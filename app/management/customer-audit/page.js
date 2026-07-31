@@ -1,4 +1,5 @@
 "use client";
+const PAGE_VERSION = "01 Aug 2026 - Update 1";
 
 import {
   Fragment,
@@ -3805,3 +3806,6 @@ return {
     </main>
   );
 }
+<div className="auditVersion">
+  Page updated: {PAGE_VERSION}
+</div>

@@ -1266,3 +1266,239 @@ button {
     text-align: right;
   }
 }
+
+
+/* ==========================================================
+   CUSTOMER AUDIT TABLES - FINAL OVERRIDE
+   MUST BE LAST IN GLOBALS.CSS
+   ========================================================== */
+
+.auditTableScroll {
+  display: block !important;
+  width: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  margin: 0 0 28px !important;
+  background: #fff !important;
+  border: 1px solid #cbd8dc !important;
+  border-radius: 12px !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+table.auditMatrix {
+  display: table !important;
+  width: max-content !important;
+  min-width: 100% !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  background: #fff !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: 12px !important;
+}
+
+table.auditMatrix th,
+table.auditMatrix td {
+  padding: 10px 12px !important;
+  border-right: 1px solid #ccd8dc !important;
+  border-bottom: 1px solid #ccd8dc !important;
+  white-space: nowrap !important;
+  vertical-align: middle !important;
+}
+
+table.auditMatrix thead th {
+  font-weight: 800 !important;
+}
+
+/* ================= YEAR ================= */
+
+table.auditMatrix .auditYearRow th {
+  background: #0d5666 !important;
+  color: #fff !important;
+  text-align: center !important;
+  border-color: #417783 !important;
+}
+
+table.auditMatrix .auditYearHeader {
+  background: #0d5666 !important;
+  color: #fff !important;
+  font-size: 13px !important;
+  text-align: center !important;
+}
+
+/* ================= MONTH ================= */
+
+table.auditMatrix .auditMonthRow th {
+  background: #eaf1f3 !important;
+  color: #254e59 !important;
+  text-align: center !important;
+  font-size: 11px !important;
+  text-transform: uppercase !important;
+}
+
+/* ================= FIRST COLUMNS ================= */
+
+table.auditMatrix .auditMetricHeader,
+table.auditMatrix .auditCategoryHeader,
+table.auditMatrix .auditCategoryMetricHeader {
+  background: #0d5666 !important;
+  color: #fff !important;
+  text-align: left !important;
+}
+
+/* ================= MONTHLY PERFORMANCE ================= */
+
+.auditPerformanceMatrix tbody th {
+  background: #f4f8f9 !important;
+  color: #073f4c !important;
+  text-align: left !important;
+  font-weight: 800 !important;
+  min-width: 100px !important;
+}
+
+.auditPerformanceMatrix tbody td {
+  min-width: 75px !important;
+  text-align: right !important;
+}
+
+/* ================= CATEGORY ================= */
+
+.auditCategoryMatrixV3 .auditCategoryHeader,
+.auditCategoryMatrixV3 .auditMergedCategory {
+  min-width: 150px !important;
+  width: 150px !important;
+}
+
+.auditCategoryMatrixV3 .auditCategoryMetricHeader,
+.auditCategoryMatrixV3 .auditCategoryMetric {
+  min-width: 85px !important;
+  width: 85px !important;
+}
+
+.auditCategoryMatrixV3 .auditMergedCategory {
+  background: #eef5f6 !important;
+  color: #073f4c !important;
+  font-weight: 800 !important;
+  text-align: left !important;
+  white-space: normal !important;
+  line-height: 1.25 !important;
+  vertical-align: middle !important;
+}
+
+.auditCategoryMatrixV3 .auditCategoryMetric {
+  background: #fafcfc !important;
+  color: #405e66 !important;
+  font-weight: 700 !important;
+  text-align: left !important;
+}
+
+.auditCategoryMatrixV3 tbody td {
+  min-width: 72px !important;
+  text-align: right !important;
+}
+
+/* Strong divider after each category */
+
+.auditCategoryMatrixV3 .auditCategorySkuRow th,
+.auditCategoryMatrixV3 .auditCategorySkuRow td {
+  border-bottom: 2px solid #91aab1 !important;
+}
+
+/* ================= TOTAL ================= */
+
+table.auditMatrix .auditTotalHeader {
+  background: #073f4c !important;
+  color: #fff !important;
+  min-width: 90px !important;
+  border-left: 2px solid #7899a1 !important;
+}
+
+table.auditMatrix .auditMatrixTotal {
+  background: #eaf1f3 !important;
+  color: #073f4c !important;
+  font-weight: 800 !important;
+  min-width: 90px !important;
+  text-align: right !important;
+  border-left: 2px solid #a4b7bc !important;
+}
+
+/* ================= GREEN / RED ================= */
+
+table.auditMatrix td.auditTrendUp {
+  color: #16834f !important;
+  background: #eff9f3 !important;
+  font-weight: 800 !important;
+}
+
+table.auditMatrix td.auditTrendDown {
+  color: #c43d3d !important;
+  background: #fff2f2 !important;
+  font-weight: 800 !important;
+}
+
+table.auditMatrix td.auditTrendSame {
+  color: #536b72 !important;
+}
+
+/* ================= STICKY CATEGORY + METRIC ================= */
+
+.auditCategoryMatrixV3 .auditCategoryHeader,
+.auditCategoryMatrixV3 .auditMergedCategory {
+  position: sticky !important;
+  left: 0 !important;
+  z-index: 4 !important;
+}
+
+.auditCategoryMatrixV3 .auditCategoryMetricHeader,
+.auditCategoryMatrixV3 .auditCategoryMetric {
+  position: sticky !important;
+  left: 150px !important;
+  z-index: 3 !important;
+  border-right: 2px solid #91aab1 !important;
+}
+
+.auditCategoryMatrixV3 .auditCategoryHeader,
+.auditCategoryMatrixV3 .auditCategoryMetricHeader {
+  z-index: 8 !important;
+}
+
+/* ================= MOBILE ================= */
+
+@media (max-width: 700px) {
+
+  .auditTableScroll {
+    border-radius: 9px !important;
+  }
+
+  table.auditMatrix {
+    font-size: 11px !important;
+  }
+
+  table.auditMatrix th,
+  table.auditMatrix td {
+    padding: 8px 8px !important;
+  }
+
+  .auditCategoryMatrixV3 .auditCategoryHeader,
+  .auditCategoryMatrixV3 .auditMergedCategory {
+    min-width: 110px !important;
+    width: 110px !important;
+    max-width: 110px !important;
+  }
+
+  .auditCategoryMatrixV3 .auditCategoryMetricHeader,
+  .auditCategoryMatrixV3 .auditCategoryMetric {
+    min-width: 70px !important;
+    width: 70px !important;
+    left: 110px !important;
+  }
+
+  .auditCategoryMatrixV3 tbody td,
+  .auditPerformanceMatrix tbody td {
+    min-width: 62px !important;
+  }
+
+  table.auditMatrix .auditTotalHeader,
+  table.auditMatrix .auditMatrixTotal {
+    min-width: 75px !important;
+  }
+}

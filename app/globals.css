@@ -1,421 +1,622 @@
 /* ==========================================================
-   CUSTOMER AUDIT MATRIX V3
-   YEAR + MONTH + MERGED CATEGORY + METRIC
+   MADIBA CUSTOMER AUDIT - BASE STYLES
    ========================================================== */
 
-
-/* ----------------------------------------------------------
-   MAIN SCROLL CONTAINER
-   ---------------------------------------------------------- */
-
-.auditTableScroll {
-  width: 100%;
-  overflow-x: auto;
-  overflow-y: visible;
-  -webkit-overflow-scrolling: touch;
-
-  background: #ffffff;
-
-  border: 1px solid #c5d2d7;
-  border-radius: 12px;
-
-  margin-bottom: 28px;
+* {
+  box-sizing: border-box;
 }
 
-
-/* ----------------------------------------------------------
-   MATRIX
-   ---------------------------------------------------------- */
-
-.auditMatrix {
-  width: max-content;
-  min-width: 100%;
-
-  border-collapse: separate;
-  border-spacing: 0;
-
-  background: #ffffff;
-
-  font-size: 12px;
+html,
+body {
+  margin: 0;
+  padding: 0;
 }
 
-
-/* ----------------------------------------------------------
-   ALL CELLS
-   ---------------------------------------------------------- */
-
-.auditMatrix th,
-.auditMatrix td {
-  padding: 10px 11px;
-
-  border-right: 1px solid #cdd8dc;
-  border-bottom: 1px solid #cdd8dc;
-
-  white-space: nowrap;
-  vertical-align: middle;
-
-  font-variant-numeric: tabular-nums;
+body {
+  background: #f3f7f8;
+  color: #062f3a;
+  font-family: Arial, Helvetica, sans-serif;
 }
 
-
-/* Remove unnecessary outside borders */
-
-.auditMatrix tr:last-child th,
-.auditMatrix tr:last-child td {
-  border-bottom: 0;
+button,
+input,
+select {
+  font: inherit;
 }
 
-.auditMatrix th:last-child,
-.auditMatrix td:last-child {
-  border-right: 0;
+button {
+  cursor: pointer;
 }
 
 
 /* ==========================================================
-   YEAR HEADER
+   PAGE
    ========================================================== */
 
-.auditYearRow th {
-  background: #0b5364;
+.auditPage {
+  min-height: 100vh;
+  background: #f3f7f8;
+  padding: 20px;
+}
+
+.auditShell {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+
+/* ==========================================================
+   HEADER
+   ========================================================== */
+
+.auditTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.auditBrand {
+  color: #0d5a6b;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  margin-bottom: 5px;
+}
+
+.auditTop h1 {
+  margin: 0;
+  color: #073b49;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.auditTop p {
+  margin: 6px 0 0;
+  color: #6c838a;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 13px;
+}
+
+.auditHome,
+.auditBack {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+
+  background: #ffffff;
+  color: #073f4c;
+
+  border: 1px solid #cbd8dc;
+  border-radius: 10px;
+
+  text-decoration: none;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 15px;
+}
+
+.auditHome:hover,
+.auditBack:hover {
+  background: #edf4f5;
+}
+
+
+/* ==========================================================
+   ERROR / LOADING
+   ========================================================== */
+
+.auditError {
+  padding: 14px 16px;
+  margin-bottom: 18px;
+
+  background: #fff1f1;
+  color: #a42c2c;
+
+  border: 1px solid #edb9b9;
+  border-radius: 10px;
+
+  font-size: 14px;
+}
+
+.auditLoading,
+.auditLoadingBox,
+.auditEmpty {
+  padding: 30px;
+  text-align: center;
+
+  background: #ffffff;
+
+  border: 1px solid #d4dfe2;
+  border-radius: 12px;
+
+  color: #60777d;
+}
+
+
+/* ==========================================================
+   FILTERS
+   ========================================================== */
+
+.auditFilters {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 14px;
+
+  padding: 16px;
+  margin-bottom: 16px;
+
+  background: #ffffff;
+
+  border: 1px solid #d1dde0;
+  border-radius: 14px;
+}
+
+.auditFilters label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+
+  color: #173f49;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.auditFilters select,
+.auditFilters input {
+  width: 100%;
+  height: 48px;
+
+  padding: 0 14px;
+
+  background: #ffffff;
+  color: #173f49;
+
+  border: 1px solid #c7d6da;
+  border-radius: 10px;
+
+  outline: none;
+
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 15px;
+}
+
+.auditFilters select:focus,
+.auditFilters input:focus {
+  border-color: #0d6071;
+  box-shadow: 0 0 0 2px rgba(13, 96, 113, 0.08);
+}
+
+
+/* ==========================================================
+   CUSTOMER COUNT
+   ========================================================== */
+
+.auditCount {
+  margin: 0 2px 12px;
+
+  color: #637a81;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 13px;
+}
+
+.auditCount strong {
+  color: #073f4c;
+}
+
+
+/* ==========================================================
+   CUSTOMER LIST
+   ========================================================== */
+
+.auditCustomerList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auditCustomerCard {
+  width: 100%;
+
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 14px;
+
+  min-height: 78px;
+  padding: 14px;
+
+  background: #ffffff;
+
+  border: 1px solid #d1dde0;
+  border-radius: 13px;
+
+  color: #073f4c;
+  text-align: left;
+
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.auditCustomerCard:hover {
+  border-color: #93b0b7;
+
+  box-shadow: 0 3px 12px rgba(0, 50, 63, 0.06);
+
+  transform: translateY(-1px);
+}
+
+.auditCustomerCode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-width: 72px;
+  max-width: 320px;
+
+  padding: 8px 10px;
+
+  background: #e9f3f5;
+  color: #07566a;
+
+  border-radius: 9px;
+
+  font-size: 12px;
+  font-weight: 800;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auditCustomerBody {
+  min-width: 0;
+
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.auditCustomerBody strong {
+  color: #062f3a;
+
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.auditCustomerBody span {
+  color: #0b6072;
+
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.auditCustomerBody small {
+  color: #7a8e94;
+
+  font-size: 10px;
+}
+
+.auditArrow {
+  color: #8aa3aa;
+
+  font-size: 26px;
+  line-height: 1;
+
+  text-align: right;
+}
+
+
+/* ==========================================================
+   CUSTOMER DETAIL
+   ========================================================== */
+
+.auditDetail {
+  width: 100%;
+}
+
+.auditBack {
+  margin-bottom: 14px;
+  border: 1px solid #cbd8dc;
+}
+
+
+/* ==========================================================
+   CUSTOMER HERO
+   ========================================================== */
+
+.auditCustomerHeader {
+  padding: 20px;
+  margin-bottom: 14px;
+
+  background: #104d5b;
+  color: #ffffff;
+
+  border-radius: 15px;
+}
+
+.auditCustomerHeaderCode {
+  margin-bottom: 7px;
+
+  color: #c5e0e6;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 11px;
+}
+
+.auditCustomerHeader h2 {
+  margin: 0 0 10px;
 
   color: #ffffff;
 
-  text-align: center;
-
-  font-size: 12px;
-  font-weight: 800;
-
-  letter-spacing: 0.04em;
-
-  border-color: #397381;
-}
-
-
-/* Year itself */
-
-.auditYearHeader {
-  background: #0b5364 !important;
-
-  color: #ffffff !important;
-
-  text-align: center !important;
-
-  font-size: 13px !important;
-
-  font-weight: 800 !important;
-
-  padding-top: 8px !important;
-  padding-bottom: 8px !important;
-}
-
-
-/* ==========================================================
-   MONTH HEADER
-   ========================================================== */
-
-.auditMonthRow th {
-  background: #edf3f5;
-
-  color: #31545e;
-
-  text-align: center;
-
-  font-size: 11px;
-
-  font-weight: 800;
-
-  text-transform: uppercase;
-
-  padding-top: 8px;
-  padding-bottom: 8px;
-}
-
-
-/* ==========================================================
-   NORMAL PERFORMANCE TABLE
-   ========================================================== */
-
-.auditPerformanceMatrix tbody th {
-  background: #f7fafb;
-
-  color: #123f4b;
-
-  text-align: left;
-
-  font-weight: 800;
-
-  min-width: 110px;
-}
-
-
-.auditPerformanceMatrix tbody td {
-  min-width: 74px;
-
-  text-align: right;
-}
-
-
-/* ==========================================================
-   CATEGORY TABLE
-   ========================================================== */
-
-.auditCategoryMatrixV3 {
-  width: max-content;
-
-  min-width: 100%;
-}
-
-
-/* ----------------------------------------------------------
-   CATEGORY HEADER
-   ---------------------------------------------------------- */
-
-.auditCategoryHeader {
-  min-width: 145px;
-
-  text-align: left !important;
-
-  background: #0b5364 !important;
-
-  color: #ffffff !important;
-}
-
-
-/* ----------------------------------------------------------
-   METRIC HEADER
-   ---------------------------------------------------------- */
-
-.auditCategoryMetricHeader {
-  min-width: 82px;
-
-  text-align: left !important;
-
-  background: #0b5364 !important;
-
-  color: #ffffff !important;
-}
-
-
-/* ----------------------------------------------------------
-   MERGED CATEGORY CELL
-
-   This cell spans:
-   SALES
-   SKUs SOLD
-   ---------------------------------------------------------- */
-
-.auditMergedCategory {
-  min-width: 145px;
-  max-width: 170px;
-
-  white-space: normal !important;
-
-  text-align: left !important;
-
-  vertical-align: middle !important;
-
-  background: #f1f6f7 !important;
-
-  color: #083f4d !important;
-
-  font-size: 12px;
-
-  font-weight: 800 !important;
-
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 21px;
   line-height: 1.25;
-
-  border-bottom: 2px solid #9fb5bc !important;
 }
 
+.auditSalesmanPill {
+  display: inline-flex;
+  align-items: center;
 
-/* ----------------------------------------------------------
-   SALES / SKUs SOLD COLUMN
-   ---------------------------------------------------------- */
+  padding: 5px 10px;
 
-.auditCategoryMetric {
-  min-width: 82px;
+  background: rgba(255, 255, 255, 0.13);
+  color: #ffffff;
 
-  text-align: left !important;
+  border-radius: 999px;
 
-  background: #fafcfc !important;
-
-  color: #51686f !important;
-
-  font-size: 11px;
-
-  font-weight: 700 !important;
-}
-
-
-/* Sales label slightly stronger */
-
-.auditCategorySalesRow
-.auditCategoryMetric {
-  color: #183f49 !important;
-
-  font-weight: 800 !important;
-}
-
-
-/* SKU label */
-
-.auditCategorySkuRow
-.auditCategoryMetric {
-  color: #63787e !important;
-}
-
-
-/* ----------------------------------------------------------
-   CATEGORY NUMBERS
-   ---------------------------------------------------------- */
-
-.auditCategoryMatrixV3 tbody td {
-  min-width: 72px;
-
-  text-align: right;
-}
-
-
-/* ----------------------------------------------------------
-   STRONG LINE AFTER EVERY CATEGORY
-
-   The SKU row is the second/final row of each category.
-   ---------------------------------------------------------- */
-
-.auditCategorySkuRow th,
-.auditCategorySkuRow td {
-  border-bottom:
-    2px solid #9fb5bc !important;
-}
-
-
-/* ==========================================================
-   TOTAL COLUMN
-   ========================================================== */
-
-.auditTotalHeader {
-  min-width: 88px;
-
-  background: #073f4c !important;
-
-  color: #ffffff !important;
-
-  border-left:
-    2px solid #7e9da5 !important;
-}
-
-
-.auditMatrixTotal {
-  min-width: 88px;
-
-  background: #edf3f5 !important;
-
-  color: #073f4c !important;
-
-  font-weight: 800 !important;
-
-  text-align: right !important;
-
-  border-left:
-    2px solid #aabcc1 !important;
-}
-
-
-/* ==========================================================
-   TREND COLOURS
-   ========================================================== */
-
-
-/* Improvement */
-
-.auditMatrix td.auditTrendUp {
-  color: #16834f !important;
-
-  background: #f1faf5;
-
+  font-size: 10px;
   font-weight: 800;
 }
 
 
-/* Decline */
+/* ==========================================================
+   SUMMARY METRICS
+   ========================================================== */
 
-.auditMatrix td.auditTrendDown {
-  color: #c63c3c !important;
+.auditMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
 
-  background: #fff4f4;
-
-  font-weight: 800;
+  margin-bottom: 22px;
 }
 
+.auditMetricsSmall {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 
-/* Same */
+.auditMetrics > div {
+  min-height: 72px;
 
-.auditMatrix td.auditTrendSame {
-  color: #52676d;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+
+  padding: 13px;
 
   background: #ffffff;
+
+  border: 1px solid #d1dde0;
+  border-radius: 12px;
+}
+
+.auditMetrics span {
+  color: #70878e;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 10px;
+}
+
+.auditMetrics strong {
+  color: #073f4c;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 17px;
 }
 
 
 /* ==========================================================
-   STICKY COLUMNS
+   SECTION TITLES
    ========================================================== */
 
+.auditSectionTitle {
+  margin: 22px 2px 10px;
 
-/*
-   CATEGORY stays on the far left when scrolling.
-*/
+  color: #073f4c;
 
-.auditCategoryMatrixV3
-.auditCategoryHeader,
-.auditCategoryMatrixV3
-.auditMergedCategory {
-  position: sticky;
-
-  left: 0;
-
-  z-index: 5;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px;
+  font-weight: 800;
 }
 
 
-/*
-   METRIC stays beside Category.
-*/
+/* ==========================================================
+   ITEM PURCHASE HISTORY
+   ========================================================== */
 
-.auditCategoryMatrixV3
-.auditCategoryMetricHeader,
-.auditCategoryMatrixV3
-.auditCategoryMetric {
-  position: sticky;
+.auditItemList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
-  left: 145px;
+.auditItemCard {
+  padding: 14px;
 
-  z-index: 4;
+  background: #ffffff;
+
+  border: 1px solid #d1dde0;
+  border-radius: 12px;
+}
+
+.auditItemTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 15px;
+
+  padding-bottom: 11px;
+  margin-bottom: 11px;
+
+  border-bottom: 1px solid #e0e8ea;
+}
+
+.auditItemTop > div:first-child {
+  min-width: 0;
+
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.auditItemCode {
+  color: #0b6173;
+
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.auditItemTop strong {
+  color: #073f4c;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.auditItemTop span {
+  color: #70868c;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 10px;
+}
+
+.auditItemSales {
+  flex-shrink: 0;
+
+  color: #073f4c;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.auditItemStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auditItemStats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.auditItemStats span {
+  color: #758b91;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 9px;
+}
+
+.auditItemStats strong {
+  color: #073f4c;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 12px;
 }
 
 
-/*
-   Headers need higher z-index.
-*/
+/* ==========================================================
+   TRANSACTION BUTTON
+   ========================================================== */
 
-.auditCategoryMatrixV3
-.auditCategoryHeader,
-.auditCategoryMatrixV3
-.auditCategoryMetricHeader {
-  z-index: 8;
+.auditTransactionButton {
+  width: 100%;
+
+  min-height: 48px;
+
+  margin-top: 18px;
+
+  background: #155667;
+  color: #ffffff;
+
+  border: 0;
+  border-radius: 11px;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.auditTransactionButton:hover {
+  background: #0d4958;
 }
 
 
-/*
-   Small separator after the Metric column.
-*/
+/* ==========================================================
+   TRANSACTIONS
+   ========================================================== */
 
-.auditCategoryMatrixV3
-.auditCategoryMetric,
-.auditCategoryMatrixV3
-.auditCategoryMetricHeader {
-  border-right:
-    2px solid #9fb5bc !important;
+.auditTransactions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  margin-top: 12px;
+}
+
+.auditTransaction {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 110px;
+  gap: 15px;
+  align-items: center;
+
+  padding: 12px 14px;
+
+  background: #ffffff;
+
+  border: 1px solid #d1dde0;
+  border-radius: 10px;
+}
+
+.auditTransaction > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.auditTransaction strong {
+  color: #073f4c;
+
+  font-size: 12px;
+}
+
+.auditTransaction span {
+  color: #778b91;
+
+  font-size: 10px;
+}
+
+.auditTransactionAmount {
+  text-align: right;
+
+  color: #073f4c;
+
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 
@@ -425,90 +626,128 @@
 
 @media (max-width: 700px) {
 
-  .auditTableScroll {
-    border-radius: 10px;
-
-    margin-left: 0;
-    margin-right: 0;
+  .auditPage {
+    padding: 14px 10px 30px;
   }
 
+  .auditShell {
+    max-width: 100%;
+  }
 
-  .auditMatrix {
+  .auditTop {
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .auditTop h1 {
+    font-size: 25px;
+  }
+
+  .auditTop p {
     font-size: 11px;
   }
 
-
-  .auditMatrix th,
-  .auditMatrix td {
-    padding: 8px 8px;
+  .auditHome {
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 13px;
   }
 
-
-  /* CATEGORY */
-
-  .auditCategoryHeader,
-  .auditMergedCategory {
-    min-width: 110px !important;
-    width: 110px !important;
-    max-width: 110px !important;
+  .auditFilters {
+    grid-template-columns: 1fr;
+    padding: 12px;
+    gap: 11px;
   }
 
-
-  /* METRIC */
-
-  .auditCategoryMetricHeader,
-  .auditCategoryMetric {
-    min-width: 68px !important;
-    width: 68px !important;
+  .auditFilters select,
+  .auditFilters input {
+    height: 46px;
+    font-size: 16px;
   }
 
+  .auditCustomerCard {
+    grid-template-columns: auto minmax(0, 1fr) 16px;
 
-  /*
-    Metric sticky position must match
-    mobile category width.
-  */
+    gap: 9px;
 
-  .auditCategoryMatrixV3
-  .auditCategoryMetricHeader,
-  .auditCategoryMatrixV3
-  .auditCategoryMetric {
-    left: 110px;
+    min-height: 74px;
+
+    padding: 11px 10px;
   }
 
+  .auditCustomerCode {
+    min-width: 58px;
+    max-width: 105px;
 
-  /* MONTH NUMBERS */
+    padding: 7px 8px;
 
-  .auditCategoryMatrixV3
-  tbody td {
-    min-width: 62px;
-  }
-
-
-  .auditPerformanceMatrix
-  tbody td {
-    min-width: 62px;
-  }
-
-
-  /* YEAR */
-
-  .auditYearHeader {
-    font-size: 11px !important;
-  }
-
-
-  /* MONTH */
-
-  .auditMonthRow th {
     font-size: 10px;
   }
 
-
-  /* TOTAL */
-
-  .auditMatrixTotal,
-  .auditTotalHeader {
-    min-width: 75px;
+  .auditCustomerBody strong {
+    font-size: 12px;
   }
 
+  .auditCustomerBody span {
+    font-size: 10px;
+  }
+
+  .auditCustomerBody small {
+    font-size: 9px;
+  }
+
+  .auditArrow {
+    font-size: 21px;
+  }
+
+  .auditCustomerHeader {
+    padding: 16px;
+  }
+
+  .auditCustomerHeader h2 {
+    font-size: 18px;
+  }
+
+  .auditMetrics,
+  .auditMetricsSmall {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .auditMetrics > div {
+    min-height: 64px;
+    padding: 11px;
+  }
+
+  .auditMetrics strong {
+    font-size: 15px;
+  }
+
+  .auditItemTop {
+    gap: 8px;
+  }
+
+  .auditItemSales {
+    font-size: 12px;
+  }
+
+  .auditItemStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .auditTransaction {
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+  }
+
+  .auditTransactionItem {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .auditTransactionAmount {
+    grid-column: 2;
+    grid-row: 1;
+
+    text-align: right;
+  }
 }

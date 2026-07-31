@@ -8,7 +8,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 );
 
-function money(value) {
+function numberFormat(value) {
   return Number(value || 0).toLocaleString("en-SA", {
     maximumFractionDigits: 0,
   });
@@ -58,7 +58,6 @@ function buildLast12Months(latestDate) {
   if (!latestDate) return [];
 
   const d = new Date(`${latestDate}T00:00:00`);
-
   const result = [];
 
   for (let i = 11; i >= 0; i--) {
@@ -76,6 +75,33 @@ function buildLast12Months(latestDate) {
   }
 
   return result;
+}
+
+/*
+  COLOR LOGIC
+
+  current > previous = green
+  current < previous = red
+  current = previous = neutral
+
+  If there is no previous month,
+  no comparison colour is applied.
+*/
+function trendClass(current, previous, hasPrevious = true) {
+  if (!hasPrevious) return "";
+
+  const currentValue = Number(current || 0);
+  const previousValue = Number(previous || 0);
+
+  if (currentValue > previousValue) {
+    return "auditTrendUp";
+  }
+
+  if (currentValue < previousValue) {
+    return "auditTrendDown";
+  }
+
+  return "auditTrendSame";
 }
 
 export default function CustomerAuditPage() {
@@ -134,7 +160,9 @@ export default function CustomerAuditPage() {
         .eq("is_active", true)
         .order("customer_name");
 
-      if (customerError) throw customerError;
+      if (customerError) {
+        throw customerError;
+      }
 
       const list = customerData || [];
 
@@ -143,7 +171,10 @@ export default function CustomerAuditPage() {
       const salesmanCodes = [
         ...new Set(
           list
-            .map((c) => c.current_salesman_code)
+            .map(
+              (customer) =>
+                customer.current_salesman_code
+            )
             .filter(Boolean)
         ),
       ].sort();
@@ -151,7 +182,8 @@ export default function CustomerAuditPage() {
       setSalesmen(salesmanCodes);
     } catch (err) {
       setError(
-        err.message || "Unable to load customer data."
+        err.message ||
+          "Unable to load customer data."
       );
     } finally {
       setLoading(false);
@@ -164,7 +196,8 @@ export default function CustomerAuditPage() {
     return customers.filter((customer) => {
       const salesmanOK =
         selectedSalesman === "ALL" ||
-        customer.current_salesman_code === selectedSalesman;
+        customer.current_salesman_code ===
+          selectedSalesman;
 
       if (!salesmanOK) return false;
 
@@ -195,18 +228,29 @@ export default function CustomerAuditPage() {
       } = await supabase
         .from("system_settings")
         .select("setting_value")
-        .eq("setting_key", "active_sales_batch_id")
+        .eq(
+          "setting_key",
+          "active_sales_batch_id"
+        )
         .single();
 
-      if (settingsError) throw settingsError;
-
-      const activeBatchId = Number(settings.setting_value);
-
-      if (!activeBatchId) {
-        throw new Error("No active sales snapshot found.");
+      if (settingsError) {
+        throw settingsError;
       }
 
-      const { data, error: salesError } = await supabase
+      const activeBatchId =
+        Number(settings.setting_value);
+
+      if (!activeBatchId) {
+        throw new Error(
+          "No active sales snapshot found."
+        );
+      }
+
+      const {
+        data,
+        error: salesError,
+      } = await supabase
         .from("sales_raw")
         .select(`
           id,
@@ -227,17 +271,32 @@ export default function CustomerAuditPage() {
           first_purchase_date,
           abc_class
         `)
-        .eq("import_batch_id", activeBatchId)
-        .eq("customer_code", customer.customer_code)
-        .order("transaction_date", { ascending: false })
-        .order("id", { ascending: false });
+        .eq(
+          "import_batch_id",
+          activeBatchId
+        )
+        .eq(
+          "customer_code",
+          customer.customer_code
+        )
+        .order(
+          "transaction_date",
+          { ascending: false }
+        )
+        .order(
+          "id",
+          { ascending: false }
+        );
 
-      if (salesError) throw salesError;
+      if (salesError) {
+        throw salesError;
+      }
 
       setTransactions(data || []);
     } catch (err) {
       setError(
-        err.message || "Unable to load customer history."
+        err.message ||
+          "Unable to load customer history."
       );
     } finally {
       setLoadingCustomer(false);
@@ -245,34 +304,38 @@ export default function CustomerAuditPage() {
   }
 
   const analytics = useMemo(() => {
-    if (!transactions.length) return null;
+    if (!transactions.length) {
+      return null;
+    }
 
     let latestDate = null;
 
     for (const row of transactions) {
       if (
         row.transaction_date &&
-        (!latestDate || row.transaction_date > latestDate)
+        (
+          !latestDate ||
+          row.transaction_date > latestDate
+        )
       ) {
         latestDate = row.transaction_date;
       }
     }
 
-    /*
-      12 months are based on the latest transaction date
-      in the uploaded dataset.
+    const months =
+      buildLast12Months(latestDate);
 
-      Example:
-      Latest data = July 2026
-      Period = Aug 2025 -> Jul 2026
-    */
-    const months = buildLast12Months(latestDate);
-    const monthSet = new Set(months);
+    const monthSet =
+      new Set(months);
 
     /*
-      MONTHLY SALES + DISTINCT SKUs
+      ======================================================
+      MONTHLY CUSTOMER TOTAL
+      ======================================================
     */
-    const monthlyMap = new Map();
+
+    const monthlyMap =
+      new Map();
 
     months.forEach((month) => {
       monthlyMap.set(month, {
@@ -283,27 +346,45 @@ export default function CustomerAuditPage() {
     });
 
     /*
+      ======================================================
       CATEGORY x MONTH
+
+      Each category/month stores:
+      - sales
+      - distinct SKUs
+      ======================================================
     */
-    const categoryMap = new Map();
+
+    const categoryMap =
+      new Map();
 
     /*
-      ITEM PURCHASE HISTORY
+      ======================================================
+      ITEM HISTORY
+      ======================================================
     */
-    const itemMap = new Map();
 
-    /*
-      OVERALL ORDERS
-    */
-    const orderSet = new Set();
+    const itemMap =
+      new Map();
+
+    const orderSet =
+      new Set();
 
     for (const row of transactions) {
-      const month = monthKey(row.transaction_date);
+      const month =
+        monthKey(
+          row.transaction_date
+        );
 
-      const sales = Number(row.sales_amount || 0);
+      const sales =
+        Number(
+          row.sales_amount || 0
+        );
 
       const itemKey =
-        row.item_code || row.item_name || "UNKNOWN";
+        row.item_code ||
+        row.item_name ||
+        "UNKNOWN";
 
       const orderKey =
         row.voucher_number ||
@@ -311,105 +392,275 @@ export default function CustomerAuditPage() {
         `ROW-${row.id}`;
 
       /*
-        Monthly summary
+        MONTHLY CUSTOMER TOTAL
       */
+
       if (monthSet.has(month)) {
-        const m = monthlyMap.get(month);
+        const monthly =
+          monthlyMap.get(month);
 
-        m.sales += sales;
+        monthly.sales += sales;
 
-        if (row.item_code || row.item_name) {
-          m.skus.add(itemKey);
+        if (
+          row.item_code ||
+          row.item_name
+        ) {
+          monthly.skus.add(
+            itemKey
+          );
         }
 
-        m.orders.add(orderKey);
+        monthly.orders.add(
+          orderKey
+        );
 
         /*
-          Category monthly sales
+          CATEGORY MONTHLY DATA
         */
-        const category =
-          row.category || "Unclassified";
 
-        if (!categoryMap.has(category)) {
+        const category =
+          row.category ||
+          "Unclassified";
+
+        if (
+          !categoryMap.has(
+            category
+          )
+        ) {
           const monthValues = {};
 
-          months.forEach((mKey) => {
-            monthValues[mKey] = 0;
-          });
+          months.forEach(
+            (monthKeyValue) => {
+              monthValues[
+                monthKeyValue
+              ] = {
+                sales: 0,
+                skus: new Set(),
+              };
+            }
+          );
 
-          categoryMap.set(category, {
+          categoryMap.set(
             category,
-            months: monthValues,
-            total: 0,
-          });
+            {
+              category,
+              months:
+                monthValues,
+
+              totalSales: 0,
+
+              totalSkus:
+                new Set(),
+            }
+          );
         }
 
-        const cat = categoryMap.get(category);
+        const cat =
+          categoryMap.get(
+            category
+          );
 
-        cat.months[month] += sales;
-        cat.total += sales;
+        cat.months[
+          month
+        ].sales += sales;
+
+        if (
+          row.item_code ||
+          row.item_name
+        ) {
+          cat.months[
+            month
+          ].skus.add(
+            itemKey
+          );
+
+          cat.totalSkus.add(
+            itemKey
+          );
+        }
+
+        cat.totalSales += sales;
       }
 
-      /*
-        Overall order count
-      */
-      orderSet.add(orderKey);
+      orderSet.add(
+        orderKey
+      );
 
       /*
-        Item history
+        ITEM PURCHASE HISTORY
       */
-      if (!itemMap.has(itemKey)) {
-        itemMap.set(itemKey, {
-          item_code: row.item_code,
-          item_name: row.item_name,
-          category: row.category,
-          abc_class: row.abc_class,
-          total_sales: 0,
-          total_qty: 0,
-          transaction_count: 0,
-          last_date: row.transaction_date,
-          active_months: new Set(),
-        });
+
+      if (
+        !itemMap.has(
+          itemKey
+        )
+      ) {
+        itemMap.set(
+          itemKey,
+          {
+            item_code:
+              row.item_code,
+
+            item_name:
+              row.item_name,
+
+            category:
+              row.category,
+
+            abc_class:
+              row.abc_class,
+
+            total_sales: 0,
+
+            total_qty: 0,
+
+            transaction_count:
+              0,
+
+            last_date:
+              row.transaction_date,
+
+            active_months:
+              new Set(),
+          }
+        );
       }
 
-      const item = itemMap.get(itemKey);
+      const item =
+        itemMap.get(
+          itemKey
+        );
 
-      item.total_sales += sales;
-      item.total_qty += Number(row.quantity || 0);
-      item.transaction_count += 1;
+      item.total_sales +=
+        sales;
+
+      item.total_qty +=
+        Number(
+          row.quantity || 0
+        );
+
+      item.transaction_count +=
+        1;
 
       if (
         row.transaction_date &&
-        (!item.last_date ||
-          row.transaction_date > item.last_date)
+        (
+          !item.last_date ||
+          row.transaction_date >
+            item.last_date
+        )
       ) {
-        item.last_date = row.transaction_date;
+        item.last_date =
+          row.transaction_date;
       }
 
       if (month) {
-        item.active_months.add(month);
+        item.active_months.add(
+          month
+        );
       }
     }
 
-    const monthlySummary = months.map((month) => ({
-      month,
-      sales: monthlyMap.get(month).sales,
-      skuCount: monthlyMap.get(month).skus.size,
-      orderCount: monthlyMap.get(month).orders.size,
-    }));
+    /*
+      MONTHLY SUMMARY
+    */
 
-    const categories = Array.from(
-      categoryMap.values()
-    ).sort((a, b) => b.total - a.total);
+    const monthlySummary =
+      months.map(
+        (month) => ({
+          month,
 
-    const items = Array.from(itemMap.values())
-      .map((item) => ({
-        ...item,
-        avg_monthly_qty:
-          item.total_qty /
-          Math.max(item.active_months.size, 1),
-      }))
-      .sort((a, b) => b.total_sales - a.total_sales);
+          sales:
+            monthlyMap.get(
+              month
+            ).sales,
+
+          skuCount:
+            monthlyMap.get(
+              month
+            ).skus.size,
+
+          orderCount:
+            monthlyMap.get(
+              month
+            ).orders.size,
+        })
+      );
+
+    /*
+      CATEGORY SUMMARY
+    */
+
+    const categories =
+      Array.from(
+        categoryMap.values()
+      )
+        .map((category) => {
+          const monthData = {};
+
+          months.forEach(
+            (month) => {
+              monthData[
+                month
+              ] = {
+                sales:
+                  category.months[
+                    month
+                  ].sales,
+
+                skuCount:
+                  category.months[
+                    month
+                  ].skus.size,
+              };
+            }
+          );
+
+          return {
+            category:
+              category.category,
+
+            months:
+              monthData,
+
+            totalSales:
+              category.totalSales,
+
+            totalSkuCount:
+              category.totalSkus
+                .size,
+          };
+        })
+        .sort(
+          (a, b) =>
+            b.totalSales -
+            a.totalSales
+        );
+
+    /*
+      ITEM SUMMARY
+    */
+
+    const items =
+      Array.from(
+        itemMap.values()
+      )
+        .map((item) => ({
+          ...item,
+
+          avg_monthly_qty:
+            item.total_qty /
+            Math.max(
+              item.active_months
+                .size,
+              1
+            ),
+        }))
+        .sort(
+          (a, b) =>
+            b.total_sales -
+            a.total_sales
+        );
 
     return {
       latestDate,
@@ -417,9 +668,15 @@ export default function CustomerAuditPage() {
       monthlySummary,
       categories,
       items,
-      orderCount: orderSet.size,
-      itemCount: itemMap.size,
-      transactionCount: transactions.length,
+
+      orderCount:
+        orderSet.size,
+
+      itemCount:
+        itemMap.size,
+
+      transactionCount:
+        transactions.length,
     };
   }, [transactions]);
 
@@ -439,96 +696,145 @@ export default function CustomerAuditPage() {
 
         <header className="auditTop">
           <div>
-            <div className="auditBrand">MADIBA SFA</div>
-            <h1>Customer Audit</h1>
-            <p>Management sales history validation</p>
+            <div className="auditBrand">
+              MADIBA SFA
+            </div>
+
+            <h1>
+              Customer Audit
+            </h1>
+
+            <p>
+              Management sales history validation
+            </p>
           </div>
 
-          <a href="/" className="auditHome">
+          <a
+            href="/"
+            className="auditHome"
+          >
             ← Home
           </a>
         </header>
 
         {error && (
-          <div className="auditError">{error}</div>
+          <div className="auditError">
+            {error}
+          </div>
         )}
 
         {!selectedCustomer && (
           <>
             <section className="auditFilters">
+
               <label>
                 Salesman
+
                 <select
-                  value={selectedSalesman}
+                  value={
+                    selectedSalesman
+                  }
                   onChange={(e) =>
-                    setSelectedSalesman(e.target.value)
+                    setSelectedSalesman(
+                      e.target.value
+                    )
                   }
                 >
                   <option value="ALL">
                     All Salesmen
                   </option>
 
-                  {salesmen.map((salesman) => (
-                    <option
-                      key={salesman}
-                      value={salesman}
-                    >
-                      {salesman}
-                    </option>
-                  ))}
+                  {salesmen.map(
+                    (salesman) => (
+                      <option
+                        key={
+                          salesman
+                        }
+                        value={
+                          salesman
+                        }
+                      >
+                        {salesman}
+                      </option>
+                    )
+                  )}
                 </select>
               </label>
 
               <label>
                 Search Customer
+
                 <input
                   type="search"
                   value={search}
                   onChange={(e) =>
-                    setSearch(e.target.value)
+                    setSearch(
+                      e.target.value
+                    )
                   }
                   placeholder="Code or customer name..."
                 />
               </label>
+
             </section>
 
             <div className="auditCount">
-              <strong>{filteredCustomers.length}</strong>{" "}
+              <strong>
+                {
+                  filteredCustomers.length
+                }
+              </strong>{" "}
               customers
             </div>
 
             <section className="auditCustomerList">
-              {filteredCustomers.map((customer) => (
-                <button
-                  key={customer.customer_code}
-                  className="auditCustomerCard"
-                  onClick={() => openCustomer(customer)}
-                >
-                  <div className="auditCustomerCode">
-                    {customer.customer_code}
-                  </div>
 
-                  <div className="auditCustomerBody">
-                    <strong>
-                      {customer.customer_name}
-                    </strong>
+              {filteredCustomers.map(
+                (customer) => (
+                  <button
+                    key={
+                      customer.customer_code
+                    }
+                    className="auditCustomerCard"
+                    onClick={() =>
+                      openCustomer(
+                        customer
+                      )
+                    }
+                  >
+                    <div className="auditCustomerCode">
+                      {
+                        customer.customer_code
+                      }
+                    </div>
 
-                    <span>
-                      {customer.current_salesman_code ||
-                        "No salesman"}
-                    </span>
+                    <div className="auditCustomerBody">
+                      <strong>
+                        {
+                          customer.customer_name
+                        }
+                      </strong>
 
-                    <small>
-                      Last transaction:{" "}
-                      {shortDate(
-                        customer.latest_transaction_date
-                      )}
-                    </small>
-                  </div>
+                      <span>
+                        {customer.current_salesman_code ||
+                          "No salesman"}
+                      </span>
 
-                  <div className="auditArrow">›</div>
-                </button>
-              ))}
+                      <small>
+                        Last transaction:{" "}
+                        {shortDate(
+                          customer.latest_transaction_date
+                        )}
+                      </small>
+                    </div>
+
+                    <div className="auditArrow">
+                      ›
+                    </div>
+                  </button>
+                )
+              )}
+
             </section>
           </>
         )}
@@ -539,27 +845,41 @@ export default function CustomerAuditPage() {
             <button
               className="auditBack"
               onClick={() => {
-                setSelectedCustomer(null);
-                setTransactions([]);
-                setShowTransactions(false);
+                setSelectedCustomer(
+                  null
+                );
+
+                setTransactions(
+                  []
+                );
+
+                setShowTransactions(
+                  false
+                );
               }}
             >
               ← Customers
             </button>
 
             <div className="auditCustomerHeader">
+
               <div className="auditCustomerHeaderCode">
-                {selectedCustomer.customer_code}
+                {
+                  selectedCustomer.customer_code
+                }
               </div>
 
               <h2>
-                {selectedCustomer.customer_name}
+                {
+                  selectedCustomer.customer_name
+                }
               </h2>
 
               <div className="auditSalesmanPill">
                 {selectedCustomer.current_salesman_code ||
                   "No salesman"}
               </div>
+
             </div>
 
             {loadingCustomer && (
@@ -568,274 +888,592 @@ export default function CustomerAuditPage() {
               </div>
             )}
 
-            {!loadingCustomer && analytics && (
-              <>
+            {!loadingCustomer &&
+              analytics && (
+                <>
 
-                {/* SUMMARY */}
+                  {/* ===============================
+                      SUMMARY
+                      =============================== */}
 
-                <div className="auditMetrics auditMetricsSmall">
-                  <div>
-                    <span>Orders</span>
-                    <strong>
-                      {analytics.orderCount}
-                    </strong>
-                  </div>
+                  <div className="auditMetrics auditMetricsSmall">
 
-                  <div>
-                    <span>Last Purchase</span>
-                    <strong>
-                      {shortDate(analytics.latestDate)}
-                    </strong>
-                  </div>
-                </div>
+                    <div>
+                      <span>
+                        Orders
+                      </span>
 
-                {/* LAST 12 MONTH SALES */}
+                      <strong>
+                        {
+                          analytics.orderCount
+                        }
+                      </strong>
+                    </div>
 
-                <div className="auditSectionTitle">
-                  Last 12 Months
-                </div>
+                    <div>
+                      <span>
+                        Last Purchase
+                      </span>
 
-                <div className="auditTableScroll">
-                  <table className="auditMatrix">
-                    <thead>
-                      <tr>
-                        <th>Metric</th>
-
-                        {analytics.months.map((month) => (
-                          <th key={month}>
-                            {monthLabel(month)}
-                          </th>
-                        ))}
-
-                        <th>Total</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      <tr>
-                        <th>Sales</th>
-
-                        {analytics.monthlySummary.map(
-                          (month) => (
-                            <td key={month.month}>
-                              {month.sales
-                                ? `SAR ${money(month.sales)}`
-                                : "-"}
-                            </td>
-                          )
+                      <strong>
+                        {shortDate(
+                          analytics.latestDate
                         )}
+                      </strong>
+                    </div>
 
-                        <td className="auditMatrixTotal">
-                          SAR{" "}
-                          {money(
-                            analytics.monthlySummary.reduce(
-                              (sum, m) => sum + m.sales,
-                              0
+                  </div>
+
+                  {/* ===============================
+                      CUSTOMER 12 MONTH PERFORMANCE
+                      =============================== */}
+
+                  <div className="auditSectionTitle">
+                    Last 12 Months Performance
+                  </div>
+
+                  <div className="auditTableScroll">
+
+                    <table className="auditMatrix">
+
+                      <thead>
+                        <tr>
+
+                          <th>
+                            Metric
+                          </th>
+
+                          {analytics.months.map(
+                            (month) => (
+                              <th
+                                key={
+                                  month
+                                }
+                              >
+                                {monthLabel(
+                                  month
+                                )}
+                              </th>
                             )
                           )}
-                        </td>
-                      </tr>
 
-                      <tr>
-                        <th>SKUs Bought</th>
-
-                        {analytics.monthlySummary.map(
-                          (month) => (
-                            <td key={month.month}>
-                              {month.skuCount || "-"}
-                            </td>
-                          )
-                        )}
-
-                        <td className="auditMatrixTotal">
-                          {analytics.itemCount}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* CATEGORY x MONTH */}
-
-                <div className="auditSectionTitle">
-                  Category Sales by Month
-                </div>
-
-                <div className="auditTableScroll">
-                  <table className="auditMatrix auditCategoryMatrix">
-                    <thead>
-                      <tr>
-                        <th>Category</th>
-
-                        {analytics.months.map((month) => (
-                          <th key={month}>
-                            {monthLabel(month)}
+                          <th>
+                            Total
                           </th>
-                        ))}
 
-                        <th>Total</th>
-                      </tr>
-                    </thead>
+                        </tr>
+                      </thead>
 
-                    <tbody>
-                      {analytics.categories.map(
-                        (category) => (
-                          <tr key={category.category}>
-                            <th>
-                              {category.category}
-                            </th>
+                      <tbody>
 
-                            {analytics.months.map(
-                              (month) => (
-                                <td key={month}>
-                                  {category.months[month]
-                                    ? money(
-                                        category.months[month]
+                        {/* SALES */}
+
+                        <tr>
+
+                          <th>
+                            Sales
+                          </th>
+
+                          {analytics.monthlySummary.map(
+                            (
+                              month,
+                              index
+                            ) => {
+                              const previous =
+                                index >
+                                0
+                                  ? analytics
+                                      .monthlySummary[
+                                      index -
+                                        1
+                                    ]
+                                      .sales
+                                  : null;
+
+                              return (
+                                <td
+                                  key={
+                                    month.month
+                                  }
+                                  className={trendClass(
+                                    month.sales,
+                                    previous,
+                                    index >
+                                      0
+                                  )}
+                                >
+                                  {month.sales
+                                    ? numberFormat(
+                                        month.sales
                                       )
                                     : "-"}
                                 </td>
+                              );
+                            }
+                          )}
+
+                          <td className="auditMatrixTotal">
+                            {numberFormat(
+                              analytics.monthlySummary.reduce(
+                                (
+                                  sum,
+                                  month
+                                ) =>
+                                  sum +
+                                  month.sales,
+                                0
                               )
                             )}
+                          </td>
 
-                            <td className="auditMatrixTotal">
-                              SAR {money(category.total)}
-                            </td>
-                          </tr>
-                        )
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                        </tr>
 
-                {/* ITEM HISTORY */}
+                        {/* SKU */}
 
-                <div className="auditSectionTitle">
-                  Item Purchase History
-                </div>
+                        <tr>
 
-                <div className="auditItemList">
-                  {analytics.items.map((item) => (
-                    <div
-                      className="auditItemCard"
-                      key={
-                        item.item_code || item.item_name
-                      }
-                    >
-                      <div className="auditItemTop">
-                        <div>
-                          <div className="auditItemCode">
-                            {item.item_code || "-"}
+                          <th>
+                            SKUs Bought
+                          </th>
+
+                          {analytics.monthlySummary.map(
+                            (
+                              month,
+                              index
+                            ) => {
+                              const previous =
+                                index >
+                                0
+                                  ? analytics
+                                      .monthlySummary[
+                                      index -
+                                        1
+                                    ]
+                                      .skuCount
+                                  : null;
+
+                              return (
+                                <td
+                                  key={
+                                    month.month
+                                  }
+                                  className={trendClass(
+                                    month.skuCount,
+                                    previous,
+                                    index >
+                                      0
+                                  )}
+                                >
+                                  {month.skuCount ||
+                                    "-"}
+                                </td>
+                              );
+                            }
+                          )}
+
+                          <td className="auditMatrixTotal">
+                            {
+                              analytics.itemCount
+                            }
+                          </td>
+
+                        </tr>
+
+                      </tbody>
+
+                    </table>
+
+                  </div>
+
+                  {/* ===============================
+                      CATEGORY x MONTH
+                      =============================== */}
+
+                  <div className="auditSectionTitle">
+                    Category Performance by Month
+                  </div>
+
+                  <div className="auditTableScroll">
+
+                    <table className="auditMatrix auditCategoryMatrix">
+
+                      <thead>
+
+                        <tr>
+
+                          <th>
+                            Category / Metric
+                          </th>
+
+                          {analytics.months.map(
+                            (month) => (
+                              <th
+                                key={
+                                  month
+                                }
+                              >
+                                {monthLabel(
+                                  month
+                                )}
+                              </th>
+                            )
+                          )}
+
+                          <th>
+                            Total
+                          </th>
+
+                        </tr>
+
+                      </thead>
+
+                      <tbody>
+
+                        {analytics.categories.map(
+                          (
+                            category
+                          ) => (
+                            <>
+
+                              {/* CATEGORY SALES */}
+
+                              <tr
+                                key={`${category.category}-sales`}
+                                className="auditCategorySalesRow"
+                              >
+
+                                <th>
+                                  <strong>
+                                    {
+                                      category.category
+                                    }
+                                  </strong>
+
+                                  <small>
+                                    Sales
+                                  </small>
+                                </th>
+
+                                {analytics.months.map(
+                                  (
+                                    month,
+                                    index
+                                  ) => {
+                                    const current =
+                                      category
+                                        .months[
+                                        month
+                                      ].sales;
+
+                                    const previous =
+                                      index >
+                                      0
+                                        ? category
+                                            .months[
+                                            analytics
+                                              .months[
+                                              index -
+                                                1
+                                            ]
+                                          ]
+                                            .sales
+                                        : null;
+
+                                    return (
+                                      <td
+                                        key={
+                                          month
+                                        }
+                                        className={trendClass(
+                                          current,
+                                          previous,
+                                          index >
+                                            0
+                                        )}
+                                      >
+                                        {current
+                                          ? numberFormat(
+                                              current
+                                            )
+                                          : "-"}
+                                      </td>
+                                    );
+                                  }
+                                )}
+
+                                <td className="auditMatrixTotal">
+                                  {numberFormat(
+                                    category.totalSales
+                                  )}
+                                </td>
+
+                              </tr>
+
+                              {/* CATEGORY SKU */}
+
+                              <tr
+                                key={`${category.category}-sku`}
+                                className="auditCategorySkuRow"
+                              >
+
+                                <th>
+                                  <span className="auditSubMetric">
+                                    SKUs Bought
+                                  </span>
+                                </th>
+
+                                {analytics.months.map(
+                                  (
+                                    month,
+                                    index
+                                  ) => {
+                                    const current =
+                                      category
+                                        .months[
+                                        month
+                                      ]
+                                        .skuCount;
+
+                                    const previous =
+                                      index >
+                                      0
+                                        ? category
+                                            .months[
+                                            analytics
+                                              .months[
+                                              index -
+                                                1
+                                            ]
+                                          ]
+                                            .skuCount
+                                        : null;
+
+                                    return (
+                                      <td
+                                        key={
+                                          month
+                                        }
+                                        className={trendClass(
+                                          current,
+                                          previous,
+                                          index >
+                                            0
+                                        )}
+                                      >
+                                        {current ||
+                                          "-"}
+                                      </td>
+                                    );
+                                  }
+                                )}
+
+                                <td className="auditMatrixTotal">
+                                  {
+                                    category.totalSkuCount
+                                  }
+                                </td>
+
+                              </tr>
+
+                            </>
+                          )
+                        )}
+
+                      </tbody>
+
+                    </table>
+
+                  </div>
+
+                  {/* ===============================
+                      ITEM PURCHASE HISTORY
+                      =============================== */}
+
+                  <div className="auditSectionTitle">
+                    Item Purchase History
+                  </div>
+
+                  <div className="auditItemList">
+
+                    {analytics.items.map(
+                      (item) => (
+                        <div
+                          className="auditItemCard"
+                          key={
+                            item.item_code ||
+                            item.item_name
+                          }
+                        >
+
+                          <div className="auditItemTop">
+
+                            <div>
+
+                              <div className="auditItemCode">
+                                {item.item_code ||
+                                  "-"}
+                              </div>
+
+                              <strong>
+                                {
+                                  item.item_name
+                                }
+                              </strong>
+
+                              <span>
+                                {item.category ||
+                                  "Unclassified"}
+
+                                {item.abc_class
+                                  ? ` • ${item.abc_class}`
+                                  : ""}
+                              </span>
+
+                            </div>
+
+                            <div className="auditItemSales">
+                              {numberFormat(
+                                item.total_sales
+                              )}
+                            </div>
+
                           </div>
 
-                          <strong>
-                            {item.item_name}
-                          </strong>
+                          <div className="auditItemStats">
 
-                          <span>
-                            {item.category ||
-                              "Unclassified"}
+                            <div>
+                              <span>
+                                Total Qty
+                              </span>
 
-                            {item.abc_class
-                              ? ` • ${item.abc_class}`
-                              : ""}
-                          </span>
+                              <strong>
+                                {qty(
+                                  item.total_qty
+                                )}
+                              </strong>
+                            </div>
+
+                            <div>
+                              <span>
+                                Avg / Active Month
+                              </span>
+
+                              <strong>
+                                {qty(
+                                  item.avg_monthly_qty
+                                )}
+                              </strong>
+                            </div>
+
+                            <div>
+                              <span>
+                                Last Bought
+                              </span>
+
+                              <strong>
+                                {shortDate(
+                                  item.last_date
+                                )}
+                              </strong>
+                            </div>
+
+                            <div>
+                              <span>
+                                Purchase Bills
+                              </span>
+
+                              <strong>
+                                {
+                                  item.transaction_count
+                                }
+                              </strong>
+                            </div>
+
+                          </div>
+
                         </div>
+                      )
+                    )}
 
-                        <div className="auditItemSales">
-                          SAR {money(item.total_sales)}
-                        </div>
-                      </div>
-
-                      <div className="auditItemStats">
-                        <div>
-                          <span>Total Qty</span>
-                          <strong>
-                            {qty(item.total_qty)}
-                          </strong>
-                        </div>
-
-                        <div>
-                          <span>Avg / Active Month</span>
-                          <strong>
-                            {qty(item.avg_monthly_qty)}
-                          </strong>
-                        </div>
-
-                        <div>
-                          <span>Last Bought</span>
-                          <strong>
-                            {shortDate(item.last_date)}
-                          </strong>
-                        </div>
-
-                        <div>
-                          <span>Purchase Bills</span>
-                          <strong>
-                            {item.transaction_count}
-                          </strong>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  className="auditTransactionButton"
-                  onClick={() =>
-                    setShowTransactions(
-                      !showTransactions
-                    )
-                  }
-                >
-                  {showTransactions
-                    ? "Hide Transactions"
-                    : `View All ${analytics.transactionCount} Transaction Lines`}
-                </button>
-
-                {showTransactions && (
-                  <div className="auditTransactions">
-                    {transactions.map((row) => (
-                      <div
-                        className="auditTransaction"
-                        key={row.id}
-                      >
-                        <div>
-                          <strong>
-                            {shortDate(
-                              row.transaction_date
-                            )}
-                          </strong>
-
-                          <span>
-                            {row.voucher_number ||
-                              row.reference ||
-                              "-"}
-                          </span>
-                        </div>
-
-                        <div className="auditTransactionItem">
-                          <strong>
-                            {row.item_name}
-                          </strong>
-
-                          <span>
-                            Qty {qty(row.quantity)}
-                          </span>
-                        </div>
-
-                        <div className="auditTransactionAmount">
-                          SAR {money(row.sales_amount)}
-                        </div>
-                      </div>
-                    ))}
                   </div>
-                )}
 
-              </>
-            )}
+                  <button
+                    className="auditTransactionButton"
+                    onClick={() =>
+                      setShowTransactions(
+                        !showTransactions
+                      )
+                    }
+                  >
+                    {showTransactions
+                      ? "Hide Transactions"
+                      : `View All ${analytics.transactionCount} Transaction Lines`}
+                  </button>
+
+                  {showTransactions && (
+                    <div className="auditTransactions">
+
+                      {transactions.map(
+                        (row) => (
+                          <div
+                            className="auditTransaction"
+                            key={
+                              row.id
+                            }
+                          >
+
+                            <div>
+
+                              <strong>
+                                {shortDate(
+                                  row.transaction_date
+                                )}
+                              </strong>
+
+                              <span>
+                                {row.voucher_number ||
+                                  row.reference ||
+                                  "-"}
+                              </span>
+
+                            </div>
+
+                            <div className="auditTransactionItem">
+
+                              <strong>
+                                {
+                                  row.item_name
+                                }
+                              </strong>
+
+                              <span>
+                                Qty{" "}
+                                {qty(
+                                  row.quantity
+                                )}
+                              </span>
+
+                            </div>
+
+                            <div className="auditTransactionAmount">
+                              {numberFormat(
+                                row.sales_amount
+                              )}
+                            </div>
+
+                          </div>
+                        )
+                      )}
+
+                    </div>
+                  )}
+
+                </>
+              )}
 
           </section>
         )}
+
       </div>
     </main>
   );

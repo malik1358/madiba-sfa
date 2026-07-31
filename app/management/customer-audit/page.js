@@ -1,7 +1,7 @@
 "use client";
 
-const PAGE_VERSION =
-  "01 Aug 2026 - Quick Order V2";
+const PAGE_VERSION = "Quick Order V3";
+const PAGE_UPDATED = "01 Aug 2026 02:30 AM";
 
 import {
   Fragment,
@@ -1396,9 +1396,9 @@ export default function CustomerAuditPage() {
       }
 
 
-      /* ================================================
-         NORMALIZE ITEM CODE
-         ================================================ */
+      /* ====================================================
+         HELPERS
+         ==================================================== */
 
       const normalizeCode = (value) =>
         String(value || "")
@@ -1406,9 +1406,33 @@ export default function CustomerAuditPage() {
           .toUpperCase();
 
 
-      /* ================================================
+      /*
+       * Exclude discontinued / unusable products.
+       *
+       * Matches:
+       * Do Not Use
+       * DO NOT USE
+       * Do Not Usee
+       * do not useee
+       * etc.
+       */
+
+      const isDoNotUseItem = (name) => {
+
+        const text =
+          String(name || "")
+            .trim()
+            .toLowerCase();
+
+        return /do\s*not\s*use+/i.test(
+          text
+        );
+      };
+
+
+      /* ====================================================
          BUILD CUSTOMER PURCHASE HISTORY
-         ================================================ */
+         ==================================================== */
 
       const historyByCode =
         new Map();
@@ -1421,16 +1445,37 @@ export default function CustomerAuditPage() {
             row.item_code
           );
 
+
         if (!code) {
           return;
         }
 
 
-        if (!historyByCode.has(code)) {
+        /*
+         * IMPORTANT:
+         * Completely ignore DO NOT USE items
+         * from Quick Order calculations.
+         */
+
+        if (
+          isDoNotUseItem(
+            row.item_name
+          )
+        ) {
+          return;
+        }
+
+
+        if (
+          !historyByCode.has(
+            code
+          )
+        ) {
 
           historyByCode.set(
             code,
             {
+
               item_code:
                 String(
                   row.item_code || ""
@@ -1449,13 +1494,20 @@ export default function CustomerAuditPage() {
                 null,
 
               months: {},
+
+              totalPositiveQty: 0,
+
+              activePurchaseMonths:
+                new Set(),
             }
           );
         }
 
 
         const item =
-          historyByCode.get(code);
+          historyByCode.get(
+            code
+          );
 
 
         const qty =
@@ -1470,22 +1522,54 @@ export default function CustomerAuditPage() {
           );
 
 
+        /*
+         * MONTHLY NET QUANTITY
+         */
+
         if (month) {
 
           if (
-            item.months[month] ===
-            undefined
+            item.months[
+              month
+            ] === undefined
           ) {
-            item.months[month] = 0;
+
+            item.months[
+              month
+            ] = 0;
           }
 
-          item.months[month] += qty;
+
+          item.months[
+            month
+          ] += qty;
         }
 
 
         /*
-         * Only positive quantity counts
-         * as an actual purchase.
+         * POSITIVE PURCHASE HISTORY
+         *
+         * Returns should NOT increase
+         * average purchase quantity.
+         */
+
+        if (
+          qty > 0 &&
+          month
+        ) {
+
+          item.totalPositiveQty +=
+            qty;
+
+
+          item.activePurchaseMonths.add(
+            month
+          );
+        }
+
+
+        /*
+         * LAST POSITIVE PURCHASE DATE
          */
 
         if (
@@ -1507,9 +1591,9 @@ export default function CustomerAuditPage() {
       });
 
 
-      /* ================================================
-         CATEGORIES THIS CUSTOMER BUYS
-         ================================================ */
+      /* ====================================================
+         CUSTOMER PURCHASED CATEGORIES
+         ==================================================== */
 
       const boughtCategories =
         new Set();
@@ -1525,7 +1609,9 @@ export default function CustomerAuditPage() {
               .trim()
               .toLowerCase();
 
+
           if (category) {
+
             boughtCategories.add(
               category
             );
@@ -1535,58 +1621,74 @@ export default function CustomerAuditPage() {
       );
 
 
-      /* ================================================
-         CLEAN ITEM MASTER
-         ================================================ */
+      /* ====================================================
+         CLEAN ACTIVE ITEM MASTER
+         ==================================================== */
 
       const cleanMaster =
         (itemMaster || [])
-          .map((row) => {
 
-            return {
+          .map((row) => ({
 
-              item_code:
-                String(
-                  row.item_code || ""
-                ).trim(),
+            item_code:
+              String(
+                row.item_code || ""
+              ).trim(),
 
-              item_name:
-                String(
-                  row.item_name || ""
-                ).trim(),
+            item_name:
+              String(
+                row.item_name || ""
+              ).trim(),
 
-              category:
-                String(
-                  row.category ||
-                  "Unclassified"
-                ).trim(),
+            category:
+              String(
+                row.category ||
+                "Unclassified"
+              ).trim(),
 
-              /*
-               * Rate intentionally blank
-               * for now.
-               */
+            rate:
+              null,
 
-              rate: null,
-            };
+          }))
 
-          })
+
+          /*
+           * Must have item code.
+           */
+
           .filter(
             (item) =>
               item.item_code
+          )
+
+
+          /*
+           * REMOVE:
+           *
+           * Do Not Use
+           * Do Not Usee
+           * Do Not Useee
+           */
+
+          .filter(
+            (item) =>
+              !isDoNotUseItem(
+                item.item_name
+              )
           );
 
 
-      /* ================================================
+      /* ====================================================
          1. NEW ITEMS
-         
-         Customer has NEVER bought item.
-         
-         Prefer a category the customer
-         already purchases.
-         ================================================ */
+         ==================================================== */
 
       const newItems =
         cleanMaster
+
+          /*
+           * Item must NEVER have been bought
+           * by this customer.
+           */
 
           .filter((item) => {
 
@@ -1595,6 +1697,7 @@ export default function CustomerAuditPage() {
                 item.item_code
               );
 
+
             return (
               !historyByCode.has(
                 code
@@ -1602,6 +1705,12 @@ export default function CustomerAuditPage() {
             );
 
           })
+
+
+          /*
+           * Prefer same categories
+           * customer already buys.
+           */
 
           .map((item) => {
 
@@ -1630,12 +1739,8 @@ export default function CustomerAuditPage() {
 
           })
 
-          .sort((a, b) => {
 
-            /*
-             * First show new items from
-             * categories customer already buys.
-             */
+          .sort((a, b) => {
 
             if (
               b.categoryMatch !==
@@ -1659,15 +1764,13 @@ export default function CustomerAuditPage() {
 
           })
 
+
           .slice(0, 3);
 
 
-      /* ================================================
+      /* ====================================================
          2. NOT BOUGHT SINCE LONG
-         
-         Must have been purchased before.
-         Oldest last purchase first.
-         ================================================ */
+         ==================================================== */
 
       const notBoughtRecently =
         Array.from(
@@ -1678,6 +1781,11 @@ export default function CustomerAuditPage() {
             (item) =>
               item.lastBought
           )
+
+
+          /*
+           * Oldest purchase first.
+           */
 
           .sort(
             (a, b) =>
@@ -1690,42 +1798,46 @@ export default function CustomerAuditPage() {
               )
           )
 
+
           .slice(0, 2)
+
 
           .map((item) => ({
 
             ...item,
 
-            rate: null,
+            rate:
+              null,
 
             recommendationReason:
               "Not Bought Since Long",
           }));
 
 
-      /* ================================================
+      /* ====================================================
          3. BUYING LESS
-         
-         Compare:
-         
-         Previous 3 transaction months
-         vs
-         Latest 3 transaction months
-         ================================================ */
+
+         Historical Average Qty:
+
+         TOTAL POSITIVE QTY
+                 ÷
+         MONTHS IN WHICH ITEM WAS BOUGHT
+
+         Then compare latest transaction month's
+         quantity against historical average.
+         ==================================================== */
+
 
       const visibleMonths =
         analytics.months || [];
 
 
-      const recentMonths =
-        visibleMonths.slice(-3);
-
-
-      const previousMonths =
-        visibleMonths.slice(
-          -6,
-          -3
-        );
+      const latestMonth =
+        visibleMonths.length
+          ? visibleMonths[
+              visibleMonths.length - 1
+            ]
+          : null;
 
 
       const buyingLess =
@@ -1735,51 +1847,50 @@ export default function CustomerAuditPage() {
 
           .map((item) => {
 
-            const recentQty =
-              recentMonths.reduce(
-                (total, month) => {
+            const activeMonths =
+              item
+                .activePurchaseMonths
+                .size;
 
-                  return (
-                    total +
-                    Number(
-                      item.months[
-                        month
-                      ] || 0
-                    )
-                  );
 
-                },
+            const totalQty =
+              Number(
+                item.totalPositiveQty ||
                 0
               );
 
 
-            const previousQty =
-              previousMonths.reduce(
-                (total, month) => {
-
-                  return (
-                    total +
-                    Number(
-                      item.months[
-                        month
-                      ] || 0
-                    )
-                  );
-
-                },
-                0
-              );
+            const avgQty =
+              activeMonths > 0
+                ? totalQty /
+                  activeMonths
+                : 0;
 
 
-            const decline =
-              previousQty -
-              recentQty;
+            /*
+             * Quantity bought in latest
+             * displayed transaction month.
+             */
+
+            const latestQty =
+              latestMonth
+                ? Number(
+                    item.months[
+                      latestMonth
+                    ] || 0
+                  )
+                : 0;
+
+
+            const declineQty =
+              avgQty -
+              latestQty;
 
 
             const declinePercent =
-              previousQty > 0
-                ? decline /
-                  previousQty
+              avgQty > 0
+                ? declineQty /
+                  avgQty
                 : 0;
 
 
@@ -1787,26 +1898,42 @@ export default function CustomerAuditPage() {
 
               ...item,
 
-              recentQty,
+              totalQty,
 
-              previousQty,
+              activeMonths,
 
-              decline,
+              avgQty,
+
+              latestQty,
+
+              declineQty,
 
               declinePercent,
             };
 
           })
 
-          .filter((item) => {
 
-            return (
-              item.previousQty > 0 &&
-              item.recentQty <
-                item.previousQty
-            );
+          /*
+           * Buying less means:
+           *
+           * Customer has history
+           * AND
+           * latest quantity is below
+           * historical monthly average.
+           */
 
-          })
+          .filter(
+            (item) =>
+              item.avgQty > 0 &&
+              item.latestQty <
+                item.avgQty
+          )
+
+
+          /*
+           * Biggest decline first.
+           */
 
           .sort((a, b) => {
 
@@ -1823,40 +1950,43 @@ export default function CustomerAuditPage() {
 
 
             return (
-              b.decline -
-              a.decline
+              b.declineQty -
+              a.declineQty
             );
 
           })
 
+
           .slice(0, 2)
+
 
           .map((item) => ({
 
             ...item,
 
-            rate: null,
+            rate:
+              null,
 
             recommendationReason:
               "Buying Less",
           }));
 
 
-      /* ================================================
+      /* ====================================================
          DEBUG
-         
-         Open browser console if needed.
-         This tells us immediately whether
-         the master/history are loaded.
-         ================================================ */
+         ==================================================== */
 
       console.log(
-        "QUICK ORDER DEBUG",
+        "QUICK ORDER V3 DEBUG",
         {
-          masterItems:
+
+          itemMaster:
+            itemMaster.length,
+
+          cleanSellableMaster:
             cleanMaster.length,
 
-          customerPurchasedItems:
+          customerHistory:
             historyByCode.size,
 
           newItems:
@@ -1868,7 +1998,8 @@ export default function CustomerAuditPage() {
           buyingLess:
             buyingLess.length,
 
-          visibleMonths,
+          latestMonth,
+
         }
       );
 
@@ -2400,6 +2531,10 @@ export default function CustomerAuditPage() {
 
           <h1>
             Customer Audit
+      <div className="auditPageVersionTop">
+  <strong>{PAGE_VERSION}</strong>
+  <span>Updated: {PAGE_UPDATED}</span>
+</div>
           </h1>
 
           <p className="auditSubtitle">
@@ -3939,7 +4074,7 @@ export default function CustomerAuditPage() {
                   key: "buyingLess",
                   title: "Buying Less",
                   subtitle:
-                    "Items where recent quantity is lower than the previous period",
+                "Items currently buying below their historical average quantity"
                   items:
                     quickOrderSuggestions.buyingLess,
                 },
@@ -4068,24 +4203,44 @@ export default function CustomerAuditPage() {
                                       )}
 
 
-                                      {group.key ===
-                                        "notBoughtRecently" && (
+                                     {group.key ===
+  "buyingLess" && (
 
-                                        <div className="auditQuickHistory">
+  <div className="auditQuickHistory">
 
-                                          <span>
-                                            Last bought
-                                          </span>
+    <span>
+      Avg Qty / Month
+    </span>
 
-                                          <strong>
-                                            {shortDate(
-                                              item.lastBought
-                                            )}
-                                          </strong>
+    <strong>
+      {qtyFormat(
+        item.avgQty
+      )}
+    </strong>
 
-                                        </div>
 
-                                      )}
+    <span>
+      Months Bought
+    </span>
+
+    <strong>
+      {item.activeMonths}
+    </strong>
+
+
+    <span>
+      Latest Qty
+    </span>
+
+    <strong className="auditQuickDecline">
+      {qtyFormat(
+        item.latestQty
+      )}
+    </strong>
+
+  </div>
+
+)}
 
 
                                       {group.key ===

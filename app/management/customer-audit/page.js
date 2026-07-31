@@ -1247,32 +1247,67 @@ const months =
                   );
 
 
-              return {
+              /* Calculate totals ONLY from the displayed 6 months */
 
-                category:
-                  category.category,
+const visibleTotalSales =
+  months.reduce(
+    (total, month) =>
+      total +
+      Number(
+        monthData[month]?.sales || 0
+      ),
+    0
+  );
 
-                months:
-                  monthData,
+const visibleSkuSet =
+  new Set();
 
-                totalSales:
-                  category.totalSales,
+months.forEach((month) => {
 
-                totalSkuCount:
-                  category
-                    .totalSkus
-                    .size,
+  const originalMonth =
+    category.months[month];
 
-                items:
-                  categoryItems,
-              };
+  if (originalMonth) {
+
+    originalMonth.skus.forEach(
+      (sku) =>
+        visibleSkuSet.add(sku)
+    );
+
+  }
+
+});
+
+
+return {
+
+  category:
+    category.category,
+
+  months:
+    monthData,
+
+  totalSales:
+    visibleTotalSales,
+
+  totalSkuCount:
+    visibleSkuSet.size,
+
+  items:
+    categoryItems,
+};
             }
           )
-          .sort(
-            (a, b) =>
-              b.totalSales -
-              a.totalSales
-          );
+        .filter(
+  (category) =>
+    category.totalSales !== 0 ||
+    category.totalSkuCount > 0
+)
+.sort(
+  (a, b) =>
+    b.totalSales -
+    a.totalSales
+);
 
 
       return {

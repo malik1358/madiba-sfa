@@ -1,217 +1,273 @@
 /* =========================================================
-   DASHBOARD
+   SALES DATA UPLOAD
    ========================================================= */
 
-.dashboardPage {
+.uploadPage {
   min-height: 100vh;
   background: #f3f6f7;
-  color: #172b34;
+  padding: 40px 20px;
 }
 
-.dashboardHeader {
-  min-height: 82px;
-  background: white;
-  border-bottom: 1px solid #e3e9ec;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 15px 6%;
-}
-
-.dashboardHeader .brand {
-  margin-bottom: 0;
-}
-
-.logoutButton {
-  border: 1px solid #d8e1e4;
-  background: white;
-  color: #435a64;
-  padding: 10px 18px;
-  border-radius: 10px;
-  cursor: pointer;
-}
-
-.dashboardContent {
-  width: 92%;
-  max-width: 1100px;
+.uploadContainer {
+  width: 100%;
+  max-width: 900px;
   margin: 0 auto;
-  padding: 38px 0 60px;
 }
 
-.dashboardWelcome {
-  margin-bottom: 20px;
+.uploadHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 25px;
+  margin-bottom: 25px;
 }
 
-.dashboardWelcome .smallText {
-  margin: 0;
+.uploadEyebrow {
+  color: #1b6572 !important;
+  font-size: 12px !important;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  margin: 0 0 7px !important;
+}
+
+.uploadHeader h1 {
+  color: #123f4b;
+  margin: 0 0 7px;
+  font-size: 30px;
+}
+
+.uploadHeader p {
   color: #75858c;
+  margin: 0;
   font-size: 14px;
 }
 
-.dashboardWelcome h2 {
-  margin: 5px 0 8px;
-  font-size: 30px;
-  color: #123f4b;
-}
-
-.roleBadge {
-  display: inline-block;
-  padding: 5px 10px;
-  border-radius: 20px;
-  background: #dcecef;
-  color: #175260;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.7px;
-}
-
-.languageDashboard {
-  display: flex;
-  gap: 6px;
-  margin: 25px 0 35px;
-}
-
-.languageDashboard button {
-  border: 1px solid #d9e2e5;
+.backButton {
+  text-decoration: none;
   background: white;
-  padding: 8px 15px;
-  border-radius: 9px;
-  cursor: pointer;
-  color: #63757c;
+  border: 1px solid #dce4e7;
+  color: #31515b;
+  padding: 10px 15px;
+  border-radius: 10px;
+  white-space: nowrap;
 }
 
-.languageDashboard button.active {
-  background: #123f4b;
-  color: white;
-  border-color: #123f4b;
+.uploadWarning {
+  background: #fff9e9;
+  border: 1px solid #f1dfaa;
+  padding: 16px 18px;
+  border-radius: 12px;
+  margin-bottom: 18px;
 }
 
-.sectionTitle {
-  font-size: 16px;
-  margin-bottom: 15px;
+.uploadWarning strong {
+  color: #735a14;
 }
 
-.menuGrid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-
-.menuCard {
-  background: white;
-  border: 1px solid #e0e7ea;
-  border-radius: 16px;
-  padding: 23px;
-  min-height: 150px;
-  display: flex;
-  flex-direction: column;
-  cursor: pointer;
-  transition: 0.2s ease;
-}
-
-.menuCard:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(18, 63, 75, 0.08);
-  border-color: #b9cdd3;
-}
-
-.menuIcon {
-  font-size: 27px;
-  margin-bottom: 16px;
-}
-
-.menuCard strong {
-  color: #173f4a;
-  font-size: 16px;
-  margin-bottom: 7px;
-}
-
-.menuCard span {
-  color: #7b898f;
+.uploadWarning p {
+  margin: 5px 0 0;
+  color: #806d36;
   font-size: 13px;
   line-height: 1.5;
 }
 
-.adminCard {
-  background: #123f4b;
-  border-color: #123f4b;
+.uploadCard {
+  background: white;
+  border: 1px solid #e0e7ea;
+  border-radius: 17px;
+  padding: 28px;
 }
 
-.adminCard strong {
-  color: white;
-}
-
-.adminCard span {
-  color: #c9dadd;
-}
-
-.loadingText {
+.fileDrop {
+  border: 2px dashed #c9d7dc;
+  border-radius: 14px;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
   text-align: center;
-  color: #123f4b;
-  font-weight: 700;
   padding: 25px;
+  transition: 0.2s;
 }
 
-.errorMessage {
+.fileDrop:hover {
+  border-color: #1b6572;
+  background: #f8fbfc;
+}
+
+.fileDrop input {
+  display: none;
+}
+
+.fileIcon {
+  font-size: 38px;
+  margin-bottom: 13px;
+}
+
+.fileDrop strong {
+  color: #214752;
+  font-size: 16px;
+}
+
+.fileDrop span {
+  color: #8a999f;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.replaceButton {
+  width: 100%;
+  border: 0;
+  border-radius: 11px;
+  padding: 14px 20px;
+  margin-top: 18px;
+  background: #123f4b;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.replaceButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.processingBox {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 20px;
+  background: #f0f7f8;
+  border: 1px solid #d4e7ea;
+  padding: 17px;
+  border-radius: 11px;
+}
+
+.processingBox p {
+  margin: 4px 0 0;
+  color: #71848b;
+  font-size: 12px;
+}
+
+.spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid #d2e4e7;
+  border-top-color: #175766;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.uploadError {
+  margin-top: 20px;
   background: #fff0f0;
-  border: 1px solid #ffd0d0;
-  color: #a12d2d;
-  border-radius: 9px;
-  padding: 10px 12px;
-  margin-bottom: 15px;
+  border: 1px solid #f2caca;
+  border-radius: 11px;
+  padding: 17px;
+  color: #982d2d;
+}
+
+.uploadError p {
+  margin: 5px 0 0;
   font-size: 13px;
 }
 
-.loginButton:disabled {
-  opacity: 0.65;
-  cursor: wait;
+.uploadSuccess {
+  margin-top: 22px;
+  border: 1px solid #cce4d8;
+  background: #f5fbf8;
+  border-radius: 14px;
+  padding: 20px;
 }
 
-@media (max-width: 750px) {
-  .dashboardHeader {
-    padding: 12px 18px;
+.successTitle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.successTick {
+  width: 38px;
+  height: 38px;
+  background: #207653;
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.successTitle strong {
+  color: #205f47;
+}
+
+.successTitle p {
+  margin: 3px 0 0;
+  color: #779187;
+  font-size: 12px;
+}
+
+.resultGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.resultGrid div {
+  background: white;
+  border: 1px solid #e1ece6;
+  border-radius: 10px;
+  padding: 13px;
+}
+
+.resultGrid span {
+  display: block;
+  color: #83938c;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+
+.resultGrid strong {
+  color: #264e41;
+  font-size: 15px;
+}
+
+.snapshotActivated {
+  margin-top: 15px;
+  background: #207653;
+  color: white;
+  text-align: center;
+  padding: 10px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+@media (max-width: 600px) {
+  .uploadPage {
+    padding: 25px 14px;
   }
 
-  .dashboardHeader .brand p {
-    display: none;
+  .uploadHeader {
+    flex-direction: column;
   }
 
-  .dashboardContent {
-    width: 90%;
-    padding-top: 28px;
-  }
-
-  .menuGrid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .menuCard {
-    min-height: 135px;
+  .uploadCard {
     padding: 18px;
   }
-}
 
-@media (max-width: 420px) {
-  .menuGrid {
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-
-  .menuCard {
-    min-height: 125px;
-    padding: 15px;
-  }
-
-  .menuIcon {
-    font-size: 23px;
-    margin-bottom: 12px;
-  }
-
-  .menuCard strong {
-    font-size: 14px;
-  }
-
-  .menuCard span {
-    font-size: 11px;
+  .resultGrid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }

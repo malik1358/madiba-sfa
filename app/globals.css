@@ -1,4 +1,519 @@
 /* ==========================================================
+   CUSTOMER AUDIT MATRIX V3
+   YEAR + MONTH + MERGED CATEGORY + METRIC
+   ========================================================== */
+
+
+/* ----------------------------------------------------------
+   MAIN SCROLL CONTAINER
+   ---------------------------------------------------------- */
+
+.auditTableScroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+
+  background: #ffffff;
+
+  border: 1px solid #c5d2d7;
+  border-radius: 12px;
+
+  margin-bottom: 28px;
+}
+
+
+/* ----------------------------------------------------------
+   MATRIX
+   ---------------------------------------------------------- */
+
+.auditMatrix {
+  width: max-content;
+  min-width: 100%;
+
+  border-collapse: separate;
+  border-spacing: 0;
+
+  background: #ffffff;
+
+  font-size: 12px;
+}
+
+
+/* ----------------------------------------------------------
+   ALL CELLS
+   ---------------------------------------------------------- */
+
+.auditMatrix th,
+.auditMatrix td {
+  padding: 10px 11px;
+
+  border-right: 1px solid #cdd8dc;
+  border-bottom: 1px solid #cdd8dc;
+
+  white-space: nowrap;
+  vertical-align: middle;
+
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* Remove unnecessary outside borders */
+
+.auditMatrix tr:last-child th,
+.auditMatrix tr:last-child td {
+  border-bottom: 0;
+}
+
+.auditMatrix th:last-child,
+.auditMatrix td:last-child {
+  border-right: 0;
+}
+
+
+/* ==========================================================
+   YEAR HEADER
+   ========================================================== */
+
+.auditYearRow th {
+  background: #0b5364;
+
+  color: #ffffff;
+
+  text-align: center;
+
+  font-size: 12px;
+  font-weight: 800;
+
+  letter-spacing: 0.04em;
+
+  border-color: #397381;
+}
+
+
+/* Year itself */
+
+.auditYearHeader {
+  background: #0b5364 !important;
+
+  color: #ffffff !important;
+
+  text-align: center !important;
+
+  font-size: 13px !important;
+
+  font-weight: 800 !important;
+
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+}
+
+
+/* ==========================================================
+   MONTH HEADER
+   ========================================================== */
+
+.auditMonthRow th {
+  background: #edf3f5;
+
+  color: #31545e;
+
+  text-align: center;
+
+  font-size: 11px;
+
+  font-weight: 800;
+
+  text-transform: uppercase;
+
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+
+/* ==========================================================
+   NORMAL PERFORMANCE TABLE
+   ========================================================== */
+
+.auditPerformanceMatrix tbody th {
+  background: #f7fafb;
+
+  color: #123f4b;
+
+  text-align: left;
+
+  font-weight: 800;
+
+  min-width: 110px;
+}
+
+
+.auditPerformanceMatrix tbody td {
+  min-width: 74px;
+
+  text-align: right;
+}
+
+
+/* ==========================================================
+   CATEGORY TABLE
+   ========================================================== */
+
+.auditCategoryMatrixV3 {
+  width: max-content;
+
+  min-width: 100%;
+}
+
+
+/* ----------------------------------------------------------
+   CATEGORY HEADER
+   ---------------------------------------------------------- */
+
+.auditCategoryHeader {
+  min-width: 145px;
+
+  text-align: left !important;
+
+  background: #0b5364 !important;
+
+  color: #ffffff !important;
+}
+
+
+/* ----------------------------------------------------------
+   METRIC HEADER
+   ---------------------------------------------------------- */
+
+.auditCategoryMetricHeader {
+  min-width: 82px;
+
+  text-align: left !important;
+
+  background: #0b5364 !important;
+
+  color: #ffffff !important;
+}
+
+
+/* ----------------------------------------------------------
+   MERGED CATEGORY CELL
+
+   This cell spans:
+   SALES
+   SKUs SOLD
+   ---------------------------------------------------------- */
+
+.auditMergedCategory {
+  min-width: 145px;
+  max-width: 170px;
+
+  white-space: normal !important;
+
+  text-align: left !important;
+
+  vertical-align: middle !important;
+
+  background: #f1f6f7 !important;
+
+  color: #083f4d !important;
+
+  font-size: 12px;
+
+  font-weight: 800 !important;
+
+  line-height: 1.25;
+
+  border-bottom: 2px solid #9fb5bc !important;
+}
+
+
+/* ----------------------------------------------------------
+   SALES / SKUs SOLD COLUMN
+   ---------------------------------------------------------- */
+
+.auditCategoryMetric {
+  min-width: 82px;
+
+  text-align: left !important;
+
+  background: #fafcfc !important;
+
+  color: #51686f !important;
+
+  font-size: 11px;
+
+  font-weight: 700 !important;
+}
+
+
+/* Sales label slightly stronger */
+
+.auditCategorySalesRow
+.auditCategoryMetric {
+  color: #183f49 !important;
+
+  font-weight: 800 !important;
+}
+
+
+/* SKU label */
+
+.auditCategorySkuRow
+.auditCategoryMetric {
+  color: #63787e !important;
+}
+
+
+/* ----------------------------------------------------------
+   CATEGORY NUMBERS
+   ---------------------------------------------------------- */
+
+.auditCategoryMatrixV3 tbody td {
+  min-width: 72px;
+
+  text-align: right;
+}
+
+
+/* ----------------------------------------------------------
+   STRONG LINE AFTER EVERY CATEGORY
+
+   The SKU row is the second/final row of each category.
+   ---------------------------------------------------------- */
+
+.auditCategorySkuRow th,
+.auditCategorySkuRow td {
+  border-bottom:
+    2px solid #9fb5bc !important;
+}
+
+
+/* ==========================================================
+   TOTAL COLUMN
+   ========================================================== */
+
+.auditTotalHeader {
+  min-width: 88px;
+
+  background: #073f4c !important;
+
+  color: #ffffff !important;
+
+  border-left:
+    2px solid #7e9da5 !important;
+}
+
+
+.auditMatrixTotal {
+  min-width: 88px;
+
+  background: #edf3f5 !important;
+
+  color: #073f4c !important;
+
+  font-weight: 800 !important;
+
+  text-align: right !important;
+
+  border-left:
+    2px solid #aabcc1 !important;
+}
+
+
+/* ==========================================================
+   TREND COLOURS
+   ========================================================== */
+
+
+/* Improvement */
+
+.auditMatrix td.auditTrendUp {
+  color: #16834f !important;
+
+  background: #f1faf5;
+
+  font-weight: 800;
+}
+
+
+/* Decline */
+
+.auditMatrix td.auditTrendDown {
+  color: #c63c3c !important;
+
+  background: #fff4f4;
+
+  font-weight: 800;
+}
+
+
+/* Same */
+
+.auditMatrix td.auditTrendSame {
+  color: #52676d;
+
+  background: #ffffff;
+}
+
+
+/* ==========================================================
+   STICKY COLUMNS
+   ========================================================== */
+
+
+/*
+   CATEGORY stays on the far left when scrolling.
+*/
+
+.auditCategoryMatrixV3
+.auditCategoryHeader,
+.auditCategoryMatrixV3
+.auditMergedCategory {
+  position: sticky;
+
+  left: 0;
+
+  z-index: 5;
+}
+
+
+/*
+   METRIC stays beside Category.
+*/
+
+.auditCategoryMatrixV3
+.auditCategoryMetricHeader,
+.auditCategoryMatrixV3
+.auditCategoryMetric {
+  position: sticky;
+
+  left: 145px;
+
+  z-index: 4;
+}
+
+
+/*
+   Headers need higher z-index.
+*/
+
+.auditCategoryMatrixV3
+.auditCategoryHeader,
+.auditCategoryMatrixV3
+.auditCategoryMetricHeader {
+  z-index: 8;
+}
+
+
+/*
+   Small separator after the Metric column.
+*/
+
+.auditCategoryMatrixV3
+.auditCategoryMetric,
+.auditCategoryMatrixV3
+.auditCategoryMetricHeader {
+  border-right:
+    2px solid #9fb5bc !important;
+}
+
+
+/* ==========================================================
+   MOBILE
+   ========================================================== */
+
+@media (max-width: 700px) {
+
+  .auditTableScroll {
+    border-radius: 10px;
+
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+
+  .auditMatrix {
+    font-size: 11px;
+  }
+
+
+  .auditMatrix th,
+  .auditMatrix td {
+    padding: 8px 8px;
+  }
+
+
+  /* CATEGORY */
+
+  .auditCategoryHeader,
+  .auditMergedCategory {
+    min-width: 110px !important;
+    width: 110px !important;
+    max-width: 110px !important;
+  }
+
+
+  /* METRIC */
+
+  .auditCategoryMetricHeader,
+  .auditCategoryMetric {
+    min-width: 68px !important;
+    width: 68px !important;
+  }
+
+
+  /*
+    Metric sticky position must match
+    mobile category width.
+  */
+
+  .auditCategoryMatrixV3
+  .auditCategoryMetricHeader,
+  .auditCategoryMatrixV3
+  .auditCategoryMetric {
+    left: 110px;
+  }
+
+
+  /* MONTH NUMBERS */
+
+  .auditCategoryMatrixV3
+  tbody td {
+    min-width: 62px;
+  }
+
+
+  .auditPerformanceMatrix
+  tbody td {
+    min-width: 62px;
+  }
+
+
+  /* YEAR */
+
+  .auditYearHeader {
+    font-size: 11px !important;
+  }
+
+
+  /* MONTH */
+
+  .auditMonthRow th {
+    font-size: 10px;
+  }
+
+
+  /* TOTAL */
+
+  .auditMatrixTotal,
+  .auditTotalHeader {
+    min-width: 75px;
+  }
+
+}
+
+/* ==========================================================
    MADIBA CUSTOMER AUDIT - BASE STYLES
    ========================================================== */
 

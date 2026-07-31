@@ -212,6 +212,10 @@ export default function CustomerAuditPage() {
 
   const [itemMaster, setItemMaster] =
     useState([]);
+  const [
+  itemMasterStatus,
+  setItemMasterStatus,
+] = useState("Not loaded");
 
 
   /* ========================================================
@@ -310,51 +314,47 @@ export default function CustomerAuditPage() {
       setCustomers(list);
 
 
-      /* ----------------------------------------------------
+           /* ----------------------------------------------------
          ITEM MASTER
-         Used for NEW ITEM suggestions
          ---------------------------------------------------- */
 
-      console.log("Loading items_master...");
+      setItemMasterStatus("Loading...");
 
       const {
         data: masterData,
         error: masterError,
       } = await supabase
         .from("items_master")
-        .select(`
-          id,
-          item_code,
-          item_name,
-          category,
-          is_active
-        `)
-        .eq("is_active", true);
+        .select("*");
 
-     if (masterError) {
+      if (masterError) {
 
-  console.error(
-    "ITEM MASTER LOAD ERROR:",
-    masterError
-  );
+        console.error(
+          "ITEM MASTER ERROR:",
+          masterError
+        );
 
-  setError(
-    `ITEM MASTER ERROR: ${masterError.message}`
-  );
+        setItemMasterStatus(
+          `ERROR: ${masterError.message}`
+        );
 
-} else {
+        setItemMaster([]);
+
+      } else {
 
         console.log(
-          "ITEM MASTER LOADED:",
-          masterData?.length || 0
+          "ITEM MASTER RESULT:",
+          masterData
+        );
+
+        setItemMasterStatus(
+          `SUCCESS: ${masterData?.length || 0} rows`
         );
 
         setItemMaster(
           masterData || []
         );
       }
-
-
       /* ----------------------------------------------------
          SALESMEN
          ---------------------------------------------------- */

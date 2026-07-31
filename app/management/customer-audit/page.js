@@ -194,6 +194,16 @@ export default function CustomerAuditPage() {
     selectedCustomer,
     setSelectedCustomer,
   ] = useState(null);
+  
+  /* ========================================================
+   PEER CUSTOMER SALES
+   Used for "New Items" recommendations
+   ======================================================== */
+
+const [
+  peerTransactions,
+  setPeerTransactions,
+] = useState([]);
 
   const [
     transactions,
@@ -566,6 +576,50 @@ export default function CustomerAuditPage() {
       setTransactions(
         data || []
       );
+      /* ----------------------------------------------------
+   PEER CUSTOMER TRANSACTIONS
+   Used to find customers with similar buying patterns
+   ---------------------------------------------------- */
+
+const {
+  data: peerData,
+  error: peerError,
+} = await supabase
+  .from("sales_raw")
+  .select(`
+    customer_code,
+    item_code,
+    item_name,
+    category,
+    transaction_date,
+    sales_amount
+  `)
+  .gt("sales_amount", 0)
+  .neq(
+    "customer_code",
+    customer.customer_code
+  );
+
+if (peerError) {
+
+  console.error(
+    "PEER SALES LOAD ERROR:",
+    peerError
+  );
+
+  setPeerTransactions([]);
+
+} else {
+
+  console.log(
+    "PEER TRANSACTIONS LOADED:",
+    peerData?.length || 0
+  );
+
+  setPeerTransactions(
+    peerData || []
+  );
+}
 
 
       /* ----------------------------------------------------

@@ -1,6 +1,7 @@
 "use client";
 
-const PAGE_VERSION = "01 Aug 2026 - Quick Order V1";
+const PAGE_VERSION =
+  "01 Aug 2026 - Quick Order V2";
 
 import {
   Fragment,
@@ -1383,13 +1384,10 @@ export default function CustomerAuditPage() {
      2 BUYING LESS
      ======================================================== */
 
-  const quickOrderSuggestions =
+    const quickOrderSuggestions =
     useMemo(() => {
 
-      if (
-        !analytics ||
-        !itemMaster.length
-      ) {
+      if (!analytics) {
         return {
           newItems: [],
           notBoughtRecently: [],
@@ -1398,290 +1396,289 @@ export default function CustomerAuditPage() {
       }
 
 
-      const normalizeCode =
-        (value) =>
-          String(value || "")
-            .trim()
-            .toUpperCase();
+      /* ================================================
+         NORMALIZE ITEM CODE
+         ================================================ */
+
+      const normalizeCode = (value) =>
+        String(value || "")
+          .trim()
+          .toUpperCase();
 
 
-      /* ----------------------------------------------------
-         BUILD COMPLETE CUSTOMER ITEM HISTORY
-         ---------------------------------------------------- */
+      /* ================================================
+         BUILD CUSTOMER PURCHASE HISTORY
+         ================================================ */
 
       const historyByCode =
         new Map();
 
 
-      transactions.forEach(
-        (row) => {
+      transactions.forEach((row) => {
 
-          const code =
-            normalizeCode(
-              row.item_code
-            );
+        const code =
+          normalizeCode(
+            row.item_code
+          );
 
-          if (!code) {
-            return;
-          }
-
-
-          if (
-            !historyByCode.has(
-              code
-            )
-          ) {
-
-            historyByCode.set(
-              code,
-              {
-
-                item_code:
-                  String(
-                    row.item_code ||
-                    ""
-                  ).trim(),
-
-                item_name:
-                  row.item_name ||
-                  row.item_code ||
-                  "Unknown Item",
-
-                category:
-                  row.category ||
-                  "Unclassified",
-
-                lastBought:
-                  null,
-
-                months:
-                  {},
-              }
-            );
-          }
+        if (!code) {
+          return;
+        }
 
 
-          const item =
-            historyByCode.get(
-              code
-            );
+        if (!historyByCode.has(code)) {
 
+          historyByCode.set(
+            code,
+            {
+              item_code:
+                String(
+                  row.item_code || ""
+                ).trim(),
 
-          const qty =
-            Number(
-              row.quantity || 0
-            );
+              item_name:
+                row.item_name ||
+                row.item_code ||
+                "Unknown Item",
 
+              category:
+                row.category ||
+                "Unclassified",
 
-          const month =
-            monthKey(
-              row.transaction_date
-            );
+              lastBought:
+                null,
 
-
-          if (month) {
-
-            if (
-              !item.months[
-                month
-              ]
-            ) {
-              item.months[
-                month
-              ] = 0;
+              months: {},
             }
+          );
+        }
 
 
-            item.months[
-              month
-            ] += qty;
-          }
+        const item =
+          historyByCode.get(code);
 
 
-          /*
-           * Returns / negative quantities
-           * do not count as a purchase date.
-           */
+        const qty =
+          Number(
+            row.quantity || 0
+          );
+
+
+        const month =
+          monthKey(
+            row.transaction_date
+          );
+
+
+        if (month) {
 
           if (
-            qty > 0 &&
-            row.transaction_date &&
-            (
-              !item.lastBought ||
-              row.transaction_date >
-                item.lastBought
-            )
+            item.months[month] ===
+            undefined
+          ) {
+            item.months[month] = 0;
+          }
+
+          item.months[month] += qty;
+        }
+
+
+        /*
+         * Only positive quantity counts
+         * as an actual purchase.
+         */
+
+        if (
+          qty > 0 &&
+          row.transaction_date
+        ) {
+
+          if (
+            !item.lastBought ||
+            row.transaction_date >
+              item.lastBought
           ) {
 
             item.lastBought =
               row.transaction_date;
+          }
+        }
+
+      });
+
+
+      /* ================================================
+         CATEGORIES THIS CUSTOMER BUYS
+         ================================================ */
+
+      const boughtCategories =
+        new Set();
+
+
+      historyByCode.forEach(
+        (item) => {
+
+          const category =
+            String(
+              item.category || ""
+            )
+              .trim()
+              .toLowerCase();
+
+          if (category) {
+            boughtCategories.add(
+              category
+            );
           }
 
         }
       );
 
 
-      /* ----------------------------------------------------
-         CUSTOMER'S PURCHASED CATEGORIES
-         ---------------------------------------------------- */
-
-      const boughtCategories =
-        new Set(
-          Array.from(
-            historyByCode.values()
-          )
-            .map(
-              (item) =>
-                String(
-                  item.category ||
-                  ""
-                )
-                  .trim()
-                  .toLowerCase()
-            )
-            .filter(Boolean)
-        );
-
-
-      /* ----------------------------------------------------
-         CLEAN ACTIVE MASTER ITEMS
-         ---------------------------------------------------- */
+      /* ================================================
+         CLEAN ITEM MASTER
+         ================================================ */
 
       const cleanMaster =
-        itemMaster
-          .map(
-            (row) => {
+        (itemMaster || [])
+          .map((row) => {
 
-              const itemCode =
+            return {
+
+              item_code:
                 String(
-                  row.item_code ||
-                  row.code ||
-                  ""
-                ).trim();
+                  row.item_code || ""
+                ).trim(),
 
+              item_name:
+                String(
+                  row.item_name || ""
+                ).trim(),
 
-              const itemName =
-                row.item_name ||
-                row.name ||
-                row.description ||
-                itemCode ||
-                "Unknown Item";
+              category:
+                String(
+                  row.category ||
+                  "Unclassified"
+                ).trim(),
 
+              /*
+               * Rate intentionally blank
+               * for now.
+               */
 
-              const category =
-                row.category ||
-                row.item_category ||
-                "Unclassified";
+              rate: null,
+            };
 
-
-              return {
-
-                item_code:
-                  itemCode,
-
-                item_name:
-                  itemName,
-
-                category,
-
-                /*
-                 * RATE INTENTIONALLY BLANK
-                 * until Google Sheet is connected.
-                 */
-
-                rate:
-                  null,
-
-                master_row:
-                  row,
-              };
-
-            }
-          )
+          })
           .filter(
             (item) =>
               item.item_code
           );
 
 
-      /* ====================================================
+      /* ================================================
          1. NEW ITEMS
-         ==================================================== */
+         
+         Customer has NEVER bought item.
+         
+         Prefer a category the customer
+         already purchases.
+         ================================================ */
 
       const newItems =
         cleanMaster
-          .filter(
-            (item) =>
+
+          .filter((item) => {
+
+            const code =
+              normalizeCode(
+                item.item_code
+              );
+
+            return (
               !historyByCode.has(
-                normalizeCode(
-                  item.item_code
-                )
+                code
               )
-          )
-          .map(
-            (item) => ({
+            );
+
+          })
+
+          .map((item) => {
+
+            const category =
+              String(
+                item.category || ""
+              )
+                .trim()
+                .toLowerCase();
+
+
+            return {
 
               ...item,
 
               categoryMatch:
                 boughtCategories.has(
-                  String(
-                    item.category ||
-                    ""
-                  )
-                    .trim()
-                    .toLowerCase()
+                  category
                 )
                   ? 1
                   : 0,
 
               recommendationReason:
                 "New Item",
+            };
 
-            })
-          )
-          .sort(
-            (a, b) => {
+          })
 
-              if (
-                b.categoryMatch !==
+          .sort((a, b) => {
+
+            /*
+             * First show new items from
+             * categories customer already buys.
+             */
+
+            if (
+              b.categoryMatch !==
+              a.categoryMatch
+            ) {
+
+              return (
+                b.categoryMatch -
                 a.categoryMatch
-              ) {
-
-                return (
-                  b.categoryMatch -
-                  a.categoryMatch
-                );
-              }
-
-
-              return String(
-                a.item_name ||
-                ""
-              ).localeCompare(
-                String(
-                  b.item_name ||
-                  ""
-                )
               );
-
             }
-          )
+
+
+            return String(
+              a.item_name
+            ).localeCompare(
+              String(
+                b.item_name
+              )
+            );
+
+          })
+
           .slice(0, 3);
 
 
-      /* ====================================================
+      /* ================================================
          2. NOT BOUGHT SINCE LONG
-         ==================================================== */
+         
+         Must have been purchased before.
+         Oldest last purchase first.
+         ================================================ */
 
       const notBoughtRecently =
         Array.from(
           historyByCode.values()
         )
+
           .filter(
             (item) =>
               item.lastBought
           )
+
           .sort(
             (a, b) =>
               String(
@@ -1692,38 +1689,36 @@ export default function CustomerAuditPage() {
                 )
               )
           )
+
           .slice(0, 2)
-          .map(
-            (item) => ({
 
-              ...item,
+          .map((item) => ({
 
-              rate:
-                null,
+            ...item,
 
-              recommendationReason:
-                "Not Bought Since Long",
+            rate: null,
 
-            })
-          );
+            recommendationReason:
+              "Not Bought Since Long",
+          }));
 
 
-      /* ====================================================
+      /* ================================================
          3. BUYING LESS
-
-         Latest 3 displayed transaction months
-         versus previous 3 displayed transaction months.
-         ==================================================== */
+         
+         Compare:
+         
+         Previous 3 transaction months
+         vs
+         Latest 3 transaction months
+         ================================================ */
 
       const visibleMonths =
-        analytics.months ||
-        [];
+        analytics.months || [];
 
 
       const recentMonths =
-        visibleMonths.slice(
-          -3
-        );
+        visibleMonths.slice(-3);
 
 
       const previousMonths =
@@ -1737,111 +1732,145 @@ export default function CustomerAuditPage() {
         Array.from(
           historyByCode.values()
         )
-          .map(
-            (item) => {
 
-              const recentQty =
-                recentMonths.reduce(
-                  (
-                    total,
-                    month
-                  ) =>
+          .map((item) => {
+
+            const recentQty =
+              recentMonths.reduce(
+                (total, month) => {
+
+                  return (
                     total +
                     Number(
                       item.months[
                         month
                       ] || 0
-                    ),
-                  0
-                );
+                    )
+                  );
 
-
-              const previousQty =
-                previousMonths.reduce(
-                  (
-                    total,
-                    month
-                  ) =>
-                    total +
-                    Number(
-                      item.months[
-                        month
-                      ] || 0
-                    ),
-                  0
-                );
-
-
-              const decline =
-                previousQty -
-                recentQty;
-
-
-              const declinePercent =
-                previousQty > 0
-                  ? decline /
-                    previousQty
-                  : 0;
-
-
-              return {
-
-                ...item,
-
-                recentQty,
-
-                previousQty,
-
-                decline,
-
-                declinePercent,
-              };
-
-            }
-          )
-          .filter(
-            (item) =>
-              item.previousQty >
-                0 &&
-              item.recentQty <
-                item.previousQty
-          )
-          .sort(
-            (a, b) => {
-
-              if (
-                b.declinePercent !==
-                a.declinePercent
-              ) {
-
-                return (
-                  b.declinePercent -
-                  a.declinePercent
-                );
-              }
-
-
-              return (
-                b.decline -
-                a.decline
+                },
+                0
               );
 
-            }
-          )
-          .slice(0, 2)
-          .map(
-            (item) => ({
+
+            const previousQty =
+              previousMonths.reduce(
+                (total, month) => {
+
+                  return (
+                    total +
+                    Number(
+                      item.months[
+                        month
+                      ] || 0
+                    )
+                  );
+
+                },
+                0
+              );
+
+
+            const decline =
+              previousQty -
+              recentQty;
+
+
+            const declinePercent =
+              previousQty > 0
+                ? decline /
+                  previousQty
+                : 0;
+
+
+            return {
 
               ...item,
 
-              rate:
-                null,
+              recentQty,
 
-              recommendationReason:
-                "Buying Less",
+              previousQty,
 
-            })
-          );
+              decline,
+
+              declinePercent,
+            };
+
+          })
+
+          .filter((item) => {
+
+            return (
+              item.previousQty > 0 &&
+              item.recentQty <
+                item.previousQty
+            );
+
+          })
+
+          .sort((a, b) => {
+
+            if (
+              b.declinePercent !==
+              a.declinePercent
+            ) {
+
+              return (
+                b.declinePercent -
+                a.declinePercent
+              );
+            }
+
+
+            return (
+              b.decline -
+              a.decline
+            );
+
+          })
+
+          .slice(0, 2)
+
+          .map((item) => ({
+
+            ...item,
+
+            rate: null,
+
+            recommendationReason:
+              "Buying Less",
+          }));
+
+
+      /* ================================================
+         DEBUG
+         
+         Open browser console if needed.
+         This tells us immediately whether
+         the master/history are loaded.
+         ================================================ */
+
+      console.log(
+        "QUICK ORDER DEBUG",
+        {
+          masterItems:
+            cleanMaster.length,
+
+          customerPurchasedItems:
+            historyByCode.size,
+
+          newItems:
+            newItems.length,
+
+          notBoughtRecently:
+            notBoughtRecently.length,
+
+          buyingLess:
+            buyingLess.length,
+
+          visibleMonths,
+        }
+      );
 
 
       return {
@@ -1858,8 +1887,6 @@ export default function CustomerAuditPage() {
       transactions,
       itemMaster,
     ]);
-
-
   const quickOrderAllItems =
     useMemo(
       () => [

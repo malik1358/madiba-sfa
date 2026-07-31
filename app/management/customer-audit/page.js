@@ -45,19 +45,24 @@ function daysBetween(date1, date2) {
 export default function CustomerAuditPage() {
   const [loading, setLoading] = useState(true);
   const [loadingCustomer, setLoadingCustomer] = useState(false);
-
   const [error, setError] = useState("");
 
   const [salesmen, setSalesmen] = useState([]);
   const [customers, setCustomers] = useState([]);
 
-  const [selectedSalesman, setSelectedSalesman] = useState("ALL");
+  const [selectedSalesman, setSelectedSalesman] =
+    useState("ALL");
+
   const [search, setSearch] = useState("");
 
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [transactions, setTransactions] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] =
+    useState(null);
 
-  const [showTransactions, setShowTransactions] = useState(false);
+  const [transactions, setTransactions] =
+    useState([]);
+
+  const [showTransactions, setShowTransactions] =
+    useState(false);
 
   useEffect(() => {
     loadFoundation();
@@ -76,25 +81,27 @@ export default function CustomerAuditPage() {
         throw new Error("Please login again.");
       }
 
-      const { data: customerData, error: customerError } =
-        await supabase
-          .from("customers")
-          .select(
-            `
-            customer_code,
-            customer_name,
-            current_salesman_code,
-            latest_transaction_date,
-            customer_type,
-            city,
-            area,
-            mobile
-          `
-          )
-          .eq("is_active", true)
-          .order("customer_name");
+      const {
+        data: customerData,
+        error: customerError,
+      } = await supabase
+        .from("customers")
+        .select(`
+          customer_code,
+          customer_name,
+          current_salesman_code,
+          latest_transaction_date,
+          customer_type,
+          city,
+          area,
+          mobile
+        `)
+        .eq("is_active", true)
+        .order("customer_name");
 
-      if (customerError) throw customerError;
+      if (customerError) {
+        throw customerError;
+      }
 
       const list = customerData || [];
 
@@ -103,41 +110,64 @@ export default function CustomerAuditPage() {
       const salesmanCodes = [
         ...new Set(
           list
-            .map((c) => c.current_salesman_code)
+            .map(
+              (customer) =>
+                customer.current_salesman_code
+            )
             .filter(Boolean)
         ),
       ].sort();
 
       setSalesmen(salesmanCodes);
     } catch (err) {
-      setError(err.message || "Unable to load customer data.");
+      setError(
+        err.message ||
+          "Unable to load customer data."
+      );
     } finally {
       setLoading(false);
     }
   }
 
   const filteredCustomers = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = search
+      .trim()
+      .toLowerCase();
 
-    return customers.filter((customer) => {
-      const salesmanOK =
-        selectedSalesman === "ALL" ||
-        customer.current_salesman_code === selectedSalesman;
+    return customers.filter(
+      (customer) => {
+        const salesmanOK =
+          selectedSalesman === "ALL" ||
+          customer.current_salesman_code ===
+            selectedSalesman;
 
-      if (!salesmanOK) return false;
+        if (!salesmanOK) {
+          return false;
+        }
 
-      if (!q) return true;
+        if (!q) {
+          return true;
+        }
 
-      return (
-        String(customer.customer_code || "")
-          .toLowerCase()
-          .includes(q) ||
-        String(customer.customer_name || "")
-          .toLowerCase()
-          .includes(q)
-      );
-    });
-  }, [customers, selectedSalesman, search]);
+        return (
+          String(
+            customer.customer_code || ""
+          )
+            .toLowerCase()
+            .includes(q) ||
+          String(
+            customer.customer_name || ""
+          )
+            .toLowerCase()
+            .includes(q)
+        );
+      }
+    );
+  }, [
+    customers,
+    selectedSalesman,
+    search,
+  ]);
 
   async function openCustomer(customer) {
     setSelectedCustomer(customer);
@@ -147,25 +177,42 @@ export default function CustomerAuditPage() {
     setError("");
 
     try {
-      const { data: settings, error: settingsError } =
-        await supabase
-          .from("system_settings")
-          .select("setting_value")
-          .eq("setting_key", "active_sales_batch_id")
-          .single();
+      const {
+        data: settings,
+        error: settingsError,
+      } = await supabase
+        .from("system_settings")
+        .select("setting_value")
+        .eq(
+          "setting_key",
+          "active_sales_batch_id"
+        )
+        .single();
 
-      if (settingsError) throw settingsError;
-
-      const activeBatchId = Number(settings.setting_value);
-
-      if (!activeBatchId) {
-        throw new Error("No active sales snapshot found.");
+      if (settingsError) {
+        throw settingsError;
       }
 
-      const { data, error: salesError } = await supabase
+      const activeBatchId =
+        Number(settings.setting_value);
+
+      if (!activeBatchId) {
+        throw new Error(
+          "No active sales snapshot found."
+        );
+      }
+
+      /*
+        IMPORTANT:
+        No Margin / GP / Cost fields are requested here.
+      */
+
+      const {
+        data,
+        error: salesError,
+      } = await supabase
         .from("sales_raw")
-        .select(
-          `
+        .select(`
           id,
           transaction_date,
           voucher_number,
@@ -181,185 +228,331 @@ export default function CustomerAuditPage() {
           quantity,
           rate,
           sales_amount,
-          margin,
-          margin_percent,
           first_purchase_date,
           abc_class
-        `
+        `)
+        .eq(
+          "import_batch_id",
+          activeBatchId
         )
-        .eq("import_batch_id", activeBatchId)
-        .eq("customer_code", customer.customer_code)
-        .order("transaction_date", { ascending: false })
-        .order("id", { ascending: false });
+        .eq(
+          "customer_code",
+          customer.customer_code
+        )
+        .order(
+          "transaction_date",
+          {
+            ascending: false,
+          }
+        )
+        .order(
+          "id",
+          {
+            ascending: false,
+          }
+        );
 
-      if (salesError) throw salesError;
+      if (salesError) {
+        throw salesError;
+      }
 
       setTransactions(data || []);
     } catch (err) {
-      setError(err.message || "Unable to load customer history.");
+      setError(
+        err.message ||
+          "Unable to load customer history."
+      );
     } finally {
       setLoadingCustomer(false);
     }
   }
 
-  const customerAnalytics = useMemo(() => {
-    if (!transactions.length) return null;
-
-    const totalSales = transactions.reduce(
-      (sum, row) => sum + Number(row.sales_amount || 0),
-      0
-    );
-
-    const totalMargin = transactions.reduce(
-      (sum, row) => sum + Number(row.margin || 0),
-      0
-    );
-
-    const totalQty = transactions.reduce(
-      (sum, row) => sum + Number(row.quantity || 0),
-      0
-    );
-
-    const marginPercent =
-      totalSales !== 0 ? (totalMargin / totalSales) * 100 : 0;
-
-    const itemMap = new Map();
-
-    for (const row of transactions) {
-      const key = row.item_code || row.item_name;
-
-      if (!itemMap.has(key)) {
-        itemMap.set(key, {
-          item_code: row.item_code,
-          item_name: row.item_name,
-          category: row.category,
-          abc_class: row.abc_class,
-
-          total_sales: 0,
-          total_qty: 0,
-          total_margin: 0,
-
-          transaction_count: 0,
-
-          first_date: row.transaction_date,
-          last_date: row.transaction_date,
-
-          months: new Set(),
-        });
+  const customerAnalytics =
+    useMemo(() => {
+      if (!transactions.length) {
+        return null;
       }
 
-      const item = itemMap.get(key);
+      const totalSales =
+        transactions.reduce(
+          (sum, row) =>
+            sum +
+            Number(
+              row.sales_amount || 0
+            ),
+          0
+        );
 
-      item.total_sales += Number(row.sales_amount || 0);
-      item.total_qty += Number(row.quantity || 0);
-      item.total_margin += Number(row.margin || 0);
+      const totalQty =
+        transactions.reduce(
+          (sum, row) =>
+            sum +
+            Number(
+              row.quantity || 0
+            ),
+          0
+        );
 
-      item.transaction_count += 1;
+      const itemMap =
+        new Map();
 
-      if (
-        row.transaction_date &&
-        (!item.first_date || row.transaction_date < item.first_date)
-      ) {
-        item.first_date = row.transaction_date;
+      for (const row of transactions) {
+        const key =
+          row.item_code ||
+          row.item_name;
+
+        if (!itemMap.has(key)) {
+          itemMap.set(key, {
+            item_code:
+              row.item_code,
+
+            item_name:
+              row.item_name,
+
+            category:
+              row.category,
+
+            abc_class:
+              row.abc_class,
+
+            total_sales: 0,
+            total_qty: 0,
+
+            transaction_count: 0,
+
+            first_date:
+              row.transaction_date,
+
+            last_date:
+              row.transaction_date,
+
+            months:
+              new Set(),
+          });
+        }
+
+        const item =
+          itemMap.get(key);
+
+        item.total_sales +=
+          Number(
+            row.sales_amount || 0
+          );
+
+        item.total_qty +=
+          Number(
+            row.quantity || 0
+          );
+
+        item.transaction_count += 1;
+
+        if (
+          row.transaction_date &&
+          (
+            !item.first_date ||
+            row.transaction_date <
+              item.first_date
+          )
+        ) {
+          item.first_date =
+            row.transaction_date;
+        }
+
+        if (
+          row.transaction_date &&
+          (
+            !item.last_date ||
+            row.transaction_date >
+              item.last_date
+          )
+        ) {
+          item.last_date =
+            row.transaction_date;
+        }
+
+        if (row.transaction_date) {
+          item.months.add(
+            row.transaction_date.slice(
+              0,
+              7
+            )
+          );
+        }
       }
 
-      if (
-        row.transaction_date &&
-        (!item.last_date || row.transaction_date > item.last_date)
-      ) {
-        item.last_date = row.transaction_date;
+      const latestDate =
+        transactions.reduce(
+          (latest, row) => {
+            if (
+              !row.transaction_date
+            ) {
+              return latest;
+            }
+
+            if (
+              !latest ||
+              row.transaction_date >
+                latest
+            ) {
+              return row.transaction_date;
+            }
+
+            return latest;
+          },
+          null
+        );
+
+      const earliestDate =
+        transactions.reduce(
+          (earliest, row) => {
+            if (
+              !row.transaction_date
+            ) {
+              return earliest;
+            }
+
+            if (
+              !earliest ||
+              row.transaction_date <
+                earliest
+            ) {
+              return row.transaction_date;
+            }
+
+            return earliest;
+          },
+          null
+        );
+
+      const items =
+        Array.from(
+          itemMap.values()
+        )
+          .map((item) => {
+            const activeMonths =
+              Math.max(
+                item.months.size,
+                1
+              );
+
+            return {
+              ...item,
+
+              active_months:
+                activeMonths,
+
+              avg_monthly_qty:
+                item.total_qty /
+                activeMonths,
+
+              avg_monthly_sales:
+                item.total_sales /
+                activeMonths,
+
+              days_since_last:
+                latestDate &&
+                item.last_date
+                  ? daysBetween(
+                      item.last_date,
+                      latestDate
+                    )
+                  : null,
+            };
+          })
+          .sort(
+            (a, b) =>
+              b.total_sales -
+              a.total_sales
+          );
+
+      const categories =
+        new Map();
+
+      for (const item of items) {
+        const category =
+          item.category ||
+          "Unclassified";
+
+        if (
+          !categories.has(
+            category
+          )
+        ) {
+          categories.set(
+            category,
+            {
+              category,
+              sales: 0,
+              qty: 0,
+              items: 0,
+            }
+          );
+        }
+
+        const c =
+          categories.get(
+            category
+          );
+
+        c.sales +=
+          item.total_sales;
+
+        c.qty +=
+          item.total_qty;
+
+        c.items += 1;
       }
 
-      if (row.transaction_date) {
-        item.months.add(row.transaction_date.slice(0, 7));
-      }
-    }
+      const categoryList =
+        Array.from(
+          categories.values()
+        ).sort(
+          (a, b) =>
+            b.sales -
+            a.sales
+        );
 
-    const latestDate = transactions.reduce((latest, row) => {
-      if (!row.transaction_date) return latest;
+      /*
+        Count distinct vouchers/orders.
+        If voucher number is missing,
+        fall back to reference.
+      */
 
-      if (!latest || row.transaction_date > latest) {
-        return row.transaction_date;
-      }
+      const orderSet =
+        new Set();
 
-      return latest;
-    }, null);
+      for (const row of transactions) {
+        const orderKey =
+          row.voucher_number ||
+          row.reference;
 
-    const items = Array.from(itemMap.values())
-      .map((item) => {
-        const activeMonths = Math.max(item.months.size, 1);
-
-        return {
-          ...item,
-
-          active_months: activeMonths,
-
-          avg_monthly_qty: item.total_qty / activeMonths,
-
-          avg_monthly_sales: item.total_sales / activeMonths,
-
-          margin_percent:
-            item.total_sales !== 0
-              ? (item.total_margin / item.total_sales) * 100
-              : 0,
-
-          days_since_last:
-            latestDate && item.last_date
-              ? daysBetween(item.last_date, latestDate)
-              : null,
-        };
-      })
-      .sort((a, b) => b.total_sales - a.total_sales);
-
-    const categories = new Map();
-
-    for (const item of items) {
-      const category = item.category || "Unclassified";
-
-      if (!categories.has(category)) {
-        categories.set(category, {
-          category,
-          sales: 0,
-          margin: 0,
-          qty: 0,
-          items: 0,
-        });
+        if (orderKey) {
+          orderSet.add(orderKey);
+        }
       }
 
-      const c = categories.get(category);
+      return {
+        totalSales,
+        totalQty,
 
-      c.sales += item.total_sales;
-      c.margin += item.total_margin;
-      c.qty += item.total_qty;
-      c.items += 1;
-    }
+        itemCount:
+          items.length,
 
-    const categoryList = Array.from(categories.values())
-      .map((category) => ({
-        ...category,
+        transactionCount:
+          transactions.length,
 
-        margin_percent:
-          category.sales !== 0
-            ? (category.margin / category.sales) * 100
-            : 0,
-      }))
-      .sort((a, b) => b.sales - a.sales);
+        orderCount:
+          orderSet.size,
 
-    return {
-      totalSales,
-      totalMargin,
-      totalQty,
-      marginPercent,
+        latestDate,
+        earliestDate,
 
-      itemCount: items.length,
-      transactionCount: transactions.length,
+        items,
 
-      latestDate,
-
-      items,
-      categories: categoryList,
-    };
-  }, [transactions]);
+        categories:
+          categoryList,
+      };
+    }, [transactions]);
 
   if (loading) {
     return (
@@ -377,12 +570,24 @@ export default function CustomerAuditPage() {
 
         <header className="auditTop">
           <div>
-            <div className="auditBrand">MADIBA SFA</div>
-            <h1>Customer Audit</h1>
-            <p>Management sales history validation</p>
+            <div className="auditBrand">
+              MADIBA SFA
+            </div>
+
+            <h1>
+              Customer Audit
+            </h1>
+
+            <p>
+              Management sales history
+              validation
+            </p>
           </div>
 
-          <a href="/" className="auditHome">
+          <a
+            href="/"
+            className="auditHome"
+          >
             ← Home
           </a>
         </header>
@@ -396,72 +601,111 @@ export default function CustomerAuditPage() {
         {!selectedCustomer && (
           <>
             <section className="auditFilters">
+
               <label>
                 Salesman
+
                 <select
-                  value={selectedSalesman}
+                  value={
+                    selectedSalesman
+                  }
                   onChange={(e) =>
-                    setSelectedSalesman(e.target.value)
+                    setSelectedSalesman(
+                      e.target.value
+                    )
                   }
                 >
                   <option value="ALL">
                     All Salesmen
                   </option>
 
-                  {salesmen.map((salesman) => (
-                    <option key={salesman} value={salesman}>
-                      {salesman}
-                    </option>
-                  ))}
+                  {salesmen.map(
+                    (salesman) => (
+                      <option
+                        key={salesman}
+                        value={salesman}
+                      >
+                        {salesman}
+                      </option>
+                    )
+                  )}
                 </select>
               </label>
 
               <label>
                 Search Customer
+
                 <input
                   type="search"
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) =>
+                    setSearch(
+                      e.target.value
+                    )
+                  }
                   placeholder="Code or customer name..."
                 />
               </label>
+
             </section>
 
             <div className="auditCount">
-              <strong>{filteredCustomers.length}</strong> customers
+              <strong>
+                {
+                  filteredCustomers.length
+                }
+              </strong>{" "}
+              customers
             </div>
 
             <section className="auditCustomerList">
-              {filteredCustomers.map((customer) => (
-                <button
-                  key={customer.customer_code}
-                  className="auditCustomerCard"
-                  onClick={() => openCustomer(customer)}
-                >
-                  <div className="auditCustomerCode">
-                    {customer.customer_code}
-                  </div>
 
-                  <div className="auditCustomerBody">
-                    <strong>
-                      {customer.customer_name}
-                    </strong>
+              {filteredCustomers.map(
+                (customer) => (
+                  <button
+                    key={
+                      customer.customer_code
+                    }
+                    className="auditCustomerCard"
+                    onClick={() =>
+                      openCustomer(
+                        customer
+                      )
+                    }
+                  >
+                    <div className="auditCustomerCode">
+                      {
+                        customer.customer_code
+                      }
+                    </div>
 
-                    <span>
-                      {customer.current_salesman_code || "No salesman"}
-                    </span>
+                    <div className="auditCustomerBody">
+                      <strong>
+                        {
+                          customer.customer_name
+                        }
+                      </strong>
 
-                    <small>
-                      Last transaction:{" "}
-                      {shortDate(
-                        customer.latest_transaction_date
-                      )}
-                    </small>
-                  </div>
+                      <span>
+                        {customer.current_salesman_code ||
+                          "No salesman"}
+                      </span>
 
-                  <div className="auditArrow">›</div>
-                </button>
-              ))}
+                      <small>
+                        Last transaction:{" "}
+                        {shortDate(
+                          customer.latest_transaction_date
+                        )}
+                      </small>
+                    </div>
+
+                    <div className="auditArrow">
+                      ›
+                    </div>
+                  </button>
+                )
+              )}
+
             </section>
           </>
         )}
@@ -472,21 +716,34 @@ export default function CustomerAuditPage() {
             <button
               className="auditBack"
               onClick={() => {
-                setSelectedCustomer(null);
-                setTransactions([]);
-                setShowTransactions(false);
+                setSelectedCustomer(
+                  null
+                );
+
+                setTransactions(
+                  []
+                );
+
+                setShowTransactions(
+                  false
+                );
               }}
             >
               ← Customers
             </button>
 
             <div className="auditCustomerHeader">
+
               <div className="auditCustomerHeaderCode">
-                {selectedCustomer.customer_code}
+                {
+                  selectedCustomer.customer_code
+                }
               </div>
 
               <h2>
-                {selectedCustomer.customer_name}
+                {
+                  selectedCustomer.customer_name
+                }
               </h2>
 
               <div className="auditSalesmanPill">
@@ -497,203 +754,340 @@ export default function CustomerAuditPage() {
               {(selectedCustomer.city ||
                 selectedCustomer.area) && (
                 <p>
-                  {[selectedCustomer.area, selectedCustomer.city]
+                  {[
+                    selectedCustomer.area,
+                    selectedCustomer.city,
+                  ]
                     .filter(Boolean)
                     .join(", ")}
                 </p>
               )}
+
             </div>
 
             {loadingCustomer && (
               <div className="auditLoadingBox">
-                Loading complete purchase history...
+                Loading complete purchase
+                history...
               </div>
             )}
 
-            {!loadingCustomer && customerAnalytics && (
-              <>
-                <div className="auditMetrics">
+            {!loadingCustomer &&
+              customerAnalytics && (
+                <>
 
-                  <div>
-                    <span>Total Sales</span>
-                    <strong>
-                      SAR {money(customerAnalytics.totalSales)}
-                    </strong>
-                  </div>
+                  {/* ==============================
+                      MAIN CUSTOMER METRICS
+                      ============================== */}
 
-                  <div>
-                    <span>GP</span>
-                    <strong>
-                      SAR {money(customerAnalytics.totalMargin)}
-                    </strong>
-                  </div>
+                  <div className="auditMetrics">
 
-                  <div>
-                    <span>GP %</span>
-                    <strong>
-                      {customerAnalytics.marginPercent.toFixed(1)}%
-                    </strong>
-                  </div>
+                    <div>
+                      <span>
+                        Total Sales
+                      </span>
 
-                  <div>
-                    <span>SKUs Bought</span>
-                    <strong>
-                      {customerAnalytics.itemCount}
-                    </strong>
-                  </div>
-
-                </div>
-
-                <div className="auditSectionTitle">
-                  Category Mix
-                </div>
-
-                <div className="auditCategoryList">
-                  {customerAnalytics.categories.map((category) => (
-                    <div
-                      className="auditCategoryCard"
-                      key={category.category}
-                    >
-                      <div>
-                        <strong>{category.category}</strong>
-                        <span>
-                          {category.items} SKU
-                          {category.items !== 1 ? "s" : ""}
-                        </span>
-                      </div>
-
-                      <div className="auditCategoryNumbers">
-                        <strong>
-                          SAR {money(category.sales)}
-                        </strong>
-                        <span>
-                          GP {category.margin_percent.toFixed(1)}%
-                        </span>
-                      </div>
+                      <strong>
+                        SAR{" "}
+                        {money(
+                          customerAnalytics.totalSales
+                        )}
+                      </strong>
                     </div>
-                  ))}
-                </div>
 
-                <div className="auditSectionTitle">
-                  Item Purchase History
-                </div>
+                    <div>
+                      <span>
+                        SKUs Bought
+                      </span>
 
-                <div className="auditItemList">
-                  {customerAnalytics.items.map((item) => (
-                    <div
-                      className="auditItemCard"
-                      key={item.item_code || item.item_name}
-                    >
-                      <div className="auditItemTop">
-                        <div>
-                          <div className="auditItemCode">
-                            {item.item_code || "-"}
+                      <strong>
+                        {
+                          customerAnalytics.itemCount
+                        }
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span>
+                        Orders
+                      </span>
+
+                      <strong>
+                        {
+                          customerAnalytics.orderCount
+                        }
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span>
+                        Last Purchase
+                      </span>
+
+                      <strong>
+                        {shortDate(
+                          customerAnalytics.latestDate
+                        )}
+                      </strong>
+                    </div>
+
+                  </div>
+
+                  {/* ==============================
+                      CATEGORY MIX
+                      ============================== */}
+
+                  <div className="auditSectionTitle">
+                    Category Mix
+                  </div>
+
+                  <div className="auditCategoryList">
+
+                    {customerAnalytics.categories.map(
+                      (
+                        category
+                      ) => (
+                        <div
+                          className="auditCategoryCard"
+                          key={
+                            category.category
+                          }
+                        >
+                          <div>
+                            <strong>
+                              {
+                                category.category
+                              }
+                            </strong>
+
+                            <span>
+                              {
+                                category.items
+                              }{" "}
+                              SKU
+                              {category.items !==
+                              1
+                                ? "s"
+                                : ""}
+                            </span>
                           </div>
 
-                          <strong>
-                            {item.item_name}
-                          </strong>
+                          <div className="auditCategoryNumbers">
+                            <strong>
+                              SAR{" "}
+                              {money(
+                                category.sales
+                              )}
+                            </strong>
 
-                          <span>
-                            {item.category || "Unclassified"}
-                            {item.abc_class
-                              ? ` • ${item.abc_class}`
-                              : ""}
-                          </span>
+                            <span>
+                              Qty{" "}
+                              {qty(
+                                category.qty
+                              )}
+                            </span>
+                          </div>
                         </div>
+                      )
+                    )}
 
-                        <div className="auditItemSales">
-                          SAR {money(item.total_sales)}
-                        </div>
-                      </div>
-
-                      <div className="auditItemStats">
-                        <div>
-                          <span>Total Qty</span>
-                          <strong>{qty(item.total_qty)}</strong>
-                        </div>
-
-                        <div>
-                          <span>Avg / Active Month</span>
-                          <strong>
-                            {qty(item.avg_monthly_qty)}
-                          </strong>
-                        </div>
-
-                        <div>
-                          <span>Last Bought</span>
-                          <strong>
-                            {shortDate(item.last_date)}
-                          </strong>
-                        </div>
-
-                        <div>
-                          <span>GP %</span>
-                          <strong>
-                            {item.margin_percent.toFixed(1)}%
-                          </strong>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  className="auditTransactionButton"
-                  onClick={() =>
-                    setShowTransactions(!showTransactions)
-                  }
-                >
-                  {showTransactions
-                    ? "Hide Transactions"
-                    : `View All ${customerAnalytics.transactionCount} Transactions`}
-                </button>
-
-                {showTransactions && (
-                  <div className="auditTransactions">
-                    {transactions.map((row) => (
-                      <div
-                        className="auditTransaction"
-                        key={row.id}
-                      >
-                        <div>
-                          <strong>
-                            {shortDate(row.transaction_date)}
-                          </strong>
-
-                          <span>
-                            {row.voucher_number || row.reference || "-"}
-                          </span>
-                        </div>
-
-                        <div className="auditTransactionItem">
-                          <strong>
-                            {row.item_name}
-                          </strong>
-
-                          <span>
-                            Qty {qty(row.quantity)}
-                          </span>
-                        </div>
-
-                        <div className="auditTransactionAmount">
-                          SAR {money(row.sales_amount)}
-                        </div>
-                      </div>
-                    ))}
                   </div>
-                )}
-              </>
-            )}
+
+                  {/* ==============================
+                      ITEM HISTORY
+                      ============================== */}
+
+                  <div className="auditSectionTitle">
+                    Item Purchase History
+                  </div>
+
+                  <div className="auditItemList">
+
+                    {customerAnalytics.items.map(
+                      (item) => (
+                        <div
+                          className="auditItemCard"
+                          key={
+                            item.item_code ||
+                            item.item_name
+                          }
+                        >
+
+                          <div className="auditItemTop">
+
+                            <div>
+                              <div className="auditItemCode">
+                                {item.item_code ||
+                                  "-"}
+                              </div>
+
+                              <strong>
+                                {
+                                  item.item_name
+                                }
+                              </strong>
+
+                              <span>
+                                {item.category ||
+                                  "Unclassified"}
+
+                                {item.abc_class
+                                  ? ` • ${item.abc_class}`
+                                  : ""}
+                              </span>
+                            </div>
+
+                            <div className="auditItemSales">
+                              SAR{" "}
+                              {money(
+                                item.total_sales
+                              )}
+                            </div>
+
+                          </div>
+
+                          <div className="auditItemStats">
+
+                            <div>
+                              <span>
+                                Total Qty
+                              </span>
+
+                              <strong>
+                                {qty(
+                                  item.total_qty
+                                )}
+                              </strong>
+                            </div>
+
+                            <div>
+                              <span>
+                                Avg / Active
+                                Month
+                              </span>
+
+                              <strong>
+                                {qty(
+                                  item.avg_monthly_qty
+                                )}
+                              </strong>
+                            </div>
+
+                            <div>
+                              <span>
+                                Last Bought
+                              </span>
+
+                              <strong>
+                                {shortDate(
+                                  item.last_date
+                                )}
+                              </strong>
+                            </div>
+
+                            <div>
+                              <span>
+                                Purchase Bills
+                              </span>
+
+                              <strong>
+                                {
+                                  item.transaction_count
+                                }
+                              </strong>
+                            </div>
+
+                          </div>
+
+                        </div>
+                      )
+                    )}
+
+                  </div>
+
+                  {/* ==============================
+                      TRANSACTIONS
+                      ============================== */}
+
+                  <button
+                    className="auditTransactionButton"
+                    onClick={() =>
+                      setShowTransactions(
+                        !showTransactions
+                      )
+                    }
+                  >
+                    {showTransactions
+                      ? "Hide Transactions"
+                      : `View All ${customerAnalytics.transactionCount} Transaction Lines`}
+                  </button>
+
+                  {showTransactions && (
+                    <div className="auditTransactions">
+
+                      {transactions.map(
+                        (row) => (
+                          <div
+                            className="auditTransaction"
+                            key={row.id}
+                          >
+
+                            <div>
+                              <strong>
+                                {shortDate(
+                                  row.transaction_date
+                                )}
+                              </strong>
+
+                              <span>
+                                {row.voucher_number ||
+                                  row.reference ||
+                                  "-"}
+                              </span>
+                            </div>
+
+                            <div className="auditTransactionItem">
+                              <strong>
+                                {
+                                  row.item_name
+                                }
+                              </strong>
+
+                              <span>
+                                Qty{" "}
+                                {qty(
+                                  row.quantity
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="auditTransactionAmount">
+                              SAR{" "}
+                              {money(
+                                row.sales_amount
+                              )}
+                            </div>
+
+                          </div>
+                        )
+                      )}
+
+                    </div>
+                  )}
+
+                </>
+              )}
 
             {!loadingCustomer &&
               !customerAnalytics &&
               !error && (
                 <div className="auditEmpty">
-                  No transactions found for this customer in the
-                  active snapshot.
+                  No transactions found for
+                  this customer in the active
+                  snapshot.
                 </div>
               )}
+
           </section>
         )}
 

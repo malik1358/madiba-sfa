@@ -271,3 +271,417 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+
+/* ==========================================================
+   MOBILE-FIRST CUSTOMER AUDIT
+   ========================================================== */
+
+.auditPage {
+  min-height: 100vh;
+  background: #f3f6f7;
+  color: #173f49;
+  padding: 0;
+}
+
+.auditShell {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 18px 14px 50px;
+}
+
+.auditTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.auditBrand {
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  font-weight: 800;
+  color: #176170;
+}
+
+.auditTop h1 {
+  margin: 3px 0;
+  font-size: 25px;
+  line-height: 1.1;
+}
+
+.auditTop p {
+  margin: 0;
+  color: #809097;
+  font-size: 12px;
+}
+
+.auditHome,
+.auditBack {
+  border: 1px solid #d6e0e3;
+  background: white;
+  color: #31535c;
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-decoration: none;
+  cursor: pointer;
+  min-height: 42px;
+}
+
+.auditFilters {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  background: white;
+  border: 1px solid #dde6e8;
+  padding: 14px;
+  border-radius: 14px;
+}
+
+.auditFilters label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.auditFilters input,
+.auditFilters select {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 13px;
+  border: 1px solid #cedadd;
+  border-radius: 10px;
+  background: white;
+  font-size: 16px;
+  color: #173f49;
+}
+
+.auditCount {
+  margin: 15px 2px 10px;
+  color: #71848a;
+  font-size: 13px;
+}
+
+.auditCount strong {
+  color: #173f49;
+}
+
+.auditCustomerList {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.auditCustomerCard {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  background: white;
+  border: 1px solid #dfe7e9;
+  border-radius: 13px;
+  padding: 13px;
+  cursor: pointer;
+  min-height: 82px;
+}
+
+.auditCustomerCode {
+  min-width: 55px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: #eaf3f4;
+  color: #155767;
+  font-weight: 800;
+  text-align: center;
+  font-size: 12px;
+}
+
+.auditCustomerBody {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.auditCustomerBody strong {
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.auditCustomerBody span {
+  color: #287080;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.auditCustomerBody small {
+  color: #8a989d;
+  margin-top: 3px;
+  font-size: 10px;
+}
+
+.auditArrow {
+  font-size: 25px;
+  color: #8da0a6;
+}
+
+.auditError {
+  background: #fff0f0;
+  color: #9b3232;
+  border: 1px solid #efcccc;
+  border-radius: 10px;
+  padding: 13px;
+  margin-bottom: 15px;
+}
+
+.auditBack {
+  margin-bottom: 13px;
+}
+
+.auditCustomerHeader {
+  background: #123f4b;
+  color: white;
+  border-radius: 15px;
+  padding: 18px;
+  margin-bottom: 12px;
+}
+
+.auditCustomerHeaderCode {
+  opacity: 0.7;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+
+.auditCustomerHeader h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.auditCustomerHeader p {
+  margin: 9px 0 0;
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+.auditSalesmanPill {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.14);
+  margin-top: 10px;
+  padding: 6px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+}
+
+.auditMetrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.auditMetrics > div {
+  background: white;
+  border: 1px solid #dfe7e9;
+  border-radius: 12px;
+  padding: 13px;
+}
+
+.auditMetrics span {
+  display: block;
+  color: #85959a;
+  font-size: 10px;
+  margin-bottom: 5px;
+}
+
+.auditMetrics strong {
+  display: block;
+  font-size: 16px;
+}
+
+.auditSectionTitle {
+  font-weight: 800;
+  font-size: 14px;
+  margin: 22px 2px 10px;
+}
+
+.auditCategoryList,
+.auditItemList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auditCategoryCard {
+  background: white;
+  border: 1px solid #dfe7e9;
+  border-radius: 12px;
+  padding: 13px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auditCategoryCard > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.auditCategoryCard span {
+  color: #829298;
+  font-size: 10px;
+  margin-top: 3px;
+}
+
+.auditCategoryNumbers {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.auditItemCard {
+  background: white;
+  border: 1px solid #dfe7e9;
+  border-radius: 13px;
+  padding: 14px;
+}
+
+.auditItemTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auditItemTop > div:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.auditItemCode {
+  color: #1b6978;
+  font-size: 10px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.auditItemTop strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.auditItemTop span {
+  font-size: 10px;
+  color: #89989d;
+  margin-top: 4px;
+}
+
+.auditItemSales {
+  font-weight: 800;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.auditItemStats {
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid #edf1f2;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.auditItemStats span {
+  display: block;
+  color: #8a999e;
+  font-size: 9px;
+  margin-bottom: 3px;
+}
+
+.auditItemStats strong {
+  font-size: 12px;
+}
+
+.auditTransactionButton {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 11px;
+  margin-top: 18px;
+  background: #164f5d;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auditTransactions {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.auditTransaction {
+  background: white;
+  border: 1px solid #e0e7e9;
+  border-radius: 11px;
+  padding: 11px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.auditTransaction > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.auditTransaction span {
+  color: #8b999e;
+  font-size: 9px;
+  margin-top: 2px;
+}
+
+.auditTransactionItem strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+.auditTransactionAmount {
+  font-weight: 800;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.auditLoading,
+.auditLoadingBox,
+.auditEmpty {
+  padding: 30px 15px;
+  text-align: center;
+  color: #71868c;
+}
+
+/* Desktop enhancement only */
+@media (min-width: 700px) {
+  .auditShell {
+    padding: 35px 25px 60px;
+  }
+
+  .auditFilters {
+    grid-template-columns: 220px 1fr;
+  }
+
+  .auditMetrics {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .auditItemStats {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}

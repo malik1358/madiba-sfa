@@ -304,10 +304,8 @@ export default function CustomerAuditPage() {
         throw customerError;
       }
 
-      const list =
+         const list =
         customerData || [];
-
-      setCustomers(list);
 
       setCustomers(list);
 
@@ -352,6 +350,48 @@ export default function CustomerAuditPage() {
           masterData || []
         );
       }
+
+
+      /* ----------------------------------------------------
+         SALESMEN
+         ---------------------------------------------------- */
+
+      const salesmanCodes = [
+        ...new Set(
+          list
+            .map(
+              (customer) =>
+                customer.current_salesman_code
+            )
+            .filter(Boolean)
+        ),
+      ].sort();
+
+      setSalesmen(
+        salesmanCodes
+      );
+
+
+    } catch (err) {
+
+      console.error(
+        "FOUNDATION LOAD ERROR:",
+        err
+      );
+
+      setError(
+        err.message ||
+          "Unable to load customer data."
+      );
+
+    } finally {
+
+      setLoading(false);
+
+    }
+  }
+
+
   /* ========================================================
      CUSTOMER FILTER
      ======================================================== */

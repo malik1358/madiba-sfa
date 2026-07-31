@@ -2580,6 +2580,10 @@ export default function CustomerAuditPage() {
               <p className="auditSubtitle">
                 Management sales history validation
               </p>
+      <div className="auditPageVersionTop">
+  <strong>{PAGE_VERSION}</strong>
+  <span>Updated: {PAGE_UPDATED}</span>
+</div>
 
             </div>
 

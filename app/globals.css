@@ -1502,3 +1502,846 @@ table.auditMatrix td.auditTrendSame {
     min-width: 75px !important;
   }
 }
+
+/* ==========================================================
+   MADIBA SFA
+   CATEGORY DRILL-DOWN + ORDER ENTRY
+   MUST BE AT BOTTOM OF GLOBALS.CSS
+   ========================================================== */
+
+
+/* SUCCESS MESSAGE */
+
+.auditSuccess {
+  margin-bottom: 16px;
+  padding: 13px 16px;
+  background: #edf9f2;
+  color: #167044;
+  border: 1px solid #b9dfc9;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+
+/* CATEGORY SECTION TITLE */
+
+.auditCategoryTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.auditCategoryTitle span {
+  color: #073f4c;
+  font-weight: 800;
+}
+
+.auditCategoryTitle small {
+  color: #74888e;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+
+/* ORDER TABLE */
+
+.auditOrderMatrix {
+  width: max-content !important;
+  min-width: 100% !important;
+}
+
+.auditRateHeader {
+  min-width: 70px !important;
+  background: #0b5364 !important;
+  color: #ffffff !important;
+  text-align: center !important;
+  border-left: 2px solid #8faab1 !important;
+}
+
+.auditOrderQtyHeader {
+  min-width: 130px !important;
+  background: #073f4c !important;
+  color: #ffffff !important;
+  text-align: center !important;
+}
+
+
+/* CLICKABLE CATEGORY */
+
+.auditClickableCategory {
+  cursor: pointer !important;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.auditClickableCategory:hover {
+  background: #dcebed !important;
+}
+
+.auditCategoryClickInner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.auditExpandIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  flex: 0 0 15px;
+  color: #0c6879;
+  font-size: 9px;
+}
+
+
+/* CATEGORY RATE / ORDER CELLS */
+
+.auditCategoryNoOrder {
+  background: #f6f9fa !important;
+  color: #8a9ba0 !important;
+  text-align: center !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  vertical-align: middle !important;
+}
+
+
+/* EXPANDED ITEM */
+
+.auditDrillItem {
+  min-width: 150px !important;
+  max-width: 190px !important;
+  padding-left: 24px !important;
+  background: #fbfdfd !important;
+  color: #123f49 !important;
+  text-align: left !important;
+  vertical-align: middle !important;
+  white-space: normal !important;
+  border-left: 4px solid #78a9b3 !important;
+  border-bottom: 2px solid #c2d1d5 !important;
+}
+
+.auditDrillItemCode {
+  margin-bottom: 3px;
+  color: #0b6678;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.auditDrillItemName {
+  color: #173f49;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.auditDrillItemABC {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 2px 6px;
+  background: #e6f0f2;
+  color: #42656e;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+
+/* ITEM METRIC */
+
+.auditItemMetric {
+  min-width: 82px !important;
+  background: #f7fafb !important;
+  color: #526b72 !important;
+  text-align: left !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+
+.auditItemValueRow td,
+.auditItemQuantityRow td {
+  font-size: 11px;
+}
+
+.auditItemValueRow > th,
+.auditItemValueRow > td {
+  border-top: 1px solid #e0e9eb !important;
+}
+
+.auditItemQuantityRow > th,
+.auditItemQuantityRow > td {
+  border-bottom: 2px solid #c2d1d5 !important;
+}
+
+.auditItemTotal {
+  background: #f4f8f9 !important;
+}
+
+
+/* RATE */
+
+.auditOrderRate {
+  min-width: 70px !important;
+  background: #fafcfc !important;
+  color: #8b9b9f !important;
+  text-align: center !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  border-left: 2px solid #b4c5c9 !important;
+  vertical-align: middle !important;
+}
+
+
+/* ORDER QUANTITY */
+
+.auditOrderQtyCell {
+  min-width: 130px !important;
+  background: #f8fbfb !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+.auditQtyControl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #b9cbd0;
+  border-radius: 9px;
+}
+
+.auditQtyButton {
+  width: 34px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: #edf4f5;
+  color: #0a5363;
+  border: 0;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.auditQtyButton:hover {
+  background: #dcebed;
+}
+
+.auditQtyButton:active {
+  background: #cbdfe3;
+}
+
+.auditQtyButton:disabled {
+  color: #aebdc1;
+  background: #f5f7f8;
+  cursor: default;
+}
+
+.auditQtyControl input {
+  width: 48px;
+  height: 36px;
+  padding: 0 3px;
+  background: #ffffff;
+  color: #073f4c;
+  border: 0;
+  border-left: 1px solid #cbd8dc;
+  border-right: 1px solid #cbd8dc;
+  outline: none;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 800;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.auditQtyControl input::-webkit-inner-spin-button,
+.auditQtyControl input::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+
+/* DRAFT NOTICE */
+
+.auditDraftNotice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -12px 0 18px;
+  padding: 10px 12px;
+  background: #fff8e8;
+  border: 1px solid #ecd99e;
+  border-radius: 9px;
+  color: #775b13;
+  font-size: 10px;
+}
+
+.auditDraftNotice span {
+  font-weight: 800;
+}
+
+.auditDraftNotice strong {
+  padding: 3px 6px;
+  background: #f3e4b8;
+  border-radius: 5px;
+}
+
+.auditDraftNotice small {
+  color: #8c773f;
+}
+
+
+/* STICKY ORDER BAR */
+
+.auditOrderBar {
+  position: sticky;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  margin-top: 20px;
+  padding: 11px 13px;
+  background: rgba(7, 63, 76, 0.97);
+  color: #ffffff;
+  border: 1px solid #356f7b;
+  border-radius: 13px;
+  box-shadow: 0 8px 28px rgba(0, 36, 46, 0.22);
+}
+
+.auditOrderBarSummary {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.auditOrderBarSummary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auditOrderBarSummary span {
+  color: #bcd2d7;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.auditOrderBarSummary strong {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.auditOrderBarActions {
+  display: flex;
+  gap: 8px;
+}
+
+
+/* BUTTONS */
+
+.auditSaveDraftButton {
+  min-height: 40px;
+  padding: 0 16px;
+  background: #ffffff;
+  color: #0a5262;
+  border: 1px solid #d2e0e3;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.auditSaveDraftButton:hover {
+  background: #edf5f6;
+}
+
+.auditViewOrderButton {
+  min-height: 40px;
+  padding: 0 18px;
+  background: #1f8294;
+  color: #ffffff;
+  border: 1px solid #4a9baa;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.auditViewOrderButton:hover {
+  background: #176e7e;
+}
+
+.auditSaveDraftButton:disabled,
+.auditViewOrderButton:disabled,
+.auditSubmitOrderButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+
+/* ORDER REVIEW OVERLAY */
+
+.auditOrderOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(2, 28, 35, 0.64);
+  backdrop-filter: blur(3px);
+}
+
+
+/* ORDER REVIEW */
+
+.auditOrderReview {
+  width: 100%;
+  max-width: 720px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f5f8f9;
+  border: 1px solid #afc3c8;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 26, 34, 0.35);
+}
+
+.auditOrderReviewHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 15px;
+  padding: 18px 20px;
+  background: #0b5364;
+  color: #ffffff;
+}
+
+.auditOrderReviewHeader span {
+  color: #a9d1d9;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.auditOrderReviewHeader h3 {
+  margin: 3px 0 2px;
+  color: #ffffff;
+  font-size: 20px;
+}
+
+.auditOrderReviewHeader p {
+  margin: 0;
+  color: #c9dfe3;
+  font-size: 11px;
+}
+
+.auditOrderClose {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 34px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+
+/* REVIEW LINES */
+
+.auditOrderReviewLines {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.auditOrderReviewLine {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 65px 140px;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 12px;
+  margin-bottom: 8px;
+  background: #ffffff;
+  border: 1px solid #d2dfe2;
+  border-radius: 10px;
+}
+
+.auditOrderReviewItem {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auditOrderReviewItem span {
+  color: #0b687a;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.auditOrderReviewItem strong {
+  overflow: hidden;
+  color: #073f4c;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auditOrderReviewItem small {
+  color: #788d93;
+  font-size: 9px;
+}
+
+.auditOrderReviewRate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.auditOrderReviewRate span {
+  color: #7b8f95;
+  font-size: 8px;
+}
+
+.auditOrderReviewRate strong {
+  color: #536b72;
+  font-size: 12px;
+}
+
+
+/* REVIEW QUANTITY */
+
+.auditReviewQty {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.auditReviewQty button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: #e8f1f3;
+  color: #0a5868;
+  border: 1px solid #c2d2d6;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.auditReviewQty button:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.auditReviewQty button:last-child {
+  border-radius: 0 8px 8px 0;
+}
+
+.auditReviewQty input {
+  width: 52px;
+  height: 34px;
+  padding: 0;
+  background: #ffffff;
+  color: #073f4c;
+  border-top: 1px solid #c2d2d6;
+  border-bottom: 1px solid #c2d2d6;
+  border-left: 0;
+  border-right: 0;
+  outline: 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.auditReviewQty input::-webkit-inner-spin-button,
+.auditReviewQty input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+
+/* EMPTY ORDER */
+
+.auditOrderEmpty {
+  padding: 50px 20px;
+  color: #70868c;
+  text-align: center;
+  font-size: 12px;
+}
+
+
+/* REVIEW SUMMARY */
+
+.auditOrderReviewSummary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid #d2dfe2;
+  border-bottom: 1px solid #d2dfe2;
+  background: #ffffff;
+}
+
+.auditOrderReviewSummary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 15px;
+  border-right: 1px solid #d2dfe2;
+}
+
+.auditOrderReviewSummary > div:last-child {
+  border-right: 0;
+}
+
+.auditOrderReviewSummary span {
+  color: #758a90;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.auditOrderReviewSummary strong {
+  color: #073f4c;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.auditOrderReviewSummary small {
+  color: #9a7d35;
+  font-size: 8px;
+}
+
+
+/* REVIEW ACTIONS */
+
+.auditOrderReviewActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  padding: 12px;
+  background: #eef3f4;
+}
+
+.auditOrderReviewActions button {
+  min-height: 46px;
+}
+
+.auditSubmitOrderButton {
+  padding: 0 18px;
+  background: #147347;
+  color: #ffffff;
+  border: 1px solid #0e653c;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.auditSubmitOrderButton:hover {
+  background: #0d633a;
+}
+
+
+/* ==========================================================
+   MOBILE
+   ========================================================== */
+
+@media (max-width: 700px) {
+
+  .auditOrderMatrix .auditCategoryHeader,
+  .auditOrderMatrix .auditMergedCategory,
+  .auditOrderMatrix .auditDrillItem {
+    min-width: 120px !important;
+    width: 120px !important;
+    max-width: 120px !important;
+  }
+
+  .auditOrderMatrix .auditCategoryMetricHeader,
+  .auditOrderMatrix .auditCategoryMetric,
+  .auditOrderMatrix .auditItemMetric {
+    min-width: 68px !important;
+    width: 68px !important;
+  }
+
+  .auditOrderMatrix .auditCategoryMetricHeader,
+  .auditOrderMatrix .auditCategoryMetric,
+  .auditOrderMatrix .auditItemMetric {
+    left: 120px !important;
+  }
+
+  .auditDrillItem {
+    padding-left: 17px !important;
+  }
+
+  .auditDrillItemCode {
+    font-size: 8px;
+  }
+
+  .auditDrillItemName {
+    font-size: 10px;
+  }
+
+  .auditOrderQtyHeader,
+  .auditOrderQtyCell {
+    min-width: 118px !important;
+  }
+
+  .auditQtyButton {
+    width: 31px;
+    height: 34px;
+  }
+
+  .auditQtyControl input {
+    width: 43px;
+    height: 34px;
+  }
+
+
+  /* MOBILE ORDER BAR */
+
+  .auditOrderBar {
+    bottom: 7px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 9px;
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  .auditOrderBarSummary {
+    justify-content: space-around;
+    gap: 5px;
+  }
+
+  .auditOrderBarSummary > div {
+    flex: 1;
+    align-items: center;
+    padding: 0 6px;
+  }
+
+  .auditOrderBarActions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .auditOrderBarActions button {
+    width: 100%;
+    min-height: 42px;
+  }
+
+
+  /* MOBILE ORDER REVIEW */
+
+  .auditOrderOverlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .auditOrderReview {
+    max-width: none;
+    max-height: 92vh;
+    border-radius: 16px 16px 0 0;
+    border-bottom: 0;
+  }
+
+  .auditOrderReviewHeader {
+    padding: 15px;
+  }
+
+  .auditOrderReviewHeader h3 {
+    font-size: 18px;
+  }
+
+  .auditOrderReviewLine {
+    grid-template-columns: minmax(0, 1fr) 48px;
+    gap: 8px;
+  }
+
+  .auditOrderReviewItem {
+    grid-column: 1;
+  }
+
+  .auditOrderReviewRate {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .auditReviewQty {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    padding-top: 7px;
+    border-top: 1px solid #e4ebed;
+  }
+
+  .auditReviewQty button {
+    width: 38px;
+    height: 36px;
+  }
+
+  .auditReviewQty input {
+    width: 58px;
+    height: 36px;
+  }
+
+  .auditOrderReviewSummary > div {
+    padding: 10px;
+  }
+
+  .auditOrderReviewSummary strong {
+    font-size: 14px;
+  }
+
+  .auditOrderReviewActions {
+    position: sticky;
+    bottom: 0;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+}
+
+
+/* VERY SMALL PHONES */
+
+@media (max-width: 390px) {
+
+  .auditOrderBarSummary span {
+    font-size: 7px;
+  }
+
+  .auditOrderBarSummary strong {
+    font-size: 12px;
+  }
+
+  .auditSaveDraftButton,
+  .auditViewOrderButton {
+    padding-left: 8px;
+    padding-right: 8px;
+    font-size: 10px;
+  }
+
+  .auditOrderReviewActions {
+    gap: 7px;
+  }
+}

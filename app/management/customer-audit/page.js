@@ -1,7 +1,9 @@
 "use client";
+const PAGE_VERSION = "Quick Order V5";
 
-const PAGE_VERSION = "Quick Order V4";
-const PAGE_UPDATED = "01 Aug 2026 03:15 AM";
+const BUILD_COMMIT =
+  process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA
+    ?.slice(0, 7) || "Local";
 
 import {
   Fragment,
@@ -1726,84 +1728,148 @@ export default function CustomerAuditPage() {
         );
 
 
-      const newItems =
-        cleanMaster
+     /* ====================================================
+   NEW ITEMS - V5
 
-          /* Remove DO NOT USE items again for safety */
-          .filter(
-            (item) =>
-              !isDoNotUseItem(
-                item.item_name
-              )
-          )
+   Master item is NEW when:
+   1. Active master item
+   2. Not "Do Not Use"
+   3. Customer has never had POSITIVE sales for item
+   ==================================================== */
 
-          /* Customer must never have purchased it */
-          .filter(
-            (item) =>
-              !purchasedItemCodes.has(
-                normalizeCode(
-                  item.item_code
-                )
-              )
-          )
+const purchasedItemCodes = new Set();
 
-          /* Prefer categories customer already buys */
-          .map(
-            (item) => {
+transactions.forEach((row) => {
 
-              const category =
-                String(
-                  item.category || ""
-                )
-                  .trim()
-                  .toLowerCase();
+  const code = normalizeCode(row.item_code);
+
+  const salesAmount =
+    Number(row.sales_amount || 0);
+
+  if (
+    code &&
+    salesAmount > 0
+  ) {
+    purchasedItemCodes.add(code);
+  }
+
+});
 
 
-              return {
+const newItems = (itemMaster || [])
 
-                ...item,
+  .filter((item) => {
 
-                categoryMatch:
-                  boughtCategories.has(
-                    category
-                  )
-                    ? 1
-                    : 0,
+    /* Must be active */
 
-                recommendationReason:
-                  "New Item",
-              };
-
-            }
-          )
-
-          .sort(
-            (a, b) => {
-
-              if (
-                b.categoryMatch !==
-                a.categoryMatch
-              ) {
-
-                return (
-                  b.categoryMatch -
-                  a.categoryMatch
-                );
-              }
+    if (item.is_active === false) {
+      return false;
+    }
 
 
-              return String(
-                a.item_name || ""
-              ).localeCompare(
-                String(
-                  b.item_name || ""
-                )
-              );
+    /* Must have item code */
 
-            }
-          )
+    const code =
+      normalizeCode(item.item_code);
 
-          .slice(0, 3);
+    if (!code) {
+      return false;
+    }
+
+
+    /* Remove discontinued items */
+
+    if (
+      isDoNotUseItem(
+        item.item_name
+      )
+    ) {
+      return false;
+    }
+
+
+    /* Must NEVER have been purchased */
+
+    return !purchasedItemCodes.has(code);
+
+  })
+
+
+  .map((item) => {
+
+    const category =
+      String(item.category || "")
+        .trim()
+        .toLowerCase();
+
+    return {
+
+      item_code:
+        String(item.item_code || "")
+          .trim(),
+
+      item_name:
+        String(item.item_name || "")
+          .trim(),
+
+      category:
+        String(
+          item.category ||
+          "Unclassified"
+        ).trim(),
+
+      rate:
+        item.rate ?? null,
+
+      categoryMatch:
+        boughtCategories.has(category)
+          ? 1
+          : 0,
+
+      recommendationReason:
+        "New Item",
+    };
+
+  })
+
+
+  /* Prefer customer's existing categories */
+
+  .sort((a, b) => {
+
+    if (
+      b.categoryMatch !==
+      a.categoryMatch
+    ) {
+      return (
+        b.categoryMatch -
+        a.categoryMatch
+      );
+    }
+
+    return a.item_name.localeCompare(
+      b.item_name
+    );
+
+  })
+
+
+  .slice(0, 3);
+      console.log("NEW ITEM CHECK", {
+  masterItems: itemMaster?.length || 0,
+  purchasedItems: purchasedItemCodes.size,
+  availableNewItems: (itemMaster || []).filter((item) => {
+    const code = normalizeCode(item.item_code);
+
+    return (
+      code &&
+      item.is_active !== false &&
+      !isDoNotUseItem(item.item_name) &&
+      !purchasedItemCodes.has(code)
+    );
+  }).length,
+  suggestions: newItems.length,
+});
 
       /* ====================================================
          2. NOT BOUGHT SINCE LONG

@@ -4074,14 +4074,14 @@ export default function CustomerAuditPage() {
                     quickOrderSuggestions.notBoughtRecently,
                 },
 
-                {
-                  key: "buyingLess",
-                  title: "Buying Less",
-                  subtitle:
-                "Items currently buying below their historical average quantity"
-                  items:
-                    quickOrderSuggestions.buyingLess,
-                },
+              {
+  key: "buyingLess",
+  title: "Buying Less",
+  subtitle:
+    "Items currently buying below their historical average quantity",
+  items:
+    quickOrderSuggestions.buyingLess,
+},
               ].map(
                 (group) => (
 

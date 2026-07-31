@@ -1074,20 +1074,20 @@ export default function CustomerAuditPage() {
       }
 
 
-      /* ====================================================
-         REMOVE COMPLETELY EMPTY MONTHS
+     /* ====================================================
+   SHOW ONLY LAST 6 MONTHS WITH TRANSACTIONS
+   ==================================================== */
 
-         Only months where the customer actually had
-         activity remain visible.
-         ==================================================== */
+const activeMonths =
+  allMonths.filter(
+    (month) =>
+      monthlyMap.get(
+        month
+      ).hasActivity
+  );
 
-      const months =
-        allMonths.filter(
-          (month) =>
-            monthlyMap.get(
-              month
-            ).hasActivity
-        );
+const months =
+  activeMonths.slice(-6);
 
 
       /* ====================================================

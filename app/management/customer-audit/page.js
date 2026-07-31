@@ -74,7 +74,6 @@ function buildLast12Months(latestDate) {
   if (!latestDate) return [];
 
   const d = new Date(`${latestDate}T00:00:00`);
-
   const result = [];
 
   for (let i = 11; i >= 0; i--) {
@@ -299,7 +298,6 @@ export default function CustomerAuditPage() {
     } finally {
 
       setLoading(false);
-
     }
   }
 
@@ -421,9 +419,8 @@ export default function CustomerAuditPage() {
       /* ----------------------------------------------------
          CUSTOMER SALES HISTORY
 
-         IMPORTANT:
-         We read historical rate because it exists in
-         sales_raw, but it is NOT used as the order rate.
+         Historical sales are loaded here.
+         Rate is NOT being used as the new order rate.
          ---------------------------------------------------- */
 
       const {
@@ -483,7 +480,7 @@ export default function CustomerAuditPage() {
       /* ----------------------------------------------------
          LOAD EXISTING DRAFT
 
-         Only the logged-in user's own draft is loaded.
+         Only the logged-in user's draft for this customer.
          ---------------------------------------------------- */
 
       const {
@@ -589,7 +586,6 @@ export default function CustomerAuditPage() {
     } finally {
 
       setLoadingCustomer(false);
-
     }
   }
 
@@ -772,7 +768,6 @@ export default function CustomerAuditPage() {
               hasActivity: false,
             }
           );
-
         }
       );
 
@@ -788,18 +783,18 @@ export default function CustomerAuditPage() {
       /* ----------------------------------------------------
          ITEM DATA
 
-         Every item stores:
-         - category
-         - item code/name
-         - total historical value
-         - total historical quantity
-         - VALUE month-by-month
-         - QUANTITY month-by-month
+         Each item stores:
+         - Category
+         - Item code
+         - Item name
+         - Total historical value
+         - Total historical quantity
+         - Monthly value
+         - Monthly quantity
          ---------------------------------------------------- */
 
       const itemMap =
         new Map();
-
 
       const orderSet =
         new Set();
@@ -853,7 +848,6 @@ export default function CustomerAuditPage() {
           row.reference ||
           `ROW-${row.id}`;
 
-
         orderSet.add(
           orderKey
         );
@@ -886,7 +880,6 @@ export default function CustomerAuditPage() {
             monthly.skus.add(
               itemKey
             );
-
           }
 
           monthly.orders.add(
@@ -918,7 +911,6 @@ export default function CustomerAuditPage() {
                 skus:
                   new Set(),
               };
-
             }
           );
 
@@ -1005,7 +997,6 @@ export default function CustomerAuditPage() {
                 value: 0,
                 quantity: 0,
               };
-
             }
           );
 
@@ -1079,7 +1070,6 @@ export default function CustomerAuditPage() {
 
           item.last_date =
             row.transaction_date;
-
         }
       }
 
@@ -1087,7 +1077,8 @@ export default function CustomerAuditPage() {
       /* ====================================================
          REMOVE COMPLETELY EMPTY MONTHS
 
-         A month remains if the CUSTOMER had any activity.
+         Only months where the customer actually had
+         activity remain visible.
          ==================================================== */
 
       const months =
@@ -1132,7 +1123,6 @@ export default function CustomerAuditPage() {
                 month,
               ],
             });
-
           }
         }
       );
@@ -1195,7 +1185,6 @@ export default function CustomerAuditPage() {
           itemLookup[
             item.item_key
           ] = item;
-
         }
       );
 
@@ -1236,7 +1225,6 @@ export default function CustomerAuditPage() {
                         .skus
                         .size,
                   };
-
                 }
               );
 
@@ -1277,7 +1265,6 @@ export default function CustomerAuditPage() {
 
                 items:
                   categoryItems,
-
               };
             }
           )
@@ -1312,14 +1299,11 @@ export default function CustomerAuditPage() {
 
         transactionCount:
           transactions.length,
-
       };
 
     }, [transactions]);
-
-
-  /* ========================================================
-     ITEMS CURRENTLY IN ORDER
+    /* ========================================================
+     ORDER ITEMS
      ======================================================== */
 
   const orderItems =
@@ -1337,10 +1321,7 @@ export default function CustomerAuditPage() {
             Number(quantity) > 0
         )
         .map(
-          ([
-            itemCode,
-            quantity,
-          ]) => {
+          ([itemCode, quantity]) => {
 
             const item =
               analytics.items.find(
@@ -1357,19 +1338,7 @@ export default function CustomerAuditPage() {
               ...item,
 
               order_quantity:
-                Number(
-                  quantity
-                ),
-
-              /*
-                RATE IS INTENTIONALLY BLANK
-                UNTIL GOOGLE SHEET PRICE
-                SOURCE IS CONNECTED.
-              */
-
-              rate: 0,
-
-              line_value: 0,
+                Number(quantity),
             };
           }
         )
@@ -1382,35 +1351,32 @@ export default function CustomerAuditPage() {
 
 
   /* ========================================================
-     ORDER TOTALS
-
-     Value intentionally remains 0 until rate is connected.
+     ORDER SUMMARY
      ======================================================== */
 
   const orderSummary =
     useMemo(() => {
+
+      let totalQuantity = 0;
+
+      for (
+        const item
+        of orderItems
+      ) {
+
+        totalQuantity +=
+          Number(
+            item.order_quantity ||
+              0
+          );
+      }
 
       return {
 
         itemCount:
           orderItems.length,
 
-        totalQuantity:
-          orderItems.reduce(
-            (
-              total,
-              item
-            ) =>
-              total +
-              Number(
-                item.order_quantity ||
-                  0
-              ),
-            0
-          ),
-
-        totalValue: 0,
-
+        totalQuantity,
       };
 
     }, [orderItems]);
@@ -1420,12 +1386,12 @@ export default function CustomerAuditPage() {
      SAVE DRAFT
      ======================================================== */
 
-  async function saveDraft(
-    showSuccess = true
-  ) {
+  async function saveDraft() {
 
-    if (!selectedCustomer) {
-      return null;
+    if (
+      !selectedCustomer
+    ) {
+      return;
     }
 
     if (
@@ -1433,16 +1399,15 @@ export default function CustomerAuditPage() {
     ) {
 
       setError(
-        "Please add at least one item to the order."
+        "Add at least one item before saving the draft."
       );
 
-      return null;
+      return;
     }
 
     setSavingOrder(true);
 
     setError("");
-
     setMessage("");
 
     try {
@@ -1459,26 +1424,22 @@ export default function CustomerAuditPage() {
       }
 
 
+      /* ----------------------------------------------------
+         CREATE OR UPDATE DRAFT HEADER
+         ---------------------------------------------------- */
+
       let orderId =
         draftOrderId;
-
-
-      /* ----------------------------------------------------
-         CREATE ORDER HEADER
-         ---------------------------------------------------- */
 
       if (!orderId) {
 
         const {
           data: newOrder,
-          error: createError,
+          error: orderError,
         } =
           await supabase
-            .from(
-              "sales_orders"
-            )
+            .from("sales_orders")
             .insert({
-
               customer_code:
                 selectedCustomer
                   .customer_code,
@@ -1489,39 +1450,19 @@ export default function CustomerAuditPage() {
 
               salesman_code:
                 selectedCustomer
-                  .current_salesman_code ||
-                null,
-
-              salesman_name:
-                null,
+                  .current_salesman_code,
 
               status:
                 "DRAFT",
 
-              total_items:
-                orderSummary
-                  .itemCount,
-
-              total_quantity:
-                orderSummary
-                  .totalQuantity,
-
-              total_value:
-                0,
-
               created_by:
                 session.user.id,
-
-              updated_at:
-                new Date()
-                  .toISOString(),
-
             })
             .select("id")
             .single();
 
-        if (createError) {
-          throw createError;
+        if (orderError) {
+          throw orderError;
         }
 
         orderId =
@@ -1533,42 +1474,27 @@ export default function CustomerAuditPage() {
 
       } else {
 
-        /* --------------------------------------------------
-           UPDATE HEADER
-           -------------------------------------------------- */
-
         const {
           error: updateError,
         } =
           await supabase
-            .from(
-              "sales_orders"
-            )
+            .from("sales_orders")
             .update({
+              customer_name:
+                selectedCustomer
+                  .customer_name,
 
-              total_items:
-                orderSummary
-                  .itemCount,
-
-              total_quantity:
-                orderSummary
-                  .totalQuantity,
-
-              total_value:
-                0,
+              salesman_code:
+                selectedCustomer
+                  .current_salesman_code,
 
               updated_at:
                 new Date()
                   .toISOString(),
-
             })
             .eq(
               "id",
               orderId
-            )
-            .eq(
-              "status",
-              "DRAFT"
             );
 
         if (updateError) {
@@ -1578,10 +1504,7 @@ export default function CustomerAuditPage() {
 
 
       /* ----------------------------------------------------
-         REWRITE ALL DRAFT LINES
-
-         Dataset is small, so this is intentionally simple:
-         delete old draft lines and insert the current basket.
+         REPLACE DRAFT LINES
          ---------------------------------------------------- */
 
       const {
@@ -1619,48 +1542,42 @@ export default function CustomerAuditPage() {
               item.category,
 
             quantity:
-              item.order_quantity,
+              Number(
+                item.order_quantity
+              ),
 
             /*
-              TEMPORARY:
-              RATE + VALUE REMAIN ZERO.
-            */
+             * RATE IS INTENTIONALLY NULL.
+             * We will connect the Google Sheet
+             * rate source later.
+             */
 
-            rate: 0,
+            rate:
+              null,
 
-            line_value: 0,
-
-            updated_at:
-              new Date()
-                .toISOString(),
-
+            line_value:
+              null,
           })
         );
 
 
       const {
-        error: insertError,
+        error: lineError,
       } =
         await supabase
           .from(
             "sales_order_items"
           )
-          .insert(
-            lines
-          );
+          .insert(lines);
 
-      if (insertError) {
-        throw insertError;
+      if (lineError) {
+        throw lineError;
       }
 
 
-      if (showSuccess) {
-
-        setMessage(
-          "Draft order saved."
-        );
-
-      }
+      setMessage(
+        "Draft order saved successfully."
+      );
 
       return orderId;
 
@@ -1676,7 +1593,6 @@ export default function CustomerAuditPage() {
     } finally {
 
       setSavingOrder(false);
-
     }
   }
 
@@ -1692,96 +1608,43 @@ export default function CustomerAuditPage() {
     ) {
 
       setError(
-        "Please add at least one item before submitting."
+        "Add at least one item before submitting the order."
       );
 
       return;
     }
-
-
-    const confirmed =
-      window.confirm(
-        "Submit this order? Once submitted it will no longer be editable from this screen."
-      );
-
-    if (!confirmed) {
-      return;
-    }
-
 
     setSubmittingOrder(true);
 
     setError("");
-
     setMessage("");
-
 
     try {
 
+      /*
+       * Save the current quantities first.
+       * This makes sure the final order contains
+       * exactly what is currently on screen.
+       */
+
       const orderId =
-        await saveDraft(
-          false
-        );
+        await saveDraft();
 
       if (!orderId) {
-        return;
+        throw new Error(
+          "Unable to save the order before submission."
+        );
       }
-
-
-      /* ----------------------------------------------------
-         GENERATE READABLE ORDER NUMBER
-         ---------------------------------------------------- */
-
-      const now =
-        new Date();
-
-      const datePart =
-        `${now.getFullYear()}${String(
-          now.getMonth() + 1
-        ).padStart(
-          2,
-          "0"
-        )}${String(
-          now.getDate()
-        ).padStart(
-          2,
-          "0"
-        )}`;
-
-      const orderNumber =
-        `SO-${datePart}-${String(
-          orderId
-        ).padStart(
-          6,
-          "0"
-        )}`;
 
 
       const {
         error: submitError,
       } =
         await supabase
-          .from(
-            "sales_orders"
-          )
+          .from("sales_orders")
           .update({
-
-            order_number:
-              orderNumber,
-
             status:
               "SUBMITTED",
-
-            total_items:
-              orderSummary
-                .itemCount,
-
-            total_quantity:
-              orderSummary
-                .totalQuantity,
-
-            total_value:
-              0,
 
             submitted_at:
               new Date()
@@ -1790,17 +1653,11 @@ export default function CustomerAuditPage() {
             updated_at:
               new Date()
                 .toISOString(),
-
           })
           .eq(
             "id",
             orderId
-          )
-          .eq(
-            "status",
-            "DRAFT"
           );
-
 
       if (submitError) {
         throw submitError;
@@ -1808,7 +1665,11 @@ export default function CustomerAuditPage() {
 
 
       setMessage(
-        `Order ${orderNumber} submitted successfully.`
+        `Order #${orderId} submitted successfully.`
+      );
+
+      setShowOrderReview(
+        false
       );
 
       setDraftOrderId(
@@ -1817,10 +1678,6 @@ export default function CustomerAuditPage() {
 
       setOrderQuantities(
         {}
-      );
-
-      setShowOrderReview(
-        false
       );
 
     } catch (err) {
@@ -1832,29 +1689,439 @@ export default function CustomerAuditPage() {
 
     } finally {
 
-      setSubmittingOrder(
-        false
-      );
-
+      setSubmittingOrder(false);
     }
   }
-    /* ========================================================
+
+
+  /* ========================================================
+     BACK TO CUSTOMER LIST
+     ======================================================== */
+
+  function closeCustomer() {
+
+    setSelectedCustomer(
+      null
+    );
+
+    setTransactions([]);
+
+    setShowTransactions(
+      false
+    );
+
+    setExpandedCategories(
+      {}
+    );
+
+    setOrderQuantities(
+      {}
+    );
+
+    setDraftOrderId(
+      null
+    );
+
+    setShowOrderReview(
+      false
+    );
+
+    setMessage("");
+    setError("");
+  }
+
+
+  /* ========================================================
      LOADING SCREEN
      ======================================================== */
 
   if (loading) {
+
     return (
       <main className="auditPage">
-        <div className="auditLoading">
-          Loading customer database...
+
+        <div className="auditShell">
+
+          <div className="auditBrand">
+            MADIBA SFA
+          </div>
+
+          <h1>
+            Customer Audit
+          </h1>
+
+          <p className="auditSubtitle">
+            Loading customer data...
+          </p>
+
         </div>
+
       </main>
     );
   }
 
 
   /* ========================================================
-     PAGE
+     CUSTOMER LIST SCREEN
+     ======================================================== */
+
+  if (!selectedCustomer) {
+
+    return (
+      <main className="auditPage">
+
+        <div className="auditShell">
+
+          {/* HEADER */}
+
+          <div className="auditTop">
+
+            <div>
+
+              <div className="auditBrand">
+                MADIBA SFA
+              </div>
+
+              <h1>
+                Customer Audit
+              </h1>
+
+              <p className="auditSubtitle">
+                Management sales history validation
+              </p>
+
+            </div>
+
+
+            <a
+              href="/management"
+              className="auditHomeButton"
+            >
+              ← Home
+            </a>
+
+          </div>
+
+
+          {/* ERROR */}
+
+          {error && (
+
+            <div className="auditError">
+              {error}
+            </div>
+
+          )}
+
+
+          {/* FILTERS */}
+
+          <div className="auditFilters">
+
+            <div className="auditFilterField">
+
+              <label>
+                Salesman
+              </label>
+
+              <select
+                value={
+                  selectedSalesman
+                }
+                onChange={(e) =>
+                  setSelectedSalesman(
+                    e.target.value
+                  )
+                }
+              >
+
+                <option value="ALL">
+                  All Salesmen
+                </option>
+
+                {salesmen.map(
+                  (salesman) => (
+
+                    <option
+                      key={
+                        salesman
+                      }
+                      value={
+                        salesman
+                      }
+                    >
+                      {salesman}
+                    </option>
+
+                  )
+                )}
+
+              </select>
+
+            </div>
+
+
+            <div className="auditFilterField auditSearchField">
+
+              <label>
+                Search Customer
+              </label>
+
+              <input
+                type="search"
+                value={search}
+                placeholder="Code or customer name..."
+                onChange={(e) =>
+                  setSearch(
+                    e.target.value
+                  )
+                }
+              />
+
+            </div>
+
+          </div>
+
+
+          {/* CUSTOMER COUNT */}
+
+          <div className="auditCustomerCount">
+
+            <strong>
+              {
+                filteredCustomers.length
+              }
+            </strong>{" "}
+            customers
+
+          </div>
+
+
+          {/* CUSTOMER CARDS */}
+
+          <div className="auditCustomerList">
+
+            {filteredCustomers.map(
+              (customer) => (
+
+                <button
+                  type="button"
+                  className="auditCustomerCard"
+                  key={
+                    customer.customer_code
+                  }
+                  onClick={() =>
+                    openCustomer(
+                      customer
+                    )
+                  }
+                >
+
+                  <div className="auditCustomerCode">
+
+                    {
+                      customer.customer_code
+                    }
+
+                  </div>
+
+
+                  <div className="auditCustomerMain">
+
+                    <strong>
+                      {
+                        customer.customer_name
+                      }
+                    </strong>
+
+                    <span>
+                      {
+                        customer.current_salesman_code ||
+                        "No salesman"
+                      }
+                    </span>
+
+                    <small>
+
+                      Last transaction:{" "}
+
+                      {shortDate(
+                        customer.latest_transaction_date
+                      )}
+
+                    </small>
+
+                  </div>
+
+
+                  <div className="auditCustomerArrow">
+                    ›
+                  </div>
+
+                </button>
+
+              )
+            )}
+
+          </div>
+
+
+          {filteredCustomers.length ===
+            0 && (
+
+            <div className="auditEmpty">
+
+              No customers match the current filters.
+
+            </div>
+
+          )}
+
+        </div>
+
+      </main>
+    );
+  }
+
+
+  /* ========================================================
+     CUSTOMER DETAIL LOADING
+     ======================================================== */
+
+  if (loadingCustomer) {
+
+    return (
+      <main className="auditPage">
+
+        <div className="auditShell">
+
+          <div className="auditTop">
+
+            <div>
+
+              <div className="auditBrand">
+                MADIBA SFA
+              </div>
+
+              <h1>
+                Customer Audit
+              </h1>
+
+              <p className="auditSubtitle">
+                Loading customer history...
+              </p>
+
+            </div>
+
+
+            <a
+              href="/management"
+              className="auditHomeButton"
+            >
+              ← Home
+            </a>
+
+          </div>
+
+
+          <button
+            type="button"
+            className="auditBackButton"
+            onClick={
+              closeCustomer
+            }
+          >
+            ← Customers
+          </button>
+
+        </div>
+
+      </main>
+    );
+  }
+
+
+  /* ========================================================
+     NO TRANSACTIONS
+     ======================================================== */
+
+  if (!analytics) {
+
+    return (
+      <main className="auditPage">
+
+        <div className="auditShell">
+
+          <div className="auditTop">
+
+            <div>
+
+              <div className="auditBrand">
+                MADIBA SFA
+              </div>
+
+              <h1>
+                Customer Audit
+              </h1>
+
+              <p className="auditSubtitle">
+                Management sales history validation
+              </p>
+
+            </div>
+
+
+            <a
+              href="/management"
+              className="auditHomeButton"
+            >
+              ← Home
+            </a>
+
+          </div>
+
+
+          <button
+            type="button"
+            className="auditBackButton"
+            onClick={
+              closeCustomer
+            }
+          >
+            ← Customers
+          </button>
+
+
+          {error && (
+
+            <div className="auditError">
+              {error}
+            </div>
+
+          )}
+
+
+          <div className="auditEmpty">
+
+            No sales history was found for{" "}
+
+            <strong>
+              {
+                selectedCustomer.customer_name
+              }
+            </strong>.
+
+          </div>
+
+        </div>
+
+      </main>
+    );
+  }
+
+
+  /* ========================================================
+     CUSTOMER DETAIL
      ======================================================== */
 
   return (
@@ -1866,7 +2133,7 @@ export default function CustomerAuditPage() {
             HEADER
             ================================================== */}
 
-        <header className="auditTop">
+        <div className="auditTop">
 
           <div>
 
@@ -1878,442 +2145,519 @@ export default function CustomerAuditPage() {
               Customer Audit
             </h1>
 
-            <p>
-              Sales history &amp; order entry
+            <p className="auditSubtitle">
+              Management sales history validation
             </p>
 
           </div>
 
+
           <a
-            href="/"
-            className="auditHome"
+            href="/management"
+            className="auditHomeButton"
           >
             ← Home
           </a>
 
-        </header>
+        </div>
+
+
+        <button
+          type="button"
+          className="auditBackButton"
+          onClick={
+            closeCustomer
+          }
+        >
+          ← Customers
+        </button>
 
 
         {/* ==================================================
-            MESSAGES
+            MESSAGE / ERROR
             ================================================== */}
 
-        {error && (
-          <div className="auditError">
-            {error}
-          </div>
-        )}
-
         {message && (
+
           <div className="auditSuccess">
             {message}
           </div>
+
+        )}
+
+
+        {error && (
+
+          <div className="auditError">
+            {error}
+          </div>
+
         )}
 
 
         {/* ==================================================
-            CUSTOMER SELECTION
+            CUSTOMER HERO
             ================================================== */}
 
-        {!selectedCustomer && (
-          <>
+        <section className="auditCustomerHero">
 
-            <section className="auditFilters">
+          <div className="auditHeroCode">
 
-              <label>
+            {
+              selectedCustomer.customer_code
+            }
 
-                Salesman
+          </div>
 
-                <select
-                  value={
-                    selectedSalesman
-                  }
-                  onChange={(e) =>
-                    setSelectedSalesman(
-                      e.target.value
-                    )
-                  }
-                >
 
-                  <option value="ALL">
-                    All Salesmen
-                  </option>
+          <h2>
 
-                  {salesmen.map(
-                    (salesman) => (
-                      <option
-                        key={salesman}
-                        value={salesman}
+            {
+              selectedCustomer.customer_code
+            }{" "}
+
+            {
+              selectedCustomer.customer_name
+            }
+
+          </h2>
+
+
+          <div className="auditHeroSalesman">
+
+            {
+              selectedCustomer.current_salesman_code ||
+              "NO SALESMAN"
+            }
+
+          </div>
+
+        </section>
+
+
+        {/* ==================================================
+            CUSTOMER SUMMARY
+            ================================================== */}
+
+        <section className="auditSummaryGrid">
+
+          <div className="auditSummaryCard">
+
+            <span>
+              Orders
+            </span>
+
+            <strong>
+              {
+                analytics.orderCount
+              }
+            </strong>
+
+          </div>
+
+
+          <div className="auditSummaryCard">
+
+            <span>
+              Last Purchase
+            </span>
+
+            <strong>
+              {shortDate(
+                analytics.latestDate
+              )}
+            </strong>
+
+          </div>
+
+        </section>
+
+
+        {/* ==================================================
+            MONTHLY PERFORMANCE
+            ================================================== */}
+
+        <section className="auditSection">
+
+          <h3>
+            Monthly Performance
+          </h3>
+
+
+          <div className="auditTableScroll">
+
+            <table className="auditMatrix auditPerformanceMatrix">
+
+              <thead>
+
+                {/* YEAR */}
+
+                <tr className="auditYearRow">
+
+                  <th rowSpan="2">
+                    Metric
+                  </th>
+
+                  {analytics.yearGroups.map(
+                    (group) => (
+
+                      <th
+                        key={
+                          group.year
+                        }
+                        colSpan={
+                          group.months.length
+                        }
+                        className="auditYearHeader"
                       >
-                        {salesman}
-                      </option>
+                        {
+                          group.year
+                        }
+                      </th>
+
                     )
                   )}
 
-                </select>
-
-              </label>
-
-
-              <label>
-
-                Search Customer
-
-                <input
-                  type="search"
-                  value={search}
-                  onChange={(e) =>
-                    setSearch(
-                      e.target.value
-                    )
-                  }
-                  placeholder="Code or customer name..."
-                />
-
-              </label>
-
-            </section>
-
-
-            <div className="auditCount">
-
-              <strong>
-                {
-                  filteredCustomers.length
-                }
-              </strong>{" "}
-              customers
-
-            </div>
-
-
-            <section className="auditCustomerList">
-
-              {filteredCustomers.map(
-                (customer) => (
-
-                  <button
-                    key={
-                      customer.customer_code
-                    }
-                    className="auditCustomerCard"
-                    onClick={() =>
-                      openCustomer(
-                        customer
-                      )
-                    }
+                  <th
+                    rowSpan="2"
+                    className="auditTotalHeader"
                   >
+                    Total
+                  </th>
 
-                    <div className="auditCustomerCode">
-                      {
-                        customer.customer_code
-                      }
-                    </div>
+                </tr>
 
 
-                    <div className="auditCustomerBody">
+                {/* MONTH */}
 
-                      <strong>
-                        {
-                          customer.customer_name
-                        }
-                      </strong>
+                <tr className="auditMonthRow">
 
-                      <span>
-                        {customer.current_salesman_code ||
-                          "No salesman"}
-                      </span>
+                  {analytics.months.map(
+                    (month) => (
 
-                      <small>
-                        Last transaction:{" "}
-                        {shortDate(
-                          customer.latest_transaction_date
+                      <th key={month}>
+                        {monthName(
+                          month
                         )}
-                      </small>
+                      </th>
 
-                    </div>
+                    )
+                  )}
+
+                </tr>
+
+              </thead>
 
 
-                    <div className="auditArrow">
-                      ›
-                    </div>
+              <tbody>
 
-                  </button>
+                {/* SALES */}
 
-                )
-              )}
+                <tr>
 
-            </section>
+                  <th>
+                    Sales
+                  </th>
 
-          </>
-        )}
+                  {analytics.monthlySummary.map(
+                    (month, index) => {
+
+                      const previous =
+                        index > 0
+                          ? analytics
+                              .monthlySummary[
+                                index - 1
+                              ].sales
+                          : 0;
+
+                      return (
+
+                        <td
+                          key={
+                            month.month
+                          }
+                          className={trendClass(
+                            month.sales,
+                            previous,
+                            index > 0
+                          )}
+                        >
+                          {numberFormat(
+                            month.sales
+                          )}
+                        </td>
+
+                      );
+                    }
+                  )}
+
+                  <td className="auditMatrixTotal">
+
+                    {numberFormat(
+                      analytics
+                        .monthlySummary
+                        .reduce(
+                          (
+                            total,
+                            month
+                          ) =>
+                            total +
+                            month.sales,
+                          0
+                        )
+                    )}
+
+                  </td>
+
+                </tr>
+
+
+                {/* SKU SOLD */}
+
+                <tr>
+
+                  <th>
+                    SKUs Sold
+                  </th>
+
+                  {analytics.monthlySummary.map(
+                    (month, index) => {
+
+                      const previous =
+                        index > 0
+                          ? analytics
+                              .monthlySummary[
+                                index - 1
+                              ].skuCount
+                          : 0;
+
+                      return (
+
+                        <td
+                          key={
+                            month.month
+                          }
+                          className={trendClass(
+                            month.skuCount,
+                            previous,
+                            index > 0
+                          )}
+                        >
+                          {
+                            month.skuCount
+                          }
+                        </td>
+
+                      );
+                    }
+                  )}
+
+                  <td className="auditMatrixTotal">
+
+                    {
+                      analytics.itemCount
+                    }
+
+                  </td>
+
+                </tr>
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        </section>
 
 
         {/* ==================================================
-            CUSTOMER DETAIL
+            CATEGORY PERFORMANCE + ITEM ORDERING
             ================================================== */}
 
-        {selectedCustomer && (
+        <section className="auditSection">
 
-          <section className="auditDetail">
+          <div className="auditCategoryTitle">
 
+            <span>
+              Category Performance by Month
+            </span>
 
-            {/* ===============================================
-                BACK BUTTON
-                =============================================== */}
+            <small>
+              Tap a category to view items and place an order.
+            </small>
 
-            <button
-              className="auditBack"
-              onClick={() => {
+          </div>
+          <div className="auditTableScroll">
 
-                setSelectedCustomer(
-                  null
-                );
+            <table className="auditMatrix auditCategoryMatrixV3">
 
-                setTransactions(
-                  []
-                );
+              <thead>
 
-                setShowTransactions(
-                  false
-                );
+                {/* YEAR HEADER */}
 
-                setExpandedCategories(
-                  {}
-                );
+                <tr className="auditYearRow">
 
-                setOrderQuantities(
-                  {}
-                );
+                  <th
+                    rowSpan="2"
+                    className="auditCategoryHeader"
+                  >
+                    Category
+                  </th>
 
-                setDraftOrderId(
-                  null
-                );
+                  <th
+                    rowSpan="2"
+                    className="auditCategoryMetricHeader"
+                  >
+                    Metric
+                  </th>
 
-                setShowOrderReview(
-                  false
-                );
+                  {analytics.yearGroups.map(
+                    (group) => (
 
-                setMessage("");
+                      <th
+                        key={group.year}
+                        colSpan={group.months.length}
+                        className="auditYearHeader"
+                      >
+                        {group.year}
+                      </th>
 
-                setError("");
+                    )
+                  )}
 
-              }}
-            >
-              ← Customers
-            </button>
+                  <th
+                    rowSpan="2"
+                    className="auditTotalHeader"
+                  >
+                    Total
+                  </th>
 
-
-            {/* ===============================================
-                CUSTOMER HEADER
-                =============================================== */}
-
-            <div className="auditCustomerHeader">
-
-              <div className="auditCustomerHeaderCode">
-                {
-                  selectedCustomer.customer_code
-                }
-              </div>
-
-              <h2>
-                {
-                  selectedCustomer.customer_name
-                }
-              </h2>
-
-              <div className="auditSalesmanPill">
-                {selectedCustomer.current_salesman_code ||
-                  "No salesman"}
-              </div>
-
-            </div>
+                </tr>
 
 
-            {/* ===============================================
-                LOADING CUSTOMER
-                =============================================== */}
+                {/* MONTH HEADER */}
 
-            {loadingCustomer && (
+                <tr className="auditMonthRow">
 
-              <div className="auditLoadingBox">
-                Loading purchase history and draft order...
-              </div>
+                  {analytics.months.map(
+                    (month) => (
 
-            )}
+                      <th key={month}>
+                        {monthName(month)}
+                      </th>
 
+                    )
+                  )}
 
-            {/* ===============================================
-                CUSTOMER ANALYTICS
-                =============================================== */}
+                </tr>
 
-            {!loadingCustomer &&
-              analytics && (
-                <>
+              </thead>
 
 
-                  {/* =========================================
-                      SUMMARY
-                      ========================================= */}
+              <tbody>
 
-                  <div className="auditMetrics auditMetricsSmall">
+                {analytics.categories.map(
+                  (category) => {
 
-                    <div>
+                    const isExpanded =
+                      Boolean(
+                        expandedCategories[
+                          category.category
+                        ]
+                      );
 
-                      <span>
-                        Orders
-                      </span>
+                    return (
 
-                      <strong>
-                        {
-                          analytics.orderCount
-                        }
-                      </strong>
+                      <Fragment
+                        key={category.category}
+                      >
 
-                    </div>
+                        {/* ================================
+                            CATEGORY SALES ROW
+                            ================================ */}
 
-
-                    <div>
-
-                      <span>
-                        Last Purchase
-                      </span>
-
-                      <strong>
-                        {shortDate(
-                          analytics.latestDate
-                        )}
-                      </strong>
-
-                    </div>
-
-                  </div>
-
-
-                  {/* =========================================
-                      MONTHLY PERFORMANCE
-                      ========================================= */}
-
-                  <div className="auditSectionTitle">
-                    Monthly Performance
-                  </div>
-
-
-                  <div className="auditTableScroll">
-
-                    <table className="auditMatrix auditPerformanceMatrix">
-
-                      <thead>
-
-                        {/* YEAR */}
-
-                        <tr className="auditYearRow">
+                        <tr className="auditCategorySalesRow">
 
                           <th
-                            rowSpan={2}
-                            className="auditMetricHeader"
+                            rowSpan="2"
+                            className="auditMergedCategory auditClickableCategory"
+                            onClick={() =>
+                              toggleCategory(
+                                category.category
+                              )
+                            }
                           >
-                            Metric
+
+                            <button
+                              type="button"
+                              className="auditCategoryToggle"
+                              onClick={(e) => {
+                                e.stopPropagation();
+
+                                toggleCategory(
+                                  category.category
+                                );
+                              }}
+                            >
+
+                              <span className="auditCategoryArrow">
+                                {isExpanded
+                                  ? "▼"
+                                  : "▶"}
+                              </span>
+
+                              <span>
+                                {category.category}
+                              </span>
+
+                            </button>
+
                           </th>
 
 
-                          {analytics.yearGroups.map(
-                            (group) => (
-
-                              <th
-                                key={
-                                  group.year
-                                }
-                                colSpan={
-                                  group.months.length
-                                }
-                                className="auditYearHeader"
-                              >
-                                {
-                                  group.year
-                                }
-                              </th>
-
-                            )
-                          )}
-
-
-                          <th
-                            rowSpan={2}
-                            className="auditTotalHeader"
-                          >
-                            Total
-                          </th>
-
-                        </tr>
-
-
-                        {/* MONTH */}
-
-                        <tr className="auditMonthRow">
-
-                          {analytics.months.map(
-                            (month) => (
-
-                              <th
-                                key={month}
-                              >
-                                {monthName(
-                                  month
-                                )}
-                              </th>
-
-                            )
-                          )}
-
-                        </tr>
-
-                      </thead>
-
-
-                      <tbody>
-
-
-                        {/* SALES */}
-
-                        <tr>
-
-                          <th>
+                          <th className="auditCategoryMetric">
                             Sales
                           </th>
 
 
-                          {analytics.monthlySummary.map(
+                          {analytics.months.map(
                             (
                               month,
                               index
                             ) => {
 
+                              const current =
+                                category.months[
+                                  month
+                                ]?.sales || 0;
+
                               const previous =
                                 index > 0
-                                  ? analytics
-                                      .monthlySummary[
-                                      index - 1
-                                    ].sales
-                                  : null;
+                                  ? category.months[
+                                      analytics.months[
+                                        index - 1
+                                      ]
+                                    ]?.sales || 0
+                                  : 0;
 
                               return (
 
                                 <td
-                                  key={
-                                    month.month
-                                  }
+                                  key={month}
                                   className={trendClass(
-                                    month.sales,
+                                    current,
                                     previous,
                                     index > 0
                                   )}
                                 >
-                                  {month.sales !== 0
+
+                                  {current
                                     ? numberFormat(
-                                        month.sales
+                                        current
                                       )
                                     : "—"}
+
                                 </td>
 
                               );
@@ -2324,15 +2668,7 @@ export default function CustomerAuditPage() {
                           <td className="auditMatrixTotal">
 
                             {numberFormat(
-                              analytics.monthlySummary.reduce(
-                                (
-                                  total,
-                                  month
-                                ) =>
-                                  total +
-                                  month.sales,
-                                0
-                              )
+                              category.totalSales
                             )}
 
                           </td>
@@ -2340,44 +2676,50 @@ export default function CustomerAuditPage() {
                         </tr>
 
 
-                        {/* SKUs */}
+                        {/* ================================
+                            CATEGORY SKU ROW
+                            ================================ */}
 
-                        <tr>
+                        <tr className="auditCategorySkuRow">
 
-                          <th>
+                          <th className="auditCategoryMetric">
                             SKUs Sold
                           </th>
 
 
-                          {analytics.monthlySummary.map(
+                          {analytics.months.map(
                             (
                               month,
                               index
                             ) => {
 
+                              const current =
+                                category.months[
+                                  month
+                                ]?.skuCount || 0;
+
                               const previous =
                                 index > 0
-                                  ? analytics
-                                      .monthlySummary[
-                                      index - 1
-                                    ].skuCount
-                                  : null;
+                                  ? category.months[
+                                      analytics.months[
+                                        index - 1
+                                      ]
+                                    ]?.skuCount || 0
+                                  : 0;
 
                               return (
 
                                 <td
-                                  key={
-                                    month.month
-                                  }
+                                  key={month}
                                   className={trendClass(
-                                    month.skuCount,
+                                    current,
                                     previous,
                                     index > 0
                                   )}
                                 >
-                                  {month.skuCount !== 0
-                                    ? month.skuCount
-                                    : "—"}
+
+                                  {current || "—"}
+
                                 </td>
 
                               );
@@ -2386,2372 +2728,1045 @@ export default function CustomerAuditPage() {
 
 
                           <td className="auditMatrixTotal">
+
                             {
-                              analytics.itemCount
+                              category.totalSkuCount
                             }
+
                           </td>
 
                         </tr>
 
-                      </tbody>
 
-                    </table>
+                        {/* ================================
+                            EXPANDED CATEGORY ITEMS
+                            ================================ */}
 
-                  </div>
+                        {isExpanded && (
 
+                          <tr className="auditExpandedItemsRow">
 
-                  {/* =========================================
-                      CATEGORY + ITEM DRILL DOWN
-                      ========================================= */}
+                            <td
+                              colSpan={
+                                analytics.months.length +
+                                3
+                              }
+                              className="auditExpandedItemsCell"
+                            >
 
-                  <div className="auditSectionTitle auditCategoryTitle">
+                              <div className="auditExpandedCategory">
 
-                    <span>
-                      Category Performance &amp; Order Entry
-                    </span>
+                                <div className="auditExpandedCategoryHeader">
 
-                    <small>
-                      Tap a category to view items and add order quantities.
-                    </small>
+                                  <div>
 
-                  </div>
+                                    <strong>
+                                      {category.category}
+                                    </strong>
 
+                                    <span>
+                                      {
+                                        category.items.length
+                                      }{" "}
+                                      items
+                                    </span>
 
-                  <div className="auditTableScroll">
-
-                    <table className="auditMatrix auditCategoryMatrixV3 auditOrderMatrix">
-
-                      <thead>
-
-
-                        {/* ===================================
-                            YEAR
-                            =================================== */}
-
-                        <tr className="auditYearRow">
-
-                          <th
-                            rowSpan={2}
-                            className="auditCategoryHeader"
-                          >
-                            Category / Item
-                          </th>
+                                  </div>
 
 
-                          <th
-                            rowSpan={2}
-                            className="auditCategoryMetricHeader"
-                          >
-                            Metric
-                          </th>
-
-
-                          {analytics.yearGroups.map(
-                            (group) => (
-
-                              <th
-                                key={
-                                  group.year
-                                }
-                                colSpan={
-                                  group.months.length
-                                }
-                                className="auditYearHeader"
-                              >
-                                {
-                                  group.year
-                                }
-                              </th>
-
-                            )
-                          )}
-
-
-                          <th
-                            rowSpan={2}
-                            className="auditTotalHeader"
-                          >
-                            Total
-                          </th>
-
-
-                          <th
-                            rowSpan={2}
-                            className="auditRateHeader"
-                          >
-                            Rate
-                          </th>
-
-
-                          <th
-                            rowSpan={2}
-                            className="auditOrderQtyHeader"
-                          >
-                            Order Qty
-                          </th>
-
-                        </tr>
-
-
-                        {/* ===================================
-                            MONTH
-                            =================================== */}
-
-                        <tr className="auditMonthRow">
-
-                          {analytics.months.map(
-                            (month) => (
-
-                              <th
-                                key={month}
-                              >
-                                {monthName(
-                                  month
-                                )}
-                              </th>
-
-                            )
-                          )}
-
-                        </tr>
-
-                      </thead>
-
-
-                      <tbody>
-
-
-                        {analytics.categories.map(
-                          (category) => {
-
-                            const isExpanded =
-                              Boolean(
-                                expandedCategories[
-                                  category.category
-                                ]
-                              );
-
-                            return (
-
-                              <Fragment
-                                key={
-                                  category.category
-                                }
-                              >
-
-
-                                {/* ===========================
-                                    CATEGORY SALES
-                                    =========================== */}
-
-                                <tr className="auditCategorySalesRow">
-
-                                  <th
-                                    rowSpan={2}
-                                    className="auditMergedCategory auditClickableCategory"
+                                  <button
+                                    type="button"
+                                    className="auditCollapseButton"
                                     onClick={() =>
                                       toggleCategory(
                                         category.category
                                       )
                                     }
                                   >
-
-                                    <div className="auditCategoryClickInner">
-
-                                      <span className="auditExpandIcon">
-                                        {isExpanded
-                                          ? "▼"
-                                          : "▶"}
-                                      </span>
-
-                                      <span>
-                                        {
-                                          category.category
-                                        }
-                                      </span>
-
-                                    </div>
-
-                                  </th>
-
-
-                                  <th className="auditCategoryMetric">
-                                    Sales
-                                  </th>
-
-
-                                  {analytics.months.map(
-                                    (
-                                      month,
-                                      index
-                                    ) => {
-
-                                      const current =
-                                        category
-                                          .months[
-                                          month
-                                        ].sales;
-
-
-                                      const previousMonth =
-                                        index > 0
-                                          ? analytics
-                                              .months[
-                                              index - 1
-                                            ]
-                                          : null;
-
-
-                                      const previous =
-                                        previousMonth
-                                          ? category
-                                              .months[
-                                              previousMonth
-                                            ].sales
-                                          : null;
-
-
-                                      return (
-
-                                        <td
-                                          key={
-                                            month
-                                          }
-                                          className={trendClass(
-                                            current,
-                                            previous,
-                                            index > 0
-                                          )}
-                                        >
-                                          {current !== 0
-                                            ? numberFormat(
-                                                current
-                                              )
-                                            : "—"}
-                                        </td>
-
-                                      );
-                                    }
-                                  )}
-
-
-                                  <td className="auditMatrixTotal">
-
-                                    {numberFormat(
-                                      category.totalSales
-                                    )}
-
-                                  </td>
-
-
-                                  {/* CATEGORY HAS NO ORDER RATE */}
-
-                                  <td
-                                    rowSpan={2}
-                                    className="auditCategoryNoOrder"
-                                  >
-                                    —
-                                  </td>
-
-
-                                  {/* CATEGORY HAS NO ORDER QTY */}
-
-                                  <td
-                                    rowSpan={2}
-                                    className="auditCategoryNoOrder"
-                                  >
-                                    {isExpanded
-                                      ? "Items ↓"
-                                      : "Open"}
-                                  </td>
-
-                                </tr>
-
-
-                                {/* ===========================
-                                    CATEGORY SKU
-                                    =========================== */}
-
-                                <tr className="auditCategorySkuRow">
-
-                                  <th className="auditCategoryMetric">
-                                    SKUs Sold
-                                  </th>
-
-
-                                  {analytics.months.map(
-                                    (
-                                      month,
-                                      index
-                                    ) => {
-
-                                      const current =
-                                        category
-                                          .months[
-                                          month
-                                        ].skuCount;
-
-
-                                      const previousMonth =
-                                        index > 0
-                                          ? analytics
-                                              .months[
-                                              index - 1
-                                            ]
-                                          : null;
-
-
-                                      const previous =
-                                        previousMonth
-                                          ? category
-                                              .months[
-                                              previousMonth
-                                            ].skuCount
-                                          : null;
-
-
-                                      return (
-
-                                        <td
-                                          key={
-                                            month
-                                          }
-                                          className={trendClass(
-                                            current,
-                                            previous,
-                                            index > 0
-                                          )}
-                                        >
-                                          {current !== 0
-                                            ? current
-                                            : "—"}
-                                        </td>
-
-                                      );
-                                    }
-                                  )}
-
-
-                                  <td className="auditMatrixTotal">
-                                    {
-                                      category.totalSkuCount
-                                    }
-                                  </td>
-
-                                </tr>
-
-
-                                {/* ===========================
-                                    EXPANDED ITEMS
-                                    =========================== */}
-
-                                {isExpanded &&
-                                  category.items.map(
-                                    (item) => {
-
-                                      const orderQty =
-                                        Number(
-                                          orderQuantities[
-                                            item.item_code
-                                          ] || 0
-                                        );
-
-
-                                      return (
-
-                                        <Fragment
-                                          key={
-                                            item.item_code
-                                          }
-                                        >
-
-
-                                          {/* =================
-                                              ITEM VALUE
-                                              ================= */}
-
-                                          <tr className="auditItemValueRow">
-
-
-                                            <th
-                                              rowSpan={2}
-                                              className="auditDrillItem"
-                                            >
-
-                                              <div className="auditDrillItemCode">
-                                                {
-                                                  item.item_code
-                                                }
-                                              </div>
-
-                                              <div className="auditDrillItemName">
-                                                {
-                                                  item.item_name
-                                                }
-                                              </div>
-
-                                              {item.abc_class && (
-
-                                                <div className="auditDrillItemABC">
-                                                  {
-                                                    item.abc_class
-                                                  }
-                                                </div>
-
-                                              )}
-
-                                            </th>
-
-
-                                            <th className="auditItemMetric">
-                                              Value
-                                            </th>
-
-
-                                            {analytics.months.map(
-                                              (
-                                                month,
-                                                index
-                                              ) => {
-
-                                                const current =
-                                                  item
-                                                    .months[
-                                                    month
-                                                  ].value;
-
-
-                                                const previousMonth =
-                                                  index > 0
-                                                    ? analytics
-                                                        .months[
-                                                        index - 1
-                                                      ]
-                                                    : null;
-
-
-                                                const previous =
-                                                  previousMonth
-                                                    ? item
-                                                        .months[
-                                                        previousMonth
-                                                      ].value
-                                                    : null;
-
-
-                                                return (
-
-                                                  <td
-                                                    key={
-                                                      month
-                                                    }
-                                                    className={trendClass(
-                                                      current,
-                                                      previous,
-                                                      index > 0
-                                                    )}
-                                                  >
-                                                    {current !== 0
-                                                      ? numberFormat(
-                                                          current
-                                                        )
-                                                      : "—"}
-                                                  </td>
-
-                                                );
-                                              }
-                                            )}
-
-
-                                            <td className="auditMatrixTotal auditItemTotal">
-
-                                              {numberFormat(
-                                                item.total_value
-                                              )}
-
-                                            </td>
-
-
-                                            {/* RATE BLANK FOR NOW */}
-
-                                            <td
-                                              rowSpan={2}
-                                              className="auditOrderRate"
-                                            >
-                                              —
-                                            </td>
-
-
-                                            {/* ORDER QUANTITY */}
-
-                                            <td
-                                              rowSpan={2}
-                                              className="auditOrderQtyCell"
-                                            >
-
-                                              <div className="auditQtyControl">
-
-
-                                                <button
-                                                  type="button"
-                                                  className="auditQtyButton"
-                                                  onClick={() =>
-                                                    decreaseOrderQty(
-                                                      item.item_code
-                                                    )
-                                                  }
-                                                  disabled={
-                                                    orderQty <= 0
-                                                  }
-                                                  aria-label={`Decrease ${item.item_name}`}
-                                                >
-                                                  −
-                                                </button>
-
-
-                                                <input
-                                                  type="number"
-                                                  min="0"
-                                                  step="1"
-                                                  inputMode="numeric"
-                                                  value={
-                                                    orderQty === 0
-                                                      ? ""
-                                                      : orderQty
-                                                  }
-                                                  placeholder="0"
-                                                  onChange={(e) =>
-                                                    changeOrderQty(
-                                                      item.item_code,
-                                                      e.target.value
-                                                    )
-                                                  }
-                                                  aria-label={`Order quantity for ${item.item_name}`}
-                                                />
-
-
-                                                <button
-                                                  type="button"
-                                                  className="auditQtyButton"
-                                                  onClick={() =>
-                                                    increaseOrderQty(
-                                                      item.item_code
-                                                    )
-                                                  }
-                                                  aria-label={`Increase ${item.item_name}`}
-                                                >
-                                                  +
-                                                </button>
-
-
-                                              </div>
-
-                                            </td>
-
-                                          </tr>
-
-
-                                          {/* =================
-                                              ITEM QUANTITY
-                                              ================= */}
-
-                                          <tr className="auditItemQuantityRow">
-
-                                            <th className="auditItemMetric">
-                                              Quantity
-                                            </th>
-
-
-                                            {analytics.months.map(
-                                              (
-                                                month,
-                                                index
-                                              ) => {
-
-                                                const current =
-                                                  item
-                                                    .months[
-                                                    month
-                                                  ].quantity;
-
-
-                                                const previousMonth =
-                                                  index > 0
-                                                    ? analytics
-                                                        .months[
-                                                        index - 1
-                                                      ]
-                                                    : null;
-
-
-                                                const previous =
-                                                  previousMonth
-                                                    ? item
-                                                        .months[
-                                                        previousMonth
-                                                      ].quantity
-                                                    : null;
-
-
-                                                return (
-
-                                                  <td
-                                                    key={
-                                                      month
-                                                    }
-                                                    className={trendClass(
-                                                      current,
-                                                      previous,
-                                                      index > 0
-                                                    )}
-                                                  >
-                                                    {current !== 0
-                                                      ? qtyFormat(
-                                                          current
-                                                        )
-                                                      : "—"}
-                                                  </td>
-
-                                                );
-                                              }
-                                            )}
-
-
-                                            <td className="auditMatrixTotal auditItemTotal">
-
-                                              {qtyFormat(
-                                                item.total_quantity
-                                              )}
-
-                                            </td>
-
-                                          </tr>
-
-                                        </Fragment>
-
-                                      );
-                                    }
-                                  )}
-
-                              </Fragment>
-
-                            );
-                          }
-                        )}
-
-                      </tbody>
-
-                    </table>
-
-                  </div>
-
-
-                  {/* =========================================
-                      DRAFT STATUS
-                      ========================================= */}
-
-                  {draftOrderId && (
-
-                    <div className="auditDraftNotice">
-
-                      <span>
-                        Draft Order
-                      </span>
-
-                      <strong>
-                        #{draftOrderId}
-                      </strong>
-
-                      <small>
-                        Changes on screen are saved when you press Save Draft.
-                      </small>
-
-                    </div>
-
-                  )}
-
-
-                  {/* =========================================
-                      TRANSACTION HISTORY
-                      ========================================= */}
-
-                  <button
-                    className="auditTransactionButton"
-                    onClick={() =>
-                      setShowTransactions(
-                        !showTransactions
-                      )
-                    }
-                  >
-
-                    {showTransactions
-                      ? "Hide Transactions"
-                      : `View All ${analytics.transactionCount} Transaction Lines`}
-
-                  </button>
-
-
-                  {showTransactions && (
-
-                    <div className="auditTransactions">
-
-                      {transactions.map(
-                        (row) => (
-
-                          <div
-                            className="auditTransaction"
-                            key={row.id}
-                          >
-
-                            <div>
-
-                              <strong>
-                                {shortDate(
-                                  row.transaction_date
-                                )}
-                              </strong>
-
-                              <span>
-                                {row.voucher_number ||
-                                  row.reference ||
-                                  "-"}
-                              </span>
-
-                            </div>
-
-
-                            <div className="auditTransactionItem">
-
-                              <strong>
-                                {
-                                  row.item_name
-                                }
-                              </strong>
-
-                              <span>
-                                Qty{" "}
-                                {qtyFormat(
-                                  row.quantity
-                                )}
-                              </span>
-
-                            </div>
-
-
-                            <div className="auditTransactionAmount">
-
-                              {numberFormat(
-                                row.sales_amount
-                              )}
-
-                            </div>
-
-                          </div>
-
-                        )
-                      )}
-
-                    </div>
-
-                  )}
-
-
-                  {/* =========================================
-                      ORDER REVIEW MODAL
-                      ========================================= */}
-
-                  {showOrderReview && (
-
-                    <div
-                      className="auditOrderOverlay"
-                      onClick={() =>
-                        setShowOrderReview(
-                          false
-                        )
-                      }
-                    >
-
-                      <div
-                        className="auditOrderReview"
-                        onClick={(e) =>
-                          e.stopPropagation()
-                        }
-                      >
-
-
-                        <div className="auditOrderReviewHeader">
-
-                          <div>
-
-                            <span>
-                              MADIBA SFA
-                            </span>
-
-                            <h3>
-                              Review Order
-                            </h3>
-
-                            <p>
-                              {
-                                selectedCustomer.customer_name
-                              }
-                            </p>
-
-                          </div>
-
-
-                          <button
-                            type="button"
-                            className="auditOrderClose"
-                            onClick={() =>
-                              setShowOrderReview(
-                                false
-                              )
-                            }
-                          >
-                            ×
-                          </button>
-
-                        </div>
-
-
-                        {orderItems.length === 0 ? (
-
-                          <div className="auditOrderEmpty">
-
-                            No items have been added to this order.
-
-                          </div>
-
-                        ) : (
-
-                          <div className="auditOrderReviewLines">
-
-                            {orderItems.map(
-                              (item) => (
-
-                                <div
-                                  className="auditOrderReviewLine"
-                                  key={
-                                    item.item_code
-                                  }
-                                >
-
-                                  <div className="auditOrderReviewItem">
-
-                                    <span>
-                                      {
-                                        item.item_code
-                                      }
-                                    </span>
-
-                                    <strong>
-                                      {
-                                        item.item_name
-                                      }
-                                    </strong>
-
-                                    <small>
-                                      {
-                                        item.category
-                                      }
-                                    </small>
-
-                                  </div>
-
-
-                                  <div className="auditOrderReviewRate">
-
-                                    <span>
-                                      Rate
-                                    </span>
-
-                                    <strong>
-                                      —
-                                    </strong>
-
-                                  </div>
-
-
-                                  <div className="auditReviewQty">
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        decreaseOrderQty(
-                                          item.item_code
-                                        )
-                                      }
-                                    >
-                                      −
-                                    </button>
-
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="1"
-                                      value={
-                                        item.order_quantity
-                                      }
-                                      onChange={(e) =>
-                                        changeOrderQty(
-                                          item.item_code,
-                                          e.target.value
-                                        )
-                                      }
-                                    />
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        increaseOrderQty(
-                                          item.item_code
-                                        )
-                                      }
-                                    >
-                                      +
-                                    </button>
-
-                                  </div>
+                                    Close
+                                  </button>
 
                                 </div>
 
-                              )
-                            )}
 
-                          </div>
+                                {category.items.length ===
+                                0 ? (
+
+                                  <div className="auditEmpty">
+
+                                    No items found in this category.
+
+                                  </div>
+
+                                ) : (
+
+                                  <div className="auditItemTableScroll">
+
+                                    <table className="auditItemMatrix">
+
+                                      <thead>
+
+                                        {/* ITEM YEAR HEADER */}
+
+                                        <tr className="auditItemYearRow">
+
+                                          <th
+                                            rowSpan="2"
+                                            className="auditItemNameHeader"
+                                          >
+                                            Item
+                                          </th>
+
+                                          <th
+                                            rowSpan="2"
+                                            className="auditItemMetricHeader"
+                                          >
+                                            Metric
+                                          </th>
+
+
+                                          {analytics.yearGroups.map(
+                                            (group) => (
+
+                                              <th
+                                                key={
+                                                  group.year
+                                                }
+                                                colSpan={
+                                                  group.months.length
+                                                }
+                                              >
+                                                {
+                                                  group.year
+                                                }
+                                              </th>
+
+                                            )
+                                          )}
+
+
+                                          <th
+                                            rowSpan="2"
+                                            className="auditItemTotalHeader"
+                                          >
+                                            Total
+                                          </th>
+
+                                          <th
+                                            rowSpan="2"
+                                            className="auditRateHeader"
+                                          >
+                                            Rate
+                                          </th>
+
+                                          <th
+                                            rowSpan="2"
+                                            className="auditOrderQtyHeader"
+                                          >
+                                            Order Qty
+                                          </th>
+
+                                        </tr>
+
+
+                                        {/* ITEM MONTH HEADER */}
+
+                                        <tr className="auditItemMonthRow">
+
+                                          {analytics.months.map(
+                                            (month) => (
+
+                                              <th
+                                                key={
+                                                  month
+                                                }
+                                              >
+                                                {monthName(
+                                                  month
+                                                )}
+                                              </th>
+
+                                            )
+                                          )}
+
+                                        </tr>
+
+                                      </thead>
+
+
+                                      <tbody>
+
+                                        {category.items.map(
+                                          (item) => {
+
+                                            const orderQty =
+                                              Number(
+                                                orderQuantities[
+                                                  item.item_code
+                                                ] || 0
+                                              );
+
+                                            return (
+
+                                              <Fragment
+                                                key={
+                                                  item.item_key
+                                                }
+                                              >
+
+                                                {/* ======================
+                                                    ITEM VALUE ROW
+                                                    ====================== */}
+
+                                                <tr className="auditItemValueRow">
+
+                                                  <th
+                                                    rowSpan="2"
+                                                    className="auditItemNameCell"
+                                                  >
+
+                                                    <div className="auditItemCode">
+
+                                                      {
+                                                        item.item_code
+                                                      }
+
+                                                    </div>
+
+
+                                                    <div className="auditItemName">
+
+                                                      {
+                                                        item.item_name
+                                                      }
+
+                                                    </div>
+
+
+                                                    {item.abc_class && (
+
+                                                      <div className="auditItemABC">
+
+                                                        {
+                                                          item.abc_class
+                                                        }
+
+                                                      </div>
+
+                                                    )}
+
+                                                  </th>
+
+
+                                                  <th className="auditItemMetricCell">
+                                                    Value
+                                                  </th>
+
+
+                                                  {analytics.months.map(
+                                                    (
+                                                      month,
+                                                      index
+                                                    ) => {
+
+                                                      const current =
+                                                        item.months[
+                                                          month
+                                                        ]?.value ||
+                                                        0;
+
+                                                      const previous =
+                                                        index > 0
+                                                          ? item.months[
+                                                              analytics.months[
+                                                                index -
+                                                                  1
+                                                              ]
+                                                            ]?.value ||
+                                                            0
+                                                          : 0;
+
+                                                      return (
+
+                                                        <td
+                                                          key={
+                                                            month
+                                                          }
+                                                          className={trendClass(
+                                                            current,
+                                                            previous,
+                                                            index >
+                                                              0
+                                                          )}
+                                                        >
+
+                                                          {current
+                                                            ? numberFormat(
+                                                                current
+                                                              )
+                                                            : "—"}
+
+                                                        </td>
+
+                                                      );
+                                                    }
+                                                  )}
+
+
+                                                  <td className="auditItemTotal">
+
+                                                    {numberFormat(
+                                                      item.total_value
+                                                    )}
+
+                                                  </td>
+
+
+                                                  {/* RATE BLANK FOR NOW */}
+
+                                                  <td
+                                                    rowSpan="2"
+                                                    className="auditRateCell"
+                                                  >
+
+                                                    <span className="auditRateBlank">
+                                                      —
+                                                    </span>
+
+                                                  </td>
+
+
+                                                  {/* ORDER QUANTITY */}
+
+                                                  <td
+                                                    rowSpan="2"
+                                                    className="auditOrderQtyCell"
+                                                  >
+
+                                                    <div className="auditQtyControl">
+
+                                                      <button
+                                                        type="button"
+                                                        className="auditQtyButton"
+                                                        aria-label={`Decrease ${item.item_name}`}
+                                                        onClick={() =>
+                                                          decreaseOrderQty(
+                                                            item.item_code
+                                                          )
+                                                        }
+                                                      >
+                                                        −
+                                                      </button>
+
+
+                                                      <input
+                                                        type="number"
+                                                        min="0"
+                                                        step="1"
+                                                        inputMode="numeric"
+                                                        value={
+                                                          orderQty ||
+                                                          ""
+                                                        }
+                                                        placeholder="0"
+                                                        aria-label={`Order quantity for ${item.item_name}`}
+                                                        onChange={(
+                                                          e
+                                                        ) =>
+                                                          changeOrderQty(
+                                                            item.item_code,
+                                                            e
+                                                              .target
+                                                              .value
+                                                          )
+                                                        }
+                                                      />
+
+
+                                                      <button
+                                                        type="button"
+                                                        className="auditQtyButton"
+                                                        aria-label={`Increase ${item.item_name}`}
+                                                        onClick={() =>
+                                                          increaseOrderQty(
+                                                            item.item_code
+                                                          )
+                                                        }
+                                                      >
+                                                        +
+                                                      </button>
+
+                                                    </div>
+
+                                                  </td>
+
+                                                </tr>
+
+
+                                                {/* ======================
+                                                    ITEM QUANTITY ROW
+                                                    ====================== */}
+
+                                                <tr className="auditItemQtyRow">
+
+                                                  <th className="auditItemMetricCell">
+                                                    Qty
+                                                  </th>
+
+
+                                                  {analytics.months.map(
+                                                    (
+                                                      month,
+                                                      index
+                                                    ) => {
+
+                                                      const current =
+                                                        item.months[
+                                                          month
+                                                        ]?.quantity ||
+                                                        0;
+
+                                                      const previous =
+                                                        index > 0
+                                                          ? item.months[
+                                                              analytics.months[
+                                                                index -
+                                                                  1
+                                                              ]
+                                                            ]?.quantity ||
+                                                            0
+                                                          : 0;
+
+                                                      return (
+
+                                                        <td
+                                                          key={
+                                                            month
+                                                          }
+                                                          className={trendClass(
+                                                            current,
+                                                            previous,
+                                                            index >
+                                                              0
+                                                          )}
+                                                        >
+
+                                                          {current
+                                                            ? qtyFormat(
+                                                                current
+                                                              )
+                                                            : "—"}
+
+                                                        </td>
+
+                                                      );
+                                                    }
+                                                  )}
+
+
+                                                  <td className="auditItemTotal">
+
+                                                    {qtyFormat(
+                                                      item.total_quantity
+                                                    )}
+
+                                                  </td>
+
+                                                </tr>
+
+                                              </Fragment>
+
+                                            );
+                                          }
+                                        )}
+
+                                      </tbody>
+
+                                    </table>
+
+                                  </div>
+
+                                )}
+
+                              </div>
+
+                            </td>
+
+                          </tr>
 
                         )}
 
+                      </Fragment>
 
-                        <div className="auditOrderReviewSummary">
+                    );
+                  }
+                )}
 
-                          <div>
+              </tbody>
 
-                            <span>
-                              Items
-                            </span>
+            </table>
 
-                            <strong>
-                              {
-                                orderSummary.itemCount
-                              }
-                            </strong>
+          </div>
 
-                          </div>
+        </section>
 
 
-                          <div>
+        {/* ==================================================
+            ORDER ACTION BAR
+            Appears once at least one item has an order qty.
+            ================================================== */}
 
-                            <span>
-                              Total Qty
-                            </span>
+        {orderItems.length > 0 && (
 
-                            <strong>
-                              {qtyFormat(
-                                orderSummary.totalQuantity
-                              )}
-                            </strong>
+          <section className="auditOrderBar">
 
-                          </div>
+            <div className="auditOrderBarSummary">
 
+              <span>
+                Current Order
+              </span>
 
-                          <div>
+              <strong>
 
-                            <span>
-                              Order Value
-                            </span>
+                {orderSummary.itemCount}{" "}
 
-                            <strong>
-                              —
-                            </strong>
+                {orderSummary.itemCount === 1
+                  ? "item"
+                  : "items"}
 
-                            <small>
-                              Rate pending
-                            </small>
+                {" • "}
 
-                          </div>
+                {qtyFormat(
+                  orderSummary.totalQuantity
+                )}{" "}
 
-                        </div>
+                units
 
+              </strong>
 
-                        <div className="auditOrderReviewActions">
+            </div>
 
 
-                          <button
-                            type="button"
-                            className="auditSaveDraftButton"
-                            disabled={
-                              savingOrder ||
-                              orderItems.length === 0
-                            }
-                            onClick={() =>
-                              saveDraft(
-                                true
-                              )
-                            }
-                          >
+            <div className="auditOrderBarActions">
 
-                            {savingOrder
-                              ? "Saving..."
-                              : "Save Draft"}
+              <button
+                type="button"
+                className="auditDraftButton"
+                disabled={
+                  savingOrder ||
+                  submittingOrder
+                }
+                onClick={
+                  saveDraft
+                }
+              >
 
-                          </button>
+                {savingOrder
+                  ? "Saving..."
+                  : draftOrderId
+                    ? "Update Draft"
+                    : "Save Draft"}
 
+              </button>
 
-                          <button
-                            type="button"
-                            className="auditSubmitOrderButton"
-                            disabled={
-                              submittingOrder ||
-                              savingOrder ||
-                              orderItems.length === 0
-                            }
-                            onClick={
-                              submitOrder
-                            }
-                          >
 
-                            {submittingOrder
-                              ? "Submitting..."
-                              : "Submit Order"}
+              <button
+                type="button"
+                className="auditViewOrderButton"
+                onClick={() =>
+                  setShowOrderReview(
+                    true
+                  )
+                }
+              >
+                View Order
+              </button>
 
-                          </button>
-
-
-                        </div>
-
-                      </div>
-
-                    </div>
-
-                  )}
-
-
-                  {/* =========================================
-                      MOBILE / DESKTOP STICKY ORDER BAR
-                      ========================================= */}
-
-                  {orderItems.length > 0 && (
-
-                    <div className="auditOrderBar">
-
-                      <div className="auditOrderBarSummary">
-
-                        <div>
-
-                          <span>
-                            Items
-                          </span>
-
-                          <strong>
-                            {
-                              orderSummary.itemCount
-                            }
-                          </strong>
-
-                        </div>
-
-
-                        <div>
-
-                          <span>
-                            Qty
-                          </span>
-
-                          <strong>
-                            {qtyFormat(
-                              orderSummary.totalQuantity
-                            )}
-                          </strong>
-
-                        </div>
-
-
-                        <div>
-
-                          <span>
-                            Value
-                          </span>
-
-                          <strong>
-                            —
-                          </strong>
-
-                        </div>
-
-                      </div>
-
-
-                      <div className="auditOrderBarActions">
-
-
-                        <button
-                          type="button"
-                          className="auditSaveDraftButton"
-                          disabled={
-                            savingOrder
-                          }
-                          onClick={() =>
-                            saveDraft(
-                              true
-                            )
-                          }
-                        >
-
-                          {savingOrder
-                            ? "Saving..."
-                            : "Save Draft"}
-
-                        </button>
-
-
-                        <button
-                          type="button"
-                          className="auditViewOrderButton"
-                          onClick={() =>
-                            setShowOrderReview(
-                              true
-                            )
-                          }
-                        >
-                          View Order
-                        </button>
-
-
-                      </div>
-
-                    </div>
-
-                  )}
-
-                </>
-              )}
-
-
-            {/* ===============================================
-                NO SALES HISTORY
-                =============================================== */}
-
-            {!loadingCustomer &&
-              !analytics &&
-              !error && (
-
-                <div className="auditEmpty">
-
-                  No transactions found for this customer in the active snapshot.
-
-                </div>
-
-              )}
+            </div>
 
           </section>
 
         )}
 
+
+        {/* ==================================================
+            ORDER REVIEW
+            ================================================== */}
+
+        {showOrderReview &&
+          orderItems.length > 0 && (
+
+          <div className="auditOrderOverlay">
+
+            <div className="auditOrderReview">
+
+              <div className="auditOrderReviewHeader">
+
+                <div>
+
+                  <span className="auditOrderReviewEyebrow">
+                    MADIBA SFA
+                  </span>
+
+                  <h3>
+                    Review Order
+                  </h3>
+
+                  <p>
+
+                    {
+                      selectedCustomer.customer_code
+                    }{" "}
+
+                    {
+                      selectedCustomer.customer_name
+                    }
+
+                  </p>
+
+                </div>
+
+
+                <button
+                  type="button"
+                  className="auditOrderClose"
+                  aria-label="Close order review"
+                  onClick={() =>
+                    setShowOrderReview(
+                      false
+                    )
+                  }
+                >
+                  ×
+                </button>
+
+              </div>
+
+
+              <div className="auditOrderReviewSummary">
+
+                <div>
+
+                  <span>
+                    Items
+                  </span>
+
+                  <strong>
+                    {
+                      orderSummary.itemCount
+                    }
+                  </strong>
+
+                </div>
+
+
+                <div>
+
+                  <span>
+                    Total Qty
+                  </span>
+
+                  <strong>
+
+                    {qtyFormat(
+                      orderSummary.totalQuantity
+                    )}
+
+                  </strong>
+
+                </div>
+
+
+                <div>
+
+                  <span>
+                    Status
+                  </span>
+
+                  <strong>
+                    {draftOrderId
+                      ? "Draft"
+                      : "New"}
+                  </strong>
+
+                </div>
+
+              </div>
+
+
+              <div className="auditOrderReviewLines">
+
+                {orderItems.map(
+                  (item) => (
+
+                    <div
+                      key={
+                        item.item_code
+                      }
+                      className="auditOrderReviewLine"
+                    >
+
+                      <div className="auditOrderReviewItem">
+
+                        <span>
+                          {
+                            item.item_code
+                          }
+                        </span>
+
+                        <strong>
+                          {
+                            item.item_name
+                          }
+                        </strong>
+
+                        <small>
+                          {
+                            item.category
+                          }
+                        </small>
+
+                      </div>
+
+
+                      <div className="auditOrderReviewRate">
+
+                        <span>
+                          Rate
+                        </span>
+
+                        <strong>
+                          —
+                        </strong>
+
+                      </div>
+
+
+                      <div className="auditOrderReviewQty">
+
+                        <span>
+                          Qty
+                        </span>
+
+
+                        <div className="auditQtyControl auditQtyControlReview">
+
+                          <button
+                            type="button"
+                            className="auditQtyButton"
+                            onClick={() =>
+                              decreaseOrderQty(
+                                item.item_code
+                              )
+                            }
+                          >
+                            −
+                          </button>
+
+
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            inputMode="numeric"
+                            value={
+                              item.order_quantity
+                            }
+                            onChange={(e) =>
+                              changeOrderQty(
+                                item.item_code,
+                                e.target.value
+                              )
+                            }
+                          />
+
+
+                          <button
+                            type="button"
+                            className="auditQtyButton"
+                            onClick={() =>
+                              increaseOrderQty(
+                                item.item_code
+                              )
+                            }
+                          >
+                            +
+                          </button>
+
+                        </div>
+
+                      </div>
+
+                    </div>
+
+                  )
+                )}
+
+              </div>
+              {/* ==========================================
+                  ORDER REVIEW ACTIONS
+                  ========================================== */}
+
+              <div className="auditOrderReviewActions">
+
+                <button
+                  type="button"
+                  className="auditSaveDraftButton"
+                  disabled={
+                    savingOrder ||
+                    submittingOrder
+                  }
+                  onClick={saveDraft}
+                >
+                  {savingOrder
+                    ? "Saving..."
+                    : draftOrderId
+                      ? "Update Draft"
+                      : "Save Draft"}
+                </button>
+
+
+                <button
+                  type="button"
+                  className="auditSubmitOrderButton"
+                  disabled={
+                    savingOrder ||
+                    submittingOrder
+                  }
+                  onClick={submitOrder}
+                >
+                  {submittingOrder
+                    ? "Submitting..."
+                    : "Submit Final Order"}
+                </button>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        )}
+
+
+        {/* ==================================================
+            DRAFT NOTICE
+            ================================================== */}
+
+        {draftOrderId && (
+
+          <div className="auditDraftNotice">
+
+            <span>
+              Draft Order
+            </span>
+
+            <strong>
+              #{draftOrderId}
+            </strong>
+
+            <small>
+              Changes are not final until the order is submitted.
+            </small>
+
+          </div>
+
+        )}
+
+
+        {/* ==================================================
+            TRANSACTION HISTORY TOGGLE
+            ================================================== */}
+
+        <section className="auditSection">
+
+          <div className="auditTransactionHeader">
+
+            <div>
+
+              <h3>
+                Transaction History
+              </h3>
+
+              <p className="auditSectionNote">
+                Full source transaction history for this customer.
+              </p>
+
+            </div>
+
+
+            <button
+              type="button"
+              className="auditTransactionToggle"
+              onClick={() =>
+                setShowTransactions(
+                  (current) =>
+                    !current
+                )
+              }
+            >
+              {showTransactions
+                ? "Hide Transactions"
+                : `Show Transactions (${analytics.transactionCount})`}
+            </button>
+
+          </div>
+
+
+          {/* ================================================
+              TRANSACTION TABLE
+              ================================================ */}
+
+          {showTransactions && (
+
+            <div className="auditTableScroll">
+
+              <table className="auditTransactionTable">
+
+                <thead>
+
+                  <tr>
+
+                    <th>
+                      Date
+                    </th>
+
+                    <th>
+                      Voucher
+                    </th>
+
+                    <th>
+                      Item Code
+                    </th>
+
+                    <th>
+                      Item
+                    </th>
+
+                    <th>
+                      Category
+                    </th>
+
+                    <th>
+                      Qty
+                    </th>
+
+                    <th>
+                      Sales
+                    </th>
+
+                  </tr>
+
+                </thead>
+
+
+                <tbody>
+
+                  {transactions.map(
+                    (row) => (
+
+                      <tr key={row.id}>
+
+                        <td>
+                          {shortDate(
+                            row.transaction_date
+                          )}
+                        </td>
+
+
+                        <td>
+                          {row.voucher_number ||
+                            row.reference ||
+                            "—"}
+                        </td>
+
+
+                        <td>
+                          {row.item_code ||
+                            "—"}
+                        </td>
+
+
+                        <td>
+                          {row.item_name ||
+                            "—"}
+                        </td>
+
+
+                        <td>
+                          {row.category ||
+                            "Unclassified"}
+                        </td>
+
+
+                        <td className="auditNumberCell">
+
+                          {qtyFormat(
+                            row.quantity
+                          )}
+
+                        </td>
+
+
+                        <td className="auditNumberCell">
+
+                          {numberFormat(
+                            row.sales_amount
+                          )}
+
+                        </td>
+
+                      </tr>
+
+                    )
+                  )}
+
+                </tbody>
+
+              </table>
+
+            </div>
+
+          )}
+
+        </section>
+
+
+        {/* ==================================================
+            PAGE FOOTER INFO
+            ================================================== */}
+
+        <div className="auditPageFooter">
+
+          <span>
+
+            Latest sales data:{" "}
+
+            <strong>
+              {shortDate(
+                analytics.latestDate
+              )}
+            </strong>
+
+          </span>
+
+
+          <span>
+
+            Customer:{" "}
+
+            <strong>
+              {
+                selectedCustomer.customer_code
+              }
+            </strong>
+
+          </span>
+
+        </div>
+
       </div>
 
     </main>
   );
-}
-/* ==========================================================
-   MADIBA SFA
-   CATEGORY DRILL-DOWN + ORDER ENTRY
-   PART 3
-   MUST BE AT BOTTOM OF GLOBALS.CSS
-   ========================================================== */
-
-
-/* ==========================================================
-   SUCCESS MESSAGE
-   ========================================================== */
-
-.auditSuccess {
-  margin-bottom: 16px;
-  padding: 13px 16px;
-
-  background: #edf9f2;
-  color: #167044;
-
-  border: 1px solid #b9dfc9;
-  border-radius: 10px;
-
-  font-size: 13px;
-  font-weight: 700;
-}
-
-
-/* ==========================================================
-   CATEGORY SECTION TITLE
-   ========================================================== */
-
-.auditCategoryTitle {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.auditCategoryTitle span {
-  color: #073f4c;
-  font-weight: 800;
-}
-
-.auditCategoryTitle small {
-  color: #74888e;
-  font-size: 10px;
-  font-weight: 400;
-}
-
-
-/* ==========================================================
-   ORDER TABLE
-   ========================================================== */
-
-.auditOrderMatrix {
-  width: max-content !important;
-  min-width: 100% !important;
-}
-
-
-/* Rate */
-
-.auditRateHeader {
-  min-width: 70px !important;
-
-  background: #0b5364 !important;
-  color: #ffffff !important;
-
-  text-align: center !important;
-
-  border-left: 2px solid #8faab1 !important;
-}
-
-
-/* Order Qty */
-
-.auditOrderQtyHeader {
-  min-width: 130px !important;
-
-  background: #073f4c !important;
-  color: #ffffff !important;
-
-  text-align: center !important;
-}
-
-
-/* ==========================================================
-   CLICKABLE CATEGORY
-   ========================================================== */
-
-.auditClickableCategory {
-  cursor: pointer !important;
-
-  transition:
-    background 0.15s ease,
-    color 0.15s ease;
-}
-
-.auditClickableCategory:hover {
-  background: #dcebed !important;
-}
-
-.auditCategoryClickInner {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.auditExpandIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  width: 15px;
-  flex: 0 0 15px;
-
-  color: #0c6879;
-
-  font-size: 9px;
-}
-
-
-/* ==========================================================
-   CATEGORY RATE / ORDER CELLS
-   ========================================================== */
-
-.auditCategoryNoOrder {
-  background: #f6f9fa !important;
-  color: #8a9ba0 !important;
-
-  text-align: center !important;
-
-  font-size: 10px !important;
-  font-weight: 700 !important;
-
-  vertical-align: middle !important;
-}
-
-
-/* ==========================================================
-   EXPANDED ITEM ROWS
-   ========================================================== */
-
-.auditItemValueRow th,
-.auditItemValueRow td,
-.auditItemQuantityRow th,
-.auditItemQuantityRow td {
-  background-clip: padding-box;
-}
-
-
-/* ----------------------------------------------------------
-   ITEM NAME
-   ---------------------------------------------------------- */
-
-.auditDrillItem {
-  min-width: 150px !important;
-  max-width: 190px !important;
-
-  padding-left: 24px !important;
-
-  background: #fbfdfd !important;
-
-  color: #123f49 !important;
-
-  text-align: left !important;
-  vertical-align: middle !important;
-
-  white-space: normal !important;
-
-  border-left: 4px solid #78a9b3 !important;
-  border-bottom: 2px solid #c2d1d5 !important;
-}
-
-
-/* Item code */
-
-.auditDrillItemCode {
-  margin-bottom: 3px;
-
-  color: #0b6678;
-
-  font-size: 9px;
-  font-weight: 800;
-
-  letter-spacing: 0.02em;
-}
-
-
-/* Item name */
-
-.auditDrillItemName {
-  color: #173f49;
-
-  font-size: 11px;
-  font-weight: 700;
-
-  line-height: 1.25;
-}
-
-
-/* ABC */
-
-.auditDrillItemABC {
-  display: inline-block;
-
-  margin-top: 5px;
-  padding: 2px 6px;
-
-  background: #e6f0f2;
-  color: #42656e;
-
-  border-radius: 999px;
-
-  font-size: 8px;
-  font-weight: 800;
-}
-
-
-/* ----------------------------------------------------------
-   ITEM METRIC
-   ---------------------------------------------------------- */
-
-.auditItemMetric {
-  min-width: 82px !important;
-
-  background: #f7fafb !important;
-  color: #526b72 !important;
-
-  text-align: left !important;
-
-  font-size: 10px !important;
-  font-weight: 700 !important;
-}
-
-
-/* ----------------------------------------------------------
-   ITEM MONTH VALUES
-   ---------------------------------------------------------- */
-
-.auditItemValueRow td,
-.auditItemQuantityRow td {
-  font-size: 11px;
-}
-
-
-/* Slight separation from category */
-
-.auditItemValueRow > th,
-.auditItemValueRow > td {
-  border-top: 1px solid #e0e9eb !important;
-}
-
-
-/* Strong separator after each item */
-
-.auditItemQuantityRow > th,
-.auditItemQuantityRow > td {
-  border-bottom: 2px solid #c2d1d5 !important;
-}
-
-
-/* Total */
-
-.auditItemTotal {
-  background: #f4f8f9 !important;
-}
-
-
-/* ==========================================================
-   RATE
-   ========================================================== */
-
-.auditOrderRate {
-  min-width: 70px !important;
-
-  background: #fafcfc !important;
-  color: #8b9b9f !important;
-
-  text-align: center !important;
-
-  font-size: 12px !important;
-  font-weight: 700 !important;
-
-  border-left: 2px solid #b4c5c9 !important;
-
-  vertical-align: middle !important;
-}
-
-
-/* ==========================================================
-   ORDER QUANTITY CELL
-   ========================================================== */
-
-.auditOrderQtyCell {
-  min-width: 130px !important;
-
-  background: #f8fbfb !important;
-
-  text-align: center !important;
-  vertical-align: middle !important;
-}
-
-
-/* ==========================================================
-   +/- QUANTITY CONTROL
-   ========================================================== */
-
-.auditQtyControl {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  overflow: hidden;
-
-  background: #ffffff;
-
-  border: 1px solid #b9cbd0;
-  border-radius: 9px;
-}
-
-
-/* Buttons */
-
-.auditQtyButton {
-  width: 34px;
-  height: 36px;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  padding: 0;
-
-  background: #edf4f5;
-  color: #0a5363;
-
-  border: 0;
-
-  font-size: 18px;
-  font-weight: 800;
-
-  line-height: 1;
-
-  cursor: pointer;
-}
-
-.auditQtyButton:hover {
-  background: #dcebed;
-}
-
-.auditQtyButton:active {
-  background: #cbdfe3;
-}
-
-.auditQtyButton:disabled {
-  color: #aebdc1;
-  background: #f5f7f8;
-
-  cursor: default;
-}
-
-
-/* Quantity input */
-
-.auditQtyControl input {
-  width: 48px;
-  height: 36px;
-
-  padding: 0 3px;
-
-  background: #ffffff;
-  color: #073f4c;
-
-  border: 0;
-  border-left: 1px solid #cbd8dc;
-  border-right: 1px solid #cbd8dc;
-
-  outline: none;
-
-  text-align: center;
-
-  font-size: 14px;
-  font-weight: 800;
-
-  appearance: textfield;
-  -moz-appearance: textfield;
-}
-
-
-/* Remove browser number arrows */
-
-.auditQtyControl input::-webkit-inner-spin-button,
-.auditQtyControl input::-webkit-outer-spin-button {
-  margin: 0;
-  -webkit-appearance: none;
-}
-
-
-/* ==========================================================
-   DRAFT NOTICE
-   ========================================================== */
-
-.auditDraftNotice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  margin: -12px 0 18px;
-  padding: 10px 12px;
-
-  background: #fff8e8;
-
-  border: 1px solid #ecd99e;
-  border-radius: 9px;
-
-  color: #775b13;
-
-  font-size: 10px;
-}
-
-.auditDraftNotice span {
-  font-weight: 800;
-}
-
-.auditDraftNotice strong {
-  padding: 3px 6px;
-
-  background: #f3e4b8;
-
-  border-radius: 5px;
-}
-
-.auditDraftNotice small {
-  color: #8c773f;
-}
-
-
-/* ==========================================================
-   STICKY ORDER BAR
-   ========================================================== */
-
-.auditOrderBar {
-  position: sticky;
-
-  left: 0;
-  right: 0;
-  bottom: 12px;
-
-  z-index: 40;
-
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-
-  width: 100%;
-
-  margin-top: 20px;
-  padding: 11px 13px;
-
-  background: rgba(7, 63, 76, 0.97);
-  color: #ffffff;
-
-  border: 1px solid #356f7b;
-  border-radius: 13px;
-
-  box-shadow:
-    0 8px 28px rgba(0, 36, 46, 0.22);
-}
-
-
-/* ----------------------------------------------------------
-   ORDER BAR TOTALS
-   ---------------------------------------------------------- */
-
-.auditOrderBarSummary {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.auditOrderBarSummary > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.auditOrderBarSummary span {
-  color: #bcd2d7;
-
-  font-size: 8px;
-  font-weight: 700;
-
-  text-transform: uppercase;
-}
-
-.auditOrderBarSummary strong {
-  color: #ffffff;
-
-  font-size: 14px;
-  font-weight: 800;
-}
-
-
-/* ----------------------------------------------------------
-   ORDER BAR BUTTONS
-   ---------------------------------------------------------- */
-
-.auditOrderBarActions {
-  display: flex;
-  gap: 8px;
-}
-
-
-/* Save Draft */
-
-.auditSaveDraftButton {
-  min-height: 40px;
-
-  padding: 0 16px;
-
-  background: #ffffff;
-  color: #0a5262;
-
-  border: 1px solid #d2e0e3;
-  border-radius: 8px;
-
-  font-size: 11px;
-  font-weight: 800;
-
-  cursor: pointer;
-}
-
-.auditSaveDraftButton:hover {
-  background: #edf5f6;
-}
-
-
-/* View Order */
-
-.auditViewOrderButton {
-  min-height: 40px;
-
-  padding: 0 18px;
-
-  background: #1f8294;
-  color: #ffffff;
-
-  border: 1px solid #4a9baa;
-  border-radius: 8px;
-
-  font-size: 11px;
-  font-weight: 800;
-
-  cursor: pointer;
-}
-
-.auditViewOrderButton:hover {
-  background: #176e7e;
-}
-
-
-/* Disabled */
-
-.auditSaveDraftButton:disabled,
-.auditViewOrderButton:disabled,
-.auditSubmitOrderButton:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-
-/* ==========================================================
-   ORDER REVIEW OVERLAY
-   ========================================================== */
-
-.auditOrderOverlay {
-  position: fixed;
-  inset: 0;
-
-  z-index: 1000;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  padding: 20px;
-
-  background: rgba(2, 28, 35, 0.64);
-
-  backdrop-filter: blur(3px);
-}
-
-
-/* ==========================================================
-   ORDER REVIEW WINDOW
-   ========================================================== */
-
-.auditOrderReview {
-  width: 100%;
-  max-width: 720px;
-  max-height: 88vh;
-
-  display: flex;
-  flex-direction: column;
-
-  overflow: hidden;
-
-  background: #f5f8f9;
-
-  border: 1px solid #afc3c8;
-  border-radius: 16px;
-
-  box-shadow:
-    0 20px 60px rgba(0, 26, 34, 0.35);
-}
-
-
-/* ==========================================================
-   REVIEW HEADER
-   ========================================================== */
-
-.auditOrderReviewHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 15px;
-
-  padding: 18px 20px;
-
-  background: #0b5364;
-  color: #ffffff;
-}
-
-.auditOrderReviewHeader span {
-  color: #a9d1d9;
-
-  font-size: 9px;
-  font-weight: 800;
-
-  letter-spacing: 1px;
-}
-
-.auditOrderReviewHeader h3 {
-  margin: 3px 0 2px;
-
-  color: #ffffff;
-
-  font-size: 20px;
-}
-
-.auditOrderReviewHeader p {
-  margin: 0;
-
-  color: #c9dfe3;
-
-  font-size: 11px;
-}
-
-
-/* Close */
-
-.auditOrderClose {
-  width: 34px;
-  height: 34px;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  flex: 0 0 34px;
-
-  padding: 0;
-
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
-
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 8px;
-
-  font-size: 22px;
-
-  cursor: pointer;
-}
-
-
-/* ==========================================================
-   REVIEW LINES
-   ========================================================== */
-
-.auditOrderReviewLines {
-  flex: 1;
-
-  overflow-y: auto;
-
-  padding: 12px;
-}
-
-.auditOrderReviewLine {
-  display: grid;
-
-  grid-template-columns:
-    minmax(0, 1fr)
-    65px
-    140px;
-
-  gap: 12px;
-
-  align-items: center;
-
-  padding: 11px 12px;
-
-  margin-bottom: 8px;
-
-  background: #ffffff;
-
-  border: 1px solid #d2dfe2;
-  border-radius: 10px;
-}
-
-
-/* Item */
-
-.auditOrderReviewItem {
-  min-width: 0;
-
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.auditOrderReviewItem span {
-  color: #0b687a;
-
-  font-size: 9px;
-  font-weight: 800;
-}
-
-.auditOrderReviewItem strong {
-  overflow: hidden;
-
-  color: #073f4c;
-
-  font-size: 11px;
-
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.auditOrderReviewItem small {
-  color: #788d93;
-
-  font-size: 9px;
-}
-
-
-/* Rate */
-
-.auditOrderReviewRate {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-}
-
-.auditOrderReviewRate span {
-  color: #7b8f95;
-
-  font-size: 8px;
-}
-
-.auditOrderReviewRate strong {
-  color: #536b72;
-
-  font-size: 12px;
-}
-
-
-/* ==========================================================
-   REVIEW QTY
-   ========================================================== */
-
-.auditReviewQty {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.auditReviewQty button {
-  width: 34px;
-  height: 34px;
-
-  padding: 0;
-
-  background: #e8f1f3;
-  color: #0a5868;
-
-  border: 1px solid #c2d2d6;
-
-  font-size: 17px;
-  font-weight: 800;
-
-  cursor: pointer;
-}
-
-.auditReviewQty button:first-child {
-  border-radius: 8px 0 0 8px;
-}
-
-.auditReviewQty button:last-child {
-  border-radius: 0 8px 8px 0;
-}
-
-.auditReviewQty input {
-  width: 52px;
-  height: 34px;
-
-  padding: 0;
-
-  background: #ffffff;
-  color: #073f4c;
-
-  border-top: 1px solid #c2d2d6;
-  border-bottom: 1px solid #c2d2d6;
-  border-left: 0;
-  border-right: 0;
-
-  outline: 0;
-
-  text-align: center;
-
-  font-size: 13px;
-  font-weight: 800;
-
-  appearance: textfield;
-  -moz-appearance: textfield;
-}
-
-.auditReviewQty input::-webkit-inner-spin-button,
-.auditReviewQty input::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-}
-
-
-/* ==========================================================
-   EMPTY ORDER
-   ========================================================== */
-
-.auditOrderEmpty {
-  padding: 50px 20px;
-
-  color: #70868c;
-
-  text-align: center;
-
-  font-size: 12px;
-}
-
-
-/* ==========================================================
-   REVIEW SUMMARY
-   ========================================================== */
-
-.auditOrderReviewSummary {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-
-  border-top: 1px solid #d2dfe2;
-  border-bottom: 1px solid #d2dfe2;
-
-  background: #ffffff;
-}
-
-.auditOrderReviewSummary > div {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-
-  padding: 12px 15px;
-
-  border-right: 1px solid #d2dfe2;
-}
-
-.auditOrderReviewSummary > div:last-child {
-  border-right: 0;
-}
-
-.auditOrderReviewSummary span {
-  color: #758a90;
-
-  font-size: 8px;
-  font-weight: 700;
-
-  text-transform: uppercase;
-}
-
-.auditOrderReviewSummary strong {
-  color: #073f4c;
-
-  font-size: 16px;
-  font-weight: 800;
-}
-
-.auditOrderReviewSummary small {
-  color: #9a7d35;
-
-  font-size: 8px;
-}
-
-
-/* ==========================================================
-   REVIEW ACTIONS
-   ========================================================== */
-
-.auditOrderReviewActions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
-
-  padding: 12px;
-
-  background: #eef3f4;
-}
-
-.auditOrderReviewActions button {
-  min-height: 46px;
-}
-
-
-/* Submit */
-
-.auditSubmitOrderButton {
-  padding: 0 18px;
-
-  background: #147347;
-  color: #ffffff;
-
-  border: 1px solid #0e653c;
-  border-radius: 8px;
-
-  font-size: 11px;
-  font-weight: 800;
-
-  cursor: pointer;
-}
-
-.auditSubmitOrderButton:hover {
-  background: #0d633a;
-}
-
-
-/* ==========================================================
-   MOBILE
-   ========================================================== */
-
-@media (max-width: 700px) {
-
-  /*
-    Category/item column
-  */
-
-  .auditOrderMatrix
-  .auditCategoryHeader,
-
-  .auditOrderMatrix
-  .auditMergedCategory,
-
-  .auditOrderMatrix
-  .auditDrillItem {
-    min-width: 120px !important;
-    width: 120px !important;
-    max-width: 120px !important;
-  }
-
-
-  /*
-    Metric column
-  */
-
-  .auditOrderMatrix
-  .auditCategoryMetricHeader,
-
-  .auditOrderMatrix
-  .auditCategoryMetric,
-
-  .auditOrderMatrix
-  .auditItemMetric {
-    min-width: 68px !important;
-    width: 68px !important;
-  }
-
-
-  /*
-    Sticky metric position
-  */
-
-  .auditOrderMatrix
-  .auditCategoryMetricHeader,
-
-  .auditOrderMatrix
-  .auditCategoryMetric,
-
-  .auditOrderMatrix
-  .auditItemMetric {
-    left: 120px !important;
-  }
-
-
-  /* Item indentation */
-
-  .auditDrillItem {
-    padding-left: 17px !important;
-  }
-
-  .auditDrillItemCode {
-    font-size: 8px;
-  }
-
-  .auditDrillItemName {
-    font-size: 10px;
-  }
-
-
-  /* Order quantity */
-
-  .auditOrderQtyHeader,
-  .auditOrderQtyCell {
-    min-width: 118px !important;
-  }
-
-  .auditQtyButton {
-    width: 31px;
-    height: 34px;
-  }
-
-  .auditQtyControl input {
-    width: 43px;
-    height: 34px;
-  }
-
-
-  /* Sticky bottom order bar */
-
-  .auditOrderBar {
-    bottom: 7px;
-
-    flex-direction: column;
-    align-items: stretch;
-
-    gap: 9px;
-
-    padding: 10px;
-
-    border-radius: 12px;
-  }
-
-  .auditOrderBarSummary {
-    justify-content: space-around;
-
-    gap: 5px;
-  }
-
-  .auditOrderBarSummary > div {
-    flex: 1;
-
-    align-items: center;
-
-    padding: 0 6px;
-  }
-
-  .auditOrderBarActions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .auditOrderBarActions button {
-    width: 100%;
-    min-height: 42px;
-  }
-
-
-  /* Review becomes mobile sheet */
-
-  .auditOrderOverlay {
-    align-items: flex-end;
-
-    padding: 0;
-  }
-
-  .auditOrderReview {
-    max-width: none;
-    max-height: 92vh;
-
-    border-radius: 16px 16px 0 0;
-
-    border-bottom: 0;
-  }
-
-  .auditOrderReviewHeader {
-    padding: 15px;
-  }
-
-  .auditOrderReviewHeader h3 {
-    font-size: 18px;
-  }
-
-
-  /* Review lines */
-
-  .auditOrderReviewLine {
-    grid-template-columns:
-      minmax(0, 1fr)
-      48px;
-
-    gap: 8px;
-  }
-
-  .auditOrderReviewItem {
-    grid-column: 1;
-  }
-
-  .auditOrderReviewRate {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .auditReviewQty {
-    grid-column: 1 / -1;
-
-    justify-content: flex-start;
-
-    padding-top: 7px;
-
-    border-top: 1px solid #e4ebed;
-  }
-
-  .auditReviewQty button {
-    width: 38px;
-    height: 36px;
-  }
-
-  .auditReviewQty input {
-    width: 58px;
-    height: 36px;
-  }
-
-
-  /* Summary */
-
-  .auditOrderReviewSummary > div {
-    padding: 10px;
-  }
-
-  .auditOrderReviewSummary strong {
-    font-size: 14px;
-  }
-
-
-  /* Actions */
-
-  .auditOrderReviewActions {
-    position: sticky;
-    bottom: 0;
-
-    padding-bottom:
-      max(
-        12px,
-        env(safe-area-inset-bottom)
-      );
-  }
-
-}
-
-
-/* ==========================================================
-   VERY SMALL PHONES
-   ========================================================== */
-
-@media (max-width: 390px) {
-
-  .auditOrderBarSummary span {
-    font-size: 7px;
-  }
-
-  .auditOrderBarSummary strong {
-    font-size: 12px;
-  }
-
-  .auditSaveDraftButton,
-  .auditViewOrderButton {
-    padding-left: 8px;
-    padding-right: 8px;
-
-    font-size: 10px;
-  }
-
-  .auditOrderReviewActions {
-    gap: 7px;
-  }
-
 }

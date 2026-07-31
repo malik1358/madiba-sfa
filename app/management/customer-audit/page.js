@@ -1711,31 +1711,7 @@ export default function CustomerAuditPage() {
          has NEVER purchased.
          ==================================================== */
 
-      const purchasedItemCodes =
-        new Set(
-          transactions
-            .filter(
-              (row) =>
-                Number(row.sales_amount || 0) > 0
-            )
-            .map(
-              (row) =>
-                normalizeCode(
-                  row.item_code
-                )
-            )
-            .filter(Boolean)
-        );
-
-
-     /* ====================================================
-   NEW ITEMS - V5
-
-   Master item is NEW when:
-   1. Active master item
-   2. Not "Do Not Use"
-   3. Customer has never had POSITIVE sales for item
-   ==================================================== */
+    
 
 const purchasedItemCodes = new Set();
 

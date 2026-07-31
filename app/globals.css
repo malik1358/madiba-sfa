@@ -685,3 +685,98 @@
     grid-template-columns: repeat(4, 1fr);
   }
 }
+
+
+/* ==========================================================
+   CUSTOMER AUDIT - 12 MONTH MATRIX
+   ========================================================== */
+
+.auditMetricsSmall {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 500px;
+}
+
+.auditTableScroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  background: #ffffff;
+  border: 1px solid #d7e1e5;
+  border-radius: 14px;
+  margin-bottom: 22px;
+}
+
+.auditMatrix {
+  width: 100%;
+  min-width: 1100px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.auditMatrix th,
+.auditMatrix td {
+  padding: 13px 12px;
+  border-bottom: 1px solid #e5ecef;
+  border-right: 1px solid #edf1f3;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.auditMatrix thead th {
+  background: #f3f7f8;
+  color: #49656d;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.auditMatrix th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  text-align: left;
+  min-width: 145px;
+  background: #ffffff;
+  color: #063f4d;
+}
+
+.auditMatrix thead th:first-child {
+  z-index: 3;
+  background: #f3f7f8;
+}
+
+.auditMatrix tbody tr:last-child th,
+.auditMatrix tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.auditMatrixTotal {
+  font-weight: 700;
+  color: #064b5b;
+  background: #f7fafb;
+}
+
+.auditCategoryMatrix tbody th {
+  font-weight: 700;
+}
+
+@media (max-width: 700px) {
+  .auditMetricsSmall {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .auditMatrix {
+    min-width: 1050px;
+    font-size: 12px;
+  }
+
+  .auditMatrix th,
+  .auditMatrix td {
+    padding: 11px 10px;
+  }
+
+  .auditTableScroll {
+    border-radius: 12px;
+  }
+}

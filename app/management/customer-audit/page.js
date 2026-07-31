@@ -43,7 +43,7 @@ function monthKey(date) {
   return date.slice(0, 7);
 }
 
-function monthLabel(key) {
+function monthName(key) {
   if (!key) return "";
 
   const [year, month] = key.split("-");
@@ -56,7 +56,6 @@ function monthLabel(key) {
 
   return d.toLocaleDateString("en-GB", {
     month: "short",
-    year: "2-digit",
   });
 }
 
@@ -84,14 +83,9 @@ function buildLast12Months(latestDate) {
 }
 
 /*
-  COLOR LOGIC
-
-  current > previous = green
-  current < previous = red
-  current = previous = neutral
-
-  If there is no previous month,
-  no comparison colour is applied.
+  Green = improvement
+  Red   = decline
+  Same  = neutral
 */
 function trendClass(current, previous, hasPrevious = true) {
   if (!hasPrevious) return "";
@@ -108,6 +102,37 @@ function trendClass(current, previous, hasPrevious = true) {
   }
 
   return "auditTrendSame";
+}
+
+/*
+  Groups visible months by year.
+
+  Example:
+
+  [
+    { year: "2025", months: ["2025-10","2025-11","2025-12"] },
+    { year: "2026", months: ["2026-01","2026-02"] }
+  ]
+*/
+function buildYearGroups(months) {
+  const groups = [];
+
+  for (const month of months) {
+    const year = month.slice(0, 4);
+
+    const lastGroup = groups[groups.length - 1];
+
+    if (lastGroup && lastGroup.year === year) {
+      lastGroup.months.push(month);
+    } else {
+      groups.push({
+        year,
+        months: [month],
+      });
+    }
+  }
+
+  return groups;
 }
 
 export default function CustomerAuditPage() {
@@ -253,6 +278,10 @@ export default function CustomerAuditPage() {
         );
       }
 
+      /*
+        No GP, Margin, Cost or Profit fields
+        are requested by Customer Audit.
+      */
       const {
         data,
         error: salesError,
@@ -316,6 +345,9 @@ export default function CustomerAuditPage() {
 
     let latestDate = null;
 
+    /*
+      Find latest transaction date for this customer.
+    */
     for (const row of transactions) {
       if (
         row.transaction_date &&
@@ -328,22 +360,27 @@ export default function CustomerAuditPage() {
       }
     }
 
-    const months =
+    /*
+      Start with maximum last 12 months.
+
+      We will later remove months where this customer
+      had absolutely no activity.
+    */
+    const allMonths =
       buildLast12Months(latestDate);
 
     const monthSet =
-      new Set(months);
+      new Set(allMonths);
 
     /*
       ======================================================
-      MONTHLY CUSTOMER TOTAL
+      CUSTOMER MONTHLY PERFORMANCE
       ======================================================
     */
-
     const monthlyMap =
       new Map();
 
-    months.forEach((month) => {
+    allMonths.forEach((month) => {
       monthlyMap.set(month, {
         sales: 0,
         skus: new Set(),
@@ -354,22 +391,16 @@ export default function CustomerAuditPage() {
     /*
       ======================================================
       CATEGORY x MONTH
-
-      Each category/month stores:
-      - sales
-      - distinct SKUs
       ======================================================
     */
-
     const categoryMap =
       new Map();
 
     /*
       ======================================================
-      ITEM HISTORY
+      ITEM PURCHASE HISTORY
       ======================================================
     */
-
     const itemMap =
       new Map();
 
@@ -378,14 +409,10 @@ export default function CustomerAuditPage() {
 
     for (const row of transactions) {
       const month =
-        monthKey(
-          row.transaction_date
-        );
+        monthKey(row.transaction_date);
 
       const sales =
-        Number(
-          row.sales_amount || 0
-        );
+        Number(row.sales_amount || 0);
 
       const itemKey =
         row.item_code ||
@@ -398,9 +425,8 @@ export default function CustomerAuditPage() {
         `ROW-${row.id}`;
 
       /*
-        MONTHLY CUSTOMER TOTAL
+        CUSTOMER MONTHLY TOTAL
       */
-
       if (monthSet.has(month)) {
         const monthly =
           monthlyMap.get(month);
@@ -411,35 +437,24 @@ export default function CustomerAuditPage() {
           row.item_code ||
           row.item_name
         ) {
-          monthly.skus.add(
-            itemKey
-          );
+          monthly.skus.add(itemKey);
         }
 
-        monthly.orders.add(
-          orderKey
-        );
+        monthly.orders.add(orderKey);
 
         /*
-          CATEGORY MONTHLY DATA
+          CATEGORY MONTHLY PERFORMANCE
         */
-
         const category =
           row.category ||
           "Unclassified";
 
-        if (
-          !categoryMap.has(
-            category
-          )
-        ) {
+        if (!categoryMap.has(category)) {
           const monthValues = {};
 
-          months.forEach(
-            (monthKeyValue) => {
-              monthValues[
-                monthKeyValue
-              ] = {
+          allMonths.forEach(
+            (monthValue) => {
+              monthValues[monthValue] = {
                 sales: 0,
                 skus: new Set(),
               };
@@ -450,25 +465,18 @@ export default function CustomerAuditPage() {
             category,
             {
               category,
-              months:
-                monthValues,
-
+              months: monthValues,
               totalSales: 0,
-
-              totalSkus:
-                new Set(),
+              totalSkus: new Set(),
             }
           );
         }
 
         const cat =
-          categoryMap.get(
-            category
-          );
+          categoryMap.get(category);
 
-        cat.months[
-          month
-        ].sales += sales;
+        cat.months[month].sales +=
+          sales;
 
         if (
           row.item_code ||
@@ -476,31 +484,22 @@ export default function CustomerAuditPage() {
         ) {
           cat.months[
             month
-          ].skus.add(
-            itemKey
-          );
+          ].skus.add(itemKey);
 
-          cat.totalSkus.add(
-            itemKey
-          );
+          cat.totalSkus.add(itemKey);
         }
 
         cat.totalSales += sales;
       }
 
-      orderSet.add(
-        orderKey
-      );
+      orderSet.add(orderKey);
 
       /*
-        ITEM PURCHASE HISTORY
+        ====================================================
+        ITEM HISTORY
+        ====================================================
       */
-
-      if (
-        !itemMap.has(
-          itemKey
-        )
-      ) {
+      if (!itemMap.has(itemKey)) {
         itemMap.set(
           itemKey,
           {
@@ -520,8 +519,7 @@ export default function CustomerAuditPage() {
 
             total_qty: 0,
 
-            transaction_count:
-              0,
+            transaction_count: 0,
 
             last_date:
               row.transaction_date,
@@ -533,9 +531,7 @@ export default function CustomerAuditPage() {
       }
 
       const item =
-        itemMap.get(
-          itemKey
-        );
+        itemMap.get(itemKey);
 
       item.total_sales +=
         sales;
@@ -568,11 +564,41 @@ export default function CustomerAuditPage() {
     }
 
     /*
-      MONTHLY SUMMARY
-    */
+      ======================================================
+      REMOVE COMPLETELY BLANK MONTHS
 
+      A month stays visible if the CUSTOMER had:
+      - any sales value, OR
+      - at least one distinct SKU.
+
+      This removes wasted blank columns while keeping all
+      categories aligned to the same months.
+      ======================================================
+    */
+    const visibleMonths =
+      allMonths.filter(
+        (month) => {
+          const data =
+            monthlyMap.get(month);
+
+          if (!data) {
+            return false;
+          }
+
+          return (
+            Number(data.sales || 0) !== 0 ||
+            data.skus.size > 0
+          );
+        }
+      );
+
+    /*
+      ======================================================
+      MONTHLY SUMMARY
+      ======================================================
+    */
     const monthlySummary =
-      months.map(
+      visibleMonths.map(
         (month) => ({
           month,
 
@@ -594,9 +620,22 @@ export default function CustomerAuditPage() {
       );
 
     /*
-      CATEGORY SUMMARY
-    */
+      ======================================================
+      YEAR GROUPS
 
+      Used to produce merged 2025 / 2026 headers.
+      ======================================================
+    */
+    const yearGroups =
+      buildYearGroups(
+        visibleMonths
+      );
+
+    /*
+      ======================================================
+      CATEGORY SUMMARY
+      ======================================================
+    */
     const categories =
       Array.from(
         categoryMap.values()
@@ -604,7 +643,7 @@ export default function CustomerAuditPage() {
         .map((category) => {
           const monthData = {};
 
-          months.forEach(
+          visibleMonths.forEach(
             (month) => {
               monthData[
                 month
@@ -644,9 +683,10 @@ export default function CustomerAuditPage() {
         );
 
     /*
+      ======================================================
       ITEM SUMMARY
+      ======================================================
     */
-
     const items =
       Array.from(
         itemMap.values()
@@ -670,9 +710,20 @@ export default function CustomerAuditPage() {
 
     return {
       latestDate,
-      months,
+
+      /*
+        IMPORTANT:
+        "months" now means ACTIVE/VISIBLE months only.
+      */
+      months:
+        visibleMonths,
+
+      yearGroups,
+
       monthlySummary,
+
       categories,
+
       items,
 
       orderCount:
@@ -729,6 +780,10 @@ export default function CustomerAuditPage() {
           </div>
         )}
 
+        {/* =================================================
+            CUSTOMER SELECTION
+            ================================================= */}
+
         {!selectedCustomer && (
           <>
             <section className="auditFilters">
@@ -753,12 +808,8 @@ export default function CustomerAuditPage() {
                   {salesmen.map(
                     (salesman) => (
                       <option
-                        key={
-                          salesman
-                        }
-                        value={
-                          salesman
-                        }
+                        key={salesman}
+                        value={salesman}
                       >
                         {salesman}
                       </option>
@@ -786,9 +837,7 @@ export default function CustomerAuditPage() {
 
             <div className="auditCount">
               <strong>
-                {
-                  filteredCustomers.length
-                }
+                {filteredCustomers.length}
               </strong>{" "}
               customers
             </div>
@@ -845,6 +894,10 @@ export default function CustomerAuditPage() {
           </>
         )}
 
+        {/* =================================================
+            CUSTOMER DETAIL
+            ================================================= */}
+
         {selectedCustomer && (
           <section className="auditDetail">
 
@@ -898,9 +951,9 @@ export default function CustomerAuditPage() {
               analytics && (
                 <>
 
-                  {/* ===============================
-                      SUMMARY
-                      =============================== */}
+                  {/* =========================================
+                      SUMMARY CARDS
+                      ========================================= */}
 
                   <div className="auditMetrics auditMetricsSmall">
 
@@ -930,44 +983,74 @@ export default function CustomerAuditPage() {
 
                   </div>
 
-                  {/* ===============================
-                      CUSTOMER 12 MONTH PERFORMANCE
-                      =============================== */}
+                  {/* =========================================
+                      MONTHLY CUSTOMER PERFORMANCE
+                      ========================================= */}
 
                   <div className="auditSectionTitle">
-                    Last 12 Months Performance
+                    Monthly Performance
                   </div>
 
                   <div className="auditTableScroll">
 
-                    <table className="auditMatrix">
+                    <table className="auditMatrix auditPerformanceMatrix">
 
                       <thead>
-                        <tr>
 
-                          <th>
+                        {/* YEAR HEADER */}
+
+                        <tr className="auditYearRow">
+
+                          <th
+                            rowSpan={2}
+                            className="auditMetricHeader"
+                          >
                             Metric
                           </th>
+
+                          {analytics.yearGroups.map(
+                            (group) => (
+                              <th
+                                key={
+                                  group.year
+                                }
+                                colSpan={
+                                  group.months.length
+                                }
+                                className="auditYearHeader"
+                              >
+                                {group.year}
+                              </th>
+                            )
+                          )}
+
+                          <th
+                            rowSpan={2}
+                            className="auditTotalHeader"
+                          >
+                            Total
+                          </th>
+
+                        </tr>
+
+                        {/* MONTH HEADER */}
+
+                        <tr className="auditMonthRow">
 
                           {analytics.months.map(
                             (month) => (
                               <th
-                                key={
-                                  month
-                                }
+                                key={month}
                               >
-                                {monthLabel(
+                                {monthName(
                                   month
                                 )}
                               </th>
                             )
                           )}
 
-                          <th>
-                            Total
-                          </th>
-
                         </tr>
+
                       </thead>
 
                       <tbody>
@@ -985,15 +1068,13 @@ export default function CustomerAuditPage() {
                               month,
                               index
                             ) => {
+
                               const previous =
-                                index >
-                                0
+                                index > 0
                                   ? analytics
                                       .monthlySummary[
-                                      index -
-                                        1
-                                    ]
-                                      .sales
+                                      index - 1
+                                    ].sales
                                   : null;
 
                               return (
@@ -1004,15 +1085,14 @@ export default function CustomerAuditPage() {
                                   className={trendClass(
                                     month.sales,
                                     previous,
-                                    index >
-                                      0
+                                    index > 0
                                   )}
                                 >
-                                  {month.sales
+                                  {month.sales !== 0
                                     ? numberFormat(
                                         month.sales
                                       )
-                                    : "-"}
+                                    : "—"}
                                 </td>
                               );
                             }
@@ -1034,12 +1114,12 @@ export default function CustomerAuditPage() {
 
                         </tr>
 
-                        {/* SKU */}
+                        {/* SKUs SOLD */}
 
                         <tr>
 
                           <th>
-                            SKUs Bought
+                            SKUs Sold
                           </th>
 
                           {analytics.monthlySummary.map(
@@ -1047,15 +1127,13 @@ export default function CustomerAuditPage() {
                               month,
                               index
                             ) => {
+
                               const previous =
-                                index >
-                                0
+                                index > 0
                                   ? analytics
                                       .monthlySummary[
-                                      index -
-                                        1
-                                    ]
-                                      .skuCount
+                                      index - 1
+                                    ].skuCount
                                   : null;
 
                               return (
@@ -1066,12 +1144,12 @@ export default function CustomerAuditPage() {
                                   className={trendClass(
                                     month.skuCount,
                                     previous,
-                                    index >
-                                      0
+                                    index > 0
                                   )}
                                 >
-                                  {month.skuCount ||
-                                    "-"}
+                                  {month.skuCount !== 0
+                                    ? month.skuCount
+                                    : "—"}
                                 </td>
                               );
                             }
@@ -1091,9 +1169,9 @@ export default function CustomerAuditPage() {
 
                   </div>
 
-                  {/* ===============================
-                      CATEGORY x MONTH
-                      =============================== */}
+                  {/* =========================================
+                      CATEGORY PERFORMANCE
+                      ========================================= */}
 
                   <div className="auditSectionTitle">
                     Category Performance by Month
@@ -1101,33 +1179,72 @@ export default function CustomerAuditPage() {
 
                   <div className="auditTableScroll">
 
-                    <table className="auditMatrix auditCategoryMatrix">
+                    <table className="auditMatrix auditCategoryMatrixV3">
 
                       <thead>
 
-                        <tr>
+                        {/* ===================================
+                            MERGED YEAR HEADER
+                            =================================== */}
 
-                          <th>
-                            Category / Metric
+                        <tr className="auditYearRow">
+
+                          <th
+                            rowSpan={2}
+                            className="auditCategoryHeader"
+                          >
+                            Category
                           </th>
+
+                          <th
+                            rowSpan={2}
+                            className="auditCategoryMetricHeader"
+                          >
+                            Metric
+                          </th>
+
+                          {analytics.yearGroups.map(
+                            (group) => (
+                              <th
+                                key={
+                                  group.year
+                                }
+                                colSpan={
+                                  group.months.length
+                                }
+                                className="auditYearHeader"
+                              >
+                                {group.year}
+                              </th>
+                            )
+                          )}
+
+                          <th
+                            rowSpan={2}
+                            className="auditTotalHeader"
+                          >
+                            Total
+                          </th>
+
+                        </tr>
+
+                        {/* ===================================
+                            MONTH HEADER
+                            =================================== */}
+
+                        <tr className="auditMonthRow">
 
                           {analytics.months.map(
                             (month) => (
                               <th
-                                key={
-                                  month
-                                }
+                                key={month}
                               >
-                                {monthLabel(
+                                {monthName(
                                   month
                                 )}
                               </th>
                             )
                           )}
-
-                          <th>
-                            Total
-                          </th>
 
                         </tr>
 
@@ -1136,28 +1253,34 @@ export default function CustomerAuditPage() {
                       <tbody>
 
                         {analytics.categories.map(
-                          (
-                            category
-                          ) => (
-                            <Fragment key={category.category}>
+                          (category) => (
+                            <Fragment
+                              key={
+                                category.category
+                              }
+                            >
 
-                              {/* CATEGORY SALES */}
+                              {/* =============================
+                                  CATEGORY SALES
+                                  ============================= */}
 
-                              <tr
-                                key={`${category.category}-sales`}
-                                className="auditCategorySalesRow"
-                              >
+                              <tr className="auditCategorySalesRow">
 
-                                <th>
-                                  <strong>
-                                    {
-                                      category.category
-                                    }
-                                  </strong>
+                                {/*
+                                  Category name appears ONCE
+                                  and spans both Sales + SKU rows.
+                                */}
+                                <th
+                                  rowSpan={2}
+                                  className="auditMergedCategory"
+                                >
+                                  {
+                                    category.category
+                                  }
+                                </th>
 
-                                  <small>
-                                    Sales
-                                  </small>
+                                <th className="auditCategoryMetric">
+                                  Sales
                                 </th>
 
                                 {analytics.months.map(
@@ -1165,24 +1288,27 @@ export default function CustomerAuditPage() {
                                     month,
                                     index
                                   ) => {
+
                                     const current =
                                       category
                                         .months[
                                         month
                                       ].sales;
 
+                                    const previousMonth =
+                                      index > 0
+                                        ? analytics
+                                            .months[
+                                            index - 1
+                                          ]
+                                        : null;
+
                                     const previous =
-                                      index >
-                                      0
+                                      previousMonth
                                         ? category
                                             .months[
-                                            analytics
-                                              .months[
-                                              index -
-                                                1
-                                            ]
-                                          ]
-                                            .sales
+                                            previousMonth
+                                          ].sales
                                         : null;
 
                                     return (
@@ -1193,15 +1319,14 @@ export default function CustomerAuditPage() {
                                         className={trendClass(
                                           current,
                                           previous,
-                                          index >
-                                            0
+                                          index > 0
                                         )}
                                       >
-                                        {current
+                                        {current !== 0
                                           ? numberFormat(
                                               current
                                             )
-                                          : "-"}
+                                          : "—"}
                                       </td>
                                     );
                                   }
@@ -1215,17 +1340,14 @@ export default function CustomerAuditPage() {
 
                               </tr>
 
-                              {/* CATEGORY SKU */}
+                              {/* =============================
+                                  CATEGORY SKUs
+                                  ============================= */}
 
-                              <tr
-                                key={`${category.category}-sku`}
-                                className="auditCategorySkuRow"
-                              >
+                              <tr className="auditCategorySkuRow">
 
-                                <th>
-                                  <span className="auditSubMetric">
-                                    SKUs Bought
-                                  </span>
+                                <th className="auditCategoryMetric">
+                                  SKUs Sold
                                 </th>
 
                                 {analytics.months.map(
@@ -1233,25 +1355,27 @@ export default function CustomerAuditPage() {
                                     month,
                                     index
                                   ) => {
+
                                     const current =
                                       category
                                         .months[
                                         month
-                                      ]
-                                        .skuCount;
+                                      ].skuCount;
+
+                                    const previousMonth =
+                                      index > 0
+                                        ? analytics
+                                            .months[
+                                            index - 1
+                                          ]
+                                        : null;
 
                                     const previous =
-                                      index >
-                                      0
+                                      previousMonth
                                         ? category
                                             .months[
-                                            analytics
-                                              .months[
-                                              index -
-                                                1
-                                            ]
-                                          ]
-                                            .skuCount
+                                            previousMonth
+                                          ].skuCount
                                         : null;
 
                                     return (
@@ -1262,12 +1386,12 @@ export default function CustomerAuditPage() {
                                         className={trendClass(
                                           current,
                                           previous,
-                                          index >
-                                            0
+                                          index > 0
                                         )}
                                       >
-                                        {current ||
-                                          "-"}
+                                        {current !== 0
+                                          ? current
+                                          : "—"}
                                       </td>
                                     );
                                   }
@@ -1291,9 +1415,9 @@ export default function CustomerAuditPage() {
 
                   </div>
 
-                  {/* ===============================
+                  {/* =========================================
                       ITEM PURCHASE HISTORY
-                      =============================== */}
+                      ========================================= */}
 
                   <div className="auditSectionTitle">
                     Item Purchase History
@@ -1403,6 +1527,10 @@ export default function CustomerAuditPage() {
 
                   </div>
 
+                  {/* =========================================
+                      TRANSACTIONS
+                      ========================================= */}
+
                   <button
                     className="auditTransactionButton"
                     onClick={() =>
@@ -1423,9 +1551,7 @@ export default function CustomerAuditPage() {
                         (row) => (
                           <div
                             className="auditTransaction"
-                            key={
-                              row.id
-                            }
+                            key={row.id}
                           >
 
                             <div>
@@ -1475,6 +1601,16 @@ export default function CustomerAuditPage() {
                   )}
 
                 </>
+              )}
+
+            {!loadingCustomer &&
+              !analytics &&
+              !error && (
+                <div className="auditEmpty">
+                  No transactions found for
+                  this customer in the active
+                  snapshot.
+                </div>
               )}
 
           </section>

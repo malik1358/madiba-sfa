@@ -4110,7 +4110,21 @@ const newItems = (itemMaster || [])
               <h3>
                 Quick Order
               </h3>
-
+<div
+  style={{
+    fontSize: "11px",
+    padding: "6px 10px",
+    margin: "6px 0",
+    background: "#fff4cc",
+    border: "1px solid #d6b84c",
+  }}
+>
+  ITEM MASTER LOADED: {itemMaster?.length || 0}
+  {" | "}
+  CUSTOMER TRANSACTIONS: {transactions?.length || 0}
+  {" | "}
+  NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
+</div>
               <p>
                 Suggested items based on this customer's purchase history.
               </p>

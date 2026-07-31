@@ -240,13 +240,12 @@ export async function POST(request) {
     const fileName =
       file.name || "sales-data.xlsx";
 
+    const lowerFileName =
+      fileName.toLowerCase();
+
     if (
-      !fileName
-        .toLowerCase()
-        .endsWith(".xlsx") &&
-      !fileName
-        .toLowerCase()
-        .endsWith(".xls")
+      !lowerFileName.endsWith(".xlsx") &&
+      !lowerFileName.endsWith(".xls")
     ) {
       return NextResponse.json(
         {
@@ -298,19 +297,30 @@ export async function POST(request) {
         "Excel sheet contains no data."
       );
     }
-     console.log("EXCEL HEADERS:", Object.keys(rows[0]));
-
-return NextResponse.json({
-  success: false,
-  diagnostic: true,
-  sheetName: sheetName,
-  totalRows: rows.length,
-  headers: Object.keys(rows[0]),
-  firstRow: rows[0],
-});
 
     /* ========================================================
-       6. MAP YOUR ACTUAL KSA EXCEL FORMAT
+       6. MAP KSA SALES DATA
+
+       IMPORTANT SECURITY RULE:
+       --------------------------------------------------------
+       We deliberately DO NOT import:
+
+       - Margin
+       - Margin %
+       - GP
+       - GP %
+       - Gross Profit
+       - Cost
+       - Cost Price
+       - Purchase Cost
+       - Landed Cost
+       - COGS
+       - Profit
+       - Profit %
+
+       We also DO NOT store the complete original Excel row.
+
+       The SFA only receives operational sales information.
        ======================================================== */
 
     const mappedRows = rows
@@ -331,7 +341,7 @@ return NextResponse.json({
 
            1224 RAWAAT MAZAYA TRADING EST
 
-           We separate:
+           becomes:
 
            customer_code = 1224
            customer_name = RAWAAT MAZAYA TRADING EST
@@ -360,8 +370,8 @@ return NextResponse.json({
               customerMatch[2].trim();
           } else {
             /*
-             Keep a usable identifier even if a future
-             export contains a party without a numeric prefix.
+              Fallback so a future ERP record without a
+              numeric prefix is not silently discarded.
             */
             customerCode = partyRaw;
           }
@@ -376,11 +386,11 @@ return NextResponse.json({
         );
 
         /*
-          Current Excel does not have a separate salesman
-          code.
+          The current source Excel does not have a separate
+          salesman code.
 
-          Therefore for V1 we use the normalized salesman
-          name as the salesman identifier.
+          For V1 the normalized salesman name is used as
+          salesman_code.
         */
 
         const salesmanCode =
@@ -429,10 +439,6 @@ return NextResponse.json({
             itemName =
               itemMatch[2].trim();
           } else {
-            /*
-             Again, don't throw away the item if the
-             future Excel format changes slightly.
-            */
             itemCode = cleanedItem;
             itemName = cleanedItem;
           }
@@ -445,29 +451,6 @@ return NextResponse.json({
             "Item Category",
           ])
         );
-
-        /* ---------------- MARGIN % ---------------- */
-
-        const marginPercentRaw =
-          findValue(row, [
-            "Margin %",
-          ]);
-
-        let marginPercent =
-          number(marginPercentRaw);
-
-        /*
-          Excel sometimes stores 18% as 0.18.
-          Convert that to 18.
-        */
-
-        if (
-          marginPercent !== 0 &&
-          Math.abs(marginPercent) <= 1
-        ) {
-          marginPercent =
-            marginPercent * 100;
-        }
 
         /* ---------------- FINAL DATABASE ROW ---------------- */
 
@@ -531,6 +514,13 @@ return NextResponse.json({
             ])
           ),
 
+          /*
+            RATE = selling rate.
+
+            We KEEP this because it will later be needed
+            for order entry and customer price reference.
+          */
+
           rate: number(
             findValue(row, [
               "Rate",
@@ -542,15 +532,6 @@ return NextResponse.json({
               "Sales Amount",
             ])
           ),
-
-          margin: number(
-            findValue(row, [
-              "Margin",
-            ])
-          ),
-
-          margin_percent:
-            marginPercent,
 
           first_purchase_date:
             excelDate(
@@ -566,21 +547,20 @@ return NextResponse.json({
           ),
 
           /*
-            IMPORTANT:
+            SECURITY:
 
-            Preserve the complete original Excel row.
+            Do NOT save the complete Excel row.
 
-            This means if later we discover another useful
-            column, the source information is still stored.
+            This prevents Margin / GP / Cost or any other
+            confidential ERP columns from being hidden
+            inside JSON.
           */
 
-          source_data: row,
+          source_data: null,
         };
       })
 
-      /*
-        Ignore completely blank / irrelevant Excel rows.
-      */
+      /* Ignore completely blank / irrelevant rows */
 
       .filter((row) => {
         return (
@@ -611,11 +591,11 @@ return NextResponse.json({
       );
 
     /*
-      If more than 20% of rows suddenly don't contain
-      date/customer/item, something probably changed in
-      the ERP export.
+      If more than 20% of the Excel suddenly does not contain
+      Date + Customer + Item, assume the ERP export structure
+      changed.
 
-      DO NOT activate such a dataset.
+      Do NOT activate the dataset.
     */
 
     if (
@@ -749,8 +729,11 @@ return NextResponse.json({
 
        BUSINESS RULE:
 
-       CUSTOMER BELONGS TO THE SALESMAN FROM THE
-       CUSTOMER'S LATEST TRANSACTION.
+       The customer belongs to the salesman from the
+       customer's LAST TRANSACTION.
+
+       If multiple transactions exist on the same latest date,
+       the later Excel row wins.
        ======================================================== */
 
     const latestCustomer =
@@ -775,10 +758,6 @@ return NextResponse.json({
         continue;
       }
 
-      /*
-        Newer transaction wins.
-      */
-
       if (
         row.transaction_date &&
         (
@@ -794,13 +773,6 @@ return NextResponse.json({
 
         continue;
       }
-
-      /*
-        If two transactions are on the same date,
-        the later Excel row wins.
-
-        This gives us deterministic ownership.
-      */
 
       if (
         row.transaction_date &&
@@ -964,6 +936,7 @@ return NextResponse.json({
       message:
         "Sales data replaced successfully.",
     });
+
   } catch (error) {
     console.error(
       "IMPORT ERROR:",
@@ -1013,6 +986,7 @@ return NextResponse.json({
             "id",
             batchId
           );
+
       } catch (
         cleanupError
       ) {

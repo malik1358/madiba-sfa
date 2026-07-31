@@ -688,7 +688,7 @@
 
 
 /* ==========================================================
-   CUSTOMER AUDIT - 12 MONTH MATRIX
+   CUSTOMER AUDIT PERFORMANCE MATRIX V2
    ========================================================== */
 
 .auditMetricsSmall {
@@ -701,64 +701,109 @@
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   background: #ffffff;
-  border: 1px solid #d7e1e5;
-  border-radius: 14px;
-  margin-bottom: 22px;
+  border: 2px solid #cbd8dd;
+  border-radius: 12px;
+  margin-bottom: 26px;
 }
 
 .auditMatrix {
   width: 100%;
-  min-width: 1100px;
-  border-collapse: separate;
-  border-spacing: 0;
+  min-width: 1150px;
+  border-collapse: collapse;
   font-size: 13px;
 }
 
 .auditMatrix th,
 .auditMatrix td {
-  padding: 13px 12px;
-  border-bottom: 1px solid #e5ecef;
-  border-right: 1px solid #edf1f3;
+  padding: 12px 11px;
+  border: 1px solid #cbd8dd;
   text-align: right;
   white-space: nowrap;
+  vertical-align: middle;
 }
 
 .auditMatrix thead th {
-  background: #f3f7f8;
-  color: #49656d;
+  background: #edf3f5;
+  color: #214d58;
   font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  text-align: center;
+  border: 1px solid #b9cbd1;
 }
 
 .auditMatrix th:first-child {
   position: sticky;
   left: 0;
   z-index: 2;
+  min-width: 175px;
   text-align: left;
-  min-width: 145px;
   background: #ffffff;
   color: #063f4d;
+  border-right: 2px solid #b9cbd1;
 }
 
 .auditMatrix thead th:first-child {
-  z-index: 3;
-  background: #f3f7f8;
-}
-
-.auditMatrix tbody tr:last-child th,
-.auditMatrix tbody tr:last-child td {
-  border-bottom: 0;
+  z-index: 4;
+  background: #edf3f5;
 }
 
 .auditMatrixTotal {
-  font-weight: 700;
-  color: #064b5b;
-  background: #f7fafb;
+  font-weight: 800;
+  color: #063f4d;
+  background: #edf3f5;
+  border-left: 2px solid #b9cbd1 !important;
 }
 
-.auditCategoryMatrix tbody th {
-  font-weight: 700;
+.auditMatrix td.auditTrendUp {
+  color: #168253;
+  font-weight: 800;
+  background: #f0faf5;
+}
+
+.auditMatrix td.auditTrendDown {
+  color: #c83d3d;
+  font-weight: 800;
+  background: #fff4f4;
+}
+
+.auditMatrix td.auditTrendSame {
+  color: #526a71;
+}
+
+.auditCategorySalesRow th {
+  background: #f5f8f9;
+  border-top: 2px solid #9fb5bd;
+}
+
+.auditCategorySalesRow th strong {
+  display: block;
+  font-size: 13px;
+}
+
+.auditCategorySalesRow th small {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #789097;
+}
+
+.auditCategorySkuRow th {
+  background: #fbfcfc;
+}
+
+.auditCategorySkuRow td {
+  font-size: 12px;
+}
+
+.auditSubMetric {
+  display: block;
+  padding-left: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6a838a;
 }
 
 @media (max-width: 700px) {
@@ -767,16 +812,20 @@
   }
 
   .auditMatrix {
-    min-width: 1050px;
+    min-width: 1100px;
     font-size: 12px;
   }
 
   .auditMatrix th,
   .auditMatrix td {
-    padding: 11px 10px;
+    padding: 10px 9px;
+  }
+
+  .auditMatrix th:first-child {
+    min-width: 145px;
   }
 
   .auditTableScroll {
-    border-radius: 12px;
+    border-radius: 10px;
   }
 }

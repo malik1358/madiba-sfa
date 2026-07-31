@@ -298,6 +298,16 @@ export async function POST(request) {
         "Excel sheet contains no data."
       );
     }
+     console.log("EXCEL HEADERS:", Object.keys(rows[0]));
+
+return NextResponse.json({
+  success: false,
+  diagnostic: true,
+  sheetName: sheetName,
+  totalRows: rows.length,
+  headers: Object.keys(rows[0]),
+  firstRow: rows[0],
+});
 
     /* ========================================================
        6. MAP YOUR ACTUAL KSA EXCEL FORMAT

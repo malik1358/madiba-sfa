@@ -2612,7 +2612,7 @@ const newItems = (itemMaster || [])
             Customer Audit
       <div className="auditPageVersionTop">
   <strong>{PAGE_VERSION}</strong>
-  <span>Updated: {PAGE_UPDATED}</span>
+  <span>Commit: {BUILD_COMMIT}</span>
 </div>
           </h1>
 
@@ -2661,7 +2661,7 @@ const newItems = (itemMaster || [])
               </p>
       <div className="auditPageVersionTop">
   <strong>{PAGE_VERSION}</strong>
-  <span>Updated: {PAGE_UPDATED}</span>
+  <span>Commit: {BUILD_COMMIT}</span>
 </div>
 
             </div>

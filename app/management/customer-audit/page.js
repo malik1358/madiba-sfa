@@ -4152,11 +4152,13 @@ const newItems = (itemMaster || [])
     border: "1px solid #d6b84c",
   }}
 >
-  ITEM MASTER LOADED: {itemMaster?.length || 0}
-  {" | "}
-  CUSTOMER TRANSACTIONS: {transactions?.length || 0}
-  {" | "}
-  NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
+  ITEM MASTER: {itemMasterStatus}
+{" | "}
+LOADED: {itemMaster?.length || 0}
+{" | "}
+CUSTOMER TRANSACTIONS: {transactions?.length || 0}
+{" | "}
+NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
 </div>
               <p>
                 Suggested items based on this customer's purchase history.

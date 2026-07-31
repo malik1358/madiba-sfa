@@ -1,7 +1,7 @@
 "use client";
 
-const PAGE_VERSION = "Quick Order V3";
-const PAGE_UPDATED = "01 Aug 2026 02:30 AM";
+const PAGE_VERSION = "Quick Order V4";
+
 
 import {
   Fragment,
@@ -33,7 +33,50 @@ function qtyFormat(value) {
     maximumFractionDigits: 2,
   });
 }
+function numberFormat(value) {
+  return Number(value || 0).toLocaleString("en-SA", {
+    maximumFractionDigits: 0,
+  });
+}
 
+function qtyFormat(value) {
+  return Number(value || 0).toLocaleString("en-SA", {
+    maximumFractionDigits: 2,
+  });
+}
+
+
+/* ==========================================================
+   SALES QTY IN SALES / ORDER UNIT
+
+   Imported Excel quantity is base unit.
+   Correct reporting quantity:
+   Sales Amount / Rate
+   ========================================================== */
+
+function salesUnitQty(row) {
+  const salesAmount = Number(row?.sales_amount || 0);
+  const rate = Number(row?.rate || 0);
+
+  if (!rate) {
+    return 0;
+  }
+
+  return salesAmount / rate;
+}
+
+
+function shortDate(value) {
+  if (!value) return "-";
+
+  const d = new Date(`${value}T00:00:00`);
+
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
 function shortDate(value) {
   if (!value) return "-";
 
@@ -476,6 +519,7 @@ export default function CustomerAuditPage() {
             local_import,
             quantity,
             sales_amount,
+            rate,
             first_purchase_date,
             abc_class
           `)
@@ -841,9 +885,7 @@ export default function CustomerAuditPage() {
           );
 
         const quantity =
-          Number(
-            row.quantity || 0
-          );
+  salesUnitQty(row);
 
         const itemCode =
           String(
@@ -1510,10 +1552,8 @@ export default function CustomerAuditPage() {
           );
 
 
-        const qty =
-          Number(
-            row.quantity || 0
-          );
+       const qty =
+  salesUnitQty(row);
 
 
         const month =
@@ -1682,91 +1722,108 @@ export default function CustomerAuditPage() {
          1. NEW ITEMS
          ==================================================== */
 
+           /* ====================================================
+         1. NEW ITEMS
+
+         Active master items that this customer
+         has NEVER purchased.
+         ==================================================== */
+
+      const purchasedItemCodes =
+        new Set(
+          transactions
+            .filter(
+              (row) =>
+                Number(row.sales_amount || 0) > 0
+            )
+            .map(
+              (row) =>
+                normalizeCode(
+                  row.item_code
+                )
+            )
+            .filter(Boolean)
+        );
+
+
       const newItems =
         cleanMaster
 
-          /*
-           * Item must NEVER have been bought
-           * by this customer.
-           */
-
-          .filter((item) => {
-
-            const code =
-              normalizeCode(
-                item.item_code
-              );
-
-
-            return (
-              !historyByCode.has(
-                code
+          /* Remove DO NOT USE items again for safety */
+          .filter(
+            (item) =>
+              !isDoNotUseItem(
+                item.item_name
               )
-            );
+          )
 
-          })
-
-
-          /*
-           * Prefer same categories
-           * customer already buys.
-           */
-
-          .map((item) => {
-
-            const category =
-              String(
-                item.category || ""
-              )
-                .trim()
-                .toLowerCase();
-
-
-            return {
-
-              ...item,
-
-              categoryMatch:
-                boughtCategories.has(
-                  category
+          /* Customer must never have purchased it */
+          .filter(
+            (item) =>
+              !purchasedItemCodes.has(
+                normalizeCode(
+                  item.item_code
                 )
-                  ? 1
-                  : 0,
-
-              recommendationReason:
-                "New Item",
-            };
-
-          })
-
-
-          .sort((a, b) => {
-
-            if (
-              b.categoryMatch !==
-              a.categoryMatch
-            ) {
-
-              return (
-                b.categoryMatch -
-                a.categoryMatch
-              );
-            }
-
-
-            return String(
-              a.item_name
-            ).localeCompare(
-              String(
-                b.item_name
               )
-            );
+          )
 
-          })
+          /* Prefer categories customer already buys */
+          .map(
+            (item) => {
 
+              const category =
+                String(
+                  item.category || ""
+                )
+                  .trim()
+                  .toLowerCase();
+
+
+              return {
+
+                ...item,
+
+                categoryMatch:
+                  boughtCategories.has(
+                    category
+                  )
+                    ? 1
+                    : 0,
+
+                recommendationReason:
+                  "New Item",
+              };
+
+            }
+          )
+
+          .sort(
+            (a, b) => {
+
+              if (
+                b.categoryMatch !==
+                a.categoryMatch
+              ) {
+
+                return (
+                  b.categoryMatch -
+                  a.categoryMatch
+                );
+              }
+
+
+              return String(
+                a.item_name || ""
+              ).localeCompare(
+                String(
+                  b.item_name || ""
+                )
+              );
+
+            }
+          )
 
           .slice(0, 3);
-
 
       /* ====================================================
          2. NOT BOUGHT SINCE LONG

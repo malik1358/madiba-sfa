@@ -312,48 +312,37 @@ export default function CustomerAuditPage() {
 
       /* ----------------------------------------------------
      /* ----------------------------------------------------
-   ITEM MASTER
-   Used for NEW ITEM suggestions
-   ---------------------------------------------------- */
+        /* ----------------------------------------------------
+         ITEM MASTER
+         Used for NEW ITEM suggestions
+         ---------------------------------------------------- */
 
-console.log("Loading items_master...");
+      const {
+        data: masterData,
+        error: masterError,
+      } = await supabase
+        .from("items_master")
+        .select("*")
+        .eq("is_active", true);
 
-const {
-  data: masterData,
-  error: masterError,
-} = await supabase
-  .from("items_master")
-  .select(`
-    id,
-    item_code,
-    item_name,
-    category,
-    rate,
-    is_active
-  `)
-  .eq("is_active", true);
+      if (masterError) {
+        console.error(
+          "ITEM MASTER LOAD ERROR:",
+          masterError
+        );
+      } else {
+        console.log(
+          "ITEM MASTER LOADED:",
+          masterData?.length || 0
+        );
 
-if (masterError) {
-
-  console.error(
-    "ITEM MASTER LOAD ERROR:",
-    masterError
-  );
-
-} else {
-
-  console.log(
-    "ITEM MASTER LOADED:",
-    masterData?.length || 0,
-    masterData
-  );
-
-  setItemMaster(
-    masterData || []
-  );
-}
+        setItemMaster(
+          masterData || []
+        );
+      }
 
 
+      const salesmanCodes = [
   /* ========================================================
      CUSTOMER FILTER
      ======================================================== */

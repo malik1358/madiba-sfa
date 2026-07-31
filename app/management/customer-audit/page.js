@@ -22,17 +22,7 @@ const supabase = createClient(
    FORMATTING
    ========================================================== */
 
-function numberFormat(value) {
-  return Number(value || 0).toLocaleString("en-SA", {
-    maximumFractionDigits: 0,
-  });
-}
 
-function qtyFormat(value) {
-  return Number(value || 0).toLocaleString("en-SA", {
-    maximumFractionDigits: 2,
-  });
-}
 function numberFormat(value) {
   return Number(value || 0).toLocaleString("en-SA", {
     maximumFractionDigits: 0,
@@ -66,17 +56,7 @@ function salesUnitQty(row) {
 }
 
 
-function shortDate(value) {
-  if (!value) return "-";
 
-  const d = new Date(`${value}T00:00:00`);
-
-  return d.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
 function shortDate(value) {
   if (!value) return "-";
 

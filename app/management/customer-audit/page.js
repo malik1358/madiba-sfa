@@ -327,19 +327,22 @@ export default function CustomerAuditPage() {
           item_code,
           item_name,
           category,
-          rate,
           is_active
         `)
         .eq("is_active", true);
 
-      if (masterError) {
+     if (masterError) {
 
-        console.error(
-          "ITEM MASTER LOAD ERROR:",
-          masterError
-        );
+  console.error(
+    "ITEM MASTER LOAD ERROR:",
+    masterError
+  );
 
-      } else {
+  setError(
+    `ITEM MASTER ERROR: ${masterError.message}`
+  );
+
+} else {
 
         console.log(
           "ITEM MASTER LOADED:",

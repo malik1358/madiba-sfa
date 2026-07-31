@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -1133,7 +1139,7 @@ export default function CustomerAuditPage() {
                           (
                             category
                           ) => (
-                            <>
+                            <Fragment key={category.category}>
 
                               {/* CATEGORY SALES */}
 
@@ -1275,7 +1281,7 @@ export default function CustomerAuditPage() {
 
                               </tr>
 
-                            </>
+                            </Fragment>
                           )
                         )}
 

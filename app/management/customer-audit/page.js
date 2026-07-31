@@ -311,55 +311,47 @@ export default function CustomerAuditPage() {
 
 
       /* ----------------------------------------------------
-         ITEM MASTER
-         RATE REMAINS BLANK FOR NOW
-         ---------------------------------------------------- */
+     /* ----------------------------------------------------
+   ITEM MASTER
+   Used for NEW ITEM suggestions
+   ---------------------------------------------------- */
 
-      const {
-        data: masterData,
-        error: masterError,
-      } =
-        await supabase
-          .from("items_master")
-          .select("*")
-          .eq("is_active", true);
+console.log("Loading items_master...");
 
-      if (masterError) {
-        throw masterError;
-      }
+const {
+  data: masterData,
+  error: masterError,
+} = await supabase
+  .from("items_master")
+  .select(`
+    id,
+    item_code,
+    item_name,
+    category,
+    rate,
+    is_active
+  `)
+  .eq("is_active", true);
 
-      setItemMaster(
-        masterData || []
-      );
+if (masterError) {
 
+  console.error(
+    "ITEM MASTER LOAD ERROR:",
+    masterError
+  );
 
-      const salesmanCodes = [
-        ...new Set(
-          list
-            .map(
-              (customer) =>
-                customer.current_salesman_code
-            )
-            .filter(Boolean)
-        ),
-      ].sort();
+} else {
 
-      setSalesmen(
-        salesmanCodes
-      );
+  console.log(
+    "ITEM MASTER LOADED:",
+    masterData?.length || 0,
+    masterData
+  );
 
-    } catch (err) {
-
-      setError(
-        err.message ||
-          "Unable to load customer data."
-      );
-
-    } finally {
-
-      setLoading(false);
-    }
-  }
+  setItemMaster(
+    masterData || []
+  );
+}
 
 
   /* ========================================================

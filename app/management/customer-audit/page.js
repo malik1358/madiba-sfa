@@ -573,9 +573,9 @@ const [
         throw salesError;
       }
 
-      setTransactions(
-        data || []
-      );
+    setTransactions(
+  transactionData || []
+);
       /* ----------------------------------------------------
    PEER CUSTOMER TRANSACTIONS
    Used to find customers with similar buying patterns
@@ -4452,7 +4452,7 @@ const newItems =
 {" | "}
 LOADED: {itemMaster?.length || 0}
 {" | "}
-CUSTOMER TRANSACTIONS: {transactions?.length || 0}
+CUSTOMER TRANSACTIONS: {transactions?.length || 0} {" | "} PEER TRANSACTIONS: {peerTransactions?.length || 0}
 {" | "}
 NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
 </div>

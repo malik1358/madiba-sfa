@@ -1818,121 +1818,363 @@ transactions.forEach((row) => {
 
 });
 
+/* ====================================================
+   NEW ITEMS - SIMILAR CUSTOMER RECOMMENDATIONS
 
-const newItems = (itemMaster || [])
-
-  .filter((item) => {
-
-    /* Must be active */
-
-    if (item.is_active === false) {
-      return false;
-    }
-
-
-    /* Must have item code */
-
-    const code =
-      normalizeCode(item.item_code);
-
-    if (!code) {
-      return false;
-    }
+   Logic:
+   1. Find items selected customer has bought
+   2. Find other customers who bought same items
+   3. Score similarity by number of shared items
+   4. Keep strongest similar customers
+   5. Find OTHER items bought by those customers
+   6. Rank by number of similar customers buying item
+   7. Exclude items selected customer already bought
+   8. Exclude Do Not Use items
+   ==================================================== */
 
 
-    /* Remove discontinued items */
+/* ----------------------------------------------------
+   ITEMS BOUGHT BY SELECTED CUSTOMER
+   ---------------------------------------------------- */
 
-    if (
-      isDoNotUseItem(
-        item.item_name
+const selectedBoughtCodes =
+  new Set(
+    transactions
+      .filter(
+        (row) =>
+          Number(row.sales_amount || 0) > 0
       )
-    ) {
-      return false;
-    }
+      .map(
+        (row) =>
+          normalizeCode(row.item_code)
+      )
+      .filter(Boolean)
+  );
 
 
-    /* Must NEVER have been purchased */
+/* ----------------------------------------------------
+   BUILD PURCHASE SET FOR EACH OTHER CUSTOMER
+   ---------------------------------------------------- */
 
-    return !purchasedItemCodes.has(code);
+const peerCustomerItems = {};
 
-  })
+peerTransactions.forEach((row) => {
+
+  if (
+    Number(row.sales_amount || 0) <= 0
+  ) {
+    return;
+  }
+
+  const customerCode =
+    String(
+      row.customer_code || ""
+    ).trim();
+
+  const itemCode =
+    normalizeCode(
+      row.item_code
+    );
+
+  if (
+    !customerCode ||
+    !itemCode
+  ) {
+    return;
+  }
+
+  if (
+    !peerCustomerItems[
+      customerCode
+    ]
+  ) {
+    peerCustomerItems[
+      customerCode
+    ] = new Set();
+  }
+
+  peerCustomerItems[
+    customerCode
+  ].add(itemCode);
+
+});
 
 
-  .map((item) => {
+/* ----------------------------------------------------
+   CALCULATE CUSTOMER SIMILARITY
 
-    const category =
-      String(item.category || "")
-        .trim()
-        .toLowerCase();
+   Shared item count = how many different items
+   both customers have bought.
+   ---------------------------------------------------- */
 
-    return {
+const similarCustomers =
+  Object.entries(
+    peerCustomerItems
+  )
+    .map(
+      ([customerCode, itemCodes]) => {
 
-      item_code:
-        String(item.item_code || "")
-          .trim(),
+        let sharedItems = 0;
 
-      item_name:
-        String(item.item_name || "")
-          .trim(),
+        itemCodes.forEach(
+          (itemCode) => {
 
-      category:
-        String(
-          item.category ||
-          "Unclassified"
-        ).trim(),
+            if (
+              selectedBoughtCodes.has(
+                itemCode
+              )
+            ) {
+              sharedItems += 1;
+            }
 
-      rate:
-        item.rate ?? null,
+          }
+        );
 
-      categoryMatch:
-        boughtCategories.has(category)
-          ? 1
-          : 0,
+        return {
+          customerCode,
+          sharedItems,
+          itemCodes,
+        };
+      }
+    )
 
-      recommendationReason:
-        "New Item",
+    /* Must share at least one item */
+    .filter(
+      (customer) =>
+        customer.sharedItems > 0
+    )
+
+    /* Most similar first */
+    .sort(
+      (a, b) =>
+        b.sharedItems -
+        a.sharedItems
+    );
+
+
+/* ----------------------------------------------------
+   USE TOP SIMILAR CUSTOMERS
+
+   Maximum 50 peers prevents a very broad customer
+   population from diluting the recommendation.
+   ---------------------------------------------------- */
+
+const topSimilarCustomers =
+  similarCustomers.slice(
+    0,
+    50
+  );
+
+const topSimilarCodes =
+  new Set(
+    topSimilarCustomers.map(
+      (customer) =>
+        customer.customerCode
+    )
+  );
+
+
+/* ----------------------------------------------------
+   COUNT HOW MANY SIMILAR CUSTOMERS BOUGHT EACH ITEM
+   ---------------------------------------------------- */
+
+const candidateStats = {};
+
+peerTransactions.forEach((row) => {
+
+  const customerCode =
+    String(
+      row.customer_code || ""
+    ).trim();
+
+  if (
+    !topSimilarCodes.has(
+      customerCode
+    )
+  ) {
+    return;
+  }
+
+  if (
+    Number(row.sales_amount || 0) <= 0
+  ) {
+    return;
+  }
+
+  const itemCode =
+    normalizeCode(
+      row.item_code
+    );
+
+  if (!itemCode) {
+    return;
+  }
+
+
+  /* Customer already buys this item */
+
+  if (
+    selectedBoughtCodes.has(
+      itemCode
+    )
+  ) {
+    return;
+  }
+
+
+  if (!candidateStats[itemCode]) {
+
+    candidateStats[itemCode] = {
+      customerCodes: new Set(),
+      totalSales: 0,
+      latestDate: null,
     };
 
-  })
+  }
 
 
-  /* Prefer customer's existing categories */
+  candidateStats[
+    itemCode
+  ].customerCodes.add(
+    customerCode
+  );
 
-  .sort((a, b) => {
 
-    if (
-      b.categoryMatch !==
-      a.categoryMatch
-    ) {
-      return (
-        b.categoryMatch -
-        a.categoryMatch
-      );
-    }
-
-    return a.item_name.localeCompare(
-      b.item_name
+  candidateStats[
+    itemCode
+  ].totalSales +=
+    Number(
+      row.sales_amount || 0
     );
 
-  })
 
+  const txDate =
+    row.transaction_date;
 
-  .slice(0, 3);
-      console.log("NEW ITEM CHECK", {
-  masterItems: itemMaster?.length || 0,
-  purchasedItems: purchasedItemCodes.size,
-  availableNewItems: (itemMaster || []).filter((item) => {
-    const code = normalizeCode(item.item_code);
+  if (
+    txDate &&
+    (
+      !candidateStats[itemCode]
+        .latestDate ||
+      txDate >
+        candidateStats[itemCode]
+          .latestDate
+    )
+  ) {
+    candidateStats[
+      itemCode
+    ].latestDate =
+      txDate;
+  }
 
-    return (
-      code &&
-      item.is_active !== false &&
-      !isDoNotUseItem(item.item_name) &&
-      !purchasedItemCodes.has(code)
-    );
-  }).length,
-  suggestions: newItems.length,
 });
+
+
+/* ----------------------------------------------------
+   MATCH CANDIDATES TO ITEM MASTER
+   ---------------------------------------------------- */
+
+const newItems =
+  (itemMaster || [])
+
+    .map((item) => {
+
+      const code =
+        normalizeCode(
+          item.item_code
+        );
+
+      const stats =
+        candidateStats[
+          code
+        ];
+
+      if (!stats) {
+        return null;
+      }
+
+
+      if (
+        isDoNotUseItem(
+          item.item_name
+        )
+      ) {
+        return null;
+      }
+
+
+      if (
+        item.is_active === false
+      ) {
+        return null;
+      }
+
+
+      return {
+
+        ...item,
+
+        similarCustomerCount:
+          stats.customerCodes.size,
+
+        peerSales:
+          stats.totalSales,
+
+        peerLatestDate:
+          stats.latestDate,
+
+        recommendationReason:
+          `Bought by ${stats.customerCodes.size} similar customers`,
+
+      };
+
+    })
+
+    .filter(Boolean)
+
+
+    /* ------------------------------------------------
+       PRIMARY RANKING:
+       MOST SIMILAR CUSTOMERS BUYING ITEM
+       ------------------------------------------------ */
+
+    .sort((a, b) => {
+
+      if (
+        b.similarCustomerCount !==
+        a.similarCustomerCount
+      ) {
+        return (
+          b.similarCustomerCount -
+          a.similarCustomerCount
+        );
+      }
+
+
+      /* Tie breaker = peer sales */
+
+      if (
+        b.peerSales !==
+        a.peerSales
+      ) {
+        return (
+          b.peerSales -
+          a.peerSales
+        );
+      }
+
+
+      return String(
+        a.item_name || ""
+      ).localeCompare(
+        String(
+          b.item_name || ""
+        )
+      );
+
+    })
+
+    .slice(0, 3);
 
       /* ====================================================
          2. NOT BOUGHT SINCE LONG
@@ -4383,7 +4625,7 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
                                         "newItems" && (
 
                                         <span className="auditQuickBadge auditQuickBadgeNew">
-                                          Never bought
+                                   {item.recommendationReason}
                                         </span>
 
                                       )}

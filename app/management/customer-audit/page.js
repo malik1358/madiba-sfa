@@ -468,9 +468,7 @@ const [
 
     setTransactions([]);
     setPeerTransactions([]);
-    console.log("PEER ROWS", peerData?.length);
-console.log("ACTIVE BATCH", activeBatchId);
-console.log("CUSTOMER", customer.customer_code);
+ 
 
     setLoadingCustomer(true);
 
@@ -599,6 +597,10 @@ const {
 if (peerError) {
   throw peerError;
 }
+      console.log("ACTIVE BATCH", activeBatchId);
+console.log("CUSTOMER", customer.customer_code);
+console.log("CUSTOMER SALES", data?.length);
+console.log("PEER SALES", peerData?.length);
 
 setPeerTransactions(peerData || []);
     

@@ -591,30 +591,30 @@ const [
          ---------------------------------------------------- */
 
       const {
-        data: peerData,
-        error: peerError,
-      } = await supabase
-        .from("sales_raw")
-        .select(`
-          customer_code,
-          item_code,
-          item_name,
-          category,
-          transaction_date,
-          sales_amount
-        `)
-        .eq(
-          "import_batch_id",
-          activeBatchId
-        )
-        .neq(
-          "customer_code",
-          customer.customer_code
-        )
-        .gt(
-          "sales_amount",
-          0
-        );
+  data: peerData,
+  error: peerError,
+} = await supabase
+  .from("sales_raw")
+  .select(`
+    customer_code,
+    item_code,
+    item_name,
+    category,
+    transaction_date,
+    sales_amount
+  `)
+  .eq(
+    "import_batch_id",
+    activeBatchId
+  )
+  .neq(
+    "customer_code",
+    customer.customer_code
+  )
+  .gt(
+    "sales_amount",
+    0
+  );
 
       if (peerError) {
 

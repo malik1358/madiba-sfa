@@ -467,6 +467,7 @@ const [
     );
 
     setTransactions([]);
+    setPeerTransactions([]);
 
     setLoadingCustomer(true);
 
@@ -569,8 +570,71 @@ const [
             }
           );
 
-      if (salesError) {
-        throw salesError;
+        /* ----------------------------------------------------
+         SAVE SELECTED CUSTOMER SALES
+         ---------------------------------------------------- */
+
+      setTransactions(
+        data || []
+      );
+
+
+      /* ----------------------------------------------------
+         PEER CUSTOMER SALES
+
+         IMPORTANT:
+         These are OTHER customers from the SAME active
+         sales snapshot.
+
+         Used only for similar-customer recommendations.
+         They do NOT go into transactions.
+         ---------------------------------------------------- */
+
+      const {
+        data: peerData,
+        error: peerError,
+      } = await supabase
+        .from("sales_raw")
+        .select(`
+          customer_code,
+          item_code,
+          item_name,
+          category,
+          transaction_date,
+          sales_amount
+        `)
+        .eq(
+          "import_batch_id",
+          activeBatchId
+        )
+        .neq(
+          "customer_code",
+          customer.customer_code
+        )
+        .gt(
+          "sales_amount",
+          0
+        );
+
+      if (peerError) {
+
+        console.error(
+          "PEER SALES LOAD ERROR:",
+          peerError
+        );
+
+        setPeerTransactions([]);
+
+      } else {
+
+        console.log(
+          "PEER TRANSACTIONS LOADED:",
+          peerData?.length || 0
+        );
+
+        setPeerTransactions(
+          peerData || []
+        );
       }
 
 

@@ -468,6 +468,9 @@ const [
 
     setTransactions([]);
     setPeerTransactions([]);
+    console.log("PEER ROWS", peerData?.length);
+console.log("ACTIVE BATCH", activeBatchId);
+console.log("CUSTOMER", customer.customer_code);
 
     setLoadingCustomer(true);
 
@@ -578,7 +581,26 @@ const [
         data || []
       );
 
+const {
+  data: peerData,
+  error: peerError,
+} = await supabase
+  .from("sales_raw")
+  .select(`
+    customer_code,
+    item_code,
+    item_name,
+    category,
+    sales_amount,
+    transaction_date
+  `)
+  .eq("import_batch_id", activeBatchId);
 
+if (peerError) {
+  throw peerError;
+}
+
+setPeerTransactions(peerData || []);
     
       /* ----------------------------------------------------
          LOAD EXISTING DRAFT
@@ -2380,10 +2402,11 @@ const newItems =
       };
 
     }, [
-      analytics,
-      transactions,
-      itemMaster,
-    ]);
+  analytics,
+  transactions,
+  peerTransactions,
+  itemMaster,
+]);
   const quickOrderAllItems =
     useMemo(
       () => [

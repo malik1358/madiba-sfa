@@ -573,9 +573,7 @@ const [
         throw salesError;
       }
 
-    setTransactions(
-  transactionData || []
-);
+
       /* ----------------------------------------------------
    PEER CUSTOMER TRANSACTIONS
    Used to find customers with similar buying patterns

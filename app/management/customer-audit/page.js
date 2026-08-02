@@ -4997,6 +4997,33 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
           }
 
         `}</style>
+@media print {
+
+  body * {
+    visibility: hidden;
+  }
+
+  .auditOrderOverlay,
+  .auditOrderOverlay * {
+    visibility: visible;
+  }
+
+  .auditOrderOverlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: white;
+  }
+
+  .auditOrderClose,
+  .auditOrderReviewActions,
+  .auditOrderBar,
+  .auditDraftNotice {
+    display: none !important;
+  }
+
+}
         {/* ==================================================
             ORDER ACTION BAR
             ================================================== */}
@@ -5022,6 +5049,31 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
                 {qtyFormat(
                   orderSummary.totalQuantity
                 )}{" "}
+<br />
+
+<strong>
+
+SAR{" "}
+
+{orderItems
+  .reduce(
+
+    (sum, item) =>
+
+      sum +
+
+      Number(
+        priceList[item.item_code] || 0
+      ) *
+
+      Number(item.order_quantity),
+
+    0
+
+  )
+  .toFixed(2)}
+
+</strong>
                 units
               </strong>
 
@@ -5196,17 +5248,27 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
                       </div>
 
 
-                      <div className="auditOrderReviewRate">
+                    <div className="auditOrderReviewRate">
 
-                        <span>
-                          Rate
-                        </span>
+  <span>
+    Rate
+  </span>
 
-                        <strong>
-                          —
-                        </strong>
+  <strong
+    style={{
+      color: priceList[item.item_code]
+        ? "#0f766e"
+        : "red",
+    }}
+  >
+    {priceList[item.item_code]
+      ? `SAR ${Number(
+          priceList[item.item_code]
+        ).toFixed(2)}`
+      : "PRICE NOT FOUND"}
+  </strong>
 
-                      </div>
+</div>
 
 
                       <div className="auditOrderReviewQty">

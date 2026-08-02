@@ -1,3 +1,6 @@
+const PRICE_API =
+  "https://script.google.com/macros/s/AKfycbzXPREoz0tUgern-5LhpEPBMY_ed2hO1fgYpIVfzG2-BU9HbjOklKCBFVMtsw64Uff5/exec";
+
 "use client";
 const PAGE_VERSION = "Quick Order V5";
 
@@ -227,6 +230,8 @@ const [
   setItemMasterStatus,
 ] = useState("Not loaded");
 
+  const [priceList, setPriceList] =
+  useState({});
 
   /* ========================================================
      CATEGORY DRILL DOWN

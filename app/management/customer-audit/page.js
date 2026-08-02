@@ -403,7 +403,22 @@ const [
       );
 
     } finally {
+try {
 
+  const response = await fetch(
+    PRICE_API
+  );
+
+  const prices =
+    await response.json();
+
+  setPriceList(prices);
+
+} catch (e) {
+
+  console.error(e);
+
+}
       setLoading(false);
 
     }

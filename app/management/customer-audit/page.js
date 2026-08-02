@@ -414,6 +414,9 @@ try {
     await response.json();
 
   setPriceList(prices);
+  console.log(prices["A003234"]);
+console.log(prices["A004108"]);
+console.log(Object.keys(prices).length);
 
 } catch (e) {
 
@@ -2734,11 +2737,12 @@ const newItems =
              * will be connected later.
              */
 
-            rate:
-              null,
+           rate:
+  Number(priceList[item.item_code] || 0),
 
-            line_value:
-              null,
+line_value:
+  Number(priceList[item.item_code] || 0) *
+  Number(item.order_quantity),
 
           })
         );
@@ -4278,10 +4282,14 @@ const newItems =
                                                     rowSpan="2"
                                                     className="auditRateCell"
                                                   >
-                                                    <span className="auditRateBlank">
-                                                      —
-                                                    </span>
-                                                  </td>
+                                                <span>
+
+  {priceList[item.item_code]
+    ? `SAR ${Number(priceList[item.item_code]).toFixed(2)}`
+    : "—"}
+
+</span>
+  </td>
 
 
                                                   {/* ORDER QTY */}
@@ -4715,10 +4723,13 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
 
 
                                     {/* RATE BLANK */}
+<td className="auditQuickRate">
 
-                                    <td className="auditQuickRate">
-                                      —
-                                    </td>
+  {priceList[item.item_code]
+    ? `SAR ${Number(priceList[item.item_code]).toFixed(2)}`
+    : "—"}
+
+</td>
 
 
                                     {/* ORDER QTY */}
@@ -5303,18 +5314,6 @@ SAR{" "}
     Total
   </span>
 
-  <strong>
-
-    SAR{" "}
-
-    {(
-      Number(
-        priceList[item.item_code] || 0
-      ) *
-      Number(item.order_quantity || 0)
-    ).toFixed(2)}
-
-  </strong>
 
 </div>
                       </div>

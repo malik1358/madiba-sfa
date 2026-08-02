@@ -2887,7 +2887,14 @@ const newItems =
     }
   }
 
-
+<button
+  type="button"
+  className="auditSaveDraftButton"
+  onClick={() => window.print()}
+>
+  Print / Save PDF
+</button>
+  
   /* ========================================================
      BACK TO CUSTOMER LIST
      ======================================================== */

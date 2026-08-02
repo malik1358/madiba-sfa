@@ -5254,7 +5254,26 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
                           </button>
 
                         </div>
+<div className="auditOrderReviewTotal">
 
+  <span>
+    Total
+  </span>
+
+  <strong>
+
+    SAR{" "}
+
+    {(
+      Number(
+        priceList[item.item_code] || 0
+      ) *
+      Number(item.order_quantity || 0)
+    ).toFixed(2)}
+
+  </strong>
+
+</div>
                       </div>
 
                     </div>
@@ -5263,7 +5282,37 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
                 )}
 
               </div>
+<div
+  className="auditOrderGrandTotal"
+>
 
+  <strong>
+
+    Grand Total :
+
+    {" "}
+
+    SAR{" "}
+
+    {orderItems
+      .reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            priceList[
+              item.item_code
+            ] || 0
+          ) *
+            Number(
+              item.order_quantity
+            ),
+        0
+      )
+      .toFixed(2)}
+
+  </strong>
+
+</div>
 
               {/* ============================================
                   ORDER REVIEW ACTIONS
@@ -5322,11 +5371,12 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
             <span>
               Draft Order
             </span>
-
-            <strong>
-              #{draftOrderId}
-            </strong>
-
+<strong>
+  SAR{" "}
+  {Number(
+    priceList[item.item_code] || 0
+  ).toFixed(2)}
+</strong>
             <small>
               Changes are not final until the order is submitted.
             </small>

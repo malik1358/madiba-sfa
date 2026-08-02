@@ -4997,33 +4997,7 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
           }
 
         `}</style>
-@media print {
 
-  body * {
-    visibility: hidden;
-  }
-
-  .auditOrderOverlay,
-  .auditOrderOverlay * {
-    visibility: visible;
-  }
-
-  .auditOrderOverlay {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    background: white;
-  }
-
-  .auditOrderClose,
-  .auditOrderReviewActions,
-  .auditOrderBar,
-  .auditDraftNotice {
-    display: none !important;
-  }
-
-}
         {/* ==================================================
             ORDER ACTION BAR
             ================================================== */}

@@ -409,7 +409,7 @@ export default function PendingOrdersPage() {
                 >
                   {downloadingPdf ? "Generating PDF..." : "Regenerate PDF"}
                 </button>
-                <Link href="/management/new-order" className="modulePrimaryButton">Open Order Workflow</Link>
+                <Link href="/management/new-order" className="moduleInlineButton">Open Order Workflow</Link>
                 <Link href="/management/customer-audit" className="moduleInlineButton">Go to Customer Audit</Link>
               </div>
             </div>

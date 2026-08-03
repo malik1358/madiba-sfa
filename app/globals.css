@@ -1,4 +1,248 @@
 /* ==========================================================
+   BASE APP SHELL
+   ========================================================== */
+
+body {
+  margin: 0;
+  background: #f3f7f8;
+  color: #062f3a;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.loginPage {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: linear-gradient(135deg, #0b5364 0%, #0b6d7d 100%);
+}
+
+.loginCard {
+  width: min(480px, 100%);
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.18);
+  padding: 32px;
+}
+
+.dashboardPage {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f3f7f8 0%, #eaf2f4 100%);
+  padding: 24px;
+}
+
+.dashboardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 auto 24px;
+  max-width: 1120px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.logo {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: #0b5364;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 24px;
+}
+
+.brand h1 {
+  margin: 0;
+  color: #073f4c;
+  font-size: 24px;
+}
+
+.brand p {
+  margin: 4px 0 0;
+  color: #6b8188;
+}
+
+.logoutButton,
+.languageSelector button,
+.loginButton {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  cursor: pointer;
+  background: #0b5364;
+  color: #ffffff;
+}
+
+.logoutButton:hover,
+.languageSelector button:hover,
+.loginButton:hover {
+  background: #0a4350;
+}
+
+.dashboardContent {
+  max-width: 1120px;
+  margin: 0 auto;
+  display: grid;
+  gap: 20px;
+}
+
+.dashboardWelcome {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 10px 30px rgba(7, 63, 76, 0.08);
+}
+
+.dashboardWelcome h2 {
+  margin: 8px 0;
+  color: #073f4c;
+}
+
+.roleBadge {
+  display: inline-block;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: #e8f1f3;
+  color: #0b5364;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.languageDashboard {
+  display: flex;
+  gap: 10px;
+}
+
+.languageDashboard button {
+  background: #ffffff;
+  color: #0b5364;
+  border: 1px solid #d5e3e6;
+}
+
+.languageDashboard button.active {
+  background: #0b5364;
+  color: #ffffff;
+}
+
+.sectionTitle {
+  margin: 8px 0 16px;
+  color: #073f4c;
+  font-size: 20px;
+}
+
+.menuGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.menuCard {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 20px;
+  box-shadow: 0 8px 24px rgba(7, 63, 76, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menuCard strong {
+  color: #073f4c;
+  font-size: 16px;
+}
+
+.menuCard span {
+  color: #6b8188;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.menuIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: #e8f1f3;
+  font-size: 20px;
+}
+
+.adminCard {
+  border: 1px solid #d7e7ea;
+}
+
+.loadingText {
+  text-align: center;
+  color: #0b5364;
+  font-weight: 700;
+}
+
+.languageSelector {
+  display: flex;
+  gap: 10px;
+  margin: 16px 0 20px;
+}
+
+.welcome {
+  margin-bottom: 20px;
+}
+
+.welcome h2 {
+  margin: 0 0 8px;
+  color: #073f4c;
+}
+
+.welcome p {
+  margin: 0;
+  color: #6b8188;
+}
+
+.errorMessage {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff1f1;
+  color: #a42c2c;
+}
+
+.footer {
+  margin-top: 18px;
+  text-align: center;
+  color: #8e9fa4;
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .menuGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* ==========================================================
    CUSTOMER AUDIT MATRIX V3
    YEAR + MONTH + MERGED CATEGORY + METRIC
    ========================================================== */

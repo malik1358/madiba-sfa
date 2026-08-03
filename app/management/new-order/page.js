@@ -162,47 +162,153 @@ export default function NewOrderPage() {
         const { jsPDF } = await import("jspdf");
         const doc = new jsPDF({ unit: "pt", format: "a4" });
 
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const marginX = 40;
+        const marginTop = 38;
+        const contentWidth = pageWidth - marginX * 2;
+        const tableStartX = marginX;
+        const vatRate = 0.15;
+        const subtotal = Number(snapshot.grandTotal || 0);
+        const vatAmount = subtotal * vatRate;
+        const totalWithVat = subtotal + vatAmount;
+
+        const columns = [
+          { key: "item_code", label: "Item Code", width: 88, align: "left" },
+          { key: "item_name", label: "Item Name", width: 222, align: "left" },
+          { key: "quantity", label: "Qty", width: 60, align: "right" },
+          { key: "rate", label: "Rate (Excl. VAT)", width: 96, align: "right" },
+          { key: "lineTotal", label: "Line Total", width: 89, align: "right" },
+        ];
+
+        function drawCellText(text, x, y, width, align = "left") {
+          if (align === "right") {
+            doc.text(text, x + width - 6, y, { align: "right" });
+            return;
+          }
+          doc.text(text, x + 6, y);
+        }
+
+        function drawTableHeader(startY) {
+          let colX = tableStartX;
+          doc.setFillColor(239, 244, 245);
+          doc.rect(tableStartX, startY, contentWidth, 24, "F");
+          doc.setFont(undefined, "bold");
+          doc.setFontSize(10);
+
+          columns.forEach((column) => {
+            doc.rect(colX, startY, column.width, 24);
+            drawCellText(column.label, colX, startY + 15, column.width, column.align);
+            colX += column.width;
+          });
+
+          doc.setFont(undefined, "normal");
+          return startY + 24;
+        }
+
+        doc.setDrawColor(72, 110, 120);
+        doc.setLineWidth(1);
+        doc.roundedRect(marginX, marginTop, contentWidth, 92, 6, 6);
+
         doc.setFontSize(18);
-        doc.text("MADIBA SFA - Order Review", 40, 44);
-
-        doc.setFontSize(11);
-        doc.text(`Order ID: ${snapshot.orderId}`, 40, 70);
-        doc.text(`Status: ${snapshot.statusLabel}`, 40, 88);
-        doc.text(`Date: ${new Date(snapshot.savedAtIso).toLocaleString("en-GB")}`, 40, 106);
-
-        doc.text(`Customer: ${snapshot.customerCode} - ${snapshot.customerName}`, 40, 126);
-        doc.text(`Salesman: ${snapshot.salesmanCode || "-"}`, 40, 144);
-
-        doc.text(`Items: ${snapshot.itemCount}`, 40, 166);
-        doc.text(`Total Qty: ${qtyFormat(snapshot.totalQuantity)}`, 150, 166);
-        doc.text(`Grand Total: ${formatMoney(snapshot.grandTotal)}`, 280, 166);
-
-        let y = 192;
-        doc.setFontSize(10);
         doc.setFont(undefined, "bold");
-        doc.text("Item Code", 40, y);
-        doc.text("Item Name", 120, y);
-        doc.text("Qty", 340, y);
-        doc.text("Rate", 390, y);
-        doc.text("Line Total", 470, y);
+        doc.text("MADIBA SFA", marginX + 12, marginTop + 24);
+        doc.setFontSize(12);
+        doc.text("SALES ORDER", marginX + 12, marginTop + 44);
+
         doc.setFont(undefined, "normal");
-        y += 8;
-        doc.line(40, y, 555, y);
-        y += 14;
+        doc.setFontSize(10);
+        doc.text(`Order ID: ${snapshot.orderId}`, marginX + 12, marginTop + 64);
+        doc.text(`Status: ${snapshot.statusLabel}`, marginX + 12, marginTop + 78);
+
+        const rightColX = marginX + contentWidth - 210;
+        doc.text(`Date: ${new Date(snapshot.savedAtIso).toLocaleString("en-GB")}`, rightColX, marginTop + 64);
+        doc.text(`Salesman: ${snapshot.salesmanCode || "-"}`, rightColX, marginTop + 78);
+
+        doc.setLineWidth(0.8);
+        doc.roundedRect(marginX, marginTop + 104, contentWidth, 56, 5, 5);
+        doc.setFont(undefined, "bold");
+        doc.text("Customer", marginX + 12, marginTop + 124);
+        doc.setFont(undefined, "normal");
+        const customerText = `${snapshot.customerCode} - ${snapshot.customerName}`;
+        const customerLines = doc.splitTextToSize(customerText, contentWidth - 24);
+        const customerLine1 = Array.isArray(customerLines) ? customerLines[0] : customerText;
+        const customerLine2 = Array.isArray(customerLines) && customerLines.length > 1 ? customerLines[1] : "";
+        doc.text(customerLine1, marginX + 12, marginTop + 140);
+        if (customerLine2) {
+          doc.text(customerLine2, marginX + 12, marginTop + 152);
+        }
+
+        doc.roundedRect(marginX, marginTop + 172, contentWidth, 40, 5, 5);
+        doc.setFont(undefined, "bold");
+        doc.text("Items", marginX + 12, marginTop + 188);
+        doc.text("Total Qty", marginX + 145, marginTop + 188);
+        doc.text("Subtotal", marginX + 282, marginTop + 188);
+        doc.text("VAT 15%", marginX + 398, marginTop + 188);
+        doc.text("Total Incl. VAT", marginX + 475, marginTop + 188);
+        doc.setFont(undefined, "normal");
+        doc.text(String(snapshot.itemCount), marginX + 12, marginTop + 202);
+        doc.text(qtyFormat(snapshot.totalQuantity), marginX + 145, marginTop + 202);
+        doc.text(formatMoney(subtotal), marginX + 282, marginTop + 202);
+        doc.text(formatMoney(vatAmount), marginX + 398, marginTop + 202);
+        doc.text(formatMoney(totalWithVat), marginX + 475, marginTop + 202);
+
+        let y = drawTableHeader(marginTop + 226);
+        doc.setFontSize(10);
 
         snapshot.lines.forEach((line) => {
-          if (y > 760) {
+          const rowValues = {
+            item_code: String(line.item_code || "-"),
+            item_name: String(line.item_name || "-"),
+            quantity: String(line.quantity),
+            rate: formatMoney(line.rate),
+            lineTotal: formatMoney(line.lineTotal),
+          };
+
+          const itemNameCol = columns.find((column) => column.key === "item_name");
+          const wrappedName = doc.splitTextToSize(rowValues.item_name, (itemNameCol?.width || 200) - 12);
+          const wrappedLines = Array.isArray(wrappedName) ? wrappedName : [rowValues.item_name];
+          const rowHeight = Math.max(24, wrappedLines.length * 12 + 8);
+
+          if (y + rowHeight > pageHeight - 110) {
             doc.addPage();
-            y = 44;
+            y = drawTableHeader(marginTop);
           }
 
-          doc.text(String(line.item_code || "-"), 40, y);
-          doc.text(String(line.item_name || "-").slice(0, 40), 120, y);
-          doc.text(String(line.quantity), 340, y);
-          doc.text(formatMoney(line.rate), 390, y);
-          doc.text(formatMoney(line.lineTotal), 470, y);
-          y += 18;
+          let colX = tableStartX;
+          columns.forEach((column) => {
+            doc.rect(colX, y, column.width, rowHeight);
+
+            if (column.key === "item_name") {
+              wrappedLines.forEach((nameLine, index) => {
+                drawCellText(nameLine, colX, y + 14 + index * 12, column.width, column.align);
+              });
+            } else {
+              drawCellText(rowValues[column.key], colX, y + 15, column.width, column.align);
+            }
+
+            colX += column.width;
+          });
+
+          y += rowHeight;
         });
+
+        const summaryBoxWidth = 220;
+        const summaryX = pageWidth - marginX - summaryBoxWidth;
+        const summaryY = Math.min(y + 16, pageHeight - 88);
+        doc.roundedRect(summaryX, summaryY, summaryBoxWidth, 68, 4, 4);
+        doc.setFont(undefined, "normal");
+        doc.text("Subtotal (Excl. VAT)", summaryX + 10, summaryY + 18);
+        doc.text(formatMoney(subtotal), summaryX + summaryBoxWidth - 10, summaryY + 18, { align: "right" });
+        doc.text("VAT @ 15%", summaryX + 10, summaryY + 34);
+        doc.text(formatMoney(vatAmount), summaryX + summaryBoxWidth - 10, summaryY + 34, { align: "right" });
+        doc.setFont(undefined, "bold");
+        doc.text("Total (Incl. VAT)", summaryX + 10, summaryY + 54);
+        doc.text(formatMoney(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 54, { align: "right" });
+        doc.setFont(undefined, "normal");
+
+        doc.setFontSize(9);
+        doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 28);
 
         const safeCustomer = String(snapshot.customerCode || "customer").replace(/[^a-zA-Z0-9_-]/g, "_");
         const safeDate = snapshot.savedAtIso.slice(0, 19).replace(/[:T]/g, "-");

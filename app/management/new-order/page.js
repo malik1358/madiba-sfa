@@ -46,6 +46,16 @@ function readAny(source, keys) {
   return "";
 }
 
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
+function hasMeaningfulValue(value) {
+  const text = normalizeText(value);
+  if (!text) return false;
+  return !["UNCLASSIFIED", "N/A", "NA", "-"] .includes(text.toUpperCase());
+}
+
 function isRowLike(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
@@ -233,19 +243,28 @@ export default function NewOrderPage() {
       if (!existing) {
         itemMap.set(code, {
           item_code: code,
-          item_name: String(sheetItem.item_name || code).trim(),
-          category: String(sheetItem.category || "Unclassified").trim() || "Unclassified",
+          item_name: normalizeText(sheetItem.item_name) || code,
+          category: normalizeText(sheetItem.category) || "Unclassified",
           source: "PRICE_SHEET_ONLY",
         });
         return;
       }
 
-      const nextName = String(existing.item_name || "").trim() || String(sheetItem.item_name || "").trim() || code;
-      const nextCategory = String(existing.category || "").trim() || String(sheetItem.category || "").trim() || "Unclassified";
+      const existingName = normalizeText(existing.item_name);
+      const sheetName = normalizeText(sheetItem.item_name);
+      const existingCategory = normalizeText(existing.category);
+      const sheetCategory = normalizeText(sheetItem.category);
+
+      const nextName = hasMeaningfulValue(existingName) ? existingName : (sheetName || code);
+      const nextCategory = hasMeaningfulValue(sheetCategory)
+        ? sheetCategory
+        : (hasMeaningfulValue(existingCategory) ? existingCategory : "Unclassified");
+
       itemMap.set(code, {
         ...existing,
         item_name: nextName,
         category: nextCategory,
+        source: existing.source === "PRICE_SHEET_ONLY" || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : existing.source,
       });
     });
 

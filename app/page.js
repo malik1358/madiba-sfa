@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "./lib/supabase";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
 
@@ -16,6 +17,7 @@ export default function Home() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const router = useRouter();
   const ar = language === "ar";
 
   useEffect(() => {
@@ -137,6 +139,10 @@ export default function Home() {
     setPassword("");
   }
 
+  function handleNavigate(path) {
+    router.push(path);
+  }
+
   if (loading) {
     return (
       <main className="loginPage">
@@ -238,81 +244,75 @@ export default function Home() {
           </h3>
 
           <div className="menuGrid">
-
-            <div className="menuCard">
-              <div className="menuIcon">📍</div>
-              <strong>
-                {ar ? "يومي" : "My Day"}
-              </strong>
-              <span>
-                {ar
+            {[
+              {
+                icon: "📍",
+                title: ar ? "يومي" : "My Day",
+                subtitle: ar
                   ? "زيارات ومتابعات اليوم"
-                  : "Today's visits & follow-ups"}
-              </span>
-            </div>
-
-            <div className="menuCard">
-              <div className="menuIcon">👥</div>
-              <strong>
-                {ar ? "عملائي" : "My Customers"}
-              </strong>
-              <span>
-                {ar
+                  : "Today's visits & follow-ups",
+                href: "/management",
+              },
+              {
+                icon: "👥",
+                title: ar ? "عملائي" : "My Customers",
+                subtitle: ar
                   ? "بحث وسجل العملاء"
-                  : "Search & customer history"}
-              </span>
-            </div>
-
-            <div className="menuCard">
-              <div className="menuIcon">🛒</div>
-              <strong>
-                {ar ? "طلب جديد" : "New Order"}
-              </strong>
-              <span>
-                {ar
+                  : "Search & customer history",
+                href: "/management/customer-audit",
+              },
+              {
+                icon: "🛒",
+                title: ar ? "طلب جديد" : "New Order",
+                subtitle: ar
                   ? "إنشاء طلب للعميل"
-                  : "Create customer order"}
-              </span>
-            </div>
-
-            <div className="menuCard">
-              <div className="menuIcon">➕</div>
-              <strong>
-                {ar ? "عميل جديد" : "New Customer"}
-              </strong>
-              <span>
-                {ar
+                  : "Create customer order",
+                href: "/management/upload",
+              },
+              {
+                icon: "➕",
+                title: ar ? "عميل جديد" : "New Customer",
+                subtitle: ar
                   ? "تسجيل عميل محتمل"
-                  : "Register a new prospect"}
-              </span>
-            </div>
-
-            <div className="menuCard">
-              <div className="menuIcon">🎯</div>
-              <strong>
-                {ar ? "أدائي" : "My Performance"}
-              </strong>
-              <span>
-                {ar
+                  : "Register a new prospect",
+                href: "/management",
+              },
+              {
+                icon: "🎯",
+                title: ar ? "أدائي" : "My Performance",
+                subtitle: ar
                   ? "الأهداف والنتائج"
-                  : "KRA & KPI progress"}
-              </span>
-            </div>
+                  : "KRA & KPI progress",
+                href: "/management",
+              },
+            ].map((item) => (
+              <button
+                key={item.title}
+                type="button"
+                className="menuCard"
+                onClick={() => handleNavigate(item.href)}
+              >
+                <div className="menuIcon">{item.icon}</div>
+                <strong>{item.title}</strong>
+                <span>{item.subtitle}</span>
+              </button>
+            ))}
 
             {profile.role === "admin" && (
-              <div className="menuCard adminCard">
+              <button
+                type="button"
+                className="menuCard adminCard"
+                onClick={() => handleNavigate("/management")}
+              >
                 <div className="menuIcon">⚙️</div>
-                <strong>
-                  {ar ? "الإدارة" : "Management"}
-                </strong>
+                <strong>{ar ? "الإدارة" : "Management"}</strong>
                 <span>
                   {ar
                     ? "لوحة تحكم الإدارة"
                     : "Management control panel"}
                 </span>
-              </div>
+              </button>
             )}
-
           </div>
 
         </section>

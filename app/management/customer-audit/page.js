@@ -417,6 +417,9 @@ try {
     await response.json();
 
   setPriceList(prices);
+  console.log("PRICE COUNT", Object.keys(prices).length);
+console.log("PRICE A003234", prices["A003234"]);
+console.log("PRICE A004108", prices["A004108"]);
   console.log(prices["A003234"]);
 console.log(prices["A004108"]);
 console.log(Object.keys(prices).length);
@@ -4727,13 +4730,10 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
 
                                     {/* RATE BLANK */}
 <td className="auditQuickRate">
-
   {priceList[item.item_code]
     ? `SAR ${Number(priceList[item.item_code]).toFixed(2)}`
-    : "—"}
-
+    : "NOT FOUND"}
 </td>
-
 
                                     {/* ORDER QTY */}
 

@@ -267,7 +267,7 @@ export default function Home() {
                 subtitle: ar
                   ? "إنشاء طلب للعميل"
                   : "Create customer order",
-                href: "/management/upload",
+                href: "/management/new-order",
               },
               {
                 icon: "➕",

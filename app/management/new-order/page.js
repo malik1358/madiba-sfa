@@ -105,6 +105,14 @@ function looksLikeItemName(value) {
   return text.length >= 3;
 }
 
+function scoreSheetName(value) {
+  const text = normalizeText(value);
+  if (!text) return -1;
+  if (looksLikeItemCode(text)) return -1;
+  if (/^\d+(\.\d+)?$/.test(text)) return -1;
+  return text.length;
+}
+
 function parsePricePayload(payload) {
   const priceMap = {};
   const sheetItems = [];
@@ -146,41 +154,27 @@ function parsePricePayload(payload) {
         const rateIndex = sheetColumnIndex("D");
 
         value.forEach((row) => {
-          const codeCandidates = [];
+          const explicitCode = itemCodeIndex >= 0 ? normalizeCode(sheetCell(row, itemCodeIndex)) : "";
+          const codeCandidates = row.filter((cell) => looksLikeItemCode(cell)).map((cell) => normalizeCode(cell));
+          const code = explicitCode || codeCandidates.find(Boolean) || "";
 
-          if (itemCodeIndex >= 0) {
-            codeCandidates.push(sheetCell(row, itemCodeIndex));
-          }
+          const explicitName = itemNameIndex >= 0 ? normalizeText(sheetCell(row, itemNameIndex)) : "";
+          const nameCandidate = explicitName || row
+            .map((cell, index) => ({ cell, index }))
+            .filter(({ cell, index }) => index !== itemCodeIndex && looksLikeItemName(cell))
+            .sort((a, b) => scoreSheetName(b.cell) - scoreSheetName(a.cell))[0]?.cell || "";
+          const name = normalizeText(nameCandidate) && normalizeCode(nameCandidate) !== code ? normalizeText(nameCandidate) : "";
 
-          row.forEach((cell) => {
-            if (looksLikeItemCode(cell)) {
-              codeCandidates.push(cell);
-            }
-          });
-
-          const code = normalizeCode(codeCandidates.find(Boolean));
-
-          const nameCandidates = [];
-          if (itemNameIndex >= 0) {
-            nameCandidates.push(sheetCell(row, itemNameIndex));
-          }
-
-          row.forEach((cell) => {
-            if (looksLikeItemName(cell)) {
-              nameCandidates.push(cell);
-            }
-          });
-
-          const name = String(nameCandidates.find((cell) => normalizeText(cell) !== code) || "").trim();
-
-          const category = String(sheetCell(row, categoryIndex) || row.find((cell) => /electronics|fridge|freezer|air conditioner|ac|window/i.test(String(cell || ""))) || "").trim();
+          const explicitCategory = categoryIndex >= 0 ? normalizeText(sheetCell(row, categoryIndex)) : "";
+          const categoryCandidate = explicitCategory || row.find((cell) => /electronics|fridge|freezer|air conditioner|ac|window/i.test(String(cell || ""))) || "";
+          const category = normalizeText(categoryCandidate);
           const rate = sheetCell(row, rateIndex) || row.find((cell) => Number.isFinite(Number(String(cell).replace(/,/g, "")))) || "";
 
           if (!code && !name) return;
 
           if (code) {
             addRate(code, rate);
-            upsertSheetItem(code, name || code, category);
+            upsertSheetItem(code, name || code, category || "Unclassified");
           }
         });
       }

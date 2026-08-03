@@ -46,6 +46,24 @@ function readAny(source, keys) {
   return "";
 }
 
+function isRowLike(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+
+  return [
+    "item_code",
+    "itemCode",
+    "code",
+    "item_name",
+    "itemName",
+    "name",
+    "category",
+    "CO",
+    "rate",
+    "price",
+    "C",
+  ].some((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
 function parsePricePayload(payload) {
   const priceMap = {};
   const sheetItems = [];
@@ -76,36 +94,54 @@ function parsePricePayload(payload) {
     priceMap[code] = rate;
   }
 
-  if (Array.isArray(payload)) {
-    payload.forEach((row) => {
-      const code = readAny(row, ["item_code", "itemCode", "code", "B", "ITEM_CODE", "Item Code"]);
-      const name = readAny(row, ["item_name", "itemName", "name", "C", "ITEM_NAME", "Item Name"]);
-      const category = readAny(row, ["category", "CO", "CATEGORY", "Category"]);
-      const rate = readAny(row, ["rate", "price", "RATE", "Price", "D"]);
+  function walk(value) {
+    if (!value) return;
+
+    if (Array.isArray(value)) {
+      value.forEach((entry) => walk(entry));
+      return;
+    }
+
+    if (typeof value !== "object") return;
+
+    if (isRowLike(value)) {
+      const code = readAny(value, ["item_code", "itemCode", "code", "B", "Item Code", "ITEM CODE"]);
+      const name = readAny(value, ["item_name", "itemName", "name", "C", "Item Name", "ITEM NAME"]);
+      const category = readAny(value, ["category", "CO", "Category", "ITEM CATEGORY", "Item Category"]);
+      const rate = readAny(value, ["rate", "price", "RATE", "Price", "D", "Selling Rate"]);
 
       if (code) {
         addRate(code, rate);
         upsertSheetItem(code, name, category);
       }
+    }
+
+    Object.entries(value).forEach(([key, entry]) => {
+      if (["priceMap", "prices", "data", "rows", "result", "items", "sheetData", "values"].includes(key)) {
+        walk(entry);
+        return;
+      }
+
+      if (typeof entry === "object") {
+        walk(entry);
+      }
     });
+  }
+
+  if (Array.isArray(payload)) {
+    walk(payload);
 
     return { priceMap, sheetItems };
   }
 
   if (payload && typeof payload === "object") {
+    walk(payload);
+
+    // If the payload is a direct code -> rate map, keep those rates too.
     Object.entries(payload).forEach(([key, value]) => {
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        const code = readAny(value, ["item_code", "itemCode", "code", "B"]) || key;
-        const name = readAny(value, ["item_name", "itemName", "name", "C"]);
-        const category = readAny(value, ["category", "CO"]);
-        const rate = readAny(value, ["rate", "price", "RATE", "D"]);
-
-        addRate(code, rate);
-        upsertSheetItem(code, name, category);
-        return;
+      if (typeof value !== "object" || value === null) {
+        addRate(key, value);
       }
-
-      addRate(key, value);
     });
   }
 

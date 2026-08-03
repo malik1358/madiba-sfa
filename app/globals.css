@@ -3150,6 +3150,7 @@ table.auditMatrix td.auditTrendSame {
   }
 
   .moduleError,
+  .moduleWarning,
   .moduleSuccess,
   .moduleHint,
   .moduleLoading {
@@ -3163,6 +3164,12 @@ table.auditMatrix td.auditTrendSame {
     background: #fff1f1;
     color: #a42c2c;
     border: 1px solid #f1caca;
+  }
+
+  .moduleWarning {
+    background: #fff8e8;
+    color: #775b13;
+    border: 1px solid #f0ddb0;
   }
 
   .moduleSuccess {

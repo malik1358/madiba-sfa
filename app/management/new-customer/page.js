@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { detectTable } from "../../lib/schemaGuards";
 
 const INITIAL_FORM = {
   customer_name: "",
@@ -25,6 +26,8 @@ export default function NewCustomerPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [schemaWarning, setSchemaWarning] = useState("");
+  const [prospectsEnabled, setProspectsEnabled] = useState(true);
   const [salesmen, setSalesmen] = useState([]);
   const [recent, setRecent] = useState([]);
   const [form, setForm] = useState(INITIAL_FORM);
@@ -49,18 +52,28 @@ export default function NewCustomerPage() {
           throw new Error("Please login again.");
         }
 
+        const prospectsCheck = await detectTable(supabase, "prospects");
+        setProspectsEnabled(prospectsCheck.available);
+        setSchemaWarning(
+          prospectsCheck.available
+            ? ""
+            : `${prospectsCheck.reason}. Create the prospects table to enable prospect registration.`
+        );
+
         const [salesmenRes, recentRes] = await Promise.all([
           supabase
             .from("profiles")
             .select("id,salesman_code,salesman_name,role")
             .in("role", ["salesman", "manager", "admin"])
             .order("salesman_name"),
-          supabase
-            .from("prospects")
-            .select("id,shop_name,owner_name,mobile,city,area,created_at,status")
-            .eq("created_by", session.user.id)
-            .order("created_at", { ascending: false })
-            .limit(10),
+          prospectsCheck.available
+            ? supabase
+                .from("prospects")
+                .select("id,shop_name,owner_name,mobile,city,area,created_at,status")
+                .eq("created_by", session.user.id)
+                .order("created_at", { ascending: false })
+                .limit(10)
+            : Promise.resolve({ data: [], error: null }),
         ]);
 
         if (salesmenRes.error) throw salesmenRes.error;
@@ -107,6 +120,11 @@ export default function NewCustomerPage() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+
+    if (!prospectsEnabled) {
+      setError("Prospect registration is disabled until the prospects table is available.");
+      return;
+    }
 
     const supabase = getSupabaseClient();
     if (!supabase) {
@@ -208,6 +226,7 @@ export default function NewCustomerPage() {
 
         {error && <div className="moduleError">{error}</div>}
         {message && <div className="moduleSuccess">{message}</div>}
+        {schemaWarning && <div className="moduleWarning">{schemaWarning}</div>}
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
@@ -279,7 +298,7 @@ export default function NewCustomerPage() {
               <textarea className="moduleTextArea" rows={4} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </label>
             <div className="moduleFieldFull">
-              <button className="modulePrimaryButton" type="submit" disabled={saving}>
+              <button className="modulePrimaryButton" type="submit" disabled={saving || !prospectsEnabled}>
                 {saving ? "Saving..." : "Save Prospect"}
               </button>
             </div>

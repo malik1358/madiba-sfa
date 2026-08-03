@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { detectTable } from "../../lib/schemaGuards";
 
 function daysBetween(date) {
   if (!date) return 0;
@@ -17,6 +18,9 @@ export default function MyDayPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [warnings, setWarnings] = useState([]);
+  const [logsEnabled, setLogsEnabled] = useState(true);
+  const [prospectsEnabled, setProspectsEnabled] = useState(true);
   const [profile, setProfile] = useState(null);
   const [summary, setSummary] = useState({
     visitsToday: 0,
@@ -43,6 +47,7 @@ export default function MyDayPage() {
 
       setLoading(true);
       setError("");
+      setWarnings([]);
 
       try {
         const {
@@ -62,14 +67,29 @@ export default function MyDayPage() {
         if (profileError) throw profileError;
         setProfile(profileData);
 
+        const [logsCheck, prospectsCheck] = await Promise.all([
+          detectTable(supabase, "daily_activity_logs"),
+          detectTable(supabase, "prospects"),
+        ]);
+
+        setLogsEnabled(logsCheck.available);
+        setProspectsEnabled(prospectsCheck.available);
+
+        const nextWarnings = [];
+        if (!logsCheck.available) {
+          nextWarnings.push(`${logsCheck.reason}. Check-in/check-out and notes are disabled.`);
+        }
+        if (!prospectsCheck.available) {
+          nextWarnings.push(`${prospectsCheck.reason}. New customers assigned metric is unavailable.`);
+        }
+        setWarnings(nextWarnings);
+
         const [
           todaySalesRes,
           pendingOrdersRes,
           submittedTodayRes,
           customersRes,
           routeRes,
-          logsRes,
-          newProspectsRes,
         ] = await Promise.all([
           supabase
             .from("sales_raw")
@@ -98,18 +118,6 @@ export default function MyDayPage() {
             .eq("current_salesman_code", profileData.salesman_code)
             .order("city")
             .limit(20),
-          supabase
-            .from("daily_activity_logs")
-            .select("id,entry_type,note,created_at")
-            .eq("user_id", session.user.id)
-            .gte("created_at", `${today}T00:00:00`)
-            .lte("created_at", `${today}T23:59:59`)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("prospects")
-            .select("id")
-            .eq("salesman_code", profileData.salesman_code)
-            .gte("created_at", `${today}T00:00:00`),
         ]);
 
         if (todaySalesRes.error) throw todaySalesRes.error;
@@ -117,13 +125,36 @@ export default function MyDayPage() {
         if (submittedTodayRes.error) throw submittedTodayRes.error;
         if (customersRes.error) throw customersRes.error;
         if (routeRes.error) throw routeRes.error;
-        if (newProspectsRes.error) throw newProspectsRes.error;
 
-        if (logsRes.error) {
-          setError("Daily activity logs table is unavailable. Check-in/out and notes cannot be stored until that table exists.");
-          setTodayLogs([]);
+        let newProspectsCount = 0;
+        if (prospectsCheck.available) {
+          const { data: newProspectsData, error: newProspectsError } = await supabase
+            .from("prospects")
+            .select("id")
+            .eq("salesman_code", profileData.salesman_code)
+            .gte("created_at", `${today}T00:00:00`);
+
+          if (!newProspectsError) {
+            newProspectsCount = (newProspectsData || []).length;
+          }
+        }
+
+        if (logsCheck.available) {
+          const { data: logsData, error: logsError } = await supabase
+            .from("daily_activity_logs")
+            .select("id,entry_type,note,created_at")
+            .eq("user_id", session.user.id)
+            .gte("created_at", `${today}T00:00:00`)
+            .lte("created_at", `${today}T23:59:59`)
+            .order("created_at", { ascending: false });
+
+          if (!logsError) {
+            setTodayLogs(logsData || []);
+          } else {
+            setTodayLogs([]);
+          }
         } else {
-          setTodayLogs(logsRes.data || []);
+          setTodayLogs([]);
         }
 
         const todayCustomers = new Set((todaySalesRes.data || []).map((row) => row.customer_code).filter(Boolean));
@@ -143,7 +174,7 @@ export default function MyDayPage() {
           followUps: followUpRows.length,
           pendingOrders: (pendingOrdersRes.data || []).length,
           overdueVisits: overdueRows.length,
-          newCustomersAssigned: (newProspectsRes.data || []).length,
+          newCustomersAssigned: newProspectsCount,
           completedVisits: productiveCustomers.size,
         });
 
@@ -176,6 +207,11 @@ export default function MyDayPage() {
   }, [today]);
 
   async function addLog(entryType) {
+    if (!logsEnabled) {
+      setError("Daily activity logs are disabled until the daily_activity_logs table is available.");
+      return;
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) {
       setError("Supabase is not configured.");
@@ -261,6 +297,9 @@ export default function MyDayPage() {
 
         {error && <div className="moduleError">{error}</div>}
         {message && <div className="moduleSuccess">{message}</div>}
+        {warnings.map((warning) => (
+          <div key={warning} className="moduleWarning">{warning}</div>
+        ))}
 
         <div className="moduleMetricGrid">
           <section className="moduleMetricCard"><span>Today's customer visits</span><strong>{summary.visitsToday}</strong></section>
@@ -277,8 +316,8 @@ export default function MyDayPage() {
             <span>{profile?.salesman_name || profile?.salesman_code || ""}</span>
           </div>
           <div className="moduleActionRow">
-            <button type="button" className="modulePrimaryButton" onClick={() => addLog("CHECK_IN")}>Check-in</button>
-            <button type="button" className="modulePrimaryButton" onClick={() => addLog("CHECK_OUT")}>Check-out</button>
+            <button type="button" className="modulePrimaryButton" onClick={() => addLog("CHECK_IN")} disabled={!logsEnabled}>Check-in</button>
+            <button type="button" className="modulePrimaryButton" onClick={() => addLog("CHECK_OUT")} disabled={!logsEnabled}>Check-out</button>
           </div>
           <div className="moduleFilterRow">
             <input
@@ -286,8 +325,9 @@ export default function MyDayPage() {
               value={note}
               onChange={(event) => setNote(event.target.value)}
               placeholder="Add planner note"
+              disabled={!logsEnabled}
             />
-            <button type="button" className="moduleInlineButton" onClick={() => addLog("NOTE")}>Save Note</button>
+            <button type="button" className="moduleInlineButton" onClick={() => addLog("NOTE")} disabled={!logsEnabled}>Save Note</button>
           </div>
           <ul className="moduleList">
             {todayLogs.map((row) => (

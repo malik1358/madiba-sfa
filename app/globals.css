@@ -1105,6 +1105,266 @@ button {
 
 
 /* ==========================================================
+   SECTIONS & QUICK ORDER
+   ========================================================== */
+
+.auditSection {
+  margin-bottom: 24px;
+}
+
+.auditQuickOrderSection {
+  margin-bottom: 28px;
+}
+
+.auditQuickOrderHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.auditQuickOrderHeading h3 {
+  margin: 0;
+  color: #073f4c;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.auditQuickOrderHeading p {
+  margin: 6px 0 0;
+  color: #6c838a;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 12px;
+}
+
+.auditQuickOrderCount {
+  flex-shrink: 0;
+  color: #0b5364;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.auditQuickOrderGroups {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.auditQuickOrderGroup {
+  background: #ffffff;
+  border: 1px solid #d1dde0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.auditQuickOrderGroupHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  background: #f9fbfc;
+  border-bottom: 1px solid #e3eded;
+}
+
+.auditQuickOrderGroupHeader div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.auditQuickOrderGroupHeader strong {
+  color: #073f4c;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.auditQuickOrderGroupHeader span {
+  color: #6c838a;
+  font-size: 11px;
+}
+
+.auditQuickOrderGroupHeader b {
+  color: #0b5364;
+  font-size: 12px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.auditQuickOrderEmpty {
+  padding: 20px;
+  color: #8a9fa4;
+  text-align: center;
+  font-size: 12px;
+}
+
+.auditQuickOrderTableWrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.auditQuickOrderTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.auditQuickOrderTable thead {
+  background: #eef5f6;
+}
+
+.auditQuickOrderTable th {
+  padding: 12px;
+  color: #073f4c;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: left;
+  text-transform: uppercase;
+  border-bottom: 1px solid #d1dde0;
+  white-space: nowrap;
+}
+
+.auditQuickOrderTable tbody tr {
+  border-bottom: 1px solid #e8eef1;
+}
+
+.auditQuickOrderTable tbody tr:last-child {
+  border-bottom: 0;
+}
+
+.auditQuickOrderTable td {
+  padding: 12px;
+  vertical-align: middle;
+  color: #073f4c;
+  font-size: 12px;
+}
+
+.auditQuickItemCode {
+  color: #0b6173;
+  font-size: 9px;
+  font-weight: 800;
+  display: block;
+  margin-bottom: 3px;
+}
+
+.auditQuickItemName {
+  display: block;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.auditQuickBadge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.auditQuickBadgeNew {
+  background: #e6f0f2;
+  color: #42656e;
+}
+
+.auditQuickHistory {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 8px 12px;
+  font-size: 11px;
+}
+
+.auditQuickHistory span {
+  color: #7a8e94;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.auditQuickHistory strong {
+  color: #073f4c;
+  font-weight: 800;
+}
+
+.auditQuickDecline {
+  color: #c63c3c;
+}
+
+.auditQuickRate {
+  color: #0b5364;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.auditQtyControl {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.auditQtyButton {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: #e8f1f3;
+  color: #0a5868;
+  border: 1px solid #c2d2d6;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.auditQtyButton:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.auditQtyButton:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.auditQtyButton:hover {
+  background: #d0e0e4;
+}
+
+.auditQtyControl input {
+  width: 48px;
+  height: 32px;
+  padding: 0;
+  background: #ffffff;
+  color: #073f4c;
+  border-top: 1px solid #c2d2d6;
+  border-bottom: 1px solid #c2d2d6;
+  border-left: 0;
+  border-right: 0;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  outline: 0;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.auditQtyControl input::-webkit-inner-spin-button,
+.auditQtyControl input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+.auditEmpty {
+  padding: 16px;
+  color: #8a9fa4;
+  background: #f9fbfc;
+  border: 1px solid #e3eded;
+  border-radius: 8px;
+  font-size: 12px;
+  text-align: center;
+}
+
+
+/* ==========================================================
    CUSTOMER HERO
    ========================================================== */
 

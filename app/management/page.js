@@ -207,6 +207,7 @@ export default function ManagementPage() {
           <div className="moduleNavGrid">
             <Link href="/management/customer-audit" className="moduleNavCard">Customers Audit</Link>
             <Link href="/management/new-order" className="moduleNavCard">Orders Workflow</Link>
+            <Link href="/management/pending-orders" className="moduleNavCard">Old Pending Orders</Link>
             <Link href="/management/new-customer" className="moduleNavCard">New Customers</Link>
             <Link href="/management/my-performance" className="moduleNavCard">Performance</Link>
             <Link href="/management/my-day" className="moduleNavCard">My Day Planner</Link>

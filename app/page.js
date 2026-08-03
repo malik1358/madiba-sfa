@@ -270,6 +270,14 @@ export default function Home() {
                 href: "/management/new-order",
               },
               {
+                icon: "⏳",
+                title: ar ? "طلبات معلقة قديمة" : "Old Pending Orders",
+                subtitle: ar
+                  ? "عرض الطلبات غير المكتملة"
+                  : "View unfinished draft orders",
+                href: "/management/pending-orders",
+              },
+              {
                 icon: "➕",
                 title: ar ? "عميل جديد" : "New Customer",
                 subtitle: ar

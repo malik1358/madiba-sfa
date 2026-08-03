@@ -17,6 +17,8 @@ function daysOld(fromDate) {
   return Math.max(0, Math.floor((now - then) / (1000 * 60 * 60 * 24)));
 }
 
+const PENDING_STATUSES = ["DRAFT", "PENDING", "SUBMITTED"];
+
 export default function PendingOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -101,7 +103,7 @@ export default function PendingOrdersPage() {
         let query = supabase
           .from("sales_orders")
           .select("id,customer_code,customer_name,salesman_code,created_by,created_at,updated_at,status")
-          .eq("status", "DRAFT")
+          .in("status", PENDING_STATUSES)
           .order("updated_at", { ascending: false })
           .limit(500);
 
@@ -172,7 +174,7 @@ export default function PendingOrdersPage() {
             <p className="moduleEyebrow">MADIBA SFA</p>
             <h1>Pending Orders</h1>
             <p className="moduleSubtitle">
-              Draft orders queue
+              Orders queue ({PENDING_STATUSES.join(", ")})
               {userRole === "admin" || userRole === "manager" ? " across the team" : " in your account"}
             </p>
           </div>
@@ -202,6 +204,7 @@ export default function PendingOrdersPage() {
                   <th>Order ID</th>
                   <th>Customer</th>
                   <th>Salesman</th>
+                  <th>Status</th>
                   <th>Created</th>
                   <th>Last Updated</th>
                   <th>Age (days)</th>
@@ -217,6 +220,7 @@ export default function PendingOrdersPage() {
                       <td>{order.id}</td>
                       <td>{order.customer_name || order.customer_code || "-"}</td>
                       <td>{order.salesman_code || "-"}</td>
+                      <td>{order.status || "-"}</td>
                       <td>{formatDateTime(order.created_at)}</td>
                       <td>{formatDateTime(order.updated_at)}</td>
                       <td>{age}</td>
@@ -236,7 +240,7 @@ export default function PendingOrdersPage() {
 
                 {orders.length === 0 && (
                   <tr>
-                    <td colSpan={7}>No pending draft orders found.</td>
+                    <td colSpan={8}>No pending orders found.</td>
                   </tr>
                 )}
               </tbody>

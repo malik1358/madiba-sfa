@@ -25,6 +25,11 @@ export default function PendingOrdersPage() {
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [orderLines, setOrderLines] = useState([]);
   const [loadingLines, setLoadingLines] = useState(false);
+  const startOfTodayIso = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return start.toISOString();
+  }, []);
 
   async function openOrder(orderId) {
     const supabase = getSupabaseClient();
@@ -93,15 +98,11 @@ export default function PendingOrdersPage() {
         const role = String(profile?.role || "").toLowerCase();
         setUserRole(role);
 
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
-
         let query = supabase
           .from("sales_orders")
           .select("id,customer_code,customer_name,salesman_code,created_by,created_at,updated_at,status")
           .eq("status", "DRAFT")
-          .lt("updated_at", startOfToday.toISOString())
-          .order("updated_at", { ascending: true })
+          .order("updated_at", { ascending: false })
           .limit(500);
 
         if (![
@@ -126,15 +127,22 @@ export default function PendingOrdersPage() {
   }, []);
 
   const summary = useMemo(() => {
+    const oldPending = orders.filter((order) => {
+      const marker = order.updated_at || order.created_at;
+      return Boolean(marker) && marker < startOfTodayIso;
+    }).length;
+    const updatedToday = Math.max(0, orders.length - oldPending);
     const olderThan7 = orders.filter((order) => daysOld(order.updated_at || order.created_at) >= 7).length;
     const olderThan30 = orders.filter((order) => daysOld(order.updated_at || order.created_at) >= 30).length;
 
     return {
       total: orders.length,
+      oldPending,
+      updatedToday,
       olderThan7,
       olderThan30,
     };
-  }, [orders]);
+  }, [orders, startOfTodayIso]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -162,9 +170,9 @@ export default function PendingOrdersPage() {
         <div className="moduleHeader">
           <div>
             <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>Old Pending Orders</h1>
+            <h1>Pending Orders</h1>
             <p className="moduleSubtitle">
-              Draft orders not updated today
+              Draft orders queue
               {userRole === "admin" || userRole === "manager" ? " across the team" : " in your account"}
             </p>
           </div>
@@ -174,7 +182,9 @@ export default function PendingOrdersPage() {
         {error && <div className="moduleError">{error}</div>}
 
         <div className="moduleMetricGrid">
-          <section className="moduleMetricCard"><span>Total old pending</span><strong>{summary.total}</strong></section>
+          <section className="moduleMetricCard"><span>Total pending</span><strong>{summary.total}</strong></section>
+          <section className="moduleMetricCard"><span>Old pending</span><strong>{summary.oldPending}</strong></section>
+          <section className="moduleMetricCard"><span>Updated today</span><strong>{summary.updatedToday}</strong></section>
           <section className="moduleMetricCard"><span>Older than 7 days</span><strong>{summary.olderThan7}</strong></section>
           <section className="moduleMetricCard"><span>Older than 30 days</span><strong>{summary.olderThan30}</strong></section>
         </div>
@@ -226,7 +236,7 @@ export default function PendingOrdersPage() {
 
                 {orders.length === 0 && (
                   <tr>
-                    <td colSpan={7}>No old pending orders found.</td>
+                    <td colSpan={7}>No pending draft orders found.</td>
                   </tr>
                 )}
               </tbody>

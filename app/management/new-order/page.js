@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
@@ -22,6 +22,7 @@ export default function NewOrderPage() {
   const [customerSearch, setCustomerSearch] = useState("");
   const [itemSearch, setItemSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [expandedCategories, setExpandedCategories] = useState({});
   const [priceList, setPriceList] = useState({});
   const [previousDrafts, setPreviousDrafts] = useState([]);
 
@@ -62,6 +63,31 @@ export default function NewOrderPage() {
       );
     });
   }, [itemsMaster, categoryFilter, itemSearch]);
+
+  const groupedItems = useMemo(() => {
+    const map = new Map();
+
+    filteredItems.forEach((item) => {
+      const category = item.category || "Unclassified";
+      const current = map.get(category) || [];
+      current.push(item);
+      map.set(category, current);
+    });
+
+    return Array.from(map.entries())
+      .map(([category, items]) => ({
+        category,
+        items,
+      }))
+      .sort((a, b) => a.category.localeCompare(b.category));
+  }, [filteredItems]);
+
+  function toggleCategory(category) {
+    setExpandedCategories((current) => ({
+      ...current,
+      [category]: !current[category],
+    }));
+  }
 
   const analyticsLike = useMemo(() => ({ items: itemsMaster }), [itemsMaster]);
 
@@ -255,46 +281,70 @@ export default function NewOrderPage() {
               </div>
 
               <div className="moduleTableWrap">
-                <table className="moduleTable">
+                <table className="moduleTable moduleOrderTable">
                   <thead>
                     <tr>
-                      <th>Item</th>
                       <th>Category</th>
+                      <th>Item</th>
                       <th>Price</th>
                       <th>Qty</th>
                       <th>Total</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredItems.slice(0, 250).map((item) => {
-                      const qty = Number(orderQuantities[item.item_code] || 0);
-                      const price = getPrice(priceList, item.item_code);
+                    {groupedItems.slice(0, 40).map((group) => {
+                      const isExpanded = Boolean(expandedCategories[group.category]);
+
                       return (
-                        <tr key={item.item_code}>
-                          <td>
-                            <strong>{item.item_name}</strong>
-                            <div className="moduleCode">{item.item_code}</div>
-                          </td>
-                          <td>{item.category || "Unclassified"}</td>
-                          <td>{price ? `SAR ${price.toFixed(2)}` : "NOT FOUND"}</td>
-                          <td>
-                            <div className="moduleQtyControl">
-                              <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
-                              <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                value={qty || ""}
-                                onChange={(event) => updateQty(item.item_code, event.target.value)}
-                              />
-                              <button type="button" onClick={() => increaseQty(item.item_code)}>+</button>
-                            </div>
-                          </td>
-                          <td>SAR {(price * qty).toFixed(2)}</td>
-                        </tr>
+                        <Fragment key={`group-${group.category}`}>
+                          <tr className="moduleCategoryRow">
+                            <td colSpan={5}>
+                              <button
+                                type="button"
+                                className="moduleCategoryToggle"
+                                onClick={() => toggleCategory(group.category)}
+                                aria-expanded={isExpanded}
+                              >
+                                <span className="moduleCategorySymbol">{isExpanded ? "−" : "+"}</span>
+                                <strong>{group.category}</strong>
+                                <small>{group.items.length} items</small>
+                              </button>
+                            </td>
+                          </tr>
+                          {isExpanded &&
+                            group.items.slice(0, 120).map((item) => {
+                              const qty = Number(orderQuantities[item.item_code] || 0);
+                              const price = getPrice(priceList, item.item_code);
+
+                              return (
+                                <tr key={item.item_code} className="moduleItemRow">
+                                  <td>{item.category || "Unclassified"}</td>
+                                  <td>
+                                    <strong>{item.item_name}</strong>
+                                    <div className="moduleCode">{item.item_code}</div>
+                                  </td>
+                                  <td>{price ? `SAR ${price.toFixed(2)}` : "NOT FOUND"}</td>
+                                  <td>
+                                    <div className="moduleQtyControl">
+                                      <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        value={qty || ""}
+                                        onChange={(event) => updateQty(item.item_code, event.target.value)}
+                                      />
+                                      <button type="button" onClick={() => increaseQty(item.item_code)}>+</button>
+                                    </div>
+                                  </td>
+                                  <td>SAR {(price * qty).toFixed(2)}</td>
+                                </tr>
+                              );
+                            })}
+                        </Fragment>
                       );
                     })}
-                    {filteredItems.length === 0 && (
+                    {groupedItems.length === 0 && (
                       <tr>
                         <td colSpan={5}>No items found for this filter.</td>
                       </tr>

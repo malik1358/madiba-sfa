@@ -5,9 +5,16 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
-import { getPrice } from "../customer-audit/lib/helpers";
+import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
 import { qtyFormat } from "../customer-audit/lib/format";
 import { calculateGrandTotal } from "../customer-audit/lib/orderHelpers";
+import { useAnalytics } from "../customer-audit/hooks/useAnalytics";
+import { useQuickOrder } from "../customer-audit/hooks/useQuickOrder";
+import CustomerHeader from "../customer-audit/components/CustomerHeader";
+import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance";
+import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
+import QuickOrder from "../customer-audit/components/QuickOrder";
+import TransactionHistory from "../customer-audit/components/TransactionHistory";
 
 const PRICE_API =
   "https://script.google.com/macros/s/AKfycbzXPREoz0tUgern-5LhpEPBMY_ed2hO1fgYpIVfzG2-BU9HbjOklKCBFVMtsw64Uff5/exec";
@@ -16,33 +23,188 @@ function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
 }
 
+function normalizeCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function toNumber(value) {
+  const cleaned = String(value ?? "")
+    .replace(/,/g, "")
+    .trim();
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function readAny(source, keys) {
+  if (!source || typeof source !== "object") return "";
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).trim();
+    }
+  }
+  return "";
+}
+
+function parsePricePayload(payload) {
+  const priceMap = {};
+  const sheetItems = [];
+  const seen = new Set();
+
+  function upsertSheetItem(rawCode, rawName, rawCategory) {
+    const code = normalizeCode(rawCode);
+    if (!code) return;
+
+    const name = String(rawName || "").trim();
+    const category = String(rawCategory || "").trim();
+    const key = `${code}::${name}::${category}`;
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    sheetItems.push({
+      item_code: code,
+      item_name: name || code,
+      category: category || "Unclassified",
+      source: "PRICE_SHEET",
+    });
+  }
+
+  function addRate(rawCode, rawRate) {
+    const code = normalizeCode(rawCode);
+    if (!code) return;
+    const rate = toNumber(rawRate);
+    priceMap[code] = rate;
+  }
+
+  if (Array.isArray(payload)) {
+    payload.forEach((row) => {
+      const code = readAny(row, ["item_code", "itemCode", "code", "B", "ITEM_CODE", "Item Code"]);
+      const name = readAny(row, ["item_name", "itemName", "name", "C", "ITEM_NAME", "Item Name"]);
+      const category = readAny(row, ["category", "CO", "CATEGORY", "Category"]);
+      const rate = readAny(row, ["rate", "price", "RATE", "Price", "D"]);
+
+      if (code) {
+        addRate(code, rate);
+        upsertSheetItem(code, name, category);
+      }
+    });
+
+    return { priceMap, sheetItems };
+  }
+
+  if (payload && typeof payload === "object") {
+    Object.entries(payload).forEach(([key, value]) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const code = readAny(value, ["item_code", "itemCode", "code", "B"]) || key;
+        const name = readAny(value, ["item_name", "itemName", "name", "C"]);
+        const category = readAny(value, ["category", "CO"]);
+        const rate = readAny(value, ["rate", "price", "RATE", "D"]);
+
+        addRate(code, rate);
+        upsertSheetItem(code, name, category);
+        return;
+      }
+
+      addRate(key, value);
+    });
+  }
+
+  return { priceMap, sheetItems };
+}
+
 export default function NewOrderPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [customers, setCustomers] = useState([]);
   const [itemsMaster, setItemsMaster] = useState([]);
+  const [priceSheetItems, setPriceSheetItems] = useState([]);
   const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [itemSearch, setItemSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
-  const [expandedCategories, setExpandedCategories] = useState({});
+  const [expandedItemCategories, setExpandedItemCategories] = useState({});
+  const [auditExpandedCategories, setAuditExpandedCategories] = useState({});
+  const [showTransactions, setShowTransactions] = useState(false);
+  const [loadingCustomerHistory, setLoadingCustomerHistory] = useState(false);
+  const [transactions, setTransactions] = useState([]);
+  const [peerTransactions, setPeerTransactions] = useState([]);
   const [priceList, setPriceList] = useState({});
   const [previousDrafts, setPreviousDrafts] = useState([]);
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  const mergedItemsMaster = useMemo(() => {
+    const itemMap = new Map();
+
+    (itemsMaster || []).forEach((item) => {
+      const code = normalizeCode(item.item_code);
+      if (!code) return;
+
+      itemMap.set(code, {
+        ...item,
+        item_code: code,
+        item_name: String(item.item_name || code).trim(),
+        category: String(item.category || "Unclassified").trim() || "Unclassified",
+        source: "ITEM_MASTER",
+      });
+    });
+
+    (priceSheetItems || []).forEach((sheetItem) => {
+      const code = normalizeCode(sheetItem.item_code);
+      if (!code) return;
+
+      const existing = itemMap.get(code);
+      if (!existing) {
+        itemMap.set(code, {
+          item_code: code,
+          item_name: String(sheetItem.item_name || code).trim(),
+          category: String(sheetItem.category || "Unclassified").trim() || "Unclassified",
+          source: "PRICE_SHEET_ONLY",
+        });
+        return;
+      }
+
+      const nextName = String(existing.item_name || "").trim() || String(sheetItem.item_name || "").trim() || code;
+      const nextCategory = String(existing.category || "").trim() || String(sheetItem.category || "").trim() || "Unclassified";
+      itemMap.set(code, {
+        ...existing,
+        item_name: nextName,
+        category: nextCategory,
+      });
+    });
+
+    return Array.from(itemMap.values()).sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
+  }, [itemsMaster, priceSheetItems]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.customer_code === selectedCustomerCode) || null,
     [customers, selectedCustomerCode]
   );
 
+  const analytics = useAnalytics(transactions);
+  const quickOrderSuggestions = useQuickOrder({
+    analytics,
+    transactions,
+    peerTransactions,
+    itemMaster: mergedItemsMaster,
+  });
+
+  const quickOrderAllItems = useMemo(
+    () => [
+      ...quickOrderSuggestions.newItems,
+      ...quickOrderSuggestions.notBoughtRecently,
+      ...quickOrderSuggestions.buyingLess,
+    ],
+    [quickOrderSuggestions]
+  );
+
   const categories = useMemo(
     () => [
       "ALL",
-      ...new Set(itemsMaster.map((item) => item.category).filter(Boolean)).values(),
+      ...new Set(mergedItemsMaster.map((item) => item.category).filter(Boolean)).values(),
     ],
-    [itemsMaster]
+    [mergedItemsMaster]
   );
 
   const filteredCustomers = useMemo(() => {
@@ -58,7 +220,7 @@ export default function NewOrderPage() {
 
   const filteredItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
-    return itemsMaster.filter((item) => {
+    return mergedItemsMaster.filter((item) => {
       if (categoryFilter !== "ALL" && item.category !== categoryFilter) return false;
       if (!q) return true;
 
@@ -68,7 +230,7 @@ export default function NewOrderPage() {
         String(item.category || "").toLowerCase().includes(q)
       );
     });
-  }, [itemsMaster, categoryFilter, itemSearch]);
+  }, [mergedItemsMaster, categoryFilter, itemSearch]);
 
   const groupedItems = useMemo(() => {
     const map = new Map();
@@ -88,14 +250,21 @@ export default function NewOrderPage() {
       .sort((a, b) => a.category.localeCompare(b.category));
   }, [filteredItems]);
 
-  function toggleCategory(category) {
-    setExpandedCategories((current) => ({
+  function toggleItemCategory(category) {
+    setExpandedItemCategories((current) => ({
       ...current,
       [category]: !current[category],
     }));
   }
 
-  const analyticsLike = useMemo(() => ({ items: itemsMaster }), [itemsMaster]);
+  function toggleAuditCategory(category) {
+    setAuditExpandedCategories((current) => ({
+      ...current,
+      [category]: !current[category],
+    }));
+  }
+
+  const analyticsLike = useMemo(() => ({ items: mergedItemsMaster }), [mergedItemsMaster]);
 
   const {
     draftOrderId,
@@ -111,7 +280,7 @@ export default function NewOrderPage() {
     submitOrder,
   } = useOrder({
     analytics: analyticsLike,
-    quickOrderAllItems: [],
+    quickOrderAllItems,
     selectedCustomer,
     priceList,
     setError,
@@ -440,15 +609,84 @@ export default function NewOrderPage() {
       try {
         const response = await fetch(PRICE_API);
         const data = await response.json();
-        setPriceList(data || {});
+        const parsed = parsePricePayload(data || {});
+        setPriceList(parsed.priceMap);
+        setPriceSheetItems(parsed.sheetItems);
       } catch {
         setPriceList({});
+        setPriceSheetItems([]);
       }
     }
 
     loadFoundation();
     loadPrices();
   }, []);
+
+  useEffect(() => {
+    async function loadCustomerHistory() {
+      if (!selectedCustomer) {
+        setTransactions([]);
+        setPeerTransactions([]);
+        setShowTransactions(false);
+        setAuditExpandedCategories({});
+        return;
+      }
+
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      setLoadingCustomerHistory(true);
+      setShowTransactions(false);
+      setAuditExpandedCategories({});
+
+      try {
+        const { data: settings, error: settingsError } = await supabase
+          .from("system_settings")
+          .select("setting_value")
+          .eq("setting_key", "active_sales_batch_id")
+          .single();
+
+        if (settingsError) throw settingsError;
+
+        const activeBatchId = Number(settings?.setting_value || 0);
+        if (!activeBatchId) {
+          setTransactions([]);
+          setPeerTransactions([]);
+          return;
+        }
+
+        const [transactionsRes, peersRes] = await Promise.all([
+          supabase
+            .from("sales_raw")
+            .select(
+              "id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class"
+            )
+            .eq("import_batch_id", activeBatchId)
+            .eq("customer_code", selectedCustomer.customer_code)
+            .order("transaction_date", { ascending: false })
+            .order("id", { ascending: false }),
+          supabase
+            .from("sales_raw")
+            .select("customer_code,item_code,item_name,category,sales_amount,transaction_date")
+            .eq("import_batch_id", activeBatchId),
+        ]);
+
+        if (transactionsRes.error) throw transactionsRes.error;
+        if (peersRes.error) throw peersRes.error;
+
+        setTransactions(transactionsRes.data || []);
+        setPeerTransactions(peersRes.data || []);
+      } catch (err) {
+        setTransactions([]);
+        setPeerTransactions([]);
+        setError(err.message || "Unable to load customer audit history.");
+      } finally {
+        setLoadingCustomerHistory(false);
+      }
+    }
+
+    loadCustomerHistory();
+  }, [selectedCustomer, setError]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -504,6 +742,9 @@ export default function NewOrderPage() {
                 setSelectedCustomerCode(event.target.value);
                 setError("");
                 setMessage("");
+                setLastSavedOrder(null);
+                setShowTransactions(false);
+                setAuditExpandedCategories({});
               }}
             >
               <option value="">Select customer</option>
@@ -522,11 +763,56 @@ export default function NewOrderPage() {
 
         {selectedCustomer && (
           <>
+            {loadingCustomerHistory && (
+              <section className="moduleSection">
+                <div className="moduleLoading">Loading customer audit sections...</div>
+              </section>
+            )}
+
+            {!loadingCustomerHistory && analytics && (
+              <>
+                <CustomerHeader customer={selectedCustomer} analytics={analytics} />
+                <MonthlyPerformance analytics={analytics} />
+                <CategoryPerformance
+                  analytics={analytics}
+                  expandedCategories={auditExpandedCategories}
+                  toggleCategory={toggleAuditCategory}
+                  orderQuantities={orderQuantities}
+                  decreaseOrderQty={decreaseQty}
+                  increaseOrderQty={increaseQty}
+                  changeOrderQty={updateQty}
+                  priceList={priceList}
+                />
+                <QuickOrder
+                  quickOrderSuggestions={quickOrderSuggestions}
+                  orderQuantities={orderQuantities}
+                  decreaseOrderQty={decreaseQty}
+                  increaseOrderQty={increaseQty}
+                  changeOrderQty={updateQty}
+                  priceList={priceList}
+                />
+                <TransactionHistory
+                  transactions={transactions}
+                  showTransactions={showTransactions}
+                  setShowTransactions={setShowTransactions}
+                  analytics={analytics}
+                />
+              </>
+            )}
+
+            {!loadingCustomerHistory && !analytics && (
+              <section className="moduleSection">
+                <div className="moduleHint">
+                  No customer transaction history found for audit sections. You can still create the order using the full item list below.
+                </div>
+              </section>
+            )}
+
             <section className="moduleSection">
               <div className="moduleSectionHeader">
-                <h2>Items</h2>
+                <h2>Full Item List</h2>
                 <span>
-                  {orderSummary.itemCount} items • {qtyFormat(orderSummary.totalQuantity)} units
+                  {mergedItemsMaster.length} catalog items • {orderSummary.itemCount} selected • {qtyFormat(orderSummary.totalQuantity)} units
                 </span>
               </div>
 
@@ -564,7 +850,7 @@ export default function NewOrderPage() {
                   </thead>
                   <tbody>
                     {groupedItems.slice(0, 40).map((group) => {
-                      const isExpanded = Boolean(expandedCategories[group.category]);
+                      const isExpanded = Boolean(expandedItemCategories[group.category]);
 
                       return (
                         <Fragment key={`group-${group.category}`}>
@@ -573,7 +859,7 @@ export default function NewOrderPage() {
                               <button
                                 type="button"
                                 className="moduleCategoryToggle"
-                                onClick={() => toggleCategory(group.category)}
+                                onClick={() => toggleItemCategory(group.category)}
                                 aria-expanded={isExpanded}
                               >
                                 <span className="moduleCategorySymbol">{isExpanded ? "−" : "+"}</span>
@@ -592,7 +878,11 @@ export default function NewOrderPage() {
                                   <td>{item.category || "Unclassified"}</td>
                                   <td>
                                     <strong>{item.item_name}</strong>
-                                    <div className="moduleCode">{item.item_code}</div>
+                                    <div className="moduleCode">
+                                      {item.item_code}
+                                      {item.source === "PRICE_SHEET_ONLY" ? " • Price Sheet" : ""}
+                                      {isDoNotUseItem(item.item_name) ? " • Do Not Use" : ""}
+                                    </div>
                                   </td>
                                   <td>{price ? `SAR ${price.toFixed(2)}` : "NOT FOUND"}</td>
                                   <td>

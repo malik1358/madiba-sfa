@@ -284,6 +284,7 @@ const [
      ======================================================== */
 
   async function loadFoundation() {
+    console.time("TOTAL LOAD");
 
     setLoading(true);
     setError("");
@@ -300,7 +301,7 @@ const [
           "Please login again."
         );
       }
-
+console.time("Customers");
       const {
         data: customerData,
         error: customerError,
@@ -328,6 +329,7 @@ const [
         customerData || [];
 
       setCustomers(list);
+      console.timeEnd("Customers");
 
 
            /* ----------------------------------------------------

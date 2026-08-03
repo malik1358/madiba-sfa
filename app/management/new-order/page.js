@@ -382,6 +382,11 @@ export default function NewOrderPage() {
       .sort((a, b) => a.category.localeCompare(b.category));
   }, [filteredItems]);
 
+  const priceSheetOnlyItems = useMemo(
+    () => mergedItemsMaster.filter((item) => item.source === "PRICE_SHEET_ONLY"),
+    [mergedItemsMaster]
+  );
+
   function toggleItemCategory(category) {
     setExpandedItemCategories((current) => ({
       ...current,
@@ -1046,6 +1051,38 @@ export default function NewOrderPage() {
                 </table>
               </div>
             </section>
+
+            {priceSheetOnlyItems.length > 0 && (
+              <section className="moduleSection">
+                <div className="moduleSectionHeader">
+                  <h2>Price Sheet Items</h2>
+                  <span>{priceSheetOnlyItems.length} sheet-only item(s)</span>
+                </div>
+                <div className="moduleTableWrap">
+                  <table className="moduleTable">
+                    <thead>
+                      <tr>
+                        <th>Category</th>
+                        <th>Item</th>
+                        <th>Price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {priceSheetOnlyItems.map((item) => (
+                        <tr key={`sheet-only-${item.item_code}`}>
+                          <td>{item.category || "Unclassified"}</td>
+                          <td>
+                            <strong>{item.item_name}</strong>
+                            <div className="moduleCode">{item.item_code}</div>
+                          </td>
+                          <td>{priceList[String(item.item_code).trim().toUpperCase()] ? `SAR ${Number(priceList[String(item.item_code).trim().toUpperCase()]).toFixed(2)}` : "NOT FOUND"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
 
             <section className="moduleSection">
               <div className="moduleOrderBar">

@@ -5,6 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { getSupabaseClient } from "../../lib/supabase";
 
+function formatMoney(value) {
+  return `SAR ${Number(value || 0).toFixed(2)}`;
+}
+
 function formatDateTime(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString("en-GB");
@@ -27,6 +31,7 @@ export default function PendingOrdersPage() {
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [orderLines, setOrderLines] = useState([]);
   const [loadingLines, setLoadingLines] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const startOfTodayIso = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -145,6 +150,116 @@ export default function PendingOrdersPage() {
       olderThan30,
     };
   }, [orders, startOfTodayIso]);
+
+  const activeOrder = useMemo(
+    () => orders.find((order) => order.id === activeOrderId) || null,
+    [orders, activeOrderId]
+  );
+
+  async function regenerateOrderPdf() {
+    if (!activeOrder) {
+      setError("Open an order first to regenerate PDF.");
+      return;
+    }
+
+    if (orderLines.length === 0) {
+      setError("This order has no line items to generate PDF.");
+      return;
+    }
+
+    setDownloadingPdf(true);
+    setError("");
+
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+      const vatRate = 0.15;
+      const subtotal = orderLines.reduce((sum, line) => sum + Number(line.line_value || 0), 0);
+      const vatAmount = subtotal * vatRate;
+      const grandTotal = subtotal + vatAmount;
+
+      doc.setFont(undefined, "bold");
+      doc.setFontSize(18);
+      doc.text("MADIBA SFA", 40, 44);
+      doc.setFontSize(12);
+      doc.text("SALES ORDER", 40, 64);
+
+      doc.setFont(undefined, "normal");
+      doc.setFontSize(10);
+      doc.text(`Order ID: ${activeOrder.id}`, 40, 86);
+      doc.text(`Status: ${activeOrder.status || "-"}`, 40, 102);
+      doc.text(`Customer: ${activeOrder.customer_code || "-"} - ${activeOrder.customer_name || "-"}`, 40, 118);
+      doc.text(`Salesman: ${activeOrder.salesman_code || "-"}`, 40, 134);
+      doc.text(`Created: ${formatDateTime(activeOrder.created_at)}`, 40, 150);
+      doc.text(`Last Updated: ${formatDateTime(activeOrder.updated_at)}`, 40, 166);
+
+      doc.setFont(undefined, "bold");
+      doc.rect(40, 186, 515, 24);
+      doc.text("Item Code", 46, 202);
+      doc.text("Item Name", 124, 202);
+      doc.text("Qty", 346, 202);
+      doc.text("Rate", 396, 202);
+      doc.text("Line Total", 476, 202);
+      doc.setFont(undefined, "normal");
+
+      let y = 210;
+      orderLines.forEach((line) => {
+        const wrapped = doc.splitTextToSize(String(line.item_name || "-"), 210);
+        const rowHeight = Math.max(22, wrapped.length * 12 + 8);
+
+        if (y + rowHeight > 760) {
+          doc.addPage();
+          y = 40;
+          doc.setFont(undefined, "bold");
+          doc.rect(40, y, 515, 24);
+          doc.text("Item Code", 46, y + 16);
+          doc.text("Item Name", 124, y + 16);
+          doc.text("Qty", 346, y + 16);
+          doc.text("Rate", 396, y + 16);
+          doc.text("Line Total", 476, y + 16);
+          doc.setFont(undefined, "normal");
+          y += 24;
+        }
+
+        doc.rect(40, y, 80, rowHeight);
+        doc.rect(120, y, 220, rowHeight);
+        doc.rect(340, y, 50, rowHeight);
+        doc.rect(390, y, 80, rowHeight);
+        doc.rect(470, y, 85, rowHeight);
+
+        doc.text(String(line.item_code || "-"), 46, y + 14);
+        wrapped.forEach((nameLine, idx) => {
+          doc.text(nameLine, 124, y + 14 + idx * 12);
+        });
+        doc.text(String(Number(line.quantity || 0)), 346, y + 14);
+        doc.text(formatMoney(line.rate), 396, y + 14);
+        doc.text(formatMoney(line.line_value), 476, y + 14);
+
+        y += rowHeight;
+      });
+
+      const summaryY = Math.min(y + 20, 740);
+      doc.roundedRect(350, summaryY, 205, 70, 4, 4);
+      doc.text("Subtotal (Excl. VAT)", 360, summaryY + 18);
+      doc.text(formatMoney(subtotal), 546, summaryY + 18, { align: "right" });
+      doc.text("VAT @ 15%", 360, summaryY + 36);
+      doc.text(formatMoney(vatAmount), 546, summaryY + 36, { align: "right" });
+      doc.setFont(undefined, "bold");
+      doc.text("Total (Incl. VAT)", 360, summaryY + 54);
+      doc.text(formatMoney(grandTotal), 546, summaryY + 54, { align: "right" });
+      doc.setFont(undefined, "normal");
+
+      const safeCustomer = String(activeOrder.customer_code || "customer").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const safeDate = String(activeOrder.updated_at || activeOrder.created_at || new Date().toISOString())
+        .slice(0, 19)
+        .replace(/[:T]/g, "-");
+      doc.save(`order-${activeOrder.id}-${safeCustomer}-${safeDate}.pdf`);
+    } catch {
+      setError("Unable to regenerate PDF for this order.");
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -286,6 +401,14 @@ export default function PendingOrdersPage() {
               </div>
 
               <div className="moduleActionRow" style={{ marginTop: "10px" }}>
+                <button
+                  type="button"
+                  className="modulePrimaryButton"
+                  onClick={regenerateOrderPdf}
+                  disabled={downloadingPdf || loadingLines || orderLines.length === 0}
+                >
+                  {downloadingPdf ? "Generating PDF..." : "Regenerate PDF"}
+                </button>
                 <Link href="/management/new-order" className="modulePrimaryButton">Open Order Workflow</Link>
                 <Link href="/management/customer-audit" className="moduleInlineButton">Go to Customer Audit</Link>
               </div>

@@ -185,7 +185,6 @@ export function useCustomerData({ setError, setMessage }) {
     search,
     setSearch,
     selectedCustomer,
-    setSelectedCustomer,
     transactions,
     peerTransactions,
     itemMaster,

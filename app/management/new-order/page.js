@@ -306,8 +306,20 @@ export default function NewOrderPage() {
       });
     });
 
+    Object.keys(priceList || {}).forEach((rawCode) => {
+      const code = normalizeCode(rawCode);
+      if (!code || itemMap.has(code)) return;
+
+      itemMap.set(code, {
+        item_code: code,
+        item_name: code,
+        category: "Unclassified",
+        source: "PRICE_MAP_ONLY",
+      });
+    });
+
     return Array.from(itemMap.values()).sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
-  }, [itemsMaster, priceSheetItems]);
+  }, [itemsMaster, priceSheetItems, priceList]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.customer_code === selectedCustomerCode) || null,
@@ -383,7 +395,7 @@ export default function NewOrderPage() {
   }, [filteredItems]);
 
   const priceSheetOnlyItems = useMemo(
-    () => mergedItemsMaster.filter((item) => item.source === "PRICE_SHEET_ONLY"),
+    () => mergedItemsMaster.filter((item) => item.source === "PRICE_SHEET_ONLY" || item.source === "PRICE_MAP_ONLY"),
     [mergedItemsMaster]
   );
 

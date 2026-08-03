@@ -164,13 +164,13 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
   const submitOrder = useCallback(async () => {
     if (orderItems.length === 0) {
       setError('Add at least one item before submitting the order.');
-      return;
+      return null;
     }
 
     const supabase = getSupabaseClient();
     if (!supabase) {
       setError('Supabase is not configured.');
-      return;
+      return null;
     }
 
     setSubmittingOrder(true);
@@ -196,8 +196,10 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
       setShowOrderReview(false);
       setDraftOrderId(null);
       setOrderQuantities({});
+      return orderId;
     } catch (err) {
       setError(err.message || 'Unable to submit order.');
+      return null;
     } finally {
       setSubmittingOrder(false);
     }

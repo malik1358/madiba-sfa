@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
@@ -11,6 +11,10 @@ import { calculateGrandTotal } from "../customer-audit/lib/orderHelpers";
 
 const PRICE_API =
   "https://script.google.com/macros/s/AKfycbzXPREoz0tUgern-5LhpEPBMY_ed2hO1fgYpIVfzG2-BU9HbjOklKCBFVMtsw64Uff5/exec";
+
+function formatMoney(value) {
+  return `SAR ${Number(value || 0).toFixed(2)}`;
+}
 
 export default function NewOrderPage() {
   const [loading, setLoading] = useState(true);
@@ -25,6 +29,8 @@ export default function NewOrderPage() {
   const [expandedCategories, setExpandedCategories] = useState({});
   const [priceList, setPriceList] = useState({});
   const [previousDrafts, setPreviousDrafts] = useState([]);
+  const [lastSavedOrder, setLastSavedOrder] = useState(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.customer_code === selectedCustomerCode) || null,
@@ -111,6 +117,165 @@ export default function NewOrderPage() {
     setError,
     setMessage,
   });
+
+  const buildOrderSnapshot = useCallback(
+    (orderId, statusLabel) => {
+      if (!selectedCustomer || orderItems.length === 0) return null;
+
+      const savedAtIso = new Date().toISOString();
+      const lines = orderItems.map((item) => {
+        const quantity = Number(item.order_quantity || 0);
+        const rate = Number(getPrice(priceList, item.item_code) || 0);
+
+        return {
+          item_code: item.item_code,
+          item_name: item.item_name,
+          category: item.category || "Unclassified",
+          quantity,
+          rate,
+          lineTotal: quantity * rate,
+        };
+      });
+
+      return {
+        orderId,
+        statusLabel,
+        savedAtIso,
+        customerCode: selectedCustomer.customer_code,
+        customerName: selectedCustomer.customer_name,
+        salesmanCode: selectedCustomer.current_salesman_code,
+        itemCount: orderSummary.itemCount,
+        totalQuantity: orderSummary.totalQuantity,
+        grandTotal: calculateGrandTotal(orderItems, priceList),
+        lines,
+      };
+    },
+    [orderItems, orderSummary.itemCount, orderSummary.totalQuantity, priceList, selectedCustomer]
+  );
+
+  const downloadOrderPdf = useCallback(
+    async (snapshot) => {
+      if (!snapshot) return;
+
+      setDownloadingPdf(true);
+      try {
+        const { jsPDF } = await import("jspdf");
+        const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+        doc.setFontSize(18);
+        doc.text("MADIBA SFA - Order Review", 40, 44);
+
+        doc.setFontSize(11);
+        doc.text(`Order ID: ${snapshot.orderId}`, 40, 70);
+        doc.text(`Status: ${snapshot.statusLabel}`, 40, 88);
+        doc.text(`Date: ${new Date(snapshot.savedAtIso).toLocaleString("en-GB")}`, 40, 106);
+
+        doc.text(`Customer: ${snapshot.customerCode} - ${snapshot.customerName}`, 40, 126);
+        doc.text(`Salesman: ${snapshot.salesmanCode || "-"}`, 40, 144);
+
+        doc.text(`Items: ${snapshot.itemCount}`, 40, 166);
+        doc.text(`Total Qty: ${qtyFormat(snapshot.totalQuantity)}`, 150, 166);
+        doc.text(`Grand Total: ${formatMoney(snapshot.grandTotal)}`, 280, 166);
+
+        let y = 192;
+        doc.setFontSize(10);
+        doc.setFont(undefined, "bold");
+        doc.text("Item Code", 40, y);
+        doc.text("Item Name", 120, y);
+        doc.text("Qty", 340, y);
+        doc.text("Rate", 390, y);
+        doc.text("Line Total", 470, y);
+        doc.setFont(undefined, "normal");
+        y += 8;
+        doc.line(40, y, 555, y);
+        y += 14;
+
+        snapshot.lines.forEach((line) => {
+          if (y > 760) {
+            doc.addPage();
+            y = 44;
+          }
+
+          doc.text(String(line.item_code || "-"), 40, y);
+          doc.text(String(line.item_name || "-").slice(0, 40), 120, y);
+          doc.text(String(line.quantity), 340, y);
+          doc.text(formatMoney(line.rate), 390, y);
+          doc.text(formatMoney(line.lineTotal), 470, y);
+          y += 18;
+        });
+
+        const safeCustomer = String(snapshot.customerCode || "customer").replace(/[^a-zA-Z0-9_-]/g, "_");
+        const safeDate = snapshot.savedAtIso.slice(0, 19).replace(/[:T]/g, "-");
+        const fileName = `order-${snapshot.orderId}-${safeCustomer}-${safeDate}.pdf`;
+        doc.save(fileName);
+      } catch {
+        setError("Order saved, but PDF generation failed. Please try again.");
+      } finally {
+        setDownloadingPdf(false);
+      }
+    },
+    [setError]
+  );
+
+  const handleSaveDraft = useCallback(async () => {
+    const orderId = await saveDraft();
+    if (!orderId) return;
+
+    const snapshot = buildOrderSnapshot(orderId, "Draft Saved");
+    if (!snapshot) return;
+
+    setLastSavedOrder(snapshot);
+    setPreviousDrafts((current) => {
+      const next = current.filter((draft) => draft.id !== orderId);
+      return [
+        {
+          id: orderId,
+          customer_code: snapshot.customerCode,
+          customer_name: snapshot.customerName,
+          updated_at: snapshot.savedAtIso,
+          status: "DRAFT",
+        },
+        ...next,
+      ].slice(0, 25);
+    });
+
+    await downloadOrderPdf(snapshot);
+    setMessage(`Draft order #${orderId} saved. PDF downloaded automatically.`);
+  }, [buildOrderSnapshot, downloadOrderPdf, saveDraft]);
+
+  const handleSubmitOrder = useCallback(async () => {
+    const pendingSnapshot = buildOrderSnapshot(draftOrderId || "pending", "Submitted");
+    const orderId = await submitOrder();
+    if (!orderId || !pendingSnapshot) return;
+
+    const snapshot = {
+      ...pendingSnapshot,
+      orderId,
+      savedAtIso: new Date().toISOString(),
+      statusLabel: "Submitted",
+    };
+
+    setLastSavedOrder(snapshot);
+    await downloadOrderPdf(snapshot);
+    setMessage(`Order #${orderId} submitted. PDF downloaded automatically.`);
+  }, [buildOrderSnapshot, downloadOrderPdf, draftOrderId, submitOrder]);
+
+  const shareText = useMemo(() => {
+    if (!lastSavedOrder) return "";
+    return `Order #${lastSavedOrder.orderId} (${lastSavedOrder.statusLabel}) for ${lastSavedOrder.customerName} - ${formatMoney(lastSavedOrder.grandTotal)}. PDF downloaded and ready to attach.`;
+  }, [lastSavedOrder]);
+
+  const whatsappShareUrl = useMemo(
+    () => (shareText ? `https://wa.me/?text=${encodeURIComponent(shareText)}` : "#"),
+    [shareText]
+  );
+
+  const emailShareUrl = useMemo(() => {
+    if (!lastSavedOrder) return "#";
+    const subject = `Order #${lastSavedOrder.orderId} - ${lastSavedOrder.customerName}`;
+    const body = `${shareText}\n\nPlease attach the downloaded PDF from your device before sending.`;
+    return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }, [lastSavedOrder, shareText]);
 
   useEffect(() => {
     async function loadFoundation() {
@@ -361,15 +526,87 @@ export default function NewOrderPage() {
                   <strong>SAR {calculateGrandTotal(orderItems, priceList).toFixed(2)}</strong>
                 </div>
                 <div className="moduleOrderActions">
-                  <button type="button" onClick={saveDraft} disabled={savingOrder || submittingOrder}>
+                  <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>
                     {savingOrder ? "Saving..." : draftOrderId ? "Update Draft" : "Save Draft"}
                   </button>
-                  <button type="button" onClick={submitOrder} disabled={savingOrder || submittingOrder}>
+                  <button type="button" onClick={handleSubmitOrder} disabled={savingOrder || submittingOrder || downloadingPdf}>
                     {submittingOrder ? "Submitting..." : "Submit Order"}
                   </button>
                 </div>
               </div>
             </section>
+
+            {lastSavedOrder && (
+              <section className="moduleSection moduleReviewSection">
+                <div className="moduleSectionHeader">
+                  <h2>Saved Order Review</h2>
+                  <span>{lastSavedOrder.statusLabel}</span>
+                </div>
+
+                <div className="moduleReviewMeta">
+                  <div>
+                    <span>Order ID</span>
+                    <strong>#{lastSavedOrder.orderId}</strong>
+                  </div>
+                  <div>
+                    <span>Customer</span>
+                    <strong>{lastSavedOrder.customerCode} - {lastSavedOrder.customerName}</strong>
+                  </div>
+                  <div>
+                    <span>Saved At</span>
+                    <strong>{new Date(lastSavedOrder.savedAtIso).toLocaleString("en-GB")}</strong>
+                  </div>
+                  <div>
+                    <span>Total</span>
+                    <strong>{formatMoney(lastSavedOrder.grandTotal)}</strong>
+                  </div>
+                </div>
+
+                <div className="moduleTableWrap">
+                  <table className="moduleTable">
+                    <thead>
+                      <tr>
+                        <th>Item Code</th>
+                        <th>Item Name</th>
+                        <th>Qty</th>
+                        <th>Rate</th>
+                        <th>Line Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lastSavedOrder.lines.map((line) => (
+                        <tr key={`${lastSavedOrder.orderId}-${line.item_code}`}>
+                          <td>{line.item_code}</td>
+                          <td>{line.item_name}</td>
+                          <td>{line.quantity}</td>
+                          <td>{formatMoney(line.rate)}</td>
+                          <td>{formatMoney(line.lineTotal)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="moduleReviewActions">
+                  <button
+                    type="button"
+                    className="moduleInlineButton"
+                    disabled={downloadingPdf}
+                    onClick={() => downloadOrderPdf(lastSavedOrder)}
+                  >
+                    {downloadingPdf ? "Preparing PDF..." : "Download PDF Again"}
+                  </button>
+                  <a className="moduleShareLink" href={emailShareUrl}>Share via Email</a>
+                  <a className="moduleShareLink" href={whatsappShareUrl} target="_blank" rel="noreferrer">
+                    Share via WhatsApp
+                  </a>
+                </div>
+
+                <p className="moduleReviewNote">
+                  PDF downloads automatically after save/submit. Attach the downloaded file in Email or WhatsApp before sending.
+                </p>
+              </section>
+            )}
           </>
         )}
 

@@ -3543,6 +3543,65 @@ table.auditMatrix td.auditTrendSame {
   margin: 6px 0 0;
 }
 
+.moduleReviewSection {
+  border-color: #bcd4da;
+  background: #f8fcfd;
+}
+
+.moduleReviewMeta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.moduleReviewMeta > div {
+  padding: 10px;
+  border: 1px solid #d3e1e5;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.moduleReviewMeta span {
+  display: block;
+  color: #678088;
+  font-size: 10px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.moduleReviewMeta strong {
+  color: #073f4c;
+  font-size: 12px;
+}
+
+.moduleReviewActions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.moduleShareLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #bfd2d8;
+  border-radius: 8px;
+  background: #edf4f5;
+  color: #073f4c;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.moduleReviewNote {
+  margin: 10px 0 0;
+  color: #5f757d;
+  font-size: 11px;
+}
+
 
 /* ==========================================================
    UPLOAD PAGE
@@ -3681,6 +3740,10 @@ table.auditMatrix td.auditTrendSame {
     grid-template-columns: 1fr;
   }
 
+  .moduleReviewMeta {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .moduleOrderBar {
     flex-direction: column;
     align-items: stretch;
@@ -3718,6 +3781,10 @@ table.auditMatrix td.auditTrendSame {
 
   .moduleOrderTable {
     min-width: 680px;
+  }
+
+  .moduleReviewMeta {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -3763,4 +3830,257 @@ table.auditMatrix td.auditTrendSame {
 .auditPageVersionTop span {
   padding-left: 10px;
   border-left: 1px solid #cdd8dc;
+}
+
+
+/* ==========================================================
+   CROSS-PAGE RESPONSIVE HARDENING
+   ========================================================== */
+
+.loginCard form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.loginCard label {
+  color: #45656e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.loginCard input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #c7d7dc;
+  border-radius: 9px;
+  color: #073f4c;
+  background: #ffffff;
+}
+
+.loginButton {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 8px;
+}
+
+.dashboardWelcome h2 {
+  overflow-wrap: anywhere;
+}
+
+.auditHomeButton,
+.auditBackButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid #cbd8dc;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #073f4c;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.auditHomeButton:hover,
+.auditBackButton:hover {
+  background: #edf4f5;
+}
+
+.auditSubtitle {
+  color: #6c838a;
+  font-size: 13px;
+}
+
+.auditTransactionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.auditSectionNote {
+  margin: 4px 0 0;
+  color: #6f858b;
+  font-size: 12px;
+}
+
+.processingBox {
+  margin-top: 12px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid #c8d8dc;
+  border-top-color: #0b6071;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+.uploadError,
+.uploadSuccess {
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.uploadError {
+  background: #fff2f2;
+  color: #a42c2c;
+  border-color: #efcccc;
+}
+
+.uploadSuccess {
+  background: #f4fbf7;
+  border-color: #cde5d7;
+}
+
+.successTitle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.successTick {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #127247;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.resultGrid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.resultGrid > div {
+  padding: 10px;
+  border: 1px solid #d6e3e6;
+  border-radius: 9px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.resultGrid span {
+  color: #738a90;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.resultGrid strong {
+  color: #073f4c;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.snapshotActivated {
+  margin-top: 10px;
+  color: #127247;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 900px) {
+  .resultGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .languageDashboard,
+  .languageSelector {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .languageDashboard button,
+  .languageSelector button,
+  .logoutButton {
+    width: 100%;
+  }
+
+  .moduleSection {
+    padding: 10px;
+  }
+
+  .moduleTable th,
+  .moduleTable td {
+    padding: 8px;
+    font-size: 11px;
+  }
+
+  .moduleCategoryToggle {
+    padding: 7px 8px;
+    gap: 8px;
+  }
+
+  .moduleCategoryToggle strong {
+    font-size: 12px;
+  }
+
+  .moduleCategoryToggle small {
+    font-size: 10px;
+  }
+
+  .moduleOrderActions {
+    grid-template-columns: 1fr;
+  }
+
+  .uploadHeader h1,
+  .moduleHeader h1,
+  .auditTop h1 {
+    font-size: 24px;
+  }
+
+  .uploadHeader p,
+  .moduleSubtitle,
+  .auditSubtitle {
+    font-size: 12px;
+  }
+
+  .resultGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .auditTop {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 14px;
+  }
+
+  .auditHomeButton,
+  .auditBackButton {
+    width: 100%;
+  }
+
+  .auditPageFooter {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
 }

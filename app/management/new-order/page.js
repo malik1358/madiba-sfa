@@ -64,6 +64,24 @@ function isRowLike(value) {
   ].some((key) => Object.prototype.hasOwnProperty.call(value, key));
 }
 
+function sheetCell(row, index) {
+  if (!Array.isArray(row)) return "";
+  return row[index] ?? "";
+}
+
+function sheetColumnIndex(columnName) {
+  const name = String(columnName || "").trim().toUpperCase();
+  let index = 0;
+
+  for (let i = 0; i < name.length; i += 1) {
+    const charCode = name.charCodeAt(i);
+    if (charCode < 65 || charCode > 90) return -1;
+    index = (index * 26) + (charCode - 64);
+  }
+
+  return index > 0 ? index - 1 : -1;
+}
+
 function parsePricePayload(payload) {
   const priceMap = {};
   const sheetItems = [];
@@ -98,6 +116,27 @@ function parsePricePayload(payload) {
     if (!value) return;
 
     if (Array.isArray(value)) {
+      if (value.length && Array.isArray(value[0])) {
+        const itemCodeIndex = sheetColumnIndex("B");
+        const itemNameIndex = sheetColumnIndex("C");
+        const categoryIndex = sheetColumnIndex("CO");
+        const rateIndex = sheetColumnIndex("D");
+
+        value.forEach((row) => {
+          const code = normalizeCode(sheetCell(row, itemCodeIndex));
+          const name = String(sheetCell(row, itemNameIndex) || "").trim();
+          const category = String(sheetCell(row, categoryIndex) || "").trim();
+          const rate = sheetCell(row, rateIndex);
+
+          if (!code && !name) return;
+
+          if (code) {
+            addRate(code, rate);
+            upsertSheetItem(code, name || code, category);
+          }
+        });
+      }
+
       value.forEach((entry) => walk(entry));
       return;
     }

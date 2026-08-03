@@ -92,6 +92,19 @@ function sheetColumnIndex(columnName) {
   return index > 0 ? index - 1 : -1;
 }
 
+function looksLikeItemCode(value) {
+  const text = normalizeCode(value);
+  return /^[A-Z][A-Z0-9]{4,12}$/.test(text);
+}
+
+function looksLikeItemName(value) {
+  const text = normalizeText(value);
+  if (!text) return false;
+  if (looksLikeItemCode(text)) return false;
+  if (/^\d+(\.\d+)?$/.test(text)) return false;
+  return text.length >= 3;
+}
+
 function parsePricePayload(payload) {
   const priceMap = {};
   const sheetItems = [];
@@ -133,10 +146,35 @@ function parsePricePayload(payload) {
         const rateIndex = sheetColumnIndex("D");
 
         value.forEach((row) => {
-          const code = normalizeCode(sheetCell(row, itemCodeIndex));
-          const name = String(sheetCell(row, itemNameIndex) || "").trim();
-          const category = String(sheetCell(row, categoryIndex) || "").trim();
-          const rate = sheetCell(row, rateIndex);
+          const codeCandidates = [];
+
+          if (itemCodeIndex >= 0) {
+            codeCandidates.push(sheetCell(row, itemCodeIndex));
+          }
+
+          row.forEach((cell) => {
+            if (looksLikeItemCode(cell)) {
+              codeCandidates.push(cell);
+            }
+          });
+
+          const code = normalizeCode(codeCandidates.find(Boolean));
+
+          const nameCandidates = [];
+          if (itemNameIndex >= 0) {
+            nameCandidates.push(sheetCell(row, itemNameIndex));
+          }
+
+          row.forEach((cell) => {
+            if (looksLikeItemName(cell)) {
+              nameCandidates.push(cell);
+            }
+          });
+
+          const name = String(nameCandidates.find((cell) => normalizeText(cell) !== code) || "").trim();
+
+          const category = String(sheetCell(row, categoryIndex) || row.find((cell) => /electronics|fridge|freezer|air conditioner|ac|window/i.test(String(cell || ""))) || "").trim();
+          const rate = sheetCell(row, rateIndex) || row.find((cell) => Number.isFinite(Number(String(cell).replace(/,/g, "")))) || "";
 
           if (!code && !name) return;
 

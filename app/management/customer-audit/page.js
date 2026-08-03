@@ -337,7 +337,7 @@ console.time("Customers");
          ---------------------------------------------------- */
 
       setItemMasterStatus("Loading...");
-
+console.time("Item Master");
       const {
         data: masterData,
         error: masterError,
@@ -372,6 +372,7 @@ console.time("Customers");
         setItemMaster(
           masterData || []
         );
+        console.timeEnd("Item Master");
       }
       /* ----------------------------------------------------
          SALESMEN

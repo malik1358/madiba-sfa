@@ -22,6 +22,45 @@ export default function PendingOrdersPage() {
   const [error, setError] = useState("");
   const [orders, setOrders] = useState([]);
   const [userRole, setUserRole] = useState("");
+  const [activeOrderId, setActiveOrderId] = useState(null);
+  const [orderLines, setOrderLines] = useState([]);
+  const [loadingLines, setLoadingLines] = useState(false);
+
+  async function openOrder(orderId) {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    if (activeOrderId === orderId) {
+      setActiveOrderId(null);
+      setOrderLines([]);
+      return;
+    }
+
+    setLoadingLines(true);
+    setError("");
+
+    try {
+      const { data, error: linesError } = await supabase
+        .from("sales_order_items")
+        .select("id,item_code,item_name,category,quantity,rate,line_value")
+        .eq("order_id", orderId)
+        .order("item_name");
+
+      if (linesError) throw linesError;
+
+      setActiveOrderId(orderId);
+      setOrderLines(data || []);
+    } catch (err) {
+      setError(err.message || "Unable to open order details.");
+      setActiveOrderId(null);
+      setOrderLines([]);
+    } finally {
+      setLoadingLines(false);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -156,6 +195,7 @@ export default function PendingOrdersPage() {
                   <th>Created</th>
                   <th>Last Updated</th>
                   <th>Age (days)</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -170,18 +210,73 @@ export default function PendingOrdersPage() {
                       <td>{formatDateTime(order.created_at)}</td>
                       <td>{formatDateTime(order.updated_at)}</td>
                       <td>{age}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="moduleInlineButton"
+                          onClick={() => openOrder(order.id)}
+                          disabled={loadingLines && activeOrderId === order.id}
+                        >
+                          {activeOrderId === order.id ? "Close" : "Open"}
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
 
                 {orders.length === 0 && (
                   <tr>
-                    <td colSpan={6}>No old pending orders found.</td>
+                    <td colSpan={7}>No old pending orders found.</td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+
+          {activeOrderId && (
+            <div style={{ marginTop: "12px" }}>
+              <div className="moduleSectionHeader">
+                <h2>Order #{activeOrderId} Details</h2>
+                <span>{loadingLines ? "Loading..." : `${orderLines.length} line(s)`}</span>
+              </div>
+              <div className="moduleTableWrap">
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>Item Code</th>
+                      <th>Item Name</th>
+                      <th>Category</th>
+                      <th>Qty</th>
+                      <th>Rate</th>
+                      <th>Line Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orderLines.map((line) => (
+                      <tr key={line.id}>
+                        <td>{line.item_code || "-"}</td>
+                        <td>{line.item_name || "-"}</td>
+                        <td>{line.category || "-"}</td>
+                        <td>{Number(line.quantity || 0)}</td>
+                        <td>{`SAR ${Number(line.rate || 0).toFixed(2)}`}</td>
+                        <td>{`SAR ${Number(line.line_value || 0).toFixed(2)}`}</td>
+                      </tr>
+                    ))}
+                    {!loadingLines && orderLines.length === 0 && (
+                      <tr>
+                        <td colSpan={6}>No line items found for this order.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="moduleActionRow" style={{ marginTop: "10px" }}>
+                <Link href="/management/new-order" className="modulePrimaryButton">Open Order Workflow</Link>
+                <Link href="/management/customer-audit" className="moduleInlineButton">Go to Customer Audit</Link>
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </main>

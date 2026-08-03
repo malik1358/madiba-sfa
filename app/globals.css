@@ -1208,7 +1208,7 @@ button {
 
 .auditQuickOrderTable {
   width: 100%;
-  border-collapse: separate;
+  border-collapse: collapse;
   border-spacing: 0;
 }
 
@@ -1223,16 +1223,16 @@ button {
   font-weight: 800;
   text-align: left;
   text-transform: uppercase;
-  border-bottom: 1px solid #d1dde0;
+  border: 1px solid #d1dde0;
   white-space: nowrap;
 }
 
 .auditQuickOrderTable tbody tr {
-  border-bottom: 1px solid #e8eef1;
+  border-bottom: 1px solid #d1dde0;
 }
 
 .auditQuickOrderTable tbody tr:last-child {
-  border-bottom: 0;
+  border-bottom: 1px solid #d1dde0;
 }
 
 .auditQuickOrderTable td {
@@ -1240,6 +1240,11 @@ button {
   vertical-align: middle;
   color: #073f4c;
   font-size: 12px;
+  border-right: 1px solid #d1dde0;
+}
+
+.auditQuickOrderTable td:last-child {
+  border-right: 0;
 }
 
 .auditQuickItemCode {

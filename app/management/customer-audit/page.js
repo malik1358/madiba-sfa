@@ -4,7 +4,6 @@ const PRICE_API =
   "https://script.google.com/macros/s/AKfycbzXPREoz0tUgern-5LhpEPBMY_ed2hO1fgYpIVfzG2-BU9HbjOklKCBFVMtsw64Uff5/exec";
 
 const PAGE_VERSION = "Quick Order V5";
-const BUILD_COMMIT = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || "Local";
 
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -91,8 +90,8 @@ export default function CustomerAuditPage() {
         const response = await fetch(PRICE_API);
         const prices = await response.json();
         setPriceList(prices);
-      } catch (e) {
-        console.error(e);
+      } catch {
+        // Ignore price lookup failures so the audit screen still renders.
       }
     }
 

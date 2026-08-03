@@ -938,11 +938,6 @@ export async function POST(request) {
     });
 
   } catch (error) {
-    console.error(
-      "IMPORT ERROR:",
-      error
-    );
-
     /* ========================================================
        MARK FAILED IMPORT
        ======================================================== */
@@ -987,13 +982,8 @@ export async function POST(request) {
             batchId
           );
 
-      } catch (
-        cleanupError
-      ) {
-        console.error(
-          "Failed to mark import as failed:",
-          cleanupError
-        );
+      } catch {
+        // Ignore cleanup failures during import error handling.
       }
     }
 

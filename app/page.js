@@ -76,7 +76,6 @@ export default function Home() {
       .single();
 
     if (error) {
-      console.error("Profile error:", error);
       setProfile(null);
       return;
     }

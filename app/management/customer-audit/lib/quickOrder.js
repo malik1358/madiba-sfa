@@ -1,13 +1,5 @@
 import { monthKey, salesUnitQty } from './format';
-
-function normalizeCode(value) {
-  return String(value || '').trim().toUpperCase();
-}
-
-function isDoNotUseItem(name) {
-  const text = String(name || '').trim().toLowerCase();
-  return /do\s*not\s*use+/i.test(text);
-}
+import { isDoNotUseItem, normalizeCode } from './helpers';
 
 export function buildQuickOrderSuggestions({ analytics, transactions, peerTransactions, itemMaster }) {
   if (!analytics) {

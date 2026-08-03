@@ -1,0 +1,191 @@
+/* Partial CSS extraction for the Quick Order area.
+   This file will gradually contain extracted styles from the page.
+   Keeping selectors identical to avoid visual changes.
+*/
+
+.auditQuickOrderSection {
+  margin-top: 28px;
+}
+
+.auditQuickOrderHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.auditQuickOrderHeading h3 {
+  margin: 0 0 3px;
+}
+
+.auditQuickOrderHeading p {
+  margin: 0;
+  color: #5b737b;
+  font-size: 12px;
+}
+
+.auditQuickOrderCount {
+  white-space: nowrap;
+  border: 1px solid #b8cbd1;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: #ffffff;
+  color: #0b5364;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.auditQuickOrderGroups {
+  display: grid;
+  gap: 14px;
+}
+
+.auditQuickOrderGroup {
+  overflow: hidden;
+  border: 1px solid #b8cbd1;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.auditQuickOrderGroupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  background: #0b5364;
+  color: #ffffff;
+}
+
+.auditQuickOrderGroupHeader > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auditQuickOrderGroupHeader strong {
+  font-size: 13px;
+}
+
+.auditQuickOrderGroupHeader span {
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.auditQuickOrderGroupHeader b {
+  min-width: 25px;
+  height: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 11px;
+}
+
+.auditQuickOrderTableWrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.auditQuickOrderTable {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.auditQuickOrderTable th,
+.auditQuickOrderTable td {
+  padding: 9px 10px;
+  border-right: 1px solid #cdd8dc;
+  border-bottom: 1px solid #cdd8dc;
+  vertical-align: middle;
+}
+
+.auditQuickOrderTable th:last-child,
+.auditQuickOrderTable td:last-child {
+  border-right: 0;
+}
+
+.auditQuickOrderTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.auditQuickOrderTable thead th {
+  background: #edf3f5;
+  color: #214d59;
+  text-align: left;
+  font-weight: 800;
+}
+
+.auditQuickItemCode {
+  margin-bottom: 2px;
+  color: #0b6a7d;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.auditQuickItemName {
+  display: block;
+  color: #073f4c;
+  line-height: 1.25;
+}
+
+.auditQuickBadge {
+  display: inline-block;
+  padding: 4px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.auditQuickBadgeNew {
+  background: #eaf7ef;
+  color: #16834f;
+}
+
+.auditQuickHistory {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 8px;
+  align-items: center;
+}
+
+.auditQuickHistory span {
+  color: #63787e;
+  font-size: 10px;
+}
+
+.auditQuickHistory strong {
+  color: #123f4b;
+  text-align: right;
+}
+
+.auditQuickDecline {
+  color: #c63c3c !important;
+}
+
+.auditQuickRate {
+  text-align: center;
+  font-weight: 800;
+}
+
+.auditQuickOrderEmpty {
+  padding: 14px;
+  color: #63787e;
+  font-size: 11px;
+}
+
+@media (max-width: 700px) {
+  .auditQuickOrderHeading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .auditQuickOrderCount {
+    align-self: flex-start;
+  }
+}

@@ -2744,10 +2744,10 @@ const newItems =
              */
 
            rate:
-  Number(priceList[item.item_code] || 0),
+  Number(priceList[String(item.item_code).trim().toUpperCase()] || 0),
 
 line_value:
-  Number(priceList[item.item_code] || 0) *
+  Number(priceList[String(item.item_code).trim().toUpperCase()] || 0) *
   Number(item.order_quantity),
 
           })
@@ -4290,8 +4290,8 @@ line_value:
                                                   >
                                                 <span>
 
-  {priceList[item.item_code]
-    ? `SAR ${Number(priceList[item.item_code]).toFixed(2)}`
+  {priceList[String(item.item_code).trim().toUpperCase()]
+    ? `SAR ${Number(priceList[String(item.item_code).trim().toUpperCase()]).toFixed(2)}`
     : "—"}
 
 </span>
@@ -4605,7 +4605,18 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
 
                             {group.items.map(
                               (item) => {
-
+console.log(
+  "ITEM:",
+  item.item_code,
+  "PRICE:",
+  priceList[String(item.item_code).trim().toUpperCase()]
+);
+                                console.log(
+  "TRIMMED:",
+  item.item_code.trim(),
+  "PRICE:",
+  priceList[item.item_code.trim()]
+);
                                 const orderQty =
                                   Number(
                                     orderQuantities[
@@ -4730,8 +4741,8 @@ NEW SUGGESTIONS: {quickOrderSuggestions.newItems.length}
 
                                     {/* RATE BLANK */}
 <td className="auditQuickRate">
-  {priceList[item.item_code]
-    ? `SAR ${Number(priceList[item.item_code]).toFixed(2)}`
+  {priceList[String(item.item_code).trim().toUpperCase()]
+    ? `SAR ${Number(priceList[String(item.item_code).trim().toUpperCase()]).toFixed(2)}`
     : "NOT FOUND"}
 </td>
 
@@ -5051,7 +5062,7 @@ SAR{" "}
       sum +
 
       Number(
-        priceList[item.item_code] || 0
+        priceList[String(item.item_code).trim().toUpperCase()] || 0
       ) *
 
       Number(item.order_quantity),
@@ -5244,14 +5255,14 @@ SAR{" "}
 
   <strong
     style={{
-      color: priceList[item.item_code]
+      color: priceList[String(item.item_code).trim().toUpperCase()]
         ? "#0f766e"
         : "red",
     }}
   >
-    {priceList[item.item_code]
+    {priceList[String(item.item_code).trim().toUpperCase()]
       ? `SAR ${Number(
-          priceList[item.item_code]
+          priceList[String(item.item_code).trim().toUpperCase()]
         ).toFixed(2)}`
       : "PRICE NOT FOUND"}
   </strong>
@@ -5419,7 +5430,7 @@ SAR{" "}
 <strong>
   SAR{" "}
   {Number(
-    priceList[item.item_code] || 0
+    priceList[String(item.item_code).trim().toUpperCase()] || 0
   ).toFixed(2)}
 </strong>
             <small>

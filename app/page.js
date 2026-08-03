@@ -1,12 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-);
+import { getSupabaseClient } from "./lib/supabase";
+import SupabaseUnavailable from "./components/SupabaseUnavailable";
 
 export default function Home() {
   const [language, setLanguage] = useState("en");
@@ -23,7 +19,14 @@ export default function Home() {
   const ar = language === "ar";
 
   useEffect(() => {
-    checkSession();
+    const supabase = getSupabaseClient();
+
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
+
+    checkSession(supabase);
 
     const {
       data: { subscription },
@@ -40,10 +43,15 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
-  async function checkSession() {
+  async function checkSession(supabaseClient = getSupabaseClient()) {
+    if (!supabaseClient) {
+      setLoading(false);
+      return;
+    }
+
     const {
       data: { session },
-    } = await supabase.auth.getSession();
+    } = await supabaseClient.auth.getSession();
 
     if (session?.user) {
       setUser(session.user);
@@ -54,6 +62,13 @@ export default function Home() {
   }
 
   async function loadProfile(userId) {
+    const supabase = getSupabaseClient();
+
+    if (!supabase) {
+      setProfile(null);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("profiles")
       .select("*")
@@ -75,6 +90,13 @@ export default function Home() {
 
   async function handleLogin(e) {
     e.preventDefault();
+
+    const supabase = getSupabaseClient();
+
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
 
     setError("");
     setLoginLoading(true);
@@ -105,7 +127,10 @@ export default function Home() {
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
 
     setUser(null);
     setProfile(null);
@@ -122,6 +147,16 @@ export default function Home() {
           </div>
         </div>
       </main>
+    );
+  }
+
+  const supabaseClient = getSupabaseClient();
+  if (!supabaseClient) {
+    return (
+      <SupabaseUnavailable
+        title="Supabase is not configured"
+        message="Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to enable authentication and data access."
+      />
     );
   }
 

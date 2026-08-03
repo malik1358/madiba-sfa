@@ -1,0 +1,73 @@
+export function numberFormat(value) {
+  return Number(value || 0).toLocaleString('en-SA', {
+    maximumFractionDigits: 0,
+  });
+}
+
+export function qtyFormat(value) {
+  return Number(value || 0).toLocaleString('en-SA', {
+    maximumFractionDigits: 2,
+  });
+}
+
+export function shortDate(value) {
+  if (!value) return '-';
+
+  const d = new Date(`${value}T00:00:00`);
+
+  return d.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+export function monthKey(date) {
+  if (!date) return null;
+  return String(date).slice(0, 7);
+}
+
+export function monthName(key) {
+  if (!key) return '';
+
+  const [year, month] = key.split('-');
+
+  return new Date(Number(year), Number(month) - 1, 1).toLocaleDateString('en-GB', {
+    month: 'short',
+  });
+}
+
+export function salesUnitQty(row) {
+  const salesAmount = Number(row?.sales_amount || 0);
+  const rate = Number(row?.rate || 0);
+
+  if (!rate) return 0;
+
+  return salesAmount / rate;
+}
+
+export function buildLast12Months(latestDate) {
+  if (!latestDate) return [];
+
+  const d = new Date(`${latestDate}T00:00:00`);
+  const result = [];
+
+  for (let i = 11; i >= 0; i -= 1) {
+    const x = new Date(d.getFullYear(), d.getMonth() - i, 1);
+    result.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`);
+  }
+
+  return result;
+}
+
+export function trendClass(current, previous, hasPrevious = true) {
+  if (!hasPrevious) return '';
+
+  const currentValue = Number(current || 0);
+  const previousValue = Number(previous || 0);
+
+  if (currentValue > previousValue) return 'auditTrendUp';
+  if (currentValue < previousValue) return 'auditTrendDown';
+
+  return 'auditTrendSame';
+}

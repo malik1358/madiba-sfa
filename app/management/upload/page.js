@@ -1,18 +1,25 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-);
+import { getSupabaseClient } from "../../lib/supabase";
+import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 
 export default function UploadSalesPage() {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+
+  const supabaseClient = getSupabaseClient();
+
+  if (!supabaseClient) {
+    return (
+      <SupabaseUnavailable
+        title="Upload unavailable"
+        message="The upload page requires Supabase credentials to authenticate and process sales files."
+      />
+    );
+  }
 
   async function uploadFile() {
     if (!file) {
@@ -25,6 +32,12 @@ export default function UploadSalesPage() {
     setResult(null);
 
     try {
+      const supabase = getSupabaseClient();
+
+      if (!supabase) {
+        throw new Error("Supabase is not configured.");
+      }
+
       const {
         data: { session },
       } = await supabase.auth.getSession();

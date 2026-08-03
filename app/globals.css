@@ -3057,6 +3057,453 @@ table.auditMatrix td.auditTrendSame {
 
   .auditTransactionTable th:nth-child(4),
   .auditTransactionTable td:nth-child(4) {
+
+
+  /* ==========================================================
+     SHARED MODULE PAGES
+     ========================================================== */
+
+  .modulePage {
+    min-height: 100vh;
+    background: #f3f7f8;
+    padding: 20px;
+  }
+
+  .moduleShell {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+
+  .moduleHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .moduleEyebrow {
+    margin: 0 0 5px;
+    color: #0d5a6b;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 1.4px;
+  }
+
+  .moduleHeader h1 {
+    margin: 0;
+    color: #073b49;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 30px;
+    line-height: 1.1;
+  }
+
+  .moduleSubtitle {
+    margin: 7px 0 0;
+    color: #6c838a;
+    font-size: 13px;
+  }
+
+  .moduleBackLink {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 0 16px;
+    background: #ffffff;
+    color: #073f4c;
+    border: 1px solid #cbd8dc;
+    border-radius: 10px;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .moduleSection {
+    margin-bottom: 16px;
+    padding: 14px;
+    background: #ffffff;
+    border: 1px solid #d1dde0;
+    border-radius: 12px;
+  }
+
+  .moduleSectionHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .moduleSectionHeader h2 {
+    margin: 0;
+    color: #073f4c;
+    font-size: 16px;
+    font-weight: 800;
+  }
+
+  .moduleSectionHeader span {
+    color: #6c838a;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .moduleError,
+  .moduleSuccess,
+  .moduleHint,
+  .moduleLoading {
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+  }
+
+  .moduleError {
+    background: #fff1f1;
+    color: #a42c2c;
+    border: 1px solid #f1caca;
+  }
+
+  .moduleSuccess {
+    background: #eef8f2;
+    color: #116843;
+    border: 1px solid #cfe6d8;
+  }
+
+  .moduleHint,
+  .moduleLoading {
+    background: #f7fafb;
+    color: #5e747b;
+    border: 1px solid #dde8eb;
+  }
+
+  .moduleMetricGrid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .moduleMetricCard {
+    background: #ffffff;
+    border: 1px solid #d1dde0;
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .moduleMetricCard span {
+    color: #6f858c;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .moduleMetricCard strong {
+    color: #073f4c;
+    font-size: 18px;
+    font-weight: 800;
+  }
+
+  .moduleFilterRow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .moduleInput,
+  .moduleTextArea,
+  .moduleInlineButton,
+  .modulePrimaryButton,
+  .moduleOrderActions button,
+  .moduleQtyControl button {
+    font: inherit;
+  }
+
+  .moduleInput,
+  .moduleTextArea {
+    width: 100%;
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid #c7d7dc;
+    border-radius: 8px;
+    color: #073f4c;
+    background: #ffffff;
+  }
+
+  .moduleTextArea {
+    min-height: 96px;
+    resize: vertical;
+  }
+
+  .moduleTableWrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .moduleTable {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .moduleTable th,
+  .moduleTable td {
+    padding: 10px;
+    border: 1px solid #d5e1e4;
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  .moduleTable th {
+    background: #edf4f5;
+    color: #073f4c;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .moduleTable td {
+    color: #073f4c;
+    font-size: 12px;
+  }
+
+  .moduleCode {
+    margin-top: 4px;
+    color: #0b6173;
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  .moduleQtyControl {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .moduleQtyControl button {
+    width: 30px;
+    height: 32px;
+    border: 1px solid #c2d2d6;
+    background: #e8f1f3;
+    color: #0a5868;
+    font-size: 16px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .moduleQtyControl button:first-child {
+    border-radius: 7px 0 0 7px;
+  }
+
+  .moduleQtyControl button:last-child {
+    border-radius: 0 7px 7px 0;
+  }
+
+  .moduleQtyControl input {
+    width: 48px;
+    height: 32px;
+    border-top: 1px solid #c2d2d6;
+    border-bottom: 1px solid #c2d2d6;
+    border-left: 0;
+    border-right: 0;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 800;
+    color: #073f4c;
+    outline: 0;
+  }
+
+  .moduleOrderBar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .moduleOrderBar span {
+    display: block;
+    color: #698087;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .moduleOrderBar strong {
+    color: #073f4c;
+    font-size: 18px;
+  }
+
+  .moduleOrderActions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .modulePrimaryButton,
+  .moduleOrderActions button,
+  .moduleInlineButton {
+    min-height: 40px;
+    padding: 0 14px;
+    border: 1px solid #0f6172;
+    border-radius: 8px;
+    background: #0d6071;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .moduleInlineButton {
+    min-height: 36px;
+    background: #edf4f5;
+    border-color: #bfd2d8;
+    color: #073f4c;
+  }
+
+  .moduleOrderActions button:last-child,
+  .modulePrimaryButton {
+    background: #147347;
+    border-color: #10623d;
+  }
+
+  .moduleFormGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .moduleFormGrid label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    color: #45656e;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .moduleFieldFull {
+    grid-column: 1 / -1;
+  }
+
+  .moduleGpsRow {
+    grid-column: 1 / -1;
+  }
+
+  .moduleGpsControls {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+  }
+
+  .moduleNavGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .moduleNavCard {
+    display: flex;
+    align-items: center;
+    min-height: 52px;
+    padding: 0 12px;
+    border: 1px solid #cddbe0;
+    border-radius: 10px;
+    background: #f8fbfc;
+    color: #073f4c;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .moduleHealthGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .moduleHealthGrid > div {
+    padding: 10px;
+    border: 1px solid #d5e1e4;
+    border-radius: 10px;
+    background: #f9fbfc;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .moduleHealthGrid span {
+    color: #778c92;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .moduleHealthGrid strong {
+    color: #073f4c;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .moduleActionRow {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .moduleList {
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .moduleList li {
+    padding: 8px 10px;
+    border: 1px solid #d5e1e4;
+    border-radius: 9px;
+    background: #f8fbfc;
+    color: #073f4c;
+    font-size: 12px;
+  }
+
+  .moduleList li span {
+    margin-left: 7px;
+    color: #74898f;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .moduleList li p {
+    margin: 6px 0 0;
+  }
+
+  @media (max-width: 900px) {
+    .moduleMetricGrid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .moduleFilterRow,
+    .moduleFormGrid,
+    .moduleNavGrid,
+    .moduleHealthGrid {
+      grid-template-columns: 1fr;
+    }
+
+    .moduleOrderBar {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .moduleOrderActions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .moduleHeader {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+  }
     min-width: 220px;
   }
 

@@ -251,7 +251,7 @@ export default function Home() {
                 subtitle: ar
                   ? "زيارات ومتابعات اليوم"
                   : "Today's visits & follow-ups",
-                href: "/management",
+                href: "/management/my-day",
               },
               {
                 icon: "👥",
@@ -275,7 +275,7 @@ export default function Home() {
                 subtitle: ar
                   ? "تسجيل عميل محتمل"
                   : "Register a new prospect",
-                href: "/management",
+                href: "/management/new-customer",
               },
               {
                 icon: "🎯",
@@ -283,7 +283,7 @@ export default function Home() {
                 subtitle: ar
                   ? "الأهداف والنتائج"
                   : "KRA & KPI progress",
-                href: "/management",
+                href: "/management/my-performance",
               },
             ].map((item) => (
               <button

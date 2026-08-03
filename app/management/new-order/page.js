@@ -1,518 +1,368 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { useOrder } from "../customer-audit/hooks/useOrder";
+import { getPrice } from "../customer-audit/lib/helpers";
+import { qtyFormat } from "../customer-audit/lib/format";
+import { calculateGrandTotal } from "../customer-audit/lib/orderHelpers";
 
 const PRICE_API =
   "https://script.google.com/macros/s/AKfycbzXPREoz0tUgern-5LhpEPBMY_ed2hO1fgYpIVfzG2-BU9HbjOklKCBFVMtsw64Uff5/exec";
 
 export default function NewOrderPage() {
   const [loading, setLoading] = useState(true);
-  const [customers, setCustomers] = useState([]);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [search, setSearch] = useState("");
-  const [priceList, setPriceList] = useState({});
-  const [itemMaster, setItemMaster] = useState([]);
-  const [orderItems, setOrderItems] = useState([]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [itemsMaster, setItemsMaster] = useState([]);
+  const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [itemSearch, setItemSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [priceList, setPriceList] = useState({});
+  const [previousDrafts, setPreviousDrafts] = useState([]);
 
-  const supabaseClient = getSupabaseClient();
+  const selectedCustomer = useMemo(
+    () => customers.find((customer) => customer.customer_code === selectedCustomerCode) || null,
+    [customers, selectedCustomerCode]
+  );
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const supabase = getSupabaseClient();
-        if (!supabase) {
-          setLoading(false);
-          return;
-        }
-
-        // Load customers
-        const { data: customersData, error: customersError } = await supabase
-          .from("customers")
-          .select("*")
-          .order("customer_name");
-
-        if (customersError) throw customersError;
-        setCustomers(customersData || []);
-
-        // Load item master
-        const { data: itemsData, error: itemsError } = await supabase
-          .from("item_master")
-          .select("*")
-          .order("item_name");
-
-        if (itemsError) throw itemsError;
-        setItemMaster(itemsData || []);
-
-        setLoading(false);
-      } catch (err) {
-        setError(err.message || "Failed to load data");
-        setLoading(false);
-      }
-    }
-
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    async function loadPrices() {
-      try {
-        const response = await fetch(PRICE_API);
-        const prices = await response.json();
-        setPriceList(prices);
-      } catch {
-        // Ignore price lookup failures
-      }
-    }
-
-    loadPrices();
-  }, []);
+  const categories = useMemo(
+    () => [
+      "ALL",
+      ...new Set(itemsMaster.map((item) => item.category).filter(Boolean)).values(),
+    ],
+    [itemsMaster]
+  );
 
   const filteredCustomers = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return customers;
-
+    const q = customerSearch.trim().toLowerCase();
     return customers.filter((customer) => {
+      if (!q) return true;
       return (
         String(customer.customer_code || "").toLowerCase().includes(q) ||
         String(customer.customer_name || "").toLowerCase().includes(q)
       );
     });
-  }, [customers, search]);
+  }, [customers, customerSearch]);
 
-  function addItemToOrder(item) {
-    const existing = orderItems.find((oi) => oi.item_code === item.item_code);
-    if (existing) {
-      setOrderItems(
-        orderItems.map((oi) =>
-          oi.item_code === item.item_code
-            ? { ...oi, order_quantity: oi.order_quantity + 1 }
-            : oi
-        )
+  const filteredItems = useMemo(() => {
+    const q = itemSearch.trim().toLowerCase();
+    return itemsMaster.filter((item) => {
+      if (categoryFilter !== "ALL" && item.category !== categoryFilter) return false;
+      if (!q) return true;
+
+      return (
+        String(item.item_code || "").toLowerCase().includes(q) ||
+        String(item.item_name || "").toLowerCase().includes(q) ||
+        String(item.category || "").toLowerCase().includes(q)
       );
-    } else {
-      setOrderItems([
-        ...orderItems,
-        {
-          item_code: item.item_code,
-          item_name: item.item_name,
-          category: item.category,
-          order_quantity: 1,
-        },
-      ]);
-    }
-  }
+    });
+  }, [itemsMaster, categoryFilter, itemSearch]);
 
-  function updateOrderQty(itemCode, value) {
-    const qty = Math.max(0, Number(value) || 0);
-    setOrderItems(
-      orderItems.map((oi) =>
-        oi.item_code === itemCode ? { ...oi, order_quantity: qty } : oi
-      )
-    );
-  }
+  const analyticsLike = useMemo(() => ({ items: itemsMaster }), [itemsMaster]);
 
-  function removeOrderItem(itemCode) {
-    setOrderItems(orderItems.filter((oi) => oi.item_code !== itemCode));
-  }
+  const {
+    draftOrderId,
+    orderItems,
+    orderSummary,
+    orderQuantities,
+    savingOrder,
+    submittingOrder,
+    updateQty,
+    increaseQty,
+    decreaseQty,
+    saveDraft,
+    submitOrder,
+  } = useOrder({
+    analytics: analyticsLike,
+    quickOrderAllItems: [],
+    selectedCustomer,
+    priceList,
+    setError,
+    setMessage,
+  });
 
-  async function submitOrder() {
-    if (!selectedCustomer) {
-      setError("Please select a customer");
-      return;
-    }
-
-    if (orderItems.length === 0) {
-      setError("Please add at least one item");
-      return;
-    }
-
-    setSubmitting(true);
-    setError("");
-    setMessage("");
-
-    try {
+  useEffect(() => {
+    async function loadFoundation() {
       const supabase = getSupabaseClient();
-      if (!supabase) throw new Error("Supabase not configured");
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Please login again");
+      setLoading(true);
+      setError("");
 
-      // Create order
-      const { data: newOrder, error: orderError } = await supabase
-        .from("sales_orders")
-        .insert({
-          customer_code: selectedCustomer.customer_code,
-          customer_name: selectedCustomer.customer_name,
-          salesman_code: selectedCustomer.current_salesman_code,
-          status: "SUBMITTED",
-          created_by: session.user.id,
-          submitted_at: new Date().toISOString(),
-        })
-        .select("id")
-        .single();
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-      if (orderError) throw orderError;
+        if (!session?.user) {
+          throw new Error("Please login again.");
+        }
 
-      // Insert order items
-      const lines = orderItems.map((item) => ({
-        order_id: newOrder.id,
-        item_code: item.item_code,
-        item_name: item.item_name,
-        category: item.category,
-        quantity: Number(item.order_quantity),
-        rate: Number(
-          priceList[String(item.item_code).trim().toUpperCase()] || 0
-        ),
-        line_value:
-          Number(priceList[String(item.item_code).trim().toUpperCase()] || 0) *
-          Number(item.order_quantity),
-      }));
+        const [customersRes, itemsRes, draftsRes] = await Promise.all([
+          supabase
+            .from("customers")
+            .select("customer_code,customer_name,current_salesman_code")
+            .eq("is_active", true)
+            .order("customer_name"),
+          supabase
+            .from("items_master")
+            .select("item_code,item_name,category")
+            .order("item_name"),
+          supabase
+            .from("sales_orders")
+            .select("id,customer_code,customer_name,updated_at,status")
+            .eq("created_by", session.user.id)
+            .eq("status", "DRAFT")
+            .order("updated_at", { ascending: false })
+            .limit(25),
+        ]);
 
-      const { error: lineError } = await supabase
-        .from("sales_order_items")
-        .insert(lines);
+        if (customersRes.error) throw customersRes.error;
+        if (itemsRes.error) throw itemsRes.error;
+        if (draftsRes.error) throw draftsRes.error;
 
-      if (lineError) throw lineError;
-
-      setMessage(`Order #${newOrder.id} created successfully!`);
-      setSelectedCustomer(null);
-      setOrderItems([]);
-      setSearch("");
-    } catch (err) {
-      setError(err.message || "Failed to submit order");
-    } finally {
-      setSubmitting(false);
+        setCustomers(customersRes.data || []);
+        setItemsMaster(itemsRes.data || []);
+        setPreviousDrafts(draftsRes.data || []);
+      } catch (err) {
+        setError(err.message || "Unable to load new order data.");
+      } finally {
+        setLoading(false);
+      }
     }
-  }
 
+    async function loadPrices() {
+      try {
+        const response = await fetch(PRICE_API);
+        const data = await response.json();
+        setPriceList(data || {});
+      } catch {
+        setPriceList({});
+      }
+    }
+
+    loadFoundation();
+    loadPrices();
+  }, []);
+
+  const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
     return (
       <SupabaseUnavailable
         title="New Order unavailable"
-        message="The new order module requires Supabase credentials to access customer and pricing data."
+        message="Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to create orders."
       />
     );
   }
 
   if (loading) {
     return (
-      <main className="auditPage">
-        <div className="auditShell">
-          <div className="auditBrand">MADIBA SFA</div>
-          <h1>New Order</h1>
-          <p className="auditSubtitle">Loading...</p>
+      <main className="modulePage">
+        <div className="moduleShell">
+          <div className="moduleLoading">Loading order workspace...</div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="auditPage">
-      <div className="auditShell">
-        <div className="auditTop">
+    <main className="modulePage">
+      <div className="moduleShell">
+        <div className="moduleHeader">
           <div>
-            <div className="auditBrand">MADIBA SFA</div>
+            <p className="moduleEyebrow">MADIBA SFA</p>
             <h1>New Order</h1>
-            <p className="auditSubtitle">Create and submit a new customer order</p>
+            <p className="moduleSubtitle">Create, save draft, and submit customer orders</p>
           </div>
-          <a href="/" className="auditHomeButton">
-            ← Dashboard
-          </a>
+          <Link href="/" className="moduleBackLink">← Dashboard</Link>
         </div>
 
-        {message && <div className="auditSuccess">{message}</div>}
-        {error && <div className="auditError">{error}</div>}
+        {error && <div className="moduleError">{error}</div>}
+        {message && <div className="moduleSuccess">{message}</div>}
 
-        {!selectedCustomer ? (
-          <section className="auditSection">
-            <h3 className="auditSectionTitle">Select Customer</h3>
-
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>Customer Search</h2>
+          </div>
+          <div className="moduleFilterRow">
             <input
+              className="moduleInput"
               type="text"
-              placeholder="Search customer by code or name..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                marginBottom: "12px",
-                border: "1px solid #cbd8dc",
-                borderRadius: "8px",
-                fontSize: "14px",
-              }}
+              placeholder="Search customer by code or name"
+              value={customerSearch}
+              onChange={(event) => setCustomerSearch(event.target.value)}
             />
+            <select
+              className="moduleInput"
+              value={selectedCustomerCode}
+              onChange={(event) => {
+                setSelectedCustomerCode(event.target.value);
+                setError("");
+                setMessage("");
+              }}
+            >
+              <option value="">Select customer</option>
+              {filteredCustomers.map((customer) => (
+                <option key={customer.customer_code} value={customer.customer_code}>
+                  {customer.customer_code} - {customer.customer_name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <div style={{ maxHeight: "400px", overflowY: "auto" }}>
-              {filteredCustomers.length === 0 ? (
-                <div className="auditEmpty">
-                  {search ? "No customers found" : "No customers available"}
-                </div>
-              ) : (
-                filteredCustomers.map((customer) => (
-                  <div
-                    key={customer.customer_code}
-                    style={{
-                      padding: "12px",
-                      border: "1px solid #d1dde0",
-                      borderRadius: "8px",
-                      marginBottom: "8px",
-                      cursor: "pointer",
-                      transition: "all 0.15s ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = "#f0f7f9";
-                      e.currentTarget.style.borderColor = "#0b5364";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = "transparent";
-                      e.currentTarget.style.borderColor = "#d1dde0";
-                    }}
-                    onClick={() => setSelectedCustomer(customer)}
-                  >
-                    <div style={{ fontWeight: 800, color: "#073f4c" }}>
-                      {customer.customer_code}
-                    </div>
-                    <div style={{ color: "#0b6072", fontSize: "14px" }}>
-                      {customer.customer_name}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-        ) : (
+          {!selectedCustomer && (
+            <div className="moduleHint">Select a customer to start building an order.</div>
+          )}
+        </section>
+
+        {selectedCustomer && (
           <>
-            <section className="auditSection">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                <div>
-                  <h3 className="auditSectionTitle">{selectedCustomer.customer_name}</h3>
-                  <p style={{ color: "#6c838a", fontSize: "12px" }}>
-                    {selectedCustomer.customer_code}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="auditBackButton"
-                  onClick={() => {
-                    setSelectedCustomer(null);
-                    setOrderItems([]);
-                  }}
+            <section className="moduleSection">
+              <div className="moduleSectionHeader">
+                <h2>Items</h2>
+                <span>
+                  {orderSummary.itemCount} items • {qtyFormat(orderSummary.totalQuantity)} units
+                </span>
+              </div>
+
+              <div className="moduleFilterRow">
+                <input
+                  className="moduleInput"
+                  type="text"
+                  placeholder="Search item code, name, or category"
+                  value={itemSearch}
+                  onChange={(event) => setItemSearch(event.target.value)}
+                />
+                <select
+                  className="moduleInput"
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
                 >
-                  ← Change Customer
-                </button>
+                  {categories.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="auditEmpty" style={{ marginBottom: "16px" }}>
-                <strong>Add Items</strong>
-                <p>Search and select items to add to the order</p>
-              </div>
-
-              <input
-                type="text"
-                placeholder="Search items..."
-                onChange={(e) => {
-                  const q = e.target.value.toLowerCase();
-                  if (!q) return;
-
-                  const matching = itemMaster.filter(
-                    (item) =>
-                      String(item.item_code || "").toLowerCase().includes(q) ||
-                      String(item.item_name || "").toLowerCase().includes(q)
-                  );
-
-                  if (matching.length === 1) {
-                    addItemToOrder(matching[0]);
-                    e.target.value = "";
-                  }
-                }}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  marginBottom: "12px",
-                  border: "1px solid #cbd8dc",
-                  borderRadius: "8px",
-                  fontSize: "14px",
-                }}
-              />
-            </section>
-
-            {orderItems.length > 0 && (
-              <section className="auditSection">
-                <h3 className="auditSectionTitle">Order Items</h3>
-
-                <div style={{ overflowX: "auto" }}>
-                  <table
-                    style={{
-                      width: "100%",
-                      borderCollapse: "collapse",
-                      fontSize: "12px",
-                    }}
-                  >
-                    <thead>
-                      <tr style={{ backgroundColor: "#eef5f6" }}>
-                        <th
-                          style={{
-                            padding: "10px",
-                            textAlign: "left",
-                            borderBottom: "1px solid #d1dde0",
-                          }}
-                        >
-                          Item
-                        </th>
-                        <th
-                          style={{
-                            padding: "10px",
-                            textAlign: "left",
-                            borderBottom: "1px solid #d1dde0",
-                          }}
-                        >
-                          Category
-                        </th>
-                        <th
-                          style={{
-                            padding: "10px",
-                            textAlign: "left",
-                            borderBottom: "1px solid #d1dde0",
-                          }}
-                        >
-                          Rate
-                        </th>
-                        <th
-                          style={{
-                            padding: "10px",
-                            textAlign: "center",
-                            borderBottom: "1px solid #d1dde0",
-                          }}
-                        >
-                          Qty
-                        </th>
-                        <th
-                          style={{
-                            padding: "10px",
-                            textAlign: "right",
-                            borderBottom: "1px solid #d1dde0",
-                          }}
-                        >
-                          Total
-                        </th>
-                        <th
-                          style={{
-                            padding: "10px",
-                            textAlign: "center",
-                            borderBottom: "1px solid #d1dde0",
-                          }}
-                        >
-                          Action
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {orderItems.map((item) => {
-                        const rate = Number(
-                          priceList[String(item.item_code).trim().toUpperCase()] || 0
-                        );
-                        const total = rate * item.order_quantity;
-                        return (
-                          <tr key={item.item_code} style={{ borderBottom: "1px solid #d1dde0" }}>
-                            <td style={{ padding: "10px" }}>
-                              <div style={{ fontWeight: 800 }}>{item.item_code}</div>
-                              <div style={{ color: "#6c838a" }}>{item.item_name}</div>
-                            </td>
-                            <td style={{ padding: "10px" }}>{item.category || "—"}</td>
-                            <td style={{ padding: "10px", fontWeight: 800 }}>
-                              SAR {rate.toFixed(2)}
-                            </td>
-                            <td style={{ padding: "10px", textAlign: "center" }}>
+              <div className="moduleTableWrap">
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th>Category</th>
+                      <th>Price</th>
+                      <th>Qty</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredItems.slice(0, 250).map((item) => {
+                      const qty = Number(orderQuantities[item.item_code] || 0);
+                      const price = getPrice(priceList, item.item_code);
+                      return (
+                        <tr key={item.item_code}>
+                          <td>
+                            <strong>{item.item_name}</strong>
+                            <div className="moduleCode">{item.item_code}</div>
+                          </td>
+                          <td>{item.category || "Unclassified"}</td>
+                          <td>{price ? `SAR ${price.toFixed(2)}` : "NOT FOUND"}</td>
+                          <td>
+                            <div className="moduleQtyControl">
+                              <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
                               <input
                                 type="number"
                                 min="0"
-                                value={item.order_quantity}
-                                onChange={(e) =>
-                                  updateOrderQty(item.item_code, e.target.value)
-                                }
-                                style={{
-                                  width: "50px",
-                                  textAlign: "center",
-                                  padding: "4px",
-                                  border: "1px solid #cbd8dc",
-                                  borderRadius: "4px",
-                                }}
+                                step="1"
+                                value={qty || ""}
+                                onChange={(event) => updateQty(item.item_code, event.target.value)}
                               />
-                            </td>
-                            <td style={{ padding: "10px", textAlign: "right", fontWeight: 800 }}>
-                              SAR {total.toFixed(2)}
-                            </td>
-                            <td style={{ padding: "10px", textAlign: "center" }}>
-                              <button
-                                type="button"
-                                onClick={() => removeOrderItem(item.item_code)}
-                                style={{
-                                  background: "#fff1f1",
-                                  color: "#a42c2c",
-                                  border: "1px solid #e8c8c8",
-                                  borderRadius: "4px",
-                                  padding: "4px 8px",
-                                  cursor: "pointer",
-                                  fontSize: "12px",
-                                }}
-                              >
-                                Remove
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              <button type="button" onClick={() => increaseQty(item.item_code)}>+</button>
+                            </div>
+                          </td>
+                          <td>SAR {(price * qty).toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                    {filteredItems.length === 0 && (
+                      <tr>
+                        <td colSpan={5}>No items found for this filter.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
 
-                <div
-                  style={{
-                    marginTop: "16px",
-                    padding: "12px",
-                    backgroundColor: "#f9fbfc",
-                    borderRadius: "8px",
-                    textAlign: "right",
-                    fontWeight: 800,
-                  }}
-                >
-                  Order Total: SAR{" "}
-                  {orderItems
-                    .reduce(
-                      (sum, item) =>
-                        sum +
-                        Number(
-                          priceList[String(item.item_code).trim().toUpperCase()] || 0
-                        ) *
-                          item.order_quantity,
-                      0
-                    )
-                    .toFixed(2)}
+            <section className="moduleSection">
+              <div className="moduleOrderBar">
+                <div>
+                  <span>Current Order</span>
+                  <strong>SAR {calculateGrandTotal(orderItems, priceList).toFixed(2)}</strong>
                 </div>
-
-                <button
-                  type="button"
-                  className="auditSubmitOrderButton"
-                  onClick={submitOrder}
-                  disabled={submitting}
-                  style={{
-                    width: "100%",
-                    marginTop: "16px",
-                    padding: "12px",
-                    minHeight: "44px",
-                  }}
-                >
-                  {submitting ? "Submitting..." : "Submit Order"}
-                </button>
-              </section>
-            )}
+                <div className="moduleOrderActions">
+                  <button type="button" onClick={saveDraft} disabled={savingOrder || submittingOrder}>
+                    {savingOrder ? "Saving..." : draftOrderId ? "Update Draft" : "Save Draft"}
+                  </button>
+                  <button type="button" onClick={submitOrder} disabled={savingOrder || submittingOrder}>
+                    {submittingOrder ? "Submitting..." : "Submit Order"}
+                  </button>
+                </div>
+              </div>
+            </section>
           </>
         )}
+
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>Previous Drafts</h2>
+          </div>
+          <div className="moduleTableWrap">
+            <table className="moduleTable">
+              <thead>
+                <tr>
+                  <th>Draft ID</th>
+                  <th>Customer</th>
+                  <th>Updated</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {previousDrafts.map((draft) => (
+                  <tr key={draft.id}>
+                    <td>{draft.id}</td>
+                    <td>{draft.customer_name || draft.customer_code}</td>
+                    <td>{draft.updated_at ? new Date(draft.updated_at).toLocaleString("en-GB") : "-"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="moduleInlineButton"
+                        onClick={() => setSelectedCustomerCode(draft.customer_code)}
+                      >
+                        Open Draft
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {previousDrafts.length === 0 && (
+                  <tr>
+                    <td colSpan={4}>No draft orders found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </main>
   );

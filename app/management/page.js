@@ -1,320 +1,262 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../lib/supabase";
 import SupabaseUnavailable from "../components/SupabaseUnavailable";
 
+function number(value) {
+  return Number(value || 0).toLocaleString("en-SA");
+}
+
 export default function ManagementPage() {
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState(null);
-  const [stats, setStats] = useState({
-    totalCustomers: 0,
-    totalSalesmen: 0,
-    pendingOrders: 0,
-    submittedOrders: 0,
+  const [error, setError] = useState("");
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [summary, setSummary] = useState({
+    customers: 0,
+    salesmen: 0,
+    orders: 0,
+    drafts: 0,
+    submitted: 0,
+    imports: 0,
   });
-  const router = useRouter();
-
-  const supabaseClient = getSupabaseClient();
+  const [recentOrders, setRecentOrders] = useState([]);
+  const [health, setHealth] = useState({
+    activeBatch: "-",
+    latestImportAt: "-",
+    sessionUser: "-",
+  });
 
   useEffect(() => {
-    async function loadData() {
+    async function load() {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+
       try {
-        const supabase = getSupabaseClient();
-        if (!supabase) {
-          setLoading(false);
-          return;
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.user) {
+          throw new Error("Please login again.");
         }
 
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          setLoading(false);
-          return;
-        }
+        setHealth((current) => ({
+          ...current,
+          sessionUser: session.user.email || session.user.id,
+        }));
 
-        // Load profile
-        const { data: profileData } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from("profiles")
-          .select("*")
+          .select("role")
           .eq("id", session.user.id)
           .single();
 
-        if (profileData) {
-          setProfile(profileData);
+        if (profileError) throw profileError;
+
+        const role = String(profile?.role || "").toLowerCase();
+        if (!["admin", "manager"].includes(role)) {
+          setAccessDenied(true);
+          setLoading(false);
+          return;
         }
 
-        // Load statistics
-        const { count: customerCount } = await supabase
-          .from("customers")
-          .select("*", { count: "exact", head: true });
+        const [
+          customersRes,
+          salesmenRes,
+          ordersRes,
+          importsRes,
+          activeBatchRes,
+          latestImportRes,
+          recentOrdersRes,
+        ] = await Promise.all([
+          supabase.from("customers").select("customer_code", { count: "exact", head: true }),
+          supabase.from("profiles").select("id", { count: "exact", head: true }).in("role", ["salesman", "manager", "admin"]),
+          supabase.from("sales_orders").select("id,status", { count: "exact" }).order("updated_at", { ascending: false }).limit(1000),
+          supabase.from("import_batches").select("id", { count: "exact", head: true }),
+          supabase.from("system_settings").select("setting_value").eq("setting_key", "active_sales_batch_id").maybeSingle(),
+          supabase.from("import_batches").select("uploaded_at").order("uploaded_at", { ascending: false }).limit(1).maybeSingle(),
+          supabase
+            .from("sales_orders")
+            .select("id,customer_code,customer_name,salesman_code,status,updated_at")
+            .order("updated_at", { ascending: false })
+            .limit(8),
+        ]);
 
-        const { count: salesmenCount } = await supabase
-          .from("salesmen")
-          .select("*", { count: "exact", head: true });
+        if (customersRes.error) throw customersRes.error;
+        if (salesmenRes.error) throw salesmenRes.error;
+        if (ordersRes.error) throw ordersRes.error;
+        if (importsRes.error) throw importsRes.error;
+        if (activeBatchRes.error) throw activeBatchRes.error;
+        if (latestImportRes.error) throw latestImportRes.error;
+        if (recentOrdersRes.error) throw recentOrdersRes.error;
 
-        const { count: draftCount } = await supabase
-          .from("sales_orders")
-          .select("*", { count: "exact", head: true })
-          .eq("status", "DRAFT");
+        const orders = ordersRes.data || [];
+        const drafts = orders.filter((row) => row.status === "DRAFT").length;
+        const submitted = orders.filter((row) => row.status === "SUBMITTED").length;
 
-        const { count: submittedCount } = await supabase
-          .from("sales_orders")
-          .select("*", { count: "exact", head: true })
-          .eq("status", "SUBMITTED");
-
-        setStats({
-          totalCustomers: customerCount || 0,
-          totalSalesmen: salesmenCount || 0,
-          pendingOrders: draftCount || 0,
-          submittedOrders: submittedCount || 0,
+        setSummary({
+          customers: customersRes.count || 0,
+          salesmen: salesmenRes.count || 0,
+          orders: ordersRes.count || 0,
+          drafts,
+          submitted,
+          imports: importsRes.count || 0,
         });
 
-        setLoading(false);
+        setHealth({
+          sessionUser: session.user.email || session.user.id,
+          activeBatch: activeBatchRes.data?.setting_value || "-",
+          latestImportAt: latestImportRes.data?.uploaded_at || "-",
+        });
+
+        setRecentOrders(recentOrdersRes.data || []);
       } catch (err) {
-        console.error(err);
+        setError(err.message || "Unable to load management data.");
+      } finally {
         setLoading(false);
       }
     }
 
-    loadData();
+    load();
   }, []);
 
+  const cards = useMemo(
+    () => [
+      { label: "Customers", value: number(summary.customers) },
+      { label: "Salesmen", value: number(summary.salesmen) },
+      { label: "Orders", value: number(summary.orders) },
+      { label: "Draft Orders", value: number(summary.drafts) },
+      { label: "Submitted Orders", value: number(summary.submitted) },
+      { label: "Imports", value: number(summary.imports) },
+    ],
+    [summary]
+  );
+
+  const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
     return (
       <SupabaseUnavailable
         title="Management unavailable"
-        message="The management panel requires Supabase credentials to access system data."
+        message="Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to use management features."
       />
     );
   }
 
   if (loading) {
     return (
-      <main className="auditPage">
-        <div className="auditShell">
-          <div className="auditBrand">MADIBA SFA</div>
-          <h1>Management</h1>
-          <p className="auditSubtitle">Loading...</p>
+      <main className="modulePage">
+        <div className="moduleShell">
+          <div className="moduleLoading">Loading management panel...</div>
         </div>
       </main>
     );
   }
 
-  const managementSections = [
-    {
-      icon: "👥",
-      title: "Customers",
-      description: "Manage customer database",
-      href: "/management/customers",
-      stats: `${stats.totalCustomers} total`,
-    },
-    {
-      icon: "📊",
-      title: "Orders",
-      description: "View all submitted orders",
-      href: "/management/orders",
-      stats: `${stats.submittedOrders} submitted`,
-    },
-    {
-      icon: "📝",
-      title: "Draft Orders",
-      description: "Manage pending draft orders",
-      href: "/management/drafts",
-      stats: `${stats.pendingOrders} drafts`,
-    },
-    {
-      icon: "👔",
-      title: "Salesmen",
-      description: "Manage sales team members",
-      href: "/management/salesmen",
-      stats: `${stats.totalSalesmen} active`,
-    },
-    {
-      icon: "📥",
-      title: "Imports",
-      description: "Upload sales data files",
-      href: "/management/upload",
-      stats: "Data management",
-    },
-    {
-      icon: "📈",
-      title: "Reports",
-      description: "System reports and analytics",
-      href: "/management/reports",
-      stats: "In development",
-    },
-    {
-      icon: "⚙️",
-      title: "Settings",
-      description: "System configuration",
-      href: "/management/settings",
-      stats: "Admin only",
-    },
-    {
-      icon: "🔍",
-      title: "System Health",
-      description: "System status and diagnostics",
-      href: "/management/health",
-      stats: "Monitoring",
-    },
-  ];
+  if (accessDenied) {
+    return (
+      <main className="modulePage">
+        <div className="moduleShell">
+          <div className="moduleHeader">
+            <div>
+              <p className="moduleEyebrow">MADIBA SFA</p>
+              <h1>Management</h1>
+            </div>
+            <Link href="/" className="moduleBackLink">← Dashboard</Link>
+          </div>
+          <div className="moduleError">Only manager/admin users can access this panel.</div>
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <main className="auditPage">
-      <div className="auditShell">
-        <div className="auditTop">
+    <main className="modulePage">
+      <div className="moduleShell">
+        <div className="moduleHeader">
           <div>
-            <div className="auditBrand">MADIBA SFA</div>
-            <h1>Management Panel</h1>
-            <p className="auditSubtitle">Admin dashboard and system management</p>
+            <p className="moduleEyebrow">MADIBA SFA</p>
+            <h1>Management</h1>
+            <p className="moduleSubtitle">Operational control center</p>
           </div>
-          <a href="/" className="auditHomeButton">
-            ← Dashboard
-          </a>
+          <Link href="/" className="moduleBackLink">← Dashboard</Link>
         </div>
 
-        <section className="auditSection">
-          <h3 className="auditSectionTitle">Quick Stats</h3>
+        {error && <div className="moduleError">{error}</div>}
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-              gap: "12px",
-            }}
-          >
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #d1dde0",
-                borderRadius: "10px",
-                padding: "14px",
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontSize: "28px", fontWeight: 800, color: "#0b5364" }}>
-                {stats.totalCustomers}
-              </div>
-              <div style={{ fontSize: "11px", color: "#6c838a", marginTop: "4px" }}>
-                Customers
-              </div>
-            </div>
+        <div className="moduleMetricGrid">
+          {cards.map((card) => (
+            <section key={card.label} className="moduleMetricCard">
+              <span>{card.label}</span>
+              <strong>{card.value}</strong>
+            </section>
+          ))}
+        </div>
 
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #d1dde0",
-                borderRadius: "10px",
-                padding: "14px",
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontSize: "28px", fontWeight: 800, color: "#0b5364" }}>
-                {stats.submittedOrders}
-              </div>
-              <div style={{ fontSize: "11px", color: "#6c838a", marginTop: "4px" }}>
-                Orders
-              </div>
-            </div>
-
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #d1dde0",
-                borderRadius: "10px",
-                padding: "14px",
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontSize: "28px", fontWeight: 800, color: "#0b5364" }}>
-                {stats.pendingOrders}
-              </div>
-              <div style={{ fontSize: "11px", color: "#6c838a", marginTop: "4px" }}>
-                Draft Orders
-              </div>
-            </div>
-
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #d1dde0",
-                borderRadius: "10px",
-                padding: "14px",
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontSize: "28px", fontWeight: 800, color: "#0b5364" }}>
-                {stats.totalSalesmen}
-              </div>
-              <div style={{ fontSize: "11px", color: "#6c838a", marginTop: "4px" }}>
-                Salesmen
-              </div>
-            </div>
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>Management Modules</h2>
+          </div>
+          <div className="moduleNavGrid">
+            <Link href="/management/customer-audit" className="moduleNavCard">Customers Audit</Link>
+            <Link href="/management/new-order" className="moduleNavCard">Orders Workflow</Link>
+            <Link href="/management/new-customer" className="moduleNavCard">New Customers</Link>
+            <Link href="/management/my-performance" className="moduleNavCard">Performance</Link>
+            <Link href="/management/my-day" className="moduleNavCard">My Day Planner</Link>
+            <Link href="/management/upload" className="moduleNavCard">Imports</Link>
           </div>
         </section>
 
-        <section className="auditSection">
-          <h3 className="auditSectionTitle">Management Modules</h3>
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>System Health</h2>
+          </div>
+          <div className="moduleHealthGrid">
+            <div><span>Session User</span><strong>{health.sessionUser}</strong></div>
+            <div><span>Active Sales Batch</span><strong>{health.activeBatch}</strong></div>
+            <div><span>Latest Import</span><strong>{health.latestImportAt === "-" ? "-" : new Date(health.latestImportAt).toLocaleString("en-GB")}</strong></div>
+          </div>
+        </section>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-              gap: "14px",
-            }}
-          >
-            {managementSections.map((section) => (
-              <button
-                key={section.title}
-                type="button"
-                onClick={() => router.push(section.href)}
-                style={{
-                  background: "#ffffff",
-                  border: "1px solid #d1dde0",
-                  borderRadius: "12px",
-                  padding: "16px",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                  textAlign: "left",
-                  fontSize: "inherit",
-                  textTransform: "none",
-                  minHeight: "120px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "8px",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = "#0b5364";
-                  e.currentTarget.style.boxShadow =
-                    "0 4px 12px rgba(11, 83, 100, 0.1)";
-                  e.currentTarget.style.transform = "translateY(-2px)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = "#d1dde0";
-                  e.currentTarget.style.boxShadow = "none";
-                  e.currentTarget.style.transform = "translateY(0)";
-                }}
-              >
-                <div style={{ fontSize: "28px" }}>{section.icon}</div>
-                <div style={{ fontWeight: 800, color: "#073f4c", fontSize: "14px" }}>
-                  {section.title}
-                </div>
-                <div style={{ color: "#6c838a", fontSize: "11px" }}>
-                  {section.description}
-                </div>
-                <div
-                  style={{
-                    marginTop: "auto",
-                    fontSize: "11px",
-                    color: "#0b5364",
-                    fontWeight: 700,
-                  }}
-                >
-                  {section.stats}
-                </div>
-              </button>
-            ))}
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>Recent Orders</h2>
+          </div>
+          <div className="moduleTableWrap">
+            <table className="moduleTable">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Customer</th>
+                  <th>Salesman</th>
+                  <th>Status</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentOrders.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.id}</td>
+                    <td>{row.customer_name || row.customer_code}</td>
+                    <td>{row.salesman_code || "-"}</td>
+                    <td>{row.status || "-"}</td>
+                    <td>{row.updated_at ? new Date(row.updated_at).toLocaleString("en-GB") : "-"}</td>
+                  </tr>
+                ))}
+                {recentOrders.length === 0 && (
+                  <tr>
+                    <td colSpan={5}>No orders found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
       </div>

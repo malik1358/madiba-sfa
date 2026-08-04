@@ -9,8 +9,15 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function normalizeCredentialToken(value) {
+  return normalizeCode(value)
+    .replace(/[^A-Z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.{2,}/g, ".");
+}
+
 function defaultPasswordFor(code) {
-  return `MADIBA-${normalizeCode(code)}@123`;
+  return `MADIBA-${normalizeCredentialToken(code)}@123`;
 }
 
 export default function SalesmanHierarchyPage() {

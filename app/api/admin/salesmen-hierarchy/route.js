@@ -11,8 +11,15 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function normalizeCredentialToken(value) {
+  return normalizeCode(value)
+    .replace(/[^A-Z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.{2,}/g, ".");
+}
+
 function defaultPasswordFor(code) {
-  return `MADIBA-${normalizeCode(code)}@123`;
+  return `MADIBA-${normalizeCredentialToken(code)}@123`;
 }
 
 function normalizeName(value, fallback = "") {
@@ -21,11 +28,7 @@ function normalizeName(value, fallback = "") {
 }
 
 function buildEmailFromCode(code, suffix = 0) {
-  const normalized = normalizeCode(code)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ".")
-    .replace(/^\.+|\.+$/g, "")
-    .replace(/\.{2,}/g, ".");
+  const normalized = normalizeCredentialToken(code).toLowerCase();
 
   const safeLocal = normalized || `salesman${Date.now()}`;
   const localPart = suffix > 0 ? `${safeLocal}${suffix}` : safeLocal;
@@ -232,6 +235,39 @@ async function loadSalesmen(admin) {
   });
 }
 
+async function syncGeneratedSalesmanPasswords(admin) {
+  const [profilesRes, usersRes] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("id,salesman_code,role")
+      .eq("role", "salesman"),
+    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+  ]);
+
+  if (profilesRes.error) throw profilesRes.error;
+  if (usersRes.error) throw usersRes.error;
+
+  const authMap = new Map((usersRes.data?.users || []).map((user) => [user.id, user]));
+
+  for (const profile of profilesRes.data || []) {
+    const authUser = authMap.get(profile.id);
+    const email = String(authUser?.email || "").toLowerCase();
+
+    if (!email.endsWith("@madiba-sfa.local")) {
+      continue;
+    }
+
+    const password = defaultPasswordFor(profile.salesman_code || profile.id);
+    const { error: updateError } = await admin.auth.admin.updateUserById(profile.id, {
+      password,
+    });
+
+    if (updateError) {
+      throw updateError;
+    }
+  }
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -246,6 +282,7 @@ export async function GET(request) {
     if (access.error) return access.error;
 
     const autoCreateSummary = await autoCreateExistingSalesmen(admin);
+    await syncGeneratedSalesmanPasswords(admin);
 
     const salesmen = await loadSalesmen(admin);
 

@@ -302,6 +302,11 @@ export default function NewCustomerPage() {
       return;
     }
 
+    if (!String(form.city || "").trim() || !String(form.area || "").trim()) {
+      setError("City and Area are auto-filled from GPS. Please capture location again.");
+      return;
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) {
       setError("Supabase is not configured.");
@@ -449,11 +454,11 @@ export default function NewCustomerPage() {
             </label>
             <label>
               City
-              <input className="moduleInput" required value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+              <input className="moduleInput" value={form.city} readOnly placeholder="Auto-filled from GPS" />
             </label>
             <label>
               Area
-              <input className="moduleInput" required value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} />
+              <input className="moduleInput" value={form.area} readOnly placeholder="Auto-filled from GPS" />
             </label>
             <label className="moduleFieldFull">
               National Address

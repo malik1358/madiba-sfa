@@ -4,7 +4,6 @@ const PRICE_API =
   "https://script.google.com/macros/s/AKfycbzXPREoz0tUgern-5LhpEPBMY_ed2hO1fgYpIVfzG2-BU9HbjOklKCBFVMtsw64Uff5/exec";
 
 const PAGE_VERSION = "Quick Order V5";
-const CUSTOMER_DOCUMENT_TYPES = ["CR", "VAT", "ID", "CREDIT_APPLICATION", "OTHER"];
 const TEXT = {
   title: { en: "Customer Audit", ar: "تدقيق العملاء" },
   subtitle: { en: "Management sales history validation", ar: "مراجعة سجل مبيعات العملاء" },
@@ -44,10 +43,6 @@ export default function CustomerAuditPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [priceList, setPriceList] = useState({});
-  const [customerMeta, setCustomerMeta] = useState({ nationalAddress: "", documents: [] });
-  const [customerMetaLoading, setCustomerMetaLoading] = useState(false);
-  const [customerMetaSaving, setCustomerMetaSaving] = useState(false);
-  const [customerDocType, setCustomerDocType] = useState("CR");
 
   const {
     customers,
@@ -116,119 +111,6 @@ export default function CustomerAuditPage() {
 
     loadPrices();
   }, []);
-
-  useEffect(() => {
-    async function loadCustomerMeta() {
-      if (!selectedCustomer?.customer_code) {
-        setCustomerMeta({ nationalAddress: "", documents: [] });
-        return;
-      }
-
-      const supabase = getSupabaseClient();
-      if (!supabase) return;
-
-      setCustomerMetaLoading(true);
-
-      try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session?.access_token) {
-          throw new Error("Please login again.");
-        }
-
-        const response = await fetch(`/api/customer-meta?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}`, {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        });
-
-        const data = await response.json();
-        if (!response.ok || !data.success) {
-          throw new Error(data.error || "Unable to load customer profile.");
-        }
-
-        setCustomerMeta({
-          nationalAddress: String(data.value?.nationalAddress || ""),
-          documents: Array.isArray(data.value?.documents) ? data.value.documents : [],
-        });
-      } catch (err) {
-        setError(err.message || "Unable to load customer profile.");
-      } finally {
-        setCustomerMetaLoading(false);
-      }
-    }
-
-    loadCustomerMeta();
-  }, [selectedCustomer]);
-
-  function handleExistingCustomerDocumentPick(event) {
-    const file = event.target.files?.[0] || null;
-    if (!file) return;
-
-    setCustomerMeta((current) => ({
-      ...current,
-      documents: [
-        ...(current.documents || []),
-        {
-          type: customerDocType,
-          name: file.name,
-          size: file.size,
-          mimeType: file.type,
-        },
-      ],
-    }));
-
-    event.target.value = "";
-  }
-
-  async function saveCustomerMeta() {
-    if (!selectedCustomer?.customer_code) return;
-
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-      setError("Supabase is not configured.");
-      return;
-    }
-
-    setCustomerMetaSaving(true);
-    setError("");
-
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        throw new Error("Please login again.");
-      }
-
-      const response = await fetch("/api/customer-meta", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          customerCode: selectedCustomer.customer_code,
-          nationalAddress: customerMeta.nationalAddress,
-          documents: customerMeta.documents,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "Unable to save customer profile.");
-      }
-
-      setMessage(`Customer profile saved for ${selectedCustomer.customer_name}.`);
-    } catch (err) {
-      setError(err.message || "Unable to save customer profile.");
-    } finally {
-      setCustomerMetaSaving(false);
-    }
-  }
 
   const filteredCustomers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -362,62 +244,6 @@ export default function CustomerAuditPage() {
         {error && <div className="auditError">{error}</div>}
 
         <CustomerHeader customer={selectedCustomer} analytics={analytics} />
-
-        <section className="moduleSection">
-          <div className="moduleSectionHeader">
-            <h2>Customer Profile</h2>
-            <span>{selectedCustomer.customer_code}</span>
-          </div>
-
-          {customerMetaLoading ? (
-            <div className="moduleLoading">Loading customer profile...</div>
-          ) : (
-            <div className="moduleFormGrid">
-              <label className="moduleFieldFull">
-                National Address
-                <textarea
-                  className="moduleTextArea"
-                  rows={3}
-                  value={customerMeta.nationalAddress}
-                  onChange={(event) => setCustomerMeta((current) => ({ ...current, nationalAddress: event.target.value }))}
-                  placeholder="Building, street, district, city, postal code, additional number"
-                />
-              </label>
-
-              <div className="moduleFieldFull">
-                <div className="moduleSectionHeader">
-                  <h2>Customer Documents</h2>
-                  <span>CR, VAT, ID, Credit Application, and other files</span>
-                </div>
-                <div className="moduleDocumentRow">
-                  <select className="moduleInput" value={customerDocType} onChange={(event) => setCustomerDocType(event.target.value)}>
-                    {CUSTOMER_DOCUMENT_TYPES.map((type) => (
-                      <option key={type} value={type}>{type}</option>
-                    ))}
-                  </select>
-                  <input className="moduleInput" type="file" onChange={handleExistingCustomerDocumentPick} />
-                </div>
-
-                {customerMeta.documents.length > 0 && (
-                  <ul className="moduleList">
-                    {customerMeta.documents.map((document, index) => (
-                      <li key={`${document.type}-${document.name}-${index}`}>
-                        <strong>{document.type}</strong>
-                        <span>{document.name}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div className="moduleFieldFull">
-                <button type="button" className="modulePrimaryButton" onClick={saveCustomerMeta} disabled={customerMetaSaving}>
-                  {customerMetaSaving ? "Saving..." : "Save Customer Profile"}
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
 
         <section className="auditSection">
           <div className="auditTransactionHeader">

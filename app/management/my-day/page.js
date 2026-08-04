@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { detectTable } from "../../lib/schemaGuards";
@@ -34,8 +34,28 @@ export default function MyDayPage() {
   const [visitStatusRows, setVisitStatusRows] = useState([]);
   const [todayLogs, setTodayLogs] = useState([]);
   const [note, setNote] = useState("");
+  const [attendanceBusy, setAttendanceBusy] = useState("");
+  const [latestGpsCaptureAt, setLatestGpsCaptureAt] = useState(0);
+  const autoPingInFlight = useRef(false);
 
   const today = new Date().toISOString().slice(0, 10);
+
+  function readCapturedAt(log) {
+    if (!log?.note) return 0;
+
+    try {
+      const parsed = JSON.parse(log.note);
+      const capturedAt = parsed?.captured_at || log.created_at;
+      const time = new Date(capturedAt).getTime();
+      return Number.isFinite(time) ? time : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  function isGpsLog(entryType) {
+    return ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY", "NOTE", "GPS_PING"].includes(entryType);
+  }
 
   useEffect(() => {
     async function load() {
@@ -149,12 +169,21 @@ export default function MyDayPage() {
             .order("created_at", { ascending: false });
 
           if (!logsError) {
-            setTodayLogs(logsData || []);
+            const rows = logsData || [];
+            setTodayLogs(rows);
+
+            const newestGpsCapture = rows
+              .filter((row) => isGpsLog(row.entry_type))
+              .reduce((latest, row) => Math.max(latest, readCapturedAt(row)), 0);
+
+            setLatestGpsCaptureAt(newestGpsCapture);
           } else {
             setTodayLogs([]);
+            setLatestGpsCaptureAt(0);
           }
         } else {
           setTodayLogs([]);
+          setLatestGpsCaptureAt(0);
         }
 
         const todayCustomers = new Set((todaySalesRes.data || []).map((row) => row.customer_code).filter(Boolean));
@@ -206,6 +235,26 @@ export default function MyDayPage() {
     load();
   }, [today]);
 
+  async function captureLocation() {
+    if (!navigator.geolocation) {
+      throw new Error("Geolocation is not supported on this device.");
+    }
+
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            latitude: Number(position.coords.latitude.toFixed(6)),
+            longitude: Number(position.coords.longitude.toFixed(6)),
+            accuracy: Number(position.coords.accuracy.toFixed(1)),
+          });
+        },
+        () => reject(new Error("Unable to read GPS location.")),
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    });
+  }
+
   async function addLog(entryType) {
     if (!logsEnabled) {
       setError("Daily activity logs are disabled until the daily_activity_logs table is available.");
@@ -227,16 +276,23 @@ export default function MyDayPage() {
         throw new Error("Please login again.");
       }
 
+      const location = await captureLocation();
+
       const payload = {
         user_id: session.user.id,
         entry_type: entryType,
-        note: entryType === "NOTE" ? note || null : null,
+        note: JSON.stringify({
+          action: entryType,
+          note: entryType === "NOTE" ? note || null : null,
+          captured_at: new Date().toISOString(),
+          location,
+        }),
       };
 
       const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
       if (insertError) throw insertError;
 
-      setMessage(entryType === "NOTE" ? "Note saved." : `${entryType} logged.`);
+      setMessage(entryType === "NOTE" ? "Note saved with GPS." : `${entryType} logged with GPS.`);
       if (entryType === "NOTE") setNote("");
 
       const { data: logs, error: logsError } = await supabase
@@ -248,11 +304,98 @@ export default function MyDayPage() {
         .order("created_at", { ascending: false });
 
       if (logsError) throw logsError;
-      setTodayLogs(logs || []);
+      const rows = logs || [];
+      setTodayLogs(rows);
+      const newestGpsCapture = rows
+        .filter((row) => isGpsLog(row.entry_type))
+        .reduce((latest, row) => Math.max(latest, readCapturedAt(row)), 0);
+      setLatestGpsCaptureAt(newestGpsCapture);
     } catch (err) {
       setError(err.message || "Unable to save activity log.");
     }
   }
+
+  async function saveGpsPing() {
+    if (!logsEnabled || autoPingInFlight.current) return;
+
+    const now = Date.now();
+    if (latestGpsCaptureAt && now - latestGpsCaptureAt < 15 * 60 * 1000) {
+      return;
+    }
+
+    autoPingInFlight.current = true;
+
+    try {
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user) return;
+
+      const location = await captureLocation();
+
+      const payload = {
+        user_id: session.user.id,
+        entry_type: "GPS_PING",
+        note: JSON.stringify({
+          action: "GPS_PING",
+          captured_at: new Date().toISOString(),
+          location,
+        }),
+      };
+
+      const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
+      if (insertError) throw insertError;
+
+      const { data: logs, error: logsError } = await supabase
+        .from("daily_activity_logs")
+        .select("id,entry_type,note,created_at")
+        .eq("user_id", session.user.id)
+        .gte("created_at", `${today}T00:00:00`)
+        .lte("created_at", `${today}T23:59:59`)
+        .order("created_at", { ascending: false });
+
+      if (logsError) throw logsError;
+
+      const rows = logs || [];
+      setTodayLogs(rows);
+      setLatestGpsCaptureAt(Date.now());
+      setMessage("Automatic GPS capture saved.");
+    } catch {
+      // Keep the screen quiet if the browser blocks background geolocation.
+    } finally {
+      autoPingInFlight.current = false;
+    }
+  }
+
+  async function handleAttendanceAction(entryType) {
+    setAttendanceBusy(entryType);
+    setError("");
+    setMessage("");
+
+    try {
+      await addLog(entryType);
+    } catch (err) {
+      setError(err.message || "Unable to save attendance action.");
+    } finally {
+      setAttendanceBusy("");
+    }
+  }
+
+  useEffect(() => {
+    if (!logsEnabled) return undefined;
+
+    const timer = window.setInterval(() => {
+      saveGpsPing();
+    }, 60 * 1000);
+
+    saveGpsPing();
+
+    return () => window.clearInterval(timer);
+  }, [logsEnabled, latestGpsCaptureAt]);
 
   const routeSummary = useMemo(() => {
     const map = new Map();
@@ -312,12 +455,22 @@ export default function MyDayPage() {
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>Check-in / Check-out / Notes</h2>
+            <h2>Attendance</h2>
             <span>{profile?.salesman_name || profile?.salesman_code || ""}</span>
           </div>
           <div className="moduleActionRow">
-            <button type="button" className="modulePrimaryButton" onClick={() => addLog("CHECK_IN")} disabled={!logsEnabled}>Check-in</button>
-            <button type="button" className="modulePrimaryButton" onClick={() => addLog("CHECK_OUT")} disabled={!logsEnabled}>Check-out</button>
+            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("MORNING_ATTENDANCE")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
+              {attendanceBusy === "MORNING_ATTENDANCE" ? "Saving..." : "Morning Attendance"}
+            </button>
+            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_OUT")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
+              {attendanceBusy === "LUNCH_BREAK_OUT" ? "Saving..." : "Lunch Break Out"}
+            </button>
+            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_IN")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
+              {attendanceBusy === "LUNCH_BREAK_IN" ? "Saving..." : "Lunch Break In"}
+            </button>
+            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("END_OF_DAY")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
+              {attendanceBusy === "END_OF_DAY" ? "Saving..." : "End of Day"}
+            </button>
           </div>
           <div className="moduleFilterRow">
             <input
@@ -327,7 +480,7 @@ export default function MyDayPage() {
               placeholder="Add planner note"
               disabled={!logsEnabled}
             />
-            <button type="button" className="moduleInlineButton" onClick={() => addLog("NOTE")} disabled={!logsEnabled}>Save Note</button>
+            <button type="button" className="moduleInlineButton" onClick={() => handleAttendanceAction("NOTE")} disabled={!logsEnabled || Boolean(attendanceBusy)}>Save Note</button>
           </div>
           <ul className="moduleList">
             {todayLogs.map((row) => (

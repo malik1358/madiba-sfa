@@ -21,6 +21,8 @@ const INITIAL_FORM = {
   notes: "",
 };
 
+const DOCUMENT_TYPES = ["CR", "VAT", "ID", "OTHER"];
+
 export default function NewCustomerPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -31,6 +33,9 @@ export default function NewCustomerPage() {
   const [salesmen, setSalesmen] = useState([]);
   const [recent, setRecent] = useState([]);
   const [form, setForm] = useState(INITIAL_FORM);
+  const [documents, setDocuments] = useState([]);
+  const [selectedDocumentType, setSelectedDocumentType] = useState("CR");
+  const [gpsStatus, setGpsStatus] = useState("GPS is required before saving.");
 
   useEffect(() => {
     async function load() {
@@ -110,6 +115,7 @@ export default function NewCustomerPage() {
         const lat = position.coords.latitude.toFixed(6);
         const lng = position.coords.longitude.toFixed(6);
         setForm((current) => ({ ...current, gps_location: `${lat}, ${lng}` }));
+        setGpsStatus(`Captured ${lat}, ${lng}`);
       },
       () => {
         setError("Unable to read GPS location.");
@@ -118,11 +124,33 @@ export default function NewCustomerPage() {
     );
   }
 
+  function handleDocumentPick(event) {
+    const file = event.target.files?.[0] || null;
+    if (!file) return;
+
+    setDocuments((current) => [
+      ...current,
+      {
+        type: selectedDocumentType,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+      },
+    ]);
+
+    event.target.value = "";
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
 
     if (!prospectsEnabled) {
       setError("Prospect registration is disabled until the prospects table is available.");
+      return;
+    }
+
+    if (!form.gps_location) {
+      setError("GPS location is required for new customer saving.");
       return;
     }
 
@@ -157,7 +185,10 @@ export default function NewCustomerPage() {
         gps_location: form.gps_location || null,
         customer_type: form.customer_type,
         salesman_code: form.salesman_code,
-        notes: form.notes || null,
+        notes: [
+          form.notes,
+          documents.length ? `Documents: ${JSON.stringify(documents)}` : "",
+        ].filter(Boolean).join("\n") || null,
         status: "PENDING",
         created_by: session.user.id,
       };
@@ -175,6 +206,8 @@ export default function NewCustomerPage() {
         ...INITIAL_FORM,
         salesman_code: current.salesman_code,
       }));
+      setDocuments([]);
+      setGpsStatus("GPS is required before saving.");
 
       const { data: latest, error: latestError } = await supabase
         .from("prospects")
@@ -289,10 +322,35 @@ export default function NewCustomerPage() {
             <label className="moduleGpsRow">
               GPS Location
               <div className="moduleGpsControls">
-                <input className="moduleInput" value={form.gps_location} onChange={(e) => setForm({ ...form, gps_location: e.target.value })} placeholder="24.774265, 46.738586" />
+                <input className="moduleInput" required value={form.gps_location} onChange={(e) => setForm({ ...form, gps_location: e.target.value })} placeholder="24.774265, 46.738586" />
                 <button type="button" className="moduleInlineButton" onClick={captureLocation}>Capture</button>
               </div>
+              <small className="moduleHint">{gpsStatus}</small>
             </label>
+            <div className="moduleFieldFull">
+              <div className="moduleSectionHeader">
+                <h2>Documents</h2>
+                <span>CR, VAT, ID, and other supporting files</span>
+              </div>
+              <div className="moduleDocumentRow">
+                <select className="moduleInput" value={selectedDocumentType} onChange={(e) => setSelectedDocumentType(e.target.value)}>
+                  {DOCUMENT_TYPES.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+                <input className="moduleInput" type="file" onChange={handleDocumentPick} />
+              </div>
+              {documents.length > 0 && (
+                <ul className="moduleList">
+                  {documents.map((document, index) => (
+                    <li key={`${document.type}-${document.name}-${index}`}>
+                      <strong>{document.type}</strong>
+                      <span>{document.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <label className="moduleFieldFull">
               Notes
               <textarea className="moduleTextArea" rows={4} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />

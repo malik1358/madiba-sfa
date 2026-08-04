@@ -19,7 +19,8 @@ const TEXT = {
 };
 
 const INITIAL_FORM = {
-  customer_name: "",
+  customer_name_en: "",
+  customer_name_ar: "",
   shop_name: "",
   owner_name: "",
   mobile: "",
@@ -74,6 +75,24 @@ async function reverseGeocode(lat, lng) {
   };
 }
 
+async function translateToArabic(text) {
+  const source = String(text || "").trim();
+  if (!source) return "";
+
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q=${encodeURIComponent(source)}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error("Translation request failed.");
+  }
+
+  const payload = await response.json();
+  const translated = Array.isArray(payload?.[0])
+    ? payload[0].map((part) => String(part?.[0] || "")).join("")
+    : "";
+
+  return translated.trim();
+}
+
 async function insertProspectWithColumnFallback(supabase, payload) {
   const workingPayload = { ...payload };
 
@@ -115,6 +134,37 @@ export default function NewCustomerPage() {
   const [documents, setDocuments] = useState([]);
   const [selectedDocumentType, setSelectedDocumentType] = useState("CR");
   const [gpsStatus, setGpsStatus] = useState("GPS is required before saving.");
+  const [arabicNameEdited, setArabicNameEdited] = useState(false);
+  const [translatingName, setTranslatingName] = useState(false);
+
+  useEffect(() => {
+    const englishName = String(form.customer_name_en || "").trim();
+
+    if (!englishName || arabicNameEdited) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(async () => {
+      try {
+        setTranslatingName(true);
+        const translated = await translateToArabic(englishName);
+        if (translated) {
+          setForm((current) => {
+            if (String(current.customer_name_en || "").trim() !== englishName) {
+              return current;
+            }
+            return { ...current, customer_name_ar: translated };
+          });
+        }
+      } catch {
+        // Ignore translation failures so manual input can still continue.
+      } finally {
+        setTranslatingName(false);
+      }
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [form.customer_name_en, arabicNameEdited]);
 
   useEffect(() => {
     async function load() {
@@ -327,7 +377,9 @@ export default function NewCustomerPage() {
       }
 
       const payload = {
-        customer_name: form.customer_name,
+        customer_name: form.customer_name_en,
+        customer_name_en: form.customer_name_en,
+        customer_name_ar: form.customer_name_ar || null,
         shop_name: form.shop_name,
         owner_name: form.owner_name || null,
         mobile: normalizedMobile,
@@ -360,7 +412,7 @@ export default function NewCustomerPage() {
       setRecent(latest || []);
 
       const customerCode = `PROSPECT-${data.id}`;
-      const customerName = data.customer_name || data.shop_name || form.customer_name || form.shop_name || `Prospect ${data.id}`;
+      const customerName = data.customer_name || data.shop_name || form.customer_name_en || form.shop_name || `Prospect ${data.id}`;
       const params = new URLSearchParams({
         customer_code: customerCode,
         customer_name: customerName,
@@ -420,8 +472,33 @@ export default function NewCustomerPage() {
 
           <form className="moduleFormGrid" onSubmit={handleSubmit}>
             <label>
-              Customer Name
-              <input className="moduleInput" required value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} />
+              Customer Name (English)
+              <input
+                className="moduleInput"
+                required
+                value={form.customer_name_en}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setArabicNameEdited(false);
+                  setForm({ ...form, customer_name_en: next });
+                }}
+              />
+            </label>
+            <label>
+              Customer Name (Arabic)
+              <input
+                className="moduleInput"
+                dir="rtl"
+                value={form.customer_name_ar}
+                onChange={(e) => {
+                  setArabicNameEdited(true);
+                  setForm({ ...form, customer_name_ar: e.target.value });
+                }}
+                placeholder="Auto-translated from English name"
+              />
+              <small className="moduleHint">
+                {translatingName ? "Translating Arabic name..." : "Auto-translated. You can edit this field manually."}
+              </small>
             </label>
             <label>
               Shop Name

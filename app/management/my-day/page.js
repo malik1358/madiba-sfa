@@ -195,7 +195,7 @@ export default function MyDayPage() {
 
         const nextWarnings = [];
         if (!logsCheck.available) {
-          nextWarnings.push("Daily activity logs table is unavailable. Check-in/check-out, visit reports, and notes are disabled.");
+          nextWarnings.push("Daily activity logs table is unavailable. Check-in/check-out and notes are disabled. Visit reports are saved using backup storage.");
         }
         if (!prospectsCheck.available) {
           nextWarnings.push(`${prospectsCheck.reason}. New customers assigned metric is unavailable.`);
@@ -349,6 +349,40 @@ export default function MyDayPage() {
                 // Ignore malformed notes.
               }
             });
+          }
+        } else {
+          const customerCodes = customerRows
+            .map((row) => String(row.customer_code || "").trim().toUpperCase())
+            .filter(Boolean);
+
+          if (customerCodes.length > 0) {
+            const settingKeys = customerCodes.map((code) => `visit_report_latest:${code}`);
+            const { data: fallbackReports, error: fallbackReportsError } = await supabase
+              .from("system_settings")
+              .select("setting_key,setting_value")
+              .in("setting_key", settingKeys);
+
+            if (!fallbackReportsError) {
+              (fallbackReports || []).forEach((row) => {
+                if (!row?.setting_value) return;
+
+                try {
+                  const parsed = JSON.parse(String(row.setting_value));
+                  const customerCode = String(parsed?.customer_code || "").trim().toUpperCase();
+                  if (!customerCode) return;
+
+                  const visitAt = parsed?.captured_at || parsed?.saved_at || null;
+                  if (!visitAt) return;
+
+                  const current = latestVisitByCustomer.get(customerCode);
+                  if (!current || getSortTimestamp(visitAt) > getSortTimestamp(current)) {
+                    latestVisitByCustomer.set(customerCode, visitAt);
+                  }
+                } catch {
+                  // Ignore malformed fallback records.
+                }
+              });
+            }
           }
         }
 
@@ -642,11 +676,6 @@ export default function MyDayPage() {
   }
 
   async function saveVisitReport(customer) {
-    if (!logsEnabled) {
-      setError("Daily activity logs are disabled until the daily_activity_logs table is available.");
-      return;
-    }
-
     const supabase = getSupabaseClient();
     if (!supabase) {
       setError("Supabase is not configured.");
@@ -667,26 +696,64 @@ export default function MyDayPage() {
       }
 
       const location = await captureLocation();
-      const payload = {
-        user_id: session.user.id,
-        entry_type: "VISIT_REPORT",
-        note: JSON.stringify({
-          action: "VISIT_REPORT",
-          customer_code: customer.customer_code,
-          customer_name: customer.customer_name,
-          outcome: visitForm.outcome,
-          next_visit_at: visitForm.nextVisitAt || null,
-          note: visitForm.note || null,
-          stock_checks: visitForm.stockChecks,
-          captured_at: new Date().toISOString(),
-          location,
-        }),
-      };
+      const capturedAt = new Date().toISOString();
 
-      const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
-      if (insertError) throw insertError;
+      if (logsEnabled) {
+        const payload = {
+          user_id: session.user.id,
+          entry_type: "VISIT_REPORT",
+          note: JSON.stringify({
+            action: "VISIT_REPORT",
+            customer_code: customer.customer_code,
+            customer_name: customer.customer_name,
+            outcome: visitForm.outcome,
+            next_visit_at: visitForm.nextVisitAt || null,
+            note: visitForm.note || null,
+            stock_checks: visitForm.stockChecks,
+            captured_at: capturedAt,
+            location,
+          }),
+        };
+
+        const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
+        if (insertError) throw insertError;
+      } else {
+        const response = await fetch("/api/visit-reports", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            customerCode: customer.customer_code,
+            customerName: customer.customer_name,
+            outcome: visitForm.outcome,
+            nextVisitAt: visitForm.nextVisitAt || null,
+            note: visitForm.note || null,
+            stockChecks: visitForm.stockChecks,
+            capturedAt,
+            location,
+          }),
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.error || "Unable to save visit report.");
+        }
+      }
 
       setMessage(`${customer.customer_name} ${language === "ar" ? "تم حفظ تقرير الزيارة" : "visit report saved"}.`);
+      setVisitStatusRows((current) =>
+        current.map((row) => {
+          if (row.customer_code !== customer.customer_code) return row;
+          return {
+            ...row,
+            last_visit_date: capturedAt,
+            days_since_last_visit: 0,
+            status: "Visited",
+          };
+        })
+      );
       setActiveVisitCustomerCode("");
       setVisitForm({
         outcome: "PAYMENT_FOLLOWUP",

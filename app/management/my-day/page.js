@@ -265,6 +265,13 @@ export default function MyDayPage() {
           .gte("submitted_at", `${today}T00:00:00`)
           .lte("submitted_at", `${today}T23:59:59`);
 
+        let todayOrdersQuery = supabase
+          .from("sales_orders")
+          .select("customer_code,created_by,salesman_code,created_at,submitted_at")
+          .or(
+            `and(created_at.gte.${today}T00:00:00,created_at.lte.${today}T23:59:59),and(submitted_at.gte.${today}T00:00:00,submitted_at.lte.${today}T23:59:59)`
+          );
+
         let routeQuery = supabase
           .from("customers")
           .select("customer_code,customer_name,city,area,latest_transaction_date")
@@ -276,18 +283,21 @@ export default function MyDayPage() {
         } else {
           todaySalesQuery = todaySalesQuery.in("salesman_code", scope.visibleSalesmanCodes);
           routeQuery = routeQuery.in("current_salesman_code", scope.visibleSalesmanCodes);
+          todayOrdersQuery = todayOrdersQuery.in("salesman_code", scope.visibleSalesmanCodes);
         }
 
         const [
           todaySalesRes,
           pendingOrdersRes,
           submittedTodayRes,
+          todayOrdersRes,
           customerRows,
           routeRes,
         ] = await Promise.all([
           todaySalesQuery,
           pendingOrdersQuery,
           submittedOrdersQuery,
+          todayOrdersQuery,
           fetchAllCustomers(supabase, scope),
           routeQuery,
         ]);
@@ -295,6 +305,7 @@ export default function MyDayPage() {
         if (todaySalesRes.error) throw todaySalesRes.error;
         if (pendingOrdersRes.error) throw pendingOrdersRes.error;
         if (submittedTodayRes.error) throw submittedTodayRes.error;
+        if (todayOrdersRes.error) throw todayOrdersRes.error;
         if (routeRes.error) throw routeRes.error;
 
         let newProspectsCount = 0;
@@ -347,11 +358,30 @@ export default function MyDayPage() {
           setLatestGpsCaptureAt(0);
         }
 
-        const todayCustomers = new Set((todaySalesRes.data || []).map((row) => row.customer_code).filter(Boolean));
+        const visibleTodayOrders = (todayOrdersRes.data || []).filter((row) => {
+          if (scope.hasAllAccess) return true;
+          return (
+            scope.visibleUserIds.includes(row.created_by) ||
+            scope.visibleSalesmanCodes.includes(String(row.salesman_code || "").trim().toUpperCase())
+          );
+        });
+
+        const todayOrderCustomers = new Set(
+          visibleTodayOrders
+            .map((row) => String(row.customer_code || "").trim().toUpperCase())
+            .filter(Boolean)
+        );
+
+        const todayCustomers = new Set(
+          (todaySalesRes.data || [])
+            .map((row) => String(row.customer_code || "").trim().toUpperCase())
+            .filter(Boolean)
+        );
+        todayOrderCustomers.forEach((customerCode) => todayCustomers.add(customerCode));
         const productiveCustomers = new Set(
           (todaySalesRes.data || [])
             .filter((row) => Number(row.sales_amount || 0) > 0)
-            .map((row) => row.customer_code)
+            .map((row) => String(row.customer_code || "").trim().toUpperCase())
             .filter(Boolean)
         );
 
@@ -461,7 +491,7 @@ export default function MyDayPage() {
               last_visit_date: latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
               days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
-              status: todayCustomers.has(row.customer_code)
+              status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
                 : daysBetween(row.latest_transaction_date) > 21
                 ? "Overdue"

@@ -10,7 +10,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 
 const TEXT = {
   title: { en: "GPS Map", ar: "خريطة GPS" },
-  subtitle: { en: "Latest attendance GPS points for all salesmen", ar: "آخر نقاط GPS للحضور لجميع المندوبين" },
+  subtitle: { en: "Customer-wise salesman visit map and raw GPS capture logs", ar: "خريطة زيارات العملاء للمندوبين مع سجلات GPS الخام" },
   management: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading GPS map...", ar: "جاري تحميل خريطة GPS..." },
 };
@@ -28,6 +28,8 @@ function parseGps(note) {
       longitude: Number(location.longitude),
       accuracy: Number(location.accuracy || 0),
       action: parsed.action || "ATTENDANCE",
+      customer_code: String(parsed.customer_code || "").trim(),
+      customer_name: String(parsed.customer_name || "").trim(),
       captured_at: parsed.captured_at || null,
     };
   } catch {
@@ -35,20 +37,21 @@ function parseGps(note) {
   }
 }
 
-function mapBounds(points) {
-  if (!points.length) {
-    return { minLat: 0, maxLat: 1, minLng: 0, maxLng: 1 };
-  }
+function normalizeCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
 
-  return points.reduce(
-    (bounds, point) => ({
-      minLat: Math.min(bounds.minLat, point.latitude),
-      maxLat: Math.max(bounds.maxLat, point.latitude),
-      minLng: Math.min(bounds.minLng, point.longitude),
-      maxLng: Math.max(bounds.maxLng, point.longitude),
-    }),
-    { minLat: points[0].latitude, maxLat: points[0].latitude, minLng: points[0].longitude, maxLng: points[0].longitude }
-  );
+function toTimestamp(value) {
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toDateValue(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
 }
 
 export default function GpsMapPage() {
@@ -56,8 +59,14 @@ export default function GpsMapPage() {
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [points, setPoints] = useState([]);
+  const [records, setRecords] = useState([]);
   const [userRole, setUserRole] = useState("");
+  const [salesmanFilter, setSalesmanFilter] = useState("ALL");
+  const [actionFilter, setActionFilter] = useState("ALL");
+  const [customerFilter, setCustomerFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -95,7 +104,7 @@ export default function GpsMapPage() {
           .from("daily_activity_logs")
           .select("id,user_id,entry_type,note,created_at")
           .order("created_at", { ascending: false })
-          .limit(1000);
+          .limit(5000);
 
         if (logsError) throw logsError;
 
@@ -107,21 +116,34 @@ export default function GpsMapPage() {
         if (profilesError) throw profilesError;
 
         const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
-        const latestBySalesman = new Map();
 
-        (logs || []).forEach((log) => {
-          const gps = parseGps(log.note);
-          if (!gps || latestBySalesman.has(log.user_id)) return;
+        const rows = (logs || [])
+          .map((log) => {
+            const gps = parseGps(log.note);
+            if (!gps) return null;
 
-          latestBySalesman.set(log.user_id, {
-            ...gps,
-            user_id: log.user_id,
-            profile: profileMap.get(log.user_id) || null,
-            created_at: log.created_at,
-          });
-        });
+            const profileRow = profileMap.get(log.user_id) || null;
+            const capturedAt = gps.captured_at || log.created_at;
 
-        setPoints(Array.from(latestBySalesman.values()));
+            return {
+              id: log.id,
+              user_id: log.user_id,
+              salesman_code: String(profileRow?.salesman_code || "").trim(),
+              salesman_name: String(profileRow?.salesman_name || "").trim(),
+              entry_type: String(log.entry_type || "").trim(),
+              action: String(gps.action || log.entry_type || "GPS").trim(),
+              customer_code: String(gps.customer_code || "").trim(),
+              customer_name: String(gps.customer_name || "").trim(),
+              latitude: gps.latitude,
+              longitude: gps.longitude,
+              accuracy: gps.accuracy,
+              captured_at: capturedAt,
+              created_at: log.created_at,
+            };
+          })
+          .filter((row) => row && Number.isFinite(row.latitude) && Number.isFinite(row.longitude));
+
+        setRecords(rows);
       } catch (err) {
         setError(err.message || "Unable to load GPS map.");
       } finally {
@@ -132,7 +154,88 @@ export default function GpsMapPage() {
     load();
   }, []);
 
-  const bounds = useMemo(() => mapBounds(points), [points]);
+  const salesmanOptions = useMemo(
+    () => [
+      "ALL",
+      ...new Set(
+        records
+          .map((row) => String(row.salesman_name || row.salesman_code || row.user_id || "").trim())
+          .filter(Boolean)
+      ),
+    ],
+    [records]
+  );
+
+  const actionOptions = useMemo(
+    () => ["ALL", ...new Set(records.map((row) => String(row.action || row.entry_type || "").trim()).filter(Boolean))],
+    [records]
+  );
+
+  const filteredRecords = useMemo(() => {
+    const query = customerFilter.trim().toLowerCase();
+    const fromTs = dateFrom ? toTimestamp(`${dateFrom}T00:00:00`) : 0;
+    const toTs = dateTo ? toTimestamp(`${dateTo}T23:59:59`) : 0;
+
+    return records.filter((row) => {
+      const salesmanLabel = String(row.salesman_name || row.salesman_code || row.user_id || "").trim();
+      if (salesmanFilter !== "ALL" && salesmanLabel !== salesmanFilter) return false;
+
+      const rowAction = String(row.action || row.entry_type || "").trim();
+      if (actionFilter !== "ALL" && rowAction !== actionFilter) return false;
+
+      if (query) {
+        const haystack = [row.customer_code, row.customer_name, salesmanLabel]
+          .map((value) => String(value || "").toLowerCase())
+          .join(" ");
+        if (!haystack.includes(query)) return false;
+      }
+
+      const ts = toTimestamp(row.captured_at || row.created_at);
+      if (fromTs && ts < fromTs) return false;
+      if (toTs && ts > toTs) return false;
+      return true;
+    });
+  }, [records, salesmanFilter, actionFilter, customerFilter, dateFrom, dateTo]);
+
+  const customerVisitPoints = useMemo(() => {
+    const latestByCustomer = new Map();
+
+    filteredRecords
+      .filter((row) => normalizeCode(row.customer_code))
+      .forEach((row) => {
+        const code = normalizeCode(row.customer_code);
+        const current = latestByCustomer.get(code);
+        const rowTs = toTimestamp(row.captured_at || row.created_at);
+        const currentTs = current ? toTimestamp(current.captured_at || current.created_at) : 0;
+
+        if (!current || rowTs > currentTs) {
+          latestByCustomer.set(code, row);
+        }
+      });
+
+    return Array.from(latestByCustomer.values()).sort((a, b) => {
+      const byTime = toTimestamp(b.captured_at || b.created_at) - toTimestamp(a.captured_at || a.created_at);
+      if (byTime !== 0) return byTime;
+      return String(a.customer_name || a.customer_code || "").localeCompare(String(b.customer_name || b.customer_code || ""));
+    });
+  }, [filteredRecords]);
+
+  const selectedPoint = useMemo(() => {
+    if (!customerVisitPoints.length) return null;
+
+    const preferred = customerVisitPoints.find((row) => normalizeCode(row.customer_code) === normalizeCode(selectedCustomerCode));
+    return preferred || customerVisitPoints[0];
+  }, [customerVisitPoints, selectedCustomerCode]);
+
+  const mapUrl = useMemo(() => {
+    if (!selectedPoint) return "";
+    return `https://maps.google.com/maps?q=${encodeURIComponent(`${selectedPoint.latitude},${selectedPoint.longitude}`)}&z=15&output=embed`;
+  }, [selectedPoint]);
+
+  const openMapUrl = useMemo(() => {
+    if (!selectedPoint) return "#";
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${selectedPoint.latitude},${selectedPoint.longitude}`)}`;
+  }, [selectedPoint]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -156,82 +259,171 @@ export default function GpsMapPage() {
 
   return (
     <MorningAttendanceGate>
-    <main className="modulePage" dir={dir}>
-      <div className="moduleShell">
-        <div className="moduleHeader">
-          <div>
-            <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>{t("title")}</h1>
-            <p className="moduleSubtitle">{t("subtitle")}</p>
+      <main className="modulePage" dir={dir}>
+        <div className="moduleShell">
+          <div className="moduleHeader">
+            <div>
+              <p className="moduleEyebrow">MADIBA SFA</p>
+              <h1>{t("title")}</h1>
+              <p className="moduleSubtitle">{t("subtitle")}</p>
+            </div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/management" className="moduleBackLink">{t("management")}</Link></div>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/management" className="moduleBackLink">{t("management")}</Link></div>
-        </div>
 
-        {error && <div className="moduleError">{error}</div>}
+          {error && <div className="moduleError">{error}</div>}
 
-        <div className="moduleMetricGrid">
-          <section className="moduleMetricCard"><span>Visible salesmen</span><strong>{points.length}</strong></section>
-          <section className="moduleMetricCard"><span>Administrator only</span><strong>{userRole === "admin" ? "Yes" : "No"}</strong></section>
-        </div>
-
-        <section className="moduleSection">
-          <div className="moduleSectionHeader">
-            <h2>Live GPS View</h2>
-            <span>Latest known point per salesman</span>
+          <div className="moduleMetricGrid">
+            <section className="moduleMetricCard"><span>Visible salesmen</span><strong>{new Set(filteredRecords.map((row) => row.user_id)).size}</strong></section>
+            <section className="moduleMetricCard"><span>Customer visit points</span><strong>{customerVisitPoints.length}</strong></section>
+            <section className="moduleMetricCard"><span>Raw GPS captures</span><strong>{filteredRecords.length}</strong></section>
+            <section className="moduleMetricCard"><span>Administrator only</span><strong>{userRole === "admin" ? "Yes" : "No"}</strong></section>
           </div>
-          <div className="gpsMapShell">
-            {points.length === 0 ? (
-              <div className="moduleHint">No GPS attendance points captured yet.</div>
-            ) : (
-              points.map((point) => {
-                const left = ((point.longitude - bounds.minLng) / Math.max(0.000001, bounds.maxLng - bounds.minLng)) * 100;
-                const top = ((bounds.maxLat - point.latitude) / Math.max(0.000001, bounds.maxLat - bounds.minLat)) * 100;
 
-                return (
-                  <div
-                    key={point.user_id}
-                    className="gpsPin"
-                    style={{ left: `${Math.min(96, Math.max(4, left))}%`, top: `${Math.min(96, Math.max(4, top))}%` }}
-                  >
-                    <strong>{point.profile?.salesman_name || point.profile?.salesman_code || point.user_id}</strong>
-                    <span>{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</span>
-                    <small>{point.action}</small>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </section>
-
-        <section className="moduleSection">
-          <div className="moduleSectionHeader">
-            <h2>Salesman Locations</h2>
-          </div>
-          <div className="moduleTableWrap">
-            <table className="moduleTable">
-              <thead>
-                <tr>
-                  <th>Salesman</th>
-                  <th>Action</th>
-                  <th>GPS</th>
-                  <th>Captured At</th>
-                </tr>
-              </thead>
-              <tbody>
-                {points.map((point) => (
-                  <tr key={point.user_id}>
-                    <td>{point.profile?.salesman_name || point.profile?.salesman_code || point.user_id}</td>
-                    <td>{point.action}</td>
-                    <td>{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</td>
-                    <td>{point.captured_at ? new Date(point.captured_at).toLocaleString("en-GB") : "-"}</td>
-                  </tr>
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>Filters</h2>
+            </div>
+            <div className="moduleFilterRow" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+              <select className="moduleInput" value={salesmanFilter} onChange={(event) => setSalesmanFilter(event.target.value)}>
+                {salesmanOptions.map((option) => (
+                  <option key={option} value={option}>{option === "ALL" ? "All Salesmen" : option}</option>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </main>
+              </select>
+              <select className="moduleInput" value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}>
+                {actionOptions.map((option) => (
+                  <option key={option} value={option}>{option === "ALL" ? "All Actions" : option}</option>
+                ))}
+              </select>
+              <input className="moduleInput" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+              <input className="moduleInput" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+              <input className="moduleInput" type="search" placeholder="Customer code/name" value={customerFilter} onChange={(event) => setCustomerFilter(event.target.value)} />
+            </div>
+          </section>
+
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>Google Map (Customer-wise Visit)</h2>
+              <span>Latest captured point per customer</span>
+            </div>
+            {selectedPoint ? (
+              <>
+                <div className="gpsMapShell" style={{ padding: 0 }}>
+                  <iframe
+                    title="Customer visit map"
+                    src={mapUrl}
+                    width="100%"
+                    height="420"
+                    style={{ border: 0, display: "block" }}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                  />
+                </div>
+                <div className="moduleFilterRow" style={{ marginTop: "10px" }}>
+                  <div className="moduleHint">
+                    Showing: {selectedPoint.customer_name || selectedPoint.customer_code} ({selectedPoint.customer_code || "-"}) • {selectedPoint.salesman_name || selectedPoint.salesman_code || selectedPoint.user_id}
+                  </div>
+                  <a className="moduleInlineButton" href={openMapUrl} target="_blank" rel="noreferrer">Open in Google Maps</a>
+                </div>
+              </>
+            ) : (
+              <div className="moduleHint">No customer-wise GPS visit points found for current filters.</div>
+            )}
+          </section>
+
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>Customer-wise Latest Visit Points</h2>
+            </div>
+            <div className="moduleTableWrap">
+              <table className="moduleTable">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Salesman</th>
+                    <th>Action</th>
+                    <th>GPS</th>
+                    <th>Captured At</th>
+                    <th>Map</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customerVisitPoints.map((point) => (
+                    <tr key={`${point.customer_code}-${point.id}`}>
+                      <td>{point.customer_name || point.customer_code || "-"}<div className="moduleCode">{point.customer_code || "-"}</div></td>
+                      <td>{point.salesman_name || point.salesman_code || point.user_id}</td>
+                      <td>{point.action || point.entry_type}</td>
+                      <td>{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</td>
+                      <td>{point.captured_at ? new Date(point.captured_at).toLocaleString("en-GB") : "-"}</td>
+                      <td>
+                        <div className="moduleInlineStack">
+                          <button type="button" className="moduleInlineButton" onClick={() => setSelectedCustomerCode(point.customer_code || "")}>View</button>
+                          <a className="moduleInlineButton" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${point.latitude},${point.longitude}`)}`} target="_blank" rel="noreferrer">Open</a>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {customerVisitPoints.length === 0 && (
+                    <tr>
+                      <td colSpan={6}>No customer-wise visit points found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>Raw GPS Capture Log</h2>
+              <span>Filterable backend capture records</span>
+            </div>
+            <div className="moduleTableWrap">
+              <table className="moduleTable">
+                <thead>
+                  <tr>
+                    <th>Captured Date</th>
+                    <th>Captured Time</th>
+                    <th>Salesman</th>
+                    <th>Customer</th>
+                    <th>Action</th>
+                    <th>GPS</th>
+                    <th>Accuracy</th>
+                    <th>Google Map</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRecords.map((point) => (
+                    <tr key={point.id}>
+                      <td>{toDateValue(point.captured_at || point.created_at) || "-"}</td>
+                      <td>{point.captured_at ? new Date(point.captured_at).toLocaleTimeString("en-GB") : "-"}</td>
+                      <td>{point.salesman_name || point.salesman_code || point.user_id}</td>
+                      <td>{point.customer_name || point.customer_code || "-"}</td>
+                      <td>{point.action || point.entry_type}</td>
+                      <td>{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</td>
+                      <td>{point.accuracy ? `${Number(point.accuracy).toFixed(1)} m` : "-"}</td>
+                      <td>
+                        <a
+                          className="moduleInlineButton"
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${point.latitude},${point.longitude}`)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredRecords.length === 0 && (
+                    <tr>
+                      <td colSpan={8}>No GPS captures found for selected filters.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
     </MorningAttendanceGate>
   );
 }

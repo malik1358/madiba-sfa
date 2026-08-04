@@ -506,6 +506,11 @@ export default function NewOrderPage() {
     });
   }, [customers, customerSearch]);
 
+  const customerNameSuggestions = useMemo(
+    () => filteredCustomers.slice(0, 100),
+    [filteredCustomers]
+  );
+
   const filteredItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
     return mergedItemsMaster.filter((item) => {
@@ -1043,9 +1048,19 @@ export default function NewOrderPage() {
               className="moduleInput"
               type="text"
               placeholder="Search customer by code or name"
+              list="customer-name-suggestions"
               value={customerSearch}
               onChange={(event) => setCustomerSearch(event.target.value)}
             />
+            <datalist id="customer-name-suggestions">
+              {customerNameSuggestions.map((customer) => (
+                <option
+                  key={`name-suggest-${customer.customer_code}`}
+                  value={customer.customer_name || ""}
+                  label={customer.customer_code || ""}
+                />
+              ))}
+            </datalist>
             <select
               className="moduleInput"
               value={selectedCustomerCode}

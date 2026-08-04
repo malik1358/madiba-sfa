@@ -1,3 +1,5 @@
+import { isDoNotUseItem } from './helpers';
+
 export function buildOrderItems(orderQuantities, analytics, quickOrderAllItems) {
   if (!analytics) return [];
 
@@ -10,7 +12,7 @@ export function buildOrderItems(orderQuantities, analytics, quickOrderAllItems) 
         item = quickOrderAllItems.find((row) => row.item_code === itemCode);
       }
 
-      if (!item) return null;
+      if (!item || isDoNotUseItem(item.item_name)) return null;
 
       return { ...item, order_quantity: Number(quantity) };
     })

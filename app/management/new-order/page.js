@@ -486,7 +486,9 @@ export default function NewOrderPage() {
       });
     });
 
-    return Array.from(itemMap.values()).sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
+    return Array.from(itemMap.values())
+      .filter((item) => !isDoNotUseItem(item.item_name))
+      .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 
   const selectedCustomer = useMemo(

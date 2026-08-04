@@ -1,5 +1,6 @@
 import { Fragment } from 'react';
 import { monthName, numberFormat, qtyFormat, trendClass } from '../lib/format';
+import { isDoNotUseItem } from '../lib/helpers';
 
 export default function CategoryPerformance({ analytics, expandedCategories, toggleCategory, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
   return (
@@ -105,7 +106,7 @@ export default function CategoryPerformance({ analytics, expandedCategories, tog
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {category.items.map((item) => {
+                                  {category.items.filter((item) => !isDoNotUseItem(item.item_name)).map((item) => {
                                     const orderQty = Number(orderQuantities[item.item_code] || 0);
                                     return (
                                       <Fragment key={item.item_key}>

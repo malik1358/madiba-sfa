@@ -49,7 +49,7 @@ async function insertProspectWithColumnFallback(supabase, payload) {
     const { data, error } = await supabase
       .from("prospects")
       .insert(workingPayload)
-      .select("id,customer_name,shop_name,salesman_code")
+      .select("id,customer_name,salesman_code")
       .single();
 
     if (!error) {

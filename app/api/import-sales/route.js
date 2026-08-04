@@ -412,18 +412,45 @@ export async function POST(request) {
            item_name = MADIBA KETTLE 1.7L
         ------------------------------------------------ */
 
-        const itemRaw = clean(
+        const itemCombinedRaw = clean(
           findValue(row, [
             "Item Name",
+            "Item",
+            "Product",
+            "Product Name",
+            "Item Name/Code",
+            "Item Code & Name",
+          ])
+        );
+
+        const itemCodeRaw = clean(
+          findValue(row, [
+            "Item Code",
+            "Item No",
+            "Item Number",
+            "SKU",
+            "Stock Code",
+            "Code",
+          ])
+        );
+
+        const itemNameRaw = clean(
+          findValue(row, [
+            "Item Description",
+            "Description",
+            "Product Description",
+            "Item Desc",
+            "Item Name",
+            "Product Name",
           ])
         );
 
         let itemCode = null;
-        let itemName = itemRaw;
+        let itemName = itemCombinedRaw || itemNameRaw;
 
-        if (itemRaw) {
+        if (itemCombinedRaw) {
           const cleanedItem =
-            itemRaw
+            itemCombinedRaw
               .replace(/^`/, "")
               .trim();
 
@@ -444,11 +471,36 @@ export async function POST(request) {
           }
         }
 
+        if (itemCodeRaw) {
+          const explicitCode = itemCodeRaw.replace(/^`/, "").trim();
+          if (explicitCode) {
+            itemCode = explicitCode;
+          }
+        }
+
+        if (itemNameRaw) {
+          const explicitName = itemNameRaw.trim();
+          if (explicitName) {
+            itemName = explicitName;
+          }
+        }
+
+        if (!itemName && itemCode) {
+          itemName = itemCode;
+        }
+
         /* ---------------- CATEGORY ---------------- */
 
         const category = clean(
           findValue(row, [
             "Item Category",
+            "Category",
+            "Product Category",
+            "Main Category",
+            "Sub Category",
+            "Item Group",
+            "Product Group",
+            "Group",
           ])
         );
 
@@ -853,7 +905,60 @@ export async function POST(request) {
     }
 
     /* ========================================================
-       13. UPDATE BATCH STATISTICS
+       13. UPSERT ITEM MASTER FROM IMPORTED SALES
+       ======================================================== */
+
+    const itemMap = new Map();
+
+    for (const row of mappedRows) {
+      const itemCode = clean(row.item_code);
+      if (!itemCode) continue;
+
+      const itemName = clean(row.item_name) || itemCode;
+      const itemCategory = clean(row.category);
+
+      if (!itemMap.has(itemCode)) {
+        itemMap.set(itemCode, {
+          item_code: itemCode,
+          item_name: itemName,
+          category: itemCategory || "Unclassified",
+        });
+        continue;
+      }
+
+      const existing = itemMap.get(itemCode);
+
+      const existingName = String(existing.item_name || "").trim();
+      const nextName = String(itemName || "").trim();
+      if ((!existingName || existingName === itemCode) && nextName && nextName !== itemCode) {
+        existing.item_name = nextName;
+      }
+
+      const existingCategory = String(existing.category || "").trim();
+      const nextCategory = String(itemCategory || "").trim();
+      if ((!existingCategory || existingCategory.toUpperCase() === "UNCLASSIFIED") && nextCategory) {
+        existing.category = nextCategory;
+      }
+
+      itemMap.set(itemCode, existing);
+    }
+
+    const itemUpserts = Array.from(itemMap.values());
+    const ITEM_CHUNK = 500;
+
+    for (let i = 0; i < itemUpserts.length; i += ITEM_CHUNK) {
+      const chunk = itemUpserts.slice(i, i + ITEM_CHUNK);
+      const { error: itemError } = await admin
+        .from("items_master")
+        .upsert(chunk, { onConflict: "item_code" });
+
+      if (itemError) {
+        throw new Error(`Item master update failed: ${itemError.message}`);
+      }
+    }
+
+    /* ========================================================
+       14. UPDATE BATCH STATISTICS
        ======================================================== */
 
     const {
@@ -889,7 +994,7 @@ export async function POST(request) {
     }
 
     /* ========================================================
-       14. ACTIVATE NEW SNAPSHOT
+       15. ACTIVATE NEW SNAPSHOT
        ======================================================== */
 
     const {
@@ -907,7 +1012,7 @@ export async function POST(request) {
     }
 
     /* ========================================================
-       15. SUCCESS RESPONSE
+       16. SUCCESS RESPONSE
        ======================================================== */
 
     return NextResponse.json({

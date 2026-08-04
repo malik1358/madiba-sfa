@@ -195,7 +195,7 @@ export default function MyDayPage() {
 
         const nextWarnings = [];
         if (!logsCheck.available) {
-          nextWarnings.push(`${logsCheck.reason}. Check-in/check-out and notes are disabled.`);
+          nextWarnings.push("Daily activity logs table is unavailable. Check-in/check-out, visit reports, and notes are disabled.");
         }
         if (!prospectsCheck.available) {
           nextWarnings.push(`${prospectsCheck.reason}. New customers assigned metric is unavailable.`);

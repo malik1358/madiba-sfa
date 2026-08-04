@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
@@ -280,6 +281,7 @@ export default function NewCustomerPage() {
   }
 
   return (
+    <MorningAttendanceGate>
     <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
@@ -441,5 +443,6 @@ export default function NewCustomerPage() {
         </section>
       </div>
     </main>
+    </MorningAttendanceGate>
   );
 }

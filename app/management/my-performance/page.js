@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchSalesScope } from "../../lib/salesScope";
+import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 
@@ -215,6 +216,7 @@ export default function MyPerformancePage() {
   }
 
   return (
+    <MorningAttendanceGate>
     <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
@@ -238,5 +240,6 @@ export default function MyPerformancePage() {
         </div>
       </div>
     </main>
+    </MorningAttendanceGate>
   );
 }

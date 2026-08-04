@@ -7,6 +7,7 @@ import { fetchSalesScope } from "../../lib/salesScope";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { detectTable } from "../../lib/schemaGuards";
 
 const PAGE_TEXT = {
@@ -673,6 +674,7 @@ export default function MyDayPage() {
   }
 
   return (
+    <MorningAttendanceGate>
     <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
@@ -857,5 +859,6 @@ export default function MyDayPage() {
         </section>
       </div>
     </main>
+    </MorningAttendanceGate>
   );
 }

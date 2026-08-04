@@ -15,6 +15,7 @@ const TEXT = {
 
 import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 
@@ -343,6 +344,7 @@ export default function CustomerAuditPage() {
   }
 
   return (
+    <MorningAttendanceGate>
     <main className="auditPage" dir={dir}>
       <div className="auditShell">
         <div className="auditTop">
@@ -504,5 +506,6 @@ export default function CustomerAuditPage() {
         </div>
       </div>
     </main>
+    </MorningAttendanceGate>
   );
 }

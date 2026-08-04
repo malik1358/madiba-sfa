@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
@@ -919,6 +920,7 @@ export default function NewOrderPage() {
   }
 
   return (
+    <MorningAttendanceGate>
     <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
@@ -1290,5 +1292,6 @@ export default function NewOrderPage() {
         </section>
       </div>
     </main>
+    </MorningAttendanceGate>
   );
 }

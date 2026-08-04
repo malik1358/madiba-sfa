@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -248,6 +249,7 @@ export default function SalesmanHierarchyPage() {
   }
 
   return (
+    <MorningAttendanceGate>
     <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
@@ -426,5 +428,6 @@ export default function SalesmanHierarchyPage() {
         </section>
       </div>
     </main>
+    </MorningAttendanceGate>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "./lib/supabase";
 import { useAppLanguage } from "./lib/appLanguage";
+import MorningAttendanceGate from "./components/MorningAttendanceGate";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
 
 export default function Home() {
@@ -171,6 +172,7 @@ export default function Home() {
 
   if (user && profile) {
     return (
+      <MorningAttendanceGate>
       <main
         className="dashboardPage"
         dir={ar ? "rtl" : "ltr"}
@@ -326,6 +328,7 @@ export default function Home() {
         </section>
 
       </main>
+      </MorningAttendanceGate>
     );
   }
 

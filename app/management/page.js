@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import MorningAttendanceGate from "../components/MorningAttendanceGate";
 import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import SupabaseUnavailable from "../components/SupabaseUnavailable";
@@ -192,6 +193,7 @@ export default function ManagementPage() {
   }
 
   return (
+    <MorningAttendanceGate>
     <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
@@ -278,5 +280,6 @@ export default function ManagementPage() {
         </section>
       </div>
     </main>
+    </MorningAttendanceGate>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -86,6 +87,7 @@ export default function UploadSalesPage() {
   }
 
   return (
+    <MorningAttendanceGate>
     <main className="uploadPage" dir={dir}>
       <div className="uploadContainer">
 
@@ -256,5 +258,6 @@ export default function UploadSalesPage() {
 
       </div>
     </main>
+    </MorningAttendanceGate>
   );
 }

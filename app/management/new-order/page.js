@@ -979,15 +979,33 @@ export default function NewOrderPage() {
     }
 
     async function loadPrices() {
+      const PRICE_CACHE_KEY = "madiba.pricePayload";
+
       try {
         const response = await fetch(PRICE_API);
+        if (!response.ok) {
+          throw new Error(`Price API failed with ${response.status}`);
+        }
+
         const data = await response.json();
         const parsed = parsePricePayload(data || {});
+        if (Object.keys(parsed.priceMap || {}).length === 0) {
+          throw new Error("Price API returned no prices");
+        }
+
         setPriceList(parsed.priceMap);
         setPriceSheetItems(parsed.sheetItems);
+        window.localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(parsed));
       } catch {
-        setPriceList({});
-        setPriceSheetItems([]);
+        try {
+          const cached = JSON.parse(window.localStorage.getItem(PRICE_CACHE_KEY) || "null");
+          if (cached?.priceMap && Object.keys(cached.priceMap).length > 0) {
+            setPriceList(cached.priceMap);
+            setPriceSheetItems(Array.isArray(cached.sheetItems) ? cached.sheetItems : []);
+          }
+        } catch {
+          // Keep previously loaded prices if cache is unavailable.
+        }
       }
     }
 

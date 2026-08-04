@@ -2,8 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
+
+const TEXT = {
+  title: { en: "GPS Map", ar: "خريطة GPS" },
+  subtitle: { en: "Latest attendance GPS points for all salesmen", ar: "آخر نقاط GPS للحضور لجميع المندوبين" },
+  management: { en: "← Management", ar: "← الإدارة" },
+  loading: { en: "Loading GPS map...", ar: "جاري تحميل خريطة GPS..." },
+};
 
 function parseGps(note) {
   if (!note) return null;
@@ -42,6 +51,8 @@ function mapBounds(points) {
 }
 
 export default function GpsMapPage() {
+  const { language, dir, setLanguage } = useAppLanguage();
+  const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [points, setPoints] = useState([]);
@@ -134,24 +145,24 @@ export default function GpsMapPage() {
 
   if (loading) {
     return (
-      <main className="modulePage">
+      <main className="modulePage" dir={dir}>
         <div className="moduleShell">
-          <div className="moduleLoading">Loading GPS map...</div>
+          <div className="moduleLoading">{t("loading")}</div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="modulePage">
+    <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
           <div>
             <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>GPS Map</h1>
-            <p className="moduleSubtitle">Latest attendance GPS points for all salesmen</p>
+            <h1>{t("title")}</h1>
+            <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <Link href="/management" className="moduleBackLink">← Management</Link>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/management" className="moduleBackLink">{t("management")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}

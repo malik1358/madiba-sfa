@@ -5,8 +5,17 @@ const PRICE_API =
 
 const PAGE_VERSION = "Quick Order V5";
 const CUSTOMER_DOCUMENT_TYPES = ["CR", "VAT", "ID", "CREDIT_APPLICATION", "OTHER"];
+const TEXT = {
+  title: { en: "Customer Audit", ar: "تدقيق العملاء" },
+  subtitle: { en: "Management sales history validation", ar: "مراجعة سجل مبيعات العملاء" },
+  home: { en: "← Home", ar: "← الرئيسية" },
+  customers: { en: "← Customers", ar: "← العملاء" },
+  loadingCustomer: { en: "Loading customer history...", ar: "جاري تحميل سجل العميل..." },
+};
 
 import { useEffect, useMemo, useState } from "react";
+import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 
 import { shortDate } from "./lib/format";
@@ -29,6 +38,8 @@ import { useOrder } from "./hooks/useOrder";
 
 
 export default function CustomerAuditPage() {
+  const { language, dir, setLanguage } = useAppLanguage();
+  const t = translate(language, TEXT);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [priceList, setPriceList] = useState({});
@@ -263,15 +274,15 @@ export default function CustomerAuditPage() {
 
   if (!selectedCustomer) {
     return (
-      <main className="auditPage">
+      <main className="auditPage" dir={dir}>
         <div className="auditShell">
           <div className="auditTop">
             <div>
               <div className="auditBrand">MADIBA SFA</div>
-              <h1>Customer Audit</h1>
-              <p className="auditSubtitle">Management sales history validation</p>
+              <h1>{t("title")}</h1>
+              <p className="auditSubtitle">{t("subtitle")}</p>
             </div>
-            <a href="/management" className="auditHomeButton">← Home</a>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
 
           {error && <div className="auditError">{error}</div>}
@@ -294,17 +305,17 @@ export default function CustomerAuditPage() {
 
   if (loadingCustomer) {
     return (
-      <main className="auditPage">
+      <main className="auditPage" dir={dir}>
         <div className="auditShell">
           <div className="auditTop">
             <div>
               <div className="auditBrand">MADIBA SFA</div>
-              <h1>Customer Audit</h1>
-              <p className="auditSubtitle">Loading customer history...</p>
+              <h1>{t("title")}</h1>
+              <p className="auditSubtitle">{t("loadingCustomer")}</p>
             </div>
-            <a href="/management" className="auditHomeButton">← Home</a>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
-          <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>← Customers</button>
+          <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
         </div>
       </main>
     );
@@ -312,17 +323,17 @@ export default function CustomerAuditPage() {
 
   if (!analytics) {
     return (
-      <main className="auditPage">
+      <main className="auditPage" dir={dir}>
         <div className="auditShell">
           <div className="auditTop">
             <div>
               <div className="auditBrand">MADIBA SFA</div>
-              <h1>Customer Audit</h1>
-              <p className="auditSubtitle">Management sales history validation</p>
+              <h1>{t("title")}</h1>
+              <p className="auditSubtitle">{t("subtitle")}</p>
             </div>
-            <a href="/management" className="auditHomeButton">← Home</a>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
-          <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>← Customers</button>
+          <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
           {error && <div className="auditError">{error}</div>}
           <EmptyState title="No sales history" message={`No sales history was found for ${selectedCustomer.customer_name}.`} />
           <div className="auditVersion">Page updated: {PAGE_VERSION}</div>
@@ -332,18 +343,18 @@ export default function CustomerAuditPage() {
   }
 
   return (
-    <main className="auditPage">
+    <main className="auditPage" dir={dir}>
       <div className="auditShell">
         <div className="auditTop">
           <div>
             <div className="auditBrand">MADIBA SFA</div>
-            <h1>Customer Audit</h1>
-            <p className="auditSubtitle">Management sales history validation</p>
+            <h1>{t("title")}</h1>
+            <p className="auditSubtitle">{t("subtitle")}</p>
           </div>
-          <a href="/management" className="auditHomeButton">← Home</a>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
         </div>
 
-        <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>← Customers</button>
+        <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
 
         {message && <div className="auditSuccess">{message}</div>}
         {error && <div className="auditError">{error}</div>}

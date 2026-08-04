@@ -4,8 +4,62 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
+import { translate, useAppLanguage } from "../../lib/appLanguage";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import { detectTable } from "../../lib/schemaGuards";
+
+const PAGE_TEXT = {
+  title: { en: "My Day", ar: "يومي" },
+  subtitle: { en: "Daily planning and visit execution", ar: "تخطيط اليوم وتنفيذ الزيارات" },
+  dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
+  loading: { en: "Loading daily planner...", ar: "جاري تحميل خطة اليوم..." },
+  attendance: { en: "Attendance", ar: "الحضور" },
+  morningAttendance: { en: "Morning Attendance", ar: "حضور الصباح" },
+  lunchBreakOut: { en: "Lunch Break Out", ar: "خروج استراحة الغداء" },
+  lunchBreakIn: { en: "Lunch Break In", ar: "العودة من استراحة الغداء" },
+  endOfDay: { en: "End of Day", ar: "نهاية اليوم" },
+  saveNote: { en: "Save Note", ar: "حفظ الملاحظة" },
+  addPlannerNote: { en: "Add planner note", ar: "أضف ملاحظة لليوم" },
+  noLogs: { en: "No activity logs for today.", ar: "لا توجد سجلات نشاط اليوم." },
+  routeSummary: { en: "Route Summary", ar: "ملخص المسار" },
+  noRoutes: { en: "No routes", ar: "لا توجد مسارات" },
+  customersCount: { en: "customers", ar: "عميل" },
+  visitStatus: { en: "Visit Status", ar: "حالة الزيارات" },
+  customer: { en: "Customer", ar: "العميل" },
+  cityArea: { en: "City / Area", ar: "المدينة / المنطقة" },
+  daysSinceLast: { en: "Days Since Last", ar: "الأيام منذ آخر زيارة" },
+  status: { en: "Status", ar: "الحالة" },
+  actions: { en: "Actions", ar: "الإجراءات" },
+  noCustomers: { en: "No customers available for route status.", ar: "لا يوجد عملاء متاحون لحالة المسار." },
+  visitWithoutOrder: { en: "Visit Without Order", ar: "زيارة بدون طلب" },
+  closeReport: { en: "Close", ar: "إغلاق" },
+  visitReport: { en: "Visit Report", ar: "تقرير الزيارة" },
+  visitOutcome: { en: "Visit Outcome", ar: "نتيجة الزيارة" },
+  nextVisit: { en: "Next Visit Schedule", ar: "موعد الزيارة القادمة" },
+  visitNotes: { en: "Visit Notes", ar: "ملاحظات الزيارة" },
+  stockCheck: { en: "Stock Check", ar: "فحص المخزون" },
+  itemName: { en: "Item name", ar: "اسم الصنف" },
+  available: { en: "Available", ar: "متوفر" },
+  notAvailable: { en: "Not Available", ar: "غير متوفر" },
+  addStock: { en: "Add Stock Note", ar: "إضافة ملاحظة مخزون" },
+  saveVisitReport: { en: "Save Visit Report", ar: "حفظ تقرير الزيارة" },
+  saving: { en: "Saving...", ar: "جاري الحفظ..." },
+  paymentFollowup: { en: "Payment follow-up", ar: "متابعة دفع" },
+  comeBackLater: { en: "Asked to come back later", ar: "طلب العودة لاحقاً" },
+  purchaseManagerUnavailable: { en: "Purchase manager not available", ar: "مدير المشتريات غير موجود" },
+  stocksAvailable: { en: "Stocks available", ar: "المخزون متوفر" },
+  orderTaken: { en: "Order taken", ar: "تم أخذ الطلب" },
+  planned: { en: "Planned", ar: "مخطط" },
+  visited: { en: "Visited", ar: "تمت الزيارة" },
+  overdue: { en: "Overdue", ar: "متأخر" },
+  visitsToday: { en: "Today's customer visits", ar: "زيارات العملاء اليوم" },
+  followUps: { en: "Follow-ups", ar: "المتابعات" },
+  pendingOrders: { en: "Pending orders", ar: "الطلبات المعلقة" },
+  overdueVisits: { en: "Overdue visits", ar: "الزيارات المتأخرة" },
+  newCustomers: { en: "New customers assigned", ar: "العملاء الجدد" },
+  completedVisits: { en: "Completed visits", ar: "الزيارات المكتملة" },
+};
 
 function daysBetween(date) {
   if (!date) return 0;
@@ -16,6 +70,8 @@ function daysBetween(date) {
 }
 
 export default function MyDayPage() {
+  const { language, dir, setLanguage } = useAppLanguage();
+  const t = translate(language, PAGE_TEXT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -38,6 +94,16 @@ export default function MyDayPage() {
   const [attendanceBusy, setAttendanceBusy] = useState("");
   const [latestGpsCaptureAt, setLatestGpsCaptureAt] = useState(0);
   const [accessScope, setAccessScope] = useState(null);
+  const [activeVisitCustomerCode, setActiveVisitCustomerCode] = useState("");
+  const [visitSaving, setVisitSaving] = useState(false);
+  const [visitForm, setVisitForm] = useState({
+    outcome: "PAYMENT_FOLLOWUP",
+    nextVisitAt: "",
+    note: "",
+    stockItem: "",
+    stockStatus: "AVAILABLE",
+    stockChecks: [],
+  });
   const autoPingInFlight = useRef(false);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -423,6 +489,96 @@ export default function MyDayPage() {
     }
   }
 
+  function openVisitReport(customerCode) {
+    setActiveVisitCustomerCode((current) => (current === customerCode ? "" : customerCode));
+    setVisitForm({
+      outcome: "PAYMENT_FOLLOWUP",
+      nextVisitAt: "",
+      note: "",
+      stockItem: "",
+      stockStatus: "AVAILABLE",
+      stockChecks: [],
+    });
+  }
+
+  function addStockCheck() {
+    if (!visitForm.stockItem.trim()) return;
+
+    setVisitForm((current) => ({
+      ...current,
+      stockItem: "",
+      stockChecks: [
+        ...current.stockChecks,
+        {
+          itemName: current.stockItem.trim(),
+          status: current.stockStatus,
+        },
+      ],
+    }));
+  }
+
+  async function saveVisitReport(customer) {
+    if (!logsEnabled) {
+      setError("Daily activity logs are disabled until the daily_activity_logs table is available.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setVisitSaving(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user) {
+        throw new Error("Please login again.");
+      }
+
+      const location = await captureLocation();
+      const payload = {
+        user_id: session.user.id,
+        entry_type: "VISIT_REPORT",
+        note: JSON.stringify({
+          action: "VISIT_REPORT",
+          customer_code: customer.customer_code,
+          customer_name: customer.customer_name,
+          outcome: visitForm.outcome,
+          next_visit_at: visitForm.nextVisitAt || null,
+          note: visitForm.note || null,
+          stock_checks: visitForm.stockChecks,
+          captured_at: new Date().toISOString(),
+          location,
+        }),
+      };
+
+      const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
+      if (insertError) throw insertError;
+
+      setMessage(`${customer.customer_name} ${language === "ar" ? "تم حفظ تقرير الزيارة" : "visit report saved"}.`);
+      setActiveVisitCustomerCode("");
+      setVisitForm({
+        outcome: "PAYMENT_FOLLOWUP",
+        nextVisitAt: "",
+        note: "",
+        stockItem: "",
+        stockStatus: "AVAILABLE",
+        stockChecks: [],
+      });
+    } catch (err) {
+      setError(err.message || "Unable to save visit report.");
+    } finally {
+      setVisitSaving(false);
+    }
+  }
+
   useEffect(() => {
     if (!logsEnabled) return undefined;
 
@@ -456,24 +612,27 @@ export default function MyDayPage() {
 
   if (loading) {
     return (
-      <main className="modulePage">
+      <main className="modulePage" dir={dir}>
         <div className="moduleShell">
-          <div className="moduleLoading">Loading daily planner...</div>
+          <div className="moduleLoading">{t("loading")}</div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="modulePage">
+    <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
           <div>
             <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>My Day</h1>
-            <p className="moduleSubtitle">Daily planning and visit execution</p>
+            <h1>{t("title")}</h1>
+            <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <Link href="/" className="moduleBackLink">← Dashboard</Link>
+          <div className="moduleHeaderMeta">
+            <AppLanguageSwitch language={language} setLanguage={setLanguage} />
+            <Link href="/" className="moduleBackLink">{t("dashboard")}</Link>
+          </div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}
@@ -483,31 +642,31 @@ export default function MyDayPage() {
         ))}
 
         <div className="moduleMetricGrid">
-          <section className="moduleMetricCard"><span>Today's customer visits</span><strong>{summary.visitsToday}</strong></section>
-          <section className="moduleMetricCard"><span>Follow-ups</span><strong>{summary.followUps}</strong></section>
-          <section className="moduleMetricCard"><span>Pending orders</span><strong>{summary.pendingOrders}</strong></section>
-          <section className="moduleMetricCard"><span>Overdue visits</span><strong>{summary.overdueVisits}</strong></section>
-          <section className="moduleMetricCard"><span>New customers assigned</span><strong>{summary.newCustomersAssigned}</strong></section>
-          <section className="moduleMetricCard"><span>Completed visits</span><strong>{summary.completedVisits}</strong></section>
+          <section className="moduleMetricCard"><span>{t("visitsToday")}</span><strong>{summary.visitsToday}</strong></section>
+          <section className="moduleMetricCard"><span>{t("followUps")}</span><strong>{summary.followUps}</strong></section>
+          <section className="moduleMetricCard"><span>{t("pendingOrders")}</span><strong>{summary.pendingOrders}</strong></section>
+          <section className="moduleMetricCard"><span>{t("overdueVisits")}</span><strong>{summary.overdueVisits}</strong></section>
+          <section className="moduleMetricCard"><span>{t("newCustomers")}</span><strong>{summary.newCustomersAssigned}</strong></section>
+          <section className="moduleMetricCard"><span>{t("completedVisits")}</span><strong>{summary.completedVisits}</strong></section>
         </div>
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>Attendance</h2>
+            <h2>{t("attendance")}</h2>
             <span>{profile?.salesman_name || profile?.salesman_code || ""}</span>
           </div>
           <div className="moduleActionRow">
             <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("MORNING_ATTENDANCE")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
-              {attendanceBusy === "MORNING_ATTENDANCE" ? "Saving..." : "Morning Attendance"}
+              {attendanceBusy === "MORNING_ATTENDANCE" ? t("saving") : t("morningAttendance")}
             </button>
             <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_OUT")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
-              {attendanceBusy === "LUNCH_BREAK_OUT" ? "Saving..." : "Lunch Break Out"}
+              {attendanceBusy === "LUNCH_BREAK_OUT" ? t("saving") : t("lunchBreakOut")}
             </button>
             <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_IN")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
-              {attendanceBusy === "LUNCH_BREAK_IN" ? "Saving..." : "Lunch Break In"}
+              {attendanceBusy === "LUNCH_BREAK_IN" ? t("saving") : t("lunchBreakIn")}
             </button>
             <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("END_OF_DAY")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
-              {attendanceBusy === "END_OF_DAY" ? "Saving..." : "End of Day"}
+              {attendanceBusy === "END_OF_DAY" ? t("saving") : t("endOfDay")}
             </button>
           </div>
           <div className="moduleFilterRow">
@@ -515,10 +674,10 @@ export default function MyDayPage() {
               className="moduleInput"
               value={note}
               onChange={(event) => setNote(event.target.value)}
-              placeholder="Add planner note"
+              placeholder={t("addPlannerNote")}
               disabled={!logsEnabled}
             />
-            <button type="button" className="moduleInlineButton" onClick={() => handleAttendanceAction("NOTE")} disabled={!logsEnabled || Boolean(attendanceBusy)}>Save Note</button>
+            <button type="button" className="moduleInlineButton" onClick={() => handleAttendanceAction("NOTE")} disabled={!logsEnabled || Boolean(attendanceBusy)}>{t("saveNote")}</button>
           </div>
           <ul className="moduleList">
             {todayLogs.map((row) => (
@@ -528,48 +687,119 @@ export default function MyDayPage() {
                 {row.note ? <p>{row.note}</p> : null}
               </li>
             ))}
-            {todayLogs.length === 0 && <li>No activity logs for today.</li>}
+            {todayLogs.length === 0 && <li>{t("noLogs")}</li>}
           </ul>
         </section>
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>Route Summary</h2>
+            <h2>{t("routeSummary")}</h2>
           </div>
           <div className="moduleHealthGrid">
             {routeSummary.map(([city, count]) => (
-              <div key={city}><span>{city}</span><strong>{count} customers</strong></div>
+              <div key={city}><span>{city}</span><strong>{count} {t("customersCount")}</strong></div>
             ))}
-            {routeSummary.length === 0 && <div><span>No routes</span><strong>0 customers</strong></div>}
+            {routeSummary.length === 0 && <div><span>{t("noRoutes")}</span><strong>0 {t("customersCount")}</strong></div>}
           </div>
         </section>
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>Visit Status</h2>
+            <h2>{t("visitStatus")}</h2>
           </div>
           <div className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
-                  <th>Customer</th>
-                  <th>City / Area</th>
-                  <th>Days Since Last</th>
-                  <th>Status</th>
+                  <th>{t("customer")}</th>
+                  <th>{t("cityArea")}</th>
+                  <th>{t("daysSinceLast")}</th>
+                  <th>{t("status")}</th>
+                  <th>{t("actions")}</th>
                 </tr>
               </thead>
               <tbody>
                 {visitStatusRows.map((row) => (
-                  <tr key={row.customer_code}>
-                    <td>{row.customer_name || row.customer_code}</td>
+                  <Fragment key={row.customer_code}>
+                  <tr>
+                    <td>
+                      <div className="moduleInlineStack">
+                        <span>{row.customer_name || row.customer_code}</span>
+                        <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row.customer_code)}>
+                          {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
+                        </button>
+                      </div>
+                    </td>
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.days_since_last}</td>
-                    <td>{row.status}</td>
+                    <td>{row.status === "Visited" ? t("visited") : row.status === "Overdue" ? t("overdue") : t("planned")}</td>
+                    <td>{row.current_salesman_code || "-"}</td>
                   </tr>
+                  {activeVisitCustomerCode === row.customer_code && (
+                    <tr>
+                      <td colSpan={5}>
+                        <div className="moduleVisitPanel">
+                          <div className="moduleSectionHeader">
+                            <h2>{t("visitReport")}</h2>
+                            <span>{row.customer_name || row.customer_code}</span>
+                          </div>
+                          <div className="moduleFormGrid">
+                            <label>
+                              {t("visitOutcome")}
+                              <select className="moduleInput" value={visitForm.outcome} onChange={(event) => setVisitForm((current) => ({ ...current, outcome: event.target.value }))}>
+                                <option value="PAYMENT_FOLLOWUP">{t("paymentFollowup")}</option>
+                                <option value="COME_BACK_LATER">{t("comeBackLater")}</option>
+                                <option value="PURCHASE_MANAGER_NOT_AVAILABLE">{t("purchaseManagerUnavailable")}</option>
+                                <option value="STOCKS_AVAILABLE">{t("stocksAvailable")}</option>
+                                <option value="ORDER_TAKEN">{t("orderTaken")}</option>
+                              </select>
+                            </label>
+                            <label>
+                              {t("nextVisit")}
+                              <input className="moduleInput" type="datetime-local" value={visitForm.nextVisitAt} onChange={(event) => setVisitForm((current) => ({ ...current, nextVisitAt: event.target.value }))} />
+                            </label>
+                            <label className="moduleFieldFull">
+                              {t("visitNotes")}
+                              <textarea className="moduleTextArea" rows={3} value={visitForm.note} onChange={(event) => setVisitForm((current) => ({ ...current, note: event.target.value }))} />
+                            </label>
+                            <div className="moduleFieldFull">
+                              <div className="moduleSectionHeader">
+                                <h2>{t("stockCheck")}</h2>
+                              </div>
+                              <div className="moduleStockRow">
+                                <input className="moduleInput" value={visitForm.stockItem} onChange={(event) => setVisitForm((current) => ({ ...current, stockItem: event.target.value }))} placeholder={t("itemName")} />
+                                <button type="button" className={`moduleChipButton ${visitForm.stockStatus === "AVAILABLE" ? "active" : ""}`} onClick={() => setVisitForm((current) => ({ ...current, stockStatus: "AVAILABLE" }))}>{t("available")}</button>
+                                <button type="button" className={`moduleChipButton ${visitForm.stockStatus === "NOT_AVAILABLE" ? "active" : ""}`} onClick={() => setVisitForm((current) => ({ ...current, stockStatus: "NOT_AVAILABLE" }))}>{t("notAvailable")}</button>
+                              </div>
+                              <div className="moduleActionRow" style={{ marginTop: "8px" }}>
+                                <button type="button" className="moduleInlineButton" onClick={addStockCheck}>{t("addStock")}</button>
+                              </div>
+                              {visitForm.stockChecks.length > 0 && (
+                                <ul className="moduleList">
+                                  {visitForm.stockChecks.map((stockCheck, index) => (
+                                    <li key={`${stockCheck.itemName}-${index}`}>
+                                      <strong>{stockCheck.itemName}</strong>
+                                      <span>{stockCheck.status === "AVAILABLE" ? t("available") : t("notAvailable")}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                            <div className="moduleFieldFull">
+                              <button type="button" className="modulePrimaryButton" onClick={() => saveVisitReport(row)} disabled={visitSaving}>
+                                {visitSaving ? t("saving") : t("saveVisitReport")}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
                 {visitStatusRows.length === 0 && (
                   <tr>
-                    <td colSpan={4}>No customers available for route status.</td>
+                    <td colSpan={5}>{t("noCustomers")}</td>
                   </tr>
                 )}
               </tbody>

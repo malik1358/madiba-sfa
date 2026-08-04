@@ -2,8 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
+
+const TEXT = {
+  title: { en: "Salesman Hierarchy", ar: "هيكل مندوبي المبيعات" },
+  subtitle: { en: "Assign salesmen under a head salesman and manage default testing passwords", ar: "تعيين المندوبين تحت رئيس مندوبين وإدارة كلمات المرور الافتراضية" },
+  management: { en: "← Management", ar: "← الإدارة" },
+  loading: { en: "Loading salesman hierarchy...", ar: "جاري تحميل هيكل المندوبين..." },
+};
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -21,6 +30,8 @@ function defaultPasswordFor(code) {
 }
 
 export default function SalesmanHierarchyPage() {
+  const { language, dir, setLanguage } = useAppLanguage();
+  const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [savingId, setSavingId] = useState("");
@@ -228,24 +239,24 @@ export default function SalesmanHierarchyPage() {
 
   if (loading) {
     return (
-      <main className="modulePage">
+      <main className="modulePage" dir={dir}>
         <div className="moduleShell">
-          <div className="moduleLoading">Loading salesman hierarchy...</div>
+          <div className="moduleLoading">{t("loading")}</div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="modulePage">
+    <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
           <div>
             <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>Salesman Hierarchy</h1>
-            <p className="moduleSubtitle">Assign salesmen under a head salesman and manage default testing passwords</p>
+            <h1>{t("title")}</h1>
+            <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <Link href="/management" className="moduleBackLink">← Management</Link>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/management" className="moduleBackLink">{t("management")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}

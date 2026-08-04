@@ -3,8 +3,17 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
+import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchSalesScope } from "../../lib/salesScope";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+
+const TEXT = {
+  title: { en: "My Performance", ar: "أدائي" },
+  subtitle: { en: "Sales KPI snapshot", ar: "ملخص مؤشرات الأداء" },
+  dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
+  loading: { en: "Loading KPI dashboard...", ar: "جاري تحميل مؤشرات الأداء..." },
+};
 
 function currency(value) {
   return `SAR ${Number(value || 0).toLocaleString("en-SA", { maximumFractionDigits: 2 })}`;
@@ -15,6 +24,8 @@ function percent(value) {
 }
 
 export default function MyPerformancePage() {
+  const { language, dir, setLanguage } = useAppLanguage();
+  const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [metrics, setMetrics] = useState({
@@ -195,24 +206,24 @@ export default function MyPerformancePage() {
 
   if (loading) {
     return (
-      <main className="modulePage">
+      <main className="modulePage" dir={dir}>
         <div className="moduleShell">
-          <div className="moduleLoading">Loading KPI dashboard...</div>
+          <div className="moduleLoading">{t("loading")}</div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="modulePage">
+    <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
           <div>
             <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>My Performance</h1>
-            <p className="moduleSubtitle">Sales KPI snapshot</p>
+            <h1>{t("title")}</h1>
+            <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <Link href="/" className="moduleBackLink">← Dashboard</Link>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}

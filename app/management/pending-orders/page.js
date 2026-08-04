@@ -3,8 +3,18 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
+
+const TEXT = {
+  title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
+  subtitleTeam: { en: "Orders queue across the team", ar: "قائمة الطلبات على مستوى الفريق" },
+  subtitleMine: { en: "Orders queue in your account", ar: "قائمة الطلبات في حسابك" },
+  dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
+  loading: { en: "Loading old pending orders...", ar: "جاري تحميل الطلبات المعلقة القديمة..." },
+};
 
 function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
@@ -25,6 +35,8 @@ function daysOld(fromDate) {
 const PENDING_STATUSES = ["DRAFT", "PENDING", "SUBMITTED"];
 
 export default function PendingOrdersPage() {
+  const { language, dir, setLanguage } = useAppLanguage();
+  const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [orders, setOrders] = useState([]);
@@ -269,27 +281,26 @@ export default function PendingOrdersPage() {
 
   if (loading) {
     return (
-      <main className="modulePage">
+      <main className="modulePage" dir={dir}>
         <div className="moduleShell">
-          <div className="moduleLoading">Loading old pending orders...</div>
+          <div className="moduleLoading">{t("loading")}</div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="modulePage">
+    <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
           <div>
             <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>Pending Orders</h1>
+            <h1>{t("title")}</h1>
             <p className="moduleSubtitle">
-              Orders queue ({PENDING_STATUSES.join(", ")})
-              {userRole === "admin" || userRole === "manager" ? " across the team" : " in your account"}
+              {userRole === "admin" || userRole === "manager" ? t("subtitleTeam") : t("subtitleMine")}
             </p>
           </div>
-          <Link href="/" className="moduleBackLink">← Dashboard</Link>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}

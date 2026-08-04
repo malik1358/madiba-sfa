@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -19,6 +21,13 @@ import TransactionHistory from "../customer-audit/components/TransactionHistory"
 
 const PRICE_API =
   "https://script.google.com/macros/s/AKfycbzXPREoz0tUgern-5LhpEPBMY_ed2hO1fgYpIVfzG2-BU9HbjOklKCBFVMtsw64Uff5/exec";
+
+const TEXT = {
+  title: { en: "New Order", ar: "طلب جديد" },
+  subtitle: { en: "Create, save draft, and submit customer orders", ar: "إنشاء طلبات العملاء وحفظها وإرسالها" },
+  dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
+  loading: { en: "Loading order workspace...", ar: "جاري تحميل مساحة الطلبات..." },
+};
 
 function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
@@ -231,6 +240,8 @@ function parsePricePayload(payload) {
 }
 
 export default function NewOrderPage() {
+  const { language, dir, setLanguage } = useAppLanguage();
+  const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -899,24 +910,24 @@ export default function NewOrderPage() {
 
   if (loading) {
     return (
-      <main className="modulePage">
+      <main className="modulePage" dir={dir}>
         <div className="moduleShell">
-          <div className="moduleLoading">Loading order workspace...</div>
+          <div className="moduleLoading">{t("loading")}</div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="modulePage">
+    <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
           <div>
             <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>New Order</h1>
-            <p className="moduleSubtitle">Create, save draft, and submit customer orders</p>
+            <h1>{t("title")}</h1>
+            <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <Link href="/" className="moduleBackLink">← Dashboard</Link>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}

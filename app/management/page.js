@@ -3,13 +3,27 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../lib/supabase";
+import { translate, useAppLanguage } from "../lib/appLanguage";
 import SupabaseUnavailable from "../components/SupabaseUnavailable";
+import AppLanguageSwitch from "../components/AppLanguageSwitch";
+
+const TEXT = {
+  title: { en: "Management", ar: "الإدارة" },
+  subtitle: { en: "Operational control center", ar: "مركز التحكم التشغيلي" },
+  dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
+  loading: { en: "Loading management panel...", ar: "جاري تحميل لوحة الإدارة..." },
+  modules: { en: "Management Modules", ar: "وحدات الإدارة" },
+  health: { en: "System Health", ar: "حالة النظام" },
+  recentOrders: { en: "Recent Orders", ar: "الطلبات الأخيرة" },
+};
 
 function number(value) {
   return Number(value || 0).toLocaleString("en-SA");
 }
 
 export default function ManagementPage() {
+  const { language, dir, setLanguage } = useAppLanguage();
+  const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [accessDenied, setAccessDenied] = useState(false);
@@ -152,9 +166,9 @@ export default function ManagementPage() {
 
   if (loading) {
     return (
-      <main className="modulePage">
+      <main className="modulePage" dir={dir}>
         <div className="moduleShell">
-          <div className="moduleLoading">Loading management panel...</div>
+          <div className="moduleLoading">{t("loading")}</div>
         </div>
       </main>
     );
@@ -162,14 +176,14 @@ export default function ManagementPage() {
 
   if (accessDenied) {
     return (
-      <main className="modulePage">
+      <main className="modulePage" dir={dir}>
         <div className="moduleShell">
           <div className="moduleHeader">
             <div>
               <p className="moduleEyebrow">MADIBA SFA</p>
-              <h1>Management</h1>
+              <h1>{t("title")}</h1>
             </div>
-            <Link href="/" className="moduleBackLink">← Dashboard</Link>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
           <div className="moduleError">Only manager/admin users can access this panel.</div>
         </div>
@@ -178,15 +192,15 @@ export default function ManagementPage() {
   }
 
   return (
-    <main className="modulePage">
+    <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
           <div>
             <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>Management</h1>
-            <p className="moduleSubtitle">Operational control center</p>
+            <h1>{t("title")}</h1>
+            <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <Link href="/" className="moduleBackLink">← Dashboard</Link>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}
@@ -202,7 +216,7 @@ export default function ManagementPage() {
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>Management Modules</h2>
+            <h2>{t("modules")}</h2>
           </div>
           <div className="moduleNavGrid">
             <Link href="/management/customer-audit" className="moduleNavCard">Customers Audit</Link>
@@ -219,7 +233,7 @@ export default function ManagementPage() {
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>System Health</h2>
+            <h2>{t("health")}</h2>
           </div>
           <div className="moduleHealthGrid">
             <div><span>Session User</span><strong>{health.sessionUser}</strong></div>
@@ -230,7 +244,7 @@ export default function ManagementPage() {
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>Recent Orders</h2>
+            <h2>{t("recentOrders")}</h2>
           </div>
           <div className="moduleTableWrap">
             <table className="moduleTable">

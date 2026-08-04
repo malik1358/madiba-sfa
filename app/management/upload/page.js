@@ -1,10 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 
+const TEXT = {
+  title: { en: "Upload Sales Data", ar: "رفع بيانات المبيعات" },
+  subtitle: { en: "Replace the current sales snapshot with the latest complete Excel export.", ar: "استبدال لقطة المبيعات الحالية بآخر ملف إكسل كامل." },
+  dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
+};
+
 export default function UploadSalesPage() {
+  const { language, dir, setLanguage } = useAppLanguage();
+  const t = translate(language, TEXT);
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
@@ -76,22 +86,17 @@ export default function UploadSalesPage() {
   }
 
   return (
-    <main className="uploadPage">
+    <main className="uploadPage" dir={dir}>
       <div className="uploadContainer">
 
         <div className="uploadHeader">
           <div>
             <p className="uploadEyebrow">MADIBA SFA</p>
-            <h1>Upload Sales Data</h1>
-            <p>
-              Replace the current sales snapshot with the
-              latest complete Excel export.
-            </p>
+            <h1>{t("title")}</h1>
+            <p>{t("subtitle")}</p>
           </div>
 
-          <a href="/" className="backButton">
-            ← Dashboard
-          </a>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/" className="backButton">{t("dashboard")}</a></div>
         </div>
 
         <div className="uploadWarning">

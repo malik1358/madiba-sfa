@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "./lib/supabase";
+import { useAppLanguage } from "./lib/appLanguage";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
 
 export default function Home() {
-  const [language, setLanguage] = useState("en");
+  const { language, ar, dir, setLanguage } = useAppLanguage();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -18,7 +19,6 @@ export default function Home() {
   const [error, setError] = useState("");
 
   const router = useRouter();
-  const ar = language === "ar";
 
   useEffect(() => {
     const supabase = getSupabaseClient();

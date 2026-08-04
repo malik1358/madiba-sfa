@@ -143,6 +143,59 @@ select {
   color: #ffffff;
 }
 
+.moduleLanguageSwitch {
+  width: auto;
+}
+
+.moduleHeaderMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.moduleVisitPanel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #d5e1e4;
+  border-radius: 10px;
+  background: #f7fafb;
+}
+
+.moduleVisitActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.moduleStockRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.moduleChipButton {
+  border: 1px solid #c7d7dc;
+  background: #ffffff;
+  color: #073f4c;
+  border-radius: 999px;
+  padding: 8px 12px;
+}
+
+.moduleChipButton.active {
+  background: #0b5364;
+  border-color: #0b5364;
+  color: #ffffff;
+}
+
+.moduleInlineStack {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .sectionTitle {
   margin: 8px 0 16px;
   color: #073f4c;

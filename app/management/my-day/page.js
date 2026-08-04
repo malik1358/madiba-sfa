@@ -331,8 +331,6 @@ export default function MyDayPage() {
             .from("daily_activity_logs")
             .select("id,user_id,entry_type,note,created_at")
             .gte("created_at", `${today}T00:00:00`)
-            .lte("created_at", `${today}T23:59:59`)
-            .order("created_at", { ascending: false });
 
           if (!scope.hasAllAccess) {
             logsQuery = logsQuery.in("user_id", scope.visibleUserIds);
@@ -696,8 +694,7 @@ export default function MyDayPage() {
         .from("sales_raw")
         .select("item_code,item_name,transaction_date,salesman_code")
         .eq("customer_code", customer.customer_code)
-        .order("transaction_date", { ascending: false })
-        .limit(500);
+          .order("transaction_date", { ascending: false });
 
       if (!accessScope?.hasAllAccess) {
         itemsQuery = itemsQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);

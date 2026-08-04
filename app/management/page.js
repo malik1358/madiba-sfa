@@ -97,7 +97,7 @@ export default function ManagementPage() {
           supabase.from("sales_orders").select("id,status", { count: "exact" }).order("updated_at", { ascending: false }).limit(1000),
           supabase.from("import_batches").select("id", { count: "exact", head: true }),
           supabase.from("system_settings").select("setting_value").eq("setting_key", "active_sales_batch_id").maybeSingle(),
-          supabase.from("import_batches").select("uploaded_at").order("uploaded_at", { ascending: false }).limit(1).maybeSingle(),
+          supabase.from("import_batches").select("created_at,completed_at").order("created_at", { ascending: false }).limit(1).maybeSingle(),
           supabase
             .from("sales_orders")
             .select("id,customer_code,customer_name,salesman_code,status,updated_at")
@@ -129,7 +129,7 @@ export default function ManagementPage() {
         setHealth({
           sessionUser: session.user.email || session.user.id,
           activeBatch: activeBatchRes.data?.setting_value || "-",
-          latestImportAt: latestImportRes.data?.uploaded_at || "-",
+          latestImportAt: latestImportRes.data?.completed_at || latestImportRes.data?.created_at || "-",
         });
 
         setRecentOrders(recentOrdersRes.data || []);

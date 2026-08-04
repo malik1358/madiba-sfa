@@ -114,6 +114,23 @@ function findValue(row, possibilities) {
   return null;
 }
 
+function normalizeImportedItemName(value) {
+  const lines = String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  let name = lines[0] || "";
+  if (!name) return null;
+
+  name = name
+    .replace(/\b(?:A\s*)?repet(?:e|i)?d\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return name || null;
+}
+
 /* ============================================================
    MAIN IMPORT API
    ============================================================ */
@@ -446,7 +463,7 @@ export async function POST(request) {
         );
 
         let itemCode = null;
-        let itemName = itemCombinedRaw || itemNameRaw;
+        let itemName = normalizeImportedItemName(itemCombinedRaw || itemNameRaw);
 
         if (itemCombinedRaw) {
           const cleanedItem =
@@ -464,10 +481,10 @@ export async function POST(request) {
               itemMatch[1].trim();
 
             itemName =
-              itemMatch[2].trim();
+              normalizeImportedItemName(itemMatch[2].trim());
           } else {
             itemCode = cleanedItem;
-            itemName = cleanedItem;
+            itemName = normalizeImportedItemName(cleanedItem);
           }
         }
 
@@ -479,7 +496,7 @@ export async function POST(request) {
         }
 
         if (itemNameRaw) {
-          const explicitName = itemNameRaw.trim();
+          const explicitName = normalizeImportedItemName(itemNameRaw.trim());
           if (explicitName) {
             itemName = explicitName;
           }
@@ -488,6 +505,8 @@ export async function POST(request) {
         if (!itemName && itemCode) {
           itemName = itemCode;
         }
+
+        itemName = normalizeImportedItemName(itemName) || itemName;
 
         /* ---------------- CATEGORY ---------------- */
 
@@ -914,7 +933,7 @@ export async function POST(request) {
       const itemCode = clean(row.item_code);
       if (!itemCode) continue;
 
-      const itemName = clean(row.item_name) || itemCode;
+      const itemName = normalizeImportedItemName(clean(row.item_name)) || itemCode;
       const itemCategory = clean(row.category);
 
       if (!itemMap.has(itemCode)) {

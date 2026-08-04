@@ -18,7 +18,7 @@ with ranked as (
 update public.items_master im
 set
   item_name = coalesce(
-    nullif(im.item_name, ''),
+    nullif(trim(regexp_replace(coalesce(im.item_name, ''), '\\m(?:A\\s*)?repet(?:e|i)?d\\M', '', 'gi')), ''),
     ranked.item_name,
     im.item_code
   ),
@@ -37,7 +37,11 @@ where im.item_code = ranked.item_code
 -- 2) Backfill sales_raw rows from items_master where category/name is missing.
 update public.sales_raw sr
 set
-  item_name = coalesce(nullif(trim(sr.item_name), ''), im.item_name, sr.item_code),
+  item_name = coalesce(
+    nullif(trim(regexp_replace(coalesce(sr.item_name, ''), '\\m(?:A\\s*)?repet(?:e|i)?d\\M', '', 'gi')), ''),
+    im.item_name,
+    sr.item_code
+  ),
   category = coalesce(nullif(trim(sr.category), ''), im.category, 'Unclassified')
 from public.items_master im
 where sr.item_code = im.item_code

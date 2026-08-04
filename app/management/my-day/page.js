@@ -25,8 +25,11 @@ const PAGE_TEXT = {
   noLogs: { en: "No activity logs for today.", ar: "لا توجد سجلات نشاط اليوم." },
   routeSummary: { en: "Route Summary", ar: "ملخص المسار" },
   visitSchedule: { en: "Visit Schedule", ar: "جدول الزيارات" },
-  plannedVisitsCount: { en: "planned visits", ar: "زيارات مخططة" },
+  plannedVisitsCount: { en: "scheduled visits", ar: "زيارات مجدولة" },
   noPlannedVisits: { en: "No planned visits for now.", ar: "لا توجد زيارات مخططة حالياً." },
+  calendarDate: { en: "Date", ar: "التاريخ" },
+  calendarTime: { en: "Time", ar: "الوقت" },
+  unscheduledVisits: { en: "Unscheduled visits", ar: "زيارات بدون موعد" },
   noRoutes: { en: "No routes", ar: "لا توجد مسارات" },
   customersCount: { en: "customers", ar: "عميل" },
   visitStatus: { en: "Visit Status", ar: "حالة الزيارات" },
@@ -100,6 +103,20 @@ function getSortTimestamp(date) {
   return parsed.getTime();
 }
 
+function toDatetimeLocalValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 function getLogPreview(row) {
   if (!row?.note) return "";
 
@@ -169,7 +186,6 @@ export default function MyDayPage() {
   const [todayLogs, setTodayLogs] = useState([]);
   const [note, setNote] = useState("");
   const [attendanceBusy, setAttendanceBusy] = useState("");
-  const [latestGpsCaptureAt, setLatestGpsCaptureAt] = useState(0);
   const [accessScope, setAccessScope] = useState(null);
   const [activeVisitCustomerCode, setActiveVisitCustomerCode] = useState("");
   const [visitSaving, setVisitSaving] = useState(false);
@@ -181,7 +197,6 @@ export default function MyDayPage() {
     note: "",
     stockChecks: [],
   });
-  const autoPingInFlight = useRef(false);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -346,18 +361,11 @@ export default function MyDayPage() {
             const rows = logsData || [];
             setTodayLogs(rows);
 
-            const newestGpsCapture = rows
-              .filter((row) => isGpsLog(row.entry_type))
-              .reduce((latest, row) => Math.max(latest, readCapturedAt(row)), 0);
-
-            setLatestGpsCaptureAt(newestGpsCapture);
           } else {
             setTodayLogs([]);
-            setLatestGpsCaptureAt(0);
           }
         } else {
           setTodayLogs([]);
-          setLatestGpsCaptureAt(0);
         }
 
         const visibleTodayOrders = (todayOrdersRes.data || []).filter((row) => {
@@ -388,6 +396,7 @@ export default function MyDayPage() {
         );
 
         const latestVisitByCustomer = new Map();
+        const nextVisitByCustomer = new Map();
 
         if (logsCheck.available) {
           let visitReportsQuery = supabase
@@ -415,6 +424,10 @@ export default function MyDayPage() {
                 const current = latestVisitByCustomer.get(customerCode);
                 if (!current || getSortTimestamp(visitAt) > getSortTimestamp(current)) {
                   latestVisitByCustomer.set(customerCode, visitAt);
+                }
+
+                if (!nextVisitByCustomer.has(customerCode)) {
+                  nextVisitByCustomer.set(customerCode, parsed?.next_visit_at ? String(parsed.next_visit_at) : null);
                 }
               } catch {
                 // Ignore malformed notes.
@@ -448,6 +461,10 @@ export default function MyDayPage() {
                   const current = latestVisitByCustomer.get(customerCode);
                   if (!current || getSortTimestamp(visitAt) > getSortTimestamp(current)) {
                     latestVisitByCustomer.set(customerCode, visitAt);
+                  }
+
+                  if (!nextVisitByCustomer.has(customerCode)) {
+                    nextVisitByCustomer.set(customerCode, parsed?.next_visit_at ? String(parsed.next_visit_at) : null);
                   }
                 } catch {
                   // Ignore malformed fallback records.
@@ -493,6 +510,7 @@ export default function MyDayPage() {
               last_visit_date: latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
               days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
+              next_visit_at: nextVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
                 : daysBetween(row.latest_transaction_date) > 21
@@ -586,68 +604,8 @@ export default function MyDayPage() {
       if (logsError) throw logsError;
       const rows = logs || [];
       setTodayLogs(rows);
-      const newestGpsCapture = rows
-        .filter((row) => isGpsLog(row.entry_type))
-        .reduce((latest, row) => Math.max(latest, readCapturedAt(row)), 0);
-      setLatestGpsCaptureAt(newestGpsCapture);
     } catch (err) {
       setError(err.message || "Unable to save activity log.");
-    }
-  }
-
-  async function saveGpsPing() {
-    if (!logsEnabled || autoPingInFlight.current) return;
-
-    const now = Date.now();
-    if (latestGpsCaptureAt && now - latestGpsCaptureAt < 15 * 60 * 1000) {
-      return;
-    }
-
-    autoPingInFlight.current = true;
-
-    try {
-      const supabase = getSupabaseClient();
-      if (!supabase) return;
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.user) return;
-
-      const location = await captureLocation();
-
-      const payload = {
-        user_id: session.user.id,
-        entry_type: "GPS_PING",
-        note: JSON.stringify({
-          action: "GPS_PING",
-          captured_at: new Date().toISOString(),
-          location,
-        }),
-      };
-
-      const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
-      if (insertError) throw insertError;
-
-      const { data: logs, error: logsError } = await supabase
-        .from("daily_activity_logs")
-        .select("id,entry_type,note,created_at")
-        .eq("user_id", session.user.id)
-        .gte("created_at", `${today}T00:00:00`)
-        .lte("created_at", `${today}T23:59:59`)
-        .order("created_at", { ascending: false });
-
-      if (logsError) throw logsError;
-
-      const rows = logs || [];
-      setTodayLogs(rows);
-      setLatestGpsCaptureAt(Date.now());
-      setMessage("Automatic GPS capture saved.");
-    } catch {
-      // Keep the screen quiet if the browser blocks background geolocation.
-    } finally {
-      autoPingInFlight.current = false;
     }
   }
 
@@ -683,7 +641,7 @@ export default function MyDayPage() {
     setVisitItemsLoading(true);
     setVisitForm({
       outcome: "PAYMENT_FOLLOWUP",
-      nextVisitAt: "",
+      nextVisitAt: toDatetimeLocalValue(customer?.next_visit_at),
       note: "",
       stockChecks: [],
     });
@@ -821,6 +779,7 @@ export default function MyDayPage() {
             last_visit_date: capturedAt,
             days_since_last_visit: 0,
             status: "Visited",
+            next_visit_at: visitForm.nextVisitAt || null,
           };
         })
       );
@@ -873,18 +832,6 @@ export default function MyDayPage() {
     }
   }
 
-  useEffect(() => {
-    if (!logsEnabled) return undefined;
-
-    const timer = window.setInterval(() => {
-      saveGpsPing();
-    }, 60 * 1000);
-
-    saveGpsPing();
-
-    return () => window.clearInterval(timer);
-  }, [logsEnabled, latestGpsCaptureAt]);
-
   const routeSummary = useMemo(() => {
     const map = new Map();
     routeRows.forEach((row) => {
@@ -897,14 +844,47 @@ export default function MyDayPage() {
   const plannedVisitRows = useMemo(
     () =>
       visitStatusRows
-        .filter((row) => row.status === "Planned")
+        .filter((row) => row.next_visit_at)
         .sort((a, b) => {
-          const byDays = Number(b.days_since_last_invoice || 0) - Number(a.days_since_last_invoice || 0);
-          if (byDays !== 0) return byDays;
+          const bySchedule = getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at);
+          if (bySchedule !== 0) return bySchedule;
           return String(a.customer_name || a.customer_code || "").localeCompare(String(b.customer_name || b.customer_code || ""));
         }),
     [visitStatusRows]
   );
+
+  const visitCalendar = useMemo(() => {
+    const dayMap = new Map();
+    const unscheduled = [];
+
+    plannedVisitRows.forEach((row) => {
+      const time = getSortTimestamp(row.next_visit_at);
+      if (!time) {
+        unscheduled.push(row);
+        return;
+      }
+
+      const dateKey = new Date(time).toISOString().slice(0, 10);
+      const current = dayMap.get(dateKey) || [];
+      current.push(row);
+      dayMap.set(dateKey, current);
+    });
+
+    const days = Array.from(dayMap.entries())
+      .map(([dateKey, rows]) => ({
+        dateKey,
+        label: new Date(`${dateKey}T00:00:00`).toLocaleDateString("en-GB", {
+          weekday: "short",
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        }),
+        rows: rows.sort((a, b) => getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at)),
+      }))
+      .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+
+    return { days, unscheduled };
+  }, [plannedVisitRows]);
 
   const isAdministrator = String(profile?.role || "").toLowerCase() === "admin";
 
@@ -1019,47 +999,93 @@ export default function MyDayPage() {
             <h2>{t("visitSchedule")}</h2>
             <span>{plannedVisitRows.length} {t("plannedVisitsCount")}</span>
           </div>
-          <div className="moduleTableWrap">
-            <table className="moduleTable">
-              <thead>
-                <tr>
-                  <th>{t("customer")}</th>
-                  <th>{t("cityArea")}</th>
-                  <th>{t("daysSinceLastInvoice")}</th>
-                  <th>{t("daysSinceLastVisit")}</th>
-                  <th>{t("actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {plannedVisitRows.map((row) => (
-                  <tr key={`planned-${row.customer_code}`}>
-                    <td>{row.customer_name || row.customer_code}</td>
-                    <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
-                    <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
-                    <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>
-                    <td>
-                      <div className="moduleInlineStack">
-                        <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
-                          {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
-                        </button>
-                        <Link
-                          href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
-                          className="moduleInlineButton"
-                        >
-                          {t("openAudit")}
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {plannedVisitRows.length === 0 && (
-                  <tr>
-                    <td colSpan={5}>{t("noPlannedVisits")}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          {visitCalendar.days.map((day) => (
+            <div key={day.dateKey} style={{ marginTop: "10px" }}>
+              <div className="moduleSectionHeader">
+                <h2>{day.label}</h2>
+                <span>{day.rows.length} {t("plannedVisitsCount")}</span>
+              </div>
+              <div className="moduleTableWrap">
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>{t("calendarTime")}</th>
+                      <th>{t("customer")}</th>
+                      <th>{t("cityArea")}</th>
+                      <th>{t("actions")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {day.rows.map((row) => (
+                      <tr key={`planned-${day.dateKey}-${row.customer_code}`}>
+                        <td>{row.next_visit_at ? new Date(row.next_visit_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "-"}</td>
+                        <td>{row.customer_name || row.customer_code}</td>
+                        <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
+                        <td>
+                          <div className="moduleInlineStack">
+                            <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                              {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
+                            </button>
+                            <Link
+                              href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
+                              className="moduleInlineButton"
+                            >
+                              {t("openAudit")}
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+
+          {visitCalendar.days.length === 0 && plannedVisitRows.length === 0 && (
+            <div className="moduleHint">{t("noPlannedVisits")}</div>
+          )}
+
+          {visitCalendar.unscheduled.length > 0 && (
+            <div style={{ marginTop: "10px" }}>
+              <div className="moduleSectionHeader">
+                <h2>{t("unscheduledVisits")}</h2>
+                <span>{visitCalendar.unscheduled.length}</span>
+              </div>
+              <div className="moduleTableWrap">
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>{t("customer")}</th>
+                      <th>{t("cityArea")}</th>
+                      <th>{t("actions")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visitCalendar.unscheduled.map((row) => (
+                      <tr key={`unscheduled-${row.customer_code}`}>
+                        <td>{row.customer_name || row.customer_code}</td>
+                        <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
+                        <td>
+                          <div className="moduleInlineStack">
+                            <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                              {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
+                            </button>
+                            <Link
+                              href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
+                              className="moduleInlineButton"
+                            >
+                              {t("openAudit")}
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="moduleSection">

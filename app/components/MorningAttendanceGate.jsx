@@ -40,6 +40,18 @@ function captureLocation() {
   });
 }
 
+function readCapturedAt(note, fallbackDate) {
+  try {
+    const parsed = JSON.parse(String(note || ""));
+    const capturedAt = parsed?.captured_at || fallbackDate;
+    const ts = new Date(capturedAt).getTime();
+    return Number.isFinite(ts) ? ts : 0;
+  } catch {
+    const ts = new Date(fallbackDate || "").getTime();
+    return Number.isFinite(ts) ? ts : 0;
+  }
+}
+
 export default function MorningAttendanceGate({ children }) {
   const { language, dir } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -49,6 +61,8 @@ export default function MorningAttendanceGate({ children }) {
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const attemptedAutoRef = useRef(false);
+  const autoPingInFlightRef = useRef(false);
+  const lastGpsCaptureAtRef = useRef(0);
 
   async function insertAttendance(sessionUserId) {
     const supabase = getSupabaseClient();
@@ -70,6 +84,84 @@ export default function MorningAttendanceGate({ children }) {
 
     const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
     if (insertError) throw insertError;
+  }
+
+  async function captureBackgroundPing(sessionUserId) {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    const location = await captureLocation();
+    const nowIso = new Date().toISOString();
+
+    const payload = {
+      user_id: sessionUserId,
+      entry_type: "GPS_PING",
+      note: JSON.stringify({
+        action: "GPS_PING",
+        captured_at: nowIso,
+        location,
+      }),
+    };
+
+    const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
+    if (insertError) throw insertError;
+
+    lastGpsCaptureAtRef.current = new Date(nowIso).getTime();
+  }
+
+  async function hydrateLastCapture(sessionUserId) {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+
+    const { data, error: latestError } = await supabase
+      .from("daily_activity_logs")
+      .select("note,created_at")
+      .eq("user_id", sessionUserId)
+      .in("entry_type", ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY", "NOTE", "GPS_PING", "VISIT_REPORT"])
+      .gte("created_at", start.toISOString())
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (latestError) return;
+
+    const latest = (data || []).reduce((maxTs, row) => {
+      const ts = readCapturedAt(row?.note, row?.created_at);
+      return Math.max(maxTs, ts);
+    }, 0);
+
+    lastGpsCaptureAtRef.current = latest;
+  }
+
+  async function maybeCaptureBackgroundPing() {
+    if (autoPingInFlightRef.current) return;
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    autoPingInFlightRef.current = true;
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const userId = session?.user?.id;
+      if (!userId) return;
+
+      const now = Date.now();
+      const last = lastGpsCaptureAtRef.current || 0;
+      if (last && now - last < 15 * 60 * 1000) {
+        return;
+      }
+
+      await captureBackgroundPing(userId);
+    } catch {
+      // Ignore background GPS failures; user can continue working.
+    } finally {
+      autoPingInFlightRef.current = false;
+    }
   }
 
   async function checkAttendance(triggerAutoCapture = false) {
@@ -119,6 +211,7 @@ export default function MorningAttendanceGate({ children }) {
       if (attendanceError) throw attendanceError;
 
       if (data?.id) {
+        await hydrateLastCapture(session.user.id);
         setReady(true);
         return;
       }
@@ -127,6 +220,7 @@ export default function MorningAttendanceGate({ children }) {
         setCapturing(true);
         try {
           await insertAttendance(session.user.id);
+          lastGpsCaptureAtRef.current = Date.now();
           setReady(true);
           return;
         } finally {
@@ -154,6 +248,19 @@ export default function MorningAttendanceGate({ children }) {
     attemptedAutoRef.current = true;
     checkAttendance(shouldAutoAttempt);
   }, []);
+
+  useEffect(() => {
+    if (!ready || warning) return undefined;
+
+    // Keep GPS fresh across all authenticated pages with a max 15-minute cadence.
+    const timer = window.setInterval(() => {
+      maybeCaptureBackgroundPing();
+    }, 60 * 1000);
+
+    maybeCaptureBackgroundPing();
+
+    return () => window.clearInterval(timer);
+  }, [ready, warning]);
 
   if (ready) {
     return children;

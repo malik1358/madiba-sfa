@@ -36,6 +36,37 @@ const INITIAL_FORM = {
 
 const DOCUMENT_TYPES = ["CR", "VAT", "ID", "CREDIT_APPLICATION", "OTHER"];
 
+function extractMissingProspectsColumn(errorMessage) {
+  const text = String(errorMessage || "");
+  const match = text.match(/column\s+prospects\.(\w+)\s+does\s+not\s+exist/i);
+  return match?.[1] || "";
+}
+
+async function insertProspectWithColumnFallback(supabase, payload) {
+  const workingPayload = { ...payload };
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const { data, error } = await supabase
+      .from("prospects")
+      .insert(workingPayload)
+      .select("id,customer_name,shop_name,salesman_code")
+      .single();
+
+    if (!error) {
+      return { data, removedColumns: [] };
+    }
+
+    const missingColumn = extractMissingProspectsColumn(error.message);
+    if (!missingColumn || !Object.prototype.hasOwnProperty.call(workingPayload, missingColumn)) {
+      throw error;
+    }
+
+    delete workingPayload[missingColumn];
+  }
+
+  throw new Error("Unable to save prospect because table columns do not match the app form.");
+}
+
 export default function NewCustomerPage() {
   const router = useRouter();
   const { language, dir, setLanguage } = useAppLanguage();
@@ -102,11 +133,19 @@ export default function NewCustomerPage() {
           });
         }
 
+        setSalesmen(salesmanRows);
+        if (salesmanRows.length > 0) {
+          setForm((current) => ({
+            ...current,
+            salesman_code: current.salesman_code || salesmanRows[0].salesman_code || "",
+          }));
+        }
+
         let recentQuery = Promise.resolve({ data: [], error: null });
         if (prospectsCheck.available) {
           let query = supabase
             .from("prospects")
-            .select("id,shop_name,owner_name,mobile,city,area,created_at,status,created_by,salesman_code")
+            .select("*")
             .order("created_at", { ascending: false })
             .limit(10);
 
@@ -128,16 +167,19 @@ export default function NewCustomerPage() {
         }
 
         const recentRes = await recentQuery;
-        if (recentRes.error) throw recentRes.error;
-
-        setSalesmen(salesmanRows);
-        setRecent(recentRes.data || []);
-
-        if (salesmanRows.length > 0) {
-          setForm((current) => ({
-            ...current,
-            salesman_code: current.salesman_code || salesmanRows[0].salesman_code || "",
-          }));
+        if (recentRes.error) {
+          const missingColumn = extractMissingProspectsColumn(recentRes.error.message);
+          if (missingColumn) {
+            setSchemaWarning((current) => {
+              const base = current ? `${current} ` : "";
+              return `${base}Prospects column ${missingColumn} is missing; showing available fields only.`.trim();
+            });
+            setRecent([]);
+          } else {
+            throw recentRes.error;
+          }
+        } else {
+          setRecent(recentRes.data || []);
         }
       } catch (err) {
         setError(err.message || "Unable to load setup data.");
@@ -239,17 +281,11 @@ export default function NewCustomerPage() {
         created_by: session.user.id,
       };
 
-      const { data, error: insertError } = await supabase
-        .from("prospects")
-        .insert(payload)
-        .select("id,customer_name,shop_name,salesman_code")
-        .single();
-
-      if (insertError) throw insertError;
+      const { data } = await insertProspectWithColumnFallback(supabase, payload);
 
       const { data: latest, error: latestError } = await supabase
         .from("prospects")
-        .select("id,shop_name,owner_name,mobile,city,area,created_at,status")
+        .select("*")
         .eq("salesman_code", form.salesman_code)
         .order("created_at", { ascending: false })
         .limit(10);
@@ -258,7 +294,7 @@ export default function NewCustomerPage() {
       setRecent(latest || []);
 
       const customerCode = `PROSPECT-${data.id}`;
-      const customerName = data.customer_name || data.shop_name || `Prospect ${data.id}`;
+      const customerName = data.customer_name || data.shop_name || form.customer_name || form.shop_name || `Prospect ${data.id}`;
       const params = new URLSearchParams({
         customer_code: customerCode,
         customer_name: customerName,
@@ -438,7 +474,7 @@ export default function NewCustomerPage() {
                 {recent.map((row) => (
                   <tr key={row.id}>
                     <td>{row.id}</td>
-                    <td>{row.shop_name || "-"}</td>
+                    <td>{row.shop_name || row.customer_name || "-"}</td>
                     <td>{row.owner_name || "-"}</td>
                     <td>{row.mobile || "-"}</td>
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>

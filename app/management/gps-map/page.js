@@ -15,26 +15,42 @@ const TEXT = {
   loading: { en: "Loading GPS map...", ar: "جاري تحميل خريطة GPS..." },
 };
 
-function parseGps(note) {
+function parseNotePayload(note) {
   if (!note) return null;
+  if (typeof note === "object") return note;
 
   try {
-    const parsed = JSON.parse(note);
-    const location = parsed?.location || null;
-    if (!location) return null;
-
-    return {
-      latitude: Number(location.latitude),
-      longitude: Number(location.longitude),
-      accuracy: Number(location.accuracy || 0),
-      action: parsed.action || "ATTENDANCE",
-      customer_code: String(parsed.customer_code || "").trim(),
-      customer_name: String(parsed.customer_name || "").trim(),
-      captured_at: parsed.captured_at || null,
-    };
+    return JSON.parse(String(note));
   } catch {
     return null;
   }
+}
+
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseGps(note) {
+  const parsed = parseNotePayload(note);
+  if (!parsed) return null;
+
+  const location = parsed?.location || {};
+  const latitude = toFiniteNumber(location.latitude ?? location.lat ?? parsed.latitude ?? parsed.lat);
+  const longitude = toFiniteNumber(location.longitude ?? location.lng ?? parsed.longitude ?? parsed.lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+    accuracy: toFiniteNumber(location.accuracy ?? parsed.accuracy) || 0,
+    action: parsed.action || "ATTENDANCE",
+    customer_code: String(parsed.customer_code || parsed.customerCode || "").trim(),
+    customer_name: String(parsed.customer_name || parsed.customerName || "").trim(),
+    captured_at: parsed.captured_at || parsed.capturedAt || null,
+  };
 }
 
 function normalizeCode(value) {
@@ -220,6 +236,24 @@ export default function GpsMapPage() {
     });
   }, [filteredRecords]);
 
+  const salesmanLastSeen = useMemo(() => {
+    const map = new Map();
+
+    filteredRecords.forEach((row) => {
+      const key = row.user_id;
+      const ts = toTimestamp(row.captured_at || row.created_at);
+      const current = map.get(key);
+      const currentTs = current ? toTimestamp(current.captured_at || current.created_at) : 0;
+      if (!current || ts > currentTs) {
+        map.set(key, row);
+      }
+    });
+
+    return Array.from(map.values()).sort(
+      (a, b) => toTimestamp(b.captured_at || b.created_at) - toTimestamp(a.captured_at || a.created_at)
+    );
+  }, [filteredRecords]);
+
   const selectedPoint = useMemo(() => {
     if (!customerVisitPoints.length) return null;
 
@@ -365,6 +399,42 @@ export default function GpsMapPage() {
                   {customerVisitPoints.length === 0 && (
                     <tr>
                       <td colSpan={6}>No customer-wise visit points found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>Last Seen by Salesman</h2>
+              <span>Latest record per user for current filters</span>
+            </div>
+            <div className="moduleTableWrap">
+              <table className="moduleTable">
+                <thead>
+                  <tr>
+                    <th>Salesman</th>
+                    <th>User ID</th>
+                    <th>Last Action</th>
+                    <th>Last Seen</th>
+                    <th>GPS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {salesmanLastSeen.map((row) => (
+                    <tr key={`last-seen-${row.user_id}`}>
+                      <td>{row.salesman_name || row.salesman_code || row.user_id}</td>
+                      <td><span className="moduleCode">{row.user_id}</span></td>
+                      <td>{row.action || row.entry_type || "-"}</td>
+                      <td>{row.captured_at ? new Date(row.captured_at).toLocaleString("en-GB") : "-"}</td>
+                      <td>{row.latitude.toFixed(6)}, {row.longitude.toFixed(6)}</td>
+                    </tr>
+                  ))}
+                  {salesmanLastSeen.length === 0 && (
+                    <tr>
+                      <td colSpan={5}>No salesman activity found for selected filters.</td>
                     </tr>
                   )}
                 </tbody>

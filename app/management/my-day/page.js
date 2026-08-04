@@ -96,6 +96,20 @@ function getSortTimestamp(date) {
   return parsed.getTime();
 }
 
+function getLogPreview(row) {
+  if (!row?.note) return "";
+
+  try {
+    const parsed = JSON.parse(row.note);
+    if (row.entry_type === "NOTE") {
+      return String(parsed?.note || "").trim();
+    }
+    return "";
+  } catch {
+    return row.entry_type === "NOTE" ? String(row.note || "").trim() : "";
+  }
+}
+
 export default function MyDayPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, PAGE_TEXT);
@@ -909,7 +923,7 @@ export default function MyDayPage() {
               <li key={row.id}>
                 <strong>{row.entry_type}</strong>
                 <span>{row.created_at ? new Date(row.created_at).toLocaleTimeString("en-GB") : ""}</span>
-                {row.note ? <p>{row.note}</p> : null}
+                {getLogPreview(row) ? <p>{getLogPreview(row)}</p> : null}
               </li>
             ))}
             {todayLogs.length === 0 && <li>{t("noLogs")}</li>}

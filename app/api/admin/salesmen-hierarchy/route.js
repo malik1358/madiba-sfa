@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { randomInt } from "crypto";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const LOCAL_LOGIN_DOMAIN = "@madiba-sfa.local";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -18,8 +20,19 @@ function normalizeCredentialToken(value) {
     .replace(/\.{2,}/g, ".");
 }
 
-function defaultPasswordFor(code) {
-  return `MADIBA-${normalizeCredentialToken(code)}@123`;
+function normalizeLoginName(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "";
+
+  const localPart = text.includes("@") ? text.split("@")[0] : text;
+  return localPart
+    .replace(/[^a-z0-9._-]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.{2,}/g, ".");
+}
+
+function randomFiveDigitPassword() {
+  return String(randomInt(10000, 100000));
 }
 
 function normalizeName(value, fallback = "") {
@@ -27,12 +40,35 @@ function normalizeName(value, fallback = "") {
   return text || fallback;
 }
 
-function buildEmailFromCode(code, suffix = 0) {
-  const normalized = normalizeCredentialToken(code).toLowerCase();
-
-  const safeLocal = normalized || `salesman${Date.now()}`;
+function buildEmailFromLoginName(loginName, suffix = 0) {
+  const safeLocal = normalizeLoginName(loginName) || `salesman${Date.now()}`;
   const localPart = suffix > 0 ? `${safeLocal}${suffix}` : safeLocal;
-  return `${localPart}@madiba-sfa.local`;
+  return `${localPart}${LOCAL_LOGIN_DOMAIN}`;
+}
+
+function displayLoginName(email) {
+  const localPart = String(email || "").trim().toLowerCase().split("@")[0];
+  return normalizeLoginName(localPart) || localPart;
+}
+
+function getStoredPassword(metadata) {
+  const password = String(metadata?.generated_password || "").trim();
+  return /^\d{5}$/.test(password) ? password : "";
+}
+
+async function setGeneratedPassword(admin, userId, metadata = {}) {
+  const password = randomFiveDigitPassword();
+  const { error } = await admin.auth.admin.updateUserById(userId, {
+    password,
+    user_metadata: {
+      ...metadata,
+      generated_password: password,
+      generated_password_mode: "random5",
+    },
+  });
+
+  if (error) throw error;
+  return password;
 }
 
 async function autoCreateExistingSalesmen(admin) {
@@ -110,12 +146,12 @@ async function autoCreateExistingSalesmen(admin) {
       continue;
     }
 
-    const password = defaultPasswordFor(salesman.code);
     let createdUser = null;
     let createdEmail = "";
+    const password = randomFiveDigitPassword();
 
     for (let suffix = 0; suffix < 20; suffix += 1) {
-      const candidateEmail = buildEmailFromCode(salesman.code, suffix);
+      const candidateEmail = buildEmailFromLoginName(salesman.code, suffix);
       if (usedEmails.has(candidateEmail)) continue;
 
       const { data: userData, error: createUserError } = await admin.auth.admin.createUser({
@@ -125,6 +161,8 @@ async function autoCreateExistingSalesmen(admin) {
         user_metadata: {
           head_salesman_code: null,
           head_salesman_name: null,
+          generated_password: password,
+          generated_password_mode: "random5",
         },
       });
 
@@ -161,6 +199,7 @@ async function autoCreateExistingSalesmen(admin) {
       salesman_code: salesman.code,
       salesman_name: salesman.name,
       email: createdEmail,
+      login_name: displayLoginName(createdEmail),
       password,
       status: "created",
     });
@@ -228,9 +267,10 @@ async function loadSalesmen(admin) {
       salesman_name: profile.salesman_name || "",
       role: profile.role || "",
       email: authUser?.email || "",
+      login_name: displayLoginName(authUser?.email || ""),
       head_salesman_code: metadata.head_salesman_code || "",
       head_salesman_name: metadata.head_salesman_name || "",
-      default_password: defaultPasswordFor(profile.salesman_code || profile.id),
+      default_password: getStoredPassword(metadata),
     };
   });
 }
@@ -251,19 +291,15 @@ async function syncGeneratedSalesmanPasswords(admin) {
 
   for (const profile of profilesRes.data || []) {
     const authUser = authMap.get(profile.id);
-    const email = String(authUser?.email || "").toLowerCase();
-
-    if (!email.endsWith("@madiba-sfa.local")) {
+    const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+    if (getStoredPassword(metadata)) {
       continue;
     }
 
-    const password = defaultPasswordFor(profile.salesman_code || profile.id);
-    const { error: updateError } = await admin.auth.admin.updateUserById(profile.id, {
-      password,
-    });
+    const password = await setGeneratedPassword(admin, profile.id, metadata);
 
-    if (updateError) {
-      throw updateError;
+    if (!password) {
+      throw new Error(`Unable to generate password for ${profile.salesman_code || profile.id}.`);
     }
   }
 }
@@ -323,13 +359,15 @@ export async function POST(request) {
     }
 
     if (mode === "create-salesman") {
-      const email = String(body?.email || "").trim().toLowerCase();
+      const inputLogin = String(body?.email || body?.loginName || "").trim().toLowerCase();
       const salesmanCode = normalizeCode(body?.salesmanCode || "");
       const salesmanName = String(body?.salesmanName || "").trim();
       const headSalesmanCode = normalizeCode(body?.headSalesmanCode || "");
+      const loginName = normalizeLoginName(inputLogin);
+      const email = inputLogin.includes("@") ? inputLogin : buildEmailFromLoginName(loginName);
 
-      if (!email || !salesmanCode || !salesmanName) {
-        return NextResponse.json({ success: false, error: "Email, salesman code, and salesman name are required." }, { status: 400 });
+      if (!loginName || !salesmanCode || !salesmanName) {
+        return NextResponse.json({ success: false, error: "Username, salesman code, and salesman name are required." }, { status: 400 });
       }
 
       const { data: existingCode, error: existingCodeError } = await admin
@@ -359,7 +397,7 @@ export async function POST(request) {
         headSalesmanName = headSalesman.salesman_name || "";
       }
 
-      const password = defaultPasswordFor(salesmanCode);
+      const password = randomFiveDigitPassword();
       const { data: createdUser, error: createUserError } = await admin.auth.admin.createUser({
         email,
         password,
@@ -367,6 +405,8 @@ export async function POST(request) {
         user_metadata: {
           head_salesman_code: headSalesmanCode || null,
           head_salesman_name: headSalesmanName || null,
+          generated_password: password,
+          generated_password_mode: "random5",
         },
       });
 
@@ -397,6 +437,7 @@ export async function POST(request) {
         created: {
           id: userId,
           email,
+          login_name: loginName,
           salesman_code: salesmanCode,
           salesman_name: salesmanName,
           password,
@@ -453,10 +494,9 @@ export async function POST(request) {
 
     if (mode === "reset-password") {
       const salesmanId = String(body?.salesmanId || "").trim();
-      const password = String(body?.password || "").trim();
 
-      if (!salesmanId || !password) {
-        return NextResponse.json({ success: false, error: "Missing salesman id or password." }, { status: 400 });
+      if (!salesmanId) {
+        return NextResponse.json({ success: false, error: "Missing salesman id." }, { status: 400 });
       }
 
       const { data: salesmen, error: salesmenError } = await admin
@@ -467,11 +507,13 @@ export async function POST(request) {
 
       if (salesmenError) throw salesmenError;
 
-      const { error: updateError } = await admin.auth.admin.updateUserById(salesmen.id, {
-        password,
-      });
+      const currentSalesmen = await loadSalesmen(admin);
+      const currentSalesman = currentSalesmen.find((item) => item.id === salesmen.id);
 
-      if (updateError) throw updateError;
+      const password = await setGeneratedPassword(admin, salesmen.id, {
+        head_salesman_code: currentSalesman?.head_salesman_code || null,
+        head_salesman_name: currentSalesman?.head_salesman_name || null,
+      });
 
       return NextResponse.json({
         success: true,
@@ -485,16 +527,16 @@ export async function POST(request) {
 
       const results = [];
       for (const salesman of salesmen) {
-        const { error: updateError } = await admin.auth.admin.updateUserById(salesman.id, {
-          password: salesman.default_password,
-        });
+        try {
+          const password = await setGeneratedPassword(admin, salesman.id, {
+            head_salesman_code: salesman.head_salesman_code || null,
+            head_salesman_name: salesman.head_salesman_name || null,
+          });
 
-        if (updateError) {
-          results.push({ salesmanId: salesman.id, success: false, error: updateError.message });
-          continue;
+          results.push({ salesmanId: salesman.id, success: true, password });
+        } catch (error) {
+          results.push({ salesmanId: salesman.id, success: false, error: error.message });
         }
-
-        results.push({ salesmanId: salesman.id, success: true, password: salesman.default_password });
       }
 
       return NextResponse.json({

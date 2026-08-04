@@ -26,8 +26,13 @@ function normalizeCredentialToken(value) {
     .replace(/\.{2,}/g, ".");
 }
 
-function defaultPasswordFor(code) {
-  return `MADIBA-${normalizeCredentialToken(code)}@123`;
+function displayLoginName(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text.includes("@") ? text.split("@")[0] : text;
+}
+
+function isRandomPassword(value) {
+  return /^\d{5}$/.test(String(value || "").trim());
 }
 
 export default function SalesmanHierarchyPage() {
@@ -174,10 +179,9 @@ export default function SalesmanHierarchyPage() {
       const result = await postAction({
         mode: "reset-password",
         salesmanId: salesman.id,
-        password,
       });
 
-      setMessage(`${result.message || "Password reset."} Default password: ${password}`);
+      setMessage(`${result.message || "Password reset."} New password: ${result.password || "-"}`);
     } catch (err) {
       setError(err.message || "Unable to reset password.");
     } finally {
@@ -202,7 +206,7 @@ export default function SalesmanHierarchyPage() {
 
       const created = result.created || {};
       setMessage(
-        `${result.message || "Salesman created."} Login: ${created.email || "-"} | Default password: ${created.password || "-"}`
+        `${result.message || "Salesman created."} Username: ${created.login_name || displayLoginName(created.email) || "-"} | Password: ${created.password || "-"}`
       );
       setNewSalesman({ salesmanName: "", salesmanCode: "", email: "", headSalesmanCode: "" });
       await loadHierarchy(false);
@@ -300,14 +304,14 @@ export default function SalesmanHierarchyPage() {
             </label>
 
             <label>
-              Email/Login
+              Username/Login
               <input
                 className="moduleInput"
                 required
-                type="email"
+                type="text"
                 value={newSalesman.email}
                 onChange={(event) => setNewSalesman((current) => ({ ...current, email: event.target.value }))}
-                placeholder="salesman@company.com"
+                placeholder="ahmed.nabil"
               />
             </label>
 
@@ -348,7 +352,7 @@ export default function SalesmanHierarchyPage() {
               <thead>
                 <tr>
                   <th>Salesman</th>
-                  <th>Login</th>
+                  <th>Username</th>
                   <th>Current Head</th>
                   <th>Assign Head</th>
                   <th>Default Password</th>
@@ -358,6 +362,8 @@ export default function SalesmanHierarchyPage() {
               <tbody>
                 {salesmen.map((salesman) => {
                   const currentHead = headOptions.find((option) => option.salesman_code === salesman.head_salesman_code);
+                  const loginName = salesman.login_name || displayLoginName(salesman.email);
+                  const password = isRandomPassword(salesman.default_password) ? salesman.default_password : "Pending reset";
 
                   return (
                     <tr key={salesman.id}>
@@ -365,7 +371,7 @@ export default function SalesmanHierarchyPage() {
                         <strong>{salesman.salesman_name || salesman.salesman_code || salesman.id}</strong>
                         <div className="moduleCode">{salesman.salesman_code || salesman.id}</div>
                       </td>
-                      <td>{salesman.email || "No email"}</td>
+                      <td>{loginName || "No username"}</td>
                       <td>{currentHead ? `${currentHead.salesman_name || currentHead.salesman_code} (${currentHead.salesman_code})` : "-"}</td>
                       <td>
                         <select
@@ -383,7 +389,7 @@ export default function SalesmanHierarchyPage() {
                             ))}
                         </select>
                       </td>
-                      <td>{defaultPasswordFor(salesman.salesman_code || salesman.id)}</td>
+                      <td>{password}</td>
                       <td>
                         <div className="moduleActionRow">
                           <button
@@ -423,7 +429,7 @@ export default function SalesmanHierarchyPage() {
             <h2>Testing Notes</h2>
           </div>
           <div className="moduleHint">
-            Login uses the email shown in the table. Default testing password is <strong> MADIBA-[SALESMAN CODE]@123 </strong>. Example: if the salesman code is A001, the password is MADIBA-A001@123.
+            Login uses the username shown in the table. Passwords are now random 5-digit numbers and are shown in the table after creation or reset.
           </div>
         </section>
       </div>

@@ -24,6 +24,9 @@ const PAGE_TEXT = {
   addPlannerNote: { en: "Add planner note", ar: "أضف ملاحظة لليوم" },
   noLogs: { en: "No activity logs for today.", ar: "لا توجد سجلات نشاط اليوم." },
   routeSummary: { en: "Route Summary", ar: "ملخص المسار" },
+  visitSchedule: { en: "Visit Schedule", ar: "جدول الزيارات" },
+  plannedVisitsCount: { en: "planned visits", ar: "زيارات مخططة" },
+  noPlannedVisits: { en: "No planned visits for now.", ar: "لا توجد زيارات مخططة حالياً." },
   noRoutes: { en: "No routes", ar: "لا توجد مسارات" },
   customersCount: { en: "customers", ar: "عميل" },
   visitStatus: { en: "Visit Status", ar: "حالة الزيارات" },
@@ -891,6 +894,18 @@ export default function MyDayPage() {
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   }, [routeRows]);
 
+  const plannedVisitRows = useMemo(
+    () =>
+      visitStatusRows
+        .filter((row) => row.status === "Planned")
+        .sort((a, b) => {
+          const byDays = Number(b.days_since_last_invoice || 0) - Number(a.days_since_last_invoice || 0);
+          if (byDays !== 0) return byDays;
+          return String(a.customer_name || a.customer_code || "").localeCompare(String(b.customer_name || b.customer_code || ""));
+        }),
+    [visitStatusRows]
+  );
+
   const isAdministrator = String(profile?.role || "").toLowerCase() === "admin";
 
   const supabaseClient = getSupabaseClient();
@@ -996,6 +1011,54 @@ export default function MyDayPage() {
               <div key={city}><span>{city}</span><strong>{count} {t("customersCount")}</strong></div>
             ))}
             {routeSummary.length === 0 && <div><span>{t("noRoutes")}</span><strong>0 {t("customersCount")}</strong></div>}
+          </div>
+        </section>
+
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>{t("visitSchedule")}</h2>
+            <span>{plannedVisitRows.length} {t("plannedVisitsCount")}</span>
+          </div>
+          <div className="moduleTableWrap">
+            <table className="moduleTable">
+              <thead>
+                <tr>
+                  <th>{t("customer")}</th>
+                  <th>{t("cityArea")}</th>
+                  <th>{t("daysSinceLastInvoice")}</th>
+                  <th>{t("daysSinceLastVisit")}</th>
+                  <th>{t("actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plannedVisitRows.map((row) => (
+                  <tr key={`planned-${row.customer_code}`}>
+                    <td>{row.customer_name || row.customer_code}</td>
+                    <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
+                    <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
+                    <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>
+                    <td>
+                      <div className="moduleInlineStack">
+                        <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                          {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
+                        </button>
+                        <Link
+                          href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
+                          className="moduleInlineButton"
+                        >
+                          {t("openAudit")}
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {plannedVisitRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5}>{t("noPlannedVisits")}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
 

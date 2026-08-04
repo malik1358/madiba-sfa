@@ -16,6 +16,7 @@ function defaultPasswordFor(code) {
 export default function SalesmanHierarchyPage() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [autoCreating, setAutoCreating] = useState(false);
   const [savingId, setSavingId] = useState("");
   const [resettingId, setResettingId] = useState("");
   const [bulkResetting, setBulkResetting] = useState(false);
@@ -194,6 +195,22 @@ export default function SalesmanHierarchyPage() {
     }
   }
 
+  async function autoCreateExistingSalesmen() {
+    setAutoCreating(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const result = await postAction({ mode: "auto-create-existing-salesmen" });
+      setMessage(result.message || "Auto-create completed.");
+      await loadHierarchy(false);
+    } catch (err) {
+      setError(err.message || "Unable to auto-create existing salesmen.");
+    } finally {
+      setAutoCreating(false);
+    }
+  }
+
   async function resetAllPasswords() {
     setBulkResetting(true);
     setError("");
@@ -254,6 +271,17 @@ export default function SalesmanHierarchyPage() {
           <div className="moduleSectionHeader">
             <h2>Create Salesman</h2>
             <span>Creates login and profile in one step</span>
+          </div>
+
+          <div className="moduleActionRow" style={{ marginBottom: "10px" }}>
+            <button
+              type="button"
+              className="moduleInlineButton"
+              onClick={autoCreateExistingSalesmen}
+              disabled={autoCreating || creating}
+            >
+              {autoCreating ? "Creating Existing..." : "Auto Create Existing Salesmen"}
+            </button>
           </div>
 
           <form className="moduleFormGrid" onSubmit={createSalesman}>

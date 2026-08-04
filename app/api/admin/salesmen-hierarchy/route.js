@@ -15,6 +15,17 @@ function defaultPasswordFor(code) {
   return `MADIBA-${normalizeCode(code)}@123`;
 }
 
+function normalizeName(value, fallback = "") {
+  const text = String(value || "").trim();
+  return text || fallback;
+}
+
+function buildEmailFromCode(code, suffix = 0) {
+  const normalized = normalizeCode(code).toLowerCase();
+  const localPart = suffix > 0 ? `${normalized}${suffix}` : normalized;
+  return `${localPart}@madiba-sfa.local`;
+}
+
 async function requireManagementAccess(admin, request) {
   const authHeader = request.headers.get("authorization");
 
@@ -119,6 +130,150 @@ export async function POST(request) {
 
     const body = await request.json();
     const mode = String(body?.mode || "").trim();
+
+    if (mode === "auto-create-existing-salesmen") {
+      const salesmanMap = new Map();
+      const pageSize = 1000;
+
+      for (let page = 0; page < 100; page += 1) {
+        const from = page * pageSize;
+        const to = from + pageSize - 1;
+
+        const { data: rows, error: rowsError } = await admin
+          .from("sales_raw")
+          .select("salesman_code,salesman_name")
+          .not("salesman_code", "is", null)
+          .range(from, to);
+
+        if (rowsError) {
+          return NextResponse.json(
+            { success: false, error: rowsError.message || "Unable to read existing salesmen from sales data." },
+            { status: 500 }
+          );
+        }
+
+        const list = rows || [];
+        list.forEach((row) => {
+          const code = normalizeCode(row.salesman_code);
+          if (!code) return;
+
+          const name = normalizeName(row.salesman_name, code);
+          if (!salesmanMap.has(code)) {
+            salesmanMap.set(code, { code, name });
+            return;
+          }
+
+          const existing = salesmanMap.get(code);
+          if (!existing.name || existing.name === code) {
+            salesmanMap.set(code, { code, name });
+          }
+        });
+
+        if (list.length < pageSize) break;
+      }
+
+      const salesmenFromData = Array.from(salesmanMap.values());
+      if (salesmenFromData.length === 0) {
+        return NextResponse.json({ success: true, created: 0, skipped: 0, failed: 0, message: "No salesman data found in sales_raw." });
+      }
+
+      const codes = salesmenFromData.map((item) => item.code);
+      const existingProfiles = [];
+
+      for (let index = 0; index < codes.length; index += 200) {
+        const batch = codes.slice(index, index + 200);
+        const { data: rows, error: profilesError } = await admin
+          .from("profiles")
+          .select("salesman_code")
+          .in("salesman_code", batch);
+
+        if (profilesError) throw profilesError;
+        existingProfiles.push(...(rows || []));
+      }
+
+      const existingCodeSet = new Set(existingProfiles.map((row) => normalizeCode(row.salesman_code)).filter(Boolean));
+
+      const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      if (usersRes.error) throw usersRes.error;
+
+      const usedEmails = new Set((usersRes.data?.users || []).map((user) => String(user.email || "").toLowerCase()).filter(Boolean));
+
+      let created = 0;
+      let skipped = 0;
+      let failed = 0;
+      const details = [];
+
+      for (const salesman of salesmenFromData) {
+        if (existingCodeSet.has(salesman.code)) {
+          skipped += 1;
+          continue;
+        }
+
+        const password = defaultPasswordFor(salesman.code);
+        let createdUser = null;
+        let createdEmail = "";
+
+        for (let suffix = 0; suffix < 20; suffix += 1) {
+          const candidateEmail = buildEmailFromCode(salesman.code, suffix);
+          if (usedEmails.has(candidateEmail)) continue;
+
+          const { data: userData, error: createUserError } = await admin.auth.admin.createUser({
+            email: candidateEmail,
+            password,
+            email_confirm: true,
+            user_metadata: {
+              head_salesman_code: null,
+              head_salesman_name: null,
+            },
+          });
+
+          if (!createUserError && userData?.user?.id) {
+            createdUser = userData.user;
+            createdEmail = candidateEmail;
+            usedEmails.add(candidateEmail);
+            break;
+          }
+        }
+
+        if (!createdUser?.id) {
+          failed += 1;
+          details.push({ salesman_code: salesman.code, status: "failed", error: "Unable to create auth user" });
+          continue;
+        }
+
+        const { error: profileInsertError } = await admin.from("profiles").upsert({
+          id: createdUser.id,
+          role: "salesman",
+          salesman_code: salesman.code,
+          salesman_name: salesman.name,
+        });
+
+        if (profileInsertError) {
+          await admin.auth.admin.deleteUser(createdUser.id);
+          failed += 1;
+          details.push({ salesman_code: salesman.code, status: "failed", error: profileInsertError.message || "Unable to create profile" });
+          continue;
+        }
+
+        created += 1;
+        details.push({
+          salesman_code: salesman.code,
+          salesman_name: salesman.name,
+          email: createdEmail,
+          password,
+          status: "created",
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        created,
+        skipped,
+        failed,
+        details,
+        message: `Auto-create completed. Created: ${created}, skipped existing: ${skipped}, failed: ${failed}.`,
+      });
+    }
 
     if (mode === "create-salesman") {
       const email = String(body?.email || "").trim().toLowerCase();

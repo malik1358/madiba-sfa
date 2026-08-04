@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
+import { fetchSalesScope } from "../../lib/salesScope";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { detectTable } from "../../lib/schemaGuards";
 
@@ -36,6 +37,7 @@ export default function MyDayPage() {
   const [note, setNote] = useState("");
   const [attendanceBusy, setAttendanceBusy] = useState("");
   const [latestGpsCaptureAt, setLatestGpsCaptureAt] = useState(0);
+  const [accessScope, setAccessScope] = useState(null);
   const autoPingInFlight = useRef(false);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -78,6 +80,9 @@ export default function MyDayPage() {
           throw new Error("Please login again.");
         }
 
+        const scope = await fetchSalesScope();
+        setAccessScope(scope);
+
         const { data: profileData, error: profileError } = await supabase
           .from("profiles")
           .select("id,salesman_code,salesman_name")
@@ -104,6 +109,41 @@ export default function MyDayPage() {
         }
         setWarnings(nextWarnings);
 
+        let todaySalesQuery = supabase
+          .from("sales_raw")
+          .select("customer_code,sales_amount")
+          .eq("transaction_date", today);
+
+        let pendingOrdersQuery = supabase
+          .from("sales_orders")
+          .select("id,status,created_by,salesman_code")
+          .eq("status", "DRAFT");
+
+        let submittedOrdersQuery = supabase
+          .from("sales_orders")
+          .select("id,status,created_by,salesman_code")
+          .eq("status", "SUBMITTED")
+          .gte("submitted_at", `${today}T00:00:00`)
+          .lte("submitted_at", `${today}T23:59:59`);
+
+        let customersQuery = supabase
+          .from("customers")
+          .select("customer_code,customer_name,city,area,latest_transaction_date,current_salesman_code");
+
+        let routeQuery = supabase
+          .from("customers")
+          .select("customer_code,customer_name,city,area,latest_transaction_date")
+          .order("city")
+          .limit(20);
+
+        if (scope.hasAllAccess) {
+          // no-op
+        } else {
+          todaySalesQuery = todaySalesQuery.in("salesman_code", scope.visibleSalesmanCodes);
+          customersQuery = customersQuery.in("current_salesman_code", scope.visibleSalesmanCodes);
+          routeQuery = routeQuery.in("current_salesman_code", scope.visibleSalesmanCodes);
+        }
+
         const [
           todaySalesRes,
           pendingOrdersRes,
@@ -111,33 +151,11 @@ export default function MyDayPage() {
           customersRes,
           routeRes,
         ] = await Promise.all([
-          supabase
-            .from("sales_raw")
-            .select("customer_code,sales_amount")
-            .eq("salesman_code", profileData.salesman_code)
-            .eq("transaction_date", today),
-          supabase
-            .from("sales_orders")
-            .select("id")
-            .eq("created_by", session.user.id)
-            .eq("status", "DRAFT"),
-          supabase
-            .from("sales_orders")
-            .select("id")
-            .eq("created_by", session.user.id)
-            .eq("status", "SUBMITTED")
-            .gte("submitted_at", `${today}T00:00:00`)
-            .lte("submitted_at", `${today}T23:59:59`),
-          supabase
-            .from("customers")
-            .select("customer_code,customer_name,city,area,latest_transaction_date,current_salesman_code")
-            .eq("current_salesman_code", profileData.salesman_code),
-          supabase
-            .from("customers")
-            .select("customer_code,customer_name,city,area,latest_transaction_date")
-            .eq("current_salesman_code", profileData.salesman_code)
-            .order("city")
-            .limit(20),
+          todaySalesQuery,
+          pendingOrdersQuery,
+          submittedOrdersQuery,
+          customersQuery,
+          routeQuery,
         ]);
 
         if (todaySalesRes.error) throw todaySalesRes.error;
@@ -148,11 +166,16 @@ export default function MyDayPage() {
 
         let newProspectsCount = 0;
         if (prospectsCheck.available) {
-          const { data: newProspectsData, error: newProspectsError } = await supabase
+          let prospectsQuery = supabase
             .from("prospects")
             .select("id")
-            .eq("salesman_code", profileData.salesman_code)
             .gte("created_at", `${today}T00:00:00`);
+
+          if (!scope.hasAllAccess) {
+            prospectsQuery = prospectsQuery.in("salesman_code", scope.visibleSalesmanCodes);
+          }
+
+          const { data: newProspectsData, error: newProspectsError } = await prospectsQuery;
 
           if (!newProspectsError) {
             newProspectsCount = (newProspectsData || []).length;
@@ -160,13 +183,18 @@ export default function MyDayPage() {
         }
 
         if (logsCheck.available) {
-          const { data: logsData, error: logsError } = await supabase
+          let logsQuery = supabase
             .from("daily_activity_logs")
-            .select("id,entry_type,note,created_at")
-            .eq("user_id", session.user.id)
+            .select("id,user_id,entry_type,note,created_at")
             .gte("created_at", `${today}T00:00:00`)
             .lte("created_at", `${today}T23:59:59`)
             .order("created_at", { ascending: false });
+
+          if (!scope.hasAllAccess) {
+            logsQuery = logsQuery.in("user_id", scope.visibleUserIds);
+          }
+
+          const { data: logsData, error: logsError } = await logsQuery;
 
           if (!logsError) {
             const rows = logsData || [];
@@ -198,10 +226,20 @@ export default function MyDayPage() {
         const overdueRows = customerRows.filter((row) => daysBetween(row.latest_transaction_date) > 21);
         const followUpRows = customerRows.filter((row) => daysBetween(row.latest_transaction_date) > 10);
 
+        const visiblePendingOrders = (pendingOrdersRes.data || []).filter((row) => {
+          if (scope.hasAllAccess) return true;
+          return scope.visibleUserIds.includes(row.created_by) || scope.visibleSalesmanCodes.includes(String(row.salesman_code || "").trim().toUpperCase());
+        });
+
+        const visibleSubmittedOrders = (submittedTodayRes.data || []).filter((row) => {
+          if (scope.hasAllAccess) return true;
+          return scope.visibleUserIds.includes(row.created_by) || scope.visibleSalesmanCodes.includes(String(row.salesman_code || "").trim().toUpperCase());
+        });
+
         setSummary({
           visitsToday: todayCustomers.size,
           followUps: followUpRows.length,
-          pendingOrders: (pendingOrdersRes.data || []).length,
+          pendingOrders: visiblePendingOrders.length,
           overdueVisits: overdueRows.length,
           newCustomersAssigned: newProspectsCount,
           completedVisits: productiveCustomers.size,

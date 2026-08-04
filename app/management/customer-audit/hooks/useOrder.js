@@ -3,7 +3,7 @@ import { getSupabaseClient } from '../../../lib/supabase';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
 
-export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, priceList, setError, setMessage }) {
+export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, priceList, setError, setMessage, accessScope = null }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
   const [orderQuantities, setOrderQuantities] = useState({});
   const [savingOrder, setSavingOrder] = useState(false);
@@ -32,15 +32,23 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
 
-        const { data: draft, error: draftError } = await supabase
+        let draftQuery = supabase
           .from('sales_orders')
           .select('id, customer_code, status, created_by')
           .eq('customer_code', selectedCustomer.customer_code)
           .eq('status', 'DRAFT')
-          .eq('created_by', session.user.id)
           .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(1);
+
+        if (accessScope?.hasAllAccess) {
+          draftQuery = draftQuery;
+        } else if (accessScope?.visibleUserIds?.length) {
+          draftQuery = draftQuery.in('created_by', accessScope.visibleUserIds);
+        } else {
+          draftQuery = draftQuery.eq('created_by', session.user.id);
+        }
+
+        const { data: draft, error: draftError } = await draftQuery.maybeSingle();
 
         if (draftError) throw draftError;
 
@@ -70,7 +78,7 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
     }
 
     loadDraftOrder();
-  }, [selectedCustomer, setError]);
+  }, [accessScope, selectedCustomer, setError]);
 
   const updateQty = useCallback((itemCode, value) => {
     setOrderQuantities((current) => changeOrderQty(current, itemCode, value));

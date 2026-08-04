@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { getSupabaseClient } from "../../lib/supabase";
+import { fetchSalesScope } from "../../lib/salesScope";
 
 function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
@@ -94,35 +95,30 @@ export default function PendingOrdersPage() {
           throw new Error("Please login again.");
         }
 
-        const { data: profile, error: profileError } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", session.user.id)
-          .single();
-
-        if (profileError) throw profileError;
-
-        const role = String(profile?.role || "").toLowerCase();
+        const scope = await fetchSalesScope();
+        const role = String(scope?.role || "").toLowerCase();
         setUserRole(role);
 
-        let query = supabase
+        const query = supabase
           .from("sales_orders")
           .select("id,customer_code,customer_name,salesman_code,created_by,created_at,updated_at,status")
           .in("status", PENDING_STATUSES)
           .order("updated_at", { ascending: false })
           .limit(500);
 
-        if (![
-          "admin",
-          "manager",
-        ].includes(role)) {
-          query = query.eq("created_by", session.user.id);
-        }
-
         const { data, error: ordersError } = await query;
         if (ordersError) throw ordersError;
 
-        setOrders(data || []);
+        const visibleOrders = (data || []).filter((order) => {
+          if (scope?.hasAllAccess) return true;
+
+          const createdByVisible = (scope?.visibleUserIds || []).includes(order.created_by);
+          const salesmanVisible = (scope?.visibleSalesmanCodes || []).includes(String(order.salesman_code || "").trim().toUpperCase());
+
+          return createdByVisible || salesmanVisible;
+        });
+
+        setOrders(visibleOrders);
       } catch (err) {
         setError(err.message || "Unable to load pending orders.");
       } finally {

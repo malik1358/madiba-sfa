@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
+import { fetchSalesScope } from "../../lib/salesScope";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
@@ -250,6 +251,7 @@ export default function NewOrderPage() {
   const [previousDrafts, setPreviousDrafts] = useState([]);
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [accessScope, setAccessScope] = useState(null);
 
   const mergedItemsMaster = useMemo(() => {
     const itemMap = new Map();
@@ -428,6 +430,7 @@ export default function NewOrderPage() {
     priceList,
     setError,
     setMessage,
+    accessScope,
   });
 
   const buildOrderSnapshot = useCallback(
@@ -715,23 +718,37 @@ export default function NewOrderPage() {
           throw new Error("Please login again.");
         }
 
+        const scope = await fetchSalesScope();
+        setAccessScope(scope);
+
+        let customersQuery = supabase
+          .from("customers")
+          .select("customer_code,customer_name,current_salesman_code")
+          .eq("is_active", true)
+          .order("customer_name");
+
+        if (!scope.hasAllAccess) {
+          customersQuery = customersQuery.in("current_salesman_code", scope.visibleSalesmanCodes);
+        }
+
+        let draftsQuery = supabase
+          .from("sales_orders")
+          .select("id,customer_code,customer_name,updated_at,status")
+          .eq("status", "DRAFT")
+          .order("updated_at", { ascending: false })
+          .limit(25);
+
+        if (!scope.hasAllAccess) {
+          draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
+        }
+
         const [customersRes, itemsRes, draftsRes] = await Promise.all([
-          supabase
-            .from("customers")
-            .select("customer_code,customer_name,current_salesman_code")
-            .eq("is_active", true)
-            .order("customer_name"),
+          customersQuery,
           supabase
             .from("items_master")
             .select("item_code,item_name,category")
             .order("item_name"),
-          supabase
-            .from("sales_orders")
-            .select("id,customer_code,customer_name,updated_at,status")
-            .eq("created_by", session.user.id)
-            .eq("status", "DRAFT")
-            .order("updated_at", { ascending: false })
-            .limit(25),
+          draftsQuery,
         ]);
 
         if (customersRes.error) throw customersRes.error;
@@ -798,6 +815,15 @@ export default function NewOrderPage() {
           return;
         }
 
+        let peersQuery = supabase
+          .from("sales_raw")
+          .select("customer_code,item_code,item_name,category,sales_amount,transaction_date")
+          .eq("import_batch_id", activeBatchId);
+
+        if (!accessScope?.hasAllAccess) {
+          peersQuery = peersQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
+        }
+
         const [transactionsRes, peersRes] = await Promise.all([
           supabase
             .from("sales_raw")
@@ -808,10 +834,7 @@ export default function NewOrderPage() {
             .eq("customer_code", selectedCustomer.customer_code)
             .order("transaction_date", { ascending: false })
             .order("id", { ascending: false }),
-          supabase
-            .from("sales_raw")
-            .select("customer_code,item_code,item_name,category,sales_amount,transaction_date")
-            .eq("import_batch_id", activeBatchId),
+          peersQuery,
         ]);
 
         if (transactionsRes.error) throw transactionsRes.error;
@@ -829,7 +852,7 @@ export default function NewOrderPage() {
     }
 
     loadCustomerHistory();
-  }, [selectedCustomer, setError]);
+  }, [accessScope, selectedCustomer, setError]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {

@@ -52,6 +52,7 @@ export default function CustomerAuditPage() {
     toggleCategory,
     openCustomer,
     closeCustomer,
+    accessScope,
   } = useCustomerData({ setError, setMessage });
 
   const analytics = useAnalytics(transactions);
@@ -82,6 +83,7 @@ export default function CustomerAuditPage() {
     priceList,
     setError,
     setMessage,
+    accessScope,
   });
 
   useEffect(() => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
+import { fetchSalesScope } from '../../../lib/salesScope';
 
 export function useCustomerData({ setError, setMessage }) {
   const [customers, setCustomers] = useState([]);
@@ -15,6 +16,7 @@ export function useCustomerData({ setError, setMessage }) {
   const [loadingCustomer, setLoadingCustomer] = useState(false);
   const [showTransactions, setShowTransactions] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState({});
+  const [accessScope, setAccessScope] = useState(null);
 
   const loadFoundation = useCallback(async () => {
     const supabase = getSupabaseClient();
@@ -34,7 +36,10 @@ export function useCustomerData({ setError, setMessage }) {
         throw new Error('Please login again.');
       }
 
-      const { data: customerData, error: customerError } = await supabase
+      const scope = await fetchSalesScope();
+      setAccessScope(scope);
+
+      let customerQuery = supabase
         .from('customers')
         .select(`
           customer_code,
@@ -48,6 +53,12 @@ export function useCustomerData({ setError, setMessage }) {
         `)
         .eq('is_active', true)
         .order('customer_name');
+
+      if (!scope.hasAllAccess) {
+        customerQuery = customerQuery.in('current_salesman_code', scope.visibleSalesmanCodes);
+      }
+
+      const { data: customerData, error: customerError } = await customerQuery;
 
       if (customerError) throw customerError;
 
@@ -67,7 +78,7 @@ export function useCustomerData({ setError, setMessage }) {
       }
 
       const salesmanCodes = [
-        ...new Set(list.map((customer) => customer.current_salesman_code).filter(Boolean)),
+        ...new Set((scope.visibleMembers || []).map((member) => member.salesman_code).filter(Boolean)),
       ].sort();
 
       setSalesmen(salesmanCodes);
@@ -135,7 +146,7 @@ export function useCustomerData({ setError, setMessage }) {
       if (salesError) throw salesError;
       setTransactions(data || []);
 
-      const { data: peerData, error: peerError } = await supabase
+      let peerQuery = supabase
         .from('sales_raw')
         .select(`
           customer_code,
@@ -147,6 +158,12 @@ export function useCustomerData({ setError, setMessage }) {
         `)
         .eq('import_batch_id', activeBatchId);
 
+      if (!accessScope?.hasAllAccess) {
+        peerQuery = peerQuery.in('salesman_code', accessScope?.visibleSalesmanCodes || []);
+      }
+
+      const { data: peerData, error: peerError } = await peerQuery;
+
       if (peerError) throw peerError;
       setPeerTransactions(peerData || []);
     } catch (err) {
@@ -154,7 +171,7 @@ export function useCustomerData({ setError, setMessage }) {
     } finally {
       setLoadingCustomer(false);
     }
-  }, [setError, setMessage]);
+  }, [accessScope, setError, setMessage]);
 
   const toggleCategory = useCallback((category) => {
     setExpandedCategories((current) => ({
@@ -197,5 +214,6 @@ export function useCustomerData({ setError, setMessage }) {
     toggleCategory,
     openCustomer,
     closeCustomer,
+    accessScope,
   };
 }

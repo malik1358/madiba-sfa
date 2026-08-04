@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
+import { fetchSalesScope } from "../../lib/salesScope";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 
 function currency(value) {
@@ -49,6 +50,8 @@ export default function MyPerformancePage() {
           throw new Error("Please login again.");
         }
 
+        const scope = await fetchSalesScope();
+
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
           .select("id,salesman_code,monthly_target")
@@ -65,34 +68,48 @@ export default function MyPerformancePage() {
 
         const salesmanCode = profile.salesman_code;
 
+        let salesTodayQuery = supabase
+          .from("sales_raw")
+          .select("sales_amount,customer_code,salesman_code")
+          .eq("transaction_date", todayISO);
+
+        let salesMonthQuery = supabase
+          .from("sales_raw")
+          .select("sales_amount,salesman_code")
+          .gte("transaction_date", monthStart)
+          .lte("transaction_date", todayISO);
+
+        let monthRowsQuery = supabase
+          .from("sales_raw")
+          .select("customer_code,sales_amount,salesman_code")
+          .eq("transaction_date", todayISO);
+
+        let ordersQuery = supabase
+          .from("sales_orders")
+          .select("id,status,total_amount,submitted_at,created_by,salesman_code")
+          .gte("created_at", `${monthStart}T00:00:00`);
+
+        let customersQuery = supabase
+          .from("customers")
+          .select("customer_code,current_salesman_code")
+          .gte("latest_transaction_date", monthStart)
+          .lte("latest_transaction_date", todayISO);
+
+        if (scope.hasAllAccess) {
+          // no-op
+        } else {
+          salesTodayQuery = salesTodayQuery.in("salesman_code", scope.visibleSalesmanCodes);
+          salesMonthQuery = salesMonthQuery.in("salesman_code", scope.visibleSalesmanCodes);
+          monthRowsQuery = monthRowsQuery.in("salesman_code", scope.visibleSalesmanCodes);
+          customersQuery = customersQuery.in("current_salesman_code", scope.visibleSalesmanCodes);
+        }
+
         const [salesTodayRes, salesMonthRes, monthRowsRes, ordersRes, customersRes] = await Promise.all([
-          supabase
-            .from("sales_raw")
-            .select("sales_amount")
-            .eq("salesman_code", salesmanCode)
-            .eq("transaction_date", todayISO),
-          supabase
-            .from("sales_raw")
-            .select("sales_amount")
-            .eq("salesman_code", salesmanCode)
-            .gte("transaction_date", monthStart)
-            .lte("transaction_date", todayISO),
-          supabase
-            .from("sales_raw")
-            .select("customer_code,sales_amount")
-            .eq("salesman_code", salesmanCode)
-            .eq("transaction_date", todayISO),
-          supabase
-            .from("sales_orders")
-            .select("id,status,total_amount,submitted_at")
-            .eq("created_by", session.user.id)
-            .gte("created_at", `${monthStart}T00:00:00`),
-          supabase
-            .from("customers")
-            .select("customer_code")
-            .eq("current_salesman_code", salesmanCode)
-            .gte("latest_transaction_date", monthStart)
-            .lte("latest_transaction_date", todayISO),
+          salesTodayQuery,
+          salesMonthQuery,
+          monthRowsQuery,
+          ordersQuery,
+          customersQuery,
         ]);
 
         if (salesTodayRes.error) throw salesTodayRes.error;
@@ -116,7 +133,12 @@ export default function MyPerformancePage() {
         const productiveVisits = productiveSet.size;
         const strikeRate = visitsToday ? (productiveVisits / visitsToday) * 100 : 0;
 
-        const submittedOrders = (ordersRes.data || []).filter((row) => row.status === "SUBMITTED");
+        const visibleOrders = (ordersRes.data || []).filter((row) => {
+          if (scope.hasAllAccess) return true;
+          return scope.visibleUserIds.includes(row.created_by) || scope.visibleSalesmanCodes.includes(String(row.salesman_code || "").trim().toUpperCase());
+        });
+
+        const submittedOrders = visibleOrders.filter((row) => row.status === "SUBMITTED");
         const orders = submittedOrders.length;
         const collection = submittedOrders.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
         const averageOrderValue = orders ? collection / orders : 0;

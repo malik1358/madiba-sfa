@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
+import { fetchSalesScope } from "../../lib/salesScope";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { detectTable } from "../../lib/schemaGuards";
 
@@ -58,6 +59,7 @@ export default function NewCustomerPage() {
         }
 
         const prospectsCheck = await detectTable(supabase, "prospects");
+        const scope = await fetchSalesScope();
         setProspectsEnabled(prospectsCheck.available);
         setSchemaWarning(
           prospectsCheck.available
@@ -65,20 +67,34 @@ export default function NewCustomerPage() {
             : `${prospectsCheck.reason}. Create the prospects table to enable prospect registration.`
         );
 
+        let salesmenQuery = supabase
+          .from("profiles")
+          .select("id,salesman_code,salesman_name,role")
+          .in("role", ["salesman", "manager", "admin"])
+          .order("salesman_name");
+
+        if (!scope.hasAllAccess) {
+          salesmenQuery = salesmenQuery.in("salesman_code", scope.visibleSalesmanCodes);
+        }
+
+        let recentQuery = Promise.resolve({ data: [], error: null });
+        if (prospectsCheck.available) {
+          let query = supabase
+            .from("prospects")
+            .select("id,shop_name,owner_name,mobile,city,area,created_at,status,created_by,salesman_code")
+            .order("created_at", { ascending: false })
+            .limit(10);
+
+          if (!scope.hasAllAccess) {
+            query = query.in("salesman_code", scope.visibleSalesmanCodes);
+          }
+
+          recentQuery = query;
+        }
+
         const [salesmenRes, recentRes] = await Promise.all([
-          supabase
-            .from("profiles")
-            .select("id,salesman_code,salesman_name,role")
-            .in("role", ["salesman", "manager", "admin"])
-            .order("salesman_name"),
-          prospectsCheck.available
-            ? supabase
-                .from("prospects")
-                .select("id,shop_name,owner_name,mobile,city,area,created_at,status")
-                .eq("created_by", session.user.id)
-                .order("created_at", { ascending: false })
-                .limit(10)
-            : Promise.resolve({ data: [], error: null }),
+          salesmenQuery,
+          recentQuery,
         ]);
 
         if (salesmenRes.error) throw salesmenRes.error;
@@ -212,7 +228,7 @@ export default function NewCustomerPage() {
       const { data: latest, error: latestError } = await supabase
         .from("prospects")
         .select("id,shop_name,owner_name,mobile,city,area,created_at,status")
-        .eq("created_by", session.user.id)
+        .eq("salesman_code", form.salesman_code)
         .order("created_at", { ascending: false })
         .limit(10);
 

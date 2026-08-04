@@ -67,6 +67,31 @@ function hasMeaningfulValue(value) {
   return !["UNCLASSIFIED", "N/A", "NA", "-"] .includes(text.toUpperCase());
 }
 
+async function resolveBatchId(supabase) {
+  const { data: settings, error: settingsError } = await supabase
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", "active_sales_batch_id")
+    .limit(1)
+    .maybeSingle();
+
+  if (settingsError) throw settingsError;
+
+  const activeBatchId = Number(settings?.setting_value || 0);
+  if (activeBatchId) return activeBatchId;
+
+  const { data: latestBatch, error: latestBatchError } = await supabase
+    .from("import_batches")
+    .select("id")
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latestBatchError) throw latestBatchError;
+
+  return Number(latestBatch?.id || 0);
+}
+
 function isRowLike(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
@@ -844,16 +869,7 @@ export default function NewOrderPage() {
       setAuditExpandedCategories({});
 
       try {
-        const { data: settings, error: settingsError } = await supabase
-          .from("system_settings")
-          .select("setting_value")
-          .eq("setting_key", "active_sales_batch_id")
-          .limit(1)
-          .maybeSingle();
-
-        if (settingsError) throw settingsError;
-
-        const activeBatchId = Number(settings?.setting_value || 0);
+        const activeBatchId = await resolveBatchId(supabase);
         if (!activeBatchId) {
           setTransactions([]);
           setPeerTransactions([]);

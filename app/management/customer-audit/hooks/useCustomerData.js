@@ -18,6 +18,31 @@ export function useCustomerData({ setError, setMessage }) {
   const [expandedCategories, setExpandedCategories] = useState({});
   const [accessScope, setAccessScope] = useState(null);
 
+  const resolveBatchId = useCallback(async (supabase) => {
+    const { data: settings, error: settingsError } = await supabase
+      .from('system_settings')
+      .select('setting_value')
+      .eq('setting_key', 'active_sales_batch_id')
+      .limit(1)
+      .maybeSingle();
+
+    if (settingsError) throw settingsError;
+
+    const activeBatchId = Number(settings?.setting_value || 0);
+    if (activeBatchId) return activeBatchId;
+
+    const { data: latestBatch, error: latestBatchError } = await supabase
+      .from('import_batches')
+      .select('id')
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestBatchError) throw latestBatchError;
+
+    return Number(latestBatch?.id || 0);
+  }, []);
+
   const loadFoundation = useCallback(async () => {
     const supabase = getSupabaseClient();
 
@@ -107,16 +132,8 @@ export function useCustomerData({ setError, setMessage }) {
     setMessage('');
 
     try {
-      const { data: settings, error: settingsError } = await supabase
-        .from('system_settings')
-        .select('setting_value')
-        .eq('setting_key', 'active_sales_batch_id')
-        .single();
-
-      if (settingsError) throw settingsError;
-
-      const activeBatchId = Number(settings.setting_value);
-      if (!activeBatchId) throw new Error('No active sales snapshot found.');
+      const activeBatchId = await resolveBatchId(supabase);
+      if (!activeBatchId) throw new Error('No sales snapshot found.');
 
       const { data, error: salesError } = await supabase
         .from('sales_raw')
@@ -171,7 +188,7 @@ export function useCustomerData({ setError, setMessage }) {
     } finally {
       setLoadingCustomer(false);
     }
-  }, [accessScope, setError, setMessage]);
+  }, [accessScope, resolveBatchId, setError, setMessage]);
 
   const toggleCategory = useCallback((category) => {
     setExpandedCategories((current) => ({

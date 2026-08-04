@@ -42,6 +42,38 @@ function extractMissingProspectsColumn(errorMessage) {
   return match?.[1] || "";
 }
 
+function parseGpsCoordinates(rawValue) {
+  const text = String(rawValue || "").trim();
+  if (!text.includes(",")) return null;
+
+  const [rawLat, rawLng] = text.split(",").map((part) => part.trim());
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+async function reverseGeocode(lat, lng) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&addressdetails=1&accept-language=en`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error("Reverse geocoding request failed.");
+  }
+
+  const payload = await response.json();
+  const address = payload?.address || {};
+  const city = String(address.city || address.town || address.village || address.state || "").trim();
+  const area = String(address.suburb || address.neighbourhood || address.city_district || address.county || address.quarter || "").trim();
+
+  return {
+    city,
+    area,
+    formatted: String(payload?.display_name || "").trim(),
+  };
+}
+
 async function insertProspectWithColumnFallback(supabase, payload) {
   const workingPayload = { ...payload };
 
@@ -158,8 +190,6 @@ export default function NewCustomerPage() {
               query = query.in("salesman_code", visibleCodes);
             } else if (scope.currentSalesmanCode) {
               query = query.eq("salesman_code", scope.currentSalesmanCode);
-            } else {
-              query = query.eq("created_by", session.user.id);
             }
           }
 
@@ -198,11 +228,30 @@ export default function NewCustomerPage() {
     }
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const lat = position.coords.latitude.toFixed(6);
         const lng = position.coords.longitude.toFixed(6);
         setForm((current) => ({ ...current, gps_location: `${lat}, ${lng}` }));
         setGpsStatus(`Captured ${lat}, ${lng}`);
+
+        try {
+          const location = await reverseGeocode(lat, lng);
+          if (location.city || location.area) {
+            setForm((current) => ({
+              ...current,
+              city: location.city || current.city,
+              area: location.area || current.area,
+            }));
+
+            const areaLabel = location.area || "-";
+            const cityLabel = location.city || "-";
+            setGpsStatus(`Captured ${lat}, ${lng} • ${areaLabel}, ${cityLabel}`);
+          } else if (location.formatted) {
+            setGpsStatus(`Captured ${lat}, ${lng} • ${location.formatted}`);
+          }
+        } catch {
+          setGpsStatus(`Captured ${lat}, ${lng}. Could not auto-detect city/area.`);
+        }
       },
       () => {
         setError("Unable to read GPS location.");
@@ -241,6 +290,18 @@ export default function NewCustomerPage() {
       return;
     }
 
+    const normalizedMobile = String(form.mobile || "").replace(/\D/g, "");
+    if (!/^05\d{8}$/.test(normalizedMobile)) {
+      setError("Mobile must be a valid KSA number with 10 digits starting with 05.");
+      return;
+    }
+
+    const parsedGps = parseGpsCoordinates(form.gps_location);
+    if (!parsedGps) {
+      setError("GPS location must be in the format: latitude, longitude");
+      return;
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) {
       setError("Supabase is not configured.");
@@ -263,13 +324,13 @@ export default function NewCustomerPage() {
       const payload = {
         customer_name: form.customer_name,
         shop_name: form.shop_name,
-        owner_name: form.owner_name,
-        mobile: form.mobile,
+        owner_name: form.owner_name || null,
+        mobile: normalizedMobile,
         whatsapp: form.whatsapp || null,
         email: form.email || null,
         city: form.city,
         area: form.area,
-        gps_location: form.gps_location || null,
+        gps_location: `${parsedGps.lat.toFixed(6)}, ${parsedGps.lng.toFixed(6)}`,
         customer_type: form.customer_type,
         salesman_code: form.salesman_code,
         notes: [
@@ -363,11 +424,20 @@ export default function NewCustomerPage() {
             </label>
             <label>
               Owner
-              <input className="moduleInput" required value={form.owner_name} onChange={(e) => setForm({ ...form, owner_name: e.target.value })} />
+              <input className="moduleInput" value={form.owner_name} onChange={(e) => setForm({ ...form, owner_name: e.target.value })} />
             </label>
             <label>
               Mobile
-              <input className="moduleInput" required value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
+              <input
+                className="moduleInput"
+                required
+                inputMode="numeric"
+                maxLength={10}
+                pattern="05[0-9]{8}"
+                title="Use 10 digits, starting with 05"
+                value={form.mobile}
+                onChange={(e) => setForm({ ...form, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+              />
             </label>
             <label>
               WhatsApp

@@ -120,6 +120,88 @@ export async function POST(request) {
     const body = await request.json();
     const mode = String(body?.mode || "").trim();
 
+    if (mode === "create-salesman") {
+      const email = String(body?.email || "").trim().toLowerCase();
+      const salesmanCode = normalizeCode(body?.salesmanCode || "");
+      const salesmanName = String(body?.salesmanName || "").trim();
+      const headSalesmanCode = normalizeCode(body?.headSalesmanCode || "");
+
+      if (!email || !salesmanCode || !salesmanName) {
+        return NextResponse.json({ success: false, error: "Email, salesman code, and salesman name are required." }, { status: 400 });
+      }
+
+      const { data: existingCode, error: existingCodeError } = await admin
+        .from("profiles")
+        .select("id")
+        .eq("salesman_code", salesmanCode)
+        .maybeSingle();
+
+      if (existingCodeError) throw existingCodeError;
+      if (existingCode) {
+        return NextResponse.json({ success: false, error: `Salesman code ${salesmanCode} already exists.` }, { status: 409 });
+      }
+
+      let headSalesmanName = "";
+      if (headSalesmanCode) {
+        const { data: headSalesman, error: headError } = await admin
+          .from("profiles")
+          .select("salesman_name,salesman_code")
+          .eq("salesman_code", headSalesmanCode)
+          .maybeSingle();
+
+        if (headError) throw headError;
+        if (!headSalesman) {
+          return NextResponse.json({ success: false, error: "Head salesman not found." }, { status: 404 });
+        }
+
+        headSalesmanName = headSalesman.salesman_name || "";
+      }
+
+      const password = defaultPasswordFor(salesmanCode);
+      const { data: createdUser, error: createUserError } = await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          head_salesman_code: headSalesmanCode || null,
+          head_salesman_name: headSalesmanName || null,
+        },
+      });
+
+      if (createUserError) {
+        return NextResponse.json({ success: false, error: createUserError.message || "Unable to create salesman login." }, { status: 409 });
+      }
+
+      const userId = createdUser?.user?.id;
+      if (!userId) {
+        return NextResponse.json({ success: false, error: "Created user id is missing." }, { status: 500 });
+      }
+
+      const { error: profileInsertError } = await admin.from("profiles").upsert({
+        id: userId,
+        role: "salesman",
+        salesman_code: salesmanCode,
+        salesman_name: salesmanName,
+      });
+
+      if (profileInsertError) {
+        await admin.auth.admin.deleteUser(userId);
+        throw profileInsertError;
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Salesman ${salesmanName} created successfully.`,
+        created: {
+          id: userId,
+          email,
+          salesman_code: salesmanCode,
+          salesman_name: salesmanName,
+          password,
+        },
+      });
+    }
+
     if (mode === "assign-head") {
       const salesmanId = String(body?.salesmanId || "").trim();
       const headSalesmanCode = normalizeCode(body?.headSalesmanCode || "");

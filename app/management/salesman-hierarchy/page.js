@@ -15,6 +15,7 @@ function defaultPasswordFor(code) {
 
 export default function SalesmanHierarchyPage() {
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
   const [savingId, setSavingId] = useState("");
   const [resettingId, setResettingId] = useState("");
   const [bulkResetting, setBulkResetting] = useState(false);
@@ -23,51 +24,60 @@ export default function SalesmanHierarchyPage() {
   const [salesmen, setSalesmen] = useState([]);
   const [headOptions, setHeadOptions] = useState([]);
   const [headSelections, setHeadSelections] = useState({});
+  const [newSalesman, setNewSalesman] = useState({
+    salesmanName: "",
+    salesmanCode: "",
+    email: "",
+    headSalesmanCode: "",
+  });
 
-  useEffect(() => {
-    async function load() {
-      const supabase = getSupabaseClient();
-      if (!supabase) {
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setError("");
-
-      try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session?.access_token) {
-          throw new Error("Please login again.");
-        }
-
-        const response = await fetch("/api/admin/salesmen-hierarchy", {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        });
-
-        const data = await response.json();
-        if (!response.ok || !data.success) {
-          throw new Error(data.error || "Unable to load salesman hierarchy.");
-        }
-
-        setSalesmen(data.salesmen || []);
-        setHeadOptions(data.headOptions || []);
-        setHeadSelections(
-          Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.head_salesman_code || ""]))
-        );
-      } catch (err) {
-        setError(err.message || "Unable to load salesman hierarchy.");
-      } finally {
-        setLoading(false);
-      }
+  async function loadHierarchy(showLoader = false) {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setLoading(false);
+      return;
     }
 
-    load();
+    if (showLoader) {
+      setLoading(true);
+    }
+
+    setError("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Please login again.");
+      }
+
+      const response = await fetch("/api/admin/salesmen-hierarchy", {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Unable to load salesman hierarchy.");
+      }
+
+      setSalesmen(data.salesmen || []);
+      setHeadOptions(data.headOptions || []);
+      setHeadSelections(
+        Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.head_salesman_code || ""]))
+      );
+    } catch (err) {
+      setError(err.message || "Unable to load salesman hierarchy.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadHierarchy(true);
   }, []);
 
   const summary = useMemo(() => {
@@ -127,6 +137,7 @@ export default function SalesmanHierarchyPage() {
       });
 
       setMessage(result.message || "Head salesman saved.");
+      await loadHierarchy(false);
     } catch (err) {
       setError(err.message || "Unable to save assignment.");
     } finally {
@@ -152,6 +163,34 @@ export default function SalesmanHierarchyPage() {
       setError(err.message || "Unable to reset password.");
     } finally {
       setResettingId("");
+    }
+  }
+
+  async function createSalesman(event) {
+    event.preventDefault();
+    setCreating(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const result = await postAction({
+        mode: "create-salesman",
+        salesmanName: newSalesman.salesmanName,
+        salesmanCode: normalizeCode(newSalesman.salesmanCode),
+        email: String(newSalesman.email || "").trim().toLowerCase(),
+        headSalesmanCode: normalizeCode(newSalesman.headSalesmanCode || ""),
+      });
+
+      const created = result.created || {};
+      setMessage(
+        `${result.message || "Salesman created."} Login: ${created.email || "-"} | Default password: ${created.password || "-"}`
+      );
+      setNewSalesman({ salesmanName: "", salesmanCode: "", email: "", headSalesmanCode: "" });
+      await loadHierarchy(false);
+    } catch (err) {
+      setError(err.message || "Unable to create salesman.");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -210,6 +249,71 @@ export default function SalesmanHierarchyPage() {
           <section className="moduleMetricCard"><span>Assigned under head</span><strong>{summary.assigned}</strong></section>
           <section className="moduleMetricCard"><span>Head salesmen in use</span><strong>{summary.heads}</strong></section>
         </div>
+
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>Create Salesman</h2>
+            <span>Creates login and profile in one step</span>
+          </div>
+
+          <form className="moduleFormGrid" onSubmit={createSalesman}>
+            <label>
+              Salesman Name
+              <input
+                className="moduleInput"
+                required
+                value={newSalesman.salesmanName}
+                onChange={(event) => setNewSalesman((current) => ({ ...current, salesmanName: event.target.value }))}
+                placeholder="Ali Khan"
+              />
+            </label>
+
+            <label>
+              Salesman Code
+              <input
+                className="moduleInput"
+                required
+                value={newSalesman.salesmanCode}
+                onChange={(event) => setNewSalesman((current) => ({ ...current, salesmanCode: normalizeCode(event.target.value) }))}
+                placeholder="S001"
+              />
+            </label>
+
+            <label>
+              Email/Login
+              <input
+                className="moduleInput"
+                required
+                type="email"
+                value={newSalesman.email}
+                onChange={(event) => setNewSalesman((current) => ({ ...current, email: event.target.value }))}
+                placeholder="salesman@company.com"
+              />
+            </label>
+
+            <label>
+              Assign Head Salesman
+              <select
+                className="moduleInput"
+                value={newSalesman.headSalesmanCode}
+                onChange={(event) => setNewSalesman((current) => ({ ...current, headSalesmanCode: event.target.value }))}
+              >
+                <option value="">No head</option>
+                {headOptions.map((option) => (
+                  <option key={`new-${option.id}`} value={option.salesman_code || ""}>
+                    {option.salesman_name || option.salesman_code} {option.salesman_code ? `(${option.salesman_code})` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="moduleFieldFull">
+              <button className="modulePrimaryButton" type="submit" disabled={creating}>
+                {creating ? "Creating..." : "Create Salesman"}
+              </button>
+            </div>
+          </form>
+        </section>
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">

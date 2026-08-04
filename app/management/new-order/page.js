@@ -34,6 +34,27 @@ function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
 }
 
+function formatHistoryChange(change) {
+  if (!change) return "";
+
+  const baseLabel = `${change.item_code || "-"} ${change.item_name || ""}`.trim();
+  if (change.type === "ADDED") {
+    return `${baseLabel}: added ${change.after_quantity || 0} qty at SAR ${Number(change.after_rate || 0).toFixed(2)}`;
+  }
+  if (change.type === "REMOVED") {
+    return `${baseLabel}: removed ${change.before_quantity || 0} qty`;
+  }
+
+  const parts = [];
+  if (Number(change.before_quantity || 0) !== Number(change.after_quantity || 0)) {
+    parts.push(`qty ${change.before_quantity || 0} -> ${change.after_quantity || 0}`);
+  }
+  if (Number(change.before_rate || 0) !== Number(change.after_rate || 0)) {
+    parts.push(`rate SAR ${Number(change.before_rate || 0).toFixed(2)} -> SAR ${Number(change.after_rate || 0).toFixed(2)}`);
+  }
+  return `${baseLabel}: ${parts.join(", ")}`;
+}
+
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
@@ -376,6 +397,7 @@ export default function NewOrderPage() {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [accessScope, setAccessScope] = useState(null);
   const [prefilledCustomer, setPrefilledCustomer] = useState(null);
+  const [editOrderId, setEditOrderId] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -384,17 +406,19 @@ export default function NewOrderPage() {
     const customerCode = String(params.get("customer_code") || "").trim();
     const customerName = String(params.get("customer_name") || "").trim();
     const salesmanCode = String(params.get("salesman_code") || "").trim();
+    const orderId = String(params.get("order_id") || "").trim();
 
     if (!customerCode || !customerName) {
       setPrefilledCustomer(null);
-      return;
+    } else {
+      setPrefilledCustomer({
+        customer_code: customerCode,
+        customer_name: customerName,
+        current_salesman_code: salesmanCode,
+      });
     }
 
-    setPrefilledCustomer({
-      customer_code: customerCode,
-      customer_name: customerName,
-      current_salesman_code: salesmanCode,
-    });
+    setEditOrderId(orderId);
   }, []);
 
   const mergedItemsMaster = useMemo(() => {
@@ -571,6 +595,8 @@ export default function NewOrderPage() {
     orderQuantities,
     savingOrder,
     submittingOrder,
+    orderHistory,
+    loadedOrderStatus,
     updateQty,
     increaseQty,
     decreaseQty,
@@ -584,6 +610,7 @@ export default function NewOrderPage() {
     setError,
     setMessage,
     accessScope,
+    editOrderId,
   });
 
   const buildOrderSnapshot = useCallback(
@@ -616,9 +643,10 @@ export default function NewOrderPage() {
         totalQuantity: orderSummary.totalQuantity,
         grandTotal: calculateGrandTotal(orderItems, priceList),
         lines,
+        history: orderHistory,
       };
     },
-    [orderItems, orderSummary.itemCount, orderSummary.totalQuantity, priceList, selectedCustomer]
+    [orderHistory, orderItems, orderSummary.itemCount, orderSummary.totalQuantity, priceList, selectedCustomer]
   );
 
   const downloadOrderPdf = useCallback(
@@ -687,6 +715,30 @@ export default function NewOrderPage() {
         doc.setFont(undefined, "normal");
         doc.setFontSize(10);
         doc.text(`Order ID: ${snapshot.orderId}`, marginX + 12, marginTop + 64);
+
+        if (Array.isArray(snapshot.history) && snapshot.history.length > 0) {
+          let historyY = pageHeight - 110;
+          doc.setFont(undefined, "bold");
+          doc.text("Change History", marginX, historyY);
+          historyY += 14;
+          doc.setFont(undefined, "normal");
+
+          snapshot.history.slice(-6).forEach((entry) => {
+            const when = entry.changedAt || entry.savedAt || entry.saved_at || entry.timestamp || "";
+            const label = `${when ? new Date(when).toLocaleString("en-GB") : "-"} • ${entry.action || "UPDATED"}`;
+            const lines = [label, ...(Array.isArray(entry.changes) ? entry.changes.map(formatHistoryChange) : [])].filter(Boolean);
+
+            lines.forEach((line) => {
+              const wrapped = doc.splitTextToSize(line, pageWidth - marginX * 2 - 16);
+              wrapped.forEach((part, index) => {
+                doc.text(part, marginX + 8, historyY + index * 10);
+              });
+              historyY += Math.max(12, wrapped.length * 10);
+            });
+
+            historyY += 4;
+          });
+        }
         doc.text(`Status: ${snapshot.statusLabel}`, marginX + 12, marginTop + 78);
 
         const rightColX = marginX + contentWidth - 210;
@@ -1042,6 +1094,7 @@ export default function NewOrderPage() {
         <section className="moduleSection">
           <div className="moduleSectionHeader">
             <h2>Customer Search</h2>
+            {editOrderId && <span>Editing order #{editOrderId}</span>}
           </div>
           <div className="moduleFilterRow">
             <input
@@ -1123,6 +1176,39 @@ export default function NewOrderPage() {
                   setShowTransactions={setShowTransactions}
                   analytics={analytics}
                 />
+
+                {Array.isArray(orderHistory) && orderHistory.length > 0 && (
+                  <section className="moduleSection">
+                    <div className="moduleSectionHeader">
+                      <h2>Order Change History</h2>
+                      <span>{orderHistory.length} event(s)</span>
+                    </div>
+                    <div className="moduleTableWrap">
+                      <table className="moduleTable">
+                        <thead>
+                          <tr>
+                            <th>When</th>
+                            <th>Action</th>
+                            <th>Details</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {orderHistory.slice().reverse().map((entry, index) => (
+                            <tr key={`${entry.changedAt || entry.savedAt || entry.saved_at || index}-${index}`}>
+                              <td>{entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-GB") : entry.savedAt || entry.saved_at || "-"}</td>
+                              <td>{entry.action || "UPDATED"}</td>
+                              <td>
+                                {(Array.isArray(entry.changes) ? entry.changes : []).map((change, changeIndex) => (
+                                  <div key={`${change.item_code || index}-${changeIndex}`}>{formatHistoryChange(change)}</div>
+                                ))}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
               </>
             )}
 

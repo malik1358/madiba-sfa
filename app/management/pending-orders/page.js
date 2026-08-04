@@ -44,6 +44,7 @@ export default function PendingOrdersPage() {
   const [userRole, setUserRole] = useState("");
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [orderLines, setOrderLines] = useState([]);
+  const [orderHistory, setOrderHistory] = useState([]);
   const [loadingLines, setLoadingLines] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const startOfTodayIso = useMemo(() => {
@@ -62,6 +63,7 @@ export default function PendingOrdersPage() {
     if (activeOrderId === orderId) {
       setActiveOrderId(null);
       setOrderLines([]);
+      setOrderHistory([]);
       return;
     }
 
@@ -77,12 +79,28 @@ export default function PendingOrdersPage() {
 
       if (linesError) throw linesError;
 
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const historyResponse = await fetch(`/api/order-history?orderId=${encodeURIComponent(orderId)}`, {
+        headers: session?.access_token
+          ? {
+              Authorization: `Bearer ${session.access_token}`,
+            }
+          : {},
+      });
+
+      const historyPayload = await historyResponse.json().catch(() => ({}));
+
       setActiveOrderId(orderId);
       setOrderLines(data || []);
+      setOrderHistory(historyResponse.ok && historyPayload.success && Array.isArray(historyPayload.history) ? historyPayload.history : []);
     } catch (err) {
       setError(err.message || "Unable to open order details.");
       setActiveOrderId(null);
       setOrderLines([]);
+      setOrderHistory([]);
     } finally {
       setLoadingLines(false);
     }
@@ -258,6 +276,35 @@ export default function PendingOrdersPage() {
       doc.text(formatMoney(grandTotal), 546, summaryY + 54, { align: "right" });
       doc.setFont(undefined, "normal");
 
+      if (orderHistory.length > 0) {
+        let historyY = Math.min(summaryY + 96, 650);
+        if (historyY > 650) {
+          doc.addPage();
+          historyY = 40;
+        }
+
+        doc.setFont(undefined, "bold");
+        doc.text("Order Change History", 40, historyY);
+        historyY += 14;
+        doc.setFont(undefined, "normal");
+
+        orderHistory.slice(-8).forEach((entry) => {
+          const header = `${entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-GB") : "-"} • ${entry.action || "UPDATED"}`;
+          const wrappedHeader = doc.splitTextToSize(header, 515);
+          wrappedHeader.forEach((line, index) => doc.text(line, 40, historyY + index * 10));
+          historyY += Math.max(12, wrappedHeader.length * 10);
+
+          (Array.isArray(entry.changes) ? entry.changes : []).forEach((change) => {
+            const changeText = `${change.item_code || "-"}: ${change.type || "UPDATED"} ${Number(change.before_quantity || 0)} -> ${Number(change.after_quantity || 0)} | SAR ${Number(change.before_rate || 0).toFixed(2)} -> SAR ${Number(change.after_rate || 0).toFixed(2)}`;
+            const wrappedChange = doc.splitTextToSize(changeText, 505);
+            wrappedChange.forEach((line, index) => doc.text(line, 48, historyY + index * 10));
+            historyY += Math.max(12, wrappedChange.length * 10);
+          });
+
+          historyY += 6;
+        });
+      }
+
       const safeCustomer = String(activeOrder.customer_code || "customer").replace(/[^a-zA-Z0-9_-]/g, "_");
       const safeDate = String(activeOrder.updated_at || activeOrder.created_at || new Date().toISOString())
         .slice(0, 19)
@@ -418,9 +465,52 @@ export default function PendingOrdersPage() {
                 >
                   {downloadingPdf ? "Generating PDF..." : "Regenerate PDF"}
                 </button>
+                {activeOrder && (
+                  <Link
+                    href={`/management/new-order?order_id=${encodeURIComponent(activeOrder.id)}&customer_code=${encodeURIComponent(activeOrder.customer_code || "")}&customer_name=${encodeURIComponent(activeOrder.customer_name || "")}&salesman_code=${encodeURIComponent(activeOrder.salesman_code || "")}`}
+                    className="moduleInlineButton"
+                  >
+                    Edit Order
+                  </Link>
+                )}
                 <Link href="/management/new-order" className="moduleInlineButton">Open Order Workflow</Link>
                 <Link href="/management/customer-audit" className="moduleInlineButton">Go to Customer Audit</Link>
               </div>
+
+              {orderHistory.length > 0 && (
+                <div style={{ marginTop: "14px" }}>
+                  <div className="moduleSectionHeader">
+                    <h2>Change History</h2>
+                    <span>{orderHistory.length} event(s)</span>
+                  </div>
+                  <div className="moduleTableWrap">
+                    <table className="moduleTable">
+                      <thead>
+                        <tr>
+                          <th>When</th>
+                          <th>Action</th>
+                          <th>Details</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orderHistory.slice().reverse().map((entry, index) => (
+                          <tr key={`${entry.changedAt || index}-${index}`}>
+                            <td>{entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-GB") : "-"}</td>
+                            <td>{entry.action || "UPDATED"}</td>
+                            <td>
+                              {(Array.isArray(entry.changes) ? entry.changes : []).map((change, changeIndex) => (
+                                <div key={`${change.item_code || index}-${changeIndex}`}>
+                                  {change.item_code || "-"}: {change.type || "UPDATED"} {Number(change.before_quantity || 0)} → {Number(change.after_quantity || 0)}
+                                </div>
+                              ))}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>

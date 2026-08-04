@@ -66,7 +66,7 @@ export default function MyPerformancePage() {
 
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
-          .select("id,salesman_code,monthly_target")
+          .select("id,salesman_code")
           .eq("id", session.user.id)
           .single();
 
@@ -154,8 +154,7 @@ export default function MyPerformancePage() {
         const orders = submittedOrders.length;
         const collection = submittedOrders.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
         const averageOrderValue = orders ? collection / orders : 0;
-        const monthlyTarget = Number(profile.monthly_target || 0);
-        const achievement = monthlyTarget > 0 ? (salesMonth / monthlyTarget) * 100 : 0;
+        const achievement = 0;
 
         setMetrics({
           salesToday,

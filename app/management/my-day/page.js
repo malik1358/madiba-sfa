@@ -224,7 +224,7 @@ export default function MyDayPage() {
 
         const { data: profileData, error: profileError } = await supabase
           .from("profiles")
-          .select("id,salesman_code,salesman_name")
+          .select("id,salesman_code,salesman_name,role")
           .eq("id", session.user.id)
           .single();
 
@@ -863,6 +863,8 @@ export default function MyDayPage() {
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   }, [routeRows]);
 
+  const isAdministrator = String(profile?.role || "").toLowerCase() === "admin";
+
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
     return (
@@ -943,16 +945,18 @@ export default function MyDayPage() {
             />
             <button type="button" className="moduleInlineButton" onClick={() => handleAttendanceAction("NOTE")} disabled={!logsEnabled || Boolean(attendanceBusy)}>{t("saveNote")}</button>
           </div>
-          <ul className="moduleList">
-            {todayLogs.map((row) => (
-              <li key={row.id}>
-                <strong>{row.entry_type}</strong>
-                <span>{row.created_at ? new Date(row.created_at).toLocaleTimeString("en-GB") : ""}</span>
-                {getLogPreview(row) ? <p>{getLogPreview(row)}</p> : null}
-              </li>
-            ))}
-            {todayLogs.length === 0 && <li>{t("noLogs")}</li>}
-          </ul>
+          {isAdministrator && (
+            <ul className="moduleList">
+              {todayLogs.map((row) => (
+                <li key={row.id}>
+                  <strong>{row.entry_type}</strong>
+                  <span>{row.created_at ? new Date(row.created_at).toLocaleTimeString("en-GB") : ""}</span>
+                  {getLogPreview(row) ? <p>{getLogPreview(row)}</p> : null}
+                </li>
+              ))}
+              {todayLogs.length === 0 && <li>{t("noLogs")}</li>}
+            </ul>
+          )}
         </section>
 
         <section className="moduleSection">

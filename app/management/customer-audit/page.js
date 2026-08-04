@@ -13,7 +13,6 @@ const TEXT = {
 };
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -39,12 +38,12 @@ import { useOrder } from "./hooks/useOrder";
 
 
 export default function CustomerAuditPage() {
-  const searchParams = useSearchParams();
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [priceList, setPriceList] = useState({});
+  const [requestedCustomerCode, setRequestedCustomerCode] = useState("");
 
   const {
     customers,
@@ -129,10 +128,11 @@ export default function CustomerAuditPage() {
     });
   }, [customers, selectedSalesman, search]);
 
-  const requestedCustomerCode = useMemo(
-    () => String(searchParams.get("customer_code") || "").trim().toUpperCase(),
-    [searchParams]
-  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setRequestedCustomerCode(String(params.get("customer_code") || "").trim().toUpperCase());
+  }, []);
 
   function handleOpenCustomer(customer) {
     setOrderQuantities({});

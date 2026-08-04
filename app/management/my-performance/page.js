@@ -98,7 +98,7 @@ export default function MyPerformancePage() {
 
         let ordersQuery = supabase
           .from("sales_orders")
-          .select("id,status,total_amount,submitted_at,created_by,salesman_code")
+          .select("id,status,submitted_at,created_by,salesman_code")
           .gte("created_at", `${monthStart}T00:00:00`);
 
         let customersQuery = supabase
@@ -151,8 +151,21 @@ export default function MyPerformancePage() {
         });
 
         const submittedOrders = visibleOrders.filter((row) => row.status === "SUBMITTED");
+        const submittedOrderIds = submittedOrders.map((row) => row.id).filter(Boolean);
+        let collection = 0;
+
+        if (submittedOrderIds.length > 0) {
+          const { data: orderItems, error: orderItemsError } = await supabase
+            .from("sales_order_items")
+            .select("order_id,line_value")
+            .in("order_id", submittedOrderIds);
+
+          if (orderItemsError) throw orderItemsError;
+
+          collection = (orderItems || []).reduce((sum, row) => sum + Number(row.line_value || 0), 0);
+        }
+
         const orders = submittedOrders.length;
-        const collection = submittedOrders.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
         const averageOrderValue = orders ? collection / orders : 0;
         const achievement = 0;
 

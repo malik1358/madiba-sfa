@@ -39,8 +39,11 @@ const DOCUMENT_TYPES = ["CR", "VAT", "ID", "CREDIT_APPLICATION", "OTHER"];
 
 function extractMissingProspectsColumn(errorMessage) {
   const text = String(errorMessage || "");
-  const match = text.match(/column\s+prospects\.(\w+)\s+does\s+not\s+exist/i);
-  return match?.[1] || "";
+  const postgresStyle = text.match(/column\s+prospects\.(\w+)\s+does\s+not\s+exist/i);
+  if (postgresStyle?.[1]) return postgresStyle[1];
+
+  const schemaCacheStyle = text.match(/Could not find the ['"](\w+)['"] column of ['"]prospects['"] in the schema cache/i);
+  return schemaCacheStyle?.[1] || "";
 }
 
 function parseGpsCoordinates(rawValue) {

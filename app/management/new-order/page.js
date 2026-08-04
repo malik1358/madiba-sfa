@@ -170,6 +170,35 @@ function scoreSheetName(value) {
   return text.length;
 }
 
+function normalizeHeaderCell(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function findHeaderIndex(rows, aliases, maxRows = 5) {
+  if (!Array.isArray(rows) || rows.length === 0) return -1;
+  const normalizedAliases = aliases.map((alias) => normalizeHeaderCell(alias));
+  const limit = Math.min(maxRows, rows.length);
+
+  for (let r = 0; r < limit; r += 1) {
+    const row = rows[r];
+    if (!Array.isArray(row)) continue;
+
+    for (let c = 0; c < row.length; c += 1) {
+      const cell = normalizeHeaderCell(row[c]);
+      if (!cell) continue;
+      if (normalizedAliases.includes(cell)) {
+        return c;
+      }
+    }
+  }
+
+  return -1;
+}
+
 function parsePricePayload(payload) {
   const priceMap = {};
   const sheetItems = [];
@@ -205,12 +234,47 @@ function parsePricePayload(payload) {
 
     if (Array.isArray(value)) {
       if (value.length && Array.isArray(value[0])) {
-        const itemCodeIndex = sheetColumnIndex("B");
-        const itemNameIndex = sheetColumnIndex("C");
-        const categoryIndex = sheetColumnIndex("CO");
-        const rateIndex = sheetColumnIndex("D");
+        const headerCodeIndex = findHeaderIndex(value, [
+          "item code",
+          "item_code",
+          "code",
+          "sku",
+          "stock code",
+        ]);
+        const headerNameIndex = findHeaderIndex(value, [
+          "item name",
+          "item",
+          "item description",
+          "description",
+          "product name",
+        ]);
+        const headerCategoryIndex = findHeaderIndex(value, [
+          "item category",
+          "category",
+          "product category",
+          "item group",
+          "group",
+        ]);
+        const headerRateIndex = findHeaderIndex(value, [
+          "rate",
+          "price",
+          "selling rate",
+          "unit price",
+        ]);
+
+        const itemCodeIndex = headerCodeIndex >= 0 ? headerCodeIndex : sheetColumnIndex("B");
+        const itemNameIndex = headerNameIndex >= 0 ? headerNameIndex : sheetColumnIndex("C");
+        const categoryIndex = headerCategoryIndex >= 0 ? headerCategoryIndex : sheetColumnIndex("CO");
+        const rateIndex = headerRateIndex >= 0 ? headerRateIndex : sheetColumnIndex("D");
 
         value.forEach((row) => {
+          const isHeaderRow = Array.isArray(row)
+            && row.some((cell) => {
+              const header = normalizeHeaderCell(cell);
+              return ["item code", "item name", "item", "rate", "price", "category", "item category"].includes(header);
+            });
+          if (isHeaderRow) return;
+
           const explicitCode = itemCodeIndex >= 0 ? normalizeCode(sheetCell(row, itemCodeIndex)) : "";
           const codeCandidates = row.filter((cell) => looksLikeItemCode(cell)).map((cell) => normalizeCode(cell));
           const code = explicitCode || codeCandidates.find(Boolean) || "";
@@ -243,9 +307,9 @@ function parsePricePayload(payload) {
     if (typeof value !== "object") return;
 
     if (isRowLike(value)) {
-      const code = readAny(value, ["item_code", "itemCode", "code", "B", "Item Code", "ITEM CODE"]);
-      const name = readAny(value, ["item_name", "itemName", "name", "C", "Item Name", "ITEM NAME"]);
-      const category = readAny(value, ["category", "CO", "Category", "ITEM CATEGORY", "Item Category"]);
+      const code = readAny(value, ["item_code", "itemCode", "code", "B", "Item Code", "ITEM CODE", "sku", "SKU"]);
+      const name = readAny(value, ["item_name", "itemName", "name", "C", "Item Name", "ITEM NAME", "description", "Description"]);
+      const category = readAny(value, ["category", "item_category", "CO", "Category", "ITEM CATEGORY", "Item Category", "group", "Group", "item_group", "Item Group"]);
       const rate = readAny(value, ["rate", "price", "RATE", "Price", "D", "Selling Rate"]);
 
       if (code) {

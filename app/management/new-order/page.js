@@ -67,6 +67,52 @@ function hasMeaningfulValue(value) {
   return !["UNCLASSIFIED", "N/A", "NA", "-"] .includes(text.toUpperCase());
 }
 
+async function fetchItemCategoryLookup(supabase, scope) {
+  const pageSize = 1000;
+  let from = 0;
+  const lookup = new Map();
+
+  while (true) {
+    let query = supabase
+      .from("sales_raw")
+      .select("item_code,item_name,category,salesman_code")
+      .order("item_code", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (!scope.hasAllAccess) {
+      query = query.in("salesman_code", scope.visibleSalesmanCodes);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const rows = data || [];
+    rows.forEach((row) => {
+      const code = normalizeCode(row.item_code);
+      if (!code) return;
+
+      const current = lookup.get(code) || { item_name: "", category: "" };
+      const nextName = normalizeText(row.item_name);
+      const nextCategory = normalizeText(row.category);
+
+      if (!hasMeaningfulValue(current.item_name) && hasMeaningfulValue(nextName)) {
+        current.item_name = nextName;
+      }
+
+      if (!hasMeaningfulValue(current.category) && hasMeaningfulValue(nextCategory)) {
+        current.category = nextCategory;
+      }
+
+      lookup.set(code, current);
+    });
+
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return lookup;
+}
+
 function isRowLike(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
@@ -249,6 +295,7 @@ export default function NewOrderPage() {
   const [customers, setCustomers] = useState([]);
   const [itemsMaster, setItemsMaster] = useState([]);
   const [priceSheetItems, setPriceSheetItems] = useState([]);
+  const [historyCategoryLookup, setHistoryCategoryLookup] = useState(new Map());
   const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [itemSearch, setItemSearch] = useState("");
@@ -292,12 +339,13 @@ export default function NewOrderPage() {
     (itemsMaster || []).forEach((item) => {
       const code = normalizeCode(item.item_code);
       if (!code) return;
+      const historyFallback = historyCategoryLookup.get(code) || {};
 
       itemMap.set(code, {
         ...item,
         item_code: code,
-        item_name: String(item.item_name || code).trim(),
-        category: String(item.category || "Unclassified").trim() || "Unclassified",
+        item_name: String(item.item_name || historyFallback.item_name || code).trim(),
+        category: String(item.category || historyFallback.category || "Unclassified").trim() || "Unclassified",
         source: "ITEM_MASTER",
       });
     });
@@ -308,10 +356,11 @@ export default function NewOrderPage() {
 
       const existing = itemMap.get(code);
       if (!existing) {
+        const historyFallback = historyCategoryLookup.get(code) || {};
         itemMap.set(code, {
           item_code: code,
-          item_name: normalizeText(sheetItem.item_name) || code,
-          category: normalizeText(sheetItem.category) || "Unclassified",
+          item_name: normalizeText(sheetItem.item_name) || historyFallback.item_name || code,
+          category: normalizeText(sheetItem.category) || historyFallback.category || "Unclassified",
           source: "PRICE_SHEET_ONLY",
         });
         return;
@@ -321,11 +370,12 @@ export default function NewOrderPage() {
       const sheetName = normalizeText(sheetItem.item_name);
       const existingCategory = normalizeText(existing.category);
       const sheetCategory = normalizeText(sheetItem.category);
+      const historyFallback = historyCategoryLookup.get(code) || {};
 
-      const nextName = hasMeaningfulValue(existingName) ? existingName : (sheetName || code);
+      const nextName = hasMeaningfulValue(existingName) ? existingName : (sheetName || historyFallback.item_name || code);
       const nextCategory = hasMeaningfulValue(sheetCategory)
         ? sheetCategory
-        : (hasMeaningfulValue(existingCategory) ? existingCategory : "Unclassified");
+        : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));
 
       itemMap.set(code, {
         ...existing,
@@ -338,17 +388,18 @@ export default function NewOrderPage() {
     Object.keys(priceList || {}).forEach((rawCode) => {
       const code = normalizeCode(rawCode);
       if (!code || itemMap.has(code)) return;
+      const historyFallback = historyCategoryLookup.get(code) || {};
 
       itemMap.set(code, {
         item_code: code,
-        item_name: code,
-        category: "Unclassified",
+        item_name: historyFallback.item_name || code,
+        category: historyFallback.category || "Unclassified",
         source: "PRICE_MAP_ONLY",
       });
     });
 
     return Array.from(itemMap.values()).sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
-  }, [itemsMaster, priceSheetItems, priceList]);
+  }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.customer_code === selectedCustomerCode) || null,
@@ -774,13 +825,14 @@ export default function NewOrderPage() {
           draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
         }
 
-        const [customersRes, itemsRes, draftsRes] = await Promise.all([
+        const [customersRes, itemsRes, draftsRes, categoriesRes] = await Promise.all([
           customersQuery,
           supabase
             .from("items_master")
             .select("item_code,item_name,category")
             .order("item_name"),
           draftsQuery,
+          fetchItemCategoryLookup(supabase, scope),
         ]);
 
         if (customersRes.error) throw customersRes.error;
@@ -795,6 +847,7 @@ export default function NewOrderPage() {
         setCustomers(mergedCustomers);
         setItemsMaster(itemsRes.data || []);
         setPreviousDrafts(draftsRes.data || []);
+        setHistoryCategoryLookup(categoriesRes || new Map());
       } catch (err) {
         setError(err.message || "Unable to load new order data.");
       } finally {

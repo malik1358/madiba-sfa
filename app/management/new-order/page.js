@@ -252,6 +252,27 @@ export default function NewOrderPage() {
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [accessScope, setAccessScope] = useState(null);
+  const [prefilledCustomer, setPrefilledCustomer] = useState(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const customerCode = String(params.get("customer_code") || "").trim();
+    const customerName = String(params.get("customer_name") || "").trim();
+    const salesmanCode = String(params.get("salesman_code") || "").trim();
+
+    if (!customerCode || !customerName) {
+      setPrefilledCustomer(null);
+      return;
+    }
+
+    setPrefilledCustomer({
+      customer_code: customerCode,
+      customer_name: customerName,
+      current_salesman_code: salesmanCode,
+    });
+  }, []);
 
   const mergedItemsMaster = useMemo(() => {
     const itemMap = new Map();
@@ -755,7 +776,12 @@ export default function NewOrderPage() {
         if (itemsRes.error) throw itemsRes.error;
         if (draftsRes.error) throw draftsRes.error;
 
-        setCustomers(customersRes.data || []);
+        const loadedCustomers = customersRes.data || [];
+        const mergedCustomers = prefilledCustomer && !loadedCustomers.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
+          ? [prefilledCustomer, ...loadedCustomers]
+          : loadedCustomers;
+
+        setCustomers(mergedCustomers);
         setItemsMaster(itemsRes.data || []);
         setPreviousDrafts(draftsRes.data || []);
       } catch (err) {
@@ -780,7 +806,14 @@ export default function NewOrderPage() {
 
     loadFoundation();
     loadPrices();
-  }, []);
+  }, [prefilledCustomer]);
+
+  useEffect(() => {
+    if (!prefilledCustomer?.customer_code) return;
+
+    setSelectedCustomerCode(prefilledCustomer.customer_code);
+    setMessage(`Prospect ${prefilledCustomer.customer_name} is ready for order creation.`);
+  }, [prefilledCustomer]);
 
   useEffect(() => {
     async function loadCustomerHistory() {

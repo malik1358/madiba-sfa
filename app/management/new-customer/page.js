@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
@@ -16,15 +17,17 @@ const INITIAL_FORM = {
   email: "",
   city: "",
   area: "",
+  national_address: "",
   gps_location: "",
   customer_type: "Retail",
   salesman_code: "",
   notes: "",
 };
 
-const DOCUMENT_TYPES = ["CR", "VAT", "ID", "OTHER"];
+const DOCUMENT_TYPES = ["CR", "VAT", "ID", "CREDIT_APPLICATION", "OTHER"];
 
 export default function NewCustomerPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -202,6 +205,7 @@ export default function NewCustomerPage() {
         customer_type: form.customer_type,
         salesman_code: form.salesman_code,
         notes: [
+          form.national_address ? `National Address: ${form.national_address}` : "",
           form.notes,
           documents.length ? `Documents: ${JSON.stringify(documents)}` : "",
         ].filter(Boolean).join("\n") || null,
@@ -212,18 +216,10 @@ export default function NewCustomerPage() {
       const { data, error: insertError } = await supabase
         .from("prospects")
         .insert(payload)
-        .select("id")
+        .select("id,customer_name,shop_name,salesman_code")
         .single();
 
       if (insertError) throw insertError;
-
-      setMessage(`Prospect #${data.id} registered successfully.`);
-      setForm((current) => ({
-        ...INITIAL_FORM,
-        salesman_code: current.salesman_code,
-      }));
-      setDocuments([]);
-      setGpsStatus("GPS is required before saving.");
 
       const { data: latest, error: latestError } = await supabase
         .from("prospects")
@@ -234,6 +230,17 @@ export default function NewCustomerPage() {
 
       if (latestError) throw latestError;
       setRecent(latest || []);
+
+      const customerCode = `PROSPECT-${data.id}`;
+      const customerName = data.customer_name || data.shop_name || `Prospect ${data.id}`;
+      const params = new URLSearchParams({
+        customer_code: customerCode,
+        customer_name: customerName,
+        salesman_code: form.salesman_code,
+        source: "prospect",
+      });
+
+      router.push(`/management/new-order?${params.toString()}`);
     } catch (err) {
       setError(err.message || "Unable to register prospect.");
     } finally {
@@ -314,6 +321,10 @@ export default function NewCustomerPage() {
             <label>
               Area
               <input className="moduleInput" required value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} />
+            </label>
+            <label className="moduleFieldFull">
+              National Address
+              <textarea className="moduleTextArea" rows={3} value={form.national_address} onChange={(e) => setForm({ ...form, national_address: e.target.value })} placeholder="Building, street, district, city, postal code, additional number" />
             </label>
             <label>
               Customer Type

@@ -18,31 +18,6 @@ export function useCustomerData({ setError, setMessage }) {
   const [expandedCategories, setExpandedCategories] = useState({});
   const [accessScope, setAccessScope] = useState(null);
 
-  const resolveBatchId = useCallback(async (supabase) => {
-    const { data: settings, error: settingsError } = await supabase
-      .from('system_settings')
-      .select('setting_value')
-      .eq('setting_key', 'active_sales_batch_id')
-      .limit(1)
-      .maybeSingle();
-
-    if (settingsError) throw settingsError;
-
-    const activeBatchId = Number(settings?.setting_value || 0);
-    if (activeBatchId) return activeBatchId;
-
-    const { data: latestBatch, error: latestBatchError } = await supabase
-      .from('import_batches')
-      .select('id')
-      .order('id', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (latestBatchError) throw latestBatchError;
-
-    return Number(latestBatch?.id || 0);
-  }, []);
-
   const loadFoundation = useCallback(async () => {
     const supabase = getSupabaseClient();
 
@@ -132,9 +107,6 @@ export function useCustomerData({ setError, setMessage }) {
     setMessage('');
 
     try {
-      const activeBatchId = await resolveBatchId(supabase);
-      if (!activeBatchId) throw new Error('No sales snapshot found.');
-
       const { data, error: salesError } = await supabase
         .from('sales_raw')
         .select(`
@@ -155,7 +127,6 @@ export function useCustomerData({ setError, setMessage }) {
           first_purchase_date,
           abc_class
         `)
-        .eq('import_batch_id', activeBatchId)
         .eq('customer_code', customer.customer_code)
         .order('transaction_date', { ascending: false })
         .order('id', { ascending: false });
@@ -172,8 +143,7 @@ export function useCustomerData({ setError, setMessage }) {
           category,
           sales_amount,
           transaction_date
-        `)
-        .eq('import_batch_id', activeBatchId);
+          `);
 
       if (!accessScope?.hasAllAccess) {
         peerQuery = peerQuery.in('salesman_code', accessScope?.visibleSalesmanCodes || []);
@@ -188,7 +158,7 @@ export function useCustomerData({ setError, setMessage }) {
     } finally {
       setLoadingCustomer(false);
     }
-  }, [accessScope, resolveBatchId, setError, setMessage]);
+  }, [accessScope, setError, setMessage]);
 
   const toggleCategory = useCallback((category) => {
     setExpandedCategories((current) => ({

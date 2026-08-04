@@ -67,31 +67,6 @@ function hasMeaningfulValue(value) {
   return !["UNCLASSIFIED", "N/A", "NA", "-"] .includes(text.toUpperCase());
 }
 
-async function resolveBatchId(supabase) {
-  const { data: settings, error: settingsError } = await supabase
-    .from("system_settings")
-    .select("setting_value")
-    .eq("setting_key", "active_sales_batch_id")
-    .limit(1)
-    .maybeSingle();
-
-  if (settingsError) throw settingsError;
-
-  const activeBatchId = Number(settings?.setting_value || 0);
-  if (activeBatchId) return activeBatchId;
-
-  const { data: latestBatch, error: latestBatchError } = await supabase
-    .from("import_batches")
-    .select("id")
-    .order("id", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latestBatchError) throw latestBatchError;
-
-  return Number(latestBatch?.id || 0);
-}
-
 function isRowLike(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
@@ -869,17 +844,9 @@ export default function NewOrderPage() {
       setAuditExpandedCategories({});
 
       try {
-        const activeBatchId = await resolveBatchId(supabase);
-        if (!activeBatchId) {
-          setTransactions([]);
-          setPeerTransactions([]);
-          return;
-        }
-
         let peersQuery = supabase
           .from("sales_raw")
           .select("customer_code,item_code,item_name,category,sales_amount,transaction_date")
-          .eq("import_batch_id", activeBatchId);
 
         if (!accessScope?.hasAllAccess) {
           peersQuery = peersQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
@@ -891,7 +858,6 @@ export default function NewOrderPage() {
             .select(
               "id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class"
             )
-            .eq("import_batch_id", activeBatchId)
             .eq("customer_code", selectedCustomer.customer_code)
             .order("transaction_date", { ascending: false })
             .order("id", { ascending: false }),

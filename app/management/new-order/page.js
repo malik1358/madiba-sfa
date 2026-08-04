@@ -768,8 +768,7 @@ export default function NewOrderPage() {
           .from("sales_orders")
           .select("id,customer_code,customer_name,updated_at,status")
           .eq("status", "DRAFT")
-          .order("updated_at", { ascending: false })
-          .limit(25);
+          .order("updated_at", { ascending: false });
 
         if (!scope.hasAllAccess) {
           draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
@@ -849,7 +848,8 @@ export default function NewOrderPage() {
           .from("system_settings")
           .select("setting_value")
           .eq("setting_key", "active_sales_batch_id")
-          .single();
+          .limit(1)
+          .maybeSingle();
 
         if (settingsError) throw settingsError;
 

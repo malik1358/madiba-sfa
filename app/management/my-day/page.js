@@ -42,7 +42,9 @@ const PAGE_TEXT = {
   itemName: { en: "Item name", ar: "اسم الصنف" },
   available: { en: "Available", ar: "متوفر" },
   notAvailable: { en: "Not Available", ar: "غير متوفر" },
-  addStock: { en: "Add Stock Note", ar: "إضافة ملاحظة مخزون" },
+  boughtItems: { en: "Bought Items", ar: "الأصناف المشتراة" },
+  loadingItems: { en: "Loading bought items...", ar: "جاري تحميل الأصناف المشتراة..." },
+  noBoughtItems: { en: "No bought items found for this customer.", ar: "لا توجد أصناف مشتراة لهذا العميل." },
   saveVisitReport: { en: "Save Visit Report", ar: "حفظ تقرير الزيارة" },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
   paymentFollowup: { en: "Payment follow-up", ar: "متابعة دفع" },
@@ -96,12 +98,11 @@ export default function MyDayPage() {
   const [accessScope, setAccessScope] = useState(null);
   const [activeVisitCustomerCode, setActiveVisitCustomerCode] = useState("");
   const [visitSaving, setVisitSaving] = useState(false);
+  const [visitItemsLoading, setVisitItemsLoading] = useState(false);
   const [visitForm, setVisitForm] = useState({
     outcome: "PAYMENT_FOLLOWUP",
     nextVisitAt: "",
     note: "",
-    stockItem: "",
-    stockStatus: "AVAILABLE",
     stockChecks: [],
   });
   const autoPingInFlight = useRef(false);
@@ -489,31 +490,84 @@ export default function MyDayPage() {
     }
   }
 
-  function openVisitReport(customerCode) {
-    setActiveVisitCustomerCode((current) => (current === customerCode ? "" : customerCode));
+  async function openVisitReport(customer) {
+    const nextCode = activeVisitCustomerCode === customer.customer_code ? "" : customer.customer_code;
+    setActiveVisitCustomerCode(nextCode);
+
+    if (!nextCode) {
+      setVisitItemsLoading(false);
+      setVisitForm({
+        outcome: "PAYMENT_FOLLOWUP",
+        nextVisitAt: "",
+        note: "",
+        stockChecks: [],
+      });
+      return;
+    }
+
+    setVisitItemsLoading(true);
     setVisitForm({
       outcome: "PAYMENT_FOLLOWUP",
       nextVisitAt: "",
       note: "",
-      stockItem: "",
-      stockStatus: "AVAILABLE",
       stockChecks: [],
     });
+
+    try {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error("Supabase is not configured.");
+      }
+
+      let itemsQuery = supabase
+        .from("sales_raw")
+        .select("item_code,item_name,transaction_date,salesman_code")
+        .eq("customer_code", customer.customer_code)
+        .order("transaction_date", { ascending: false })
+        .limit(500);
+
+      if (!accessScope?.hasAllAccess) {
+        itemsQuery = itemsQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
+      }
+
+      const { data, error: itemsError } = await itemsQuery;
+      if (itemsError) throw itemsError;
+
+      const uniqueItems = [];
+      const seen = new Set();
+      (data || []).forEach((row) => {
+        const key = String(row.item_code || row.item_name || "").trim().toUpperCase();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        uniqueItems.push({
+          itemCode: row.item_code || "",
+          itemName: row.item_name || row.item_code || key,
+          status: "",
+        });
+      });
+
+      setVisitForm((current) => ({
+        ...current,
+        stockChecks: uniqueItems,
+      }));
+    } catch (err) {
+      setError(err.message || "Unable to load bought items for this customer.");
+    } finally {
+      setVisitItemsLoading(false);
+    }
   }
 
-  function addStockCheck() {
-    if (!visitForm.stockItem.trim()) return;
-
+  function setStockStatus(itemKey, status) {
     setVisitForm((current) => ({
       ...current,
-      stockItem: "",
-      stockChecks: [
-        ...current.stockChecks,
-        {
-          itemName: current.stockItem.trim(),
-          status: current.stockStatus,
-        },
-      ],
+      stockChecks: current.stockChecks.map((item) => {
+        const key = String(item.itemCode || item.itemName).trim().toUpperCase();
+        if (key !== itemKey) return item;
+        return {
+          ...item,
+          status,
+        };
+      }),
     }));
   }
 
@@ -568,8 +622,6 @@ export default function MyDayPage() {
         outcome: "PAYMENT_FOLLOWUP",
         nextVisitAt: "",
         note: "",
-        stockItem: "",
-        stockStatus: "AVAILABLE",
         stockChecks: [],
       });
     } catch (err) {
@@ -725,7 +777,7 @@ export default function MyDayPage() {
                     <td>
                       <div className="moduleInlineStack">
                         <span>{row.customer_name || row.customer_code}</span>
-                        <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row.customer_code)}>
+                        <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
                           {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
                         </button>
                       </div>
@@ -764,26 +816,23 @@ export default function MyDayPage() {
                             </label>
                             <div className="moduleFieldFull">
                               <div className="moduleSectionHeader">
-                                <h2>{t("stockCheck")}</h2>
+                                <h2>{t("boughtItems")}</h2>
                               </div>
-                              <div className="moduleStockRow">
-                                <input className="moduleInput" value={visitForm.stockItem} onChange={(event) => setVisitForm((current) => ({ ...current, stockItem: event.target.value }))} placeholder={t("itemName")} />
-                                <button type="button" className={`moduleChipButton ${visitForm.stockStatus === "AVAILABLE" ? "active" : ""}`} onClick={() => setVisitForm((current) => ({ ...current, stockStatus: "AVAILABLE" }))}>{t("available")}</button>
-                                <button type="button" className={`moduleChipButton ${visitForm.stockStatus === "NOT_AVAILABLE" ? "active" : ""}`} onClick={() => setVisitForm((current) => ({ ...current, stockStatus: "NOT_AVAILABLE" }))}>{t("notAvailable")}</button>
-                              </div>
-                              <div className="moduleActionRow" style={{ marginTop: "8px" }}>
-                                <button type="button" className="moduleInlineButton" onClick={addStockCheck}>{t("addStock")}</button>
-                              </div>
-                              {visitForm.stockChecks.length > 0 && (
+                              {visitItemsLoading && <div className="moduleLoading">{t("loadingItems")}</div>}
+                              {!visitItemsLoading && visitForm.stockChecks.length > 0 && (
                                 <ul className="moduleList">
                                   {visitForm.stockChecks.map((stockCheck, index) => (
                                     <li key={`${stockCheck.itemName}-${index}`}>
-                                      <strong>{stockCheck.itemName}</strong>
-                                      <span>{stockCheck.status === "AVAILABLE" ? t("available") : t("notAvailable")}</span>
+                                      <div className="moduleStockRow">
+                                        <strong>{stockCheck.itemName}</strong>
+                                        <button type="button" className={`moduleChipButton ${stockCheck.status === "AVAILABLE" ? "active" : ""}`} onClick={() => setStockStatus(String(stockCheck.itemCode || stockCheck.itemName).trim().toUpperCase(), "AVAILABLE")}>{t("available")}</button>
+                                        <button type="button" className={`moduleChipButton ${stockCheck.status === "NOT_AVAILABLE" ? "active" : ""}`} onClick={() => setStockStatus(String(stockCheck.itemCode || stockCheck.itemName).trim().toUpperCase(), "NOT_AVAILABLE")}>{t("notAvailable")}</button>
+                                      </div>
                                     </li>
                                   ))}
                                 </ul>
                               )}
+                              {!visitItemsLoading && visitForm.stockChecks.length === 0 && <div className="moduleHint">{t("noBoughtItems")}</div>}
                             </div>
                             <div className="moduleFieldFull">
                               <button type="button" className="modulePrimaryButton" onClick={() => saveVisitReport(row)} disabled={visitSaving}>

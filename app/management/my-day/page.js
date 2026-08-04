@@ -29,9 +29,13 @@ const PAGE_TEXT = {
   visitStatus: { en: "Visit Status", ar: "حالة الزيارات" },
   customer: { en: "Customer", ar: "العميل" },
   cityArea: { en: "City / Area", ar: "المدينة / المنطقة" },
-  daysSinceLast: { en: "Days Since Last", ar: "الأيام منذ آخر زيارة" },
+  daysSinceLastInvoice: { en: "Days From Last Invoice", ar: "الأيام منذ آخر فاتورة" },
+  daysSinceLastVisit: { en: "Days From Last Visit", ar: "الأيام منذ آخر زيارة" },
   status: { en: "Status", ar: "الحالة" },
   actions: { en: "Actions", ar: "الإجراءات" },
+  markInactive: { en: "Mark Inactive", ar: "تعطيل العميل" },
+  markingInactive: { en: "Marking...", ar: "جاري التعطيل..." },
+  inactiveSaved: { en: "Customer marked inactive and removed from visit status.", ar: "تم تعطيل العميل وإزالته من حالة الزيارات." },
   noCustomers: { en: "No customers available for route status.", ar: "لا يوجد عملاء متاحون لحالة المسار." },
   visitWithoutOrder: { en: "Visit Without Order", ar: "زيارة بدون طلب" },
   closeReport: { en: "Close", ar: "إغلاق" },
@@ -66,10 +70,30 @@ const PAGE_TEXT = {
 
 function daysBetween(date) {
   if (!date) return 0;
-  const target = new Date(`${date}T00:00:00`);
+  const normalized = typeof date === "string" && date.includes("T") ? date : `${date}T00:00:00`;
+  const target = new Date(normalized);
+  if (Number.isNaN(target.getTime())) return 0;
   const now = new Date();
   const diff = now.getTime() - target.getTime();
   return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+}
+
+function daysBetweenNullable(date) {
+  if (!date) return null;
+  const normalized = typeof date === "string" && date.includes("T") ? date : `${date}T00:00:00`;
+  const target = new Date(normalized);
+  if (Number.isNaN(target.getTime())) return null;
+  const now = new Date();
+  const diff = now.getTime() - target.getTime();
+  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+}
+
+function getSortTimestamp(date) {
+  if (!date) return 0;
+  const normalized = typeof date === "string" && date.includes("T") ? date : `${date}T00:00:00`;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return 0;
+  return parsed.getTime();
 }
 
 export default function MyDayPage() {
@@ -100,6 +124,7 @@ export default function MyDayPage() {
   const [activeVisitCustomerCode, setActiveVisitCustomerCode] = useState("");
   const [visitSaving, setVisitSaving] = useState(false);
   const [visitItemsLoading, setVisitItemsLoading] = useState(false);
+  const [inactiveCustomerCode, setInactiveCustomerCode] = useState("");
   const [visitForm, setVisitForm] = useState({
     outcome: "PAYMENT_FOLLOWUP",
     nextVisitAt: "",
@@ -196,7 +221,7 @@ export default function MyDayPage() {
 
         let customersQuery = supabase
           .from("customers")
-          .select("customer_code,customer_name,city,area,latest_transaction_date,current_salesman_code");
+          .select("customer_code,customer_name,city,area,latest_transaction_date,current_salesman_code,is_active");
 
         let routeQuery = supabase
           .from("customers")
@@ -291,6 +316,42 @@ export default function MyDayPage() {
         );
 
         const customerRows = customersRes.data || [];
+        const latestVisitByCustomer = new Map();
+
+        if (logsCheck.available) {
+          let visitReportsQuery = supabase
+            .from("daily_activity_logs")
+            .select("user_id,note,created_at")
+            .eq("entry_type", "VISIT_REPORT")
+            .order("created_at", { ascending: false })
+            .limit(5000);
+
+          if (!scope.hasAllAccess) {
+            visitReportsQuery = visitReportsQuery.in("user_id", scope.visibleUserIds);
+          }
+
+          const { data: visitReportsData, error: visitReportsError } = await visitReportsQuery;
+          if (!visitReportsError) {
+            (visitReportsData || []).forEach((row) => {
+              if (!row?.note) return;
+
+              try {
+                const parsed = JSON.parse(row.note);
+                const customerCode = String(parsed?.customer_code || "").trim().toUpperCase();
+                if (!customerCode) return;
+
+                const visitAt = parsed?.captured_at || row.created_at;
+                const current = latestVisitByCustomer.get(customerCode);
+                if (!current || getSortTimestamp(visitAt) > getSortTimestamp(current)) {
+                  latestVisitByCustomer.set(customerCode, visitAt);
+                }
+              } catch {
+                // Ignore malformed notes.
+              }
+            });
+          }
+        }
+
         const overdueRows = customerRows.filter((row) => daysBetween(row.latest_transaction_date) > 21);
         const followUpRows = customerRows.filter((row) => daysBetween(row.latest_transaction_date) > 10);
 
@@ -317,19 +378,27 @@ export default function MyDayPage() {
 
         setVisitStatusRows(
           customerRows
-            .slice(0, 30)
+            .filter((row) => row.is_active !== false)
             .map((row) => ({
               customer_code: row.customer_code,
               customer_name: row.customer_name,
               city: row.city,
               area: row.area,
-              days_since_last: daysBetween(row.latest_transaction_date),
+              last_invoice_date: row.latest_transaction_date || null,
+              last_visit_date: latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
+              days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
+              days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
               status: todayCustomers.has(row.customer_code)
                 ? "Visited"
                 : daysBetween(row.latest_transaction_date) > 21
                 ? "Overdue"
                 : "Planned",
             }))
+            .sort((a, b) => {
+              const byInvoiceDate = getSortTimestamp(a.last_invoice_date) - getSortTimestamp(b.last_invoice_date);
+              if (byInvoiceDate !== 0) return byInvoiceDate;
+              return String(a.customer_name || a.customer_code || "").localeCompare(String(b.customer_name || b.customer_code || ""));
+            })
         );
       } catch (err) {
         setError(err.message || "Unable to load My Day planner.");
@@ -632,6 +701,41 @@ export default function MyDayPage() {
     }
   }
 
+  async function markCustomerInactive(customer) {
+    const code = String(customer?.customer_code || "").trim();
+    if (!code) return;
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setInactiveCustomerCode(code);
+    setError("");
+    setMessage("");
+
+    try {
+      const { error: updateError } = await supabase
+        .from("customers")
+        .update({ is_active: false })
+        .eq("customer_code", code);
+
+      if (updateError) throw updateError;
+
+      setVisitStatusRows((current) => current.filter((row) => row.customer_code !== code));
+      setRouteRows((current) => current.filter((row) => row.customer_code !== code));
+      if (activeVisitCustomerCode === code) {
+        setActiveVisitCustomerCode("");
+      }
+      setMessage(t("inactiveSaved"));
+    } catch (err) {
+      setError(err.message || "Unable to mark customer inactive.");
+    } finally {
+      setInactiveCustomerCode("");
+    }
+  }
+
   useEffect(() => {
     if (!logsEnabled) return undefined;
 
@@ -767,7 +871,8 @@ export default function MyDayPage() {
                 <tr>
                   <th>{t("customer")}</th>
                   <th>{t("cityArea")}</th>
-                  <th>{t("daysSinceLast")}</th>
+                  <th>{t("daysSinceLastInvoice")}</th>
+                  <th>{t("daysSinceLastVisit")}</th>
                   <th>{t("status")}</th>
                   <th>{t("actions")}</th>
                 </tr>
@@ -785,13 +890,23 @@ export default function MyDayPage() {
                       </div>
                     </td>
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
-                    <td>{row.days_since_last}</td>
+                    <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
+                    <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>
                     <td>{row.status === "Visited" ? t("visited") : row.status === "Overdue" ? t("overdue") : t("planned")}</td>
-                    <td>{row.current_salesman_code || "-"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="moduleInlineButton"
+                        onClick={() => markCustomerInactive(row)}
+                        disabled={inactiveCustomerCode === row.customer_code}
+                      >
+                        {inactiveCustomerCode === row.customer_code ? t("markingInactive") : t("markInactive")}
+                      </button>
+                    </td>
                   </tr>
                   {activeVisitCustomerCode === row.customer_code && (
                     <tr>
-                      <td colSpan={5}>
+                      <td colSpan={6}>
                         <div className="moduleVisitPanel">
                           <div className="moduleSectionHeader">
                             <h2>{t("visitReport")}</h2>
@@ -850,7 +965,7 @@ export default function MyDayPage() {
                 ))}
                 {visitStatusRows.length === 0 && (
                   <tr>
-                    <td colSpan={5}>{t("noCustomers")}</td>
+                    <td colSpan={6}>{t("noCustomers")}</td>
                   </tr>
                 )}
               </tbody>

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
+import { detectTable } from "../lib/schemaGuards";
 
 const TEXT = {
   checking: { en: "Checking morning attendance...", ar: "جاري التحقق من حضور الصباح..." },
@@ -13,6 +14,10 @@ const TEXT = {
   retry: { en: "Retry Attendance", ar: "إعادة محاولة الحضور" },
   locationUnsupported: { en: "Geolocation is not supported on this device.", ar: "خدمة تحديد الموقع غير مدعومة على هذا الجهاز." },
   locationFailed: { en: "Unable to read GPS location. Please allow location and retry.", ar: "تعذر قراءة موقع GPS. يرجى السماح بالموقع وإعادة المحاولة." },
+  logsUnavailableBypass: {
+    en: "Attendance log table is unavailable. Access is allowed, but attendance logging is temporarily disabled.",
+    ar: "جدول سجلات الحضور غير متاح. تم السماح بالدخول، لكن تسجيل الحضور معطل مؤقتاً.",
+  },
 };
 
 function captureLocation() {
@@ -42,6 +47,7 @@ export default function MorningAttendanceGate({ children }) {
   const [capturing, setCapturing] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
   const attemptedAutoRef = useRef(false);
 
   async function insertAttendance(sessionUserId) {
@@ -76,6 +82,7 @@ export default function MorningAttendanceGate({ children }) {
 
     setChecking(true);
     setError("");
+    setWarning("");
 
     try {
       const {
@@ -83,6 +90,13 @@ export default function MorningAttendanceGate({ children }) {
       } = await supabase.auth.getSession();
 
       if (!session?.user?.id) {
+        setReady(true);
+        return;
+      }
+
+      const logsTable = await detectTable(supabase, "daily_activity_logs");
+      if (!logsTable.available) {
+        setWarning(t("logsUnavailableBypass"));
         setReady(true);
         return;
       }
@@ -158,6 +172,7 @@ export default function MorningAttendanceGate({ children }) {
               <div className="moduleHint">{t("gpsHelp")}</div>
             </>
           )}
+          {warning && <div className="moduleWarning">{warning}</div>}
           {error && <div className="moduleError">{error}</div>}
           {!checking && !capturing && (
             <button type="button" className="modulePrimaryButton" onClick={() => checkAttendance(true)}>

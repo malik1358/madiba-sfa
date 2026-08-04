@@ -21,8 +21,14 @@ function normalizeName(value, fallback = "") {
 }
 
 function buildEmailFromCode(code, suffix = 0) {
-  const normalized = normalizeCode(code).toLowerCase();
-  const localPart = suffix > 0 ? `${normalized}${suffix}` : normalized;
+  const normalized = normalizeCode(code)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.{2,}/g, ".");
+
+  const safeLocal = normalized || `salesman${Date.now()}`;
+  const localPart = suffix > 0 ? `${safeLocal}${suffix}` : safeLocal;
   return `${localPart}@madiba-sfa.local`;
 }
 
@@ -239,17 +245,7 @@ export async function GET(request) {
     const access = await requireManagementAccess(admin, request);
     if (access.error) return access.error;
 
-    const { count: salesmenCount, error: countError } = await admin
-      .from("profiles")
-      .select("id", { count: "exact", head: true })
-      .eq("role", "salesman");
-
-    if (countError) throw countError;
-
-    let autoCreateSummary = null;
-    if (Number(salesmenCount || 0) === 0) {
-      autoCreateSummary = await autoCreateExistingSalesmen(admin);
-    }
+    const autoCreateSummary = await autoCreateExistingSalesmen(admin);
 
     const salesmen = await loadSalesmen(admin);
 

@@ -63,6 +63,7 @@ export default function MorningAttendanceGate({ children }) {
   const attemptedAutoRef = useRef(false);
   const autoPingInFlightRef = useRef(false);
   const lastGpsCaptureAtRef = useRef(0);
+  const loginPingAttemptedRef = useRef(false);
 
   async function insertAttendance(sessionUserId) {
     const supabase = getSupabaseClient();
@@ -135,7 +136,7 @@ export default function MorningAttendanceGate({ children }) {
     lastGpsCaptureAtRef.current = latest;
   }
 
-  async function maybeCaptureBackgroundPing() {
+  async function maybeCaptureBackgroundPing({ force = false } = {}) {
     if (autoPingInFlightRef.current) return;
 
     const supabase = getSupabaseClient();
@@ -152,7 +153,7 @@ export default function MorningAttendanceGate({ children }) {
 
       const now = Date.now();
       const last = lastGpsCaptureAtRef.current || 0;
-      if (last && now - last < 15 * 60 * 1000) {
+      if (!force && last && now - last < 15 * 60 * 1000) {
         return;
       }
 
@@ -250,17 +251,44 @@ export default function MorningAttendanceGate({ children }) {
   }, []);
 
   useEffect(() => {
-    if (!ready || warning) return undefined;
+    if (!ready) return undefined;
+
+    if (!loginPingAttemptedRef.current) {
+      loginPingAttemptedRef.current = true;
+      maybeCaptureBackgroundPing({ force: true });
+    }
 
     // Keep GPS fresh across all authenticated pages with a max 15-minute cadence.
     const timer = window.setInterval(() => {
       maybeCaptureBackgroundPing();
     }, 60 * 1000);
 
-    maybeCaptureBackgroundPing();
+    const handleVisibleOrFocused = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
+      }
+      maybeCaptureBackgroundPing();
+    };
 
-    return () => window.clearInterval(timer);
-  }, [ready, warning]);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibleOrFocused);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", handleVisibleOrFocused);
+      window.addEventListener("online", handleVisibleOrFocused);
+    }
+
+    return () => {
+      window.clearInterval(timer);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibleOrFocused);
+      }
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", handleVisibleOrFocused);
+        window.removeEventListener("online", handleVisibleOrFocused);
+      }
+    };
+  }, [ready]);
 
   if (ready) {
     return children;

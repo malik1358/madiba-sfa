@@ -82,14 +82,24 @@ export default function NewCustomerPage() {
             : `${prospectsCheck.reason}. Create the prospects table to enable prospect registration.`
         );
 
-        let salesmenQuery = supabase
-          .from("profiles")
-          .select("id,salesman_code,salesman_name,role")
-          .in("role", ["salesman", "manager", "admin"])
-          .order("salesman_name");
+        const salesmanRows = (Array.isArray(scope.visibleMembers) ? scope.visibleMembers : [])
+          .filter((member) => ["salesman", "manager", "admin"].includes(String(member.role || "").toLowerCase()))
+          .map((member) => ({
+            id: member.id,
+            salesman_code: String(member.salesman_code || "").trim(),
+            salesman_name: String(member.salesman_name || "").trim(),
+            role: String(member.role || "").trim(),
+          }))
+          .filter((member) => member.salesman_code)
+          .sort((a, b) => (a.salesman_name || a.salesman_code).localeCompare(b.salesman_name || b.salesman_code));
 
-        if (!scope.hasAllAccess) {
-          salesmenQuery = salesmenQuery.in("salesman_code", scope.visibleSalesmanCodes);
+        if (salesmanRows.length === 0 && scope.currentSalesmanCode) {
+          salesmanRows.push({
+            id: scope.currentUserId || session.user.id,
+            salesman_code: scope.currentSalesmanCode,
+            salesman_name: scope.currentSalesmanCode,
+            role: String(scope.role || "salesman").toLowerCase(),
+          });
         }
 
         let recentQuery = Promise.resolve({ data: [], error: null });
@@ -101,21 +111,25 @@ export default function NewCustomerPage() {
             .limit(10);
 
           if (!scope.hasAllAccess) {
-            query = query.in("salesman_code", scope.visibleSalesmanCodes);
+            const visibleCodes = Array.isArray(scope.visibleSalesmanCodes)
+              ? scope.visibleSalesmanCodes.filter(Boolean)
+              : [];
+
+            if (visibleCodes.length > 0) {
+              query = query.in("salesman_code", visibleCodes);
+            } else if (scope.currentSalesmanCode) {
+              query = query.eq("salesman_code", scope.currentSalesmanCode);
+            } else {
+              query = query.eq("created_by", session.user.id);
+            }
           }
 
           recentQuery = query;
         }
 
-        const [salesmenRes, recentRes] = await Promise.all([
-          salesmenQuery,
-          recentQuery,
-        ]);
-
-        if (salesmenRes.error) throw salesmenRes.error;
+        const recentRes = await recentQuery;
         if (recentRes.error) throw recentRes.error;
 
-        const salesmanRows = salesmenRes.data || [];
         setSalesmen(salesmanRows);
         setRecent(recentRes.data || []);
 

@@ -32,7 +32,7 @@ function displayLoginName(value) {
 }
 
 function isRandomPassword(value) {
-  return /^\d{5}$/.test(String(value || "").trim());
+  return /^\d{6}$/.test(String(value || "").trim());
 }
 
 export default function SalesmanHierarchyPage() {
@@ -175,7 +175,6 @@ export default function SalesmanHierarchyPage() {
     setMessage("");
 
     try {
-      const password = defaultPasswordFor(salesman.salesman_code || salesman.id);
       const result = await postAction({
         mode: "reset-password",
         salesmanId: salesman.id,
@@ -429,7 +428,7 @@ export default function SalesmanHierarchyPage() {
             <h2>Testing Notes</h2>
           </div>
           <div className="moduleHint">
-            Login uses the username shown in the table. Passwords are now random 5-digit numbers and are shown in the table after creation or reset.
+            Login uses the username shown in the table. Passwords are now random 6-digit numbers and are shown in the table after creation or reset.
           </div>
         </section>
       </div>

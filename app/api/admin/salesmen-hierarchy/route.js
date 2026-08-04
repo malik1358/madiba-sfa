@@ -31,8 +31,8 @@ function normalizeLoginName(value) {
     .replace(/\.{2,}/g, ".");
 }
 
-function randomFiveDigitPassword() {
-  return String(randomInt(10000, 100000));
+function randomSixDigitPassword() {
+  return String(randomInt(100000, 1000000));
 }
 
 function normalizeName(value, fallback = "") {
@@ -53,17 +53,17 @@ function displayLoginName(email) {
 
 function getStoredPassword(metadata) {
   const password = String(metadata?.generated_password || "").trim();
-  return /^\d{5}$/.test(password) ? password : "";
+  return /^\d{6}$/.test(password) ? password : "";
 }
 
 async function setGeneratedPassword(admin, userId, metadata = {}) {
-  const password = randomFiveDigitPassword();
+  const password = randomSixDigitPassword();
   const { error } = await admin.auth.admin.updateUserById(userId, {
     password,
     user_metadata: {
       ...metadata,
       generated_password: password,
-      generated_password_mode: "random5",
+      generated_password_mode: "random6",
     },
   });
 
@@ -148,7 +148,7 @@ async function autoCreateExistingSalesmen(admin) {
 
     let createdUser = null;
     let createdEmail = "";
-    const password = randomFiveDigitPassword();
+    const password = randomSixDigitPassword();
 
     for (let suffix = 0; suffix < 20; suffix += 1) {
       const candidateEmail = buildEmailFromLoginName(salesman.code, suffix);
@@ -162,7 +162,7 @@ async function autoCreateExistingSalesmen(admin) {
           head_salesman_code: null,
           head_salesman_name: null,
           generated_password: password,
-          generated_password_mode: "random5",
+          generated_password_mode: "random6",
         },
       });
 
@@ -397,7 +397,7 @@ export async function POST(request) {
         headSalesmanName = headSalesman.salesman_name || "";
       }
 
-      const password = randomFiveDigitPassword();
+      const password = randomSixDigitPassword();
       const { data: createdUser, error: createUserError } = await admin.auth.admin.createUser({
         email,
         password,
@@ -406,7 +406,7 @@ export async function POST(request) {
           head_salesman_code: headSalesmanCode || null,
           head_salesman_name: headSalesmanName || null,
           generated_password: password,
-          generated_password_mode: "random5",
+          generated_password_mode: "random6",
         },
       });
 

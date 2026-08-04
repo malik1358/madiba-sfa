@@ -13,6 +13,7 @@ const TEXT = {
 };
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -38,6 +39,7 @@ import { useOrder } from "./hooks/useOrder";
 
 
 export default function CustomerAuditPage() {
+  const searchParams = useSearchParams();
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [error, setError] = useState("");
@@ -127,6 +129,11 @@ export default function CustomerAuditPage() {
     });
   }, [customers, selectedSalesman, search]);
 
+  const requestedCustomerCode = useMemo(
+    () => String(searchParams.get("customer_code") || "").trim().toUpperCase(),
+    [searchParams]
+  );
+
   function handleOpenCustomer(customer) {
     setOrderQuantities({});
     setShowOrderReview(false);
@@ -140,6 +147,19 @@ export default function CustomerAuditPage() {
     setMessage("");
     setError("");
   }
+
+  useEffect(() => {
+    if (!requestedCustomerCode || loading || selectedCustomer) return;
+    if (!customers.length) return;
+
+    const target = customers.find(
+      (customer) => String(customer.customer_code || "").trim().toUpperCase() === requestedCustomerCode
+    );
+
+    if (target) {
+      handleOpenCustomer(target);
+    }
+  }, [requestedCustomerCode, loading, selectedCustomer, customers, handleOpenCustomer]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {

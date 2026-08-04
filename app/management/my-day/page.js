@@ -33,6 +33,7 @@ const PAGE_TEXT = {
   daysSinceLastVisit: { en: "Days From Last Visit", ar: "الأيام منذ آخر زيارة" },
   status: { en: "Status", ar: "الحالة" },
   actions: { en: "Actions", ar: "الإجراءات" },
+  openAudit: { en: "Open Audit", ar: "فتح التدقيق" },
   markInactive: { en: "Mark Inactive", ar: "تعطيل العميل" },
   markingInactive: { en: "Marking...", ar: "جاري التعطيل..." },
   inactiveSaved: { en: "Customer marked inactive and removed from visit status.", ar: "تم تعطيل العميل وإزالته من حالة الزيارات." },
@@ -1031,14 +1032,22 @@ export default function MyDayPage() {
                     <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>
                     <td>{row.status === "Visited" ? t("visited") : row.status === "Overdue" ? t("overdue") : t("planned")}</td>
                     <td>
-                      <button
-                        type="button"
-                        className="moduleInlineButton"
-                        onClick={() => markCustomerInactive(row)}
-                        disabled={inactiveCustomerCode === row.customer_code}
-                      >
-                        {inactiveCustomerCode === row.customer_code ? t("markingInactive") : t("markInactive")}
-                      </button>
+                      <div className="moduleInlineStack">
+                        <Link
+                          href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
+                          className="moduleInlineButton"
+                        >
+                          {t("openAudit")}
+                        </Link>
+                        <button
+                          type="button"
+                          className="moduleInlineButton"
+                          onClick={() => markCustomerInactive(row)}
+                          disabled={inactiveCustomerCode === row.customer_code}
+                        >
+                          {inactiveCustomerCode === row.customer_code ? t("markingInactive") : t("markInactive")}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   {activeVisitCustomerCode === row.customer_code && (

@@ -110,6 +110,38 @@ function getLogPreview(row) {
   }
 }
 
+async function fetchAllCustomers(supabase, scope) {
+  const pageSize = 1000;
+  let from = 0;
+  const rows = [];
+
+  while (true) {
+    let query = supabase
+      .from("customers")
+      .select("customer_code,customer_name,city,area,latest_transaction_date,current_salesman_code,is_active")
+      .order("customer_code", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (!scope.hasAllAccess) {
+      query = query.in("current_salesman_code", scope.visibleSalesmanCodes);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const chunk = data || [];
+    rows.push(...chunk);
+
+    if (chunk.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  return rows;
+}
+
 export default function MyDayPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, PAGE_TEXT);
@@ -233,10 +265,6 @@ export default function MyDayPage() {
           .gte("submitted_at", `${today}T00:00:00`)
           .lte("submitted_at", `${today}T23:59:59`);
 
-        let customersQuery = supabase
-          .from("customers")
-          .select("customer_code,customer_name,city,area,latest_transaction_date,current_salesman_code,is_active");
-
         let routeQuery = supabase
           .from("customers")
           .select("customer_code,customer_name,city,area,latest_transaction_date")
@@ -247,7 +275,6 @@ export default function MyDayPage() {
           // no-op
         } else {
           todaySalesQuery = todaySalesQuery.in("salesman_code", scope.visibleSalesmanCodes);
-          customersQuery = customersQuery.in("current_salesman_code", scope.visibleSalesmanCodes);
           routeQuery = routeQuery.in("current_salesman_code", scope.visibleSalesmanCodes);
         }
 
@@ -255,20 +282,19 @@ export default function MyDayPage() {
           todaySalesRes,
           pendingOrdersRes,
           submittedTodayRes,
-          customersRes,
+          customerRows,
           routeRes,
         ] = await Promise.all([
           todaySalesQuery,
           pendingOrdersQuery,
           submittedOrdersQuery,
-          customersQuery,
+          fetchAllCustomers(supabase, scope),
           routeQuery,
         ]);
 
         if (todaySalesRes.error) throw todaySalesRes.error;
         if (pendingOrdersRes.error) throw pendingOrdersRes.error;
         if (submittedTodayRes.error) throw submittedTodayRes.error;
-        if (customersRes.error) throw customersRes.error;
         if (routeRes.error) throw routeRes.error;
 
         let newProspectsCount = 0;
@@ -329,7 +355,6 @@ export default function MyDayPage() {
             .filter(Boolean)
         );
 
-        const customerRows = customersRes.data || [];
         const latestVisitByCustomer = new Map();
 
         if (logsCheck.available) {

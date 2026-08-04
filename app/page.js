@@ -20,6 +20,8 @@ export default function Home() {
   const [error, setError] = useState("");
 
   const router = useRouter();
+  const role = String(profile?.role || "").toLowerCase();
+  const isInvoiceMaker = role === "invoice_maker" || role === "invoice-maker";
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -89,6 +91,12 @@ export default function Home() {
       setLanguage(data.preferred_language);
     }
   }
+
+  useEffect(() => {
+    if (isInvoiceMaker) {
+      router.replace("/management/pending-orders");
+    }
+  }, [isInvoiceMaker, router]);
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -171,6 +179,16 @@ export default function Home() {
   // =========================================================
 
   if (user && profile) {
+    if (isInvoiceMaker) {
+      return (
+        <main className="loginPage">
+          <div className="loginCard">
+            <div className="loadingText">Opening pending orders...</div>
+          </div>
+        </main>
+      );
+    }
+
     return (
       <MorningAttendanceGate>
       <main
@@ -246,7 +264,19 @@ export default function Home() {
           </h3>
 
           <div className="menuGrid">
-            {[
+            {(
+              isInvoiceMaker
+                ? [
+                    {
+                      icon: "⏳",
+                      title: ar ? "الطلبات المعلقة" : "Pending Orders",
+                      subtitle: ar
+                        ? "عرض الطلبات وطباعتها وتصديرها"
+                        : "View, print, and export pending orders",
+                      href: "/management/pending-orders",
+                    },
+                  ]
+                : [
               {
                 icon: "📍",
                 title: ar ? "يومي" : "My Day",
@@ -295,7 +325,8 @@ export default function Home() {
                   : "KRA & KPI progress",
                 href: "/management/my-performance",
               },
-            ].map((item) => (
+                ]
+            ).map((item) => (
               <button
                 key={item.title}
                 type="button"

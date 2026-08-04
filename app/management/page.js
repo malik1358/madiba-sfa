@@ -97,7 +97,14 @@ export default function ManagementPage() {
           supabase.from("sales_orders").select("id,status", { count: "exact" }).order("updated_at", { ascending: false }).limit(1000),
           supabase.from("import_batches").select("id", { count: "exact", head: true }),
           supabase.from("system_settings").select("setting_value").eq("setting_key", "active_sales_batch_id").maybeSingle(),
-          supabase.from("import_batches").select("created_at,completed_at").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+          (async () => {
+            return supabase
+              .from("import_batches")
+              .select("id")
+              .order("id", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+          })(),
           supabase
             .from("sales_orders")
             .select("id,customer_code,customer_name,salesman_code,status,updated_at")
@@ -110,7 +117,8 @@ export default function ManagementPage() {
         if (ordersRes.error) throw ordersRes.error;
         if (importsRes.error) throw importsRes.error;
         if (activeBatchRes.error) throw activeBatchRes.error;
-        if (latestImportRes.error) throw latestImportRes.error;
+        // Some deployments do not have import batch timestamp columns.
+        // Keep management page usable even when that metadata is unavailable.
         if (recentOrdersRes.error) throw recentOrdersRes.error;
 
         const orders = ordersRes.data || [];
@@ -129,7 +137,7 @@ export default function ManagementPage() {
         setHealth({
           sessionUser: session.user.email || session.user.id,
           activeBatch: activeBatchRes.data?.setting_value || "-",
-          latestImportAt: latestImportRes.data?.completed_at || latestImportRes.data?.created_at || "-",
+          latestImportAt: latestImportRes.data?.id || "-",
         });
 
         setRecentOrders(recentOrdersRes.data || []);

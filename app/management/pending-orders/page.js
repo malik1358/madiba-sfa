@@ -35,6 +35,46 @@ function daysOld(fromDate) {
 
 const PENDING_STATUSES = ["DRAFT", "PENDING", "SUBMITTED"];
 
+function isInvoiceMakerRole(role) {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "invoice_maker" || normalized === "invoice-maker";
+}
+
+function buildQueueWorkbook(orders, activeOrder, orderLines) {
+  const rows = orders.map((order) => ({
+    "Order ID": order.id,
+    Customer: order.customer_name || order.customer_code || "-",
+    "Customer Code": order.customer_code || "-",
+    Salesman: order.salesman_code || "-",
+    Status: order.status || "-",
+    Created: formatDateTime(order.created_at),
+    "Last Updated": formatDateTime(order.updated_at),
+    "Age (days)": daysOld(order.updated_at || order.created_at),
+  }));
+
+  const workbook = { Sheets: {}, SheetNames: [] };
+  const queueSheet = window.XLSX.utils.json_to_sheet(rows);
+  workbook.Sheets.PendingOrders = queueSheet;
+  workbook.SheetNames.push("PendingOrders");
+
+  if (activeOrder && Array.isArray(orderLines) && orderLines.length > 0) {
+    const lineRows = orderLines.map((line) => ({
+      "Order ID": activeOrder.id,
+      "Item Code": line.item_code || "-",
+      "Item Name": line.item_name || "-",
+      Category: line.category || "-",
+      Quantity: Number(line.quantity || 0),
+      Rate: Number(line.rate || 0),
+      "Line Total": Number(line.line_value || 0),
+    }));
+
+    workbook.Sheets.OrderLines = window.XLSX.utils.json_to_sheet(lineRows);
+    workbook.SheetNames.push("OrderLines");
+  }
+
+  return workbook;
+}
+
 export default function PendingOrdersPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -231,8 +271,20 @@ export default function PendingOrdersPage() {
 
       let y = 210;
       orderLines.forEach((line) => {
-        const wrapped = doc.splitTextToSize(String(line.item_name || "-"), 210);
-        const rowHeight = Math.max(22, wrapped.length * 12 + 8);
+        const codeLines = doc.splitTextToSize(String(line.item_code || "-"), 72);
+        const nameLines = doc.splitTextToSize(String(line.item_name || "-"), 214);
+        const qtyLines = doc.splitTextToSize(String(Number(line.quantity || 0)), 42);
+        const rateLines = doc.splitTextToSize(formatMoney(line.rate), 72);
+        const totalLines = doc.splitTextToSize(formatMoney(line.line_value), 77);
+        const lineCount = Math.max(
+          codeLines.length,
+          nameLines.length,
+          qtyLines.length,
+          rateLines.length,
+          totalLines.length,
+          1
+        );
+        const rowHeight = Math.max(22, lineCount * 12 + 8);
 
         if (y + rowHeight > 760) {
           doc.addPage();
@@ -254,13 +306,21 @@ export default function PendingOrdersPage() {
         doc.rect(390, y, 80, rowHeight);
         doc.rect(470, y, 85, rowHeight);
 
-        doc.text(String(line.item_code || "-"), 46, y + 14);
-        wrapped.forEach((nameLine, idx) => {
+        codeLines.forEach((codeLine, idx) => {
+          doc.text(codeLine, 46, y + 14 + idx * 12);
+        });
+        nameLines.forEach((nameLine, idx) => {
           doc.text(nameLine, 124, y + 14 + idx * 12);
         });
-        doc.text(String(Number(line.quantity || 0)), 346, y + 14);
-        doc.text(formatMoney(line.rate), 396, y + 14);
-        doc.text(formatMoney(line.line_value), 476, y + 14);
+        qtyLines.forEach((qtyLine, idx) => {
+          doc.text(qtyLine, 386, y + 14 + idx * 12, { align: "right" });
+        });
+        rateLines.forEach((rateLine, idx) => {
+          doc.text(rateLine, 464, y + 14 + idx * 12, { align: "right" });
+        });
+        totalLines.forEach((totalLine, idx) => {
+          doc.text(totalLine, 548, y + 14 + idx * 12, { align: "right" });
+        });
 
         y += rowHeight;
       });
@@ -314,6 +374,49 @@ export default function PendingOrdersPage() {
       setError("Unable to regenerate PDF for this order.");
     } finally {
       setDownloadingPdf(false);
+    }
+  }
+
+  async function exportQueueToExcel() {
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = {
+        Sheets: {},
+        SheetNames: [],
+      };
+
+      const queueRows = orders.map((order) => ({
+        "Order ID": order.id,
+        Customer: order.customer_name || order.customer_code || "-",
+        "Customer Code": order.customer_code || "-",
+        Salesman: order.salesman_code || "-",
+        Status: order.status || "-",
+        Created: formatDateTime(order.created_at),
+        "Last Updated": formatDateTime(order.updated_at),
+        "Age (days)": daysOld(order.updated_at || order.created_at),
+      }));
+
+      workbook.Sheets.PendingOrders = XLSX.utils.json_to_sheet(queueRows);
+      workbook.SheetNames.push("PendingOrders");
+
+      if (activeOrder && Array.isArray(orderLines) && orderLines.length > 0) {
+        const lineRows = orderLines.map((line) => ({
+          "Order ID": activeOrder.id,
+          "Item Code": line.item_code || "-",
+          "Item Name": line.item_name || "-",
+          Category: line.category || "-",
+          Quantity: Number(line.quantity || 0),
+          Rate: Number(line.rate || 0),
+          "Line Total": Number(line.line_value || 0),
+        }));
+
+        workbook.Sheets.OrderLines = XLSX.utils.json_to_sheet(lineRows);
+        workbook.SheetNames.push("OrderLines");
+      }
+
+      XLSX.writeFile(workbook, `pending-orders-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.xlsx`);
+    } catch {
+      setError("Unable to export pending orders to Excel.");
     }
   }
 
@@ -465,7 +568,10 @@ export default function PendingOrdersPage() {
                 >
                   {downloadingPdf ? "Generating PDF..." : "Regenerate PDF"}
                 </button>
-                {activeOrder && (
+                <button type="button" className="moduleInlineButton" onClick={exportQueueToExcel} disabled={orders.length === 0}>
+                  Export Excel
+                </button>
+                {activeOrder && !isInvoiceMakerRole(userRole) && (
                   <Link
                     href={`/management/new-order?order_id=${encodeURIComponent(activeOrder.id)}&customer_code=${encodeURIComponent(activeOrder.customer_code || "")}&customer_name=${encodeURIComponent(activeOrder.customer_name || "")}&salesman_code=${encodeURIComponent(activeOrder.salesman_code || "")}`}
                     className="moduleInlineButton"
@@ -473,8 +579,8 @@ export default function PendingOrdersPage() {
                     Edit Order
                   </Link>
                 )}
-                <Link href="/management/new-order" className="moduleInlineButton">Open Order Workflow</Link>
-                <Link href="/management/customer-audit" className="moduleInlineButton">Go to Customer Audit</Link>
+                {!isInvoiceMakerRole(userRole) && <Link href="/management/new-order" className="moduleInlineButton">Open Order Workflow</Link>}
+                {!isInvoiceMakerRole(userRole) && <Link href="/management/customer-audit" className="moduleInlineButton">Go to Customer Audit</Link>}
               </div>
 
               {orderHistory.length > 0 && (

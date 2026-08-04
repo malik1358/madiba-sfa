@@ -11,6 +11,11 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function isInvoiceMakerRole(role) {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "invoice_maker" || normalized === "invoice-maker";
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -96,12 +101,14 @@ export async function GET(request) {
     const visibleSalesmanCodes = [...new Set(visibleMembers.map((member) => normalizeCode(member.salesman_code)).filter(Boolean))];
     const visibleUserIds = [...new Set(visibleMembers.map((member) => member.id).filter(Boolean))];
 
+    const hasAllAccess = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role);
+
     return NextResponse.json({
       success: true,
       role,
       currentUserId: currentProfile.id,
       currentSalesmanCode,
-      hasAllAccess: ["admin", "manager"].includes(role),
+      hasAllAccess,
       visibleSalesmanCodes,
       visibleUserIds,
       visibleMembers,

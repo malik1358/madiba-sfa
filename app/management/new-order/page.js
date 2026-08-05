@@ -158,6 +158,43 @@ async function fetchItemCategoryLookup(supabase, scope) {
   return lookup;
 }
 
+async function fetchItemRateLookup(supabase, scope) {
+  const pageSize = 1000;
+  let from = 0;
+  const lookup = new Map();
+
+  while (true) {
+    let query = supabase
+      .from("sales_raw")
+      .select("item_code,rate,transaction_date,salesman_code")
+      .order("transaction_date", { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (!scope.hasAllAccess) {
+      query = query.in("salesman_code", scope.visibleSalesmanCodes);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const rows = data || [];
+    rows.forEach((row) => {
+      const code = normalizeCode(row.item_code);
+      if (!code || lookup.has(code)) return;
+
+      const rate = toNumber(row.rate);
+      if (rate > 0) {
+        lookup.set(code, rate);
+      }
+    });
+
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return lookup;
+}
+
 async function fetchVisibleCustomers(token) {
   const response = await fetch("/api/customers/visible", {
     headers: {
@@ -452,6 +489,7 @@ export default function NewOrderPage() {
   const [transactions, setTransactions] = useState([]);
   const [peerTransactions, setPeerTransactions] = useState([]);
   const [priceList, setPriceList] = useState({});
+  const [salesRateLookup, setSalesRateLookup] = useState(new Map());
   const [previousDrafts, setPreviousDrafts] = useState([]);
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -1053,7 +1091,7 @@ export default function NewOrderPage() {
           draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
         }
 
-        const [loadedCustomers, itemsRes, draftsRes, categoriesRes] = await Promise.all([
+        const [loadedCustomers, itemsRes, draftsRes, categoriesRes, rateLookupRes] = await Promise.all([
           fetchVisibleCustomers(session.access_token),
           supabase
             .from("items_master")
@@ -1061,6 +1099,7 @@ export default function NewOrderPage() {
             .order("item_name"),
           draftsQuery,
           fetchItemCategoryLookup(supabase, scope),
+          fetchItemRateLookup(supabase, scope),
         ]);
 
         if (itemsRes.error) throw itemsRes.error;
@@ -1074,6 +1113,7 @@ export default function NewOrderPage() {
         setItemsMaster(itemsRes.data || []);
         setPreviousDrafts(draftsRes.data || []);
         setHistoryCategoryLookup(categoriesRes || new Map());
+        setSalesRateLookup(rateLookupRes || new Map());
       } catch (err) {
         setError(err.message || "Unable to load new order data.");
       } finally {
@@ -1120,6 +1160,24 @@ export default function NewOrderPage() {
     loadFoundation();
     loadPrices();
   }, [prefilledCustomer]);
+
+  useEffect(() => {
+    if (!salesRateLookup || salesRateLookup.size === 0) return;
+
+    setPriceList((current) => {
+      const merged = { ...current };
+      let changed = false;
+
+      salesRateLookup.forEach((rate, code) => {
+        const currentRate = toNumber(merged[code]);
+        if (currentRate > 0 || !Number.isFinite(rate) || rate <= 0) return;
+        merged[code] = rate;
+        changed = true;
+      });
+
+      return changed ? merged : current;
+    });
+  }, [salesRateLookup]);
 
   useEffect(() => {
     if (!prefilledCustomer?.customer_code) return;

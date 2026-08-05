@@ -140,6 +140,10 @@ function normalizeCategoryLabel(value) {
     .join(" ");
 }
 
+function isSameCategory(left, right) {
+  return normalizeCategoryKey(left) === normalizeCategoryKey(right);
+}
+
 async function fetchItemCategoryLookup(supabase, scope) {
   const pageSize = 1000;
   let from = 0;
@@ -685,10 +689,21 @@ export default function NewOrderPage() {
   );
 
   const categories = useMemo(
-    () => [
-      "ALL",
-      ...new Set(mergedItemsMaster.map((item) => item.category).filter(Boolean)).values(),
-    ],
+    () => {
+      const keyToLabel = new Map();
+
+      (mergedItemsMaster || []).forEach((item) => {
+        const label = normalizeCategoryLabel(item.category);
+        const key = normalizeCategoryKey(label);
+        if (!key || keyToLabel.has(key)) return;
+        keyToLabel.set(key, label);
+      });
+
+      return [
+        "ALL",
+        ...Array.from(keyToLabel.values()).sort((a, b) => a.localeCompare(b)),
+      ];
+    },
     [mergedItemsMaster]
   );
 
@@ -714,7 +729,7 @@ export default function NewOrderPage() {
     const includeNeedsMapping = categoryFilter === NEEDS_MAPPING_CATEGORY;
 
     return mergedItemsMaster.filter((item) => {
-      if (categoryFilter !== "ALL" && item.category !== categoryFilter) return false;
+      if (categoryFilter !== "ALL" && !isSameCategory(item.category, categoryFilter)) return false;
 
       const matchesQuery = !q || (
         String(item.item_code || "").toLowerCase().includes(q) ||
@@ -739,15 +754,16 @@ export default function NewOrderPage() {
     const map = new Map();
 
     filteredItems.forEach((item) => {
-      const category = item.category || "Unclassified";
-      const current = map.get(category) || [];
+      const category = normalizeCategoryLabel(item.category || "Unclassified");
+      const categoryKey = normalizeCategoryKey(category);
+      const current = map.get(categoryKey) || [];
       current.push(item);
-      map.set(category, current);
+      map.set(categoryKey, current);
     });
 
     return Array.from(map.entries())
-      .map(([category, items]) => ({
-        category,
+      .map(([categoryKey, items]) => ({
+        category: normalizeCategoryLabel(items[0]?.category || categoryKey || "Unclassified"),
         items,
       }))
       .sort((a, b) => a.category.localeCompare(b.category));

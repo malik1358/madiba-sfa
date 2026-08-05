@@ -10,11 +10,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Fetch upstream price payload
+        env:
+          PRICE_SOURCE_URL: ${{ secrets.PRICE_SOURCE_URL }}
         run: |
-          SOURCE_URL='https://script.google.com/macros/s/AKfycbypi2PkOaBIWdcQnxrBJAT6xGmqsuyx2mekiIkkOjE/exec'
-          curl -sS -L "$SOURCE_URL" -o upstream-price.json
+          if [[ -z "$PRICE_SOURCE_URL" ]]; then
+            echo "PRICE_SOURCE_URL secret is missing"
+            exit 1
+          fi
 
-          node -e 'const fs = require("fs"); const payload = JSON.parse(fs.readFileSync("upstream-price.json", "utf8")); fs.writeFileSync("price-sync-body.json", JSON.stringify({ payload }));'
+          http_code="$(curl -sS -L -o upstream-price.json -w "%{http_code}" "$PRICE_SOURCE_URL")"
+
+          if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+            echo "Upstream price source failed with HTTP $http_code"
+            exit 1
+          fi
+
+          node -e '
+            const fs = require("fs");
+            const raw = fs.readFileSync("upstream-price.json", "utf8");
+            let payload;
+            try {
+              payload = JSON.parse(raw);
+            } catch (e) {
+              const snippet = raw.slice(0, 200).replace(/\s+/g, " ").trim();
+              console.error("Upstream price source returned non-JSON content. First bytes: " + snippet);
+              process.exit(1);
+            }
+            fs.writeFileSync("price-sync-body.json", JSON.stringify({ payload }));
+          '
 
       - name: Trigger price sync endpoint
         env:

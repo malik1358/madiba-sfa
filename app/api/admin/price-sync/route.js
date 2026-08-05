@@ -277,6 +277,10 @@ async function runSync(sourcePayload = null) {
   let payload = sourcePayload;
 
   if (!payload) {
+    if (!PRICE_SOURCE_URL) {
+      throw new Error("PRICE_SOURCE_URL is not configured.");
+    }
+
     const response = await fetch(PRICE_SOURCE_URL, { cache: "no-store" });
     if (!response.ok) {
       throw new Error(`Price source failed with ${response.status}`);

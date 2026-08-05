@@ -668,9 +668,10 @@ export default function NewOrderPage() {
         const code = normalizeCode(item.item_code);
         const hasSalesHistory = historyCategoryLookup.has(code);
         const hasUsableSheetPrice = toNumber(priceList?.[code]) > 0;
+        const isUnclassified = normalizeCategoryKey(item.category) === normalizeCategoryKey("Unclassified");
 
-        // Hide only orphan price-map rows that have no sales evidence and no usable price.
-        if (item.source === "PRICE_MAP_ONLY" && !hasSalesHistory && !hasUsableSheetPrice) return false;
+        // Hide only unclassified orphan rows that have no sales evidence and no usable price.
+        if (isUnclassified && !hasSalesHistory && !hasUsableSheetPrice) return false;
 
         return true;
       })

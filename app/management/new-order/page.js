@@ -88,6 +88,14 @@ function hasMeaningfulValue(value) {
   return !["UNCLASSIFIED", "N/A", "NA", "-"] .includes(text.toUpperCase());
 }
 
+function hasMeaningfulItemName(value, itemCode = "") {
+  const text = normalizeText(value);
+  if (!text) return false;
+  if (looksLikeItemCode(text)) return false;
+  if (normalizeCode(text) === normalizeCode(itemCode)) return false;
+  return true;
+}
+
 async function fetchItemCategoryLookup(supabase, scope) {
   const pageSize = 1000;
   let from = 0;
@@ -460,10 +468,18 @@ export default function NewOrderPage() {
       const existing = itemMap.get(code);
       if (!existing) {
         const historyFallback = historyCategoryLookup.get(code) || {};
+        const nextName = normalizeText(sheetItem.item_name) || historyFallback.item_name || code;
+        const nextCategory = normalizeText(sheetItem.category) || historyFallback.category || "Unclassified";
+
+        // Skip placeholder-only sheet rows that still have no meaningful name/category.
+        if (!hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory)) {
+          return;
+        }
+
         itemMap.set(code, {
           item_code: code,
-          item_name: normalizeText(sheetItem.item_name) || historyFallback.item_name || code,
-          category: normalizeText(sheetItem.category) || historyFallback.category || "Unclassified",
+          item_name: nextName,
+          category: nextCategory,
           source: "PRICE_SHEET_ONLY",
         });
         return;
@@ -493,10 +509,19 @@ export default function NewOrderPage() {
       if (!code || itemMap.has(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
 
+      const fallbackName = historyFallback.item_name || "";
+      const fallbackCategory = historyFallback.category || "";
+
+      // Do not create a visible catalog item from price-only data unless
+      // history provides a meaningful identity.
+      if (!hasMeaningfulItemName(fallbackName, code) && !hasMeaningfulValue(fallbackCategory)) {
+        return;
+      }
+
       itemMap.set(code, {
         item_code: code,
-        item_name: historyFallback.item_name || code,
-        category: historyFallback.category || "Unclassified",
+        item_name: fallbackName || code,
+        category: fallbackCategory || "Unclassified",
         source: "PRICE_MAP_ONLY",
       });
     });

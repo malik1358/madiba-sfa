@@ -126,7 +126,7 @@ async function fetchItemCategoryLookup(supabase, scope) {
       const nextName = normalizeText(row.item_name);
       const nextCategory = normalizeText(row.category);
 
-      if (!hasMeaningfulValue(current.item_name) && hasMeaningfulValue(nextName)) {
+      if (!hasMeaningfulItemName(current.item_name, code) && hasMeaningfulItemName(nextName, code)) {
         current.item_name = nextName;
       }
 
@@ -245,6 +245,19 @@ function findHeaderIndex(rows, aliases, maxRows = 5) {
   return -1;
 }
 
+function hasDataAtIndex(rows, index, maxRows = 50) {
+  if (!Array.isArray(rows) || index < 0) return false;
+  const limit = Math.min(rows.length, maxRows);
+
+  for (let r = 0; r < limit; r += 1) {
+    const row = rows[r];
+    if (!Array.isArray(row) || row.length <= index) continue;
+    if (String(row[index] ?? "").trim() !== "") return true;
+  }
+
+  return false;
+}
+
 function parsePricePayload(payload) {
   const priceMap = {};
   const sheetItems = [];
@@ -313,10 +326,10 @@ function parsePricePayload(payload) {
         const categoryColumnIndex = sheetColumnIndex("CO");
         const rateColumnIndex = sheetColumnIndex("D");
 
-        const itemCodeIndex = codeColumnIndex >= 0 ? codeColumnIndex : headerCodeIndex;
-        const itemNameIndex = nameColumnIndex >= 0 ? nameColumnIndex : headerNameIndex;
-        const categoryIndex = categoryColumnIndex >= 0 ? categoryColumnIndex : headerCategoryIndex;
-        const rateIndex = rateColumnIndex >= 0 ? rateColumnIndex : headerRateIndex;
+        const itemCodeIndex = hasDataAtIndex(value, codeColumnIndex) ? codeColumnIndex : headerCodeIndex;
+        const itemNameIndex = hasDataAtIndex(value, nameColumnIndex) ? nameColumnIndex : headerNameIndex;
+        const categoryIndex = hasDataAtIndex(value, categoryColumnIndex) ? categoryColumnIndex : headerCategoryIndex;
+        const rateIndex = hasDataAtIndex(value, rateColumnIndex) ? rateColumnIndex : headerRateIndex;
 
         value.forEach((row) => {
           const isHeaderRow = Array.isArray(row)
@@ -329,11 +342,14 @@ function parsePricePayload(payload) {
           const explicitCode = itemCodeIndex >= 0 ? normalizeCode(sheetCell(row, itemCodeIndex)) : "";
           const codeCandidates = row.filter((cell) => looksLikeItemCode(cell)).map((cell) => normalizeCode(cell));
           const code = explicitCode || codeCandidates.find(Boolean) || "";
+          const codeCellIndex = explicitCode
+            ? itemCodeIndex
+            : row.findIndex((cell) => normalizeCode(cell) === code);
 
           const explicitName = itemNameIndex >= 0 ? normalizeText(sheetCell(row, itemNameIndex)) : "";
           const nameCandidate = explicitName || row
             .map((cell, index) => ({ cell, index }))
-            .filter(({ cell, index }) => index !== itemCodeIndex && looksLikeItemName(cell))
+            .filter(({ cell, index }) => index !== codeCellIndex && looksLikeItemName(cell))
             .sort((a, b) => scoreSheetName(b.cell) - scoreSheetName(a.cell))[0]?.cell || "";
           const name = normalizeText(nameCandidate) && normalizeCode(nameCandidate) !== code ? normalizeText(nameCandidate) : "";
 
@@ -506,7 +522,9 @@ export default function NewOrderPage() {
       const sheetCategory = normalizeText(sheetItem.category);
       const historyFallback = historyCategoryLookup.get(code) || {};
 
-      const nextName = hasMeaningfulValue(existingName) ? existingName : (sheetName || historyFallback.item_name || code);
+      const nextName = hasMeaningfulItemName(existingName, code)
+        ? existingName
+        : (hasMeaningfulItemName(sheetName, code) ? sheetName : (historyFallback.item_name || code));
       const nextCategory = hasMeaningfulValue(sheetCategory)
         ? sheetCategory
         : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));

@@ -2,8 +2,20 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
 function looksLikeItemCode(value) {
   return /^[A-Z][A-Z0-9/.-]{3,20}$/i.test(String(value || "").trim());
+}
+
+function looksLikeItemName(value) {
+  const text = normalizeText(value);
+  if (!text) return false;
+  if (looksLikeItemCode(text)) return false;
+  if (/^\d+(\.\d+)?$/.test(text)) return false;
+  return text.length >= 3;
 }
 
 function toNumber(value) {
@@ -28,15 +40,15 @@ function findHeaderIndex(rows, aliases, maxRows = 5) {
   const normalizedAliases = aliases.map((alias) => normalizeHeaderCell(alias));
   const limit = Math.min(maxRows, rows.length);
 
-  for (let r = 0; r < limit; r += 1) {
-    const row = rows[r];
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    const row = rows[rowIndex];
     if (!Array.isArray(row)) continue;
 
-    for (let c = 0; c < row.length; c += 1) {
-      const cell = normalizeHeaderCell(row[c]);
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+      const cell = normalizeHeaderCell(row[columnIndex]);
       if (!cell) continue;
       if (normalizedAliases.includes(cell)) {
-        return c;
+        return columnIndex;
       }
     }
   }
@@ -62,6 +74,45 @@ function sheetColumnIndex(columnName) {
   return index > 0 ? index - 1 : -1;
 }
 
+function isRowLike(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+
+  return [
+    "item_code",
+    "itemCode",
+    "code",
+    "item_name",
+    "itemName",
+    "name",
+    "category",
+    "CO",
+    "rate",
+    "price",
+    "C",
+  ].some((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function scoreSheetName(value) {
+  const text = normalizeText(value);
+  if (!text) return -1;
+  if (looksLikeItemCode(text)) return -1;
+  if (/^\d+(\.\d+)?$/.test(text)) return -1;
+  return text.length;
+}
+
+function hasDataAtIndex(rows, index, maxRows = 50) {
+  if (!Array.isArray(rows) || index < 0) return false;
+  const limit = Math.min(rows.length, maxRows);
+
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (!Array.isArray(row) || row.length <= index) continue;
+    if (String(row[index] ?? "").trim() !== "") return true;
+  }
+
+  return false;
+}
+
 export function parsePricePayload(payload) {
   const priceMap = {};
   const sheetItems = [];
@@ -71,8 +122,8 @@ export function parsePricePayload(payload) {
     const code = normalizeCode(rawCode);
     if (!code) return;
 
-    const name = String(rawName || "").trim();
-    const category = String(rawCategory || "").trim();
+    const name = normalizeText(rawName);
+    const category = normalizeText(rawCategory);
     const key = `${code}::${name}::${category}`;
     if (seen.has(key)) return;
 
@@ -115,7 +166,6 @@ export function parsePricePayload(payload) {
           "sku",
           "product code",
         ]);
-
         const headerNameIndex = findHeaderIndex(value, [
           "item name",
           "item_name",
@@ -124,14 +174,12 @@ export function parsePricePayload(payload) {
           "product",
           "product name",
         ]);
-
         const headerCategoryIndex = findHeaderIndex(value, [
           "category",
           "item category",
           "group",
           "product group",
         ]);
-
         const headerRateIndex = findHeaderIndex(value, [
           "rate",
           "price",
@@ -145,18 +193,46 @@ export function parsePricePayload(payload) {
         const categoryIndex = sheetColumnIndex("CO");
         const rateIndex = sheetColumnIndex("D");
 
+        const itemCodeIndex = headerCodeIndex >= 0 ? headerCodeIndex : (hasDataAtIndex(value, codeIndex) ? codeIndex : -1);
+        const itemNameIndex = headerNameIndex >= 0 ? headerNameIndex : (hasDataAtIndex(value, nameIndex) ? nameIndex : -1);
+        const resolvedCategoryIndex = headerCategoryIndex >= 0 ? headerCategoryIndex : (hasDataAtIndex(value, categoryIndex) ? categoryIndex : -1);
+        const resolvedRateIndex = headerRateIndex >= 0 ? headerRateIndex : (hasDataAtIndex(value, rateIndex) ? rateIndex : -1);
+
         value.forEach((row) => {
           if (!Array.isArray(row)) return;
 
-          const rawCode = sheetCell(row, codeIndex) || (headerCodeIndex >= 0 ? row[headerCodeIndex] : row[0]);
-          if (!normalizeCode(rawCode)) return;
+          const isHeaderRow = row.some((cell) => {
+            const header = normalizeHeaderCell(cell);
+            return ["item code", "item name", "item", "rate", "price", "category", "item category"].includes(header);
+          });
+          if (isHeaderRow) return;
 
-          const rawName = sheetCell(row, nameIndex) || (headerNameIndex >= 0 ? row[headerNameIndex] : "");
-          const rawCategory = sheetCell(row, categoryIndex) || (headerCategoryIndex >= 0 ? row[headerCategoryIndex] : "");
-          const rawRate = sheetCell(row, rateIndex) || (headerRateIndex >= 0 ? row[headerRateIndex] : row[1]);
+          const rawExplicitCode = itemCodeIndex >= 0 ? sheetCell(row, itemCodeIndex) : "";
+          const explicitCode = looksLikeItemCode(rawExplicitCode) ? normalizeCode(rawExplicitCode) : "";
+          const codeCandidates = row.filter((cell) => looksLikeItemCode(cell)).map((cell) => normalizeCode(cell));
+          const code = explicitCode || codeCandidates.find(Boolean) || "";
+          if (!code) return;
 
-          upsertSheetItem(rawCode, rawName, rawCategory);
-          addRate(rawCode, rawRate);
+          const codeCellIndex = explicitCode
+            ? itemCodeIndex
+            : row.findIndex((cell) => normalizeCode(cell) === code);
+
+          const explicitName = itemNameIndex >= 0 ? normalizeText(sheetCell(row, itemNameIndex)) : "";
+          const nameCandidate = explicitName || row
+            .map((cell, index) => ({ cell, index }))
+            .filter(({ index }) => index !== codeCellIndex)
+            .filter(({ cell }) => looksLikeItemName(cell))
+            .sort((a, b) => scoreSheetName(b.cell) - scoreSheetName(a.cell))[0]?.cell || "";
+          const rawName = normalizeText(nameCandidate) && normalizeCode(nameCandidate) !== code ? normalizeText(nameCandidate) : "";
+
+          const explicitCategory = resolvedCategoryIndex >= 0 ? normalizeText(sheetCell(row, resolvedCategoryIndex)) : "";
+          const categoryCandidate = explicitCategory || row.find((cell) => /electronics|fridge|freezer|air conditioner|ac|window/i.test(String(cell || ""))) || "";
+          const rawCategory = normalizeText(categoryCandidate);
+
+          const rawRate = sheetCell(row, resolvedRateIndex) || row.find((cell) => Number.isFinite(Number(String(cell).replace(/,/g, "")))) || "";
+
+          upsertSheetItem(code, rawName || code, rawCategory || "Unclassified");
+          addRate(code, rawRate);
         });
         return;
       }
@@ -165,33 +241,46 @@ export function parsePricePayload(payload) {
       return;
     }
 
-    if (typeof value === "object") {
-      const keys = Object.keys(value);
+    if (typeof value !== "object") return;
 
-      // Handle row-like objects where columns are serialized as keys (e.g. B/C/CO/D).
-      const rowCode = readAny(value, ["B", "item_code", "itemCode", "code", "sku", "SKU", "Item Code", "ITEM CODE"]);
-      if (rowCode) {
-        const rowName = readAny(value, ["C", "item_name", "itemName", "name", "description", "Item Name", "ITEM NAME"]);
-        const rowCategory = readAny(value, ["CO", "category", "item_category", "group", "Item Category", "ITEM CATEGORY"]);
-        const rowRate = readAny(value, ["D", "rate", "price", "unit_price", "selling_price", "Rate", "Price"]);
+    if (isRowLike(value)) {
+      const code = readAny(value, ["item_code", "itemCode", "code", "B", "Item Code", "ITEM CODE", "sku", "SKU"]);
+      const name = readAny(value, ["item_name", "itemName", "name", "C", "Item Name", "ITEM NAME", "description", "Description"]);
+      const category = readAny(value, ["category", "item_category", "CO", "Category", "ITEM CATEGORY", "Item Category", "group", "Group", "item_group", "Item Group"]);
+      const rate = readAny(value, ["rate", "price", "RATE", "Price", "D", "Selling Rate"]);
 
-        upsertSheetItem(rowCode, rowName, rowCategory);
-        addRate(rowCode, rowRate);
+      if (code) {
+        addRate(code, rate);
+        upsertSheetItem(code, name, category);
       }
-
-      const looksLikeRateMap = keys.some((key) => looksLikeItemCode(key) && typeof value[key] !== "object");
-
-      if (looksLikeRateMap) {
-        keys.forEach((key) => {
-          addRate(key, value[key]);
-        });
-      }
-
-      keys.forEach((key) => walk(value[key]));
     }
+
+    Object.entries(value).forEach(([key, entry]) => {
+      if (["priceMap", "prices", "data", "rows", "result", "items", "sheetData", "values"].includes(key)) {
+        walk(entry);
+        return;
+      }
+
+      if (typeof entry === "object") {
+        walk(entry);
+      }
+    });
   }
 
-  walk(payload);
+  if (Array.isArray(payload)) {
+    walk(payload);
+    return { priceMap, sheetItems };
+  }
+
+  if (payload && typeof payload === "object") {
+    walk(payload);
+
+    Object.entries(payload).forEach(([key, value]) => {
+      if (typeof value !== "object" || value === null) {
+        addRate(key, value);
+      }
+    });
+  }
 
   return { priceMap, sheetItems };
 }
@@ -233,7 +322,6 @@ export async function loadPricePayload(apiUrl, cacheKey = "madiba.pricePayload")
       }
 
       const data = await response.json();
-
       const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
         ? {
             priceMap: data.priceMap,

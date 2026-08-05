@@ -24,6 +24,10 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function isExcludedCategory(value) {
+  return normalizeText(value).toLowerCase() === "building material";
+}
+
 function toPositiveNumber(value) {
   const cleaned = String(value ?? "")
     .replace(/,/g, "")
@@ -183,6 +187,8 @@ function buildEnrichedSheetItems(parsed, metadataByCode) {
     const code = normalizeCode(item?.item_code);
     if (!code) return;
 
+    if (isExcludedCategory(item?.category)) return;
+
     byCode.set(code, {
       item_code: code,
       item_name: normalizeText(item.item_name) || code,
@@ -210,6 +216,11 @@ function buildEnrichedSheetItems(parsed, metadataByCode) {
     const nextCategory = hasMeaningfulCategory(existing.category)
       ? normalizeText(existing.category)
       : (hasMeaningfulCategory(meta.category) ? normalizeText(meta.category) : "Unclassified");
+
+    if (isExcludedCategory(nextCategory)) {
+      byCode.delete(code);
+      return;
+    }
 
     byCode.set(code, {
       item_code: code,
@@ -313,6 +324,16 @@ async function runSync(sourcePayload = null) {
   const codes = Object.keys(parsed.priceMap || {}).map((value) => normalizeCode(value)).filter(Boolean);
   const metadataByCode = await loadItemMetadata(admin, codes);
   const fallbackRatesByCode = await loadRateFallback(admin, codes);
+
+  Object.keys(parsed.priceMap || {}).forEach((rawCode) => {
+    const code = normalizeCode(rawCode);
+    if (!code) return;
+
+    const metadataCategory = normalizeText(metadataByCode.get(code)?.category);
+    if (isExcludedCategory(metadataCategory)) {
+      delete parsed.priceMap[rawCode];
+    }
+  });
 
   Object.keys(parsed.priceMap || {}).forEach((rawCode) => {
     const code = normalizeCode(rawCode);

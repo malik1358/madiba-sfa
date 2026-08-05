@@ -10,14 +10,21 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const cronSecret = process.env.CRON_SECRET;
 
+function normalizeSecret(value) {
+  return String(value || "").trim();
+}
+
 function isAuthorized(request) {
-  if (!cronSecret) return false;
+  const expectedSecret = normalizeSecret(cronSecret);
+  if (!expectedSecret) return false;
 
   const authHeader = request.headers.get("authorization") || "";
-  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-  const headerSecret = request.headers.get("x-cron-secret") || "";
+  const bearer = authHeader.startsWith("Bearer ")
+    ? normalizeSecret(authHeader.slice(7))
+    : "";
+  const headerSecret = normalizeSecret(request.headers.get("x-cron-secret"));
 
-  return bearer === cronSecret || headerSecret === cronSecret;
+  return bearer === expectedSecret || headerSecret === expectedSecret;
 }
 
 async function runSync() {

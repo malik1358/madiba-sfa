@@ -295,6 +295,21 @@ async function runSync(sourcePayload = null) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  const { data: existingCacheRow, error: existingCacheError } = await admin
+    .from("price_catalog_cache")
+    .select("price_map")
+    .eq("cache_key", "default")
+    .maybeSingle();
+
+  if (existingCacheError) {
+    throw new Error(`Existing cache lookup failed: ${existingCacheError.message}`);
+  }
+
+  const existingPriceMap =
+    existingCacheRow && existingCacheRow.price_map && typeof existingCacheRow.price_map === "object"
+      ? existingCacheRow.price_map
+      : {};
+
   const codes = Object.keys(parsed.priceMap || {}).map((value) => normalizeCode(value)).filter(Boolean);
   const metadataByCode = await loadItemMetadata(admin, codes);
   const fallbackRatesByCode = await loadRateFallback(admin, codes);
@@ -309,6 +324,12 @@ async function runSync(sourcePayload = null) {
     const fallbackRate = fallbackRatesByCode.get(code) || 0;
     if (fallbackRate > 0) {
       parsed.priceMap[rawCode] = fallbackRate;
+      return;
+    }
+
+    const existingRate = toPositiveNumber(existingPriceMap[rawCode] ?? existingPriceMap[code]);
+    if (existingRate > 0) {
+      parsed.priceMap[rawCode] = existingRate;
     }
   });
 

@@ -488,13 +488,26 @@ export default function NewOrderPage() {
       const code = normalizeCode(item.item_code);
       if (!code) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
+      const sheetFallback = (priceSheetItems || []).find((sheetItem) => normalizeCode(sheetItem.item_code) === code) || {};
+
+      const masterName = normalizeText(item.item_name);
+      const masterCategory = normalizeText(item.category);
+      const sheetName = normalizeText(sheetFallback.item_name);
+      const sheetCategory = normalizeText(sheetFallback.category);
+
+      const nextName = hasMeaningfulItemName(masterName, code)
+        ? masterName
+        : (hasMeaningfulItemName(sheetName, code) ? sheetName : (historyFallback.item_name || code));
+      const nextCategory = hasMeaningfulValue(masterCategory)
+        ? masterCategory
+        : (hasMeaningfulValue(sheetCategory) ? sheetCategory : (historyFallback.category || "Unclassified"));
 
       itemMap.set(code, {
         ...item,
         item_code: code,
-        item_name: String(item.item_name || historyFallback.item_name || code).trim(),
-        category: String(item.category || historyFallback.category || "Unclassified").trim() || "Unclassified",
-        source: "ITEM_MASTER",
+        item_name: nextName,
+        category: nextCategory,
+        source: hasMeaningfulItemName(sheetName, code) || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : "ITEM_MASTER",
       });
     });
 

@@ -608,18 +608,25 @@ export default function NewOrderPage() {
 
   const filteredItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
+    const normalizedQueryCode = normalizeCode(itemSearch);
     const includeNeedsMapping = categoryFilter === NEEDS_MAPPING_CATEGORY;
 
     return mergedItemsMaster.filter((item) => {
-      if (item.category === NEEDS_MAPPING_CATEGORY && !includeNeedsMapping) return false;
       if (categoryFilter !== "ALL" && item.category !== categoryFilter) return false;
-      if (!q) return true;
 
-      return (
+      const matchesQuery = !q || (
         String(item.item_code || "").toLowerCase().includes(q) ||
         String(item.item_name || "").toLowerCase().includes(q) ||
         String(item.category || "").toLowerCase().includes(q)
       );
+
+      if (item.category === NEEDS_MAPPING_CATEGORY && !includeNeedsMapping) {
+        // Keep unresolved rows out of normal browsing, but allow direct code lookup.
+        const isExactCodeLookup = normalizedQueryCode && normalizeCode(item.item_code) === normalizedQueryCode;
+        if (!isExactCodeLookup) return false;
+      }
+
+      return matchesQuery;
     });
   }, [mergedItemsMaster, categoryFilter, itemSearch]);
 

@@ -1425,7 +1425,7 @@ export default function NewOrderPage() {
               <div className="moduleSectionHeader">
                 <h2>Full Item List</h2>
                 <span>
-                  {mergedItemsMaster.length} catalog items • {orderSummary.itemCount} selected • {qtyFormat(orderSummary.totalQuantity)} units
+                  {filteredItems.length} visible of {mergedItemsMaster.length} catalog items • {orderSummary.itemCount} selected • {qtyFormat(orderSummary.totalQuantity)} units
                 </span>
               </div>
 
@@ -1462,7 +1462,7 @@ export default function NewOrderPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {groupedItems.slice(0, 40).map((group) => {
+                    {groupedItems.map((group) => {
                       const isExpanded = Boolean(expandedItemCategories[group.category]);
 
                       return (
@@ -1482,7 +1482,7 @@ export default function NewOrderPage() {
                             </td>
                           </tr>
                           {isExpanded &&
-                            group.items.slice(0, 120).map((item) => {
+                            group.items.map((item) => {
                               const qty = Number(orderQuantities[item.item_code] || 0);
                               const price = getPrice(priceList, item.item_code);
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);

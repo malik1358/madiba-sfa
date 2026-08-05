@@ -120,6 +120,26 @@ function isExcludedCategory(value) {
 
 const NEEDS_MAPPING_CATEGORY = "Needs Mapping";
 
+function normalizeCategoryKey(value) {
+  return normalizeText(value).replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeCategoryLabel(value) {
+  const text = normalizeText(value).replace(/\s+/g, " ");
+  if (!text) return "Unclassified";
+
+  if (normalizeCategoryKey(text) === normalizeCategoryKey(NEEDS_MAPPING_CATEGORY)) {
+    return NEEDS_MAPPING_CATEGORY;
+  }
+
+  return text
+    .split(" ")
+    .map((word) => (word.toUpperCase() === "POS"
+      ? "POS"
+      : `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`))
+    .join(" ");
+}
+
 async function fetchItemCategoryLookup(supabase, scope) {
   const pageSize = 1000;
   let from = 0;
@@ -548,14 +568,15 @@ export default function NewOrderPage() {
       const nextCategory = hasMeaningfulValue(masterCategory)
         ? masterCategory
         : (hasMeaningfulValue(sheetCategory) ? sheetCategory : (historyFallback.category || "Unclassified"));
+      const normalizedCategory = normalizeCategoryLabel(nextCategory);
 
-      if (isExcludedCategory(nextCategory)) return;
+      if (isExcludedCategory(normalizedCategory)) return;
 
       itemMap.set(code, {
         ...item,
         item_code: code,
         item_name: nextName,
-        category: nextCategory,
+        category: normalizedCategory,
         source: hasMeaningfulItemName(sheetName, code) || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : "ITEM_MASTER",
       });
     });
@@ -570,6 +591,7 @@ export default function NewOrderPage() {
         const historyFallback = historyCategoryLookup.get(code) || {};
         const nextName = normalizeText(sheetItem.item_name) || historyFallback.item_name || code;
         const nextCategory = normalizeText(sheetItem.category) || historyFallback.category || "Unclassified";
+        const normalizedCategory = normalizeCategoryLabel(nextCategory);
 
         // Keep placeholder-only sheet rows visible, but isolate them for cleanup.
         const unresolved = !hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory);
@@ -587,7 +609,7 @@ export default function NewOrderPage() {
         itemMap.set(code, {
           item_code: code,
           item_name: nextName,
-          category: unresolved ? NEEDS_MAPPING_CATEGORY : nextCategory,
+          category: unresolved ? NEEDS_MAPPING_CATEGORY : normalizedCategory,
           source: "PRICE_SHEET_ONLY",
         });
         return;
@@ -605,11 +627,12 @@ export default function NewOrderPage() {
       const nextCategory = hasMeaningfulValue(sheetCategory)
         ? sheetCategory
         : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));
+      const normalizedCategory = normalizeCategoryLabel(nextCategory);
 
       itemMap.set(code, {
         ...existing,
         item_name: nextName,
-        category: nextCategory,
+        category: normalizedCategory,
         source: existing.source === "PRICE_SHEET_ONLY" || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : existing.source,
       });
     });
@@ -629,7 +652,7 @@ export default function NewOrderPage() {
       itemMap.set(code, {
         item_code: code,
         item_name: fallbackName || code,
-        category: unresolved ? NEEDS_MAPPING_CATEGORY : (fallbackCategory || "Unclassified"),
+        category: unresolved ? NEEDS_MAPPING_CATEGORY : normalizeCategoryLabel(fallbackCategory || "Unclassified"),
         source: "PRICE_MAP_ONLY",
       });
     });
@@ -708,6 +731,9 @@ export default function NewOrderPage() {
       return matchesQuery;
     });
   }, [mergedItemsMaster, categoryFilter, itemSearch]);
+
+  const hiddenItemCount = Math.max(0, mergedItemsMaster.length - filteredItems.length);
+  const hasActiveFilters = itemSearch.trim().length > 0 || categoryFilter !== "ALL";
 
   const groupedItems = useMemo(() => {
     const map = new Map();
@@ -1449,6 +1475,26 @@ export default function NewOrderPage() {
                   ))}
                 </select>
               </div>
+
+              {hiddenItemCount > 0 && (
+                <div className="moduleHint">
+                  {hiddenItemCount} item(s) are hidden by current view rules
+                  {hasActiveFilters ? " (search/category filters)." : " (mostly unresolved mapping items)."}
+                  {hasActiveFilters && (
+                    <button
+                      type="button"
+                      className="moduleInlineButton"
+                      onClick={() => {
+                        setItemSearch("");
+                        setCategoryFilter("ALL");
+                      }}
+                      style={{ marginLeft: "8px" }}
+                    >
+                      Reset Filters
+                    </button>
+                  )}
+                </div>
+              )}
 
               <div className="moduleTableWrap">
                 <table className="moduleTable moduleOrderTable">

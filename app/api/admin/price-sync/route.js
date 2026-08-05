@@ -203,7 +203,20 @@ async function runSync() {
     throw new Error(`Price source failed with ${response.status}`);
   }
 
-  const payload = await response.json();
+  const sourceContentType = String(response.headers.get("content-type") || "").toLowerCase();
+  const sourceText = await response.text();
+
+  let payload;
+  try {
+    payload = JSON.parse(sourceText);
+  } catch {
+    const snippet = sourceText.slice(0, 180).replace(/\s+/g, " ").trim();
+    throw new Error(
+      `Price source returned non-JSON content (content-type: ${sourceContentType || "unknown"}). ` +
+      `First bytes: ${snippet || "(empty response)"}`
+    );
+  }
+
   const parsed = parsePricePayload(payload || {});
 
   if (!parsed.priceMap || Object.keys(parsed.priceMap).length === 0) {

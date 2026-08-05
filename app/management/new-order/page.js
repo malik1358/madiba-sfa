@@ -662,7 +662,18 @@ export default function NewOrderPage() {
     });
 
     return Array.from(itemMap.values())
-      .filter((item) => !isDoNotUseItem(item.item_name))
+      .filter((item) => {
+        if (isDoNotUseItem(item.item_name)) return false;
+
+        const code = normalizeCode(item.item_code);
+        const hasSalesHistory = historyCategoryLookup.has(code);
+        const hasUsableSheetPrice = toNumber(priceList?.[code]) > 0;
+
+        // Hide unmapped/no-price codes that have never appeared in sales data.
+        if (!hasSalesHistory && !hasUsableSheetPrice) return false;
+
+        return true;
+      })
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 

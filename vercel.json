@@ -1,8 +1,1 @@
-{
-  "crons": [
-    {
-      "path": "/api/admin/price-sync",
-      "schedule": "0 */8 * * *"
-    }
-  ]
-}
+{}

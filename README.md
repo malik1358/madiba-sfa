@@ -17,10 +17,13 @@ Run [sql/setup_price_catalog_cache.sql](sql/setup_price_catalog_cache.sql) in Su
 
 ### 3) Automatic schedule
 
-The sync endpoint is scheduled via [vercel.json](vercel.json) to run every 8 hours:
+For Vercel Hobby plans, use GitHub Actions for 8-hour scheduling:
 
-- Path: /api/admin/price-sync
+- Workflow: [.github/workflows/price-sync.yml](.github/workflows/price-sync.yml)
 - Cron: 0 */8 * * *
+- Required GitHub repository secrets:
+	- PRICE_SYNC_URL (example: https://madiba-sfa.vercel.app/api/admin/price-sync)
+	- CRON_SECRET (same value as Vercel env var CRON_SECRET)
 
 ### 4) Manual sync (optional)
 

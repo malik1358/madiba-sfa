@@ -1,0 +1,29 @@
+name: Price Sync
+
+on:
+  schedule:
+    - cron: "0 */8 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger price sync endpoint
+        env:
+          PRICE_SYNC_URL: ${{ secrets.PRICE_SYNC_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [[ -z "$PRICE_SYNC_URL" ]]; then
+            echo "PRICE_SYNC_URL secret is missing"
+            exit 1
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          curl -fsS -X POST "$PRICE_SYNC_URL" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json"

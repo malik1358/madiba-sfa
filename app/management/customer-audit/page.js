@@ -1,7 +1,6 @@
 "use client";
 
-const PRICE_API =
-  "https://script.google.com/macros/s/AKfycbzXPREoz0tUgern-5LhpEPBMY_ed2hO1fgYpIVfzG2-BU9HbjOklKCBFVMtsw64Uff5/exec";
+const PRICE_CACHE_API = "/api/pricing/cache";
 
 const PAGE_VERSION = "Quick Order V5";
 const TEXT = {
@@ -103,7 +102,7 @@ export default function CustomerAuditPage() {
   useEffect(() => {
     async function loadPrices() {
       try {
-        const parsed = await loadPricePayload(PRICE_API, "madiba.pricePayload");
+        const parsed = await loadPricePayload(PRICE_CACHE_API, "madiba.pricePayload");
         setPriceList(parsed.priceMap || {});
       } catch {
         // Keep previous prices if fresh fetch fails.

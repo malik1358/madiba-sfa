@@ -20,8 +20,7 @@ import CategoryPerformance from "../customer-audit/components/CategoryPerformanc
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
 
-const PRICE_API =
-  "https://script.google.com/macros/s/AKfycbzXPREoz0tUgern-5LhpEPBMY_ed2hO1fgYpIVfzG2-BU9HbjOklKCBFVMtsw64Uff5/exec";
+const PRICE_CACHE_API = "/api/pricing/cache";
 
 const TEXT = {
   title: { en: "New Order", ar: "طلب جديد" },
@@ -1058,15 +1057,20 @@ export default function NewOrderPage() {
       const PRICE_CACHE_KEY = "madiba.pricePayload";
 
       try {
-        const response = await fetch(PRICE_API);
+        const response = await fetch(PRICE_CACHE_API, { cache: "no-store" });
         if (!response.ok) {
           throw new Error(`Price API failed with ${response.status}`);
         }
 
         const data = await response.json();
-        const parsed = parsePricePayload(data || {});
+        const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
+          ? {
+              priceMap: data.priceMap,
+              sheetItems: Array.isArray(data.sheetItems) ? data.sheetItems : [],
+            }
+          : parsePricePayload(data || {});
         if (Object.keys(parsed.priceMap || {}).length === 0) {
-          throw new Error("Price API returned no prices");
+          throw new Error("Price cache returned no prices");
         }
 
         setPriceList(parsed.priceMap);

@@ -2,6 +2,10 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function looksLikeItemCode(value) {
+  return /^[A-Z][A-Z0-9/.-]{3,20}$/i.test(String(value || "").trim());
+}
+
 function toNumber(value) {
   const cleaned = String(value ?? "")
     .replace(/,/g, "")
@@ -175,7 +179,7 @@ export function parsePricePayload(payload) {
         addRate(rowCode, rowRate);
       }
 
-      const looksLikeRateMap = keys.some((key) => normalizeCode(key) && typeof value[key] !== "object");
+      const looksLikeRateMap = keys.some((key) => looksLikeItemCode(key) && typeof value[key] !== "object");
 
       if (looksLikeRateMap) {
         keys.forEach((key) => {
@@ -230,7 +234,14 @@ export async function loadPricePayload(apiUrl, cacheKey = "madiba.pricePayload")
       }
 
       const data = await response.json();
-      const parsed = parsePricePayload(data || {});
+
+      const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
+        ? {
+            priceMap: data.priceMap,
+            sheetItems: Array.isArray(data.sheetItems) ? data.sheetItems : [],
+          }
+        : parsePricePayload(data || {});
+
       if (Object.keys(parsed.priceMap).length === 0) {
         throw new Error("Price API returned no prices");
       }

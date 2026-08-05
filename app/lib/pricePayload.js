@@ -150,7 +150,17 @@ export function parsePricePayload(payload) {
     const code = normalizeCode(rawCode);
     if (!code) return;
     if (isExcludedItemCode(code)) return;
-    priceMap[code] = toNumber(rawRate);
+
+    const nextRate = toNumber(rawRate);
+    const hasCurrent = Object.prototype.hasOwnProperty.call(priceMap, code);
+    const currentRate = hasCurrent ? toNumber(priceMap[code]) : 0;
+
+    // Keep a usable rate once discovered; do not downgrade it to zero.
+    if (currentRate > 0 && nextRate <= 0) return;
+
+    if (nextRate > 0 || !hasCurrent) {
+      priceMap[code] = nextRate;
+    }
   }
 
   function readAny(source, keys) {

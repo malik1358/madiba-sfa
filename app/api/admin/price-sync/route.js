@@ -24,6 +24,16 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function toPositiveNumber(value) {
+  const cleaned = String(value ?? "")
+    .replace(/,/g, "")
+    .replace(/[^\d.-]/g, "")
+    .trim();
+
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 function isPlaceholderValue(value) {
   const text = normalizeText(value).toUpperCase();
   if (!text) return true;
@@ -130,6 +140,39 @@ async function loadItemMetadata(admin, codes) {
   }
 
   return metadataByCode;
+}
+
+async function loadRateFallback(admin, codes) {
+  const rateByCode = new Map();
+  if (!Array.isArray(codes) || codes.length === 0) return rateByCode;
+
+  const codeChunks = chunkCodes(codes);
+
+  for (const chunk of codeChunks) {
+    const { data, error } = await admin
+      .from("sales_raw")
+      .select("item_code,rate,transaction_date,id")
+      .in("item_code", chunk)
+      .order("transaction_date", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(2000);
+
+    if (error) {
+      throw new Error(`sales_raw rate lookup failed: ${error.message}`);
+    }
+
+    (data || []).forEach((row) => {
+      const code = normalizeCode(row.item_code);
+      if (!code || rateByCode.has(code)) return;
+
+      const rate = toPositiveNumber(row.rate);
+      if (rate > 0) {
+        rateByCode.set(code, rate);
+      }
+    });
+  }
+
+  return rateByCode;
 }
 
 function buildEnrichedSheetItems(parsed, metadataByCode) {
@@ -253,6 +296,21 @@ async function runSync(sourcePayload = null) {
 
   const codes = Object.keys(parsed.priceMap || {}).map((value) => normalizeCode(value)).filter(Boolean);
   const metadataByCode = await loadItemMetadata(admin, codes);
+  const fallbackRatesByCode = await loadRateFallback(admin, codes);
+
+  Object.keys(parsed.priceMap || {}).forEach((rawCode) => {
+    const code = normalizeCode(rawCode);
+    if (!code) return;
+
+    const currentRate = toPositiveNumber(parsed.priceMap[rawCode]);
+    if (currentRate > 0) return;
+
+    const fallbackRate = fallbackRatesByCode.get(code) || 0;
+    if (fallbackRate > 0) {
+      parsed.priceMap[rawCode] = fallbackRate;
+    }
+  });
+
   const enrichedSheetItems = buildEnrichedSheetItems(parsed, metadataByCode);
 
   const nowIso = new Date().toISOString();

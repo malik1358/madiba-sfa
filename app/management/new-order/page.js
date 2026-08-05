@@ -608,7 +608,7 @@ export default function NewOrderPage() {
 
   const filteredItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
-    const includeNeedsMapping = categoryFilter === NEEDS_MAPPING_CATEGORY || q.length > 0;
+    const includeNeedsMapping = categoryFilter === NEEDS_MAPPING_CATEGORY;
 
     return mergedItemsMaster.filter((item) => {
       if (item.category === NEEDS_MAPPING_CATEGORY && !includeNeedsMapping) return false;
@@ -642,7 +642,16 @@ export default function NewOrderPage() {
   }, [filteredItems]);
 
   const priceSheetOnlyItems = useMemo(
-    () => mergedItemsMaster.filter((item) => item.source === "PRICE_SHEET_ONLY" || item.source === "PRICE_MAP_ONLY"),
+    () => mergedItemsMaster.filter((item) => {
+      if (!(item.source === "PRICE_SHEET_ONLY" || item.source === "PRICE_MAP_ONLY")) return false;
+
+      // Keep this list focused on items that actually have usable mapping metadata.
+      if (item.category === NEEDS_MAPPING_CATEGORY && !hasMeaningfulItemName(item.item_name, item.item_code)) {
+        return false;
+      }
+
+      return true;
+    }),
     [mergedItemsMaster]
   );
 

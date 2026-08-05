@@ -81,15 +81,29 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function isPlaceholderValue(value) {
+  const text = normalizeText(value).toUpperCase();
+  if (!text) return true;
+  return [
+    "PUT_REAL_ITEM_NAME_HERE",
+    "PUT_REAL_CATEGORY_HERE",
+    "TO_MAP",
+    "TBD",
+    "TODO",
+  ].includes(text);
+}
+
 function hasMeaningfulValue(value) {
   const text = normalizeText(value);
   if (!text) return false;
+  if (isPlaceholderValue(text)) return false;
   return !["UNCLASSIFIED", "N/A", "NA", "-"] .includes(text.toUpperCase());
 }
 
 function hasMeaningfulItemName(value, itemCode = "") {
   const text = normalizeText(value);
   if (!text) return false;
+  if (isPlaceholderValue(text)) return false;
   if (looksLikeItemCode(text)) return false;
   if (normalizeCode(text) === normalizeCode(itemCode)) return false;
   return true;

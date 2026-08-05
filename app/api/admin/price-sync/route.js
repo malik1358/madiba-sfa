@@ -24,9 +24,22 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function isPlaceholderValue(value) {
+  const text = normalizeText(value).toUpperCase();
+  if (!text) return true;
+  return [
+    "PUT_REAL_ITEM_NAME_HERE",
+    "PUT_REAL_CATEGORY_HERE",
+    "TO_MAP",
+    "TBD",
+    "TODO",
+  ].includes(text);
+}
+
 function hasMeaningfulItemName(value, itemCode = "") {
   const text = normalizeText(value);
   if (!text) return false;
+  if (isPlaceholderValue(text)) return false;
   if (/^[A-Z][A-Z0-9/.-]{3,20}$/i.test(text)) return false;
   if (normalizeCode(text) === normalizeCode(itemCode)) return false;
   return true;
@@ -35,6 +48,7 @@ function hasMeaningfulItemName(value, itemCode = "") {
 function hasMeaningfulCategory(value) {
   const text = normalizeText(value);
   if (!text) return false;
+  if (isPlaceholderValue(text)) return false;
   return !["UNCLASSIFIED", "N/A", "NA", "-"].includes(text.toUpperCase());
 }
 

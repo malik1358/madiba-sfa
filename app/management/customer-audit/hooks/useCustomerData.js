@@ -2,6 +2,21 @@ import { useCallback, useEffect, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
 import { fetchSalesScope } from '../../../lib/salesScope';
 
+async function fetchVisibleCustomers(token) {
+  const response = await fetch('/api/customers/visible', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const payload = await response.json();
+  if (!response.ok || !payload.success) {
+    throw new Error(payload.error || 'Unable to load visible customers.');
+  }
+
+  return payload.customers || [];
+}
+
 export function useCustomerData({ setError, setMessage }) {
   const [customers, setCustomers] = useState([]);
   const [salesmen, setSalesmen] = useState([]);
@@ -39,30 +54,7 @@ export function useCustomerData({ setError, setMessage }) {
       const scope = await fetchSalesScope();
       setAccessScope(scope);
 
-      let customerQuery = supabase
-        .from('customers')
-        .select(`
-          customer_code,
-          customer_name,
-          current_salesman_code,
-          latest_transaction_date,
-          customer_type,
-          city,
-          area,
-          mobile
-        `)
-        .eq('is_active', true)
-        .order('customer_name');
-
-      if (!scope.hasAllAccess) {
-        customerQuery = customerQuery.in('current_salesman_code', scope.visibleSalesmanCodes);
-      }
-
-      const { data: customerData, error: customerError } = await customerQuery;
-
-      if (customerError) throw customerError;
-
-      const list = customerData || [];
+      const list = await fetchVisibleCustomers(session.access_token);
       setCustomers(list);
 
       const { data: masterData, error: masterError } = await supabase

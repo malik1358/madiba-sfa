@@ -134,6 +134,21 @@ async function fetchItemCategoryLookup(supabase, scope) {
   return lookup;
 }
 
+async function fetchVisibleCustomers(token) {
+  const response = await fetch("/api/customers/visible", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const payload = await response.json();
+  if (!response.ok || !payload.success) {
+    throw new Error(payload.error || "Unable to load visible customers.");
+  }
+
+  return payload.customers || [];
+}
+
 function isRowLike(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
@@ -928,16 +943,6 @@ export default function NewOrderPage() {
         const scope = await fetchSalesScope();
         setAccessScope(scope);
 
-        let customersQuery = supabase
-          .from("customers")
-          .select("customer_code,customer_name,current_salesman_code")
-          .eq("is_active", true)
-          .order("customer_name");
-
-        if (!scope.hasAllAccess) {
-          customersQuery = customersQuery.in("current_salesman_code", scope.visibleSalesmanCodes);
-        }
-
         let draftsQuery = supabase
           .from("sales_orders")
           .select("id,customer_code,customer_name,updated_at,status")
@@ -948,8 +953,8 @@ export default function NewOrderPage() {
           draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
         }
 
-        const [customersRes, itemsRes, draftsRes, categoriesRes] = await Promise.all([
-          customersQuery,
+        const [loadedCustomers, itemsRes, draftsRes, categoriesRes] = await Promise.all([
+          fetchVisibleCustomers(session.access_token),
           supabase
             .from("items_master")
             .select("item_code,item_name,category")
@@ -958,11 +963,9 @@ export default function NewOrderPage() {
           fetchItemCategoryLookup(supabase, scope),
         ]);
 
-        if (customersRes.error) throw customersRes.error;
         if (itemsRes.error) throw itemsRes.error;
         if (draftsRes.error) throw draftsRes.error;
 
-        const loadedCustomers = customersRes.data || [];
         const mergedCustomers = prefilledCustomer && !loadedCustomers.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
           ? [prefilledCustomer, ...loadedCustomers]
           : loadedCustomers;

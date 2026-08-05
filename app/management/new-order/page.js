@@ -1384,21 +1384,25 @@ export default function NewOrderPage() {
                             group.items.slice(0, 120).map((item) => {
                               const qty = Number(orderQuantities[item.item_code] || 0);
                               const price = getPrice(priceList, item.item_code);
+                              const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
+                              const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
+                              const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
+                              const showMetaLine = !nameIsCode || hasSourceBadge || hasDoNotUseBadge;
 
                               return (
                                 <tr key={item.item_code} className="moduleItemRow">
                                   <td>{item.category || "Unclassified"}</td>
                                   <td>
                                     <strong>
-                                      {normalizeCode(item.item_name) === normalizeCode(item.item_code)
-                                        ? item.item_code
-                                        : item.item_name}
+                                      {nameIsCode ? item.item_code : item.item_name}
                                     </strong>
-                                    <div className="moduleCode">
-                                      {item.item_code}
-                                      {item.source === "PRICE_SHEET_ONLY" ? " • Price Sheet" : ""}
-                                      {isDoNotUseItem(item.item_name) ? " • Do Not Use" : ""}
-                                    </div>
+                                    {showMetaLine && (
+                                      <div className="moduleCode">
+                                        {!nameIsCode ? item.item_code : ""}
+                                        {hasSourceBadge ? " • Price Sheet" : ""}
+                                        {hasDoNotUseBadge ? " • Do Not Use" : ""}
+                                      </div>
+                                    )}
                                   </td>
                                   <td>{price ? `SAR ${price.toFixed(2)}` : "NOT FOUND"}</td>
                                   <td>
@@ -1451,8 +1455,14 @@ export default function NewOrderPage() {
                         <tr key={`sheet-only-${item.item_code}`}>
                           <td>{item.category || "Unclassified"}</td>
                           <td>
-                            <strong>{item.item_name}</strong>
-                            <div className="moduleCode">{item.item_code}</div>
+                            <strong>
+                              {normalizeCode(item.item_name) === normalizeCode(item.item_code)
+                                ? item.item_code
+                                : item.item_name}
+                            </strong>
+                            {normalizeCode(item.item_name) !== normalizeCode(item.item_code) && (
+                              <div className="moduleCode">{item.item_code}</div>
+                            )}
                           </td>
                           <td>{priceList[String(item.item_code).trim().toUpperCase()] ? `SAR ${Number(priceList[String(item.item_code).trim().toUpperCase()]).toFixed(2)}` : "NOT FOUND"}</td>
                         </tr>

@@ -1385,7 +1385,11 @@ export default function NewOrderPage() {
                                 <tr key={item.item_code} className="moduleItemRow">
                                   <td>{item.category || "Unclassified"}</td>
                                   <td>
-                                    <strong>{item.item_name}</strong>
+                                    <strong>
+                                      {normalizeCode(item.item_name) === normalizeCode(item.item_code)
+                                        ? item.item_code
+                                        : item.item_name}
+                                    </strong>
                                     <div className="moduleCode">
                                       {item.item_code}
                                       {item.source === "PRICE_SHEET_ONLY" ? " • Price Sheet" : ""}

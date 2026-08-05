@@ -96,6 +96,8 @@ function hasMeaningfulItemName(value, itemCode = "") {
   return true;
 }
 
+const NEEDS_MAPPING_CATEGORY = "Needs Mapping";
+
 async function fetchItemCategoryLookup(supabase, scope) {
   const pageSize = 1000;
   let from = 0;
@@ -471,15 +473,23 @@ export default function NewOrderPage() {
         const nextName = normalizeText(sheetItem.item_name) || historyFallback.item_name || code;
         const nextCategory = normalizeText(sheetItem.category) || historyFallback.category || "Unclassified";
 
-        // Skip placeholder-only sheet rows that still have no meaningful name/category.
+        // Keep placeholder-only sheet rows visible, but isolate them for cleanup.
+        const unresolved = !hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory);
+
         if (!hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory)) {
+          itemMap.set(code, {
+            item_code: code,
+            item_name: nextName,
+            category: NEEDS_MAPPING_CATEGORY,
+            source: "PRICE_SHEET_ONLY",
+          });
           return;
         }
 
         itemMap.set(code, {
           item_code: code,
           item_name: nextName,
-          category: nextCategory,
+          category: unresolved ? NEEDS_MAPPING_CATEGORY : nextCategory,
           source: "PRICE_SHEET_ONLY",
         });
         return;
@@ -512,16 +522,12 @@ export default function NewOrderPage() {
       const fallbackName = historyFallback.item_name || "";
       const fallbackCategory = historyFallback.category || "";
 
-      // Do not create a visible catalog item from price-only data unless
-      // history provides a meaningful identity.
-      if (!hasMeaningfulItemName(fallbackName, code) && !hasMeaningfulValue(fallbackCategory)) {
-        return;
-      }
+      const unresolved = !hasMeaningfulItemName(fallbackName, code) && !hasMeaningfulValue(fallbackCategory);
 
       itemMap.set(code, {
         item_code: code,
         item_name: fallbackName || code,
-        category: fallbackCategory || "Unclassified",
+        category: unresolved ? NEEDS_MAPPING_CATEGORY : (fallbackCategory || "Unclassified"),
         source: "PRICE_MAP_ONLY",
       });
     });

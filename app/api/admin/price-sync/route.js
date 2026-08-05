@@ -10,8 +10,159 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const cronSecret = process.env.CRON_SECRET;
 
+const CODE_CHUNK_SIZE = 200;
+
 function normalizeSecret(value) {
   return String(value || "").trim();
+}
+
+function normalizeCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
+function hasMeaningfulItemName(value, itemCode = "") {
+  const text = normalizeText(value);
+  if (!text) return false;
+  if (/^[A-Z][A-Z0-9/.-]{3,20}$/i.test(text)) return false;
+  if (normalizeCode(text) === normalizeCode(itemCode)) return false;
+  return true;
+}
+
+function hasMeaningfulCategory(value) {
+  const text = normalizeText(value);
+  if (!text) return false;
+  return !["UNCLASSIFIED", "N/A", "NA", "-"].includes(text.toUpperCase());
+}
+
+function chunkCodes(codes, size = CODE_CHUNK_SIZE) {
+  const chunks = [];
+  for (let i = 0; i < codes.length; i += size) {
+    chunks.push(codes.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function loadItemMetadata(admin, codes) {
+  const metadataByCode = new Map();
+  if (!Array.isArray(codes) || codes.length === 0) return metadataByCode;
+
+  const codeChunks = chunkCodes(codes);
+
+  for (const chunk of codeChunks) {
+    const { data, error } = await admin
+      .from("items_master")
+      .select("item_code,item_name,category")
+      .in("item_code", chunk);
+
+    if (error) {
+      throw new Error(`items_master lookup failed: ${error.message}`);
+    }
+
+    (data || []).forEach((row) => {
+      const code = normalizeCode(row.item_code);
+      if (!code) return;
+
+      const current = metadataByCode.get(code) || { item_name: "", category: "" };
+      const nextName = normalizeText(row.item_name);
+      const nextCategory = normalizeText(row.category);
+
+      if (!hasMeaningfulItemName(current.item_name, code) && hasMeaningfulItemName(nextName, code)) {
+        current.item_name = nextName;
+      }
+
+      if (!hasMeaningfulCategory(current.category) && hasMeaningfulCategory(nextCategory)) {
+        current.category = nextCategory;
+      }
+
+      metadataByCode.set(code, current);
+    });
+  }
+
+  for (const chunk of codeChunks) {
+    const { data, error } = await admin
+      .from("sales_raw")
+      .select("item_code,item_name,category,transaction_date")
+      .in("item_code", chunk)
+      .order("transaction_date", { ascending: false })
+      .limit(2000);
+
+    if (error) {
+      throw new Error(`sales_raw lookup failed: ${error.message}`);
+    }
+
+    (data || []).forEach((row) => {
+      const code = normalizeCode(row.item_code);
+      if (!code) return;
+
+      const current = metadataByCode.get(code) || { item_name: "", category: "" };
+      const nextName = normalizeText(row.item_name);
+      const nextCategory = normalizeText(row.category);
+
+      if (!hasMeaningfulItemName(current.item_name, code) && hasMeaningfulItemName(nextName, code)) {
+        current.item_name = nextName;
+      }
+
+      if (!hasMeaningfulCategory(current.category) && hasMeaningfulCategory(nextCategory)) {
+        current.category = nextCategory;
+      }
+
+      metadataByCode.set(code, current);
+    });
+  }
+
+  return metadataByCode;
+}
+
+function buildEnrichedSheetItems(parsed, metadataByCode) {
+  const byCode = new Map();
+
+  (Array.isArray(parsed.sheetItems) ? parsed.sheetItems : []).forEach((item) => {
+    const code = normalizeCode(item?.item_code);
+    if (!code) return;
+
+    byCode.set(code, {
+      item_code: code,
+      item_name: normalizeText(item.item_name) || code,
+      category: normalizeText(item.category) || "Unclassified",
+      source: "PRICE_SHEET",
+    });
+  });
+
+  Object.keys(parsed.priceMap || {}).forEach((rawCode) => {
+    const code = normalizeCode(rawCode);
+    if (!code) return;
+
+    const existing = byCode.get(code) || {
+      item_code: code,
+      item_name: code,
+      category: "Unclassified",
+      source: "PRICE_MAP_ONLY",
+    };
+
+    const meta = metadataByCode.get(code) || {};
+    const nextName = hasMeaningfulItemName(existing.item_name, code)
+      ? normalizeText(existing.item_name)
+      : (hasMeaningfulItemName(meta.item_name, code) ? normalizeText(meta.item_name) : code);
+
+    const nextCategory = hasMeaningfulCategory(existing.category)
+      ? normalizeText(existing.category)
+      : (hasMeaningfulCategory(meta.category) ? normalizeText(meta.category) : "Unclassified");
+
+    byCode.set(code, {
+      item_code: code,
+      item_name: nextName,
+      category: nextCategory,
+      source: hasMeaningfulItemName(meta.item_name, code) || hasMeaningfulCategory(meta.category)
+        ? "ENRICHED_CACHE"
+        : existing.source,
+    });
+  });
+
+  return Array.from(byCode.values());
 }
 
 function isAuthorized(request) {
@@ -48,6 +199,10 @@ async function runSync() {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  const codes = Object.keys(parsed.priceMap || {}).map((value) => normalizeCode(value)).filter(Boolean);
+  const metadataByCode = await loadItemMetadata(admin, codes);
+  const enrichedSheetItems = buildEnrichedSheetItems(parsed, metadataByCode);
+
   const nowIso = new Date().toISOString();
   const priceCount = Object.keys(parsed.priceMap).length;
 
@@ -66,7 +221,7 @@ async function runSync() {
     {
       cache_key: "default",
       price_map: parsed.priceMap,
-      sheet_items: parsed.sheetItems,
+      sheet_items: enrichedSheetItems,
       source_synced_at: nowIso,
       updated_at: nowIso,
     },
@@ -81,7 +236,7 @@ async function runSync() {
     ok: true,
     syncedAt: nowIso,
     priceCount,
-    sheetItemCount: Array.isArray(parsed.sheetItems) ? parsed.sheetItems.length : 0,
+    sheetItemCount: enrichedSheetItems.length,
   };
 }
 

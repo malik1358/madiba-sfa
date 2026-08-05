@@ -84,6 +84,7 @@ function normalizeText(value) {
 function isPlaceholderValue(value) {
   const text = normalizeText(value).toUpperCase();
   if (!text) return true;
+  if (/^REAL_(?:ITEM_NAME|CATEGORY)_FOR_[A-Z0-9/._-]+$/.test(text)) return true;
   return [
     "PUT_REAL_ITEM_NAME_HERE",
     "PUT_REAL_CATEGORY_HERE",

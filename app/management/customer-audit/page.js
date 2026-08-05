@@ -11,7 +11,7 @@ const TEXT = {
   loadingCustomer: { en: "Loading customer history...", ar: "جاري تحميل سجل العميل..." },
 };
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -37,7 +37,7 @@ import { useQuickOrder } from "./hooks/useQuickOrder";
 import { useOrder } from "./hooks/useOrder";
 
 
-export default function CustomerAuditPage() {
+function CustomerAuditPageContent() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [error, setError] = useState("");
@@ -352,5 +352,13 @@ export default function CustomerAuditPage() {
       </div>
     </main>
     </MorningAttendanceGate>
+  );
+}
+
+export default function CustomerAuditPage() {
+  return (
+    <Suspense fallback={<LoadingScreen title="Customer Audit" subtitle="Loading customer data..." />}>
+      <CustomerAuditPageContent />
+    </Suspense>
   );
 }

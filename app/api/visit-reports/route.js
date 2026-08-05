@@ -15,7 +15,7 @@ function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
-const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ"]];
+const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function resolveMutualGroupCodes(allProfiles, currentProfile) {
   const currentName = normalizeName(currentProfile?.salesman_name);

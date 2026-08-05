@@ -143,59 +143,6 @@ select {
   color: #ffffff;
 }
 
-.moduleLanguageSwitch {
-  width: auto;
-}
-
-.moduleHeaderMeta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
-}
-
-.moduleVisitPanel {
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid #d5e1e4;
-  border-radius: 10px;
-  background: #f7fafb;
-}
-
-.moduleVisitActions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.moduleStockRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.moduleChipButton {
-  border: 1px solid #c7d7dc;
-  background: #ffffff;
-  color: #073f4c;
-  border-radius: 999px;
-  padding: 8px 12px;
-}
-
-.moduleChipButton.active {
-  background: #0b5364;
-  border-color: #0b5364;
-  color: #ffffff;
-}
-
-.moduleInlineStack {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
 .sectionTitle {
   margin: 8px 0 16px;
   color: #073f4c;
@@ -3511,75 +3458,6 @@ table.auditMatrix td.auditTrendSame {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
-}
-
-.moduleDocumentRow {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.gpsMapShell {
-  position: relative;
-  min-height: 420px;
-  overflow: hidden;
-  border: 1px solid #d5e1e4;
-  border-radius: 12px;
-  background:
-    radial-gradient(circle at 20% 20%, rgba(11, 83, 100, 0.08), transparent 24%),
-    radial-gradient(circle at 80% 30%, rgba(11, 109, 125, 0.08), transparent 18%),
-    linear-gradient(180deg, #f8fbfc 0%, #edf4f6 100%);
-}
-
-.gpsMapShell::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: linear-gradient(rgba(7, 63, 76, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(7, 63, 76, 0.04) 1px, transparent 1px);
-  background-size: 48px 48px;
-  pointer-events: none;
-}
-
-.gpsPin {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  min-width: 180px;
-  max-width: 240px;
-  border-radius: 16px;
-  padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #c8dde1;
-  box-shadow: 0 10px 24px rgba(7, 63, 76, 0.14);
-}
-
-.gpsPin strong,
-.gpsPin span,
-.gpsPin small {
-  display: block;
-}
-
-.gpsPin strong {
-  color: #073f4c;
-}
-
-.gpsPin span,
-.gpsPin small {
-  color: #5f767d;
-  font-size: 12px;
-}
-
-.gpsPin::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: -10px;
-  width: 14px;
-  height: 14px;
-  transform: translateX(-50%) rotate(45deg);
-  background: #ffffff;
-  border-left: 1px solid #c8dde1;
-  border-top: 1px solid #c8dde1;
 }
 
 .moduleNavGrid {

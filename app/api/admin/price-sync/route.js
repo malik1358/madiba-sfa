@@ -193,28 +193,52 @@ function isAuthorized(request) {
   return bearer === expectedSecret || headerSecret === expectedSecret;
 }
 
-async function runSync() {
+function extractSourcePayload(body) {
+  if (!body || typeof body !== "object") return null;
+  if (body.payload && typeof body.payload === "object") return body.payload;
+  if (body.priceMap && typeof body.priceMap === "object") return body;
+  return null;
+}
+
+async function readRequestBody(request) {
+  const contentType = String(request.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes("application/json")) return null;
+
+  const text = await request.text();
+  if (!text.trim()) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Request body must be valid JSON when provided.");
+  }
+}
+
+async function runSync(sourcePayload = null) {
   if (!supabaseUrl || !serviceKey) {
     throw new Error("Server configuration is incomplete.");
   }
 
-  const response = await fetch(PRICE_SOURCE_URL, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`Price source failed with ${response.status}`);
-  }
+  let payload = sourcePayload;
 
-  const sourceContentType = String(response.headers.get("content-type") || "").toLowerCase();
-  const sourceText = await response.text();
+  if (!payload) {
+    const response = await fetch(PRICE_SOURCE_URL, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Price source failed with ${response.status}`);
+    }
 
-  let payload;
-  try {
-    payload = JSON.parse(sourceText);
-  } catch {
-    const snippet = sourceText.slice(0, 180).replace(/\s+/g, " ").trim();
-    throw new Error(
-      `Price source returned non-JSON content (content-type: ${sourceContentType || "unknown"}). ` +
-      `First bytes: ${snippet || "(empty response)"}`
-    );
+    const sourceContentType = String(response.headers.get("content-type") || "").toLowerCase();
+    const sourceText = await response.text();
+
+    try {
+      payload = JSON.parse(sourceText);
+    } catch {
+      const snippet = sourceText.slice(0, 180).replace(/\s+/g, " ").trim();
+      throw new Error(
+        `Price source returned non-JSON content (content-type: ${sourceContentType || "unknown"}). ` +
+        `First bytes: ${snippet || "(empty response)"}`
+      );
+    }
   }
 
   const parsed = parsePricePayload(payload || {});
@@ -274,7 +298,8 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    const result = await runSync();
+    const body = await readRequestBody(request);
+    const result = await runSync(extractSourcePayload(body));
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     return NextResponse.json(

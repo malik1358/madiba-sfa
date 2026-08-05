@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
+import { normalizeImportedItemName } from "../../lib/itemName.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -114,22 +115,6 @@ function findValue(row, possibilities) {
   return null;
 }
 
-function normalizeImportedItemName(value) {
-  const lines = String(value || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  let name = lines[0] || "";
-  if (!name) return null;
-
-  name = name
-    .replace(/\b(?:A\s*)?repet(?:e|i)?d\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return name || null;
-}
 
 /* ============================================================
    MAIN IMPORT API

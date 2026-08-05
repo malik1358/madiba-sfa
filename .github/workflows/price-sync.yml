@@ -9,6 +9,13 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      - name: Fetch upstream price payload
+        run: |
+          SOURCE_URL='https://script.google.com/macros/s/AKfycbypi2PkOaBIWdcQnxrBJAT6xGmqsuyx2mekiIkkOjE/exec'
+          curl -sS -L "$SOURCE_URL" -o upstream-price.json
+
+          node -e 'const fs = require("fs"); const payload = JSON.parse(fs.readFileSync("upstream-price.json", "utf8")); fs.writeFileSync("price-sync-body.json", JSON.stringify({ payload }));'
+
       - name: Trigger price sync endpoint
         env:
           PRICE_SYNC_URL: ${{ secrets.PRICE_SYNC_URL }}
@@ -29,7 +36,8 @@ jobs:
 
           status_code="$(curl -sS -o response.json -w "%{http_code}" -X POST "$PRICE_SYNC_URL" \
             -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
-            -H "Content-Type: application/json")"
+            -H "Content-Type: application/json" \
+            --data-binary @price-sync-body.json)"
 
           if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
             echo "Price sync failed with HTTP $status_code"

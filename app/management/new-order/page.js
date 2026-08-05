@@ -669,8 +669,8 @@ export default function NewOrderPage() {
         const hasSalesHistory = historyCategoryLookup.has(code);
         const hasUsableSheetPrice = toNumber(priceList?.[code]) > 0;
 
-        // Hide unmapped/no-price codes that have never appeared in sales data.
-        if (!hasSalesHistory && !hasUsableSheetPrice) return false;
+        // Hide only orphan price-map rows that have no sales evidence and no usable price.
+        if (item.source === "PRICE_MAP_ONLY" && !hasSalesHistory && !hasUsableSheetPrice) return false;
 
         return true;
       })

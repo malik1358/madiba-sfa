@@ -308,10 +308,15 @@ function parsePricePayload(payload) {
           "unit price",
         ]);
 
-        const itemCodeIndex = headerCodeIndex >= 0 ? headerCodeIndex : sheetColumnIndex("B");
-        const itemNameIndex = headerNameIndex >= 0 ? headerNameIndex : sheetColumnIndex("C");
-        const categoryIndex = headerCategoryIndex >= 0 ? headerCategoryIndex : sheetColumnIndex("CO");
-        const rateIndex = headerRateIndex >= 0 ? headerRateIndex : sheetColumnIndex("D");
+        const codeColumnIndex = sheetColumnIndex("B");
+        const nameColumnIndex = sheetColumnIndex("C");
+        const categoryColumnIndex = sheetColumnIndex("CO");
+        const rateColumnIndex = sheetColumnIndex("D");
+
+        const itemCodeIndex = codeColumnIndex >= 0 ? codeColumnIndex : headerCodeIndex;
+        const itemNameIndex = nameColumnIndex >= 0 ? nameColumnIndex : headerNameIndex;
+        const categoryIndex = categoryColumnIndex >= 0 ? categoryColumnIndex : headerCategoryIndex;
+        const rateIndex = rateColumnIndex >= 0 ? rateColumnIndex : headerRateIndex;
 
         value.forEach((row) => {
           const isHeaderRow = Array.isArray(row)

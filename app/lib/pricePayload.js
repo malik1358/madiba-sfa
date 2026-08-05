@@ -184,7 +184,6 @@ export function parsePricePayload(payload) {
       if (looksLikeRateMap) {
         keys.forEach((key) => {
           addRate(key, value[key]);
-          upsertSheetItem(key, key, "");
         });
       }
 

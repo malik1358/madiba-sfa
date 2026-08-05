@@ -11,6 +11,23 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function normalizeName(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ"]];
+
+function resolveMutualGroupCodes(allProfiles, currentProfile) {
+  const currentName = normalizeName(currentProfile?.salesman_name);
+  const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => group.includes(currentName));
+  if (!matchedGroup) return [];
+
+  return allProfiles
+    .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
+    .map((profile) => normalizeCode(profile.salesman_code))
+    .filter(Boolean);
+}
+
 function latestKey(orderId) {
   return `order_history_latest:${String(orderId || "").trim()}`;
 }
@@ -39,7 +56,7 @@ async function resolveScope(admin, token) {
 
   const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("id,role,salesman_code")
+    .select("id,role,salesman_code,salesman_name")
     .eq("id", user.id)
     .single();
 
@@ -53,7 +70,7 @@ async function resolveScope(admin, token) {
   const [profilesRes, usersRes] = await Promise.all([
     admin
       .from("profiles")
-      .select("id,role,salesman_code")
+      .select("id,role,salesman_code,salesman_name")
       .in("role", ["salesman", "manager", "admin"]),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
@@ -73,16 +90,22 @@ async function resolveScope(admin, token) {
     });
   }
 
-  const visibleProfiles = (profilesRes.data || []).filter((entry) => {
+  const allProfiles = profilesRes.data || [];
+  const visibleProfiles = allProfiles.filter((entry) => {
     if (["admin", "manager"].includes(role)) return true;
     return entry.id === profile.id || subordinateIds.has(entry.id);
   });
+
+  const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, profile);
 
   return {
     userId: user.id,
     hasAllAccess: ["admin", "manager"].includes(role),
     visibleUserIds: [...new Set(visibleProfiles.map((entry) => entry.id).filter(Boolean))],
-    visibleSalesmanCodes: [...new Set(visibleProfiles.map((entry) => normalizeCode(entry.salesman_code)).filter(Boolean))],
+    visibleSalesmanCodes: [...new Set([
+      ...visibleProfiles.map((entry) => normalizeCode(entry.salesman_code)).filter(Boolean),
+      ...mutualGroupCodes,
+    ])],
   };
 }
 

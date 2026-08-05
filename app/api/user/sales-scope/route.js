@@ -11,6 +11,23 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function normalizeName(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ"]];
+
+function resolveMutualGroupCodes(allProfiles, currentProfile) {
+  const currentName = normalizeName(currentProfile?.salesman_name);
+  const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => group.includes(currentName));
+  if (!matchedGroup) return [];
+
+  return allProfiles
+    .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
+    .map((profile) => normalizeCode(profile.salesman_code))
+    .filter(Boolean);
+}
+
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "invoice_maker" || normalized === "invoice-maker";
@@ -98,7 +115,11 @@ export async function GET(request) {
       };
     });
 
-    const visibleSalesmanCodes = [...new Set(visibleMembers.map((member) => normalizeCode(member.salesman_code)).filter(Boolean))];
+    const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
+    const visibleSalesmanCodes = [...new Set([
+      ...visibleMembers.map((member) => normalizeCode(member.salesman_code)).filter(Boolean),
+      ...mutualGroupCodes,
+    ])];
     const visibleUserIds = [...new Set(visibleMembers.map((member) => member.id).filter(Boolean))];
 
     const hasAllAccess = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role);

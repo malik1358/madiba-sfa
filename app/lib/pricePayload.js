@@ -18,6 +18,14 @@ function looksLikeItemName(value) {
   return text.length >= 3;
 }
 
+function isExcludedItemCode(value) {
+  return normalizeCode(value).startsWith("LP");
+}
+
+function isExcludedCategory(value) {
+  return normalizeText(value).toLowerCase() === "building material";
+}
+
 function toNumber(value) {
   const cleaned = String(value ?? "")
     .replace(/,/g, "")
@@ -121,9 +129,11 @@ export function parsePricePayload(payload) {
   function upsertSheetItem(rawCode, rawName, rawCategory) {
     const code = normalizeCode(rawCode);
     if (!code) return;
+    if (isExcludedItemCode(code)) return;
 
     const name = normalizeText(rawName);
     const category = normalizeText(rawCategory);
+    if (isExcludedCategory(category)) return;
     const key = `${code}::${name}::${category}`;
     if (seen.has(key)) return;
 
@@ -139,6 +149,7 @@ export function parsePricePayload(payload) {
   function addRate(rawCode, rawRate) {
     const code = normalizeCode(rawCode);
     if (!code) return;
+    if (isExcludedItemCode(code)) return;
     priceMap[code] = toNumber(rawRate);
   }
 

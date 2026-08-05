@@ -164,6 +164,7 @@ async function loadRateFallback(admin, codes) {
     (data || []).forEach((row) => {
       const code = normalizeCode(row.item_code);
       if (!code || rateByCode.has(code)) return;
+      if (code.startsWith("LP")) return;
 
       const rate = toPositiveNumber(row.rate);
       if (rate > 0) {

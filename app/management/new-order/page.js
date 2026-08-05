@@ -110,6 +110,14 @@ function hasMeaningfulItemName(value, itemCode = "") {
   return true;
 }
 
+function isExcludedItemCode(value) {
+  return normalizeCode(value).startsWith("LP");
+}
+
+function isExcludedCategory(value) {
+  return normalizeText(value).toLowerCase() === "building material";
+}
+
 const NEEDS_MAPPING_CATEGORY = "Needs Mapping";
 
 async function fetchItemCategoryLookup(supabase, scope) {
@@ -525,6 +533,7 @@ export default function NewOrderPage() {
     (itemsMaster || []).forEach((item) => {
       const code = normalizeCode(item.item_code);
       if (!code) return;
+      if (isExcludedItemCode(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
       const sheetFallback = (priceSheetItems || []).find((sheetItem) => normalizeCode(sheetItem.item_code) === code) || {};
 
@@ -540,6 +549,8 @@ export default function NewOrderPage() {
         ? masterCategory
         : (hasMeaningfulValue(sheetCategory) ? sheetCategory : (historyFallback.category || "Unclassified"));
 
+      if (isExcludedCategory(nextCategory)) return;
+
       itemMap.set(code, {
         ...item,
         item_code: code,
@@ -552,6 +563,7 @@ export default function NewOrderPage() {
     (priceSheetItems || []).forEach((sheetItem) => {
       const code = normalizeCode(sheetItem.item_code);
       if (!code) return;
+      if (isExcludedItemCode(code) || isExcludedCategory(sheetItem.category)) return;
 
       const existing = itemMap.get(code);
       if (!existing) {
@@ -605,10 +617,12 @@ export default function NewOrderPage() {
     Object.keys(priceList || {}).forEach((rawCode) => {
       const code = normalizeCode(rawCode);
       if (!code || itemMap.has(code)) return;
+      if (isExcludedItemCode(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
 
       const fallbackName = historyFallback.item_name || "";
       const fallbackCategory = historyFallback.category || "";
+      if (isExcludedCategory(fallbackCategory)) return;
 
       const unresolved = !hasMeaningfulItemName(fallbackName, code) && !hasMeaningfulValue(fallbackCategory);
 
@@ -1169,6 +1183,7 @@ export default function NewOrderPage() {
       let changed = false;
 
       salesRateLookup.forEach((rate, code) => {
+        if (isExcludedItemCode(code)) return;
         const currentRate = toNumber(merged[code]);
         if (currentRate > 0 || !Number.isFinite(rate) || rate <= 0) return;
         merged[code] = rate;

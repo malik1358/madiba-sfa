@@ -608,7 +608,10 @@ export default function NewOrderPage() {
 
   const filteredItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
+    const includeNeedsMapping = categoryFilter === NEEDS_MAPPING_CATEGORY || q.length > 0;
+
     return mergedItemsMaster.filter((item) => {
+      if (item.category === NEEDS_MAPPING_CATEGORY && !includeNeedsMapping) return false;
       if (categoryFilter !== "ALL" && item.category !== categoryFilter) return false;
       if (!q) return true;
 

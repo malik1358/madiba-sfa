@@ -39,8 +39,11 @@ const DOCUMENT_TYPES = ["CR", "VAT", "ID", "CREDIT_APPLICATION", "OTHER"];
 
 function extractMissingProspectsColumn(errorMessage) {
   const text = String(errorMessage || "");
-  const postgresStyle = text.match(/column\s+prospects\.(\w+)\s+does\s+not\s+exist/i);
+  const postgresStyle = text.match(/column\s+(?:\w+\.)?"?(\w+)"?\s+of\s+relation\s+"?prospects"?\s+does\s+not\s+exist/i);
   if (postgresStyle?.[1]) return postgresStyle[1];
+
+  const genericPostgresStyle = text.match(/column\s+(?:\w+\.)?"?(\w+)"?\s+does\s+not\s+exist/i);
+  if (genericPostgresStyle?.[1]) return genericPostgresStyle[1];
 
   const schemaCacheStyle = text.match(/Could not find the ['"](\w+)['"] column of ['"]prospects['"] in the schema cache/i);
   return schemaCacheStyle?.[1] || "";
@@ -110,8 +113,10 @@ async function translateToArabic(text) {
 
 async function insertProspectWithColumnFallback(supabase, payload) {
   const workingPayload = { ...payload };
+  const removedColumns = [];
+  const maxAttempts = Object.keys(workingPayload).length + 2;
 
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const { data, error } = await supabase
       .from("prospects")
       .insert(workingPayload)
@@ -119,7 +124,7 @@ async function insertProspectWithColumnFallback(supabase, payload) {
       .single();
 
     if (!error) {
-      return { data, removedColumns: [] };
+      return { data, removedColumns };
     }
 
     const missingColumn = extractMissingProspectsColumn(error.message);
@@ -127,6 +132,7 @@ async function insertProspectWithColumnFallback(supabase, payload) {
       throw error;
     }
 
+    removedColumns.push(missingColumn);
     delete workingPayload[missingColumn];
   }
 
@@ -414,7 +420,12 @@ export default function NewCustomerPage() {
         created_by: session.user.id,
       };
 
-      const { data } = await insertProspectWithColumnFallback(supabase, payload);
+      const { data, removedColumns } = await insertProspectWithColumnFallback(supabase, payload);
+
+      if (removedColumns.length > 0) {
+        const removed = Array.from(new Set(removedColumns)).join(", ");
+        setSchemaWarning(`Prospect was saved, but these missing columns were skipped: ${removed}`);
+      }
 
       const { data: latest, error: latestError } = await supabase
         .from("prospects")

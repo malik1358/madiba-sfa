@@ -3,6 +3,10 @@
 
 begin;
 
+-- Avoid Supabase cancelling this one-time backfill while it scans and updates
+-- the catalog tables.
+set local statement_timeout = '0';
+
 -- 1) Create missing items_master rows from historical sales_raw where values exist.
 with ranked as (
   select distinct on (base.item_code)

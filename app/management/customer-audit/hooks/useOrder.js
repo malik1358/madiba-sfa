@@ -100,6 +100,11 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
   const [orderHistory, setOrderHistory] = useState([]);
   const [loadedOrderStatus, setLoadedOrderStatus] = useState('DRAFT');
 
+  const selectedQuantityCount = useMemo(
+    () => Object.values(orderQuantities || {}).filter((qty) => Number(qty) > 0).length,
+    [orderQuantities]
+  );
+
   const orderItems = useMemo(
     () => buildOrderItems(orderQuantities, analytics, quickOrderAllItems),
     [analytics, orderQuantities, quickOrderAllItems]
@@ -227,7 +232,11 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
   const saveDraft = useCallback(async () => {
     if (!selectedCustomer) return null;
     if (orderItems.length === 0) {
-      setError('Add at least one item before saving the draft.');
+      if (selectedQuantityCount > 0) {
+        setError('Selected items are not allowed for ordering. Please choose active items and try again.');
+      } else {
+        setError('Add at least one item before saving the draft.');
+      }
       return null;
     }
 
@@ -345,11 +354,15 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
     } finally {
       setSavingOrder(false);
     }
-  }, [draftOrderId, orderItems, priceList, selectedCustomer, setError, setMessage]);
+  }, [draftOrderId, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage]);
 
   const submitOrder = useCallback(async () => {
     if (orderItems.length === 0) {
-      setError('Add at least one item before submitting the order.');
+      if (selectedQuantityCount > 0) {
+        setError('Selected items are not allowed for ordering. Please choose active items and try again.');
+      } else {
+        setError('Add at least one item before submitting the order.');
+      }
       return null;
     }
 
@@ -414,7 +427,7 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
     } finally {
       setSubmittingOrder(false);
     }
-  }, [loadedOrderStatus, orderItems.length, saveDraft, setError, setMessage]);
+  }, [loadedOrderStatus, orderItems.length, saveDraft, selectedQuantityCount, setError, setMessage]);
 
   return {
     draftOrderId,

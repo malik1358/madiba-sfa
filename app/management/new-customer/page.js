@@ -433,7 +433,6 @@ export default function NewCustomerPage() {
           form.notes,
           documents.length ? `Documents: ${JSON.stringify(documents)}` : "",
         ].filter(Boolean).join("\n") || null,
-        status: "PENDING",
         created_by: session.user.id,
       };
 

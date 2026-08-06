@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -497,7 +497,7 @@ function parsePricePayload(payload) {
   return { priceMap, sheetItems };
 }
 
-export default function NewOrderPage() {
+function NewOrderPageContent() {
   const searchParams = useSearchParams();
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -1737,5 +1737,13 @@ export default function NewOrderPage() {
       </div>
     </main>
     </MorningAttendanceGate>
+  );
+}
+
+export default function NewOrderPage() {
+  return (
+    <Suspense fallback={<main className="modulePage"><div className="moduleShell"><div className="moduleLoading">Loading order workspace...</div></div></main>}>
+      <NewOrderPageContent />
+    </Suspense>
   );
 }

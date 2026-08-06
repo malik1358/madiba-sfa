@@ -415,6 +415,7 @@ export default function NewCustomerPage() {
 
       const payload = {
         customer_name: form.customer_name_en,
+        company_name: form.shop_name || form.customer_name_en,
         customer_name_en: form.customer_name_en,
         customer_name_ar: form.customer_name_ar || null,
         shop_name: form.shop_name,

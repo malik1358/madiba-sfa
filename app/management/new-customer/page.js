@@ -120,7 +120,7 @@ async function insertProspectWithColumnFallback(supabase, payload) {
     const { data, error } = await supabase
       .from("prospects")
       .insert(workingPayload)
-      .select("id,customer_name,salesman_code")
+      .select("id")
       .single();
 
     if (!error) {
@@ -186,6 +186,13 @@ export default function NewCustomerPage() {
 
     return () => window.clearTimeout(timer);
   }, [form.customer_name_en, arabicNameEdited]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (form.gps_location) return;
+
+    captureLocation();
+  }, [loading, form.gps_location]);
 
   useEffect(() => {
     async function load() {
@@ -585,11 +592,7 @@ export default function NewCustomerPage() {
               </select>
             </label>
             <label className="moduleGpsRow">
-              GPS Location
-              <div className="moduleGpsControls">
-                <input className="moduleInput" required value={form.gps_location} onChange={(e) => setForm({ ...form, gps_location: e.target.value })} placeholder="24.774265, 46.738586" />
-                <button type="button" className="moduleInlineButton" onClick={captureLocation}>Capture</button>
-              </div>
+              GPS Status
               <small className="moduleHint">{gpsStatus}</small>
             </label>
             <div className="moduleFieldFull">

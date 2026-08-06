@@ -224,6 +224,16 @@ async function fetchItemCategoryLookup(supabase, scope) {
   return lookup;
 }
 
+async function fetchItemsMasterCatalog(supabase) {
+  const { data, error } = await supabase
+    .from("items_master")
+    .select("item_code,item_name,category")
+    .order("item_name");
+
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+}
+
 async function fetchVisibleCustomers(token) {
   const response = await fetch("/api/customers/visible", {
     headers: {
@@ -505,6 +515,7 @@ function NewOrderPageContent() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [customers, setCustomers] = useState([]);
+  const [itemsMaster, setItemsMaster] = useState([]);
   const [priceSheetItems, setPriceSheetItems] = useState([]);
   const [historyCategoryLookup, setHistoryCategoryLookup] = useState(new Map());
   const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
@@ -552,6 +563,32 @@ function NewOrderPageContent() {
   const mergedItemsMaster = useMemo(() => {
     const itemMap = new Map();
 
+    (itemsMaster || []).forEach((item) => {
+      const code = normalizeCode(item.item_code);
+      if (!code) return;
+      if (isExcludedItemCode(code)) return;
+
+      const itemName = normalizeText(item.item_name);
+      const itemCategory = normalizeText(item.category);
+      const sheetFallback = (priceSheetItems || []).find((sheetItem) => normalizeCode(sheetItem.item_code) === code) || {};
+
+      const nextName = hasMeaningfulItemName(itemName, code)
+        ? itemName
+        : (hasMeaningfulItemName(sheetFallback.item_name, code) ? normalizeText(sheetFallback.item_name) : code);
+      const nextCategory = hasMeaningfulValue(itemCategory)
+        ? itemCategory
+        : (hasMeaningfulValue(sheetFallback.category) ? sheetFallback.category : "Unclassified");
+
+      if (isExcludedCategory(nextCategory)) return;
+
+      itemMap.set(code, {
+        item_code: code,
+        item_name: nextName,
+        category: normalizeCategoryLabel(nextCategory),
+        source: "ITEMS_MASTER",
+      });
+    });
+
     const sheetByCode = new Map();
     (priceSheetItems || []).forEach((sheetItem) => {
       const code = normalizeCode(sheetItem.item_code);
@@ -582,30 +619,6 @@ function NewOrderPageContent() {
       }
     });
 
-    historyCategoryLookup.forEach((salesItem, code) => {
-      const normalizedCode = normalizeCode(code);
-      if (!normalizedCode) return;
-
-      const salesName = normalizeText(salesItem?.item_name);
-      const salesCategory = normalizeText(salesItem?.category);
-      const sheetFallback = sheetByCode.get(normalizedCode) || {};
-      const sheetName = normalizeText(sheetFallback.item_name);
-
-      const nextName = hasMeaningfulItemName(salesName, normalizedCode)
-        ? salesName
-        : (hasMeaningfulItemName(sheetName, normalizedCode) ? sheetName : normalizedCode);
-      const nextCategory = hasMeaningfulValue(salesCategory)
-        ? salesCategory
-        : (hasMeaningfulValue(sheetFallback.category) ? sheetFallback.category : "Unclassified");
-
-      itemMap.set(normalizedCode, {
-        item_code: normalizedCode,
-        item_name: nextName,
-        category: normalizeCategoryLabel(nextCategory),
-        source: hasMeaningfulItemName(salesName, normalizedCode) ? "SALES_LATEST" : "SALES_LATEST_WITH_SHEET_NAME",
-      });
-    });
-
     sheetByCode.forEach((sheetItem, code) => {
       if (!code || itemMap.has(code)) return;
       if (isExcludedItemCode(code)) return;
@@ -626,7 +639,7 @@ function NewOrderPageContent() {
 
     return Array.from(itemMap.values())
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
-  }, [historyCategoryLookup, priceSheetItems, priceList]);
+  }, [itemsMaster, priceSheetItems, priceList]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.customer_code === selectedCustomerCode) || null,
@@ -1117,12 +1130,13 @@ function NewOrderPageContent() {
           draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
         }
 
-        const [loadedCustomers, draftsRes, categoriesRes] = await Promise.all([
+        const [loadedCustomers, itemsRes, draftsRes] = await Promise.all([
           fetchVisibleCustomers(session.access_token),
+          fetchItemsMasterCatalog(supabase),
           draftsQuery,
-          fetchItemCategoryLookup(supabase, scope),
         ]);
 
+        if (itemsRes.error) throw itemsRes.error;
         if (draftsRes.error) throw draftsRes.error;
 
         const mergedCustomers = prefilledCustomer && !loadedCustomers.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
@@ -1130,8 +1144,8 @@ function NewOrderPageContent() {
           : loadedCustomers;
 
         setCustomers(mergedCustomers);
+        setItemsMaster(itemsRes || []);
         setPreviousDrafts(draftsRes.data || []);
-        setHistoryCategoryLookup(categoriesRes || new Map());
       } catch (err) {
         setError(err.message || "Unable to load new order data.");
       } finally {

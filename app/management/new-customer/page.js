@@ -59,6 +59,18 @@ function parseGpsCoordinates(rawValue) {
   return { lat, lng };
 }
 
+function buildProspectOrderParams({ id, customerName, salesmanCode }) {
+  const customerCode = `PROSPECT-${id}`;
+  const resolvedName = String(customerName || "").trim() || `Prospect ${id}`;
+  const params = new URLSearchParams({
+    customer_code: customerCode,
+    customer_name: resolvedName,
+    salesman_code: String(salesmanCode || "").trim(),
+    source: "prospect",
+  });
+  return params.toString();
+}
+
 async function reverseGeocode(lat, lng) {
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&addressdetails=1&accept-language=en`;
   const response = await fetch(url);
@@ -414,16 +426,13 @@ export default function NewCustomerPage() {
       if (latestError) throw latestError;
       setRecent(latest || []);
 
-      const customerCode = `PROSPECT-${data.id}`;
-      const customerName = data.customer_name || data.shop_name || form.customer_name_en || form.shop_name || `Prospect ${data.id}`;
-      const params = new URLSearchParams({
-        customer_code: customerCode,
-        customer_name: customerName,
-        salesman_code: form.salesman_code,
-        source: "prospect",
+      const query = buildProspectOrderParams({
+        id: data.id,
+        customerName: data.customer_name || data.shop_name || form.customer_name_en || form.shop_name,
+        salesmanCode: form.salesman_code,
       });
 
-      router.push(`/management/new-order?${params.toString()}`);
+      router.push(`/management/new-order?${query}`);
     } catch (err) {
       setError(err.message || "Unable to register prospect.");
     } finally {
@@ -623,6 +632,7 @@ export default function NewCustomerPage() {
                   <th>Area</th>
                   <th>Status</th>
                   <th>Created</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -635,11 +645,27 @@ export default function NewCustomerPage() {
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.status || "-"}</td>
                     <td>{row.created_at ? new Date(row.created_at).toLocaleString("en-GB") : "-"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="moduleInlineButton"
+                        onClick={() => {
+                          const query = buildProspectOrderParams({
+                            id: row.id,
+                            customerName: row.customer_name || row.shop_name,
+                            salesmanCode: row.salesman_code || form.salesman_code,
+                          });
+                          router.push(`/management/new-order?${query}`);
+                        }}
+                      >
+                        Create Order
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {recent.length === 0 && (
                   <tr>
-                    <td colSpan={7}>No prospects created yet.</td>
+                    <td colSpan={8}>No prospects created yet.</td>
                   </tr>
                 )}
               </tbody>

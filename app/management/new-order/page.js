@@ -674,6 +674,7 @@ export default function NewOrderPage() {
     });
 
     return Array.from(itemMap.values())
+      .filter((item) => !isDoNotUseItem(item.item_name))
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 
@@ -892,11 +893,11 @@ export default function NewOrderPage() {
         const totalWithVat = subtotal + vatAmount;
 
         const columns = [
-          { key: "item_code", label: "Item Code", width: 88, align: "left" },
-          { key: "item_name", label: "Item Name", width: 222, align: "left" },
-          { key: "quantity", label: "Qty", width: 60, align: "right" },
-          { key: "rate", label: "Rate (Excl. VAT)", width: 96, align: "right" },
-          { key: "lineTotal", label: "Line Total", width: 89, align: "right" },
+          { key: "item_code", label: "Item Code", width: 78, align: "left" },
+          { key: "item_name", label: "Item Name", width: 200, align: "left" },
+          { key: "quantity", label: "Qty", width: 52, align: "right" },
+          { key: "rate", label: "Rate (Excl. VAT)", width: 90, align: "right" },
+          { key: "lineTotal", label: "Line Total", width: 95, align: "right" },
         ];
 
         function drawCellText(text, x, y, width, align = "left") {
@@ -981,19 +982,27 @@ export default function NewOrderPage() {
           doc.text(customerLine2, marginX + 12, marginTop + 152);
         }
 
-        doc.roundedRect(marginX, marginTop + 172, contentWidth, 40, 5, 5);
-        doc.setFont(undefined, "bold");
-        doc.text("Items", marginX + 12, marginTop + 188);
-        doc.text("Total Qty", marginX + 145, marginTop + 188);
-        doc.text("Subtotal", marginX + 282, marginTop + 188);
-        doc.text("VAT 15%", marginX + 398, marginTop + 188);
-        doc.text("Total Incl. VAT", marginX + 475, marginTop + 188);
-        doc.setFont(undefined, "normal");
-        doc.text(String(snapshot.itemCount), marginX + 12, marginTop + 202);
-        doc.text(qtyFormat(snapshot.totalQuantity), marginX + 145, marginTop + 202);
-        doc.text(formatMoney(subtotal), marginX + 282, marginTop + 202);
-        doc.text(formatMoney(vatAmount), marginX + 398, marginTop + 202);
-        doc.text(formatMoney(totalWithVat), marginX + 475, marginTop + 202);
+        const statsTop = marginTop + 172;
+        const statsHeight = 40;
+        const stats = [
+          { label: "Items", value: String(snapshot.itemCount), align: "left" },
+          { label: "Total Qty", value: qtyFormat(snapshot.totalQuantity), align: "left" },
+          { label: "Subtotal", value: formatMoney(subtotal), align: "right" },
+          { label: "VAT 15%", value: formatMoney(vatAmount), align: "right" },
+          { label: "Total Incl. VAT", value: formatMoney(totalWithVat), align: "right" },
+        ];
+
+        doc.roundedRect(marginX, statsTop, contentWidth, statsHeight, 5, 5);
+        const statsWidth = contentWidth / stats.length;
+        stats.forEach((stat, index) => {
+          const x = marginX + index * statsWidth;
+
+          doc.setFont(undefined, "bold");
+          drawCellText(stat.label, x, statsTop + 16, statsWidth, stat.align);
+
+          doc.setFont(undefined, "normal");
+          drawCellText(stat.value, x, statsTop + 32, statsWidth, stat.align);
+        });
 
         let y = drawTableHeader(marginTop + 226);
         doc.setFontSize(10);

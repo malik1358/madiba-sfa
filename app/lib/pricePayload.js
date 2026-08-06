@@ -25,7 +25,8 @@ function isExcludedItemCode(value) {
 }
 
 function isExcludedCategory(value) {
-  return normalizeText(value).toLowerCase() === "building material";
+  const compact = normalizeText(value).toLowerCase().replace(/[^a-z]/g, "");
+  return ["buildingmaterial", "buildingmaterials", "buidingmaterial", "buidingmaterials"].includes(compact);
 }
 
 function toNumber(value) {

@@ -667,6 +667,14 @@ export default function NewOrderPage() {
       .filter((item) => {
         if (isDoNotUseItem(item.item_name)) return false;
 
+        const code = normalizeCode(item.item_code);
+        const price = toNumber(priceList?.[code]);
+        const isUnclassified = normalizeCategoryKey(item.category) === normalizeCategoryKey("Unclassified");
+        const isNameJustCode = normalizeCode(item.item_name) === code;
+
+        // Remove generic placeholder rows that are not actionable in ordering.
+        if (isUnclassified && isNameJustCode && price <= 0) return false;
+
         return true;
       })
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));

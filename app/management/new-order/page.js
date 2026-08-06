@@ -155,8 +155,9 @@ async function fetchItemCategoryLookup(supabase, scope) {
   while (true) {
     let query = supabase
       .from("sales_raw")
-      .select("item_code,item_name,category,salesman_code")
-      .order("item_code", { ascending: true })
+      .select("item_code,item_name,category,transaction_date,id,salesman_code")
+      .order("transaction_date", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: false })
       .range(from, from + pageSize - 1);
 
     if (!scope.hasAllAccess) {
@@ -170,57 +171,12 @@ async function fetchItemCategoryLookup(supabase, scope) {
     rows.forEach((row) => {
       const code = normalizeCode(row.item_code);
       if (!code) return;
+      if (lookup.has(code)) return;
 
-      const current = lookup.get(code) || { item_name: "", category: "" };
-      const nextName = normalizeText(row.item_name);
-      const nextCategory = normalizeText(row.category);
-
-      if (!hasMeaningfulItemName(current.item_name, code) && hasMeaningfulItemName(nextName, code)) {
-        current.item_name = nextName;
-      }
-
-      if (!hasMeaningfulValue(current.category) && hasMeaningfulValue(nextCategory)) {
-        current.category = nextCategory;
-      }
-
-      lookup.set(code, current);
-    });
-
-    if (rows.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return lookup;
-}
-
-async function fetchItemRateLookup(supabase, scope) {
-  const pageSize = 1000;
-  let from = 0;
-  const lookup = new Map();
-
-  while (true) {
-    let query = supabase
-      .from("sales_raw")
-      .select("item_code,rate,transaction_date,salesman_code")
-      .order("transaction_date", { ascending: false })
-      .range(from, from + pageSize - 1);
-
-    if (!scope.hasAllAccess) {
-      query = query.in("salesman_code", scope.visibleSalesmanCodes);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    const rows = data || [];
-    rows.forEach((row) => {
-      const code = normalizeCode(row.item_code);
-      if (!code || lookup.has(code)) return;
-
-      const rate = toNumber(row.rate);
-      if (rate > 0) {
-        lookup.set(code, rate);
-      }
+      lookup.set(code, {
+        item_name: normalizeText(row.item_name),
+        category: normalizeText(row.category),
+      });
     });
 
     if (rows.length < pageSize) break;
@@ -510,7 +466,6 @@ export default function NewOrderPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [customers, setCustomers] = useState([]);
-  const [itemsMaster, setItemsMaster] = useState([]);
   const [priceSheetItems, setPriceSheetItems] = useState([]);
   const [historyCategoryLookup, setHistoryCategoryLookup] = useState(new Map());
   const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
@@ -524,7 +479,6 @@ export default function NewOrderPage() {
   const [transactions, setTransactions] = useState([]);
   const [peerTransactions, setPeerTransactions] = useState([]);
   const [priceList, setPriceList] = useState({});
-  const [salesRateLookup, setSalesRateLookup] = useState(new Map());
   const [previousDrafts, setPreviousDrafts] = useState([]);
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -557,126 +511,81 @@ export default function NewOrderPage() {
   const mergedItemsMaster = useMemo(() => {
     const itemMap = new Map();
 
-    (itemsMaster || []).forEach((item) => {
-      const code = normalizeCode(item.item_code);
-      if (!code) return;
-      if (isExcludedItemCode(code)) return;
-      const historyFallback = historyCategoryLookup.get(code) || {};
-      const sheetFallback = (priceSheetItems || []).find((sheetItem) => normalizeCode(sheetItem.item_code) === code) || {};
-
-      const masterName = normalizeText(item.item_name);
-      const masterCategory = normalizeText(item.category);
-      const sheetName = normalizeText(sheetFallback.item_name);
-      const sheetCategory = normalizeText(sheetFallback.category);
-
-      const masterNameUsable = hasMeaningfulItemName(masterName, code);
-      const sheetNameUsable = hasMeaningfulItemName(sheetName, code);
-      const historyName = normalizeText(historyFallback.item_name);
-      const historyNameUsable = hasMeaningfulItemName(historyName, code);
-
-      const nextName = historyNameUsable
-        ? historyName
-        : (sheetNameUsable ? sheetName : (masterNameUsable ? masterName : code));
-      const nextCategory = hasMeaningfulValue(masterCategory)
-        ? masterCategory
-        : (hasMeaningfulValue(sheetCategory) ? sheetCategory : (historyFallback.category || "Unclassified"));
-      const normalizedCategory = normalizeCategoryLabel(nextCategory);
-
-      if (isExcludedCategory(normalizedCategory)) return;
-
-      itemMap.set(code, {
-        ...item,
-        item_code: code,
-        item_name: nextName,
-        category: normalizedCategory,
-        source: hasMeaningfulItemName(sheetName, code) || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : "ITEM_MASTER",
-      });
-    });
-
+    const sheetByCode = new Map();
     (priceSheetItems || []).forEach((sheetItem) => {
       const code = normalizeCode(sheetItem.item_code);
       if (!code) return;
-      if (isExcludedItemCode(code) || isExcludedCategory(sheetItem.category)) return;
 
-      const existing = itemMap.get(code);
+      const candidateName = normalizeText(sheetItem.item_name);
+      const candidateCategory = normalizeText(sheetItem.category);
+      const existing = sheetByCode.get(code);
+
       if (!existing) {
-        const historyFallback = historyCategoryLookup.get(code) || {};
-        const nextName = normalizeText(sheetItem.item_name) || historyFallback.item_name || code;
-        const nextCategory = normalizeText(sheetItem.category) || historyFallback.category || "Unclassified";
-        const normalizedCategory = normalizeCategoryLabel(nextCategory);
-
-        // Keep placeholder-only sheet rows visible, but isolate them for cleanup.
-        const unresolved = !hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory);
-
-        if (!hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory)) {
-          itemMap.set(code, {
-            item_code: code,
-            item_name: nextName,
-            category: NEEDS_MAPPING_CATEGORY,
-            source: "PRICE_SHEET_ONLY",
-          });
-          return;
-        }
-
-        itemMap.set(code, {
-          item_code: code,
-          item_name: nextName,
-          category: unresolved ? NEEDS_MAPPING_CATEGORY : normalizedCategory,
-          source: "PRICE_SHEET_ONLY",
+        sheetByCode.set(code, {
+          item_name: candidateName,
+          category: candidateCategory,
         });
         return;
       }
 
-      const existingName = normalizeText(existing.item_name);
-      const sheetName = normalizeText(sheetItem.item_name);
-      const existingCategory = normalizeText(existing.category);
-      const sheetCategory = normalizeText(sheetItem.category);
-      const historyFallback = historyCategoryLookup.get(code) || {};
+      const existingNameScore = hasMeaningfulItemName(existing.item_name, code) ? 2 : (normalizeText(existing.item_name) ? 1 : 0);
+      const candidateNameScore = hasMeaningfulItemName(candidateName, code) ? 2 : (candidateName ? 1 : 0);
+      const existingCategoryScore = hasMeaningfulValue(existing.category) ? 1 : 0;
+      const candidateCategoryScore = hasMeaningfulValue(candidateCategory) ? 1 : 0;
 
-      const existingNameUsable = hasMeaningfulItemName(existingName, code);
-      const sheetNameUsable = hasMeaningfulItemName(sheetName, code);
-      const historyName = normalizeText(historyFallback.item_name);
-      const historyNameUsable = hasMeaningfulItemName(historyName, code);
+      if ((candidateNameScore + candidateCategoryScore) > (existingNameScore + existingCategoryScore)) {
+        sheetByCode.set(code, {
+          item_name: candidateName,
+          category: candidateCategory,
+        });
+      }
+    });
 
-      const nextName = historyNameUsable
-        ? historyName
-        : (sheetNameUsable ? sheetName : (existingNameUsable ? existingName : code));
-      const nextCategory = hasMeaningfulValue(sheetCategory)
-        ? sheetCategory
-        : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));
-      const normalizedCategory = normalizeCategoryLabel(nextCategory);
+    historyCategoryLookup.forEach((salesItem, code) => {
+      const normalizedCode = normalizeCode(code);
+      if (!normalizedCode) return;
 
-      itemMap.set(code, {
-        ...existing,
+      const salesName = normalizeText(salesItem?.item_name);
+      const salesCategory = normalizeText(salesItem?.category);
+      const sheetFallback = sheetByCode.get(normalizedCode) || {};
+      const sheetName = normalizeText(sheetFallback.item_name);
+
+      const nextName = hasMeaningfulItemName(salesName, normalizedCode)
+        ? salesName
+        : (hasMeaningfulItemName(sheetName, normalizedCode) ? sheetName : normalizedCode);
+      const nextCategory = hasMeaningfulValue(salesCategory)
+        ? salesCategory
+        : (hasMeaningfulValue(sheetFallback.category) ? sheetFallback.category : "Unclassified");
+
+      itemMap.set(normalizedCode, {
+        item_code: normalizedCode,
         item_name: nextName,
-        category: normalizedCategory,
-        source: existing.source === "PRICE_SHEET_ONLY" || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : existing.source,
+        category: normalizeCategoryLabel(nextCategory),
+        source: hasMeaningfulItemName(salesName, normalizedCode) ? "SALES_LATEST" : "SALES_LATEST_WITH_SHEET_NAME",
       });
     });
 
-    Object.keys(priceList || {}).forEach((rawCode) => {
-      const code = normalizeCode(rawCode);
+    sheetByCode.forEach((sheetItem, code) => {
       if (!code || itemMap.has(code)) return;
       if (isExcludedItemCode(code)) return;
-      const historyFallback = historyCategoryLookup.get(code) || {};
 
-      const fallbackName = historyFallback.item_name || "";
-      const fallbackCategory = historyFallback.category || "";
-      if (isExcludedCategory(fallbackCategory)) return;
+      const price = toNumber(priceList[code]);
+      if (price <= 0) return;
 
-      const unresolved = !hasMeaningfulItemName(fallbackName, code) && !hasMeaningfulValue(fallbackCategory);
+      const sheetCategory = normalizeText(sheetItem.category) || "Unclassified";
+      if (isExcludedCategory(sheetCategory)) return;
 
       itemMap.set(code, {
         item_code: code,
-        item_name: fallbackName || code,
-        category: unresolved ? NEEDS_MAPPING_CATEGORY : normalizeCategoryLabel(fallbackCategory || "Unclassified"),
-        source: "PRICE_MAP_ONLY",
+        item_name: hasMeaningfulItemName(sheetItem.item_name, code) ? normalizeText(sheetItem.item_name) : code,
+        category: normalizeCategoryLabel(sheetCategory),
+        source: "PRICE_SHEET_ONLY",
       });
     });
 
     return Array.from(itemMap.values())
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
-  }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
+  }, [historyCategoryLookup, priceSheetItems, priceList]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.customer_code === selectedCustomerCode) || null,
@@ -1167,18 +1076,12 @@ export default function NewOrderPage() {
           draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
         }
 
-        const [loadedCustomers, itemsRes, draftsRes, categoriesRes, rateLookupRes] = await Promise.all([
+        const [loadedCustomers, draftsRes, categoriesRes] = await Promise.all([
           fetchVisibleCustomers(session.access_token),
-          supabase
-            .from("items_master")
-            .select("item_code,item_name,category")
-            .order("item_name"),
           draftsQuery,
           fetchItemCategoryLookup(supabase, scope),
-          fetchItemRateLookup(supabase, scope),
         ]);
 
-        if (itemsRes.error) throw itemsRes.error;
         if (draftsRes.error) throw draftsRes.error;
 
         const mergedCustomers = prefilledCustomer && !loadedCustomers.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
@@ -1186,10 +1089,8 @@ export default function NewOrderPage() {
           : loadedCustomers;
 
         setCustomers(mergedCustomers);
-        setItemsMaster(itemsRes.data || []);
         setPreviousDrafts(draftsRes.data || []);
         setHistoryCategoryLookup(categoriesRes || new Map());
-        setSalesRateLookup(rateLookupRes || new Map());
       } catch (err) {
         setError(err.message || "Unable to load new order data.");
       } finally {
@@ -1234,25 +1135,6 @@ export default function NewOrderPage() {
     loadFoundation();
     loadPrices();
   }, [prefilledCustomer]);
-
-  useEffect(() => {
-    if (!salesRateLookup || salesRateLookup.size === 0) return;
-
-    setPriceList((current) => {
-      const merged = { ...current };
-      let changed = false;
-
-      salesRateLookup.forEach((rate, code) => {
-        if (isExcludedItemCode(code)) return;
-        const currentRate = toNumber(merged[code]);
-        if (currentRate > 0 || !Number.isFinite(rate) || rate <= 0) return;
-        merged[code] = rate;
-        changed = true;
-      });
-
-      return changed ? merged : current;
-    });
-  }, [salesRateLookup]);
 
   useEffect(() => {
     if (!prefilledCustomer?.customer_code) return;

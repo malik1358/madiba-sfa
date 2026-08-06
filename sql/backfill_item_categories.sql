@@ -31,23 +31,17 @@ with ranked as (
         ),
         ''
       ) as cleaned_item_name,
-      category
+      category,
+      transaction_date,
+      id
     from public.sales_raw
     where item_code is not null
       and trim(item_code) <> ''
   ) base
   order by
     base.item_code,
-    case
-      when base.cleaned_item_name is not null
-        and upper(base.cleaned_item_name) <> upper(trim(base.item_code)) then 0
-      else 1
-    end,
-    case
-      when nullif(trim(base.category), '') is not null
-        and upper(trim(base.category)) <> 'UNCLASSIFIED' then 0
-      else 1
-    end
+    base.transaction_date desc nulls last,
+    base.id desc
 )
 insert into public.items_master (item_code, item_name, category)
 select
@@ -101,16 +95,6 @@ with ranked as (
   ) base
   order by
     base.item_code,
-    case
-      when base.cleaned_item_name is not null
-        and upper(base.cleaned_item_name) <> upper(trim(base.item_code)) then 0
-      else 1
-    end,
-    case
-      when nullif(trim(base.category), '') is not null
-        and upper(trim(base.category)) <> 'UNCLASSIFIED' then 0
-      else 1
-    end,
     base.transaction_date desc nulls last,
     base.id desc
 )

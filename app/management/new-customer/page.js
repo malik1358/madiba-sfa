@@ -155,6 +155,7 @@ export default function NewCustomerPage() {
   const [documents, setDocuments] = useState([]);
   const [selectedDocumentType, setSelectedDocumentType] = useState("CR");
   const [gpsStatus, setGpsStatus] = useState("GPS is required before saving.");
+  const [gpsPermissionWarning, setGpsPermissionWarning] = useState("");
   const [arabicNameEdited, setArabicNameEdited] = useState(false);
   const [translatingName, setTranslatingName] = useState(false);
 
@@ -301,9 +302,11 @@ export default function NewCustomerPage() {
 
   async function captureLocation() {
     if (!navigator.geolocation) {
-      setError("Geolocation is not supported on this device.");
+      setGpsPermissionWarning("Location is not supported on this device. GPS is required to save a prospect.");
       return;
     }
+
+    setGpsPermissionWarning("");
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
@@ -331,8 +334,14 @@ export default function NewCustomerPage() {
           setGpsStatus(`Captured ${lat}, ${lng}. Could not auto-detect city/area.`);
         }
       },
-      () => {
-        setError("Unable to read GPS location.");
+      (positionError) => {
+        if (positionError?.code === 1) {
+          setGpsPermissionWarning("Location permission is blocked. Allow location access in your browser and reload this page.");
+        } else if (positionError?.code === 2) {
+          setGpsPermissionWarning("Location is unavailable right now. Check device GPS/network and reload this page.");
+        } else {
+          setGpsPermissionWarning("Unable to read location. Please allow GPS/location access and reload this page.");
+        }
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
@@ -494,6 +503,7 @@ export default function NewCustomerPage() {
         {error && <div className="moduleError">{error}</div>}
         {message && <div className="moduleSuccess">{message}</div>}
         {schemaWarning && <div className="moduleWarning">{schemaWarning}</div>}
+        {gpsPermissionWarning && <div className="moduleWarning">{gpsPermissionWarning}</div>}
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">

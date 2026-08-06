@@ -7,6 +7,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
+import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
@@ -1190,8 +1191,6 @@ export default function NewOrderPage() {
     }
 
     async function loadPrices() {
-      const PRICE_CACHE_KEY = "madiba.pricePayload";
-
       try {
         const response = await fetch(PRICE_CACHE_API, { cache: "no-store" });
         if (!response.ok) {

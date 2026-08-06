@@ -16,6 +16,7 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
+import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
 
 import { shortDate } from "./lib/format";
@@ -102,7 +103,7 @@ function CustomerAuditPageContent() {
   useEffect(() => {
     async function loadPrices() {
       try {
-        const parsed = await loadPricePayload(PRICE_CACHE_API, "madiba.pricePayload");
+        const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
         setPriceList(parsed.priceMap || {});
       } catch {
         // Keep previous prices if fresh fetch fails.

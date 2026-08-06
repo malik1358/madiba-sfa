@@ -1,3 +1,5 @@
+import { PRICE_CACHE_KEY as DEFAULT_PRICE_CACHE_KEY } from "./priceApiConfig.js";
+
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
@@ -332,7 +334,7 @@ function writeCached(cacheKey, data) {
   }
 }
 
-export async function loadPricePayload(apiUrl, cacheKey = "madiba.pricePayload") {
+export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KEY) {
   const cached = readCached(cacheKey);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {

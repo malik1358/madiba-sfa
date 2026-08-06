@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -62,9 +63,46 @@ function normalizeCode(value) {
 function toNumber(value) {
   const cleaned = String(value ?? "")
     .replace(/,/g, "")
+    .replace(/[^\d.-]/g, "")
     .trim();
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizePriceMap(rawMap) {
+  const normalized = {};
+  if (!rawMap || typeof rawMap !== "object") return normalized;
+
+  Object.entries(rawMap).forEach(([rawCode, rawRate]) => {
+    const code = normalizeCode(rawCode);
+    if (!code) return;
+
+    const nextRate = toNumber(rawRate);
+    const currentRate = toNumber(normalized[code]);
+
+    if (currentRate > 0 && nextRate <= 0) return;
+    normalized[code] = nextRate;
+  });
+
+  return normalized;
+}
+
+function normalizeSheetItems(rawItems) {
+  if (!Array.isArray(rawItems)) return [];
+
+  return rawItems
+    .map((item) => {
+      const code = normalizeCode(item?.item_code);
+      if (!code) return null;
+
+      return {
+        ...item,
+        item_code: code,
+        item_name: normalizeText(item?.item_name) || code,
+        category: normalizeText(item?.category) || "Unclassified",
+      };
+    })
+    .filter(Boolean);
 }
 
 function readAny(source, keys) {
@@ -460,6 +498,7 @@ function parsePricePayload(payload) {
 }
 
 export default function NewOrderPage() {
+  const searchParams = useSearchParams();
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
@@ -487,13 +526,10 @@ export default function NewOrderPage() {
   const [editOrderId, setEditOrderId] = useState("");
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const params = new URLSearchParams(window.location.search);
-    const customerCode = String(params.get("customer_code") || "").trim();
-    const customerName = String(params.get("customer_name") || "").trim();
-    const salesmanCode = String(params.get("salesman_code") || "").trim();
-    const orderId = String(params.get("order_id") || "").trim();
+    const customerCode = String(searchParams?.get("customer_code") || "").trim();
+    const customerName = String(searchParams?.get("customer_name") || "").trim();
+    const salesmanCode = String(searchParams?.get("salesman_code") || "").trim();
+    const orderId = String(searchParams?.get("order_id") || "").trim();
 
     if (!customerCode || !customerName) {
       setPrefilledCustomer(null);
@@ -506,7 +542,7 @@ export default function NewOrderPage() {
     }
 
     setEditOrderId(orderId);
-  }, []);
+  }, [searchParams]);
 
   const mergedItemsMaster = useMemo(() => {
     const itemMap = new Map();
@@ -1108,23 +1144,23 @@ export default function NewOrderPage() {
         const data = await response.json();
         const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
           ? {
-              priceMap: data.priceMap,
-              sheetItems: Array.isArray(data.sheetItems) ? data.sheetItems : [],
+              priceMap: normalizePriceMap(data.priceMap),
+              sheetItems: normalizeSheetItems(data.sheetItems),
             }
           : parsePricePayload(data || {});
         if (Object.keys(parsed.priceMap || {}).length === 0) {
           throw new Error("Price cache returned no prices");
         }
 
-        setPriceList(parsed.priceMap);
-        setPriceSheetItems(parsed.sheetItems);
+        setPriceList(normalizePriceMap(parsed.priceMap));
+        setPriceSheetItems(normalizeSheetItems(parsed.sheetItems));
         window.localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(parsed));
       } catch {
         try {
           const cached = JSON.parse(window.localStorage.getItem(PRICE_CACHE_KEY) || "null");
           if (cached?.priceMap && Object.keys(cached.priceMap).length > 0) {
-            setPriceList(cached.priceMap);
-            setPriceSheetItems(Array.isArray(cached.sheetItems) ? cached.sheetItems : []);
+            setPriceList(normalizePriceMap(cached.priceMap));
+            setPriceSheetItems(normalizeSheetItems(cached.sheetItems));
           }
         } catch {
           // Keep previously loaded prices if cache is unavailable.

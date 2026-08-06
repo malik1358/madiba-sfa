@@ -121,6 +121,11 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
         return;
       }
 
+      if (!accessScope) {
+        // Wait for visibility scope before resolving draft/edit access checks.
+        return;
+      }
+
       const supabase = getSupabaseClient();
       if (!supabase) return;
 

@@ -568,9 +568,14 @@ export default function NewOrderPage() {
       const sheetName = normalizeText(sheetFallback.item_name);
       const sheetCategory = normalizeText(sheetFallback.category);
 
-      const nextName = hasMeaningfulItemName(masterName, code)
+      const masterNameUsable = hasMeaningfulItemName(masterName, code) && !isDoNotUseItem(masterName);
+      const sheetNameUsable = hasMeaningfulItemName(sheetName, code) && !isDoNotUseItem(sheetName);
+      const historyName = normalizeText(historyFallback.item_name);
+      const historyNameUsable = hasMeaningfulItemName(historyName, code) && !isDoNotUseItem(historyName);
+
+      const nextName = masterNameUsable
         ? masterName
-        : (hasMeaningfulItemName(sheetName, code) ? sheetName : (historyFallback.item_name || code));
+        : (sheetNameUsable ? sheetName : (historyNameUsable ? historyName : code));
       const nextCategory = hasMeaningfulValue(masterCategory)
         ? masterCategory
         : (hasMeaningfulValue(sheetCategory) ? sheetCategory : (historyFallback.category || "Unclassified"));
@@ -627,9 +632,14 @@ export default function NewOrderPage() {
       const sheetCategory = normalizeText(sheetItem.category);
       const historyFallback = historyCategoryLookup.get(code) || {};
 
-      const nextName = hasMeaningfulItemName(existingName, code)
+      const existingNameUsable = hasMeaningfulItemName(existingName, code) && !isDoNotUseItem(existingName);
+      const sheetNameUsable = hasMeaningfulItemName(sheetName, code) && !isDoNotUseItem(sheetName);
+      const historyName = normalizeText(historyFallback.item_name);
+      const historyNameUsable = hasMeaningfulItemName(historyName, code) && !isDoNotUseItem(historyName);
+
+      const nextName = existingNameUsable
         ? existingName
-        : (hasMeaningfulItemName(sheetName, code) ? sheetName : (historyFallback.item_name || code));
+        : (sheetNameUsable ? sheetName : (historyNameUsable ? historyName : code));
       const nextCategory = hasMeaningfulValue(sheetCategory)
         ? sheetCategory
         : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));

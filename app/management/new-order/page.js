@@ -524,6 +524,11 @@ export default function NewOrderPage() {
   const [accessScope, setAccessScope] = useState(null);
   const [prefilledCustomer, setPrefilledCustomer] = useState(null);
   const [editOrderId, setEditOrderId] = useState("");
+  const [priceStatus, setPriceStatus] = useState({
+    source: "",
+    syncedAt: "",
+    isStale: false,
+  });
 
   useEffect(() => {
     const customerCode = String(searchParams?.get("customer_code") || "").trim();
@@ -1154,6 +1159,11 @@ export default function NewOrderPage() {
 
         setPriceList(normalizePriceMap(parsed.priceMap));
         setPriceSheetItems(normalizeSheetItems(parsed.sheetItems));
+        setPriceStatus({
+          source: String(data?.source || "api").trim() || "api",
+          syncedAt: String(data?.syncedAt || "").trim(),
+          isStale: Boolean(data?.isStale),
+        });
         window.localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(parsed));
       } catch {
         try {
@@ -1161,6 +1171,11 @@ export default function NewOrderPage() {
           if (cached?.priceMap && Object.keys(cached.priceMap).length > 0) {
             setPriceList(normalizePriceMap(cached.priceMap));
             setPriceSheetItems(normalizeSheetItems(cached.sheetItems));
+            setPriceStatus({
+              source: "local-cache",
+              syncedAt: String(cached?.syncedAt || "").trim(),
+              isStale: false,
+            });
           }
         } catch {
           // Keep previously loaded prices if cache is unavailable.
@@ -1254,6 +1269,21 @@ export default function NewOrderPage() {
     );
   }
 
+  const priceStatusText = (() => {
+    if (!priceStatus.source) return "Price source: unavailable";
+    const parts = [`Price source: ${priceStatus.source}`];
+    if (priceStatus.syncedAt) {
+      const dateText = new Date(priceStatus.syncedAt).toLocaleString("en-GB");
+      if (dateText && dateText !== "Invalid Date") {
+        parts.push(`Synced: ${dateText}`);
+      }
+    }
+    if (priceStatus.isStale) {
+      parts.push("Status: stale");
+    }
+    return parts.join(" | ");
+  })();
+
   return (
     <MorningAttendanceGate>
     <main className="modulePage" dir={dir}>
@@ -1269,6 +1299,7 @@ export default function NewOrderPage() {
 
         {error && <div className="moduleError">{error}</div>}
         {message && <div className="moduleSuccess">{message}</div>}
+  <div className="moduleHint">{priceStatusText}</div>
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">

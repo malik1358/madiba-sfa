@@ -115,11 +115,6 @@ function isExcludedItemCode(value) {
   return normalizeCode(value).startsWith("LP");
 }
 
-function isKnownBuildingMaterialCode(value) {
-  const code = normalizeCode(value);
-  return ["A003622", "A003623", "A003624", "A003625", "A003626", "A003627"].includes(code);
-}
-
 function isExcludedCategory(value) {
   const compact = normalizeText(value).toLowerCase().replace(/[^a-z]/g, "");
   return ["buildingmaterial", "buildingmaterials", "buidingmaterial", "buidingmaterials"].includes(compact);
@@ -565,7 +560,6 @@ export default function NewOrderPage() {
       const code = normalizeCode(item.item_code);
       if (!code) return;
       if (isExcludedItemCode(code)) return;
-      if (isKnownBuildingMaterialCode(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
       const sheetFallback = (priceSheetItems || []).find((sheetItem) => normalizeCode(sheetItem.item_code) === code) || {};
 
@@ -602,7 +596,6 @@ export default function NewOrderPage() {
       const code = normalizeCode(sheetItem.item_code);
       if (!code) return;
       if (isExcludedItemCode(code) || isExcludedCategory(sheetItem.category)) return;
-      if (isKnownBuildingMaterialCode(code)) return;
 
       const existing = itemMap.get(code);
       if (!existing) {
@@ -664,7 +657,6 @@ export default function NewOrderPage() {
       const code = normalizeCode(rawCode);
       if (!code || itemMap.has(code)) return;
       if (isExcludedItemCode(code)) return;
-      if (isKnownBuildingMaterialCode(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
 
       const fallbackName = historyFallback.item_name || "";
@@ -682,19 +674,6 @@ export default function NewOrderPage() {
     });
 
     return Array.from(itemMap.values())
-      .filter((item) => {
-        if (isDoNotUseItem(item.item_name)) return false;
-
-        const code = normalizeCode(item.item_code);
-        const price = toNumber(priceList?.[code]);
-        const isUnclassified = normalizeCategoryKey(item.category) === normalizeCategoryKey("Unclassified");
-        const isNameJustCode = normalizeCode(item.item_name) === code;
-
-        // Keep placeholder unclassified zero-price rows out of ordering.
-        if (isUnclassified && isNameJustCode && price <= 0) return false;
-
-        return true;
-      })
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 

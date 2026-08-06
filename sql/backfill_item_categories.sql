@@ -9,6 +9,7 @@ with ranked as (
     base.item_code,
     case
       when base.cleaned_item_name is null then null
+      when base.cleaned_item_name ~* 'do\s*not\s*use+' then null
       when upper(base.cleaned_item_name) = upper(trim(base.item_code)) then null
       else base.cleaned_item_name
     end as item_name,
@@ -67,6 +68,7 @@ with ranked as (
     base.item_code,
     case
       when base.cleaned_item_name is null then null
+      when base.cleaned_item_name ~* 'do\s*not\s*use+' then null
       when upper(base.cleaned_item_name) = upper(trim(base.item_code)) then null
       else base.cleaned_item_name
     end as item_name,
@@ -137,6 +139,14 @@ set
           )
         )
       ) = upper(trim(im.item_code)) then null
+      when trim(
+        regexp_replace(
+          coalesce(im.item_name, ''),
+          '\\m(?:(?:[A-Za-z]\\s*)?(?:repeat(?:ed)?|repet(?:e|i)?d)|(?:[A-Za-z]\\s*)new)\\M',
+          '',
+          'gi'
+        )
+      ) ~* 'do\\s*not\\s*use+' then null
       else nullif(
         trim(
           regexp_replace(
@@ -169,6 +179,7 @@ where im.item_code = ranked.item_code
     or im.category is null
     or trim(im.category) = ''
     or upper(trim(im.category)) = 'UNCLASSIFIED'
+    or coalesce(im.item_name, '') ~* 'do\s*not\s*use+'
     or coalesce(im.item_name, '') ~* '\\m(?:(?:[A-Za-z]\\s*)?(?:repeat(?:ed)?|repet(?:e|i)?d)|(?:[A-Za-z]\\s*)new)\\M'
   );
 
@@ -198,6 +209,14 @@ set
           )
         )
       ) = upper(trim(sr.item_code)) then null
+      when trim(
+        regexp_replace(
+          coalesce(sr.item_name, ''),
+          '\\m(?:(?:[A-Za-z]\\s*)?(?:repeat(?:ed)?|repet(?:e|i)?d)|(?:[A-Za-z]\\s*)new)\\M',
+          '',
+          'gi'
+        )
+      ) ~* 'do\\s*not\\s*use+' then null
       else nullif(
         trim(
           regexp_replace(
@@ -233,6 +252,7 @@ where sr.item_code = im.item_code
     or sr.category is null
     or trim(sr.category) = ''
     or upper(trim(sr.category)) = 'UNCLASSIFIED'
+    or coalesce(sr.item_name, '') ~* 'do\s*not\s*use+'
     or coalesce(sr.item_name, '') ~* '\\m(?:(?:[A-Za-z]\\s*)?(?:repeat(?:ed)?|repet(?:e|i)?d)|(?:[A-Za-z]\\s*)new)\\M'
   );
 
@@ -251,6 +271,7 @@ with cache_items as (
     item_code,
     case
       when item_name is null then null
+      when item_name ~* 'do\s*not\s*use+' then null
       when upper(item_name) = upper(item_code) then null
       else item_name
     end as item_name,
@@ -271,6 +292,7 @@ set
   item_name = coalesce(
     case
       when nullif(trim(im.item_name), '') is null then null
+      when trim(im.item_name) ~* 'do\s*not\s*use+' then null
       when upper(trim(im.item_name)) = upper(trim(im.item_code)) then null
       else nullif(trim(im.item_name), '')
     end,
@@ -290,6 +312,7 @@ where im.item_code = ranked_cache.item_code
   and (
     im.item_name is null
     or trim(im.item_name) = ''
+    or coalesce(im.item_name, '') ~* 'do\s*not\s*use+'
     or upper(trim(coalesce(im.item_name, ''))) = upper(trim(im.item_code))
     or im.category is null
     or trim(im.category) = ''
@@ -309,6 +332,7 @@ with cache_items as (
     item_code,
     case
       when item_name is null then null
+      when item_name ~* 'do\s*not\s*use+' then null
       when upper(item_name) = upper(item_code) then null
       else item_name
     end as item_name,
@@ -329,6 +353,7 @@ set
   item_name = coalesce(
     case
       when nullif(trim(sr.item_name), '') is null then null
+      when trim(sr.item_name) ~* 'do\s*not\s*use+' then null
       when upper(trim(sr.item_name)) = upper(trim(sr.item_code)) then null
       else nullif(trim(sr.item_name), '')
     end,
@@ -348,6 +373,7 @@ where sr.item_code = ranked_cache.item_code
   and (
     sr.item_name is null
     or trim(sr.item_name) = ''
+    or coalesce(sr.item_name, '') ~* 'do\s*not\s*use+'
     or upper(trim(coalesce(sr.item_name, ''))) = upper(trim(sr.item_code))
     or sr.category is null
     or trim(sr.category) = ''

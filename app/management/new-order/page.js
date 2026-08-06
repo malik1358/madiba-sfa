@@ -106,6 +106,7 @@ function hasMeaningfulItemName(value, itemCode = "") {
   const text = normalizeText(value);
   if (!text) return false;
   if (isPlaceholderValue(text)) return false;
+  if (isDoNotUseItem(text)) return false;
   if (looksLikeItemCode(text)) return false;
   if (normalizeCode(text) === normalizeCode(itemCode)) return false;
   return true;
@@ -573,9 +574,9 @@ export default function NewOrderPage() {
       const historyName = normalizeText(historyFallback.item_name);
       const historyNameUsable = hasMeaningfulItemName(historyName, code);
 
-      const nextName = masterNameUsable
-        ? masterName
-        : (sheetNameUsable ? sheetName : (historyNameUsable ? historyName : code));
+      const nextName = historyNameUsable
+        ? historyName
+        : (sheetNameUsable ? sheetName : (masterNameUsable ? masterName : code));
       const nextCategory = hasMeaningfulValue(masterCategory)
         ? masterCategory
         : (hasMeaningfulValue(sheetCategory) ? sheetCategory : (historyFallback.category || "Unclassified"));
@@ -637,9 +638,9 @@ export default function NewOrderPage() {
       const historyName = normalizeText(historyFallback.item_name);
       const historyNameUsable = hasMeaningfulItemName(historyName, code);
 
-      const nextName = existingNameUsable
-        ? existingName
-        : (sheetNameUsable ? sheetName : (historyNameUsable ? historyName : code));
+      const nextName = historyNameUsable
+        ? historyName
+        : (sheetNameUsable ? sheetName : (existingNameUsable ? existingName : code));
       const nextCategory = hasMeaningfulValue(sheetCategory)
         ? sheetCategory
         : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));
@@ -674,7 +675,6 @@ export default function NewOrderPage() {
     });
 
     return Array.from(itemMap.values())
-      .filter((item) => !isDoNotUseItem(item.item_name))
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 

@@ -568,10 +568,10 @@ export default function NewOrderPage() {
       const sheetName = normalizeText(sheetFallback.item_name);
       const sheetCategory = normalizeText(sheetFallback.category);
 
-      const masterNameUsable = hasMeaningfulItemName(masterName, code) && !isDoNotUseItem(masterName);
-      const sheetNameUsable = hasMeaningfulItemName(sheetName, code) && !isDoNotUseItem(sheetName);
+      const masterNameUsable = hasMeaningfulItemName(masterName, code);
+      const sheetNameUsable = hasMeaningfulItemName(sheetName, code);
       const historyName = normalizeText(historyFallback.item_name);
-      const historyNameUsable = hasMeaningfulItemName(historyName, code) && !isDoNotUseItem(historyName);
+      const historyNameUsable = hasMeaningfulItemName(historyName, code);
 
       const nextName = masterNameUsable
         ? masterName
@@ -632,10 +632,10 @@ export default function NewOrderPage() {
       const sheetCategory = normalizeText(sheetItem.category);
       const historyFallback = historyCategoryLookup.get(code) || {};
 
-      const existingNameUsable = hasMeaningfulItemName(existingName, code) && !isDoNotUseItem(existingName);
-      const sheetNameUsable = hasMeaningfulItemName(sheetName, code) && !isDoNotUseItem(sheetName);
+      const existingNameUsable = hasMeaningfulItemName(existingName, code);
+      const sheetNameUsable = hasMeaningfulItemName(sheetName, code);
       const historyName = normalizeText(historyFallback.item_name);
-      const historyNameUsable = hasMeaningfulItemName(historyName, code) && !isDoNotUseItem(historyName);
+      const historyNameUsable = hasMeaningfulItemName(historyName, code);
 
       const nextName = existingNameUsable
         ? existingName
@@ -674,19 +674,6 @@ export default function NewOrderPage() {
     });
 
     return Array.from(itemMap.values())
-      .filter((item) => {
-        if (isDoNotUseItem(item.item_name)) return false;
-
-        const code = normalizeCode(item.item_code);
-        const price = toNumber(priceList?.[code]);
-        const isUnclassified = normalizeCategoryKey(item.category) === normalizeCategoryKey("Unclassified");
-        const isNameJustCode = normalizeCode(item.item_name) === code;
-
-        // Remove generic placeholder rows that are not actionable in ordering.
-        if (isUnclassified && isNameJustCode && price <= 0) return false;
-
-        return true;
-      })
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 

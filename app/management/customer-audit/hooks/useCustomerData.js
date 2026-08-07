@@ -17,6 +17,22 @@ async function fetchVisibleCustomers(token) {
   return payload.customers || [];
 }
 
+function normalizeCode(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function canUseCrossSalesHistory(accessScope, customer) {
+  if (!customer) return false;
+  if (accessScope?.hasAllAccess) return true;
+
+  const mutualCodes = Array.isArray(accessScope?.mutualSalesmanCodes)
+    ? accessScope.mutualSalesmanCodes.map((code) => normalizeCode(code)).filter(Boolean)
+    : [];
+
+  if (mutualCodes.length === 0) return false;
+  return mutualCodes.includes(normalizeCode(customer.current_salesman_code));
+}
+
 export function useCustomerData({ setError, setMessage }) {
   const [customers, setCustomers] = useState([]);
   const [salesmen, setSalesmen] = useState([]);
@@ -137,7 +153,9 @@ export function useCustomerData({ setError, setMessage }) {
           transaction_date
           `);
 
-      if (!accessScope?.hasAllAccess) {
+      const allowCrossSalesHistory = canUseCrossSalesHistory(accessScope, customer);
+
+      if (!accessScope?.hasAllAccess && !allowCrossSalesHistory) {
         peerQuery = peerQuery.in('salesman_code', accessScope?.visibleSalesmanCodes || []);
       }
 

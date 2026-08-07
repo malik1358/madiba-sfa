@@ -130,6 +130,7 @@ export async function GET(request) {
       currentUserId: currentProfile.id,
       currentSalesmanCode,
       hasAllAccess,
+      mutualSalesmanCodes: mutualGroupCodes,
       visibleSalesmanCodes,
       visibleUserIds,
       visibleMembers,

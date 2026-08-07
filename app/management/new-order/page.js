@@ -185,6 +185,18 @@ function isSameCategory(left, right) {
   return normalizeCategoryKey(left) === normalizeCategoryKey(right);
 }
 
+function canUseCrossSalesHistory(accessScope, customer) {
+  if (!customer) return false;
+  if (accessScope?.hasAllAccess) return true;
+
+  const mutualCodes = Array.isArray(accessScope?.mutualSalesmanCodes)
+    ? accessScope.mutualSalesmanCodes.map((code) => normalizeCode(code)).filter(Boolean)
+    : [];
+
+  if (mutualCodes.length === 0) return false;
+  return mutualCodes.includes(normalizeCode(customer.current_salesman_code));
+}
+
 async function fetchItemCategoryLookup(supabase, scope) {
   const pageSize = 1000;
   let from = 0;
@@ -1226,11 +1238,13 @@ function NewOrderPageContent() {
       setAuditExpandedCategories({});
 
       try {
+        const allowCrossSalesHistory = canUseCrossSalesHistory(accessScope, selectedCustomer);
+
         let peersQuery = supabase
           .from("sales_raw")
           .select("customer_code,item_code,item_name,category,sales_amount,transaction_date")
 
-        if (!accessScope?.hasAllAccess) {
+        if (!accessScope?.hasAllAccess && !allowCrossSalesHistory) {
           peersQuery = peersQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
         }
 

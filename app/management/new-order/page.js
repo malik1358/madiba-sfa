@@ -23,6 +23,7 @@ import TransactionHistory from "../customer-audit/components/TransactionHistory"
 import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
+const CUSTOMER_HISTORY_API = "/api/customer-history";
 const OUTSTANDING_API = "/api/outstanding";
 
 const TEXT = {
@@ -1305,31 +1306,27 @@ export default function NewOrderPage() {
       setAuditExpandedCategories({});
 
       try {
-        let peersQuery = supabase
-          .from("sales_raw")
-          .select("customer_code,item_code,item_name,category,sales_amount,transaction_date")
-
-        if (!accessScope?.hasAllAccess) {
-          peersQuery = peersQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
+        const accessToken = await waitForAccessToken(supabase);
+        if (!accessToken) {
+          throw new Error("Please login again.");
         }
 
-        const [transactionsRes, peersRes] = await Promise.all([
-          supabase
-            .from("sales_raw")
-            .select(
-              "id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class"
-            )
-            .eq("customer_code", selectedCustomer.customer_code)
-            .order("transaction_date", { ascending: false })
-            .order("id", { ascending: false }),
-          peersQuery,
-        ]);
+        const response = await fetch(
+          `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
+        );
 
-        if (transactionsRes.error) throw transactionsRes.error;
-        if (peersRes.error) throw peersRes.error;
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load customer audit history.");
+        }
 
-        setTransactions(transactionsRes.data || []);
-        setPeerTransactions(peersRes.data || []);
+        setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);
+        setPeerTransactions(Array.isArray(payload.peerTransactions) ? payload.peerTransactions : []);
       } catch (err) {
         setTransactions([]);
         setPeerTransactions([]);

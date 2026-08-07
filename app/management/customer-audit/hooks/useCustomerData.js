@@ -2,6 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
 import { fetchSalesScope } from '../../../lib/salesScope';
 
+const PEER_HISTORY_MONTHS = 18;
+const PEER_HISTORY_LIMIT = 20000;
+const CUSTOMER_HISTORY_LIMIT = 5000;
+
 async function fetchVisibleCustomers(token) {
   const response = await fetch('/api/customers/visible', {
     headers: {
@@ -31,6 +35,12 @@ function canUseCrossSalesHistory(accessScope, customer) {
 
   if (mutualCodes.length === 0) return false;
   return mutualCodes.includes(normalizeCode(customer.current_salesman_code));
+}
+
+function historyCutoffIso(monthsBack = PEER_HISTORY_MONTHS) {
+  const now = new Date();
+  now.setMonth(now.getMonth() - monthsBack);
+  return now.toISOString().slice(0, 10);
 }
 
 export function useCustomerData({ setError, setMessage }) {
@@ -115,6 +125,8 @@ export function useCustomerData({ setError, setMessage }) {
     setMessage('');
 
     try {
+      const cutoffDate = historyCutoffIso();
+
       const { data, error: salesError } = await supabase
         .from('sales_raw')
         .select(`
@@ -137,7 +149,8 @@ export function useCustomerData({ setError, setMessage }) {
         `)
         .eq('customer_code', customer.customer_code)
         .order('transaction_date', { ascending: false })
-        .order('id', { ascending: false });
+        .order('id', { ascending: false })
+        .limit(CUSTOMER_HISTORY_LIMIT);
 
       if (salesError) throw salesError;
       setTransactions(data || []);
@@ -151,7 +164,10 @@ export function useCustomerData({ setError, setMessage }) {
           category,
           sales_amount,
           transaction_date
-          `);
+          `)
+        .gte('transaction_date', cutoffDate)
+        .order('transaction_date', { ascending: false })
+        .limit(PEER_HISTORY_LIMIT);
 
       const allowCrossSalesHistory = canUseCrossSalesHistory(accessScope, customer);
 

@@ -58,9 +58,14 @@ function getStoredPassword(metadata) {
 
 function normalizeRole(value) {
   const role = String(value || "").trim().toLowerCase();
-  if (role === "invoice-maker") return "invoice_maker";
-  if (["salesman", "manager", "admin", "invoice_maker"].includes(role)) return role;
+  if (role === "invoice-maker" || role === "invoice_maker") return "invoice-maker";
+  if (["salesman", "manager", "admin"].includes(role)) return role;
   return "salesman";
+}
+
+function isInvoiceMakerRole(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  return normalized === "invoice-maker" || normalized === "invoice_maker";
 }
 
 async function setGeneratedPassword(admin, userId, metadata = {}) {
@@ -253,7 +258,7 @@ async function loadSalesmen(admin) {
     admin
       .from("profiles")
       .select("id,salesman_code,salesman_name,role")
-      .in("role", ["salesman", "manager", "admin", "invoice_maker"])
+      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"])
       .order("salesman_name"),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
@@ -287,7 +292,7 @@ async function syncGeneratedSalesmanPasswords(admin) {
     admin
       .from("profiles")
       .select("id,salesman_code,role")
-      .in("role", ["salesman", "invoice_maker"]),
+      .in("role", ["salesman", "invoice-maker", "invoice_maker"]),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
 
@@ -334,7 +339,7 @@ export async function GET(request) {
       salesmen,
       autoCreateSummary,
       headOptions: salesmen
-        .filter((salesman) => String(salesman.role || "").toLowerCase() !== "invoice_maker")
+        .filter((salesman) => !isInvoiceMakerRole(salesman.role))
         .map((salesman) => ({
           id: salesman.id,
           salesman_code: salesman.salesman_code,
@@ -392,7 +397,7 @@ export async function POST(request) {
       }
 
       let headSalesmanName = "";
-      if (headSalesmanCode && selectedRole !== "invoice_maker") {
+      if (headSalesmanCode && !isInvoiceMakerRole(selectedRole)) {
         const { data: headSalesman, error: headError } = await admin
           .from("profiles")
           .select("salesman_name,salesman_code")
@@ -413,8 +418,8 @@ export async function POST(request) {
         password,
         email_confirm: true,
         user_metadata: {
-          head_salesman_code: selectedRole === "invoice_maker" ? null : (headSalesmanCode || null),
-          head_salesman_name: selectedRole === "invoice_maker" ? null : (headSalesmanName || null),
+          head_salesman_code: isInvoiceMakerRole(selectedRole) ? null : (headSalesmanCode || null),
+          head_salesman_name: isInvoiceMakerRole(selectedRole) ? null : (headSalesmanName || null),
           generated_password: password,
           generated_password_mode: "random6",
         },
@@ -443,7 +448,7 @@ export async function POST(request) {
 
       return NextResponse.json({
         success: true,
-        message: `${selectedRole === "invoice_maker" ? "Invoice maker" : "Salesman"} ${salesmanName} created successfully.`,
+        message: `${isInvoiceMakerRole(selectedRole) ? "Invoice maker" : "Salesman"} ${salesmanName} created successfully.`,
         created: {
           id: userId,
           email,

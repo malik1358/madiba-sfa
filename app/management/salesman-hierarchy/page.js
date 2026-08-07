@@ -35,6 +35,11 @@ function isRandomPassword(value) {
   return /^\d{6}$/.test(String(value || "").trim());
 }
 
+function isInvoiceMakerRole(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  return normalized === "invoice-maker" || normalized === "invoice_maker";
+}
+
 export default function SalesmanHierarchyPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -325,7 +330,7 @@ export default function SalesmanHierarchyPage() {
                 onChange={(event) => setNewSalesman((current) => ({ ...current, role: event.target.value }))}
               >
                 <option value="salesman">Salesman</option>
-                <option value="invoice_maker">Invoice Maker</option>
+                <option value="invoice-maker">Invoice Maker</option>
               </select>
             </label>
 
@@ -334,7 +339,7 @@ export default function SalesmanHierarchyPage() {
               <select
                 className="moduleInput"
                 value={newSalesman.headSalesmanCode}
-                disabled={newSalesman.role === "invoice_maker"}
+                disabled={isInvoiceMakerRole(newSalesman.role)}
                 onChange={(event) => setNewSalesman((current) => ({ ...current, headSalesmanCode: event.target.value }))}
               >
                 <option value="">No head</option>
@@ -394,7 +399,7 @@ export default function SalesmanHierarchyPage() {
                         <select
                           className="moduleInput"
                           value={headSelections[salesman.id] || ""}
-                          disabled={String(salesman.role || "").toLowerCase() === "invoice_maker"}
+                          disabled={isInvoiceMakerRole(salesman.role)}
                           onChange={(event) => setHeadSelections((current) => ({ ...current, [salesman.id]: event.target.value }))}
                         >
                           <option value="">No head</option>

@@ -82,6 +82,22 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function normalizeCategoryKey(value) {
+  return normalizeText(value).replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeCategoryLabel(value) {
+  const text = normalizeText(value).replace(/\s+/g, " ");
+  if (!text) return "Unclassified";
+
+  return text
+    .split(" ")
+    .map((word) => (word.toUpperCase() === "POS"
+      ? "POS"
+      : `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`))
+    .join(" ");
+}
+
 function isPlaceholderValue(value) {
   const text = normalizeText(value).toUpperCase();
   if (!text) return true;
@@ -632,7 +648,7 @@ export default function NewOrderPage() {
     const includeNeedsMapping = categoryFilter === NEEDS_MAPPING_CATEGORY;
 
     return mergedItemsMaster.filter((item) => {
-      if (categoryFilter !== "ALL" && item.category !== categoryFilter) return false;
+      if (categoryFilter !== "ALL" && normalizeCategoryLabel(normalizeText(item.category) || "Unclassified") !== categoryFilter) return false;
 
       const matchesQuery = !q || (
         String(item.item_code || "").toLowerCase().includes(q) ||

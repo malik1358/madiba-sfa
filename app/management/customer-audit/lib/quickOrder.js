@@ -105,11 +105,27 @@ export function buildQuickOrderSuggestions({ analytics, transactions, peerTransa
 
   const topSimilarCustomers = similarCustomers.slice(0, 50);
   const topSimilarCodes = new Set(topSimilarCustomers.map((customer) => customer.customerCode));
+  const shouldUseAllPeers = topSimilarCodes.size === 0;
+
+  const peerItemMeta = new Map();
+  peerTransactions.forEach((row) => {
+    const code = normalizeCode(row.item_code);
+    if (!code || isDoNotUseItem(row.item_name)) return;
+    if (peerItemMeta.has(code)) return;
+
+    peerItemMeta.set(code, {
+      item_code: String(row.item_code || '').trim(),
+      item_name: row.item_name || row.item_code || 'Unknown Item',
+      category: row.category || 'Unclassified',
+      rate: null,
+      is_active: true,
+    });
+  });
 
   const candidateStats = {};
   peerTransactions.forEach((row) => {
     const customerCode = String(row.customer_code || '').trim();
-    if (!topSimilarCodes.has(customerCode)) return;
+    if (!shouldUseAllPeers && !topSimilarCodes.has(customerCode)) return;
     if (!hasPositivePurchase(row)) return;
 
     const itemCode = normalizeCode(row.item_code);
@@ -128,9 +144,13 @@ export function buildQuickOrderSuggestions({ analytics, transactions, peerTransa
     }
   });
 
-  const newItems = cleanMaster
-    .map((item) => {
-      const code = normalizeCode(item.item_code);
+  const masterByCode = new Map(cleanMaster.map((item) => [normalizeCode(item.item_code), item]));
+  const candidateCodes = Object.keys(candidateStats);
+
+  const newItems = candidateCodes
+    .map((code) => {
+      const item = masterByCode.get(code) || peerItemMeta.get(code);
+      if (!item) return null;
       const stats = candidateStats[code];
 
       if (!stats) return null;

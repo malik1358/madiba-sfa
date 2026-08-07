@@ -9,7 +9,8 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const HISTORY_MONTHS = 6;
 const HISTORY_LIMIT = 5000;
-const CACHE_VERSION = 3;
+const PEER_LIMIT = 30000;
+const CACHE_VERSION = 4;
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function normalizeCode(value) {
@@ -265,18 +266,57 @@ async function fetchCustomerTransactions(admin, customerCode) {
 
   return {
     fromDate: monthStartFromKey(lastMonthKey),
+    monthKeys: selectedMonthKeys,
     transactions: filtered,
   };
 }
 
-async function refreshCustomerCache(admin, customerCode, cacheKey) {
+async function fetchPeerTransactions(admin, scope, selectedMonthKeys, customerCode) {
+  const monthSet = new Set((selectedMonthKeys || []).filter(Boolean));
+  if (monthSet.size === 0) return [];
+
+  let query = admin
+    .from("sales_raw")
+    .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
+    .neq("customer_code", customerCode)
+    .order("transaction_date", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(PEER_LIMIT);
+
+  if (!scope.hasAllAccess && Array.isArray(scope.visibleSalesmanCodes) && scope.visibleSalesmanCodes.length > 0) {
+    query = query.in("salesman_code", scope.visibleSalesmanCodes);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const rows = Array.isArray(data) ? data : [];
+
+  return rows
+    .filter((row) => monthSet.has(monthKey(row.transaction_date)))
+    .map((row) => {
+      const parsed = parseDateValue(row.transaction_date);
+      return {
+        ...row,
+        __stamp: parsed ? parsed.getTime() : 0,
+      };
+    })
+    .sort((a, b) => {
+      if (b.__stamp !== a.__stamp) return b.__stamp - a.__stamp;
+      return Number(b.id || 0) - Number(a.id || 0);
+    })
+    .map(({ __stamp, ...row }) => row);
+}
+
+async function refreshCustomerCache(admin, customerCode, cacheKey, scope) {
   const fresh = await fetchCustomerTransactions(admin, customerCode);
+  const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
   const payload = {
     version: CACHE_VERSION,
     updatedAt: new Date().toISOString(),
     fromDate: fresh.fromDate,
     transactions: fresh.transactions,
-    peerTransactions: [],
+    peerTransactions,
   };
 
   await writeCached(admin, cacheKey, payload);
@@ -320,7 +360,7 @@ export async function GET(request) {
 
       if (stale) {
         // Return previous data immediately, refresh snapshot in background.
-        void refreshCustomerCache(admin, customerCode, key).catch(() => {});
+        void refreshCustomerCache(admin, customerCode, key, scope).catch(() => {});
       }
 
       return NextResponse.json({
@@ -336,7 +376,16 @@ export async function GET(request) {
       });
     }
 
-    const payload = await refreshCustomerCache(admin, customerCode, key);
+    const fresh = await fetchCustomerTransactions(admin, customerCode);
+    const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
+    const payload = {
+      version: CACHE_VERSION,
+      updatedAt: new Date().toISOString(),
+      fromDate: fresh.fromDate,
+      transactions: fresh.transactions,
+      peerTransactions,
+    };
+    await writeCached(admin, key, payload);
 
     return NextResponse.json({
       success: true,

@@ -52,6 +52,7 @@ function CustomerAuditPageContent() {
     fileName: "",
     bucketLabels: [],
     customer: null,
+    customerInvoices: [],
   });
 
   const {
@@ -111,7 +112,7 @@ function CustomerAuditPageContent() {
   useEffect(() => {
     async function loadOutstanding() {
       if (!selectedCustomer) {
-        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null });
+        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [] });
         return;
       }
 
@@ -145,9 +146,10 @@ function CustomerAuditPageContent() {
           fileName: String(payload.fileName || ""),
           bucketLabels: sortBucketLabels(payload.bucketLabels || []),
           customer: payload.customer || null,
+          customerInvoices: Array.isArray(payload.customerInvoices) ? payload.customerInvoices : [],
         });
       } catch (err) {
-        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null });
+        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [] });
         setError(err.message || "Unable to load outstanding data.");
       } finally {
         setOutstandingLoading(false);
@@ -337,30 +339,66 @@ function CustomerAuditPageContent() {
           {outstandingLoading && <div className="auditEmpty">Loading outstanding buckets...</div>}
 
           {!outstandingLoading && outstandingInfo.customer && (
-            <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
-              <table className="moduleTable">
-                <thead>
-                  <tr>
-                    <th>Customer</th>
-                    {outstandingInfo.bucketLabels.map((label) => (
-                      <th key={`audit-out-bucket-${label}`}>{label} days</th>
+            <>
+              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      {outstandingInfo.bucketLabels.map((label) => (
+                        <th key={`audit-out-bucket-${label}`}>{label} days</th>
+                      ))}
+                      <th>Open Invoices</th>
+                      <th>Total Outstanding</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{selectedCustomer.customer_code} - {selectedCustomer.customer_name}</td>
+                      {outstandingInfo.bucketLabels.map((label) => (
+                        <td key={`audit-out-val-${label}`}>{`SAR ${parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]).toFixed(2)}`}</td>
+                      ))}
+                      <td>{parseOutstandingNumber(outstandingInfo.customer?.open_invoices)}</td>
+                      <td>{`SAR ${parseOutstandingNumber(outstandingInfo.customer?.total_outstanding).toFixed(2)}`}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Ref. No.</th>
+                      <th>Pending Amount</th>
+                      <th>Due Date</th>
+                      <th>Overdue Days</th>
+                      <th>Invoice Day</th>
+                      <th>Salesman</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(outstandingInfo.customerInvoices || []).map((invoice, index) => (
+                      <tr key={`${invoice.ref_no || "no-ref"}-${invoice.due_date || "no-due"}-${index}`}>
+                        <td>{invoice.invoice_date || "-"}</td>
+                        <td>{invoice.ref_no || "-"}</td>
+                        <td>{`SAR ${parseOutstandingNumber(invoice.pending_amount).toFixed(2)}`}</td>
+                        <td>{invoice.due_date || "-"}</td>
+                        <td>{parseOutstandingNumber(invoice.overdue_days)}</td>
+                        <td>{parseOutstandingNumber(invoice.invoice_day)}</td>
+                        <td>{invoice.salesman || "-"}</td>
+                      </tr>
                     ))}
-                    <th>Open Invoices</th>
-                    <th>Total Outstanding</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>{selectedCustomer.customer_code} - {selectedCustomer.customer_name}</td>
-                    {outstandingInfo.bucketLabels.map((label) => (
-                      <td key={`audit-out-val-${label}`}>{`SAR ${parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]).toFixed(2)}`}</td>
-                    ))}
-                    <td>{parseOutstandingNumber(outstandingInfo.customer?.open_invoices)}</td>
-                    <td>{`SAR ${parseOutstandingNumber(outstandingInfo.customer?.total_outstanding).toFixed(2)}`}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+                    {(!Array.isArray(outstandingInfo.customerInvoices) || outstandingInfo.customerInvoices.length === 0) && (
+                      <tr>
+                        <td colSpan={7}>No invoice-level rows found for this customer in the latest upload.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
 
           {!outstandingLoading && !outstandingInfo.customer && (

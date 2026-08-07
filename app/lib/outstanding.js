@@ -156,3 +156,28 @@ export function findOutstandingForCustomer(dataset, customerCode, customerName) 
 
   return null;
 }
+
+export function isSameOutstandingCustomer(rowCustomerCode, rowCustomerName, customerCode, customerName) {
+  const targetCode = normalizeCode(customerCode);
+  const targetName = normalizeName(customerName);
+  const targetCodeNoZeros = targetCode.replace(/^0+/, "");
+  const targetCmpName = normalizeComparableName(customerName);
+
+  const rowCode = normalizeCode(rowCustomerCode);
+  if (targetCode && rowCode) {
+    if (rowCode === targetCode) return true;
+    if (rowCode.replace(/^0+/, "") === targetCodeNoZeros) return true;
+  }
+
+  const rowName = normalizeName(rowCustomerName);
+  if (targetName && rowName === targetName) return true;
+
+  const rowCmpName = normalizeComparableName(rowCustomerName);
+  if (targetCmpName && rowCmpName) {
+    if (rowCmpName === targetCmpName) return true;
+    if (rowCmpName.includes(targetCmpName)) return true;
+    if (targetCmpName.includes(rowCmpName)) return true;
+  }
+
+  return false;
+}

@@ -57,7 +57,7 @@ jobs:
           # Guard against accidental leading/trailing whitespace in pasted secrets.
           CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
-          status_code="$(curl -sS -o response.json -w "%{http_code}" -X POST "$PRICE_SYNC_URL" \
+          status_code="$(curl -sS -L -o response.json -w "%{http_code}" -X POST "$PRICE_SYNC_URL" \
             -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
             -H "Content-Type: application/json" \
             --data-binary @price-sync-body.json)"

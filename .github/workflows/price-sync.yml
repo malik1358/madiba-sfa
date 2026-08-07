@@ -12,7 +12,19 @@ jobs:
       - name: Fetch upstream price payload
         run: |
           SOURCE_URL='https://script.google.com/macros/s/AKfycbypi2PkOaBIWdcQnxrBJAT6xGmqsuyx2mekiIkkOjE/exec'
-          curl -sS -L "$SOURCE_URL" -o upstream-price.json
+          http_status=$(curl -sS -L -w "%{http_code}" -o upstream-price.json "$SOURCE_URL")
+
+          if [[ "$http_status" -lt 200 || "$http_status" -ge 300 ]]; then
+            echo "Upstream fetch failed with HTTP $http_status"
+            cat upstream-price.json
+            exit 1
+          fi
+
+          if ! node -e 'JSON.parse(require("fs").readFileSync("upstream-price.json","utf8"))'; then
+            echo "Upstream response is not valid JSON (HTTP $http_status). Response:"
+            head -c 500 upstream-price.json
+            exit 1
+          fi
 
           node -e 'const fs = require("fs"); const payload = JSON.parse(fs.readFileSync("upstream-price.json", "utf8")); fs.writeFileSync("price-sync-body.json", JSON.stringify({ payload }));'
 

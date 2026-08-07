@@ -56,6 +56,13 @@ function getStoredPassword(metadata) {
   return /^\d{6}$/.test(password) ? password : "";
 }
 
+function normalizeRole(value) {
+  const role = String(value || "").trim().toLowerCase();
+  if (role === "invoice-maker") return "invoice_maker";
+  if (["salesman", "manager", "admin", "invoice_maker"].includes(role)) return role;
+  return "salesman";
+}
+
 async function setGeneratedPassword(admin, userId, metadata = {}) {
   const password = randomSixDigitPassword();
   const { error } = await admin.auth.admin.updateUserById(userId, {
@@ -246,7 +253,7 @@ async function loadSalesmen(admin) {
     admin
       .from("profiles")
       .select("id,salesman_code,salesman_name,role")
-      .in("role", ["salesman", "manager", "admin"])
+      .in("role", ["salesman", "manager", "admin", "invoice_maker"])
       .order("salesman_name"),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
@@ -280,7 +287,7 @@ async function syncGeneratedSalesmanPasswords(admin) {
     admin
       .from("profiles")
       .select("id,salesman_code,role")
-      .eq("role", "salesman"),
+      .in("role", ["salesman", "invoice_maker"]),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
 
@@ -326,11 +333,13 @@ export async function GET(request) {
       success: true,
       salesmen,
       autoCreateSummary,
-      headOptions: salesmen.map((salesman) => ({
-        id: salesman.id,
-        salesman_code: salesman.salesman_code,
-        salesman_name: salesman.salesman_name,
-      })),
+      headOptions: salesmen
+        .filter((salesman) => String(salesman.role || "").toLowerCase() !== "invoice_maker")
+        .map((salesman) => ({
+          id: salesman.id,
+          salesman_code: salesman.salesman_code,
+          salesman_name: salesman.salesman_name,
+        })),
     });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message || "Unable to load salesman hierarchy." }, { status: 500 });
@@ -360,6 +369,7 @@ export async function POST(request) {
 
     if (mode === "create-salesman") {
       const inputLogin = String(body?.email || body?.loginName || "").trim().toLowerCase();
+      const selectedRole = normalizeRole(body?.role || "salesman");
       const salesmanCode = normalizeCode(body?.salesmanCode || "");
       const salesmanName = String(body?.salesmanName || "").trim();
       const headSalesmanCode = normalizeCode(body?.headSalesmanCode || "");
@@ -382,7 +392,7 @@ export async function POST(request) {
       }
 
       let headSalesmanName = "";
-      if (headSalesmanCode) {
+      if (headSalesmanCode && selectedRole !== "invoice_maker") {
         const { data: headSalesman, error: headError } = await admin
           .from("profiles")
           .select("salesman_name,salesman_code")
@@ -403,8 +413,8 @@ export async function POST(request) {
         password,
         email_confirm: true,
         user_metadata: {
-          head_salesman_code: headSalesmanCode || null,
-          head_salesman_name: headSalesmanName || null,
+          head_salesman_code: selectedRole === "invoice_maker" ? null : (headSalesmanCode || null),
+          head_salesman_name: selectedRole === "invoice_maker" ? null : (headSalesmanName || null),
           generated_password: password,
           generated_password_mode: "random6",
         },
@@ -421,7 +431,7 @@ export async function POST(request) {
 
       const { error: profileInsertError } = await admin.from("profiles").upsert({
         id: userId,
-        role: "salesman",
+        role: selectedRole,
         salesman_code: salesmanCode,
         salesman_name: salesmanName,
       });
@@ -433,13 +443,14 @@ export async function POST(request) {
 
       return NextResponse.json({
         success: true,
-        message: `Salesman ${salesmanName} created successfully.`,
+        message: `${selectedRole === "invoice_maker" ? "Invoice maker" : "Salesman"} ${salesmanName} created successfully.`,
         created: {
           id: userId,
           email,
           login_name: loginName,
           salesman_code: salesmanCode,
           salesman_name: salesmanName,
+          role: selectedRole,
           password,
         },
       });

@@ -9,7 +9,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const HISTORY_MONTHS = 6;
 const HISTORY_LIMIT = 5000;
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function normalizeCode(value) {
@@ -41,9 +41,24 @@ function cacheKeyFor(customerCode) {
 }
 
 function monthKey(value) {
-  const date = value ? new Date(value) : null;
+  const date = parseDateValue(value);
   if (!date || Number.isNaN(date.getTime())) return "";
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function parseDateValue(value) {
+  if (!value) return null;
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    const isoDate = new Date(`${text.slice(0, 10)}T00:00:00Z`);
+    return Number.isNaN(isoDate.getTime()) ? null : isoDate;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function monthStartFromKey(key) {
@@ -197,30 +212,39 @@ async function fetchCustomerTransactions(admin, customerCode) {
   if (error) throw error;
 
   const rows = Array.isArray(data) ? data : [];
-  const selectedMonths = new Set();
-  const filtered = [];
 
-  for (const row of rows) {
+  // Sort in JS by parsed date to avoid DB text-order artifacts.
+  const sortedRows = rows
+    .map((row) => {
+      const parsed = parseDateValue(row.transaction_date);
+      return {
+        ...row,
+        __stamp: parsed ? parsed.getTime() : 0,
+      };
+    })
+    .sort((a, b) => {
+      if (b.__stamp !== a.__stamp) return b.__stamp - a.__stamp;
+      return Number(b.id || 0) - Number(a.id || 0);
+    });
+
+  const selectedMonthKeys = [];
+  const selectedMonthSet = new Set();
+
+  for (const row of sortedRows) {
     const key = monthKey(row.transaction_date);
-    if (!key) continue;
+    if (!key || selectedMonthSet.has(key)) continue;
 
-    if (selectedMonths.has(key)) {
-      filtered.push(row);
-      continue;
-    }
+    selectedMonthSet.add(key);
+    selectedMonthKeys.push(key);
 
-    if (selectedMonths.size < HISTORY_MONTHS) {
-      selectedMonths.add(key);
-      filtered.push(row);
-      continue;
-    }
-
-    // Rows are ordered newest->oldest; after the 6th distinct month,
-    // any unseen month is older and can be skipped with early exit.
-    break;
+    if (selectedMonthSet.size >= HISTORY_MONTHS) break;
   }
 
-  const lastMonthKey = Array.from(selectedMonths).at(-1) || "";
+  const filtered = sortedRows
+    .filter((row) => selectedMonthSet.has(monthKey(row.transaction_date)))
+    .map(({ __stamp, ...row }) => row);
+
+  const lastMonthKey = selectedMonthKeys.at(-1) || "";
 
   return {
     fromDate: monthStartFromKey(lastMonthKey),

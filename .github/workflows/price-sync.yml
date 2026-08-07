@@ -12,7 +12,19 @@ jobs:
       - name: Fetch upstream price payload
         run: |
           SOURCE_URL='https://script.google.com/macros/s/AKfycbypi2PkOaBIWdcQnxrBJAT6xGmqsuyx2mekiIkkOjE/exec'
-          curl -sS -L "$SOURCE_URL" -o upstream-price.json
+          curl -sS -L --fail-with-body "$SOURCE_URL" -o upstream-price.json || {
+            echo "ERROR: curl failed to fetch upstream price data (HTTP error or network failure)."
+            echo "Response body (first 500 chars):"
+            head -c 500 upstream-price.json 2>/dev/null || true
+            exit 1
+          }
+
+          if ! node -e 'JSON.parse(require("fs").readFileSync("upstream-price.json","utf8"))' 2>/dev/null; then
+            echo "ERROR: upstream-price.json is not valid JSON. The upstream URL may be returning an error page."
+            echo "Response body (first 500 chars):"
+            head -c 500 upstream-price.json
+            exit 1
+          fi
 
           node -e 'const fs = require("fs"); const payload = JSON.parse(fs.readFileSync("upstream-price.json", "utf8")); fs.writeFileSync("price-sync-body.json", JSON.stringify({ payload }));'
 

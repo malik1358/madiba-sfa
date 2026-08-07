@@ -1,4 +1,4 @@
-import { buildLast12Months, monthKey, parseDateValue, salesUnitQty } from './format';
+import { monthKey, parseDateValue, salesUnitQty } from './format';
 
 export function buildAnalytics(transactions) {
   if (!transactions.length) {
@@ -19,11 +19,27 @@ export function buildAnalytics(transactions) {
     }
   }
 
-  const allMonths = buildLast12Months(latestDate);
-  const monthSet = new Set(allMonths);
+  const monthOrder = new Map();
+
+  transactions.forEach((row) => {
+    const month = monthKey(row.transaction_date);
+    if (!month || monthOrder.has(month)) return;
+
+    const parsed = parseDateValue(row.transaction_date);
+    if (!parsed) return;
+
+    monthOrder.set(month, Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), 1));
+  });
+
+  const allMonths = Array.from(monthOrder.entries())
+    .sort((a, b) => a[1] - b[1])
+    .map(([month]) => month);
+
+  const months = allMonths.slice(-6);
+  const monthSet = new Set(months);
 
   const monthlyMap = new Map();
-  allMonths.forEach((month) => {
+  months.forEach((month) => {
     monthlyMap.set(month, {
       sales: 0,
       skus: new Set(),
@@ -62,7 +78,7 @@ export function buildAnalytics(transactions) {
 
     if (!categoryMap.has(category)) {
       const monthValues = {};
-      allMonths.forEach((monthValue) => {
+      months.forEach((monthValue) => {
         monthValues[monthValue] = { sales: 0, skus: new Set() };
       });
 
@@ -87,7 +103,7 @@ export function buildAnalytics(transactions) {
 
     if (!itemMap.has(itemKey)) {
       const itemMonths = {};
-      allMonths.forEach((monthValue) => {
+      months.forEach((monthValue) => {
         itemMonths[monthValue] = { value: 0, quantity: 0 };
       });
 
@@ -117,9 +133,6 @@ export function buildAnalytics(transactions) {
       item.last_date = row.transaction_date;
     }
   }
-
-  const activeMonths = allMonths.filter((month) => monthlyMap.get(month).hasActivity);
-  const months = activeMonths.slice(-6);
 
   const yearGroups = [];
   months.forEach((month) => {

@@ -991,12 +991,24 @@ function NewOrderPageContent() {
         const totalWithVat = subtotal + vatAmount;
 
         const columns = [
-          { key: "item_code", label: "Item Code", width: 78, align: "left" },
-          { key: "item_name", label: "Item Name", width: 200, align: "left" },
-          { key: "quantity", label: "Qty", width: 52, align: "right" },
-          { key: "rate", label: "Rate (Excl. VAT)", width: 90, align: "right" },
-          { key: "lineTotal", label: "Line Total", width: 95, align: "right" },
+          { key: "item_code", label: "Item Code", width: 110, align: "left" },
+          { key: "item_name", label: "Item Name", width: 210, align: "left" },
+          { key: "quantity", label: "Qty", width: 45, align: "right" },
+          { key: "rate", label: "Rate (Excl. VAT)", width: 75, align: "right" },
+          { key: "lineTotal", label: "Line Total", width: 75, align: "right" },
         ];
+
+        function formatPdfAmount(value, showZero = true) {
+          const amount = Number(value || 0);
+          if (!showZero && amount === 0) return "";
+          return `SAR ${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+
+        function formatPdfCount(value, showZero = true) {
+          const count = Number(value || 0);
+          if (!showZero && count === 0) return "";
+          return count.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        }
 
         function drawCellText(text, x, y, width, align = "left") {
           if (align === "right") {
@@ -1114,10 +1126,16 @@ function NewOrderPageContent() {
             lineTotal: formatMoney(line.lineTotal),
           };
 
+          const itemCodeCol = columns.find((column) => column.key === "item_code");
           const itemNameCol = columns.find((column) => column.key === "item_name");
-          const wrappedName = doc.splitTextToSize(rowValues.item_name, (itemNameCol?.width || 200) - 12);
-          const wrappedLines = Array.isArray(wrappedName) ? wrappedName : [rowValues.item_name];
-          const rowHeight = Math.max(24, wrappedLines.length * 12 + 8);
+          const codeForWrap = rowValues.item_code.replace(/_/g, " ");
+          const nameForWrap = rowValues.item_name.replace(/_/g, " ");
+          const wrappedCode = doc.splitTextToSize(codeForWrap, (itemCodeCol?.width || 110) - 12);
+          const wrappedName = doc.splitTextToSize(nameForWrap, (itemNameCol?.width || 210) - 12);
+          const codeLines = Array.isArray(wrappedCode) ? wrappedCode : [codeForWrap];
+          const nameLines = Array.isArray(wrappedName) ? wrappedName : [nameForWrap];
+          const lineCount = Math.max(codeLines.length, nameLines.length);
+          const rowHeight = Math.max(24, lineCount * 12 + 8);
 
           if (y + rowHeight > pageHeight - 110) {
             doc.addPage();
@@ -1128,8 +1146,12 @@ function NewOrderPageContent() {
           columns.forEach((column) => {
             doc.rect(colX, y, column.width, rowHeight);
 
-            if (column.key === "item_name") {
-              wrappedLines.forEach((nameLine, index) => {
+            if (column.key === "item_code") {
+              codeLines.forEach((codeLine, index) => {
+                drawCellText(codeLine, colX, y + 14 + index * 12, column.width, column.align);
+              });
+            } else if (column.key === "item_name") {
+              nameLines.forEach((nameLine, index) => {
                 drawCellText(nameLine, colX, y + 14 + index * 12, column.width, column.align);
               });
             } else {
@@ -1180,10 +1202,10 @@ function NewOrderPageContent() {
           const rows = [
             ...outstandingBuckets.map((label) => ({
               label: `${label} days`,
-              value: formatMoney(parseOutstandingNumber(outstandingCustomer?.buckets?.[label])),
+              value: formatPdfAmount(parseOutstandingNumber(outstandingCustomer?.buckets?.[label]), false),
             })),
-            { label: "Open invoices", value: String(parseOutstandingNumber(outstandingCustomer?.open_invoices)) },
-            { label: "Total outstanding", value: formatMoney(parseOutstandingNumber(outstandingCustomer?.total_outstanding)) },
+            { label: "Open invoices", value: formatPdfCount(parseOutstandingNumber(outstandingCustomer?.open_invoices), false) },
+            { label: "Total outstanding", value: formatPdfAmount(parseOutstandingNumber(outstandingCustomer?.total_outstanding), false) },
           ];
 
           rows.forEach((row, index) => {
@@ -1200,6 +1222,84 @@ function NewOrderPageContent() {
             }
             tableY += rowHeight;
           });
+
+          const invoiceRows = Array.isArray(snapshot?.outstanding?.customerInvoices)
+            ? snapshot.outstanding.customerInvoices
+            : [];
+
+          if (invoiceRows.length > 0) {
+            let invoiceY = tableY + 20;
+            const invoiceCols = [
+              { key: "invoice_date", label: "Date", width: 72, align: "left" },
+              { key: "ref_no", label: "Ref No", width: 80, align: "left" },
+              { key: "pending_amount", label: "Pending", width: 84, align: "right" },
+              { key: "due_date", label: "Due", width: 70, align: "left" },
+              { key: "overdue_days", label: "Overdue", width: 64, align: "right" },
+              { key: "invoice_day", label: "Inv Day", width: 60, align: "right" },
+              { key: "salesman", label: "Salesman", width: 85, align: "left" },
+            ];
+            const invoiceTableWidth = invoiceCols.reduce((sum, col) => sum + col.width, 0);
+
+            if (invoiceY + 24 > pageHeight - 110) {
+              doc.addPage();
+              invoiceY = marginTop;
+            }
+
+            doc.setFont(undefined, "bold");
+            doc.setFontSize(11);
+            doc.text("Outstanding Invoices", marginX, invoiceY);
+            doc.setFontSize(9);
+            doc.setFont(undefined, "normal");
+            invoiceY += 8;
+
+            const drawInvoiceHeader = (startY) => {
+              let x = marginX;
+              doc.setFillColor(239, 244, 245);
+              doc.rect(marginX, startY, invoiceTableWidth, 20, "F");
+              doc.setFont(undefined, "bold");
+              invoiceCols.forEach((col) => {
+                doc.rect(x, startY, col.width, 20);
+                drawCellText(col.label, x, startY + 13, col.width, col.align);
+                x += col.width;
+              });
+              doc.setFont(undefined, "normal");
+              return startY + 20;
+            };
+
+            invoiceY = drawInvoiceHeader(invoiceY);
+
+            invoiceRows.slice(0, 12).forEach((invoice) => {
+              if (invoiceY + 20 > pageHeight - 110) {
+                doc.addPage();
+                invoiceY = drawInvoiceHeader(marginTop);
+              }
+
+              const displayRow = {
+                invoice_date: String(invoice?.invoice_date || "-"),
+                ref_no: String(invoice?.ref_no || "-"),
+                pending_amount: formatPdfAmount(parseOutstandingNumber(invoice?.pending_amount), false),
+                due_date: String(invoice?.due_date || "-"),
+                overdue_days: formatPdfCount(parseOutstandingNumber(invoice?.overdue_days), false),
+                invoice_day: formatPdfCount(parseOutstandingNumber(invoice?.invoice_day), false),
+                salesman: String(invoice?.salesman || "-"),
+              };
+
+              let x = marginX;
+              invoiceCols.forEach((col) => {
+                doc.rect(x, invoiceY, col.width, 20);
+                drawCellText(displayRow[col.key], x, invoiceY + 13, col.width, col.align);
+                x += col.width;
+              });
+
+              invoiceY += 20;
+            });
+
+            if (invoiceRows.length > 12) {
+              doc.setFontSize(8);
+              doc.text(`Showing 12 of ${invoiceRows.length} invoice row(s).`, marginX, invoiceY + 12);
+              doc.setFontSize(10);
+            }
+          }
         }
 
         doc.setFontSize(9);
@@ -1796,7 +1896,7 @@ function NewOrderPageContent() {
                   <thead>
                     <tr>
                       <th>Category</th>
-                      <th className="moduleItemColumn">Item</th>
+                      <th>Item</th>
                       <th>Price</th>
                       <th>Qty</th>
                       <th>Total</th>
@@ -1834,19 +1934,17 @@ function NewOrderPageContent() {
                               return (
                                 <tr key={item.item_code} className="moduleItemRow">
                                   <td>{item.category || "Unclassified"}</td>
-                                  <td className="moduleItemColumn">
-                                    <div className="moduleItemValue">
-                                      <strong>
-                                        {nameIsCode ? item.item_code : item.item_name}
-                                      </strong>
-                                      {showMetaLine && (
-                                        <div className="moduleCode">
-                                          {!nameIsCode ? item.item_code : ""}
-                                          {hasSourceBadge ? " • Price Sheet" : ""}
-                                          {hasDoNotUseBadge ? " • Do Not Use" : ""}
-                                        </div>
-                                      )}
-                                    </div>
+                                  <td>
+                                    <strong>
+                                      {nameIsCode ? item.item_code : item.item_name}
+                                    </strong>
+                                    {showMetaLine && (
+                                      <div className="moduleCode">
+                                        {!nameIsCode ? item.item_code : ""}
+                                        {hasSourceBadge ? " • Price Sheet" : ""}
+                                        {hasDoNotUseBadge ? " • Do Not Use" : ""}
+                                      </div>
+                                    )}
                                   </td>
                                   <td>{price ? `SAR ${price.toFixed(2)}` : "NOT FOUND"}</td>
                                   <td>

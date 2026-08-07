@@ -97,8 +97,10 @@ function findHeaderRow(rows) {
     });
 
     const hasBucket = labels.some((label) => Boolean(parseBucketLabelFromHeader(label)));
+    const hasPending = labels.some((label) => String(label || "").trim().toLowerCase().includes("pending"));
+    const hasInvoiceDay = labels.some((label) => String(label || "").trim().toLowerCase().includes("invoice day"));
 
-    if (hasCustomer && hasBucket) {
+    if (hasCustomer && (hasBucket || (hasPending && hasInvoiceDay))) {
       return r;
     }
   }
@@ -111,6 +113,8 @@ function detectColumnIndexes(headerRow) {
     customerCode: -1,
     customerName: -1,
     openInvoices: -1,
+    pendingAmount: -1,
+    invoiceDay: -1,
     buckets: [],
   };
 
@@ -129,6 +133,14 @@ function detectColumnIndexes(headerRow) {
       indexes.customerName = idx;
     }
 
+    if (indexes.pendingAmount < 0 && normalized.includes("pending")) {
+      indexes.pendingAmount = idx;
+    }
+
+    if (indexes.invoiceDay < 0 && normalized.includes("invoice day")) {
+      indexes.invoiceDay = idx;
+    }
+
     const bucketLabel = parseBucketLabelFromHeader(text);
     if (!bucketLabel) return;
 
@@ -143,16 +155,30 @@ function detectColumnIndexes(headerRow) {
   return indexes;
 }
 
+function bucketLabelForInvoiceDay(dayValue) {
+  const day = toNumber(dayValue);
+  if (!Number.isFinite(day) || day <= 0) return "0-30";
+  if (day <= 30) return "0-30";
+  if (day <= 60) return "31-60";
+  if (day <= 90) return "61-90";
+  if (day <= 120) return "91-120";
+  return ">120";
+}
+
 function parseOutstandingRows(rows, headerRowIndex) {
   const headerRow = rows[headerRowIndex] || [];
   const columns = detectColumnIndexes(headerRow);
 
-  if (columns.buckets.length === 0 && columns.openInvoices < 0) {
+  const hasInvoiceDayLayout = columns.pendingAmount >= 0 && columns.invoiceDay >= 0;
+
+  if (!hasInvoiceDayLayout && columns.buckets.length === 0 && columns.openInvoices < 0) {
     throw new Error("Could not detect bucket columns or open invoices column in uploaded file.");
   }
 
   const aggregate = new Map();
-  const bucketLabels = sortBucketLabels(columns.buckets.map((bucket) => bucket.label));
+  const bucketLabels = hasInvoiceDayLayout
+    ? ["0-30", "31-60", "61-90", "91-120", ">120"]
+    : sortBucketLabels(columns.buckets.map((bucket) => bucket.label));
 
   for (let r = headerRowIndex + 1; r < rows.length; r += 1) {
     const row = Array.isArray(rows[r]) ? rows[r] : [];
@@ -164,13 +190,24 @@ function parseOutstandingRows(rows, headerRowIndex) {
     const rowBuckets = {};
     let hasAnyValue = false;
 
-    columns.buckets.forEach((bucket) => {
-      const value = toNumber(row[bucket.idx]);
-      rowBuckets[bucket.label] = value;
-      if (value !== 0) hasAnyValue = true;
-    });
+    if (hasInvoiceDayLayout) {
+      const pendingValue = toNumber(row[columns.pendingAmount]);
+      const dayBucket = bucketLabelForInvoiceDay(row[columns.invoiceDay]);
+      bucketLabels.forEach((label) => {
+        rowBuckets[label] = label === dayBucket ? pendingValue : 0;
+      });
+      hasAnyValue = pendingValue !== 0;
+    } else {
+      columns.buckets.forEach((bucket) => {
+        const value = toNumber(row[bucket.idx]);
+        rowBuckets[bucket.label] = value;
+        if (value !== 0) hasAnyValue = true;
+      });
+    }
 
-    const openInvoices = columns.openInvoices >= 0 ? toNumber(row[columns.openInvoices]) : 0;
+    const openInvoices = hasInvoiceDayLayout
+      ? (toNumber(row[columns.pendingAmount]) > 0 ? 1 : 0)
+      : (columns.openInvoices >= 0 ? toNumber(row[columns.openInvoices]) : 0);
     if (openInvoices !== 0) hasAnyValue = true;
 
     if (!hasAnyValue) continue;

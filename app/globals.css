@@ -3366,8 +3366,8 @@ table.auditMatrix td.auditTrendSame {
   background: #ffffff;
 }
 
-.moduleOrderTable th:nth-child(2),
-.moduleOrderTable td:nth-child(2) {
+.moduleOrderTable th.moduleItemColumn,
+.moduleOrderTable td.moduleItemColumn {
   position: sticky;
   left: 92px;
   z-index: 2;
@@ -3376,8 +3376,14 @@ table.auditMatrix td.auditTrendSame {
   min-width: 220px;
 }
 
+.moduleItemValue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .moduleOrderTable .moduleCategoryRow td:first-child,
-.moduleOrderTable .moduleCategoryRow td:nth-child(2) {
+.moduleOrderTable .moduleCategoryRow td.moduleItemColumn {
   background: #f8fbfc;
 }
 
@@ -3386,8 +3392,8 @@ table.auditMatrix td.auditTrendSame {
     min-width: 720px;
   }
 
-  .moduleOrderTable th:nth-child(2),
-  .moduleOrderTable td:nth-child(2) {
+  .moduleOrderTable th.moduleItemColumn,
+  .moduleOrderTable td.moduleItemColumn {
     left: 90px;
     min-width: 200px;
   }

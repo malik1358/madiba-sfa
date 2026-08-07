@@ -1796,7 +1796,7 @@ function NewOrderPageContent() {
                   <thead>
                     <tr>
                       <th>Category</th>
-                      <th>Item</th>
+                      <th className="moduleItemColumn">Item</th>
                       <th>Price</th>
                       <th>Qty</th>
                       <th>Total</th>
@@ -1834,17 +1834,19 @@ function NewOrderPageContent() {
                               return (
                                 <tr key={item.item_code} className="moduleItemRow">
                                   <td>{item.category || "Unclassified"}</td>
-                                  <td>
-                                    <strong>
-                                      {nameIsCode ? item.item_code : item.item_name}
-                                    </strong>
-                                    {showMetaLine && (
-                                      <div className="moduleCode">
-                                        {!nameIsCode ? item.item_code : ""}
-                                        {hasSourceBadge ? " • Price Sheet" : ""}
-                                        {hasDoNotUseBadge ? " • Do Not Use" : ""}
-                                      </div>
-                                    )}
+                                  <td className="moduleItemColumn">
+                                    <div className="moduleItemValue">
+                                      <strong>
+                                        {nameIsCode ? item.item_code : item.item_name}
+                                      </strong>
+                                      {showMetaLine && (
+                                        <div className="moduleCode">
+                                          {!nameIsCode ? item.item_code : ""}
+                                          {hasSourceBadge ? " • Price Sheet" : ""}
+                                          {hasDoNotUseBadge ? " • Do Not Use" : ""}
+                                        </div>
+                                      )}
+                                    </div>
                                   </td>
                                   <td>{price ? `SAR ${price.toFixed(2)}` : "NOT FOUND"}</td>
                                   <td>

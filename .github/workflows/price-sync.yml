@@ -44,9 +44,16 @@ jobs:
           PRICE_SYNC_URL: ${{ secrets.PRICE_SYNC_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          if [[ -z "$PRICE_SYNC_URL" ]]; then
-            echo "PRICE_SYNC_URL secret is missing"
-            exit 1
+          DEFAULT_PRICE_SYNC_URL='https://madiba-sfa.vercel.app/api/admin/price-sync'
+          PRICE_SYNC_URL_TRIMMED="$(printf '%s' "$PRICE_SYNC_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          PRICE_SYNC_URL_EFFECTIVE="$PRICE_SYNC_URL_TRIMMED"
+
+          if [[ -z "$PRICE_SYNC_URL_EFFECTIVE" ]]; then
+            echo "PRICE_SYNC_URL secret is missing; falling back to default endpoint."
+            PRICE_SYNC_URL_EFFECTIVE="$DEFAULT_PRICE_SYNC_URL"
+          elif [[ ! "$PRICE_SYNC_URL_EFFECTIVE" =~ /api/admin/price-sync([/?].*)?$ ]]; then
+            echo "PRICE_SYNC_URL secret does not point to /api/admin/price-sync; falling back to default endpoint."
+            PRICE_SYNC_URL_EFFECTIVE="$DEFAULT_PRICE_SYNC_URL"
           fi
 
           if [[ -z "$CRON_SECRET" ]]; then
@@ -57,7 +64,7 @@ jobs:
           # Guard against accidental leading/trailing whitespace in pasted secrets.
           CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
-          status_code="$(curl -sS -L --post301 --post302 --post303 -o response.json -w "%{http_code}" -X POST "$PRICE_SYNC_URL" \
+          status_code="$(curl -sS -L --post301 --post302 --post303 -o response.json -w "%{http_code}" -X POST "$PRICE_SYNC_URL_EFFECTIVE" \
             -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
             -H "Content-Type: application/json" \
             --data-binary @price-sync-body.json)"

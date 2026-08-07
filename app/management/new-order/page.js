@@ -1,14 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
-import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
@@ -21,11 +19,8 @@ import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance"
 import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
-import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
-const CUSTOMER_HISTORY_API = "/api/customer-history";
-const OUTSTANDING_API = "/api/outstanding";
 
 const TEXT = {
   title: { en: "New Order", ar: "طلب جديد" },
@@ -36,20 +31,6 @@ const TEXT = {
 
 function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
-}
-
-function formatAmount(value) {
-  return Number(value || 0).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function formatCount(value) {
-  return Number(value || 0).toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
 }
 
 function formatHistoryChange(change) {
@@ -80,46 +61,9 @@ function normalizeCode(value) {
 function toNumber(value) {
   const cleaned = String(value ?? "")
     .replace(/,/g, "")
-    .replace(/[^\d.-]/g, "")
     .trim();
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function normalizePriceMap(rawMap) {
-  const normalized = {};
-  if (!rawMap || typeof rawMap !== "object") return normalized;
-
-  Object.entries(rawMap).forEach(([rawCode, rawRate]) => {
-    const code = normalizeCode(rawCode);
-    if (!code) return;
-
-    const nextRate = toNumber(rawRate);
-    const currentRate = toNumber(normalized[code]);
-
-    if (currentRate > 0 && nextRate <= 0) return;
-    normalized[code] = nextRate;
-  });
-
-  return normalized;
-}
-
-function normalizeSheetItems(rawItems) {
-  if (!Array.isArray(rawItems)) return [];
-
-  return rawItems
-    .map((item) => {
-      const code = normalizeCode(item?.item_code);
-      if (!code) return null;
-
-      return {
-        ...item,
-        item_code: code,
-        item_name: normalizeText(item?.item_name) || code,
-        category: normalizeText(item?.category) || "Unclassified",
-      };
-    })
-    .filter(Boolean);
 }
 
 function readAny(source, keys) {
@@ -161,46 +105,12 @@ function hasMeaningfulItemName(value, itemCode = "") {
   const text = normalizeText(value);
   if (!text) return false;
   if (isPlaceholderValue(text)) return false;
-  if (isDoNotUseItem(text)) return false;
   if (looksLikeItemCode(text)) return false;
   if (normalizeCode(text) === normalizeCode(itemCode)) return false;
   return true;
 }
 
-function isExcludedItemCode(value) {
-  return normalizeCode(value).startsWith("LP");
-}
-
-function isExcludedCategory(value) {
-  const compact = normalizeText(value).toLowerCase().replace(/[^a-z]/g, "");
-  return ["buildingmaterial", "buildingmaterials", "buidingmaterial", "buidingmaterials"].includes(compact);
-}
-
 const NEEDS_MAPPING_CATEGORY = "Needs Mapping";
-
-function normalizeCategoryKey(value) {
-  return normalizeText(value).replace(/\s+/g, " ").toLowerCase();
-}
-
-function normalizeCategoryLabel(value) {
-  const text = normalizeText(value).replace(/\s+/g, " ");
-  if (!text) return "Unclassified";
-
-  if (normalizeCategoryKey(text) === normalizeCategoryKey(NEEDS_MAPPING_CATEGORY)) {
-    return NEEDS_MAPPING_CATEGORY;
-  }
-
-  return text
-    .split(" ")
-    .map((word) => (word.toUpperCase() === "POS"
-      ? "POS"
-      : `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`))
-    .join(" ");
-}
-
-function isSameCategory(left, right) {
-  return normalizeCategoryKey(left) === normalizeCategoryKey(right);
-}
 
 async function fetchItemCategoryLookup(supabase, scope) {
   const pageSize = 1000;
@@ -210,9 +120,8 @@ async function fetchItemCategoryLookup(supabase, scope) {
   while (true) {
     let query = supabase
       .from("sales_raw")
-      .select("item_code,item_name,category,transaction_date,id,salesman_code")
-      .order("transaction_date", { ascending: false, nullsFirst: false })
-      .order("id", { ascending: false })
+      .select("item_code,item_name,category,salesman_code")
+      .order("item_code", { ascending: true })
       .range(from, from + pageSize - 1);
 
     if (!scope.hasAllAccess) {
@@ -226,12 +135,20 @@ async function fetchItemCategoryLookup(supabase, scope) {
     rows.forEach((row) => {
       const code = normalizeCode(row.item_code);
       if (!code) return;
-      if (lookup.has(code)) return;
 
-      lookup.set(code, {
-        item_name: normalizeText(row.item_name),
-        category: normalizeText(row.category),
-      });
+      const current = lookup.get(code) || { item_name: "", category: "" };
+      const nextName = normalizeText(row.item_name);
+      const nextCategory = normalizeText(row.category);
+
+      if (!hasMeaningfulItemName(current.item_name, code) && hasMeaningfulItemName(nextName, code)) {
+        current.item_name = nextName;
+      }
+
+      if (!hasMeaningfulValue(current.category) && hasMeaningfulValue(nextCategory)) {
+        current.category = nextCategory;
+      }
+
+      lookup.set(code, current);
     });
 
     if (rows.length < pageSize) break;
@@ -239,16 +156,6 @@ async function fetchItemCategoryLookup(supabase, scope) {
   }
 
   return lookup;
-}
-
-async function fetchItemsMasterCatalog(supabase) {
-  const { data, error } = await supabase
-    .from("items_master")
-    .select("item_code,item_name,category")
-    .order("item_name");
-
-  if (error) throw error;
-  return Array.isArray(data) ? data : [];
 }
 
 async function fetchVisibleCustomers(token) {
@@ -524,8 +431,7 @@ function parsePricePayload(payload) {
   return { priceMap, sheetItems };
 }
 
-function NewOrderPageContent() {
-  const searchParams = useSearchParams();
+export default function NewOrderPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
@@ -549,32 +455,18 @@ function NewOrderPageContent() {
   const [previousDrafts, setPreviousDrafts] = useState([]);
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
-  const [outstandingUploadFile, setOutstandingUploadFile] = useState(null);
-  const [outstandingUploading, setOutstandingUploading] = useState(false);
-  const [outstandingLoading, setOutstandingLoading] = useState(false);
-  const [outstandingInfo, setOutstandingInfo] = useState({
-    uploadedAt: "",
-    fileName: "",
-    bucketLabels: [],
-    customer: null,
-    customerInvoices: [],
-    needsInvoiceRowsReupload: false,
-    rowsCount: 0,
-  });
   const [accessScope, setAccessScope] = useState(null);
   const [prefilledCustomer, setPrefilledCustomer] = useState(null);
   const [editOrderId, setEditOrderId] = useState("");
-  const [priceStatus, setPriceStatus] = useState({
-    source: "",
-    syncedAt: "",
-    isStale: false,
-  });
 
   useEffect(() => {
-    const customerCode = String(searchParams?.get("customer_code") || "").trim();
-    const customerName = String(searchParams?.get("customer_name") || "").trim();
-    const salesmanCode = String(searchParams?.get("salesman_code") || "").trim();
-    const orderId = String(searchParams?.get("order_id") || "").trim();
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const customerCode = String(params.get("customer_code") || "").trim();
+    const customerName = String(params.get("customer_name") || "").trim();
+    const salesmanCode = String(params.get("salesman_code") || "").trim();
+    const orderId = String(params.get("order_id") || "").trim();
 
     if (!customerCode || !customerName) {
       setPrefilledCustomer(null);
@@ -587,7 +479,7 @@ function NewOrderPageContent() {
     }
 
     setEditOrderId(orderId);
-  }, [searchParams]);
+  }, []);
 
   const mergedItemsMaster = useMemo(() => {
     const itemMap = new Map();
@@ -595,80 +487,92 @@ function NewOrderPageContent() {
     (itemsMaster || []).forEach((item) => {
       const code = normalizeCode(item.item_code);
       if (!code) return;
-      if (isExcludedItemCode(code)) return;
-
-      const itemName = normalizeText(item.item_name);
-      const itemCategory = normalizeText(item.category);
-      const sheetFallback = (priceSheetItems || []).find((sheetItem) => normalizeCode(sheetItem.item_code) === code) || {};
-
-      const nextName = hasMeaningfulItemName(itemName, code)
-        ? itemName
-        : (hasMeaningfulItemName(sheetFallback.item_name, code) ? normalizeText(sheetFallback.item_name) : code);
-      const nextCategory = hasMeaningfulValue(itemCategory)
-        ? itemCategory
-        : (hasMeaningfulValue(sheetFallback.category) ? sheetFallback.category : "Unclassified");
-
-      if (isExcludedCategory(nextCategory)) return;
+      const historyFallback = historyCategoryLookup.get(code) || {};
 
       itemMap.set(code, {
+        ...item,
         item_code: code,
-        item_name: nextName,
-        category: normalizeCategoryLabel(nextCategory),
-        source: "ITEMS_MASTER",
+        item_name: String(item.item_name || historyFallback.item_name || code).trim(),
+        category: String(item.category || historyFallback.category || "Unclassified").trim() || "Unclassified",
+        source: "ITEM_MASTER",
       });
     });
 
-    const sheetByCode = new Map();
     (priceSheetItems || []).forEach((sheetItem) => {
       const code = normalizeCode(sheetItem.item_code);
       if (!code) return;
 
-      const candidateName = normalizeText(sheetItem.item_name);
-      const candidateCategory = normalizeText(sheetItem.category);
-      const existing = sheetByCode.get(code);
-
+      const existing = itemMap.get(code);
       if (!existing) {
-        sheetByCode.set(code, {
-          item_name: candidateName,
-          category: candidateCategory,
+        const historyFallback = historyCategoryLookup.get(code) || {};
+        const nextName = normalizeText(sheetItem.item_name) || historyFallback.item_name || code;
+        const nextCategory = normalizeText(sheetItem.category) || historyFallback.category || "Unclassified";
+
+        // Keep placeholder-only sheet rows visible, but isolate them for cleanup.
+        const unresolved = !hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory);
+
+        if (!hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory)) {
+          itemMap.set(code, {
+            item_code: code,
+            item_name: nextName,
+            category: NEEDS_MAPPING_CATEGORY,
+            source: "PRICE_SHEET_ONLY",
+          });
+          return;
+        }
+
+        itemMap.set(code, {
+          item_code: code,
+          item_name: nextName,
+          category: unresolved ? NEEDS_MAPPING_CATEGORY : nextCategory,
+          source: "PRICE_SHEET_ONLY",
         });
         return;
       }
 
-      const existingNameScore = hasMeaningfulItemName(existing.item_name, code) ? 2 : (normalizeText(existing.item_name) ? 1 : 0);
-      const candidateNameScore = hasMeaningfulItemName(candidateName, code) ? 2 : (candidateName ? 1 : 0);
-      const existingCategoryScore = hasMeaningfulValue(existing.category) ? 1 : 0;
-      const candidateCategoryScore = hasMeaningfulValue(candidateCategory) ? 1 : 0;
+      const existingName = normalizeText(existing.item_name);
+      const sheetName = normalizeText(sheetItem.item_name);
+      const existingCategory = normalizeText(existing.category);
+      const sheetCategory = normalizeText(sheetItem.category);
+      const historyFallback = historyCategoryLookup.get(code) || {};
 
-      if ((candidateNameScore + candidateCategoryScore) > (existingNameScore + existingCategoryScore)) {
-        sheetByCode.set(code, {
-          item_name: candidateName,
-          category: candidateCategory,
-        });
-      }
+      const nextName = hasMeaningfulItemName(existingName, code)
+        ? existingName
+        : (hasMeaningfulItemName(sheetName, code) ? sheetName : (historyFallback.item_name || code));
+      const nextCategory = hasMeaningfulValue(sheetCategory)
+        ? sheetCategory
+        : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));
+
+      itemMap.set(code, {
+        ...existing,
+        item_name: nextName,
+        category: nextCategory,
+        source: existing.source === "PRICE_SHEET_ONLY" || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : existing.source,
+      });
     });
 
-    sheetByCode.forEach((sheetItem, code) => {
+    Object.keys(priceList || {}).forEach((rawCode) => {
+      const code = normalizeCode(rawCode);
       if (!code || itemMap.has(code)) return;
-      if (isExcludedItemCode(code)) return;
+      const historyFallback = historyCategoryLookup.get(code) || {};
 
-      const price = toNumber(priceList[code]);
-      if (price <= 0) return;
+      const fallbackName = historyFallback.item_name || "";
+      const fallbackCategory = historyFallback.category || "";
 
-      const sheetCategory = normalizeText(sheetItem.category) || "Unclassified";
-      if (isExcludedCategory(sheetCategory)) return;
+      const unresolved = !hasMeaningfulItemName(fallbackName, code) && !hasMeaningfulValue(fallbackCategory);
 
       itemMap.set(code, {
         item_code: code,
-        item_name: hasMeaningfulItemName(sheetItem.item_name, code) ? normalizeText(sheetItem.item_name) : code,
-        category: normalizeCategoryLabel(sheetCategory),
-        source: "PRICE_SHEET_ONLY",
+        item_name: fallbackName || code,
+        category: unresolved ? NEEDS_MAPPING_CATEGORY : (fallbackCategory || "Unclassified"),
+        source: "PRICE_MAP_ONLY",
       });
     });
 
     return Array.from(itemMap.values())
+      .filter((item) => !isDoNotUseItem(item.item_name))
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
-  }, [itemsMaster, priceSheetItems, priceList]);
+  }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.customer_code === selectedCustomerCode) || null,
@@ -693,21 +597,10 @@ function NewOrderPageContent() {
   );
 
   const categories = useMemo(
-    () => {
-      const keyToLabel = new Map();
-
-      (mergedItemsMaster || []).forEach((item) => {
-        const label = normalizeCategoryLabel(item.category);
-        const key = normalizeCategoryKey(label);
-        if (!key || keyToLabel.has(key)) return;
-        keyToLabel.set(key, label);
-      });
-
-      return [
-        "ALL",
-        ...Array.from(keyToLabel.values()).sort((a, b) => a.localeCompare(b)),
-      ];
-    },
+    () => [
+      "ALL",
+      ...new Set(mergedItemsMaster.map((item) => item.category).filter(Boolean)).values(),
+    ],
     [mergedItemsMaster]
   );
 
@@ -733,7 +626,7 @@ function NewOrderPageContent() {
     const includeNeedsMapping = categoryFilter === NEEDS_MAPPING_CATEGORY;
 
     return mergedItemsMaster.filter((item) => {
-      if (categoryFilter !== "ALL" && !isSameCategory(item.category, categoryFilter)) return false;
+      if (categoryFilter !== "ALL" && item.category !== categoryFilter) return false;
 
       const matchesQuery = !q || (
         String(item.item_code || "").toLowerCase().includes(q) ||
@@ -751,23 +644,19 @@ function NewOrderPageContent() {
     });
   }, [mergedItemsMaster, categoryFilter, itemSearch]);
 
-  const hiddenItemCount = Math.max(0, mergedItemsMaster.length - filteredItems.length);
-  const hasActiveFilters = itemSearch.trim().length > 0 || categoryFilter !== "ALL";
-
   const groupedItems = useMemo(() => {
     const map = new Map();
 
     filteredItems.forEach((item) => {
-      const category = normalizeCategoryLabel(item.category || "Unclassified");
-      const categoryKey = normalizeCategoryKey(category);
-      const current = map.get(categoryKey) || [];
+      const category = item.category || "Unclassified";
+      const current = map.get(category) || [];
       current.push(item);
-      map.set(categoryKey, current);
+      map.set(category, current);
     });
 
     return Array.from(map.entries())
-      .map(([categoryKey, items]) => ({
-        category: normalizeCategoryLabel(items[0]?.category || categoryKey || "Unclassified"),
+      .map(([category, items]) => ({
+        category,
         items,
       }))
       .sort((a, b) => a.category.localeCompare(b.category));
@@ -828,111 +717,6 @@ function NewOrderPageContent() {
     editOrderId,
   });
 
-  const canUploadOutstanding = useMemo(() => {
-    const role = String(accessScope?.role || "").toLowerCase();
-    return ["admin", "manager", "invoice-maker", "invoice_maker"].includes(role);
-  }, [accessScope]);
-
-  const fetchOutstandingForCustomer = useCallback(async (customer) => {
-    if (!customer) {
-      setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], needsInvoiceRowsReupload: false, rowsCount: 0 });
-      return;
-    }
-
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-
-    setOutstandingLoading(true);
-
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) throw new Error("Please login again.");
-
-      const response = await fetch(
-        `${OUTSTANDING_API}?customerCode=${encodeURIComponent(customer.customer_code || "")}&customerName=${encodeURIComponent(customer.customer_name || "")}`,
-        {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        }
-      );
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to load outstanding data.");
-      }
-
-      setOutstandingInfo({
-        uploadedAt: String(payload.uploadedAt || ""),
-        fileName: String(payload.fileName || ""),
-        bucketLabels: sortBucketLabels(payload.bucketLabels || []),
-        customer: payload.customer || null,
-        customerInvoices: Array.isArray(payload.customerInvoices) ? payload.customerInvoices : [],
-        needsInvoiceRowsReupload: Boolean(payload.needsInvoiceRowsReupload),
-        rowsCount: Number(payload.rowsCount || 0),
-      });
-    } catch (err) {
-      setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], needsInvoiceRowsReupload: false, rowsCount: 0 });
-      setError(err.message || "Unable to load outstanding data.");
-    } finally {
-      setOutstandingLoading(false);
-    }
-  }, [setError]);
-
-  const handleOutstandingUpload = useCallback(async () => {
-    if (!outstandingUploadFile) {
-      setError("Please select outstanding Excel file first.");
-      return;
-    }
-
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-      setError("Supabase is not configured.");
-      return;
-    }
-
-    setOutstandingUploading(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        throw new Error("Please login again.");
-      }
-
-      const formData = new FormData();
-      formData.append("file", outstandingUploadFile);
-
-      const response = await fetch(OUTSTANDING_API, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: formData,
-      });
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to upload outstanding file.");
-      }
-
-      setMessage(`Outstanding file uploaded. Replaced with ${payload.rowsCount || 0} customer row(s).`);
-      setOutstandingUploadFile(null);
-      await fetchOutstandingForCustomer(selectedCustomer);
-    } catch (err) {
-      setError(err.message || "Unable to upload outstanding file.");
-    } finally {
-      setOutstandingUploading(false);
-    }
-  }, [fetchOutstandingForCustomer, outstandingUploadFile, selectedCustomer, setError, setMessage]);
-
   const buildOrderSnapshot = useCallback(
     (orderId, statusLabel) => {
       if (!selectedCustomer || orderItems.length === 0) return null;
@@ -964,10 +748,9 @@ function NewOrderPageContent() {
         grandTotal: calculateGrandTotal(orderItems, priceList),
         lines,
         history: orderHistory,
-        outstanding: outstandingInfo,
       };
     },
-    [orderHistory, orderItems, orderSummary.itemCount, orderSummary.totalQuantity, outstandingInfo, priceList, selectedCustomer]
+    [orderHistory, orderItems, orderSummary.itemCount, orderSummary.totalQuantity, priceList, selectedCustomer]
   );
 
   const downloadOrderPdf = useCallback(
@@ -991,24 +774,12 @@ function NewOrderPageContent() {
         const totalWithVat = subtotal + vatAmount;
 
         const columns = [
-          { key: "item_code", label: "Item Code", width: 110, align: "left" },
-          { key: "item_name", label: "Item Name", width: 210, align: "left" },
-          { key: "quantity", label: "Qty", width: 45, align: "right" },
-          { key: "rate", label: "Rate (Excl. VAT)", width: 75, align: "right" },
-          { key: "lineTotal", label: "Line Total", width: 75, align: "right" },
+          { key: "item_code", label: "Item Code", width: 88, align: "left" },
+          { key: "item_name", label: "Item Name", width: 222, align: "left" },
+          { key: "quantity", label: "Qty", width: 60, align: "right" },
+          { key: "rate", label: "Rate (Excl. VAT)", width: 96, align: "right" },
+          { key: "lineTotal", label: "Line Total", width: 89, align: "right" },
         ];
-
-        function formatPdfAmount(value, showZero = true) {
-          const amount = Number(value || 0);
-          if (!showZero && amount === 0) return "";
-          return `SAR ${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }
-
-        function formatPdfCount(value, showZero = true) {
-          const count = Number(value || 0);
-          if (!showZero && count === 0) return "";
-          return count.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-        }
 
         function drawCellText(text, x, y, width, align = "left") {
           if (align === "right") {
@@ -1092,27 +863,19 @@ function NewOrderPageContent() {
           doc.text(customerLine2, marginX + 12, marginTop + 152);
         }
 
-        const statsTop = marginTop + 172;
-        const statsHeight = 40;
-        const stats = [
-          { label: "Items", value: String(snapshot.itemCount), align: "left" },
-          { label: "Total Qty", value: qtyFormat(snapshot.totalQuantity), align: "left" },
-          { label: "Subtotal", value: formatMoney(subtotal), align: "right" },
-          { label: "VAT 15%", value: formatMoney(vatAmount), align: "right" },
-          { label: "Total Incl. VAT", value: formatMoney(totalWithVat), align: "right" },
-        ];
-
-        doc.roundedRect(marginX, statsTop, contentWidth, statsHeight, 5, 5);
-        const statsWidth = contentWidth / stats.length;
-        stats.forEach((stat, index) => {
-          const x = marginX + index * statsWidth;
-
-          doc.setFont(undefined, "bold");
-          drawCellText(stat.label, x, statsTop + 16, statsWidth, stat.align);
-
-          doc.setFont(undefined, "normal");
-          drawCellText(stat.value, x, statsTop + 32, statsWidth, stat.align);
-        });
+        doc.roundedRect(marginX, marginTop + 172, contentWidth, 40, 5, 5);
+        doc.setFont(undefined, "bold");
+        doc.text("Items", marginX + 12, marginTop + 188);
+        doc.text("Total Qty", marginX + 145, marginTop + 188);
+        doc.text("Subtotal", marginX + 282, marginTop + 188);
+        doc.text("VAT 15%", marginX + 398, marginTop + 188);
+        doc.text("Total Incl. VAT", marginX + 475, marginTop + 188);
+        doc.setFont(undefined, "normal");
+        doc.text(String(snapshot.itemCount), marginX + 12, marginTop + 202);
+        doc.text(qtyFormat(snapshot.totalQuantity), marginX + 145, marginTop + 202);
+        doc.text(formatMoney(subtotal), marginX + 282, marginTop + 202);
+        doc.text(formatMoney(vatAmount), marginX + 398, marginTop + 202);
+        doc.text(formatMoney(totalWithVat), marginX + 475, marginTop + 202);
 
         let y = drawTableHeader(marginTop + 226);
         doc.setFontSize(10);
@@ -1126,16 +889,10 @@ function NewOrderPageContent() {
             lineTotal: formatMoney(line.lineTotal),
           };
 
-          const itemCodeCol = columns.find((column) => column.key === "item_code");
           const itemNameCol = columns.find((column) => column.key === "item_name");
-          const codeForWrap = rowValues.item_code.replace(/_/g, " ");
-          const nameForWrap = rowValues.item_name.replace(/_/g, " ");
-          const wrappedCode = doc.splitTextToSize(codeForWrap, (itemCodeCol?.width || 110) - 12);
-          const wrappedName = doc.splitTextToSize(nameForWrap, (itemNameCol?.width || 210) - 12);
-          const codeLines = Array.isArray(wrappedCode) ? wrappedCode : [codeForWrap];
-          const nameLines = Array.isArray(wrappedName) ? wrappedName : [nameForWrap];
-          const lineCount = Math.max(codeLines.length, nameLines.length);
-          const rowHeight = Math.max(24, lineCount * 12 + 8);
+          const wrappedName = doc.splitTextToSize(rowValues.item_name, (itemNameCol?.width || 200) - 12);
+          const wrappedLines = Array.isArray(wrappedName) ? wrappedName : [rowValues.item_name];
+          const rowHeight = Math.max(24, wrappedLines.length * 12 + 8);
 
           if (y + rowHeight > pageHeight - 110) {
             doc.addPage();
@@ -1146,12 +903,8 @@ function NewOrderPageContent() {
           columns.forEach((column) => {
             doc.rect(colX, y, column.width, rowHeight);
 
-            if (column.key === "item_code") {
-              codeLines.forEach((codeLine, index) => {
-                drawCellText(codeLine, colX, y + 14 + index * 12, column.width, column.align);
-              });
-            } else if (column.key === "item_name") {
-              nameLines.forEach((nameLine, index) => {
+            if (column.key === "item_name") {
+              wrappedLines.forEach((nameLine, index) => {
                 drawCellText(nameLine, colX, y + 14 + index * 12, column.width, column.align);
               });
             } else {
@@ -1177,130 +930,6 @@ function NewOrderPageContent() {
         doc.text("Total (Incl. VAT)", summaryX + 10, summaryY + 54);
         doc.text(formatMoney(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 54, { align: "right" });
         doc.setFont(undefined, "normal");
-
-        const outstandingCustomer = snapshot?.outstanding?.customer;
-        const outstandingBuckets = sortBucketLabels(snapshot?.outstanding?.bucketLabels || []);
-        if (outstandingCustomer && outstandingBuckets.length > 0) {
-          let outstandingY = summaryY + 88;
-          if (outstandingY > pageHeight - 170) {
-            doc.addPage();
-            outstandingY = marginTop;
-          }
-
-          doc.setFont(undefined, "bold");
-          doc.setFontSize(11);
-          doc.text("Outstanding Buckets", marginX, outstandingY);
-          doc.setFont(undefined, "normal");
-          doc.setFontSize(10);
-
-          const tableX = marginX;
-          const tableW = Math.min(360, contentWidth);
-          const labelW = Math.floor(tableW * 0.6);
-          const valueW = tableW - labelW;
-          let tableY = outstandingY + 10;
-
-          const rows = [
-            ...outstandingBuckets.map((label) => ({
-              label: `${label} days`,
-              value: formatPdfAmount(parseOutstandingNumber(outstandingCustomer?.buckets?.[label]), false),
-            })),
-            { label: "Open invoices", value: formatPdfCount(parseOutstandingNumber(outstandingCustomer?.open_invoices), false) },
-            { label: "Total outstanding", value: formatPdfAmount(parseOutstandingNumber(outstandingCustomer?.total_outstanding), false) },
-          ];
-
-          rows.forEach((row, index) => {
-            const rowHeight = 18;
-            doc.rect(tableX, tableY, labelW, rowHeight);
-            doc.rect(tableX + labelW, tableY, valueW, rowHeight);
-            doc.text(row.label, tableX + 6, tableY + 12);
-            if (index === rows.length - 1) {
-              doc.setFont(undefined, "bold");
-            }
-            doc.text(row.value, tableX + labelW + valueW - 6, tableY + 12, { align: "right" });
-            if (index === rows.length - 1) {
-              doc.setFont(undefined, "normal");
-            }
-            tableY += rowHeight;
-          });
-
-          const invoiceRows = Array.isArray(snapshot?.outstanding?.customerInvoices)
-            ? snapshot.outstanding.customerInvoices
-            : [];
-
-          if (invoiceRows.length > 0) {
-            let invoiceY = tableY + 20;
-            const invoiceCols = [
-              { key: "invoice_date", label: "Date", width: 72, align: "left" },
-              { key: "ref_no", label: "Ref No", width: 80, align: "left" },
-              { key: "pending_amount", label: "Pending", width: 84, align: "right" },
-              { key: "due_date", label: "Due", width: 70, align: "left" },
-              { key: "overdue_days", label: "Overdue", width: 64, align: "right" },
-              { key: "invoice_day", label: "Inv Day", width: 60, align: "right" },
-              { key: "salesman", label: "Salesman", width: 85, align: "left" },
-            ];
-            const invoiceTableWidth = invoiceCols.reduce((sum, col) => sum + col.width, 0);
-
-            if (invoiceY + 24 > pageHeight - 110) {
-              doc.addPage();
-              invoiceY = marginTop;
-            }
-
-            doc.setFont(undefined, "bold");
-            doc.setFontSize(11);
-            doc.text("Outstanding Invoices", marginX, invoiceY);
-            doc.setFontSize(9);
-            doc.setFont(undefined, "normal");
-            invoiceY += 8;
-
-            const drawInvoiceHeader = (startY) => {
-              let x = marginX;
-              doc.setFillColor(239, 244, 245);
-              doc.rect(marginX, startY, invoiceTableWidth, 20, "F");
-              doc.setFont(undefined, "bold");
-              invoiceCols.forEach((col) => {
-                doc.rect(x, startY, col.width, 20);
-                drawCellText(col.label, x, startY + 13, col.width, col.align);
-                x += col.width;
-              });
-              doc.setFont(undefined, "normal");
-              return startY + 20;
-            };
-
-            invoiceY = drawInvoiceHeader(invoiceY);
-
-            invoiceRows.slice(0, 12).forEach((invoice) => {
-              if (invoiceY + 20 > pageHeight - 110) {
-                doc.addPage();
-                invoiceY = drawInvoiceHeader(marginTop);
-              }
-
-              const displayRow = {
-                invoice_date: String(invoice?.invoice_date || "-"),
-                ref_no: String(invoice?.ref_no || "-"),
-                pending_amount: formatPdfAmount(parseOutstandingNumber(invoice?.pending_amount), false),
-                due_date: String(invoice?.due_date || "-"),
-                overdue_days: formatPdfCount(parseOutstandingNumber(invoice?.overdue_days), false),
-                invoice_day: formatPdfCount(parseOutstandingNumber(invoice?.invoice_day), false),
-                salesman: String(invoice?.salesman || "-"),
-              };
-
-              let x = marginX;
-              invoiceCols.forEach((col) => {
-                doc.rect(x, invoiceY, col.width, 20);
-                drawCellText(displayRow[col.key], x, invoiceY + 13, col.width, col.align);
-                x += col.width;
-              });
-
-              invoiceY += 20;
-            });
-
-            if (invoiceRows.length > 12) {
-              doc.setFontSize(8);
-              doc.text(`Showing 12 of ${invoiceRows.length} invoice row(s).`, marginX, invoiceY + 12);
-              doc.setFontSize(10);
-            }
-          }
-        }
 
         doc.setFontSize(9);
         doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 28);
@@ -1411,10 +1040,14 @@ function NewOrderPageContent() {
           draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
         }
 
-        const [loadedCustomers, itemsRes, draftsRes] = await Promise.all([
+        const [loadedCustomers, itemsRes, draftsRes, categoriesRes] = await Promise.all([
           fetchVisibleCustomers(session.access_token),
-          fetchItemsMasterCatalog(supabase),
+          supabase
+            .from("items_master")
+            .select("item_code,item_name,category")
+            .order("item_name"),
           draftsQuery,
+          fetchItemCategoryLookup(supabase, scope),
         ]);
 
         if (itemsRes.error) throw itemsRes.error;
@@ -1425,8 +1058,9 @@ function NewOrderPageContent() {
           : loadedCustomers;
 
         setCustomers(mergedCustomers);
-        setItemsMaster(itemsRes || []);
+        setItemsMaster(itemsRes.data || []);
         setPreviousDrafts(draftsRes.data || []);
+        setHistoryCategoryLookup(categoriesRes || new Map());
       } catch (err) {
         setError(err.message || "Unable to load new order data.");
       } finally {
@@ -1435,6 +1069,8 @@ function NewOrderPageContent() {
     }
 
     async function loadPrices() {
+      const PRICE_CACHE_KEY = "madiba.pricePayload";
+
       try {
         const response = await fetch(PRICE_CACHE_API, { cache: "no-store" });
         if (!response.ok) {
@@ -1444,33 +1080,23 @@ function NewOrderPageContent() {
         const data = await response.json();
         const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
           ? {
-              priceMap: normalizePriceMap(data.priceMap),
-              sheetItems: normalizeSheetItems(data.sheetItems),
+              priceMap: data.priceMap,
+              sheetItems: Array.isArray(data.sheetItems) ? data.sheetItems : [],
             }
           : parsePricePayload(data || {});
         if (Object.keys(parsed.priceMap || {}).length === 0) {
           throw new Error("Price cache returned no prices");
         }
 
-        setPriceList(normalizePriceMap(parsed.priceMap));
-        setPriceSheetItems(normalizeSheetItems(parsed.sheetItems));
-        setPriceStatus({
-          source: String(data?.source || "api").trim() || "api",
-          syncedAt: String(data?.syncedAt || "").trim(),
-          isStale: Boolean(data?.isStale),
-        });
+        setPriceList(parsed.priceMap);
+        setPriceSheetItems(parsed.sheetItems);
         window.localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(parsed));
       } catch {
         try {
           const cached = JSON.parse(window.localStorage.getItem(PRICE_CACHE_KEY) || "null");
           if (cached?.priceMap && Object.keys(cached.priceMap).length > 0) {
-            setPriceList(normalizePriceMap(cached.priceMap));
-            setPriceSheetItems(normalizeSheetItems(cached.sheetItems));
-            setPriceStatus({
-              source: "local-cache",
-              syncedAt: String(cached?.syncedAt || "").trim(),
-              isStale: false,
-            });
+            setPriceList(cached.priceMap);
+            setPriceSheetItems(Array.isArray(cached.sheetItems) ? cached.sheetItems : []);
           }
         } catch {
           // Keep previously loaded prices if cache is unavailable.
@@ -1507,27 +1133,31 @@ function NewOrderPageContent() {
       setAuditExpandedCategories({});
 
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) {
-          throw new Error("Please login again.");
+        let peersQuery = supabase
+          .from("sales_raw")
+          .select("customer_code,item_code,item_name,category,sales_amount,transaction_date")
+
+        if (!accessScope?.hasAllAccess) {
+          peersQuery = peersQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
         }
 
-        const response = await fetch(
-          `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}`,
-          {
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          }
-        );
+        const [transactionsRes, peersRes] = await Promise.all([
+          supabase
+            .from("sales_raw")
+            .select(
+              "id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class"
+            )
+            .eq("customer_code", selectedCustomer.customer_code)
+            .order("transaction_date", { ascending: false })
+            .order("id", { ascending: false }),
+          peersQuery,
+        ]);
 
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.error || "Unable to load customer audit history.");
-        }
+        if (transactionsRes.error) throw transactionsRes.error;
+        if (peersRes.error) throw peersRes.error;
 
-        setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);
-        setPeerTransactions(Array.isArray(payload.peerTransactions) ? payload.peerTransactions : []);
+        setTransactions(transactionsRes.data || []);
+        setPeerTransactions(peersRes.data || []);
       } catch (err) {
         setTransactions([]);
         setPeerTransactions([]);
@@ -1539,17 +1169,6 @@ function NewOrderPageContent() {
 
     loadCustomerHistory();
   }, [accessScope, selectedCustomer, setError]);
-
-  useEffect(() => {
-    fetchOutstandingForCustomer(selectedCustomer);
-  }, [fetchOutstandingForCustomer, selectedCustomer]);
-
-  const visibleOutstandingBuckets = useMemo(
-    () => (outstandingInfo.bucketLabels || []).filter(
-      (label) => parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]) !== 0
-    ),
-    [outstandingInfo.bucketLabels, outstandingInfo.customer]
-  );
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -1571,21 +1190,6 @@ function NewOrderPageContent() {
     );
   }
 
-  const priceStatusText = (() => {
-    if (!priceStatus.source) return "Price source: unavailable";
-    const parts = [`Price source: ${priceStatus.source}`];
-    if (priceStatus.syncedAt) {
-      const dateText = new Date(priceStatus.syncedAt).toLocaleString("en-GB");
-      if (dateText && dateText !== "Invalid Date") {
-        parts.push(`Synced: ${dateText}`);
-      }
-    }
-    if (priceStatus.isStale) {
-      parts.push("Status: stale");
-    }
-    return parts.join(" | ");
-  })();
-
   return (
     <MorningAttendanceGate>
     <main className="modulePage" dir={dir}>
@@ -1601,117 +1205,6 @@ function NewOrderPageContent() {
 
         {error && <div className="moduleError">{error}</div>}
         {message && <div className="moduleSuccess">{message}</div>}
-  <div className="moduleHint">{priceStatusText}</div>
-
-        <section className="moduleSection">
-          <div className="moduleSectionHeader">
-            <h2>Outstanding Customerwise</h2>
-            <span>
-              {outstandingInfo.uploadedAt
-                ? `Uploaded ${new Date(outstandingInfo.uploadedAt).toLocaleString("en-GB")}`
-                : "No outstanding upload yet"}
-            </span>
-          </div>
-
-          {canUploadOutstanding && (
-            <div className="moduleFormGrid">
-              <label>
-                Upload Outstanding Excel (.xlsx/.xls)
-                <input
-                  className="moduleInput"
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={(event) => setOutstandingUploadFile(event.target.files?.[0] || null)}
-                />
-              </label>
-              <div className="moduleFieldFull">
-                <button
-                  type="button"
-                  className="modulePrimaryButton"
-                  onClick={handleOutstandingUpload}
-                  disabled={outstandingUploading || !outstandingUploadFile}
-                >
-                  {outstandingUploading ? "Uploading outstanding..." : "Upload & Replace Outstanding Data"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {!selectedCustomer && <div className="moduleHint">Select a customer to view 30-day outstanding buckets.</div>}
-
-          {selectedCustomer && outstandingLoading && <div className="moduleLoading">Loading outstanding buckets...</div>}
-
-          {selectedCustomer && !outstandingLoading && outstandingInfo.customer && (
-            <>
-              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
-                <table className="moduleTable">
-                  <thead>
-                    <tr>
-                      <th>Customer</th>
-                      {visibleOutstandingBuckets.map((label) => (
-                        <th key={`bucket-head-${label}`}>{label} days</th>
-                      ))}
-                      <th>Open Invoices</th>
-                      <th>Total Outstanding</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>{selectedCustomer.customer_code} - {selectedCustomer.customer_name}</td>
-                      {visibleOutstandingBuckets.map((label) => (
-                        <td key={`bucket-val-${label}`}>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]))}</td>
-                      ))}
-                      <td>{formatCount(parseOutstandingNumber(outstandingInfo.customer?.open_invoices))}</td>
-                      <td>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.total_outstanding))}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
-                <table className="moduleTable">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Ref. No.</th>
-                      <th>Pending Amount</th>
-                      <th>Due Date</th>
-                      <th>Overdue Days</th>
-                      <th>Invoice Day</th>
-                      <th>Salesman</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(outstandingInfo.customerInvoices || []).map((invoice, index) => (
-                      <tr key={`${invoice.ref_no || "no-ref"}-${invoice.due_date || "no-due"}-${index}`}>
-                        <td>{invoice.invoice_date || "-"}</td>
-                        <td>{invoice.ref_no || "-"}</td>
-                        <td>{formatAmount(parseOutstandingNumber(invoice.pending_amount))}</td>
-                        <td>{invoice.due_date || "-"}</td>
-                        <td>{formatCount(parseOutstandingNumber(invoice.overdue_days))}</td>
-                        <td>{formatCount(parseOutstandingNumber(invoice.invoice_day))}</td>
-                        <td>{invoice.salesman || "-"}</td>
-                      </tr>
-                    ))}
-                    {(!Array.isArray(outstandingInfo.customerInvoices) || outstandingInfo.customerInvoices.length === 0) && (
-                      <tr>
-                        <td colSpan={7}>
-                          {outstandingInfo.needsInvoiceRowsReupload
-                            ? "Invoice-level rows are missing in current dataset. Re-upload the outstanding file once to include Ref No and invoice row details."
-                            : "No invoice-level rows found for this customer in the latest upload."}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-
-          {selectedCustomer && !outstandingLoading && !outstandingInfo.customer && (
-            <div className="moduleHint">No outstanding row found for this customer in latest upload.</div>
-          )}
-        </section>
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
@@ -1846,7 +1339,7 @@ function NewOrderPageContent() {
               <div className="moduleSectionHeader">
                 <h2>Full Item List</h2>
                 <span>
-                  {filteredItems.length} visible of {mergedItemsMaster.length} catalog items • {orderSummary.itemCount} selected • {qtyFormat(orderSummary.totalQuantity)} units
+                  {mergedItemsMaster.length} catalog items • {orderSummary.itemCount} selected • {qtyFormat(orderSummary.totalQuantity)} units
                 </span>
               </div>
 
@@ -1871,26 +1364,6 @@ function NewOrderPageContent() {
                 </select>
               </div>
 
-              {hiddenItemCount > 0 && (
-                <div className="moduleHint">
-                  {hiddenItemCount} item(s) are hidden by current view rules
-                  {hasActiveFilters ? " (search/category filters)." : " (mostly unresolved mapping items)."}
-                  {hasActiveFilters && (
-                    <button
-                      type="button"
-                      className="moduleInlineButton"
-                      onClick={() => {
-                        setItemSearch("");
-                        setCategoryFilter("ALL");
-                      }}
-                      style={{ marginLeft: "8px" }}
-                    >
-                      Reset Filters
-                    </button>
-                  )}
-                </div>
-              )}
-
               <div className="moduleTableWrap">
                 <table className="moduleTable moduleOrderTable">
                   <thead>
@@ -1903,7 +1376,7 @@ function NewOrderPageContent() {
                     </tr>
                   </thead>
                   <tbody>
-                    {groupedItems.map((group) => {
+                    {groupedItems.slice(0, 40).map((group) => {
                       const isExpanded = Boolean(expandedItemCategories[group.category]);
 
                       return (
@@ -1923,7 +1396,7 @@ function NewOrderPageContent() {
                             </td>
                           </tr>
                           {isExpanded &&
-                            group.items.map((item) => {
+                            group.items.slice(0, 120).map((item) => {
                               const qty = Number(orderQuantities[item.item_code] || 0);
                               const price = getPrice(priceList, item.item_code);
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
@@ -2130,7 +1603,13 @@ function NewOrderPageContent() {
                       <button
                         type="button"
                         className="moduleInlineButton"
-                        onClick={() => setSelectedCustomerCode(draft.customer_code)}
+                        onClick={() => {
+                          setSelectedCustomerCode(draft.customer_code);
+                          setCustomerSearch(draft.customer_name || draft.customer_code || "");
+                          setEditOrderId(String(draft.id || ""));
+                          setMessage(`Opening draft #${draft.id}...`);
+                          setError("");
+                        }}
                       >
                         Open Draft
                       </button>
@@ -2149,13 +1628,5 @@ function NewOrderPageContent() {
       </div>
     </main>
     </MorningAttendanceGate>
-  );
-}
-
-export default function NewOrderPage() {
-  return (
-    <Suspense fallback={<main className="modulePage"><div className="moduleShell"><div className="moduleLoading">Loading order workspace...</div></div></main>}>
-      <NewOrderPageContent />
-    </Suspense>
   );
 }

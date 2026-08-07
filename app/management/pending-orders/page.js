@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -17,6 +17,11 @@ const TEXT = {
   loading: { en: "Loading old pending orders...", ar: "جاري تحميل الطلبات المعلقة القديمة..." },
 };
 
+const PENDING_STATUSES = ["DRAFT", "PENDING", "SUBMITTED"];
+const INVOICE_STATUS_PENDING_CREDIT = "Pending for credit approval";
+const INVOICE_STATUS_REJECTED = "Rejected by management";
+const INVOICE_STATUS_MADE = "Invoice made";
+
 function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
 }
@@ -26,6 +31,19 @@ function formatDateTime(value) {
   return new Date(value).toLocaleString("en-GB");
 }
 
+function formatDuration(secondsValue) {
+  const seconds = Number(secondsValue || 0);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "-";
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m ${remainingSeconds}s`;
+  if (minutes > 0) return `${minutes}m ${remainingSeconds}s`;
+  return `${remainingSeconds}s`;
+}
+
 function daysOld(fromDate) {
   if (!fromDate) return 0;
   const then = new Date(fromDate).getTime();
@@ -33,46 +51,16 @@ function daysOld(fromDate) {
   return Math.max(0, Math.floor((now - then) / (1000 * 60 * 60 * 24)));
 }
 
-const PENDING_STATUSES = ["DRAFT", "PENDING", "SUBMITTED"];
-
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
-function buildQueueWorkbook(orders, activeOrder, orderLines) {
-  const rows = orders.map((order) => ({
-    "Order ID": order.id,
-    Customer: order.customer_name || order.customer_code || "-",
-    "Customer Code": order.customer_code || "-",
-    Salesman: order.salesman_code || "-",
-    Status: order.status || "-",
-    Created: formatDateTime(order.created_at),
-    "Last Updated": formatDateTime(order.updated_at),
-    "Age (days)": daysOld(order.updated_at || order.created_at),
-  }));
-
-  const workbook = { Sheets: {}, SheetNames: [] };
-  const queueSheet = window.XLSX.utils.json_to_sheet(rows);
-  workbook.Sheets.PendingOrders = queueSheet;
-  workbook.SheetNames.push("PendingOrders");
-
-  if (activeOrder && Array.isArray(orderLines) && orderLines.length > 0) {
-    const lineRows = orderLines.map((line) => ({
-      "Order ID": activeOrder.id,
-      "Item Code": line.item_code || "-",
-      "Item Name": line.item_name || "-",
-      Category: line.category || "-",
-      Quantity: Number(line.quantity || 0),
-      Rate: Number(line.rate || 0),
-      "Line Total": Number(line.line_value || 0),
-    }));
-
-    workbook.Sheets.OrderLines = window.XLSX.utils.json_to_sheet(lineRows);
-    workbook.SheetNames.push("OrderLines");
-  }
-
-  return workbook;
+function invoiceStatusText(meta) {
+  if (!meta) return "-";
+  if (meta.status) return meta.status;
+  if (meta.invoiceUploadedAt) return INVOICE_STATUS_MADE;
+  return "-";
 }
 
 export default function PendingOrdersPage() {
@@ -87,11 +75,68 @@ export default function PendingOrdersPage() {
   const [orderHistory, setOrderHistory] = useState([]);
   const [loadingLines, setLoadingLines] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [invoiceMetaByOrder, setInvoiceMetaByOrder] = useState({});
+  const [statusDraftByOrder, setStatusDraftByOrder] = useState({});
+  const [openStartedAtByOrder, setOpenStartedAtByOrder] = useState({});
+  const [selectedInvoiceFile, setSelectedInvoiceFile] = useState(null);
+  const [uploadingInvoice, setUploadingInvoice] = useState(false);
+  const [savingInvoiceStatus, setSavingInvoiceStatus] = useState(false);
+
   const startOfTodayIso = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
     return start.toISOString();
   }, []);
+
+  async function getAuthToken() {
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      throw new Error("Please login again.");
+    }
+
+    return session.access_token;
+  }
+
+  async function loadInvoiceMeta(orderIds) {
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      setInvoiceMetaByOrder({});
+      return;
+    }
+
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(`/api/order-invoice?orderIds=${encodeURIComponent(orderIds.join(","))}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to load invoice status.");
+      }
+
+      const items = payload.items && typeof payload.items === "object" ? payload.items : {};
+      setInvoiceMetaByOrder(items);
+      setStatusDraftByOrder((current) => {
+        const next = { ...current };
+        Object.entries(items).forEach(([orderId, meta]) => {
+          if (!next[orderId]) {
+            next[orderId] = String(meta?.status || "");
+          }
+        });
+        return next;
+      });
+    } catch (err) {
+      setError(err.message || "Unable to load invoice status.");
+    }
+  }
 
   async function openOrder(orderId) {
     const supabase = getSupabaseClient();
@@ -104,6 +149,7 @@ export default function PendingOrdersPage() {
       setActiveOrderId(null);
       setOrderLines([]);
       setOrderHistory([]);
+      setSelectedInvoiceFile(null);
       return;
     }
 
@@ -119,16 +165,11 @@ export default function PendingOrdersPage() {
 
       if (linesError) throw linesError;
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
+      const token = await getAuthToken();
       const historyResponse = await fetch(`/api/order-history?orderId=${encodeURIComponent(orderId)}`, {
-        headers: session?.access_token
-          ? {
-              Authorization: `Bearer ${session.access_token}`,
-            }
-          : {},
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       const historyPayload = await historyResponse.json().catch(() => ({}));
@@ -136,6 +177,23 @@ export default function PendingOrdersPage() {
       setActiveOrderId(orderId);
       setOrderLines(data || []);
       setOrderHistory(historyResponse.ok && historyPayload.success && Array.isArray(historyPayload.history) ? historyPayload.history : []);
+      setSelectedInvoiceFile(null);
+
+      setStatusDraftByOrder((current) => {
+        const existing = current[orderId];
+        if (existing) return current;
+        return {
+          ...current,
+          [orderId]: String(invoiceMetaByOrder?.[orderId]?.status || ""),
+        };
+      });
+
+      if (isInvoiceMakerRole(userRole)) {
+        setOpenStartedAtByOrder((current) => {
+          if (current[orderId]) return current;
+          return { ...current, [orderId]: new Date().toISOString() };
+        });
+      }
     } catch (err) {
       setError(err.message || "Unable to open order details.");
       setActiveOrderId(null);
@@ -190,6 +248,7 @@ export default function PendingOrdersPage() {
         });
 
         setOrders(visibleOrders);
+        await loadInvoiceMeta(visibleOrders.map((order) => order.id));
       } catch (err) {
         setError(err.message || "Unable to load pending orders.");
       } finally {
@@ -391,6 +450,9 @@ export default function PendingOrdersPage() {
         "Customer Code": order.customer_code || "-",
         Salesman: order.salesman_code || "-",
         Status: order.status || "-",
+        "Invoice Status": invoiceStatusText(invoiceMetaByOrder?.[order.id]),
+        "Invoice Uploaded At": formatDateTime(invoiceMetaByOrder?.[order.id]?.invoiceUploadedAt),
+        "Invoice Build Time": formatDuration(invoiceMetaByOrder?.[order.id]?.invoiceBuildSeconds),
         Created: formatDateTime(order.created_at),
         "Last Updated": formatDateTime(order.updated_at),
         "Age (days)": daysOld(order.updated_at || order.created_at),
@@ -420,6 +482,94 @@ export default function PendingOrdersPage() {
     }
   }
 
+  async function saveInvoiceStatus(orderId) {
+    const status = String(statusDraftByOrder?.[orderId] || "").trim();
+    if (!status) {
+      setError("Choose invoice status first.");
+      return;
+    }
+
+    setSavingInvoiceStatus(true);
+    setError("");
+
+    try {
+      const token = await getAuthToken();
+      const response = await fetch("/api/order-invoice", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          mode: "set-status",
+          orderId,
+          status,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to save invoice status.");
+      }
+
+      setInvoiceMetaByOrder((current) => ({
+        ...current,
+        [orderId]: payload.item || { orderId, status },
+      }));
+    } catch (err) {
+      setError(err.message || "Unable to save invoice status.");
+    } finally {
+      setSavingInvoiceStatus(false);
+    }
+  }
+
+  async function uploadInvoicePdf(orderId) {
+    if (!selectedInvoiceFile) {
+      setError("Select a PDF invoice first.");
+      return;
+    }
+
+    setUploadingInvoice(true);
+    setError("");
+
+    try {
+      const token = await getAuthToken();
+      const form = new FormData();
+      form.append("mode", "upload");
+      form.append("orderId", String(orderId));
+      form.append("startedAt", String(openStartedAtByOrder?.[orderId] || new Date().toISOString()));
+      form.append("file", selectedInvoiceFile);
+
+      const response = await fetch("/api/order-invoice", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: form,
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to upload invoice PDF.");
+      }
+
+      const item = payload.item || { orderId };
+      setInvoiceMetaByOrder((current) => ({
+        ...current,
+        [orderId]: item,
+      }));
+      setStatusDraftByOrder((current) => ({
+        ...current,
+        [orderId]: String(item.status || INVOICE_STATUS_MADE),
+      }));
+      setSelectedInvoiceFile(null);
+    } catch (err) {
+      setError(err.message || "Unable to upload invoice PDF.");
+    } finally {
+      setUploadingInvoice(false);
+    }
+  }
+
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
     return (
@@ -440,188 +590,263 @@ export default function PendingOrdersPage() {
     );
   }
 
+  const isInvoiceMaker = isInvoiceMakerRole(userRole);
+
   return (
     <MorningAttendanceGate>
-    <main className="modulePage" dir={dir}>
-      <div className="moduleShell">
-        <div className="moduleHeader">
-          <div>
-            <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>{t("title")}</h1>
-            <p className="moduleSubtitle">
-              {userRole === "admin" || userRole === "manager" ? t("subtitleTeam") : t("subtitleMine")}
-            </p>
-          </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
-        </div>
-
-        {error && <div className="moduleError">{error}</div>}
-
-        <div className="moduleMetricGrid">
-          <section className="moduleMetricCard"><span>Total pending</span><strong>{summary.total}</strong></section>
-          <section className="moduleMetricCard"><span>Old pending</span><strong>{summary.oldPending}</strong></section>
-          <section className="moduleMetricCard"><span>Updated today</span><strong>{summary.updatedToday}</strong></section>
-          <section className="moduleMetricCard"><span>Older than 7 days</span><strong>{summary.olderThan7}</strong></section>
-          <section className="moduleMetricCard"><span>Older than 30 days</span><strong>{summary.olderThan30}</strong></section>
-        </div>
-
-        <section className="moduleSection">
-          <div className="moduleSectionHeader">
-            <h2>Pending Order Queue</h2>
-            <span>{summary.total} order(s)</span>
+      <main className="modulePage" dir={dir}>
+        <div className="moduleShell">
+          <div className="moduleHeader">
+            <div>
+              <p className="moduleEyebrow">MADIBA SFA</p>
+              <h1>{t("title")}</h1>
+              <p className="moduleSubtitle">
+                {userRole === "admin" || userRole === "manager" || isInvoiceMaker ? t("subtitleTeam") : t("subtitleMine")}
+              </p>
+            </div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
 
-          <div className="moduleTableWrap">
-            <table className="moduleTable">
-              <thead>
-                <tr>
-                  <th>Order ID</th>
-                  <th>Customer</th>
-                  <th>Salesman</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Last Updated</th>
-                  <th>Age (days)</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order) => {
-                  const age = daysOld(order.updated_at || order.created_at);
+          {error && <div className="moduleError">{error}</div>}
 
-                  return (
-                    <tr key={order.id}>
-                      <td>{order.id}</td>
-                      <td>{order.customer_name || order.customer_code || "-"}</td>
-                      <td>{order.salesman_code || "-"}</td>
-                      <td>{order.status || "-"}</td>
-                      <td>{formatDateTime(order.created_at)}</td>
-                      <td>{formatDateTime(order.updated_at)}</td>
-                      <td>{age}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="moduleInlineButton"
-                          onClick={() => openOrder(order.id)}
-                          disabled={loadingLines && activeOrderId === order.id}
-                        >
-                          {activeOrderId === order.id ? "Close" : "Open"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+          <div className="moduleMetricGrid">
+            <section className="moduleMetricCard"><span>Total pending</span><strong>{summary.total}</strong></section>
+            <section className="moduleMetricCard"><span>Old pending</span><strong>{summary.oldPending}</strong></section>
+            <section className="moduleMetricCard"><span>Updated today</span><strong>{summary.updatedToday}</strong></section>
+            <section className="moduleMetricCard"><span>Older than 7 days</span><strong>{summary.olderThan7}</strong></section>
+            <section className="moduleMetricCard"><span>Older than 30 days</span><strong>{summary.olderThan30}</strong></section>
+          </div>
 
-                {orders.length === 0 && (
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>Pending Order Queue</h2>
+              <span>{summary.total} order(s)</span>
+            </div>
+
+            <div className="moduleTableWrap">
+              <table className="moduleTable">
+                <thead>
                   <tr>
-                    <td colSpan={8}>No pending orders found.</td>
+                    <th>Order ID</th>
+                    <th>Customer</th>
+                    <th>Salesman</th>
+                    <th>Status</th>
+                    <th>Invoice Status</th>
+                    <th>Uploaded At</th>
+                    <th>Time to Make</th>
+                    <th>Created</th>
+                    <th>Last Updated</th>
+                    <th>Age (days)</th>
+                    <th>Action</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {orders.map((order) => {
+                    const age = daysOld(order.updated_at || order.created_at);
+                    const meta = invoiceMetaByOrder?.[order.id] || null;
 
-          {activeOrderId && (
-            <div style={{ marginTop: "12px" }}>
-              <div className="moduleSectionHeader">
-                <h2>Order #{activeOrderId} Details</h2>
-                <span>{loadingLines ? "Loading..." : `${orderLines.length} line(s)`}</span>
-              </div>
-              <div className="moduleTableWrap">
-                <table className="moduleTable">
-                  <thead>
-                    <tr>
-                      <th>Item Code</th>
-                      <th>Item Name</th>
-                      <th>Category</th>
-                      <th>Qty</th>
-                      <th>Rate</th>
-                      <th>Line Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orderLines.map((line) => (
-                      <tr key={line.id}>
-                        <td>{line.item_code || "-"}</td>
-                        <td>{line.item_name || "-"}</td>
-                        <td>{line.category || "-"}</td>
-                        <td>{Number(line.quantity || 0)}</td>
-                        <td>{`SAR ${Number(line.rate || 0).toFixed(2)}`}</td>
-                        <td>{`SAR ${Number(line.line_value || 0).toFixed(2)}`}</td>
-                      </tr>
-                    ))}
-                    {!loadingLines && orderLines.length === 0 && (
-                      <tr>
-                        <td colSpan={6}>No line items found for this order.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="moduleActionRow" style={{ marginTop: "10px" }}>
-                <button
-                  type="button"
-                  className="modulePrimaryButton"
-                  onClick={regenerateOrderPdf}
-                  disabled={downloadingPdf || loadingLines || orderLines.length === 0}
-                >
-                  {downloadingPdf ? "Generating PDF..." : "Regenerate PDF"}
-                </button>
-                <button type="button" className="moduleInlineButton" onClick={exportQueueToExcel} disabled={orders.length === 0}>
-                  Export Excel
-                </button>
-                {activeOrder && !isInvoiceMakerRole(userRole) && (
-                  <Link
-                    href={`/management/new-order?order_id=${encodeURIComponent(activeOrder.id)}&customer_code=${encodeURIComponent(activeOrder.customer_code || "")}&customer_name=${encodeURIComponent(activeOrder.customer_name || "")}&salesman_code=${encodeURIComponent(activeOrder.salesman_code || "")}`}
-                    className="moduleInlineButton"
-                  >
-                    Edit Order
-                  </Link>
-                )}
-                {!isInvoiceMakerRole(userRole) && <Link href="/management/new-order" className="moduleInlineButton">Open Order Workflow</Link>}
-                {!isInvoiceMakerRole(userRole) && <Link href="/management/customer-audit" className="moduleInlineButton">Go to Customer Audit</Link>}
-              </div>
-
-              {orderHistory.length > 0 && (
-                <div style={{ marginTop: "14px" }}>
-                  <div className="moduleSectionHeader">
-                    <h2>Change History</h2>
-                    <span>{orderHistory.length} event(s)</span>
-                  </div>
-                  <div className="moduleTableWrap">
-                    <table className="moduleTable">
-                      <thead>
+                    return (
+                      <Fragment key={order.id}>
                         <tr>
-                          <th>When</th>
-                          <th>Action</th>
-                          <th>Details</th>
+                          <td>{order.id}</td>
+                          <td>{order.customer_name || order.customer_code || "-"}</td>
+                          <td>{order.salesman_code || "-"}</td>
+                          <td>{order.status || "-"}</td>
+                          <td>{invoiceStatusText(meta)}</td>
+                          <td>{formatDateTime(meta?.invoiceUploadedAt)}</td>
+                          <td>{formatDuration(meta?.invoiceBuildSeconds)}</td>
+                          <td>{formatDateTime(order.created_at)}</td>
+                          <td>{formatDateTime(order.updated_at)}</td>
+                          <td>{age}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="moduleInlineButton"
+                              onClick={() => openOrder(order.id)}
+                              disabled={loadingLines && activeOrderId === order.id}
+                            >
+                              {activeOrderId === order.id ? "Close" : "Open"}
+                            </button>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {orderHistory.slice().reverse().map((entry, index) => (
-                          <tr key={`${entry.changedAt || index}-${index}`}>
-                            <td>{entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-GB") : "-"}</td>
-                            <td>{entry.action || "UPDATED"}</td>
-                            <td>
-                              {(Array.isArray(entry.changes) ? entry.changes : []).map((change, changeIndex) => (
-                                <div key={`${change.item_code || index}-${changeIndex}`}>
-                                  {change.item_code || "-"}: {change.type || "UPDATED"} {Number(change.before_quantity || 0)} → {Number(change.after_quantity || 0)}
+
+                        {activeOrderId === order.id && (
+                          <tr>
+                            <td colSpan={11}>
+                              <div style={{ marginTop: "8px", marginBottom: "8px" }}>
+                                <div className="moduleSectionHeader">
+                                  <h2>Order #{order.id} Details</h2>
+                                  <span>{loadingLines ? "Loading..." : `${orderLines.length} line(s)`}</span>
                                 </div>
-                              ))}
+
+                                <div className="moduleTableWrap">
+                                  <table className="moduleTable">
+                                    <thead>
+                                      <tr>
+                                        <th>Item Code</th>
+                                        <th>Item Name</th>
+                                        <th>Category</th>
+                                        <th>Qty</th>
+                                        <th>Rate</th>
+                                        <th>Line Total</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {orderLines.map((line) => (
+                                        <tr key={line.id}>
+                                          <td>{line.item_code || "-"}</td>
+                                          <td>{line.item_name || "-"}</td>
+                                          <td>{line.category || "-"}</td>
+                                          <td>{Number(line.quantity || 0)}</td>
+                                          <td>{`SAR ${Number(line.rate || 0).toFixed(2)}`}</td>
+                                          <td>{`SAR ${Number(line.line_value || 0).toFixed(2)}`}</td>
+                                        </tr>
+                                      ))}
+                                      {!loadingLines && orderLines.length === 0 && (
+                                        <tr>
+                                          <td colSpan={6}>No line items found for this order.</td>
+                                        </tr>
+                                      )}
+                                    </tbody>
+                                  </table>
+                                </div>
+
+                                <div className="moduleHint" style={{ marginTop: "10px" }}>
+                                  <strong>Invoice status:</strong> {invoiceStatusText(meta)}
+                                  {meta?.invoiceFileUrl ? (
+                                    <span> | <a href={meta.invoiceFileUrl} target="_blank" rel="noreferrer">View uploaded invoice</a></span>
+                                  ) : null}
+                                  <span> | <strong>Uploaded at:</strong> {formatDateTime(meta?.invoiceUploadedAt)}</span>
+                                  <span> | <strong>Time to make:</strong> {formatDuration(meta?.invoiceBuildSeconds)}</span>
+                                </div>
+
+                                {isInvoiceMaker && (
+                                  <div style={{ marginTop: "12px" }}>
+                                    <div className="moduleFormGrid">
+                                      <label>
+                                        Invoice Status
+                                        <select
+                                          className="moduleInput"
+                                          value={statusDraftByOrder?.[order.id] || ""}
+                                          onChange={(event) => setStatusDraftByOrder((current) => ({ ...current, [order.id]: event.target.value }))}
+                                        >
+                                          <option value="">Select status</option>
+                                          <option value={INVOICE_STATUS_PENDING_CREDIT}>{INVOICE_STATUS_PENDING_CREDIT}</option>
+                                          <option value={INVOICE_STATUS_REJECTED}>{INVOICE_STATUS_REJECTED}</option>
+                                          <option value={INVOICE_STATUS_MADE} disabled={!meta?.invoiceFilePath}>{INVOICE_STATUS_MADE}</option>
+                                        </select>
+                                      </label>
+
+                                      <label>
+                                        Upload PDF Invoice
+                                        <input
+                                          className="moduleInput"
+                                          type="file"
+                                          accept="application/pdf,.pdf"
+                                          onChange={(event) => setSelectedInvoiceFile(event.target.files?.[0] || null)}
+                                        />
+                                      </label>
+                                    </div>
+
+                                    <div className="moduleActionRow" style={{ marginTop: "10px" }}>
+                                      <button
+                                        type="button"
+                                        className="modulePrimaryButton"
+                                        onClick={() => saveInvoiceStatus(order.id)}
+                                        disabled={savingInvoiceStatus || !statusDraftByOrder?.[order.id]}
+                                      >
+                                        {savingInvoiceStatus ? "Saving status..." : "Save Invoice Status"}
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        className="moduleInlineButton"
+                                        onClick={() => uploadInvoicePdf(order.id)}
+                                        disabled={uploadingInvoice || !selectedInvoiceFile}
+                                      >
+                                        {uploadingInvoice ? "Uploading..." : "Upload Invoice PDF"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                <div className="moduleActionRow" style={{ marginTop: "10px" }}>
+                                  <button
+                                    type="button"
+                                    className="modulePrimaryButton"
+                                    onClick={regenerateOrderPdf}
+                                    disabled={downloadingPdf || loadingLines || orderLines.length === 0}
+                                  >
+                                    {downloadingPdf ? "Generating PDF..." : "Regenerate PDF"}
+                                  </button>
+                                  <button type="button" className="moduleInlineButton" onClick={exportQueueToExcel} disabled={orders.length === 0}>
+                                    Export Excel
+                                  </button>
+                                  {!isInvoiceMaker && (
+                                    <Link
+                                      href={`/management/new-order?order_id=${encodeURIComponent(order.id)}&customer_code=${encodeURIComponent(order.customer_code || "")}&customer_name=${encodeURIComponent(order.customer_name || "")}&salesman_code=${encodeURIComponent(order.salesman_code || "")}`}
+                                      className="moduleInlineButton"
+                                    >
+                                      Edit Order
+                                    </Link>
+                                  )}
+                                  {!isInvoiceMaker && <Link href="/management/new-order" className="moduleInlineButton">Open Order Workflow</Link>}
+                                  {!isInvoiceMaker && <Link href="/management/customer-audit" className="moduleInlineButton">Go to Customer Audit</Link>}
+                                </div>
+
+                                {orderHistory.length > 0 && (
+                                  <div style={{ marginTop: "14px" }}>
+                                    <div className="moduleSectionHeader">
+                                      <h2>Change History</h2>
+                                      <span>{orderHistory.length} event(s)</span>
+                                    </div>
+                                    <div className="moduleTableWrap">
+                                      <table className="moduleTable">
+                                        <thead>
+                                          <tr>
+                                            <th>When</th>
+                                            <th>Action</th>
+                                            <th>Details</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {orderHistory.slice().reverse().map((entry, index) => (
+                                            <tr key={`${entry.changedAt || index}-${index}`}>
+                                              <td>{entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-GB") : "-"}</td>
+                                              <td>{entry.action || "UPDATED"}</td>
+                                              <td>
+                                                {(Array.isArray(entry.changes) ? entry.changes : []).map((change, changeIndex) => (
+                                                  <div key={`${change.item_code || index}-${changeIndex}`}>
+                                                    {change.item_code || "-"}: {change.type || "UPDATED"} {Number(change.before_quantity || 0)} → {Number(change.after_quantity || 0)}
+                                                  </div>
+                                                ))}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
+                        )}
+                      </Fragment>
+                    );
+                  })}
+
+                  {orders.length === 0 && (
+                    <tr>
+                      <td colSpan={11}>No pending orders found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-          )}
-        </section>
-      </div>
-    </main>
+          </section>
+        </div>
+      </main>
     </MorningAttendanceGate>
   );
 }

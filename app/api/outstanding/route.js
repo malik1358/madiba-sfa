@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import {
   OUTSTANDING_DATASET_KEY,
   buildOutstandingRow,
+  extractLeadingCustomerCodeAndName,
   findOutstandingForCustomer,
   normalizeCode,
   normalizeName,
@@ -182,8 +183,11 @@ function parseOutstandingRows(rows, headerRowIndex) {
 
   for (let r = headerRowIndex + 1; r < rows.length; r += 1) {
     const row = Array.isArray(rows[r]) ? rows[r] : [];
-    const customerCode = columns.customerCode >= 0 ? String(row[columns.customerCode] || "").trim() : "";
-    const customerName = columns.customerName >= 0 ? String(row[columns.customerName] || "").trim() : "";
+    const rawCustomerCode = columns.customerCode >= 0 ? String(row[columns.customerCode] || "").trim() : "";
+    const rawCustomerName = columns.customerName >= 0 ? String(row[columns.customerName] || "").trim() : "";
+    const extracted = extractLeadingCustomerCodeAndName(rawCustomerName);
+    const customerCode = rawCustomerCode || extracted.customer_code;
+    const customerName = extracted.customer_name || rawCustomerName;
 
     if (!customerCode && !customerName) continue;
 

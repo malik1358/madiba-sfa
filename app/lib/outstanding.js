@@ -8,6 +8,32 @@ export function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+function normalizeComparableName(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function extractLeadingCustomerCodeAndName(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return { customer_code: "", customer_name: "" };
+  }
+
+  const match = text.match(/^(\d{3,10})\s+(.+)$/);
+  if (!match) {
+    return { customer_code: "", customer_name: text };
+  }
+
+  return {
+    customer_code: String(match[1] || "").trim(),
+    customer_name: String(match[2] || "").trim(),
+  };
+}
+
 export function toNumber(value) {
   const cleaned = String(value ?? "")
     .replace(/,/g, "")
@@ -103,14 +129,28 @@ export function findOutstandingForCustomer(dataset, customerCode, customerName) 
   const rows = Array.isArray(dataset?.rows) ? dataset.rows : [];
   const code = normalizeCode(customerCode);
   const name = normalizeName(customerName);
+  const codeNoZeros = code.replace(/^0+/, "");
+  const cmpName = normalizeComparableName(customerName);
 
   if (code) {
-    const byCode = rows.find((row) => normalizeCode(row.customer_code) === code);
+    const byCode = rows.find((row) => {
+      const rowCode = normalizeCode(row.customer_code);
+      if (!rowCode) return false;
+      if (rowCode === code) return true;
+      return rowCode.replace(/^0+/, "") === codeNoZeros;
+    });
     if (byCode) return buildOutstandingRow(byCode);
   }
 
   if (name) {
-    const byName = rows.find((row) => normalizeName(row.customer_name) === name);
+    const byName = rows.find((row) => {
+      const rowName = normalizeName(row.customer_name);
+      if (rowName === name) return true;
+
+      const rowCmp = normalizeComparableName(row.customer_name);
+      if (!cmpName || !rowCmp) return false;
+      return rowCmp === cmpName || rowCmp.includes(cmpName) || cmpName.includes(rowCmp);
+    });
     if (byName) return buildOutstandingRow(byName);
   }
 

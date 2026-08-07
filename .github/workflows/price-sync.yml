@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Fetch upstream price payload
         run: |
-          SOURCE_URL='https://script.google.com/macros/s/AKfycbypi2PkOaBIWdcQnxrBJAT6xGmqsuyx2mekiIkkOjE/exec'
+          SOURCE_URL='https://script.google.com/macros/s/AKfycbwmgoTXNLgIVM_HyVl3iwnfmhqmqjvJcIriCDtZAc0FDgvBbslYmmmC8-h2P2I0RH6f/exec'
           curl -sS -L --fail-with-body "$SOURCE_URL" -o upstream-price.json || {
             echo "ERROR: curl failed to fetch upstream price data (HTTP error or network failure)."
             echo "Response body (first 500 chars):"

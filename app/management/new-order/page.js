@@ -664,6 +664,22 @@ export default function NewOrderPage() {
       .sort((a, b) => a.category.localeCompare(b.category));
   }, [filteredItems]);
 
+  useEffect(() => {
+    if (!groupedItems.length) return;
+
+    setExpandedItemCategories((current) => {
+      const next = { ...current };
+
+      groupedItems.forEach((group) => {
+        if (next[group.category] === undefined) {
+          next[group.category] = true;
+        }
+      });
+
+      return next;
+    });
+  }, [groupedItems]);
+
   const priceSheetOnlyItems = useMemo(
     () => mergedItemsMaster.filter((item) => {
       if (!(item.source === "PRICE_SHEET_ONLY" || item.source === "PRICE_MAP_ONLY")) return false;
@@ -1378,7 +1394,7 @@ export default function NewOrderPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {groupedItems.slice(0, 40).map((group) => {
+                    {groupedItems.map((group) => {
                       const isExpanded = Boolean(expandedItemCategories[group.category]);
 
                       return (
@@ -1398,7 +1414,7 @@ export default function NewOrderPage() {
                             </td>
                           </tr>
                           {isExpanded &&
-                            group.items.slice(0, 120).map((item) => {
+                            group.items.map((item) => {
                               const qty = Number(orderQuantities[item.item_code] || 0);
                               const price = getPrice(priceList, item.item_code);
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);

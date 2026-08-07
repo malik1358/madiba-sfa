@@ -2,9 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
 import { fetchSalesScope } from '../../../lib/salesScope';
 
-const PEER_HISTORY_MONTHS = 18;
-const PEER_HISTORY_LIMIT = 20000;
-const CUSTOMER_HISTORY_LIMIT = 5000;
+const CUSTOMER_HISTORY_API = '/api/customer-history';
 
 async function fetchVisibleCustomers(token) {
   const response = await fetch('/api/customers/visible', {
@@ -19,28 +17,6 @@ async function fetchVisibleCustomers(token) {
   }
 
   return payload.customers || [];
-}
-
-function normalizeCode(value) {
-  return String(value || '').trim().toUpperCase();
-}
-
-function canUseCrossSalesHistory(accessScope, customer) {
-  if (!customer) return false;
-  if (accessScope?.hasAllAccess) return true;
-
-  const mutualCodes = Array.isArray(accessScope?.mutualSalesmanCodes)
-    ? accessScope.mutualSalesmanCodes.map((code) => normalizeCode(code)).filter(Boolean)
-    : [];
-
-  if (mutualCodes.length === 0) return false;
-  return mutualCodes.includes(normalizeCode(customer.current_salesman_code));
-}
-
-function historyCutoffIso(monthsBack = PEER_HISTORY_MONTHS) {
-  const now = new Date();
-  now.setMonth(now.getMonth() - monthsBack);
-  return now.toISOString().slice(0, 10);
 }
 
 export function useCustomerData({ setError, setMessage }) {
@@ -125,60 +101,27 @@ export function useCustomerData({ setError, setMessage }) {
     setMessage('');
 
     try {
-      const cutoffDate = historyCutoffIso();
-
-      const { data, error: salesError } = await supabase
-        .from('sales_raw')
-        .select(`
-          id,
-          transaction_date,
-          voucher_number,
-          reference,
-          customer_code,
-          customer_name,
-          salesman_code,
-          salesman_name,
-          item_code,
-          item_name,
-          category,
-          quantity,
-          sales_amount,
-          rate,
-          first_purchase_date,
-          abc_class
-        `)
-        .eq('customer_code', customer.customer_code)
-        .order('transaction_date', { ascending: false })
-        .order('id', { ascending: false })
-        .limit(CUSTOMER_HISTORY_LIMIT);
-
-      if (salesError) throw salesError;
-      setTransactions(data || []);
-
-      let peerQuery = supabase
-        .from('sales_raw')
-        .select(`
-          customer_code,
-          item_code,
-          item_name,
-          category,
-          sales_amount,
-          transaction_date
-          `)
-        .gte('transaction_date', cutoffDate)
-        .order('transaction_date', { ascending: false })
-        .limit(PEER_HISTORY_LIMIT);
-
-      const allowCrossSalesHistory = canUseCrossSalesHistory(accessScope, customer);
-
-      if (!accessScope?.hasAllAccess && !allowCrossSalesHistory) {
-        peerQuery = peerQuery.in('salesman_code', accessScope?.visibleSalesmanCodes || []);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Please login again.');
       }
 
-      const { data: peerData, error: peerError } = await peerQuery;
+      const response = await fetch(
+        `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(customer.customer_code)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
+      );
 
-      if (peerError) throw peerError;
-      setPeerTransactions(peerData || []);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'Unable to load customer history.');
+      }
+
+      setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);
+      setPeerTransactions(Array.isArray(payload.peerTransactions) ? payload.peerTransactions : []);
     } catch (err) {
       setError(err.message || 'Unable to load customer history.');
     } finally {

@@ -23,9 +23,7 @@ import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
-const PEER_HISTORY_MONTHS = 18;
-const PEER_HISTORY_LIMIT = 20000;
-const CUSTOMER_HISTORY_LIMIT = 5000;
+const CUSTOMER_HISTORY_API = "/api/customer-history";
 
 const TEXT = {
   title: { en: "New Order", ar: "طلب جديد" },
@@ -186,24 +184,6 @@ function normalizeCategoryLabel(value) {
 
 function isSameCategory(left, right) {
   return normalizeCategoryKey(left) === normalizeCategoryKey(right);
-}
-
-function canUseCrossSalesHistory(accessScope, customer) {
-  if (!customer) return false;
-  if (accessScope?.hasAllAccess) return true;
-
-  const mutualCodes = Array.isArray(accessScope?.mutualSalesmanCodes)
-    ? accessScope.mutualSalesmanCodes.map((code) => normalizeCode(code)).filter(Boolean)
-    : [];
-
-  if (mutualCodes.length === 0) return false;
-  return mutualCodes.includes(normalizeCode(customer.current_salesman_code));
-}
-
-function historyCutoffIso(monthsBack = PEER_HISTORY_MONTHS) {
-  const now = new Date();
-  now.setMonth(now.getMonth() - monthsBack);
-  return now.toISOString().slice(0, 10);
 }
 
 async function fetchItemCategoryLookup(supabase, scope) {
@@ -1247,38 +1227,27 @@ function NewOrderPageContent() {
       setAuditExpandedCategories({});
 
       try {
-        const allowCrossSalesHistory = canUseCrossSalesHistory(accessScope, selectedCustomer);
-        const cutoffDate = historyCutoffIso();
-
-        let peersQuery = supabase
-          .from("sales_raw")
-          .select("customer_code,item_code,item_name,category,sales_amount,transaction_date")
-          .gte("transaction_date", cutoffDate)
-          .order("transaction_date", { ascending: false })
-          .limit(PEER_HISTORY_LIMIT)
-
-        if (!accessScope?.hasAllAccess && !allowCrossSalesHistory) {
-          peersQuery = peersQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          throw new Error("Please login again.");
         }
 
-        const [transactionsRes, peersRes] = await Promise.all([
-          supabase
-            .from("sales_raw")
-            .select(
-              "id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class"
-            )
-            .eq("customer_code", selectedCustomer.customer_code)
-            .order("transaction_date", { ascending: false })
-            .order("id", { ascending: false })
-            .limit(CUSTOMER_HISTORY_LIMIT),
-          peersQuery,
-        ]);
+        const response = await fetch(
+          `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        );
 
-        if (transactionsRes.error) throw transactionsRes.error;
-        if (peersRes.error) throw peersRes.error;
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load customer audit history.");
+        }
 
-        setTransactions(transactionsRes.data || []);
-        setPeerTransactions(peersRes.data || []);
+        setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);
+        setPeerTransactions(Array.isArray(payload.peerTransactions) ? payload.peerTransactions : []);
       } catch (err) {
         setTransactions([]);
         setPeerTransactions([]);

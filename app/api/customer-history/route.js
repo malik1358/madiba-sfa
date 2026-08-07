@@ -223,18 +223,63 @@ async function writeCached(admin, cacheKey, payload) {
   if (error) throw error;
 }
 
-async function fetchCustomerTransactions(admin, customerCode) {
-  const { data, error } = await admin
-    .from("sales_raw")
-    .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
-    .eq("customer_code", customerCode)
-    .order("transaction_date", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(HISTORY_LIMIT);
+async function fetchCustomerTransactions(admin, customerCode, scope) {
+  const target = normalizeCode(customerCode);
+  const targetNoZeros = target.replace(/^0+/, "");
+
+  async function runCustomerQuery(matchValue) {
+    let query = admin
+      .from("sales_raw")
+      .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
+      .eq("customer_code", matchValue)
+      .order("transaction_date", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(HISTORY_LIMIT);
+
+    if (!scope?.hasAllAccess && Array.isArray(scope?.visibleSalesmanCodes) && scope.visibleSalesmanCodes.length > 0) {
+      query = query.in("salesman_code", scope.visibleSalesmanCodes);
+    }
+
+    return query;
+  }
+
+  let { data, error } = await runCustomerQuery(customerCode);
 
   if (error) throw error;
 
-  const rows = Array.isArray(data) ? data : [];
+  let rows = Array.isArray(data) ? data : [];
+
+  if (rows.length === 0 && target) {
+    // Fallback for dirty imported codes (different case/spacing/leading zeros or code+suffix text).
+    const looseLike = `%${targetNoZeros || target}%`;
+    let scopedFallbackQuery = admin
+      .from("sales_raw")
+      .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
+      .ilike("customer_code", looseLike)
+      .order("transaction_date", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(HISTORY_LIMIT);
+
+    if (!scope?.hasAllAccess && Array.isArray(scope?.visibleSalesmanCodes) && scope.visibleSalesmanCodes.length > 0) {
+      scopedFallbackQuery = scopedFallbackQuery.in("salesman_code", scope.visibleSalesmanCodes);
+    }
+
+    const { data: fallbackScopedData, error: fallbackScopedError } = await scopedFallbackQuery;
+
+    if (fallbackScopedError) throw fallbackScopedError;
+
+    rows = (Array.isArray(fallbackScopedData) ? fallbackScopedData : []).filter((row) => {
+      const rowCode = normalizeCode(row.customer_code);
+      if (!rowCode) return false;
+      const rowCodeNoZeros = rowCode.replace(/^0+/, "");
+      return (
+        rowCode === target
+        || rowCodeNoZeros === targetNoZeros
+        || rowCode.startsWith(`${target} `)
+        || rowCodeNoZeros.startsWith(`${targetNoZeros} `)
+      );
+    });
+  }
 
   // Sort in JS by parsed date to avoid DB text-order artifacts.
   const sortedRows = rows
@@ -314,7 +359,7 @@ async function fetchPeerTransactions(admin, scope, selectedMonthKeys, customerCo
 }
 
 async function refreshCustomerCache(admin, customerCode, cacheKey, scope) {
-  const fresh = await fetchCustomerTransactions(admin, customerCode);
+  const fresh = await fetchCustomerTransactions(admin, customerCode, scope);
   const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
   const payload = {
     version: CACHE_VERSION,
@@ -381,7 +426,7 @@ export async function GET(request) {
       });
     }
 
-    const fresh = await fetchCustomerTransactions(admin, customerCode);
+    const fresh = await fetchCustomerTransactions(admin, customerCode, scope);
     const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
     const payload = {
       version: CACHE_VERSION,

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -432,6 +433,7 @@ function parsePricePayload(payload) {
 }
 
 export default function NewOrderPage() {
+  const router = useRouter();
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
@@ -1604,11 +1606,12 @@ export default function NewOrderPage() {
                         type="button"
                         className="moduleInlineButton"
                         onClick={() => {
-                          setSelectedCustomerCode(draft.customer_code);
-                          setCustomerSearch(draft.customer_name || draft.customer_code || "");
-                          setEditOrderId(String(draft.id || ""));
-                          setMessage(`Opening draft #${draft.id}...`);
-                          setError("");
+                          const params = new URLSearchParams();
+                          if (draft.id) params.set("order_id", String(draft.id));
+                          if (draft.customer_code) params.set("customer_code", String(draft.customer_code));
+                          if (draft.customer_name) params.set("customer_name", String(draft.customer_name));
+                          if (draft.salesman_code) params.set("salesman_code", String(draft.salesman_code));
+                          router.push(`/management/new-order?${params.toString()}`);
                         }}
                       >
                         Open Draft

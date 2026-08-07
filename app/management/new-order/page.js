@@ -34,6 +34,24 @@ function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
 }
 
+async function waitForAccessToken(supabase, attempts = 8, delayMs = 250) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (session?.access_token) {
+      return session.access_token;
+    }
+
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  return null;
+}
+
 function formatHistoryChange(change) {
   if (!change) return "";
 
@@ -1041,11 +1059,9 @@ export default function NewOrderPage() {
       setError("");
 
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        const accessToken = await waitForAccessToken(supabase);
 
-        if (!session?.user) {
+        if (!accessToken) {
           throw new Error("Please login again.");
         }
 
@@ -1063,7 +1079,7 @@ export default function NewOrderPage() {
         }
 
         const [loadedCustomers, itemsRes, draftsRes, categoriesRes] = await Promise.all([
-          fetchVisibleCustomers(session.access_token),
+          fetchVisibleCustomers(accessToken),
           supabase
             .from("items_master")
             .select("item_code,item_name,category")

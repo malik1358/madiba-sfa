@@ -601,7 +601,11 @@ export default function NewOrderPage() {
   const categories = useMemo(
     () => [
       "ALL",
-      ...new Set(mergedItemsMaster.map((item) => item.category).filter(Boolean)).values(),
+      ...new Set(
+        mergedItemsMaster
+          .map((item) => normalizeCategoryLabel(normalizeText(item.category) || "Unclassified"))
+          .filter(Boolean)
+      ).values(),
     ],
     [mergedItemsMaster]
   );
@@ -650,7 +654,7 @@ export default function NewOrderPage() {
     const map = new Map();
 
     filteredItems.forEach((item) => {
-      const category = item.category || "Unclassified";
+      const category = normalizeCategoryLabel(normalizeText(item.category) || "Unclassified");
       const current = map.get(category) || [];
       current.push(item);
       map.set(category, current);
@@ -663,22 +667,6 @@ export default function NewOrderPage() {
       }))
       .sort((a, b) => a.category.localeCompare(b.category));
   }, [filteredItems]);
-
-  useEffect(() => {
-    if (!groupedItems.length) return;
-
-    setExpandedItemCategories((current) => {
-      const next = { ...current };
-
-      groupedItems.forEach((group) => {
-        if (next[group.category] === undefined) {
-          next[group.category] = true;
-        }
-      });
-
-      return next;
-    });
-  }, [groupedItems]);
 
   const priceSheetOnlyItems = useMemo(
     () => mergedItemsMaster.filter((item) => {

@@ -321,7 +321,11 @@ export async function POST(request) {
       throw new Error("Excel file does not contain any sheet.");
     }
 
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const preferredSheetName = workbook.SheetNames.find(
+      (name) => String(name || "").trim().toLowerCase() === "bills receivable"
+    );
+    const selectedSheetName = preferredSheetName || workbook.SheetNames[0];
+    const sheet = workbook.Sheets[selectedSheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
     if (!Array.isArray(rows) || rows.length === 0) {

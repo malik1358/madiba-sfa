@@ -544,6 +544,7 @@ function NewOrderPageContent() {
     bucketLabels: [],
     customer: null,
     customerInvoices: [],
+    needsInvoiceRowsReupload: false,
     rowsCount: 0,
   });
   const [accessScope, setAccessScope] = useState(null);
@@ -820,7 +821,7 @@ function NewOrderPageContent() {
 
   const fetchOutstandingForCustomer = useCallback(async (customer) => {
     if (!customer) {
-      setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], rowsCount: 0 });
+      setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], needsInvoiceRowsReupload: false, rowsCount: 0 });
       return;
     }
 
@@ -856,10 +857,11 @@ function NewOrderPageContent() {
         bucketLabels: sortBucketLabels(payload.bucketLabels || []),
         customer: payload.customer || null,
         customerInvoices: Array.isArray(payload.customerInvoices) ? payload.customerInvoices : [],
+        needsInvoiceRowsReupload: Boolean(payload.needsInvoiceRowsReupload),
         rowsCount: Number(payload.rowsCount || 0),
       });
     } catch (err) {
-      setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], rowsCount: 0 });
+      setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], needsInvoiceRowsReupload: false, rowsCount: 0 });
       setError(err.message || "Unable to load outstanding data.");
     } finally {
       setOutstandingLoading(false);
@@ -1572,7 +1574,11 @@ function NewOrderPageContent() {
                     ))}
                     {(!Array.isArray(outstandingInfo.customerInvoices) || outstandingInfo.customerInvoices.length === 0) && (
                       <tr>
-                        <td colSpan={7}>No invoice-level rows found for this customer in the latest upload.</td>
+                        <td colSpan={7}>
+                          {outstandingInfo.needsInvoiceRowsReupload
+                            ? "Invoice-level rows are missing in current dataset. Re-upload the outstanding file once to include Ref No and invoice row details."
+                            : "No invoice-level rows found for this customer in the latest upload."}
+                        </td>
                       </tr>
                     )}
                   </tbody>

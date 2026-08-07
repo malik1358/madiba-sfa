@@ -177,7 +177,7 @@ function detectColumnIndexes(headerRow) {
       indexes.customerName = idx;
     }
 
-    if (indexes.pendingAmount < 0 && normalized.includes("pending")) {
+    if (indexes.pendingAmount < 0 && (normalized.includes("pending") || normalized.startsWith("pend"))) {
       indexes.pendingAmount = idx;
     }
 
@@ -300,7 +300,9 @@ function parseOutstandingRows(rows, headerRowIndex) {
 
     aggregate.set(key, current);
 
-    const pendingAmount = toNumber(row[columns.pendingAmount]);
+    const pendingAmount = columns.pendingAmount >= 0
+      ? toNumber(row[columns.pendingAmount])
+      : Object.values(rowBuckets).reduce((sum, value) => sum + toNumber(value), 0);
     if (pendingAmount > 0) {
       invoices.push({
         customer_code: customerCode,
@@ -352,6 +354,7 @@ export async function GET(request) {
     const customer = (customerCode || customerName)
       ? findOutstandingForCustomer(dataset, customerCode, customerName)
       : null;
+    const hasInvoiceRowsInDataset = Array.isArray(dataset.invoices) && dataset.invoices.length > 0;
     const customerInvoices = (customerCode || customerName)
       ? dataset.invoices
         .filter((row) => isSameOutstandingCustomer(row.customer_code, row.customer_name, customerCode, customerName))
@@ -370,6 +373,7 @@ export async function GET(request) {
       bucketLabels: dataset.bucketLabels,
       customer,
       customerInvoices,
+      needsInvoiceRowsReupload: !hasInvoiceRowsInDataset,
       rowsCount: dataset.rows.length,
     });
   } catch (error) {

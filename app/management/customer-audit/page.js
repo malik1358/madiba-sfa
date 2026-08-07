@@ -53,6 +53,7 @@ function CustomerAuditPageContent() {
     bucketLabels: [],
     customer: null,
     customerInvoices: [],
+    needsInvoiceRowsReupload: false,
   });
 
   const {
@@ -112,7 +113,7 @@ function CustomerAuditPageContent() {
   useEffect(() => {
     async function loadOutstanding() {
       if (!selectedCustomer) {
-        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [] });
+        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], needsInvoiceRowsReupload: false });
         return;
       }
 
@@ -147,9 +148,10 @@ function CustomerAuditPageContent() {
           bucketLabels: sortBucketLabels(payload.bucketLabels || []),
           customer: payload.customer || null,
           customerInvoices: Array.isArray(payload.customerInvoices) ? payload.customerInvoices : [],
+          needsInvoiceRowsReupload: Boolean(payload.needsInvoiceRowsReupload),
         });
       } catch (err) {
-        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [] });
+        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], needsInvoiceRowsReupload: false });
         setError(err.message || "Unable to load outstanding data.");
       } finally {
         setOutstandingLoading(false);
@@ -392,7 +394,11 @@ function CustomerAuditPageContent() {
                     ))}
                     {(!Array.isArray(outstandingInfo.customerInvoices) || outstandingInfo.customerInvoices.length === 0) && (
                       <tr>
-                        <td colSpan={7}>No invoice-level rows found for this customer in the latest upload.</td>
+                        <td colSpan={7}>
+                          {outstandingInfo.needsInvoiceRowsReupload
+                            ? "Invoice-level rows are missing in current dataset. Re-upload the outstanding file once to include Ref No and invoice row details."
+                            : "No invoice-level rows found for this customer in the latest upload."}
+                        </td>
                       </tr>
                     )}
                   </tbody>

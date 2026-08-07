@@ -358,7 +358,7 @@ export default function PendingOrdersPage() {
         const codeLines = doc.splitTextToSize(String(line.item_code || "-"), 72);
         const nameLines = doc.splitTextToSize(String(line.item_name || "-"), 214);
         const qtyLines = doc.splitTextToSize(String(Number(line.quantity || 0)), 42);
-        const rateLines = doc.splitTextToSize(formatMoney(line.rate), 72);
+        const rateLines = doc.splitTextToSize(Number(line.rate || 0).toFixed(2), 72);
         const totalLines = doc.splitTextToSize(formatMoney(line.line_value), 77);
         const lineCount = Math.max(
           codeLines.length,

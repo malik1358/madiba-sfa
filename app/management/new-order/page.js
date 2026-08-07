@@ -815,9 +815,23 @@ export default function NewOrderPage() {
         grandTotal: calculateGrandTotal(orderItems, priceList),
         lines,
         history: orderHistory,
+        outstanding: {
+          bucketLabels: visibleOutstandingBuckets,
+          customer: outstandingInfo?.customer || null,
+          customerInvoices: Array.isArray(outstandingInfo?.customerInvoices) ? outstandingInfo.customerInvoices : [],
+        },
       };
     },
-    [orderHistory, orderItems, orderSummary.itemCount, orderSummary.totalQuantity, priceList, selectedCustomer]
+    [
+      orderHistory,
+      orderItems,
+      orderSummary.itemCount,
+      orderSummary.totalQuantity,
+      outstandingInfo,
+      priceList,
+      selectedCustomer,
+      visibleOutstandingBuckets,
+    ]
   );
 
   const downloadOrderPdf = useCallback(
@@ -952,7 +966,7 @@ export default function NewOrderPage() {
             item_code: String(line.item_code || "-"),
             item_name: String(line.item_name || "-"),
             quantity: String(line.quantity),
-            rate: formatMoney(line.rate),
+            rate: Number(line.rate || 0).toFixed(2),
             lineTotal: formatMoney(line.lineTotal),
           };
 
@@ -997,6 +1011,109 @@ export default function NewOrderPage() {
         doc.text("Total (Incl. VAT)", summaryX + 10, summaryY + 54);
         doc.text(formatMoney(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 54, { align: "right" });
         doc.setFont(undefined, "normal");
+
+        const outstandingCustomer = snapshot.outstanding?.customer || null;
+        const outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
+        const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
+
+        if (outstandingCustomer && outstandingBuckets.length > 0) {
+          let outstandingY = summaryY + 90;
+          if (outstandingY > pageHeight - 170) {
+            doc.addPage();
+            outstandingY = marginTop;
+          }
+
+          doc.setFont(undefined, "bold");
+          doc.text("Outstanding Details", marginX, outstandingY);
+          doc.setFont(undefined, "normal");
+
+          let bucketY = outstandingY + 10;
+          const labelW = 220;
+          const valueW = 120;
+
+          const bucketRows = [
+            ...outstandingBuckets.map((label) => ({
+              label: `${label} days`,
+              value: formatMoney(parseOutstandingNumber(outstandingCustomer?.buckets?.[label])),
+            })),
+            { label: "Open invoices", value: String(parseOutstandingNumber(outstandingCustomer?.open_invoices)) },
+            { label: "Total outstanding", value: formatMoney(parseOutstandingNumber(outstandingCustomer?.total_outstanding)) },
+          ];
+
+          bucketRows.forEach((row, index) => {
+            const rowH = 18;
+            doc.rect(marginX, bucketY, labelW, rowH);
+            doc.rect(marginX + labelW, bucketY, valueW, rowH);
+            doc.text(row.label, marginX + 6, bucketY + 12);
+            if (index === bucketRows.length - 1) {
+              doc.setFont(undefined, "bold");
+            }
+            doc.text(row.value, marginX + labelW + valueW - 6, bucketY + 12, { align: "right" });
+            if (index === bucketRows.length - 1) {
+              doc.setFont(undefined, "normal");
+            }
+            bucketY += rowH;
+          });
+
+          if (outstandingInvoices.length > 0) {
+            let invoicesY = bucketY + 16;
+            if (invoicesY > pageHeight - 130) {
+              doc.addPage();
+              invoicesY = marginTop;
+            }
+
+            doc.setFont(undefined, "bold");
+            doc.text("Outstanding Invoice Rows", marginX, invoicesY);
+            doc.setFont(undefined, "normal");
+
+            const invoiceCols = [
+              { label: "Invoice #", width: 130, key: "ref_no" },
+              { label: "Due Date", width: 100, key: "due_date" },
+              { label: "Amount", width: 120, key: "amount" },
+              { label: "Salesman", width: 130, key: "salesman" },
+            ];
+            const rowH = 18;
+            let rowY = invoicesY + 8;
+            let colX = marginX;
+
+            doc.setFont(undefined, "bold");
+            invoiceCols.forEach((col) => {
+              doc.rect(colX, rowY, col.width, rowH);
+              doc.text(col.label, colX + 6, rowY + 12);
+              colX += col.width;
+            });
+            doc.setFont(undefined, "normal");
+            rowY += rowH;
+
+            outstandingInvoices.slice(0, 12).forEach((invoice) => {
+              if (rowY > pageHeight - 70) {
+                doc.addPage();
+                rowY = marginTop;
+              }
+
+              const values = [
+                String(invoice?.ref_no || "-"),
+                String(invoice?.due_date || "-"),
+                formatMoney(parseOutstandingNumber(invoice?.amount || 0)),
+                String(invoice?.salesman || "-"),
+              ];
+
+              let valueX = marginX;
+              values.forEach((value, idx) => {
+                const width = invoiceCols[idx].width;
+                doc.rect(valueX, rowY, width, rowH);
+                if (idx === 2) {
+                  doc.text(value, valueX + width - 6, rowY + 12, { align: "right" });
+                } else {
+                  doc.text(value, valueX + 6, rowY + 12);
+                }
+                valueX += width;
+              });
+
+              rowY += rowH;
+            });
+          }
+        }
 
         doc.setFontSize(9);
         doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 28);

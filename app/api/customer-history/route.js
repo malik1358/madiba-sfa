@@ -224,7 +224,11 @@ async function writeCached(admin, cacheKey, payload) {
 }
 
 async function fetchCustomerTransactions(admin, customerCode, scope) {
-  const target = normalizeCode(customerCode);
+  const normalizedInput = normalizeCode(customerCode);
+  const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
+  const leadingCode = normalizeCode(leadingCodeMatch?.[1] || "");
+  const codeCandidates = [...new Set([normalizedInput, leadingCode].filter(Boolean))];
+  const target = leadingCode || normalizedInput;
   const targetNoZeros = target.replace(/^0+/, "");
 
   async function runCustomerQuery(matchValue) {
@@ -243,11 +247,14 @@ async function fetchCustomerTransactions(admin, customerCode, scope) {
     return query;
   }
 
-  let { data, error } = await runCustomerQuery(customerCode);
+  let rows = [];
+  for (const codeCandidate of codeCandidates) {
+    const { data, error } = await runCustomerQuery(codeCandidate);
+    if (error) throw error;
 
-  if (error) throw error;
-
-  let rows = Array.isArray(data) ? data : [];
+    rows = Array.isArray(data) ? data : [];
+    if (rows.length > 0) break;
+  }
 
   if (rows.length === 0 && target) {
     // Fallback for dirty imported codes (different case/spacing/leading zeros or code+suffix text).

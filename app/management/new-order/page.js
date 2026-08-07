@@ -1311,18 +1311,27 @@ export default function NewOrderPage() {
           throw new Error("Please login again.");
         }
 
-        const response = await fetch(
-          `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}`,
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          }
-        );
+        async function loadHistory(refresh = false) {
+          const response = await fetch(
+            `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}${refresh ? "&refresh=1" : ""}`,
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+              },
+            }
+          );
 
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.error || "Unable to load customer audit history.");
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.success) {
+            throw new Error(payload.error || "Unable to load customer audit history.");
+          }
+
+          return payload;
+        }
+
+        let payload = await loadHistory(false);
+        if (!Array.isArray(payload.transactions) || payload.transactions.length === 0) {
+          payload = await loadHistory(true);
         }
 
         setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);

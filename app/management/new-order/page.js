@@ -1016,6 +1016,13 @@ export default function NewOrderPage() {
         const outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
         const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
 
+        function formatOutstandingValue(value, digits = 2, withCurrency = true) {
+          const number = parseOutstandingNumber(value);
+          if (number === 0) return "";
+          if (withCurrency) return formatMoney(number);
+          return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+        }
+
         if (outstandingCustomer && outstandingBuckets.length > 0) {
           let outstandingY = summaryY + 90;
           if (outstandingY > pageHeight - 170) {
@@ -1034,10 +1041,10 @@ export default function NewOrderPage() {
           const bucketRows = [
             ...outstandingBuckets.map((label) => ({
               label: `${label} days`,
-              value: formatMoney(parseOutstandingNumber(outstandingCustomer?.buckets?.[label])),
+              value: formatOutstandingValue(outstandingCustomer?.buckets?.[label], 2, true),
             })),
-            { label: "Open invoices", value: String(parseOutstandingNumber(outstandingCustomer?.open_invoices)) },
-            { label: "Total outstanding", value: formatMoney(parseOutstandingNumber(outstandingCustomer?.total_outstanding)) },
+            { label: "Open invoices", value: formatOutstandingValue(outstandingCustomer?.open_invoices, 0, false) },
+            { label: "Total outstanding", value: formatOutstandingValue(outstandingCustomer?.total_outstanding, 2, true) },
           ];
 
           bucketRows.forEach((row, index) => {
@@ -1102,10 +1109,10 @@ export default function NewOrderPage() {
               const values = [
                 String(invoice?.invoice_date || "-"),
                 String(invoice?.ref_no || "-"),
-                parseOutstandingNumber(invoice?.pending_amount ?? invoice?.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                formatOutstandingValue(invoice?.pending_amount ?? invoice?.amount, 2, false),
                 String(invoice?.due_date || "-"),
-                parseOutstandingNumber(invoice?.overdue_days).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
-                parseOutstandingNumber(invoice?.invoice_day).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+                formatOutstandingValue(invoice?.overdue_days, 0, false),
+                formatOutstandingValue(invoice?.invoice_day, 0, false),
                 String(invoice?.salesman || "-"),
               ];
 

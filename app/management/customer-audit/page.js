@@ -16,7 +16,9 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
+import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
+import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 
 import { shortDate } from "./lib/format";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -36,6 +38,20 @@ import { useAnalytics } from "./hooks/useAnalytics";
 import { useQuickOrder } from "./hooks/useQuickOrder";
 import { useOrder } from "./hooks/useOrder";
 
+function formatAmount(value) {
+  return Number(value || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatCount(value) {
+  return Number(value || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+}
+
 
 function CustomerAuditPageContent() {
   const { language, dir, setLanguage } = useAppLanguage();
@@ -44,6 +60,15 @@ function CustomerAuditPageContent() {
   const [message, setMessage] = useState("");
   const [priceList, setPriceList] = useState({});
   const [requestedCustomerCode, setRequestedCustomerCode] = useState("");
+  const [outstandingLoading, setOutstandingLoading] = useState(false);
+  const [outstandingInfo, setOutstandingInfo] = useState({
+    uploadedAt: "",
+    fileName: "",
+    bucketLabels: [],
+    customer: null,
+    customerInvoices: [],
+    needsInvoiceRowsReupload: false,
+  });
 
   const {
     customers,
@@ -100,9 +125,67 @@ function CustomerAuditPageContent() {
   });
 
   useEffect(() => {
+    async function loadOutstanding() {
+      if (!selectedCustomer) {
+        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], needsInvoiceRowsReupload: false });
+        return;
+      }
+
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      setOutstandingLoading(true);
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.access_token) throw new Error("Please login again.");
+
+        const response = await fetch(
+          `/api/outstanding?customerCode=${encodeURIComponent(selectedCustomer.customer_code || "")}&customerName=${encodeURIComponent(selectedCustomer.customer_name || "")}`,
+          {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        );
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load outstanding data.");
+        }
+
+        setOutstandingInfo({
+          uploadedAt: String(payload.uploadedAt || ""),
+          fileName: String(payload.fileName || ""),
+          bucketLabels: sortBucketLabels(payload.bucketLabels || []),
+          customer: payload.customer || null,
+          customerInvoices: Array.isArray(payload.customerInvoices) ? payload.customerInvoices : [],
+          needsInvoiceRowsReupload: Boolean(payload.needsInvoiceRowsReupload),
+        });
+      } catch (err) {
+        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], needsInvoiceRowsReupload: false });
+        setError(err.message || "Unable to load outstanding data.");
+      } finally {
+        setOutstandingLoading(false);
+      }
+    }
+
+    loadOutstanding();
+  }, [selectedCustomer, setError]);
+
+  const visibleOutstandingBuckets = useMemo(
+    () => (outstandingInfo.bucketLabels || []).filter(
+      (label) => parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]) !== 0
+    ),
+    [outstandingInfo.bucketLabels, outstandingInfo.customer]
+  );
+
+  useEffect(() => {
     async function loadPrices() {
       try {
-        const parsed = await loadPricePayload(PRICE_CACHE_API, "madiba.pricePayload");
+        const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
         setPriceList(parsed.priceMap || {});
       } catch {
         // Keep previous prices if fresh fetch fails.
@@ -263,6 +346,92 @@ function CustomerAuditPageContent() {
         {error && <div className="auditError">{error}</div>}
 
         <CustomerHeader customer={selectedCustomer} analytics={analytics} />
+
+        <section className="auditSection">
+          <div className="auditTransactionHeader">
+            <div>
+              <h3>Outstanding Customerwise</h3>
+              <p className="auditSectionNote">
+                {outstandingInfo.uploadedAt
+                  ? `Latest upload: ${new Date(outstandingInfo.uploadedAt).toLocaleString("en-GB")}`
+                  : "No outstanding upload yet"}
+              </p>
+            </div>
+          </div>
+
+          {outstandingLoading && <div className="auditEmpty">Loading outstanding buckets...</div>}
+
+          {!outstandingLoading && outstandingInfo.customer && (
+            <>
+              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      {visibleOutstandingBuckets.map((label) => (
+                        <th key={`audit-out-bucket-${label}`}>{label} days</th>
+                      ))}
+                      <th>Open Invoices</th>
+                      <th>Total Outstanding</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{selectedCustomer.customer_code} - {selectedCustomer.customer_name}</td>
+                      {visibleOutstandingBuckets.map((label) => (
+                        <td key={`audit-out-val-${label}`}>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]))}</td>
+                      ))}
+                      <td>{formatCount(parseOutstandingNumber(outstandingInfo.customer?.open_invoices))}</td>
+                      <td>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.total_outstanding))}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Ref. No.</th>
+                      <th>Pending Amount</th>
+                      <th>Due Date</th>
+                      <th>Overdue Days</th>
+                      <th>Invoice Day</th>
+                      <th>Salesman</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(outstandingInfo.customerInvoices || []).map((invoice, index) => (
+                      <tr key={`${invoice.ref_no || "no-ref"}-${invoice.due_date || "no-due"}-${index}`}>
+                        <td>{invoice.invoice_date || "-"}</td>
+                        <td>{invoice.ref_no || "-"}</td>
+                        <td>{formatAmount(parseOutstandingNumber(invoice.pending_amount))}</td>
+                        <td>{invoice.due_date || "-"}</td>
+                        <td>{formatCount(parseOutstandingNumber(invoice.overdue_days))}</td>
+                        <td>{formatCount(parseOutstandingNumber(invoice.invoice_day))}</td>
+                        <td>{invoice.salesman || "-"}</td>
+                      </tr>
+                    ))}
+                    {(!Array.isArray(outstandingInfo.customerInvoices) || outstandingInfo.customerInvoices.length === 0) && (
+                      <tr>
+                        <td colSpan={7}>
+                          {outstandingInfo.needsInvoiceRowsReupload
+                            ? "Invoice-level rows are missing in current dataset. Re-upload the outstanding file once to include Ref No and invoice row details."
+                            : "No invoice-level rows found for this customer in the latest upload."}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {!outstandingLoading && !outstandingInfo.customer && (
+            <div className="auditEmpty">No outstanding row found for this customer in latest upload.</div>
+          )}
+        </section>
 
         <section className="auditSection">
           <div className="auditTransactionHeader">

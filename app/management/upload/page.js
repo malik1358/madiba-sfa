@@ -20,6 +20,10 @@ export default function UploadSalesPage() {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [outstandingFile, setOutstandingFile] = useState(null);
+  const [outstandingUploading, setOutstandingUploading] = useState(false);
+  const [outstandingResult, setOutstandingResult] = useState(null);
+  const [outstandingError, setOutstandingError] = useState("");
 
   const supabaseClient = getSupabaseClient();
 
@@ -83,6 +87,55 @@ export default function UploadSalesPage() {
       setError(err.message);
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function uploadOutstandingFile() {
+    if (!outstandingFile) {
+      setOutstandingError("Please select an outstanding Excel file first.");
+      return;
+    }
+
+    setOutstandingUploading(true);
+    setOutstandingError("");
+    setOutstandingResult(null);
+
+    try {
+      const supabase = getSupabaseClient();
+
+      if (!supabase) {
+        throw new Error("Supabase is not configured.");
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Your login session has expired. Please login again.");
+      }
+
+      const formData = new FormData();
+      formData.append("file", outstandingFile);
+
+      const response = await fetch("/api/outstanding", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Outstanding upload failed.");
+      }
+
+      setOutstandingResult(data);
+    } catch (err) {
+      setOutstandingError(err.message || "Outstanding upload failed.");
+    } finally {
+      setOutstandingUploading(false);
     }
   }
 
@@ -254,6 +307,69 @@ export default function UploadSalesPage() {
             </div>
           )}
 
+        </div>
+
+        <div className="uploadCard" style={{ marginTop: "18px" }}>
+          <div className="uploadWarning">
+            <strong>Outstanding Customerwise Upload</strong>
+            <p>
+              Upload the evening outstanding file. Previous outstanding data is cleared and replaced with this file.
+            </p>
+          </div>
+
+          <label className="fileDrop">
+            <div className="fileIcon">📁</div>
+            <strong>{outstandingFile ? outstandingFile.name : "Choose Outstanding Excel File"}</strong>
+            <span>{outstandingFile ? `${(outstandingFile.size / 1024 / 1024).toFixed(2)} MB` : ".xlsx or .xls"}</span>
+
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => {
+                setOutstandingFile(e.target.files?.[0] || null);
+                setOutstandingResult(null);
+                setOutstandingError("");
+              }}
+            />
+          </label>
+
+          <button
+            className="replaceButton"
+            onClick={uploadOutstandingFile}
+            disabled={!outstandingFile || outstandingUploading}
+          >
+            {outstandingUploading ? "Uploading Outstanding..." : "Upload & Replace Outstanding Data"}
+          </button>
+
+          {outstandingError && (
+            <div className="uploadError">
+              <strong>Outstanding Upload Failed</strong>
+              <p>{outstandingError}</p>
+            </div>
+          )}
+
+          {outstandingResult && (
+            <div className="uploadSuccess">
+              <div className="successTitle">
+                <div className="successTick">✓</div>
+                <div>
+                  <strong>Outstanding Data Updated Successfully</strong>
+                  <p>{outstandingResult.fileName || "Outstanding file"}</p>
+                </div>
+              </div>
+
+              <div className="resultGrid">
+                <div>
+                  <span>Customers Loaded</span>
+                  <strong>{Number(outstandingResult.rowsCount || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Uploaded At</span>
+                  <strong>{outstandingResult.uploadedAt ? new Date(outstandingResult.uploadedAt).toLocaleString("en-GB") : "-"}</strong>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
       </div>

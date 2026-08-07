@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -19,8 +20,11 @@ import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance"
 import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
+import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
+const CUSTOMER_HISTORY_API = "/api/customer-history";
+const OUTSTANDING_API = "/api/outstanding";
 
 const TEXT = {
   title: { en: "New Order", ar: "طلب جديد" },
@@ -31,6 +35,24 @@ const TEXT = {
 
 function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
+}
+
+async function waitForAccessToken(supabase, attempts = 8, delayMs = 250) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (session?.access_token) {
+      return session.access_token;
+    }
+
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  return null;
 }
 
 function formatHistoryChange(change) {
@@ -81,6 +103,22 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function normalizeCategoryKey(value) {
+  return normalizeText(value).replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeCategoryLabel(value) {
+  const text = normalizeText(value).replace(/\s+/g, " ");
+  if (!text) return "Unclassified";
+
+  return text
+    .split(" ")
+    .map((word) => (word.toUpperCase() === "POS"
+      ? "POS"
+      : `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`))
+    .join(" ");
+}
+
 function isPlaceholderValue(value) {
   const text = normalizeText(value).toUpperCase();
   if (!text) return true;
@@ -110,39 +148,7 @@ function hasMeaningfulItemName(value, itemCode = "") {
   return true;
 }
 
-function isExcludedItemCode(value) {
-  return normalizeCode(value).startsWith("LP");
-}
-
-function isExcludedCategory(value) {
-  return normalizeText(value).toLowerCase() === "building material";
-}
-
 const NEEDS_MAPPING_CATEGORY = "Needs Mapping";
-
-function normalizeCategoryKey(value) {
-  return normalizeText(value).replace(/\s+/g, " ").toLowerCase();
-}
-
-function normalizeCategoryLabel(value) {
-  const text = normalizeText(value).replace(/\s+/g, " ");
-  if (!text) return "Unclassified";
-
-  if (normalizeCategoryKey(text) === normalizeCategoryKey(NEEDS_MAPPING_CATEGORY)) {
-    return NEEDS_MAPPING_CATEGORY;
-  }
-
-  return text
-    .split(" ")
-    .map((word) => (word.toUpperCase() === "POS"
-      ? "POS"
-      : `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`))
-    .join(" ");
-}
-
-function isSameCategory(left, right) {
-  return normalizeCategoryKey(left) === normalizeCategoryKey(right);
-}
 
 async function fetchItemCategoryLookup(supabase, scope) {
   const pageSize = 1000;
@@ -181,43 +187,6 @@ async function fetchItemCategoryLookup(supabase, scope) {
       }
 
       lookup.set(code, current);
-    });
-
-    if (rows.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return lookup;
-}
-
-async function fetchItemRateLookup(supabase, scope) {
-  const pageSize = 1000;
-  let from = 0;
-  const lookup = new Map();
-
-  while (true) {
-    let query = supabase
-      .from("sales_raw")
-      .select("item_code,rate,transaction_date,salesman_code")
-      .order("transaction_date", { ascending: false })
-      .range(from, from + pageSize - 1);
-
-    if (!scope.hasAllAccess) {
-      query = query.in("salesman_code", scope.visibleSalesmanCodes);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    const rows = data || [];
-    rows.forEach((row) => {
-      const code = normalizeCode(row.item_code);
-      if (!code || lookup.has(code)) return;
-
-      const rate = toNumber(row.rate);
-      if (rate > 0) {
-        lookup.set(code, rate);
-      }
     });
 
     if (rows.length < pageSize) break;
@@ -501,6 +470,7 @@ function parsePricePayload(payload) {
 }
 
 export default function NewOrderPage() {
+  const router = useRouter();
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
@@ -521,10 +491,21 @@ export default function NewOrderPage() {
   const [transactions, setTransactions] = useState([]);
   const [peerTransactions, setPeerTransactions] = useState([]);
   const [priceList, setPriceList] = useState({});
-  const [salesRateLookup, setSalesRateLookup] = useState(new Map());
   const [previousDrafts, setPreviousDrafts] = useState([]);
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [outstandingUploadFile, setOutstandingUploadFile] = useState(null);
+  const [outstandingUploading, setOutstandingUploading] = useState(false);
+  const [outstandingLoading, setOutstandingLoading] = useState(false);
+  const [outstandingInfo, setOutstandingInfo] = useState({
+    uploadedAt: "",
+    fileName: "",
+    bucketLabels: [],
+    customer: null,
+    customerInvoices: [],
+    needsInvoiceRowsReupload: false,
+    rowsCount: 0,
+  });
   const [accessScope, setAccessScope] = useState(null);
   const [prefilledCustomer, setPrefilledCustomer] = useState(null);
   const [editOrderId, setEditOrderId] = useState("");
@@ -557,45 +538,26 @@ export default function NewOrderPage() {
     (itemsMaster || []).forEach((item) => {
       const code = normalizeCode(item.item_code);
       if (!code) return;
-      if (isExcludedItemCode(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
-      const sheetFallback = (priceSheetItems || []).find((sheetItem) => normalizeCode(sheetItem.item_code) === code) || {};
-
-      const masterName = normalizeText(item.item_name);
-      const masterCategory = normalizeText(item.category);
-      const sheetName = normalizeText(sheetFallback.item_name);
-      const sheetCategory = normalizeText(sheetFallback.category);
-
-      const nextName = hasMeaningfulItemName(masterName, code)
-        ? masterName
-        : (hasMeaningfulItemName(sheetName, code) ? sheetName : (historyFallback.item_name || code));
-      const nextCategory = hasMeaningfulValue(masterCategory)
-        ? masterCategory
-        : (hasMeaningfulValue(sheetCategory) ? sheetCategory : (historyFallback.category || "Unclassified"));
-      const normalizedCategory = normalizeCategoryLabel(nextCategory);
-
-      if (isExcludedCategory(normalizedCategory)) return;
 
       itemMap.set(code, {
         ...item,
         item_code: code,
-        item_name: nextName,
-        category: normalizedCategory,
-        source: hasMeaningfulItemName(sheetName, code) || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : "ITEM_MASTER",
+        item_name: String(item.item_name || historyFallback.item_name || code).trim(),
+        category: String(item.category || historyFallback.category || "Unclassified").trim() || "Unclassified",
+        source: "ITEM_MASTER",
       });
     });
 
     (priceSheetItems || []).forEach((sheetItem) => {
       const code = normalizeCode(sheetItem.item_code);
       if (!code) return;
-      if (isExcludedItemCode(code) || isExcludedCategory(sheetItem.category)) return;
 
       const existing = itemMap.get(code);
       if (!existing) {
         const historyFallback = historyCategoryLookup.get(code) || {};
         const nextName = normalizeText(sheetItem.item_name) || historyFallback.item_name || code;
         const nextCategory = normalizeText(sheetItem.category) || historyFallback.category || "Unclassified";
-        const normalizedCategory = normalizeCategoryLabel(nextCategory);
 
         // Keep placeholder-only sheet rows visible, but isolate them for cleanup.
         const unresolved = !hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory);
@@ -613,7 +575,7 @@ export default function NewOrderPage() {
         itemMap.set(code, {
           item_code: code,
           item_name: nextName,
-          category: unresolved ? NEEDS_MAPPING_CATEGORY : normalizedCategory,
+          category: unresolved ? NEEDS_MAPPING_CATEGORY : nextCategory,
           source: "PRICE_SHEET_ONLY",
         });
         return;
@@ -631,12 +593,11 @@ export default function NewOrderPage() {
       const nextCategory = hasMeaningfulValue(sheetCategory)
         ? sheetCategory
         : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));
-      const normalizedCategory = normalizeCategoryLabel(nextCategory);
 
       itemMap.set(code, {
         ...existing,
         item_name: nextName,
-        category: normalizedCategory,
+        category: nextCategory,
         source: existing.source === "PRICE_SHEET_ONLY" || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : existing.source,
       });
     });
@@ -644,37 +605,23 @@ export default function NewOrderPage() {
     Object.keys(priceList || {}).forEach((rawCode) => {
       const code = normalizeCode(rawCode);
       if (!code || itemMap.has(code)) return;
-      if (isExcludedItemCode(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
 
       const fallbackName = historyFallback.item_name || "";
       const fallbackCategory = historyFallback.category || "";
-      if (isExcludedCategory(fallbackCategory)) return;
 
       const unresolved = !hasMeaningfulItemName(fallbackName, code) && !hasMeaningfulValue(fallbackCategory);
 
       itemMap.set(code, {
         item_code: code,
         item_name: fallbackName || code,
-        category: unresolved ? NEEDS_MAPPING_CATEGORY : normalizeCategoryLabel(fallbackCategory || "Unclassified"),
+        category: unresolved ? NEEDS_MAPPING_CATEGORY : (fallbackCategory || "Unclassified"),
         source: "PRICE_MAP_ONLY",
       });
     });
 
     return Array.from(itemMap.values())
-      .filter((item) => {
-        if (isDoNotUseItem(item.item_name)) return false;
-
-        const code = normalizeCode(item.item_code);
-        const hasSalesHistory = historyCategoryLookup.has(code);
-        const hasUsableSheetPrice = toNumber(priceList?.[code]) > 0;
-        const isUnclassified = normalizeCategoryKey(item.category) === normalizeCategoryKey("Unclassified");
-
-        // Hide only unclassified orphan rows that have no sales evidence and no usable price.
-        if (isUnclassified && !hasSalesHistory && !hasUsableSheetPrice) return false;
-
-        return true;
-      })
+      .filter((item) => !isDoNotUseItem(item.item_name))
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 
@@ -701,21 +648,14 @@ export default function NewOrderPage() {
   );
 
   const categories = useMemo(
-    () => {
-      const keyToLabel = new Map();
-
-      (mergedItemsMaster || []).forEach((item) => {
-        const label = normalizeCategoryLabel(item.category);
-        const key = normalizeCategoryKey(label);
-        if (!key || keyToLabel.has(key)) return;
-        keyToLabel.set(key, label);
-      });
-
-      return [
-        "ALL",
-        ...Array.from(keyToLabel.values()).sort((a, b) => a.localeCompare(b)),
-      ];
-    },
+    () => [
+      "ALL",
+      ...new Set(
+        mergedItemsMaster
+          .map((item) => normalizeCategoryLabel(normalizeText(item.category) || "Unclassified"))
+          .filter(Boolean)
+      ).values(),
+    ],
     [mergedItemsMaster]
   );
 
@@ -741,7 +681,7 @@ export default function NewOrderPage() {
     const includeNeedsMapping = categoryFilter === NEEDS_MAPPING_CATEGORY;
 
     return mergedItemsMaster.filter((item) => {
-      if (categoryFilter !== "ALL" && !isSameCategory(item.category, categoryFilter)) return false;
+      if (categoryFilter !== "ALL" && normalizeCategoryLabel(normalizeText(item.category) || "Unclassified") !== categoryFilter) return false;
 
       const matchesQuery = !q || (
         String(item.item_code || "").toLowerCase().includes(q) ||
@@ -759,27 +699,30 @@ export default function NewOrderPage() {
     });
   }, [mergedItemsMaster, categoryFilter, itemSearch]);
 
-  const hiddenItemCount = Math.max(0, mergedItemsMaster.length - filteredItems.length);
-  const hasActiveFilters = itemSearch.trim().length > 0 || categoryFilter !== "ALL";
-
   const groupedItems = useMemo(() => {
     const map = new Map();
 
     filteredItems.forEach((item) => {
-      const category = normalizeCategoryLabel(item.category || "Unclassified");
-      const categoryKey = normalizeCategoryKey(category);
-      const current = map.get(categoryKey) || [];
+      const category = normalizeCategoryLabel(normalizeText(item.category) || "Unclassified");
+      const current = map.get(category) || [];
       current.push(item);
-      map.set(categoryKey, current);
+      map.set(category, current);
     });
 
     return Array.from(map.entries())
-      .map(([categoryKey, items]) => ({
-        category: normalizeCategoryLabel(items[0]?.category || categoryKey || "Unclassified"),
+      .map(([category, items]) => ({
+        category,
         items,
       }))
       .sort((a, b) => a.category.localeCompare(b.category));
   }, [filteredItems]);
+
+  const visibleOutstandingBuckets = useMemo(
+    () => (outstandingInfo.bucketLabels || []).filter(
+      (label) => parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]) !== 0
+    ),
+    [outstandingInfo.bucketLabels, outstandingInfo.customer]
+  );
 
   const priceSheetOnlyItems = useMemo(
     () => mergedItemsMaster.filter((item) => {
@@ -794,6 +737,11 @@ export default function NewOrderPage() {
     }),
     [mergedItemsMaster]
   );
+
+  const canUploadOutstanding = useMemo(() => {
+    const role = String(accessScope?.role || "").toLowerCase();
+    return ["admin", "manager", "invoice-maker", "invoice_maker"].includes(role);
+  }, [accessScope]);
 
   function toggleItemCategory(category) {
     setExpandedItemCategories((current) => ({
@@ -867,9 +815,23 @@ export default function NewOrderPage() {
         grandTotal: calculateGrandTotal(orderItems, priceList),
         lines,
         history: orderHistory,
+        outstanding: {
+          bucketLabels: Array.isArray(outstandingInfo?.bucketLabels) ? outstandingInfo.bucketLabels : [],
+          customer: outstandingInfo?.customer || null,
+          customerInvoices: Array.isArray(outstandingInfo?.customerInvoices) ? outstandingInfo.customerInvoices : [],
+        },
       };
     },
-    [orderHistory, orderItems, orderSummary.itemCount, orderSummary.totalQuantity, priceList, selectedCustomer]
+    [
+      orderHistory,
+      orderItems,
+      orderSummary.itemCount,
+      orderSummary.totalQuantity,
+      outstandingInfo,
+      priceList,
+      selectedCustomer,
+      visibleOutstandingBuckets,
+    ]
   );
 
   const downloadOrderPdf = useCallback(
@@ -893,11 +855,19 @@ export default function NewOrderPage() {
         const totalWithVat = subtotal + vatAmount;
 
         const columns = [
-          { key: "item_code", label: "Item Code", width: 88, align: "left" },
-          { key: "item_name", label: "Item Name", width: 222, align: "left" },
-          { key: "quantity", label: "Qty", width: 60, align: "right" },
-          { key: "rate", label: "Rate (Excl. VAT)", width: 96, align: "right" },
-          { key: "lineTotal", label: "Line Total", width: 89, align: "right" },
+          { key: "item_code", label: "Item Code", width: 78, align: "left" },
+          { key: "item_name", label: "Item Name", width: 215, align: "left" },
+          { key: "quantity", label: "Qty", width: 50, align: "right" },
+          { key: "rate", label: "Rate (Excl. VAT)", width: 82, align: "right" },
+          { key: "lineTotal", label: "Line Total", width: 90, align: "right" },
+        ];
+
+        const orderSummaryColumns = [
+          { label: "Items", value: String(snapshot.itemCount), align: "left" },
+          { label: "Total Qty", value: qtyFormat(snapshot.totalQuantity), align: "left" },
+          { label: "Subtotal", value: formatMoney(subtotal), align: "left" },
+          { label: "VAT 15%", value: formatMoney(vatAmount), align: "left" },
+          { label: "Total Incl. VAT", value: formatMoney(totalWithVat), align: "left" },
         ];
 
         function drawCellText(text, x, y, width, align = "left") {
@@ -982,19 +952,20 @@ export default function NewOrderPage() {
           doc.text(customerLine2, marginX + 12, marginTop + 152);
         }
 
-        doc.roundedRect(marginX, marginTop + 172, contentWidth, 40, 5, 5);
+        const orderSummaryY = marginTop + 172;
+        const orderSummaryHeight = 40;
+        const orderSummaryColWidth = contentWidth / orderSummaryColumns.length;
+        doc.roundedRect(marginX, orderSummaryY, contentWidth, orderSummaryHeight, 5, 5);
         doc.setFont(undefined, "bold");
-        doc.text("Items", marginX + 12, marginTop + 188);
-        doc.text("Total Qty", marginX + 145, marginTop + 188);
-        doc.text("Subtotal", marginX + 282, marginTop + 188);
-        doc.text("VAT 15%", marginX + 398, marginTop + 188);
-        doc.text("Total Incl. VAT", marginX + 475, marginTop + 188);
+        orderSummaryColumns.forEach((col, index) => {
+          const colX = marginX + index * orderSummaryColWidth;
+          doc.text(col.label, colX + 8, orderSummaryY + 16);
+        });
         doc.setFont(undefined, "normal");
-        doc.text(String(snapshot.itemCount), marginX + 12, marginTop + 202);
-        doc.text(qtyFormat(snapshot.totalQuantity), marginX + 145, marginTop + 202);
-        doc.text(formatMoney(subtotal), marginX + 282, marginTop + 202);
-        doc.text(formatMoney(vatAmount), marginX + 398, marginTop + 202);
-        doc.text(formatMoney(totalWithVat), marginX + 475, marginTop + 202);
+        orderSummaryColumns.forEach((col, index) => {
+          const colX = marginX + index * orderSummaryColWidth;
+          doc.text(col.value, colX + 8, orderSummaryY + 32);
+        });
 
         let y = drawTableHeader(marginTop + 226);
         doc.setFontSize(10);
@@ -1004,7 +975,7 @@ export default function NewOrderPage() {
             item_code: String(line.item_code || "-"),
             item_name: String(line.item_name || "-"),
             quantity: String(line.quantity),
-            rate: formatMoney(line.rate),
+            rate: Number(line.rate || 0).toFixed(2),
             lineTotal: formatMoney(line.lineTotal),
           };
 
@@ -1049,6 +1020,127 @@ export default function NewOrderPage() {
         doc.text("Total (Incl. VAT)", summaryX + 10, summaryY + 54);
         doc.text(formatMoney(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 54, { align: "right" });
         doc.setFont(undefined, "normal");
+
+        const outstandingCustomer = snapshot.outstanding?.customer || null;
+        const outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
+        const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
+
+        function formatOutstandingValue(value, digits = 2, withCurrency = true) {
+          const number = parseOutstandingNumber(value);
+          if (number === 0) return "";
+          if (withCurrency) return formatMoney(number);
+          return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+        }
+
+        if (outstandingCustomer && outstandingBuckets.length > 0) {
+          let outstandingY = summaryY + 90;
+          if (outstandingY > pageHeight - 170) {
+            doc.addPage();
+            outstandingY = marginTop;
+          }
+
+          doc.setFont(undefined, "bold");
+          doc.text("Outstanding Details", marginX, outstandingY);
+          doc.setFont(undefined, "normal");
+
+          let bucketY = outstandingY + 10;
+          const labelW = 220;
+          const valueW = 120;
+
+          const bucketRows = [
+            ...outstandingBuckets.map((label) => ({
+              label: `${label} days`,
+              value: formatOutstandingValue(outstandingCustomer?.buckets?.[label], 2, true),
+            })),
+            { label: "Open invoices", value: formatOutstandingValue(outstandingCustomer?.open_invoices, 0, false) },
+            { label: "Total outstanding", value: formatOutstandingValue(outstandingCustomer?.total_outstanding, 2, true) },
+          ];
+
+          bucketRows.forEach((row, index) => {
+            const rowH = 18;
+            doc.rect(marginX, bucketY, labelW, rowH);
+            doc.rect(marginX + labelW, bucketY, valueW, rowH);
+            doc.text(row.label, marginX + 6, bucketY + 12);
+            if (index === bucketRows.length - 1) {
+              doc.setFont(undefined, "bold");
+            }
+            doc.text(row.value, marginX + labelW + valueW - 6, bucketY + 12, { align: "right" });
+            if (index === bucketRows.length - 1) {
+              doc.setFont(undefined, "normal");
+            }
+            bucketY += rowH;
+          });
+
+          if (outstandingInvoices.length > 0) {
+            let invoicesY = bucketY + 16;
+            if (invoicesY > pageHeight - 130) {
+              doc.addPage();
+              invoicesY = marginTop;
+            }
+
+            doc.setFont(undefined, "bold");
+            doc.text("Outstanding Invoice Rows", marginX, invoicesY);
+            doc.setFont(undefined, "normal");
+
+            const invoiceCols = [
+              { label: "Date", width: 72 },
+              { label: "Ref. No.", width: 90 },
+              { label: "Pending Amount", width: 92 },
+              { label: "Due Date", width: 72 },
+              { label: "Overdue Days", width: 62 },
+              { label: "Invoice Day", width: 62 },
+              { label: "Salesman", width: 65 },
+            ];
+            const rowH = 18;
+            let rowY = invoicesY + 8;
+
+            function drawInvoiceHeader(atY) {
+              let colX = marginX;
+              doc.setFont(undefined, "bold");
+              doc.setFontSize(9);
+              invoiceCols.forEach((col) => {
+                doc.rect(colX, atY, col.width, rowH);
+                doc.text(col.label, colX + 4, atY + 12);
+                colX += col.width;
+              });
+              doc.setFont(undefined, "normal");
+              return atY + rowH;
+            }
+
+            rowY = drawInvoiceHeader(rowY);
+
+            outstandingInvoices.slice(0, 12).forEach((invoice) => {
+              if (rowY > pageHeight - 70) {
+                doc.addPage();
+                rowY = drawInvoiceHeader(marginTop);
+              }
+
+              const values = [
+                String(invoice?.invoice_date || "-"),
+                String(invoice?.ref_no || "-"),
+                formatOutstandingValue(invoice?.pending_amount ?? invoice?.amount, 2, false),
+                String(invoice?.due_date || "-"),
+                formatOutstandingValue(invoice?.overdue_days, 0, false),
+                formatOutstandingValue(invoice?.invoice_day, 0, false),
+                String(invoice?.salesman || "-"),
+              ];
+
+              let valueX = marginX;
+              values.forEach((value, idx) => {
+                const width = invoiceCols[idx].width;
+                doc.rect(valueX, rowY, width, rowH);
+                const rightAligned = idx === 2 || idx === 4 || idx === 5;
+                if (rightAligned) doc.text(String(value), valueX + width - 4, rowY + 12, { align: "right" });
+                else doc.text(String(value), valueX + 4, rowY + 12);
+                valueX += width;
+              });
+
+              rowY += rowH;
+            });
+
+            doc.setFontSize(10);
+          }
+        }
 
         doc.setFontSize(9);
         doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 28);
@@ -1114,6 +1206,114 @@ export default function NewOrderPage() {
     return `Order #${lastSavedOrder.orderId} (${lastSavedOrder.statusLabel}) for ${lastSavedOrder.customerName} - ${formatMoney(lastSavedOrder.grandTotal)}. PDF downloaded and ready to attach.`;
   }, [lastSavedOrder]);
 
+  const fetchOutstandingForCustomer = useCallback(async (customer) => {
+    if (!customer) {
+      setOutstandingInfo({
+        uploadedAt: "",
+        fileName: "",
+        bucketLabels: [],
+        customer: null,
+        customerInvoices: [],
+        needsInvoiceRowsReupload: false,
+        rowsCount: 0,
+      });
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    setOutstandingLoading(true);
+
+    try {
+      const accessToken = await waitForAccessToken(supabase);
+      if (!accessToken) throw new Error("Please login again.");
+
+      const response = await fetch(
+        `${OUTSTANDING_API}?customerCode=${encodeURIComponent(customer.customer_code || "")}&customerName=${encodeURIComponent(customer.customer_name || "")}`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to load outstanding data.");
+      }
+
+      setOutstandingInfo({
+        uploadedAt: String(payload.uploadedAt || ""),
+        fileName: String(payload.fileName || ""),
+        bucketLabels: sortBucketLabels(payload.bucketLabels || []),
+        customer: payload.customer || null,
+        customerInvoices: Array.isArray(payload.customerInvoices) ? payload.customerInvoices : [],
+        needsInvoiceRowsReupload: Boolean(payload.needsInvoiceRowsReupload),
+        rowsCount: Number(payload.rowsCount || 0),
+      });
+    } catch (err) {
+      setOutstandingInfo({
+        uploadedAt: "",
+        fileName: "",
+        bucketLabels: [],
+        customer: null,
+        customerInvoices: [],
+        needsInvoiceRowsReupload: false,
+        rowsCount: 0,
+      });
+      setError(err.message || "Unable to load outstanding data.");
+    } finally {
+      setOutstandingLoading(false);
+    }
+  }, [setError]);
+
+  const handleOutstandingUpload = useCallback(async () => {
+    if (!outstandingUploadFile) {
+      setError("Please select outstanding Excel file first.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setOutstandingUploading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const accessToken = await waitForAccessToken(supabase);
+      if (!accessToken) throw new Error("Please login again.");
+
+      const formData = new FormData();
+      formData.append("file", outstandingUploadFile);
+
+      const response = await fetch(OUTSTANDING_API, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: formData,
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to upload outstanding file.");
+      }
+
+      setMessage(`Outstanding file uploaded. Replaced with ${payload.rowsCount || 0} customer row(s).`);
+      setOutstandingUploadFile(null);
+      await fetchOutstandingForCustomer(selectedCustomer);
+    } catch (err) {
+      setError(err.message || "Unable to upload outstanding file.");
+    } finally {
+      setOutstandingUploading(false);
+    }
+  }, [fetchOutstandingForCustomer, outstandingUploadFile, selectedCustomer, setError, setMessage]);
+
   const whatsappShareUrl = useMemo(
     () => (shareText ? `https://wa.me/?text=${encodeURIComponent(shareText)}` : "#"),
     [shareText]
@@ -1138,11 +1338,9 @@ export default function NewOrderPage() {
       setError("");
 
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        const accessToken = await waitForAccessToken(supabase);
 
-        if (!session?.user) {
+        if (!accessToken) {
           throw new Error("Please login again.");
         }
 
@@ -1159,15 +1357,14 @@ export default function NewOrderPage() {
           draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
         }
 
-        const [loadedCustomers, itemsRes, draftsRes, categoriesRes, rateLookupRes] = await Promise.all([
-          fetchVisibleCustomers(session.access_token),
+        const [loadedCustomers, itemsRes, draftsRes, categoriesRes] = await Promise.all([
+          fetchVisibleCustomers(accessToken),
           supabase
             .from("items_master")
             .select("item_code,item_name,category")
             .order("item_name"),
           draftsQuery,
           fetchItemCategoryLookup(supabase, scope),
-          fetchItemRateLookup(supabase, scope),
         ]);
 
         if (itemsRes.error) throw itemsRes.error;
@@ -1181,7 +1378,6 @@ export default function NewOrderPage() {
         setItemsMaster(itemsRes.data || []);
         setPreviousDrafts(draftsRes.data || []);
         setHistoryCategoryLookup(categoriesRes || new Map());
-        setSalesRateLookup(rateLookupRes || new Map());
       } catch (err) {
         setError(err.message || "Unable to load new order data.");
       } finally {
@@ -1230,25 +1426,6 @@ export default function NewOrderPage() {
   }, [prefilledCustomer]);
 
   useEffect(() => {
-    if (!salesRateLookup || salesRateLookup.size === 0) return;
-
-    setPriceList((current) => {
-      const merged = { ...current };
-      let changed = false;
-
-      salesRateLookup.forEach((rate, code) => {
-        if (isExcludedItemCode(code)) return;
-        const currentRate = toNumber(merged[code]);
-        if (currentRate > 0 || !Number.isFinite(rate) || rate <= 0) return;
-        merged[code] = rate;
-        changed = true;
-      });
-
-      return changed ? merged : current;
-    });
-  }, [salesRateLookup]);
-
-  useEffect(() => {
     if (!prefilledCustomer?.customer_code) return;
 
     setSelectedCustomerCode(prefilledCustomer.customer_code);
@@ -1273,31 +1450,36 @@ export default function NewOrderPage() {
       setAuditExpandedCategories({});
 
       try {
-        let peersQuery = supabase
-          .from("sales_raw")
-          .select("customer_code,item_code,item_name,category,sales_amount,transaction_date")
-
-        if (!accessScope?.hasAllAccess) {
-          peersQuery = peersQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
+        const accessToken = await waitForAccessToken(supabase);
+        if (!accessToken) {
+          throw new Error("Please login again.");
         }
 
-        const [transactionsRes, peersRes] = await Promise.all([
-          supabase
-            .from("sales_raw")
-            .select(
-              "id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class"
-            )
-            .eq("customer_code", selectedCustomer.customer_code)
-            .order("transaction_date", { ascending: false })
-            .order("id", { ascending: false }),
-          peersQuery,
-        ]);
+        async function loadHistory(refresh = false) {
+          const response = await fetch(
+            `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}${refresh ? "&refresh=1" : ""}`,
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+              },
+            }
+          );
 
-        if (transactionsRes.error) throw transactionsRes.error;
-        if (peersRes.error) throw peersRes.error;
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.success) {
+            throw new Error(payload.error || "Unable to load customer audit history.");
+          }
 
-        setTransactions(transactionsRes.data || []);
-        setPeerTransactions(peersRes.data || []);
+          return payload;
+        }
+
+        let payload = await loadHistory(false);
+        if (!Array.isArray(payload.transactions) || payload.transactions.length === 0) {
+          payload = await loadHistory(true);
+        }
+
+        setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);
+        setPeerTransactions(Array.isArray(payload.peerTransactions) ? payload.peerTransactions : []);
       } catch (err) {
         setTransactions([]);
         setPeerTransactions([]);
@@ -1309,6 +1491,10 @@ export default function NewOrderPage() {
 
     loadCustomerHistory();
   }, [accessScope, selectedCustomer, setError]);
+
+  useEffect(() => {
+    fetchOutstandingForCustomer(selectedCustomer);
+  }, [fetchOutstandingForCustomer, selectedCustomer]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -1345,6 +1531,116 @@ export default function NewOrderPage() {
 
         {error && <div className="moduleError">{error}</div>}
         {message && <div className="moduleSuccess">{message}</div>}
+
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>Outstanding Customerwise</h2>
+            <span>
+              {outstandingInfo.uploadedAt
+                ? `Uploaded ${new Date(outstandingInfo.uploadedAt).toLocaleString("en-GB")}`
+                : "No outstanding upload yet"}
+            </span>
+          </div>
+
+          {canUploadOutstanding && (
+            <div className="moduleFormGrid">
+              <label>
+                Upload Outstanding Excel (.xlsx/.xls)
+                <input
+                  className="moduleInput"
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={(event) => setOutstandingUploadFile(event.target.files?.[0] || null)}
+                />
+              </label>
+              <div className="moduleFieldFull">
+                <button
+                  type="button"
+                  className="modulePrimaryButton"
+                  onClick={handleOutstandingUpload}
+                  disabled={outstandingUploading || !outstandingUploadFile}
+                >
+                  {outstandingUploading ? "Uploading outstanding..." : "Upload & Replace Outstanding Data"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!selectedCustomer && <div className="moduleHint">Select a customer to view outstanding details.</div>}
+
+          {selectedCustomer && outstandingLoading && <div className="moduleLoading">Loading outstanding details...</div>}
+
+          {selectedCustomer && !outstandingLoading && outstandingInfo.customer && (
+            <>
+              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      {visibleOutstandingBuckets.map((label) => (
+                        <th key={`bucket-head-${label}`}>{label} days</th>
+                      ))}
+                      <th>Open Invoices</th>
+                      <th>Total Outstanding</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{selectedCustomer.customer_code} - {selectedCustomer.customer_name}</td>
+                      {visibleOutstandingBuckets.map((label) => (
+                        <td key={`bucket-val-${label}`}>{parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      ))}
+                      <td>{parseOutstandingNumber(outstandingInfo.customer?.open_invoices).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                      <td>{parseOutstandingNumber(outstandingInfo.customer?.total_outstanding).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Ref. No.</th>
+                      <th>Pending Amount</th>
+                      <th>Due Date</th>
+                      <th>Overdue Days</th>
+                      <th>Invoice Day</th>
+                      <th>Salesman</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(outstandingInfo.customerInvoices || []).map((invoice, index) => (
+                      <tr key={`${invoice.ref_no || "no-ref"}-${invoice.due_date || "no-due"}-${index}`}>
+                        <td>{invoice.invoice_date || "-"}</td>
+                        <td>{invoice.ref_no || "-"}</td>
+                        <td>{parseOutstandingNumber(invoice.pending_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td>{invoice.due_date || "-"}</td>
+                        <td>{parseOutstandingNumber(invoice.overdue_days).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                        <td>{parseOutstandingNumber(invoice.invoice_day).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                        <td>{invoice.salesman || "-"}</td>
+                      </tr>
+                    ))}
+                    {(!Array.isArray(outstandingInfo.customerInvoices) || outstandingInfo.customerInvoices.length === 0) && (
+                      <tr>
+                        <td colSpan={7}>
+                          {outstandingInfo.needsInvoiceRowsReupload
+                            ? "Invoice-level rows are missing in current dataset. Re-upload the outstanding file once to include Ref No and invoice row details."
+                            : "No invoice-level rows found for this customer in the latest upload."}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {selectedCustomer && !outstandingLoading && !outstandingInfo.customer && (
+            <div className="moduleHint">No outstanding row found for this customer in latest upload.</div>
+          )}
+        </section>
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
@@ -1479,7 +1775,7 @@ export default function NewOrderPage() {
               <div className="moduleSectionHeader">
                 <h2>Full Item List</h2>
                 <span>
-                  {filteredItems.length} visible of {mergedItemsMaster.length} catalog items • {orderSummary.itemCount} selected • {qtyFormat(orderSummary.totalQuantity)} units
+                  {mergedItemsMaster.length} catalog items • {orderSummary.itemCount} selected • {qtyFormat(orderSummary.totalQuantity)} units
                 </span>
               </div>
 
@@ -1503,26 +1799,6 @@ export default function NewOrderPage() {
                   ))}
                 </select>
               </div>
-
-              {hiddenItemCount > 0 && (
-                <div className="moduleHint">
-                  {hiddenItemCount} item(s) are hidden by current view rules
-                  {hasActiveFilters ? " (search/category filters)." : " (mostly unresolved mapping items)."}
-                  {hasActiveFilters && (
-                    <button
-                      type="button"
-                      className="moduleInlineButton"
-                      onClick={() => {
-                        setItemSearch("");
-                        setCategoryFilter("ALL");
-                      }}
-                      style={{ marginLeft: "8px" }}
-                    >
-                      Reset Filters
-                    </button>
-                  )}
-                </div>
-              )}
 
               <div className="moduleTableWrap">
                 <table className="moduleTable moduleOrderTable">
@@ -1763,7 +2039,14 @@ export default function NewOrderPage() {
                       <button
                         type="button"
                         className="moduleInlineButton"
-                        onClick={() => setSelectedCustomerCode(draft.customer_code)}
+                        onClick={() => {
+                          const params = new URLSearchParams();
+                          if (draft.id) params.set("order_id", String(draft.id));
+                          if (draft.customer_code) params.set("customer_code", String(draft.customer_code));
+                          if (draft.customer_name) params.set("customer_name", String(draft.customer_name));
+                          if (draft.salesman_code) params.set("salesman_code", String(draft.salesman_code));
+                          router.push(`/management/new-order?${params.toString()}`);
+                        }}
                       >
                         Open Draft
                       </button>

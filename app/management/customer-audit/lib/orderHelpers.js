@@ -1,20 +1,35 @@
 import { isDoNotUseItem } from './helpers';
 
+function normalizeCode(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
 export function buildOrderItems(orderQuantities, analytics, quickOrderAllItems) {
   if (!analytics) return [];
+
+  const itemLookup = new Map();
+
+  (Array.isArray(analytics.items) ? analytics.items : []).forEach((row) => {
+    const code = normalizeCode(row?.item_code);
+    if (!code || itemLookup.has(code)) return;
+    itemLookup.set(code, row);
+  });
+
+  (Array.isArray(quickOrderAllItems) ? quickOrderAllItems : []).forEach((row) => {
+    const code = normalizeCode(row?.item_code);
+    if (!code || itemLookup.has(code)) return;
+    itemLookup.set(code, row);
+  });
 
   return Object.entries(orderQuantities)
     .filter(([, quantity]) => Number(quantity) > 0)
     .map(([itemCode, quantity]) => {
-      let item = analytics.items.find((row) => row.item_code === itemCode);
-
-      if (!item) {
-        item = quickOrderAllItems.find((row) => row.item_code === itemCode);
-      }
+      const code = normalizeCode(itemCode);
+      const item = itemLookup.get(code);
 
       if (!item || isDoNotUseItem(item.item_name)) return null;
 
-      return { ...item, order_quantity: Number(quantity) };
+      return { ...item, item_code: code, order_quantity: Number(quantity) };
     })
     .filter(Boolean);
 }

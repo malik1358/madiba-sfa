@@ -13,10 +13,15 @@ jobs:
         env:
           PRICE_SOURCE_URL: ${{ secrets.PRICE_SOURCE_URL || 'https://script.google.com/macros/s/AKfycbwmgoTXNLgIVM_HyVl3iwnfmhqmqjvJcIriCDtZAc0FDgvBbslYmmmC8-h2P2I0RH6f/exec' }}
         run: |
-          http_code="$(curl -sS -L -o upstream-price.json -w "%{http_code}" "$PRICE_SOURCE_URL")"
+          http_code="$(curl -sS -L -o upstream-price.json -w "%{http_code}" "$PRICE_SOURCE_URL")" || {
+            echo "ERROR: curl failed to fetch upstream price data (HTTP error or network failure)."
+            head -c 500 upstream-price.json 2>/dev/null || true
+            exit 1
+          }
 
           if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
-            echo "Upstream price source failed with HTTP $http_code"
+            echo "Upstream fetch failed with HTTP $http_code"
+            cat upstream-price.json
             exit 1
           fi
 
@@ -27,8 +32,8 @@ jobs:
             try {
               payload = JSON.parse(raw);
             } catch (e) {
-              const snippet = raw.slice(0, 200).replace(/\s+/g, " ").trim();
-              console.error("Upstream price source returned non-JSON content. First bytes: " + snippet);
+              console.error("Upstream response is not valid JSON. Response body:");
+              console.error(raw.slice(0, 2000));
               process.exit(1);
             }
             fs.writeFileSync("price-sync-body.json", JSON.stringify({ payload }));
@@ -39,9 +44,16 @@ jobs:
           PRICE_SYNC_URL: ${{ secrets.PRICE_SYNC_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          if [[ -z "$PRICE_SYNC_URL" ]]; then
-            echo "PRICE_SYNC_URL secret is missing"
-            exit 1
+          DEFAULT_PRICE_SYNC_URL='https://madiba-sfa.vercel.app/api/admin/price-sync'
+          PRICE_SYNC_URL_TRIMMED="$(printf '%s' "$PRICE_SYNC_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          PRICE_SYNC_URL_EFFECTIVE="$PRICE_SYNC_URL_TRIMMED"
+
+          if [[ -z "$PRICE_SYNC_URL_EFFECTIVE" ]]; then
+            echo "PRICE_SYNC_URL secret is missing; falling back to default endpoint."
+            PRICE_SYNC_URL_EFFECTIVE="$DEFAULT_PRICE_SYNC_URL"
+          elif [[ ! "$PRICE_SYNC_URL_EFFECTIVE" =~ /api/admin/price-sync([/?].*)?$ ]]; then
+            echo "PRICE_SYNC_URL secret does not point to /api/admin/price-sync; falling back to default endpoint."
+            PRICE_SYNC_URL_EFFECTIVE="$DEFAULT_PRICE_SYNC_URL"
           fi
 
           if [[ -z "$CRON_SECRET" ]]; then
@@ -52,10 +64,21 @@ jobs:
           # Guard against accidental leading/trailing whitespace in pasted secrets.
           CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
-          status_code="$(curl -sS -o response.json -w "%{http_code}" -X POST "$PRICE_SYNC_URL" \
-            -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
-            -H "Content-Type: application/json" \
-            --data-binary @price-sync-body.json)"
+          post_sync() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data-binary @price-sync-body.json
+          }
+
+          status_code="$(post_sync "$PRICE_SYNC_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$PRICE_SYNC_URL_EFFECTIVE" != "$DEFAULT_PRICE_SYNC_URL" ]]; then
+            echo "Primary PRICE_SYNC_URL failed with HTTP $status_code; retrying default endpoint."
+            PRICE_SYNC_URL_EFFECTIVE="$DEFAULT_PRICE_SYNC_URL"
+            status_code="$(post_sync "$PRICE_SYNC_URL_EFFECTIVE")"
+          fi
 
           if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
             echo "Price sync failed with HTTP $status_code"

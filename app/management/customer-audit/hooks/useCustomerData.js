@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
 import { fetchSalesScope } from '../../../lib/salesScope';
 
+const CUSTOMER_HISTORY_API = '/api/customer-history';
+
 async function fetchVisibleCustomers(token) {
   const response = await fetch('/api/customers/visible', {
     headers: {
@@ -99,52 +101,27 @@ export function useCustomerData({ setError, setMessage }) {
     setMessage('');
 
     try {
-      const { data, error: salesError } = await supabase
-        .from('sales_raw')
-        .select(`
-          id,
-          transaction_date,
-          voucher_number,
-          reference,
-          customer_code,
-          customer_name,
-          salesman_code,
-          salesman_name,
-          item_code,
-          item_name,
-          category,
-          quantity,
-          sales_amount,
-          rate,
-          first_purchase_date,
-          abc_class
-        `)
-        .eq('customer_code', customer.customer_code)
-        .order('transaction_date', { ascending: false })
-        .order('id', { ascending: false });
-
-      if (salesError) throw salesError;
-      setTransactions(data || []);
-
-      let peerQuery = supabase
-        .from('sales_raw')
-        .select(`
-          customer_code,
-          item_code,
-          item_name,
-          category,
-          sales_amount,
-          transaction_date
-          `);
-
-      if (!accessScope?.hasAllAccess) {
-        peerQuery = peerQuery.in('salesman_code', accessScope?.visibleSalesmanCodes || []);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Please login again.');
       }
 
-      const { data: peerData, error: peerError } = await peerQuery;
+      const response = await fetch(
+        `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(customer.customer_code)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
+      );
 
-      if (peerError) throw peerError;
-      setPeerTransactions(peerData || []);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'Unable to load customer history.');
+      }
+
+      setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);
+      setPeerTransactions(Array.isArray(payload.peerTransactions) ? payload.peerTransactions : []);
     } catch (err) {
       setError(err.message || 'Unable to load customer history.');
     } finally {

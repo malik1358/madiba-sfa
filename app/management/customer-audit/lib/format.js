@@ -22,9 +22,46 @@ export function shortDate(value) {
   });
 }
 
+export function parseDateValue(value) {
+  if (!value) return null;
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  // Fast path for ISO-like YYYY-MM-DD values.
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    const isoDate = new Date(`${text.slice(0, 10)}T00:00:00Z`);
+    return Number.isNaN(isoDate.getTime()) ? null : isoDate;
+  }
+
+  // Handles formats like 30/04/2025 or 30-04-2025.
+  const dmyMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]);
+    const year = Number(dmyMatch[3]);
+    const utc = new Date(Date.UTC(year, month - 1, day));
+    if (!Number.isNaN(utc.getTime())) return utc;
+  }
+
+  // Handles formats like "Wednesday, April 30, 2025".
+  const longMonthMatch = text.match(/(?:^|,\s*)([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if (longMonthMatch) {
+    const candidate = new Date(`${longMonthMatch[1]} ${longMonthMatch[2]}, ${longMonthMatch[3]} UTC`);
+    if (!Number.isNaN(candidate.getTime())) return candidate;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export function monthKey(date) {
-  if (!date) return null;
-  return String(date).slice(0, 7);
+  const parsed = parseDateValue(date);
+  if (!parsed) return null;
+
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
 }
 
 export function monthName(key) {
@@ -47,9 +84,8 @@ export function salesUnitQty(row) {
 }
 
 export function buildLast12Months(latestDate) {
-  if (!latestDate) return [];
-
-  const d = new Date(`${latestDate}T00:00:00`);
+  const d = parseDateValue(latestDate);
+  if (!d) return [];
   const result = [];
 
   for (let i = 11; i >= 0; i -= 1) {

@@ -39,8 +39,11 @@ const DOCUMENT_TYPES = ["CR", "VAT", "ID", "CREDIT_APPLICATION", "OTHER"];
 
 function extractMissingProspectsColumn(errorMessage) {
   const text = String(errorMessage || "");
-  const postgresStyle = text.match(/column\s+prospects\.(\w+)\s+does\s+not\s+exist/i);
+  const postgresStyle = text.match(/column\s+(?:\w+\.)?"?(\w+)"?\s+of\s+relation\s+"?prospects"?\s+does\s+not\s+exist/i);
   if (postgresStyle?.[1]) return postgresStyle[1];
+
+  const genericPostgresStyle = text.match(/column\s+(?:\w+\.)?"?(\w+)"?\s+does\s+not\s+exist/i);
+  if (genericPostgresStyle?.[1]) return genericPostgresStyle[1];
 
   const schemaCacheStyle = text.match(/Could not find the ['"](\w+)['"] column of ['"]prospects['"] in the schema cache/i);
   return schemaCacheStyle?.[1] || "";
@@ -57,6 +60,18 @@ function parseGpsCoordinates(rawValue) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   return { lat, lng };
+}
+
+function buildProspectOrderParams({ id, customerName, salesmanCode }) {
+  const customerCode = `PROSPECT-${id}`;
+  const resolvedName = String(customerName || "").trim() || `Prospect ${id}`;
+  const params = new URLSearchParams({
+    customer_code: customerCode,
+    customer_name: resolvedName,
+    salesman_code: String(salesmanCode || "").trim(),
+    source: "prospect",
+  });
+  return params.toString();
 }
 
 async function reverseGeocode(lat, lng) {
@@ -98,16 +113,18 @@ async function translateToArabic(text) {
 
 async function insertProspectWithColumnFallback(supabase, payload) {
   const workingPayload = { ...payload };
+  const removedColumns = [];
+  const maxAttempts = Object.keys(workingPayload).length + 2;
 
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const { data, error } = await supabase
       .from("prospects")
       .insert(workingPayload)
-      .select("id,customer_name,salesman_code")
+      .select("id")
       .single();
 
     if (!error) {
-      return { data, removedColumns: [] };
+      return { data, removedColumns };
     }
 
     const missingColumn = extractMissingProspectsColumn(error.message);
@@ -115,6 +132,7 @@ async function insertProspectWithColumnFallback(supabase, payload) {
       throw error;
     }
 
+    removedColumns.push(missingColumn);
     delete workingPayload[missingColumn];
   }
 
@@ -137,6 +155,7 @@ export default function NewCustomerPage() {
   const [documents, setDocuments] = useState([]);
   const [selectedDocumentType, setSelectedDocumentType] = useState("CR");
   const [gpsStatus, setGpsStatus] = useState("GPS is required before saving.");
+  const [gpsPermissionWarning, setGpsPermissionWarning] = useState("");
   const [arabicNameEdited, setArabicNameEdited] = useState(false);
   const [translatingName, setTranslatingName] = useState(false);
 
@@ -168,6 +187,13 @@ export default function NewCustomerPage() {
 
     return () => window.clearTimeout(timer);
   }, [form.customer_name_en, arabicNameEdited]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (form.gps_location) return;
+
+    captureLocation();
+  }, [loading, form.gps_location]);
 
   useEffect(() => {
     async function load() {
@@ -276,9 +302,11 @@ export default function NewCustomerPage() {
 
   async function captureLocation() {
     if (!navigator.geolocation) {
-      setError("Geolocation is not supported on this device.");
+      setGpsPermissionWarning("Location is not supported on this device. GPS is required to save a prospect.");
       return;
     }
+
+    setGpsPermissionWarning("");
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
@@ -306,8 +334,14 @@ export default function NewCustomerPage() {
           setGpsStatus(`Captured ${lat}, ${lng}. Could not auto-detect city/area.`);
         }
       },
-      () => {
-        setError("Unable to read GPS location.");
+      (positionError) => {
+        if (positionError?.code === 1) {
+          setGpsPermissionWarning("Location permission is blocked. Allow location access in your browser and reload this page.");
+        } else if (positionError?.code === 2) {
+          setGpsPermissionWarning("Location is unavailable right now. Check device GPS/network and reload this page.");
+        } else {
+          setGpsPermissionWarning("Unable to read location. Please allow GPS/location access and reload this page.");
+        }
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
@@ -381,6 +415,7 @@ export default function NewCustomerPage() {
 
       const payload = {
         customer_name: form.customer_name_en,
+        company_name: form.shop_name || form.customer_name_en,
         customer_name_en: form.customer_name_en,
         customer_name_ar: form.customer_name_ar || null,
         shop_name: form.shop_name,
@@ -398,11 +433,15 @@ export default function NewCustomerPage() {
           form.notes,
           documents.length ? `Documents: ${JSON.stringify(documents)}` : "",
         ].filter(Boolean).join("\n") || null,
-        status: "PENDING",
         created_by: session.user.id,
       };
 
-      const { data } = await insertProspectWithColumnFallback(supabase, payload);
+      const { data, removedColumns } = await insertProspectWithColumnFallback(supabase, payload);
+
+      if (removedColumns.length > 0) {
+        const removed = Array.from(new Set(removedColumns)).join(", ");
+        setSchemaWarning(`Prospect was saved, but these missing columns were skipped: ${removed}`);
+      }
 
       const { data: latest, error: latestError } = await supabase
         .from("prospects")
@@ -414,16 +453,13 @@ export default function NewCustomerPage() {
       if (latestError) throw latestError;
       setRecent(latest || []);
 
-      const customerCode = `PROSPECT-${data.id}`;
-      const customerName = data.customer_name || data.shop_name || form.customer_name_en || form.shop_name || `Prospect ${data.id}`;
-      const params = new URLSearchParams({
-        customer_code: customerCode,
-        customer_name: customerName,
-        salesman_code: form.salesman_code,
-        source: "prospect",
+      const query = buildProspectOrderParams({
+        id: data.id,
+        customerName: data.customer_name || data.shop_name || form.customer_name_en || form.shop_name,
+        salesmanCode: form.salesman_code,
       });
 
-      router.push(`/management/new-order?${params.toString()}`);
+      router.push(`/management/new-order?${query}`);
     } catch (err) {
       setError(err.message || "Unable to register prospect.");
     } finally {
@@ -467,6 +503,7 @@ export default function NewCustomerPage() {
         {error && <div className="moduleError">{error}</div>}
         {message && <div className="moduleSuccess">{message}</div>}
         {schemaWarning && <div className="moduleWarning">{schemaWarning}</div>}
+        {gpsPermissionWarning && <div className="moduleWarning">{gpsPermissionWarning}</div>}
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
@@ -565,11 +602,7 @@ export default function NewCustomerPage() {
               </select>
             </label>
             <label className="moduleGpsRow">
-              GPS Location
-              <div className="moduleGpsControls">
-                <input className="moduleInput" required value={form.gps_location} onChange={(e) => setForm({ ...form, gps_location: e.target.value })} placeholder="24.774265, 46.738586" />
-                <button type="button" className="moduleInlineButton" onClick={captureLocation}>Capture</button>
-              </div>
+              GPS Status
               <small className="moduleHint">{gpsStatus}</small>
             </label>
             <div className="moduleFieldFull">
@@ -623,6 +656,7 @@ export default function NewCustomerPage() {
                   <th>Area</th>
                   <th>Status</th>
                   <th>Created</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -635,11 +669,27 @@ export default function NewCustomerPage() {
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.status || "-"}</td>
                     <td>{row.created_at ? new Date(row.created_at).toLocaleString("en-GB") : "-"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="moduleInlineButton"
+                        onClick={() => {
+                          const query = buildProspectOrderParams({
+                            id: row.id,
+                            customerName: row.customer_name || row.shop_name,
+                            salesmanCode: row.salesman_code || form.salesman_code,
+                          });
+                          router.push(`/management/new-order?${query}`);
+                        }}
+                      >
+                        Create Order
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {recent.length === 0 && (
                   <tr>
-                    <td colSpan={7}>No prospects created yet.</td>
+                    <td colSpan={8}>No prospects created yet.</td>
                   </tr>
                 )}
               </tbody>

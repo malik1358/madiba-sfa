@@ -3780,7 +3780,7 @@ table.auditMatrix td.auditTrendSame {
   }
 
   .moduleOrderTable {
-    min-width: 680px;
+    min-width: 0;
   }
 
   .moduleReviewMeta {

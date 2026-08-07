@@ -35,6 +35,11 @@ function isRandomPassword(value) {
   return /^\d{6}$/.test(String(value || "").trim());
 }
 
+function isInvoiceMakerRole(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  return normalized === "invoice-maker" || normalized === "invoice_maker";
+}
+
 export default function SalesmanHierarchyPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -52,6 +57,7 @@ export default function SalesmanHierarchyPage() {
     salesmanName: "",
     salesmanCode: "",
     email: "",
+    role: "salesman",
     headSalesmanCode: "",
   });
 
@@ -200,14 +206,16 @@ export default function SalesmanHierarchyPage() {
         salesmanName: newSalesman.salesmanName,
         salesmanCode: normalizeCode(newSalesman.salesmanCode),
         email: String(newSalesman.email || "").trim().toLowerCase(),
+        role: String(newSalesman.role || "salesman"),
         headSalesmanCode: normalizeCode(newSalesman.headSalesmanCode || ""),
       });
 
       const created = result.created || {};
+      const createdRole = String(created.role || "salesman").replace("_", " ");
       setMessage(
-        `${result.message || "Salesman created."} Username: ${created.login_name || displayLoginName(created.email) || "-"} | Password: ${created.password || "-"}`
+        `${result.message || "User created."} Role: ${createdRole.toUpperCase()} | Username: ${created.login_name || displayLoginName(created.email) || "-"} | Password: ${created.password || "-"}`
       );
-      setNewSalesman({ salesmanName: "", salesmanCode: "", email: "", headSalesmanCode: "" });
+      setNewSalesman({ salesmanName: "", salesmanCode: "", email: "", role: "salesman", headSalesmanCode: "" });
       await loadHierarchy(false);
     } catch (err) {
       setError(err.message || "Unable to create salesman.");
@@ -275,7 +283,7 @@ export default function SalesmanHierarchyPage() {
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>Create Salesman</h2>
+            <h2>Create User</h2>
             <span>Creates login and profile in one step</span>
           </div>
 
@@ -315,10 +323,23 @@ export default function SalesmanHierarchyPage() {
             </label>
 
             <label>
+              User Role
+              <select
+                className="moduleInput"
+                value={newSalesman.role}
+                onChange={(event) => setNewSalesman((current) => ({ ...current, role: event.target.value }))}
+              >
+                <option value="salesman">Salesman</option>
+                <option value="invoice-maker">Invoice Maker</option>
+              </select>
+            </label>
+
+            <label>
               Assign Head Salesman
               <select
                 className="moduleInput"
                 value={newSalesman.headSalesmanCode}
+                disabled={isInvoiceMakerRole(newSalesman.role)}
                 onChange={(event) => setNewSalesman((current) => ({ ...current, headSalesmanCode: event.target.value }))}
               >
                 <option value="">No head</option>
@@ -332,7 +353,7 @@ export default function SalesmanHierarchyPage() {
 
             <div className="moduleFieldFull">
               <button className="modulePrimaryButton" type="submit" disabled={creating}>
-                {creating ? "Creating..." : "Create Salesman"}
+                {creating ? "Creating..." : "Create User"}
               </button>
             </div>
           </form>
@@ -351,6 +372,7 @@ export default function SalesmanHierarchyPage() {
               <thead>
                 <tr>
                   <th>Salesman</th>
+                  <th>Role</th>
                   <th>Username</th>
                   <th>Current Head</th>
                   <th>Assign Head</th>
@@ -370,12 +392,14 @@ export default function SalesmanHierarchyPage() {
                         <strong>{salesman.salesman_name || salesman.salesman_code || salesman.id}</strong>
                         <div className="moduleCode">{salesman.salesman_code || salesman.id}</div>
                       </td>
+                      <td>{String(salesman.role || "-").replace("_", " ").toUpperCase()}</td>
                       <td>{loginName || "No username"}</td>
                       <td>{currentHead ? `${currentHead.salesman_name || currentHead.salesman_code} (${currentHead.salesman_code})` : "-"}</td>
                       <td>
                         <select
                           className="moduleInput"
                           value={headSelections[salesman.id] || ""}
+                          disabled={isInvoiceMakerRole(salesman.role)}
                           onChange={(event) => setHeadSelections((current) => ({ ...current, [salesman.id]: event.target.value }))}
                         >
                           <option value="">No head</option>
@@ -415,7 +439,7 @@ export default function SalesmanHierarchyPage() {
 
                 {salesmen.length === 0 && (
                   <tr>
-                    <td colSpan={6}>No salesmen found.</td>
+                    <td colSpan={7}>No users found.</td>
                   </tr>
                 )}
               </tbody>

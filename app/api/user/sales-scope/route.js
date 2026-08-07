@@ -33,6 +33,11 @@ function isInvoiceMakerRole(role) {
   return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
+function isSoyebProfile(profile) {
+  const normalizedName = normalizeName(profile?.salesman_name);
+  return normalizedName === "SOYEB";
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -122,7 +127,7 @@ export async function GET(request) {
     ])];
     const visibleUserIds = [...new Set(visibleMembers.map((member) => member.id).filter(Boolean))];
 
-    const hasAllAccess = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role);
+    const hasAllAccess = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role) || isSoyebProfile(currentProfile);
 
     return NextResponse.json({
       success: true,
@@ -130,6 +135,7 @@ export async function GET(request) {
       currentUserId: currentProfile.id,
       currentSalesmanCode,
       hasAllAccess,
+      mutualSalesmanCodes: mutualGroupCodes,
       visibleSalesmanCodes,
       visibleUserIds,
       visibleMembers,

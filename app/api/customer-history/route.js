@@ -9,6 +9,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const HISTORY_MONTHS = 6;
 const HISTORY_LIMIT = 5000;
+const CACHE_VERSION = 2;
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function normalizeCode(value) {
@@ -39,10 +40,16 @@ function cacheKeyFor(customerCode) {
   return `customer_history_cache:${normalizeCode(customerCode)}`;
 }
 
-function fromDateIso(monthsBack = HISTORY_MONTHS) {
-  const date = new Date();
-  date.setMonth(date.getMonth() - monthsBack);
-  return date.toISOString().slice(0, 10);
+function monthKey(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return "";
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthStartFromKey(key) {
+  const match = String(key || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  return `${match[1]}-${match[2]}-01`;
 }
 
 function isStaleCache(updatedAt) {
@@ -179,28 +186,52 @@ async function writeCached(admin, cacheKey, payload) {
 }
 
 async function fetchCustomerTransactions(admin, customerCode) {
-  const fromDate = fromDateIso();
-
   const { data, error } = await admin
     .from("sales_raw")
     .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
     .eq("customer_code", customerCode)
-    .gte("transaction_date", fromDate)
     .order("transaction_date", { ascending: false })
     .order("id", { ascending: false })
     .limit(HISTORY_LIMIT);
 
   if (error) throw error;
 
+  const rows = Array.isArray(data) ? data : [];
+  const selectedMonths = new Set();
+  const filtered = [];
+
+  for (const row of rows) {
+    const key = monthKey(row.transaction_date);
+    if (!key) continue;
+
+    if (selectedMonths.has(key)) {
+      filtered.push(row);
+      continue;
+    }
+
+    if (selectedMonths.size < HISTORY_MONTHS) {
+      selectedMonths.add(key);
+      filtered.push(row);
+      continue;
+    }
+
+    // Rows are ordered newest->oldest; after the 6th distinct month,
+    // any unseen month is older and can be skipped with early exit.
+    break;
+  }
+
+  const lastMonthKey = Array.from(selectedMonths).at(-1) || "";
+
   return {
-    fromDate,
-    transactions: Array.isArray(data) ? data : [],
+    fromDate: monthStartFromKey(lastMonthKey),
+    transactions: filtered,
   };
 }
 
 async function refreshCustomerCache(admin, customerCode, cacheKey) {
   const fresh = await fetchCustomerTransactions(admin, customerCode);
   const payload = {
+    version: CACHE_VERSION,
     updatedAt: new Date().toISOString(),
     fromDate: fresh.fromDate,
     transactions: fresh.transactions,
@@ -241,7 +272,9 @@ export async function GET(request) {
     const key = cacheKeyFor(customerCode);
     const cached = await loadCached(admin, key);
 
-    if (cached && !forceRefresh) {
+    const isCurrentCacheVersion = Number(cached?.version || 0) === CACHE_VERSION;
+
+    if (cached && isCurrentCacheVersion && !forceRefresh) {
       const stale = isStaleCache(cached.updatedAt);
 
       if (stale) {
@@ -252,7 +285,7 @@ export async function GET(request) {
       return NextResponse.json({
         success: true,
         customerCode,
-        fromDate: cached.fromDate || fromDateIso(),
+        fromDate: cached.fromDate || "",
         updatedAt: cached.updatedAt || "",
         isStale: stale,
         isRefreshing: stale,

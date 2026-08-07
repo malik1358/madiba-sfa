@@ -154,7 +154,7 @@ function canSeeOrder(order, scope) {
 async function ensureOrderVisible(admin, orderId, scope) {
   const { data: order, error } = await admin
     .from("sales_orders")
-    .select("id,customer_code,created_by,salesman_code")
+    .select("id,customer_code,created_by,salesman_code,created_at")
     .eq("id", orderId)
     .maybeSingle();
 
@@ -346,8 +346,8 @@ export async function POST(request) {
       const existingMap = await readMetaMap(admin, [orderId]);
       const existing = existingMap.get(orderId) || { orderId };
 
-      const startedAt = parseIso(form.get("startedAt"));
-      const diffSeconds = startedAt ? Math.max(0, Math.round((now.getTime() - startedAt.getTime()) / 1000)) : null;
+      const orderCreatedAt = parseIso(order.created_at);
+      const diffSeconds = orderCreatedAt ? Math.max(0, Math.round((now.getTime() - orderCreatedAt.getTime()) / 1000)) : null;
 
       const updated = {
         ...existing,

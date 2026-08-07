@@ -816,7 +816,7 @@ export default function NewOrderPage() {
         lines,
         history: orderHistory,
         outstanding: {
-          bucketLabels: visibleOutstandingBuckets,
+          bucketLabels: Array.isArray(outstandingInfo?.bucketLabels) ? outstandingInfo.bucketLabels : [],
           customer: outstandingInfo?.customer || null,
           customerInvoices: Array.isArray(outstandingInfo?.customerInvoices) ? outstandingInfo.customerInvoices : [],
         },

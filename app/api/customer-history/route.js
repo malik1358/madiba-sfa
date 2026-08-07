@@ -175,7 +175,12 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
 
   if (error) throw error;
   if (!customer) {
-    throw new Error("Customer not found.");
+    // Some customer codes can be present in uploaded datasets but missing in customers master.
+    // Allow request to continue; downstream sales query will return empty transactions if no history exists.
+    return {
+      customer_code: customerCode,
+      current_salesman_code: "",
+    };
   }
 
   if (!scope.hasAllAccess && !scope.visibleSalesmanCodes.includes(normalizeCode(customer.current_salesman_code))) {

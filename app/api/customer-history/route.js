@@ -10,7 +10,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const HISTORY_MONTHS = 6;
 const HISTORY_LIMIT = 5000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function normalizeCode(value) {
@@ -407,6 +407,32 @@ export async function GET(request) {
 
     if (cached && isCurrentCacheVersion && !forceRefresh) {
       const stale = isStaleCache(cached.updatedAt);
+      const cachedTransactions = Array.isArray(cached.transactions) ? cached.transactions : [];
+
+      if (cachedTransactions.length === 0) {
+        const fresh = await fetchCustomerTransactions(admin, customerCode, scope);
+        const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
+        const payload = {
+          version: CACHE_VERSION,
+          updatedAt: new Date().toISOString(),
+          fromDate: fresh.fromDate,
+          transactions: fresh.transactions,
+          peerTransactions,
+        };
+        await writeCached(admin, key, payload);
+
+        return NextResponse.json({
+          success: true,
+          customerCode,
+          fromDate: payload.fromDate,
+          updatedAt: payload.updatedAt,
+          isStale: false,
+          isRefreshing: false,
+          source: "fresh",
+          transactions: payload.transactions,
+          peerTransactions: payload.peerTransactions,
+        });
+      }
 
       if (stale) {
         // Return previous data immediately, refresh snapshot in background.
@@ -421,7 +447,7 @@ export async function GET(request) {
         isStale: stale,
         isRefreshing: stale,
         source: "cache",
-        transactions: Array.isArray(cached.transactions) ? cached.transactions : [],
+        transactions: cachedTransactions,
         peerTransactions: Array.isArray(cached.peerTransactions) ? cached.peerTransactions : [],
       });
     }

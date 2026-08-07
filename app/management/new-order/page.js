@@ -20,8 +20,10 @@ import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance"
 import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
+import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
+const OUTSTANDING_API = "/api/outstanding";
 
 const TEXT = {
   title: { en: "New Order", ar: "طلب جديد" },
@@ -491,6 +493,18 @@ export default function NewOrderPage() {
   const [previousDrafts, setPreviousDrafts] = useState([]);
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [outstandingUploadFile, setOutstandingUploadFile] = useState(null);
+  const [outstandingUploading, setOutstandingUploading] = useState(false);
+  const [outstandingLoading, setOutstandingLoading] = useState(false);
+  const [outstandingInfo, setOutstandingInfo] = useState({
+    uploadedAt: "",
+    fileName: "",
+    bucketLabels: [],
+    customer: null,
+    customerInvoices: [],
+    needsInvoiceRowsReupload: false,
+    rowsCount: 0,
+  });
   const [accessScope, setAccessScope] = useState(null);
   const [prefilledCustomer, setPrefilledCustomer] = useState(null);
   const [editOrderId, setEditOrderId] = useState("");
@@ -702,6 +716,13 @@ export default function NewOrderPage() {
       .sort((a, b) => a.category.localeCompare(b.category));
   }, [filteredItems]);
 
+  const visibleOutstandingBuckets = useMemo(
+    () => (outstandingInfo.bucketLabels || []).filter(
+      (label) => parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]) !== 0
+    ),
+    [outstandingInfo.bucketLabels, outstandingInfo.customer]
+  );
+
   const priceSheetOnlyItems = useMemo(
     () => mergedItemsMaster.filter((item) => {
       if (!(item.source === "PRICE_SHEET_ONLY" || item.source === "PRICE_MAP_ONLY")) return false;
@@ -715,6 +736,11 @@ export default function NewOrderPage() {
     }),
     [mergedItemsMaster]
   );
+
+  const canUploadOutstanding = useMemo(() => {
+    const role = String(accessScope?.role || "").toLowerCase();
+    return ["admin", "manager", "invoice-maker", "invoice_maker"].includes(role);
+  }, [accessScope]);
 
   function toggleItemCategory(category) {
     setExpandedItemCategories((current) => ({
@@ -1035,6 +1061,114 @@ export default function NewOrderPage() {
     return `Order #${lastSavedOrder.orderId} (${lastSavedOrder.statusLabel}) for ${lastSavedOrder.customerName} - ${formatMoney(lastSavedOrder.grandTotal)}. PDF downloaded and ready to attach.`;
   }, [lastSavedOrder]);
 
+  const fetchOutstandingForCustomer = useCallback(async (customer) => {
+    if (!customer) {
+      setOutstandingInfo({
+        uploadedAt: "",
+        fileName: "",
+        bucketLabels: [],
+        customer: null,
+        customerInvoices: [],
+        needsInvoiceRowsReupload: false,
+        rowsCount: 0,
+      });
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    setOutstandingLoading(true);
+
+    try {
+      const accessToken = await waitForAccessToken(supabase);
+      if (!accessToken) throw new Error("Please login again.");
+
+      const response = await fetch(
+        `${OUTSTANDING_API}?customerCode=${encodeURIComponent(customer.customer_code || "")}&customerName=${encodeURIComponent(customer.customer_name || "")}`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to load outstanding data.");
+      }
+
+      setOutstandingInfo({
+        uploadedAt: String(payload.uploadedAt || ""),
+        fileName: String(payload.fileName || ""),
+        bucketLabels: sortBucketLabels(payload.bucketLabels || []),
+        customer: payload.customer || null,
+        customerInvoices: Array.isArray(payload.customerInvoices) ? payload.customerInvoices : [],
+        needsInvoiceRowsReupload: Boolean(payload.needsInvoiceRowsReupload),
+        rowsCount: Number(payload.rowsCount || 0),
+      });
+    } catch (err) {
+      setOutstandingInfo({
+        uploadedAt: "",
+        fileName: "",
+        bucketLabels: [],
+        customer: null,
+        customerInvoices: [],
+        needsInvoiceRowsReupload: false,
+        rowsCount: 0,
+      });
+      setError(err.message || "Unable to load outstanding data.");
+    } finally {
+      setOutstandingLoading(false);
+    }
+  }, [setError]);
+
+  const handleOutstandingUpload = useCallback(async () => {
+    if (!outstandingUploadFile) {
+      setError("Please select outstanding Excel file first.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setOutstandingUploading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const accessToken = await waitForAccessToken(supabase);
+      if (!accessToken) throw new Error("Please login again.");
+
+      const formData = new FormData();
+      formData.append("file", outstandingUploadFile);
+
+      const response = await fetch(OUTSTANDING_API, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: formData,
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to upload outstanding file.");
+      }
+
+      setMessage(`Outstanding file uploaded. Replaced with ${payload.rowsCount || 0} customer row(s).`);
+      setOutstandingUploadFile(null);
+      await fetchOutstandingForCustomer(selectedCustomer);
+    } catch (err) {
+      setError(err.message || "Unable to upload outstanding file.");
+    } finally {
+      setOutstandingUploading(false);
+    }
+  }, [fetchOutstandingForCustomer, outstandingUploadFile, selectedCustomer, setError, setMessage]);
+
   const whatsappShareUrl = useMemo(
     () => (shareText ? `https://wa.me/?text=${encodeURIComponent(shareText)}` : "#"),
     [shareText]
@@ -1208,6 +1342,10 @@ export default function NewOrderPage() {
     loadCustomerHistory();
   }, [accessScope, selectedCustomer, setError]);
 
+  useEffect(() => {
+    fetchOutstandingForCustomer(selectedCustomer);
+  }, [fetchOutstandingForCustomer, selectedCustomer]);
+
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
     return (
@@ -1243,6 +1381,116 @@ export default function NewOrderPage() {
 
         {error && <div className="moduleError">{error}</div>}
         {message && <div className="moduleSuccess">{message}</div>}
+
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>Outstanding Customerwise</h2>
+            <span>
+              {outstandingInfo.uploadedAt
+                ? `Uploaded ${new Date(outstandingInfo.uploadedAt).toLocaleString("en-GB")}`
+                : "No outstanding upload yet"}
+            </span>
+          </div>
+
+          {canUploadOutstanding && (
+            <div className="moduleFormGrid">
+              <label>
+                Upload Outstanding Excel (.xlsx/.xls)
+                <input
+                  className="moduleInput"
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={(event) => setOutstandingUploadFile(event.target.files?.[0] || null)}
+                />
+              </label>
+              <div className="moduleFieldFull">
+                <button
+                  type="button"
+                  className="modulePrimaryButton"
+                  onClick={handleOutstandingUpload}
+                  disabled={outstandingUploading || !outstandingUploadFile}
+                >
+                  {outstandingUploading ? "Uploading outstanding..." : "Upload & Replace Outstanding Data"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!selectedCustomer && <div className="moduleHint">Select a customer to view outstanding details.</div>}
+
+          {selectedCustomer && outstandingLoading && <div className="moduleLoading">Loading outstanding details...</div>}
+
+          {selectedCustomer && !outstandingLoading && outstandingInfo.customer && (
+            <>
+              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      {visibleOutstandingBuckets.map((label) => (
+                        <th key={`bucket-head-${label}`}>{label} days</th>
+                      ))}
+                      <th>Open Invoices</th>
+                      <th>Total Outstanding</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{selectedCustomer.customer_code} - {selectedCustomer.customer_name}</td>
+                      {visibleOutstandingBuckets.map((label) => (
+                        <td key={`bucket-val-${label}`}>{parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      ))}
+                      <td>{parseOutstandingNumber(outstandingInfo.customer?.open_invoices).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                      <td>{parseOutstandingNumber(outstandingInfo.customer?.total_outstanding).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Ref. No.</th>
+                      <th>Pending Amount</th>
+                      <th>Due Date</th>
+                      <th>Overdue Days</th>
+                      <th>Invoice Day</th>
+                      <th>Salesman</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(outstandingInfo.customerInvoices || []).map((invoice, index) => (
+                      <tr key={`${invoice.ref_no || "no-ref"}-${invoice.due_date || "no-due"}-${index}`}>
+                        <td>{invoice.invoice_date || "-"}</td>
+                        <td>{invoice.ref_no || "-"}</td>
+                        <td>{parseOutstandingNumber(invoice.pending_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td>{invoice.due_date || "-"}</td>
+                        <td>{parseOutstandingNumber(invoice.overdue_days).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                        <td>{parseOutstandingNumber(invoice.invoice_day).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
+                        <td>{invoice.salesman || "-"}</td>
+                      </tr>
+                    ))}
+                    {(!Array.isArray(outstandingInfo.customerInvoices) || outstandingInfo.customerInvoices.length === 0) && (
+                      <tr>
+                        <td colSpan={7}>
+                          {outstandingInfo.needsInvoiceRowsReupload
+                            ? "Invoice-level rows are missing in current dataset. Re-upload the outstanding file once to include Ref No and invoice row details."
+                            : "No invoice-level rows found for this customer in the latest upload."}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {selectedCustomer && !outstandingLoading && !outstandingInfo.customer && (
+            <div className="moduleHint">No outstanding row found for this customer in latest upload.</div>
+          )}
+        </section>
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">

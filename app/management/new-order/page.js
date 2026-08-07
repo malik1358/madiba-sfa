@@ -1067,34 +1067,45 @@ export default function NewOrderPage() {
             doc.setFont(undefined, "normal");
 
             const invoiceCols = [
-              { label: "Invoice #", width: 130, key: "ref_no" },
-              { label: "Due Date", width: 100, key: "due_date" },
-              { label: "Amount", width: 120, key: "amount" },
-              { label: "Salesman", width: 130, key: "salesman" },
+              { label: "Date", width: 72 },
+              { label: "Ref. No.", width: 90 },
+              { label: "Pending Amount", width: 92 },
+              { label: "Due Date", width: 72 },
+              { label: "Overdue Days", width: 62 },
+              { label: "Invoice Day", width: 62 },
+              { label: "Salesman", width: 65 },
             ];
             const rowH = 18;
             let rowY = invoicesY + 8;
-            let colX = marginX;
 
-            doc.setFont(undefined, "bold");
-            invoiceCols.forEach((col) => {
-              doc.rect(colX, rowY, col.width, rowH);
-              doc.text(col.label, colX + 6, rowY + 12);
-              colX += col.width;
-            });
-            doc.setFont(undefined, "normal");
-            rowY += rowH;
+            function drawInvoiceHeader(atY) {
+              let colX = marginX;
+              doc.setFont(undefined, "bold");
+              doc.setFontSize(9);
+              invoiceCols.forEach((col) => {
+                doc.rect(colX, atY, col.width, rowH);
+                doc.text(col.label, colX + 4, atY + 12);
+                colX += col.width;
+              });
+              doc.setFont(undefined, "normal");
+              return atY + rowH;
+            }
+
+            rowY = drawInvoiceHeader(rowY);
 
             outstandingInvoices.slice(0, 12).forEach((invoice) => {
               if (rowY > pageHeight - 70) {
                 doc.addPage();
-                rowY = marginTop;
+                rowY = drawInvoiceHeader(marginTop);
               }
 
               const values = [
+                String(invoice?.invoice_date || "-"),
                 String(invoice?.ref_no || "-"),
+                parseOutstandingNumber(invoice?.pending_amount ?? invoice?.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
                 String(invoice?.due_date || "-"),
-                formatMoney(parseOutstandingNumber(invoice?.amount || 0)),
+                parseOutstandingNumber(invoice?.overdue_days).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+                parseOutstandingNumber(invoice?.invoice_day).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
                 String(invoice?.salesman || "-"),
               ];
 
@@ -1102,16 +1113,16 @@ export default function NewOrderPage() {
               values.forEach((value, idx) => {
                 const width = invoiceCols[idx].width;
                 doc.rect(valueX, rowY, width, rowH);
-                if (idx === 2) {
-                  doc.text(value, valueX + width - 6, rowY + 12, { align: "right" });
-                } else {
-                  doc.text(value, valueX + 6, rowY + 12);
-                }
+                const rightAligned = idx === 2 || idx === 4 || idx === 5;
+                if (rightAligned) doc.text(String(value), valueX + width - 4, rowY + 12, { align: "right" });
+                else doc.text(String(value), valueX + 4, rowY + 12);
                 valueX += width;
               });
 
               rowY += rowH;
             });
+
+            doc.setFontSize(10);
           }
         }
 

@@ -8,6 +8,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
+import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -21,6 +22,7 @@ const PENDING_STATUSES = ["DRAFT", "PENDING", "SUBMITTED"];
 const INVOICE_STATUS_PENDING_CREDIT = "Pending for credit approval";
 const INVOICE_STATUS_REJECTED = "Rejected by management";
 const INVOICE_STATUS_MADE = "Invoice made";
+const OUTSTANDING_API = "/api/outstanding";
 
 function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
@@ -81,6 +83,7 @@ export default function PendingOrdersPage() {
   const [selectedInvoiceFile, setSelectedInvoiceFile] = useState(null);
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
   const [savingInvoiceStatus, setSavingInvoiceStatus] = useState(false);
+  const [outstandingInfoByOrder, setOutstandingInfoByOrder] = useState({});
 
   const startOfTodayIso = useMemo(() => {
     const start = new Date();
@@ -174,10 +177,32 @@ export default function PendingOrdersPage() {
 
       const historyPayload = await historyResponse.json().catch(() => ({}));
 
+      const currentOrder = orders.find((entry) => entry.id === orderId) || null;
+      const outstandingResponse = await fetch(
+        `${OUTSTANDING_API}?customerCode=${encodeURIComponent(currentOrder?.customer_code || "")}&customerName=${encodeURIComponent(currentOrder?.customer_name || "")}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
+
       setActiveOrderId(orderId);
       setOrderLines(data || []);
       setOrderHistory(historyResponse.ok && historyPayload.success && Array.isArray(historyPayload.history) ? historyPayload.history : []);
       setSelectedInvoiceFile(null);
+
+      if (outstandingResponse.ok && outstandingPayload.success) {
+        setOutstandingInfoByOrder((current) => ({
+          ...current,
+          [orderId]: {
+            uploadedAt: String(outstandingPayload.uploadedAt || ""),
+            bucketLabels: sortBucketLabels(outstandingPayload.bucketLabels || []),
+            customer: outstandingPayload.customer || null,
+          },
+        }));
+      }
 
       setStatusDraftByOrder((current) => {
         const existing = current[orderId];
@@ -421,6 +446,51 @@ export default function PendingOrdersPage() {
           });
 
           historyY += 6;
+        });
+      }
+
+      const outstandingInfo = outstandingInfoByOrder?.[activeOrder.id] || null;
+      const outstandingCustomer = outstandingInfo?.customer;
+      const outstandingBuckets = sortBucketLabels(outstandingInfo?.bucketLabels || []);
+
+      if (outstandingCustomer && outstandingBuckets.length > 0) {
+        let outstandingY = Math.min(y + 18, 730);
+        if (outstandingY > 680) {
+          doc.addPage();
+          outstandingY = 40;
+        }
+
+        doc.setFont(undefined, "bold");
+        doc.text("Outstanding Buckets", 40, outstandingY);
+        doc.setFont(undefined, "normal");
+
+        let rowY = outstandingY + 10;
+        const leftX = 40;
+        const labelW = 220;
+        const valueW = 120;
+
+        const bucketRows = [
+          ...outstandingBuckets.map((label) => ({
+            label: `${label} days`,
+            value: formatMoney(parseOutstandingNumber(outstandingCustomer?.buckets?.[label])),
+          })),
+          { label: "Open invoices", value: String(parseOutstandingNumber(outstandingCustomer?.open_invoices)) },
+          { label: "Total outstanding", value: formatMoney(parseOutstandingNumber(outstandingCustomer?.total_outstanding)) },
+        ];
+
+        bucketRows.forEach((row, index) => {
+          const rowH = 18;
+          doc.rect(leftX, rowY, labelW, rowH);
+          doc.rect(leftX + labelW, rowY, valueW, rowH);
+          doc.text(row.label, leftX + 6, rowY + 12);
+          if (index === bucketRows.length - 1) {
+            doc.setFont(undefined, "bold");
+          }
+          doc.text(row.value, leftX + labelW + valueW - 6, rowY + 12, { align: "right" });
+          if (index === bucketRows.length - 1) {
+            doc.setFont(undefined, "normal");
+          }
+          rowY += rowH;
         });
       }
 

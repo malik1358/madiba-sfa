@@ -18,6 +18,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
+import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 
 import { shortDate } from "./lib/format";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -45,6 +46,13 @@ function CustomerAuditPageContent() {
   const [message, setMessage] = useState("");
   const [priceList, setPriceList] = useState({});
   const [requestedCustomerCode, setRequestedCustomerCode] = useState("");
+  const [outstandingLoading, setOutstandingLoading] = useState(false);
+  const [outstandingInfo, setOutstandingInfo] = useState({
+    uploadedAt: "",
+    fileName: "",
+    bucketLabels: [],
+    customer: null,
+  });
 
   const {
     customers,
@@ -99,6 +107,55 @@ function CustomerAuditPageContent() {
     setMessage,
     accessScope,
   });
+
+  useEffect(() => {
+    async function loadOutstanding() {
+      if (!selectedCustomer) {
+        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null });
+        return;
+      }
+
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      setOutstandingLoading(true);
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.access_token) throw new Error("Please login again.");
+
+        const response = await fetch(
+          `/api/outstanding?customerCode=${encodeURIComponent(selectedCustomer.customer_code || "")}&customerName=${encodeURIComponent(selectedCustomer.customer_name || "")}`,
+          {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        );
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load outstanding data.");
+        }
+
+        setOutstandingInfo({
+          uploadedAt: String(payload.uploadedAt || ""),
+          fileName: String(payload.fileName || ""),
+          bucketLabels: sortBucketLabels(payload.bucketLabels || []),
+          customer: payload.customer || null,
+        });
+      } catch (err) {
+        setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null });
+        setError(err.message || "Unable to load outstanding data.");
+      } finally {
+        setOutstandingLoading(false);
+      }
+    }
+
+    loadOutstanding();
+  }, [selectedCustomer, setError]);
 
   useEffect(() => {
     async function loadPrices() {
@@ -264,6 +321,52 @@ function CustomerAuditPageContent() {
         {error && <div className="auditError">{error}</div>}
 
         <CustomerHeader customer={selectedCustomer} analytics={analytics} />
+
+        <section className="auditSection">
+          <div className="auditTransactionHeader">
+            <div>
+              <h3>Outstanding Customerwise</h3>
+              <p className="auditSectionNote">
+                {outstandingInfo.uploadedAt
+                  ? `Latest upload: ${new Date(outstandingInfo.uploadedAt).toLocaleString("en-GB")}`
+                  : "No outstanding upload yet"}
+              </p>
+            </div>
+          </div>
+
+          {outstandingLoading && <div className="auditEmpty">Loading outstanding buckets...</div>}
+
+          {!outstandingLoading && outstandingInfo.customer && (
+            <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+              <table className="moduleTable">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    {outstandingInfo.bucketLabels.map((label) => (
+                      <th key={`audit-out-bucket-${label}`}>{label} days</th>
+                    ))}
+                    <th>Open Invoices</th>
+                    <th>Total Outstanding</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>{selectedCustomer.customer_code} - {selectedCustomer.customer_name}</td>
+                    {outstandingInfo.bucketLabels.map((label) => (
+                      <td key={`audit-out-val-${label}`}>{`SAR ${parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]).toFixed(2)}`}</td>
+                    ))}
+                    <td>{parseOutstandingNumber(outstandingInfo.customer?.open_invoices)}</td>
+                    <td>{`SAR ${parseOutstandingNumber(outstandingInfo.customer?.total_outstanding).toFixed(2)}`}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!outstandingLoading && !outstandingInfo.customer && (
+            <div className="auditEmpty">No outstanding row found for this customer in latest upload.</div>
+          )}
+        </section>
 
         <section className="auditSection">
           <div className="auditTransactionHeader">

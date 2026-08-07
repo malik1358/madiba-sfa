@@ -38,6 +38,20 @@ import { useAnalytics } from "./hooks/useAnalytics";
 import { useQuickOrder } from "./hooks/useQuickOrder";
 import { useOrder } from "./hooks/useOrder";
 
+function formatAmount(value) {
+  return Number(value || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatCount(value) {
+  return Number(value || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+}
+
 
 function CustomerAuditPageContent() {
   const { language, dir, setLanguage } = useAppLanguage();
@@ -160,6 +174,13 @@ function CustomerAuditPageContent() {
 
     loadOutstanding();
   }, [selectedCustomer, setError]);
+
+  const visibleOutstandingBuckets = useMemo(
+    () => (outstandingInfo.bucketLabels || []).filter(
+      (label) => parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]) !== 0
+    ),
+    [outstandingInfo.bucketLabels, outstandingInfo.customer]
+  );
 
   useEffect(() => {
     async function loadPrices() {
@@ -347,7 +368,7 @@ function CustomerAuditPageContent() {
                   <thead>
                     <tr>
                       <th>Customer</th>
-                      {outstandingInfo.bucketLabels.map((label) => (
+                      {visibleOutstandingBuckets.map((label) => (
                         <th key={`audit-out-bucket-${label}`}>{label} days</th>
                       ))}
                       <th>Open Invoices</th>
@@ -357,11 +378,11 @@ function CustomerAuditPageContent() {
                   <tbody>
                     <tr>
                       <td>{selectedCustomer.customer_code} - {selectedCustomer.customer_name}</td>
-                      {outstandingInfo.bucketLabels.map((label) => (
-                        <td key={`audit-out-val-${label}`}>{`SAR ${parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]).toFixed(2)}`}</td>
+                      {visibleOutstandingBuckets.map((label) => (
+                        <td key={`audit-out-val-${label}`}>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]))}</td>
                       ))}
-                      <td>{parseOutstandingNumber(outstandingInfo.customer?.open_invoices)}</td>
-                      <td>{`SAR ${parseOutstandingNumber(outstandingInfo.customer?.total_outstanding).toFixed(2)}`}</td>
+                      <td>{formatCount(parseOutstandingNumber(outstandingInfo.customer?.open_invoices))}</td>
+                      <td>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.total_outstanding))}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -385,10 +406,10 @@ function CustomerAuditPageContent() {
                       <tr key={`${invoice.ref_no || "no-ref"}-${invoice.due_date || "no-due"}-${index}`}>
                         <td>{invoice.invoice_date || "-"}</td>
                         <td>{invoice.ref_no || "-"}</td>
-                        <td>{`SAR ${parseOutstandingNumber(invoice.pending_amount).toFixed(2)}`}</td>
+                        <td>{formatAmount(parseOutstandingNumber(invoice.pending_amount))}</td>
                         <td>{invoice.due_date || "-"}</td>
-                        <td>{parseOutstandingNumber(invoice.overdue_days)}</td>
-                        <td>{parseOutstandingNumber(invoice.invoice_day)}</td>
+                        <td>{formatCount(parseOutstandingNumber(invoice.overdue_days))}</td>
+                        <td>{formatCount(parseOutstandingNumber(invoice.invoice_day))}</td>
                         <td>{invoice.salesman || "-"}</td>
                       </tr>
                     ))}

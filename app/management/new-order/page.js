@@ -38,6 +38,20 @@ function formatMoney(value) {
   return `SAR ${Number(value || 0).toFixed(2)}`;
 }
 
+function formatAmount(value) {
+  return Number(value || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatCount(value) {
+  return Number(value || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+}
+
 function formatHistoryChange(change) {
   if (!change) return "";
 
@@ -1430,6 +1444,13 @@ function NewOrderPageContent() {
     fetchOutstandingForCustomer(selectedCustomer);
   }, [fetchOutstandingForCustomer, selectedCustomer]);
 
+  const visibleOutstandingBuckets = useMemo(
+    () => (outstandingInfo.bucketLabels || []).filter(
+      (label) => parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]) !== 0
+    ),
+    [outstandingInfo.bucketLabels, outstandingInfo.customer]
+  );
+
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
     return (
@@ -1527,7 +1548,7 @@ function NewOrderPageContent() {
                   <thead>
                     <tr>
                       <th>Customer</th>
-                      {outstandingInfo.bucketLabels.map((label) => (
+                      {visibleOutstandingBuckets.map((label) => (
                         <th key={`bucket-head-${label}`}>{label} days</th>
                       ))}
                       <th>Open Invoices</th>
@@ -1537,11 +1558,11 @@ function NewOrderPageContent() {
                   <tbody>
                     <tr>
                       <td>{selectedCustomer.customer_code} - {selectedCustomer.customer_name}</td>
-                      {outstandingInfo.bucketLabels.map((label) => (
-                        <td key={`bucket-val-${label}`}>{formatMoney(parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]))}</td>
+                      {visibleOutstandingBuckets.map((label) => (
+                        <td key={`bucket-val-${label}`}>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]))}</td>
                       ))}
-                      <td>{parseOutstandingNumber(outstandingInfo.customer?.open_invoices)}</td>
-                      <td>{formatMoney(parseOutstandingNumber(outstandingInfo.customer?.total_outstanding))}</td>
+                      <td>{formatCount(parseOutstandingNumber(outstandingInfo.customer?.open_invoices))}</td>
+                      <td>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.total_outstanding))}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1565,10 +1586,10 @@ function NewOrderPageContent() {
                       <tr key={`${invoice.ref_no || "no-ref"}-${invoice.due_date || "no-due"}-${index}`}>
                         <td>{invoice.invoice_date || "-"}</td>
                         <td>{invoice.ref_no || "-"}</td>
-                        <td>{formatMoney(parseOutstandingNumber(invoice.pending_amount))}</td>
+                        <td>{formatAmount(parseOutstandingNumber(invoice.pending_amount))}</td>
                         <td>{invoice.due_date || "-"}</td>
-                        <td>{parseOutstandingNumber(invoice.overdue_days)}</td>
-                        <td>{parseOutstandingNumber(invoice.invoice_day)}</td>
+                        <td>{formatCount(parseOutstandingNumber(invoice.overdue_days))}</td>
+                        <td>{formatCount(parseOutstandingNumber(invoice.invoice_day))}</td>
                         <td>{invoice.salesman || "-"}</td>
                       </tr>
                     ))}

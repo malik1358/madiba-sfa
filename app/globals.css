@@ -3363,24 +3363,34 @@ table.auditMatrix td.auditTrendSame {
 
 .moduleOrderTable th:nth-child(1),
 .moduleOrderTable td:nth-child(1) {
-  position: sticky;
-  left: 0;
-  z-index: 2;
   background: #ffffff;
 }
 
 .moduleOrderTable th:nth-child(2),
 .moduleOrderTable td:nth-child(2) {
   position: sticky;
-  left: 110px;
+  left: 92px;
   z-index: 2;
   background: #ffffff;
   box-shadow: 1px 0 0 rgba(7, 63, 76, 0.06);
+  min-width: 220px;
 }
 
 .moduleOrderTable .moduleCategoryRow td:first-child,
 .moduleOrderTable .moduleCategoryRow td:nth-child(2) {
   background: #f8fbfc;
+}
+
+@media (max-width: 640px) {
+  .moduleOrderTable {
+    min-width: 720px;
+  }
+
+  .moduleOrderTable th:nth-child(2),
+  .moduleOrderTable td:nth-child(2) {
+    left: 90px;
+    min-width: 200px;
+  }
 }
 
 .moduleCategoryRow td {

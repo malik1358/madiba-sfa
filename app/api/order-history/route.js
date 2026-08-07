@@ -15,6 +15,10 @@ function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+function isSoyebProfile(profile) {
+  return normalizeName(profile?.salesman_name) === "SOYEB";
+}
+
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function resolveMutualGroupCodes(allProfiles, currentProfile) {
@@ -100,7 +104,7 @@ async function resolveScope(admin, token) {
 
   return {
     userId: user.id,
-    hasAllAccess: ["admin", "manager"].includes(role),
+    hasAllAccess: ["admin", "manager"].includes(role) || isSoyebProfile(profile),
     visibleUserIds: [...new Set(visibleProfiles.map((entry) => entry.id).filter(Boolean))],
     visibleSalesmanCodes: [...new Set([
       ...visibleProfiles.map((entry) => normalizeCode(entry.salesman_code)).filter(Boolean),

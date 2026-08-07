@@ -22,9 +22,29 @@ export function shortDate(value) {
   });
 }
 
+export function parseDateValue(value) {
+  if (!value) return null;
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  // Fast path for ISO-like YYYY-MM-DD values.
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    const isoDate = new Date(`${text.slice(0, 10)}T00:00:00Z`);
+    return Number.isNaN(isoDate.getTime()) ? null : isoDate;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export function monthKey(date) {
-  if (!date) return null;
-  return String(date).slice(0, 7);
+  const parsed = parseDateValue(date);
+  if (!parsed) return null;
+
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
 }
 
 export function monthName(key) {
@@ -47,9 +67,8 @@ export function salesUnitQty(row) {
 }
 
 export function buildLast12Months(latestDate) {
-  if (!latestDate) return [];
-
-  const d = new Date(`${latestDate}T00:00:00`);
+  const d = parseDateValue(latestDate);
+  if (!d) return [];
   const result = [];
 
   for (let i = 11; i >= 0; i -= 1) {

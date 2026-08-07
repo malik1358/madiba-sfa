@@ -1,4 +1,4 @@
-import { buildLast12Months, monthKey, salesUnitQty } from './format';
+import { buildLast12Months, monthKey, parseDateValue, salesUnitQty } from './format';
 
 export function buildAnalytics(transactions) {
   if (!transactions.length) {
@@ -6,10 +6,16 @@ export function buildAnalytics(transactions) {
   }
 
   let latestDate = null;
+  let latestTimestamp = 0;
 
   for (const row of transactions) {
-    if (row.transaction_date && (!latestDate || row.transaction_date > latestDate)) {
+    const parsed = parseDateValue(row.transaction_date);
+    if (!parsed) continue;
+
+    const stamp = parsed.getTime();
+    if (!latestDate || stamp > latestTimestamp) {
       latestDate = row.transaction_date;
+      latestTimestamp = stamp;
     }
   }
 

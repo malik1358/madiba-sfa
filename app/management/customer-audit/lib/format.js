@@ -34,6 +34,23 @@ export function parseDateValue(value) {
     return Number.isNaN(isoDate.getTime()) ? null : isoDate;
   }
 
+  // Handles formats like 30/04/2025 or 30-04-2025.
+  const dmyMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]);
+    const year = Number(dmyMatch[3]);
+    const utc = new Date(Date.UTC(year, month - 1, day));
+    if (!Number.isNaN(utc.getTime())) return utc;
+  }
+
+  // Handles formats like "Wednesday, April 30, 2025".
+  const longMonthMatch = text.match(/(?:^|,\s*)([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if (longMonthMatch) {
+    const candidate = new Date(`${longMonthMatch[1]} ${longMonthMatch[2]}, ${longMonthMatch[3]} UTC`);
+    if (!Number.isNaN(candidate.getTime())) return candidate;
+  }
+
   const parsed = new Date(text);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }

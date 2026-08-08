@@ -13,6 +13,20 @@ body {
   box-sizing: border-box;
 }
 
+.environmentBanner {
+  position: sticky;
+  top: 0;
+  z-index: 10000;
+  padding: 8px 16px;
+  background: #f6c344;
+  border-bottom: 2px solid #7a4d00;
+  color: #2c2100;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-align: center;
+}
+
 button,
 input,
 select {

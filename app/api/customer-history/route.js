@@ -21,6 +21,15 @@ function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+function normalizeRole(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isSalesTeamRole(role) {
+  const normalized = normalizeRole(role);
+  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker"].includes(normalized);
+}
+
 function resolveMutualGroupCodes(allProfiles, currentProfile) {
   const currentName = normalizeName(currentProfile?.salesman_name);
   const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => group.includes(currentName));
@@ -118,14 +127,13 @@ async function resolveScope(admin, token) {
     throw new Error("Profile not found.");
   }
 
-  const role = String(currentProfile.role || "").toLowerCase();
+  const role = normalizeRole(currentProfile.role);
   const currentSalesmanCode = normalizeCode(currentProfile.salesman_code);
 
   const [profilesRes, usersRes] = await Promise.all([
     admin
       .from("profiles")
       .select("id,role,salesman_code,salesman_name")
-      .in("role", ["salesman", "manager", "admin"])
       .order("salesman_name"),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
@@ -134,11 +142,12 @@ async function resolveScope(admin, token) {
   if (usersRes.error) throw usersRes.error;
 
   const allProfiles = profilesRes.data || [];
+  const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
   const authUsers = usersRes.data?.users || [];
 
   let members = [];
   if (["admin", "manager"].includes(role)) {
-    members = allProfiles;
+    members = scopedProfiles;
   } else {
     const subordinateIds = new Set();
 
@@ -150,7 +159,12 @@ async function resolveScope(admin, token) {
       }
     });
 
-    members = allProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
+    members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
+
+    // Keep self-scope even when profile role text is dirty (case/spacing mismatch).
+    if (!members.some((profile) => profile.id === currentProfile.id)) {
+      members = [currentProfile, ...members];
+    }
   }
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);

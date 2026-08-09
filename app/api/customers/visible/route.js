@@ -162,6 +162,7 @@ async function resolveScope(admin, token) {
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
   const currentAuthUser = authMap.get(currentProfile.id) || user;
+  const identitySearchPattern = normalizeCode(extractEmailLocalPart(currentAuthUser?.email)).replace(/[._-]+/g, "%");
 
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),
@@ -173,6 +174,7 @@ async function resolveScope(admin, token) {
   return {
     hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
     visibleSalesmanCodes,
+    identitySearchPattern,
   };
 }
 
@@ -193,6 +195,30 @@ async function fetchVisibleCustomers(admin, scope) {
         .from("sales_raw")
         .select("customer_code,salesman_code")
         .in("salesman_code", visibleCodes)
+        .range(salesFrom, salesFrom + salesPageSize - 1);
+
+      if (salesError) throw salesError;
+
+      const chunk = salesRows || [];
+      chunk.forEach((row) => {
+        const code = normalizeCode(row.customer_code);
+        if (code) historyVisibleCustomerCodes.add(code);
+      });
+
+      if (chunk.length < salesPageSize) break;
+      salesFrom += salesPageSize;
+    }
+  }
+
+  if (!scope.hasAllAccess && historyVisibleCustomerCodes.size === 0 && scope.identitySearchPattern) {
+    const salesPageSize = 2000;
+    let salesFrom = 0;
+
+    while (true) {
+      const { data: salesRows, error: salesError } = await admin
+        .from("sales_raw")
+        .select("customer_code,salesman_name")
+        .ilike("salesman_name", `%${scope.identitySearchPattern}%`)
         .range(salesFrom, salesFrom + salesPageSize - 1);
 
       if (salesError) throw salesError;

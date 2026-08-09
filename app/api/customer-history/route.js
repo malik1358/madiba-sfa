@@ -216,6 +216,7 @@ async function resolveScope(admin, token) {
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
   const currentAuthUser = authMap.get(currentProfile.id) || user;
+  const identitySearchPattern = normalizeCode(extractEmailLocalPart(currentAuthUser?.email)).replace(/[._-]+/g, "%");
 
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),
@@ -228,6 +229,7 @@ async function resolveScope(admin, token) {
     hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
     visibleSalesmanCodes,
     mutualSalesmanCodes: mutualGroupCodes,
+    identitySearchPattern,
   };
 }
 
@@ -268,6 +270,22 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
       if (historyRow?.id) {
         hasHistoryAccess = true;
         break;
+      }
+
+      if (!hasHistoryAccess && scope.identitySearchPattern) {
+        const { data: nameHistoryRow, error: nameHistoryError } = await admin
+          .from("sales_raw")
+          .select("id")
+          .eq("customer_code", codeCandidate)
+          .ilike("salesman_name", `%${scope.identitySearchPattern}%`)
+          .limit(1)
+          .maybeSingle();
+
+        if (nameHistoryError) throw nameHistoryError;
+        if (nameHistoryRow?.id) {
+          hasHistoryAccess = true;
+          break;
+        }
       }
     }
 

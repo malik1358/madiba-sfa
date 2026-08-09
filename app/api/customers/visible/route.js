@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  OUTSTANDING_DATASET_KEY,
+  findOutstandingCustomerCodesForSalesmen,
+} from "../../../lib/outstanding";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -243,6 +247,24 @@ async function fetchVisibleCustomers(admin, scope) {
 
       if (chunk.length < salesPageSize) break;
       salesFrom += salesPageSize;
+    }
+  }
+
+  if (!scope.hasAllAccess && normalizedScopeCodes.size > 0) {
+    const { data: setting, error: outstandingError } = await admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", OUTSTANDING_DATASET_KEY)
+      .maybeSingle();
+
+    if (outstandingError) throw outstandingError;
+
+    try {
+      const dataset = JSON.parse(setting?.setting_value || "null");
+      findOutstandingCustomerCodesForSalesmen(dataset, scope.visibleSalesmanCodes)
+        .forEach((code) => historyVisibleCustomerCodes.add(normalizeCode(code)));
+    } catch {
+      // Ignore malformed optional outstanding data and retain sales-based visibility.
     }
   }
 

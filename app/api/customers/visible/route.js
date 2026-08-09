@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   OUTSTANDING_DATASET_KEY,
   customerCodeCandidates,
-  findOutstandingCustomerCodesForSalesmen,
+  resolveOutstandingCustomerOwnership,
 } from "../../../lib/outstanding";
 
 export const runtime = "nodejs";
@@ -198,6 +198,8 @@ async function fetchVisibleCustomers(admin, scope) {
   const rows = [];
   const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
   const historyVisibleCustomerCodes = new Set();
+  const outstandingAssignedCustomerCodes = new Set();
+  const outstandingOwnedCustomerCodes = new Set();
 
   if (!scope.hasAllAccess && normalizedScopeCodes.size > 0) {
     const salesPageSize = 2000;
@@ -263,8 +265,9 @@ async function fetchVisibleCustomers(admin, scope) {
 
     try {
       const dataset = JSON.parse(setting?.setting_value || "null");
-      findOutstandingCustomerCodesForSalesmen(dataset, scope.visibleSalesmanCodes)
-        .forEach((code) => historyVisibleCustomerCodes.add(normalizeCode(code)));
+      const ownership = resolveOutstandingCustomerOwnership(dataset, scope.visibleSalesmanCodes);
+      ownership.assignedCustomerCodes.forEach((code) => outstandingAssignedCustomerCodes.add(normalizeCode(code)));
+      ownership.ownedCustomerCodes.forEach((code) => outstandingOwnedCustomerCodes.add(normalizeCode(code)));
     } catch {
       // Ignore malformed optional outstanding data and retain sales-based visibility.
     }
@@ -284,12 +287,16 @@ async function fetchVisibleCustomers(admin, scope) {
     const chunk = (data || []).filter((row) => {
       if (scope.hasAllAccess) return true;
       if (normalizedScopeCodes.size === 0) return false;
+      const codeCandidates = customerCodeCandidates(row.customer_code).map(normalizeCode);
+      if (codeCandidates.some((code) => outstandingAssignedCustomerCodes.has(code))) {
+        return codeCandidates.some((code) => outstandingOwnedCustomerCodes.has(code));
+      }
+
       const rowSalesmanCode = normalizeCode(row.current_salesman_code);
       if (normalizedScopeCodes.has(rowSalesmanCode)) return true;
 
       // Fallback: include customers that have sales history under visible salesman codes.
-      return customerCodeCandidates(row.customer_code)
-        .some((code) => historyVisibleCustomerCodes.has(normalizeCode(code)));
+      return codeCandidates.some((code) => historyVisibleCustomerCodes.has(code));
     });
     rows.push(...chunk);
 

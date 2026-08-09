@@ -8,6 +8,8 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
+import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
+import { loadPricePayload } from "../../lib/pricePayload";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
@@ -148,6 +150,10 @@ function hasMeaningfulItemName(value, itemCode = "") {
   return true;
 }
 
+function hasCurrentItemName(value, itemCode = "") {
+  return hasMeaningfulItemName(value, itemCode) && !isDoNotUseItem(value);
+}
+
 const NEEDS_MAPPING_CATEGORY = "Needs Mapping";
 
 async function fetchItemCategoryLookup(supabase, scope) {
@@ -158,8 +164,9 @@ async function fetchItemCategoryLookup(supabase, scope) {
   while (true) {
     let query = supabase
       .from("sales_raw")
-      .select("item_code,item_name,category,salesman_code")
-      .order("item_code", { ascending: true })
+      .select("id,item_code,item_name,category,salesman_code,transaction_date")
+      .order("transaction_date", { ascending: false })
+      .order("id", { ascending: false })
       .range(from, from + pageSize - 1);
 
     if (!scope.hasAllAccess) {
@@ -178,7 +185,7 @@ async function fetchItemCategoryLookup(supabase, scope) {
       const nextName = normalizeText(row.item_name);
       const nextCategory = normalizeText(row.category);
 
-      if (!hasMeaningfulItemName(current.item_name, code) && hasMeaningfulItemName(nextName, code)) {
+      if (!hasCurrentItemName(current.item_name, code) && hasCurrentItemName(nextName, code)) {
         current.item_name = nextName;
       }
 
@@ -544,7 +551,7 @@ export default function NewOrderPage() {
       itemMap.set(code, {
         ...item,
         item_code: code,
-        item_name: String(item.item_name || historyFallback.item_name || code).trim(),
+        item_name: String(historyFallback.item_name || item.item_name || code).trim(),
         category: String(item.category || historyFallback.category || "Unclassified").trim() || "Unclassified",
         source: "ITEM_MASTER",
       });
@@ -557,7 +564,11 @@ export default function NewOrderPage() {
       const existing = itemMap.get(code);
       if (!existing) {
         const historyFallback = historyCategoryLookup.get(code) || {};
-        const nextName = normalizeText(sheetItem.item_name) || historyFallback.item_name || code;
+        const historyName = normalizeText(historyFallback.item_name);
+        const sheetName = normalizeText(sheetItem.item_name);
+        const nextName = hasCurrentItemName(historyName, code)
+          ? historyName
+          : (hasCurrentItemName(sheetName, code) ? sheetName : code);
         const nextCategory = normalizeText(sheetItem.category) || historyFallback.category || "Unclassified";
 
         // Keep placeholder-only sheet rows visible, but isolate them for cleanup.
@@ -587,10 +598,13 @@ export default function NewOrderPage() {
       const existingCategory = normalizeText(existing.category);
       const sheetCategory = normalizeText(sheetItem.category);
       const historyFallback = historyCategoryLookup.get(code) || {};
+      const historyName = normalizeText(historyFallback.item_name);
 
-      const nextName = hasMeaningfulItemName(existingName, code)
-        ? existingName
-        : (hasMeaningfulItemName(sheetName, code) ? sheetName : (historyFallback.item_name || code));
+      const nextName = hasCurrentItemName(historyName, code)
+        ? historyName
+        : (hasCurrentItemName(sheetName, code)
+          ? sheetName
+          : (hasCurrentItemName(existingName, code) ? existingName : code));
       const nextCategory = hasMeaningfulValue(sheetCategory)
         ? sheetCategory
         : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));
@@ -608,7 +622,9 @@ export default function NewOrderPage() {
       if (!code || itemMap.has(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
 
-      const fallbackName = historyFallback.item_name || "";
+      const fallbackName = hasCurrentItemName(historyFallback.item_name, code)
+        ? historyFallback.item_name
+        : "";
       const fallbackCategory = historyFallback.category || "";
 
       const unresolved = !hasMeaningfulItemName(fallbackName, code) && !hasMeaningfulValue(fallbackCategory);
@@ -1389,38 +1405,12 @@ export default function NewOrderPage() {
     }
 
     async function loadPrices() {
-      const PRICE_CACHE_KEY = "madiba.pricePayload";
-
       try {
-        const response = await fetch(PRICE_CACHE_API, { cache: "no-store" });
-        if (!response.ok) {
-          throw new Error(`Price API failed with ${response.status}`);
-        }
-
-        const data = await response.json();
-        const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
-          ? {
-              priceMap: data.priceMap,
-              sheetItems: Array.isArray(data.sheetItems) ? data.sheetItems : [],
-            }
-          : parsePricePayload(data || {});
-        if (Object.keys(parsed.priceMap || {}).length === 0) {
-          throw new Error("Price cache returned no prices");
-        }
-
-        setPriceList(parsed.priceMap);
-        setPriceSheetItems(parsed.sheetItems);
-        window.localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(parsed));
+        const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
+        setPriceList(parsed.priceMap || {});
+        setPriceSheetItems(parsed.sheetItems || []);
       } catch {
-        try {
-          const cached = JSON.parse(window.localStorage.getItem(PRICE_CACHE_KEY) || "null");
-          if (cached?.priceMap && Object.keys(cached.priceMap).length > 0) {
-            setPriceList(cached.priceMap);
-            setPriceSheetItems(Array.isArray(cached.sheetItems) ? cached.sheetItems : []);
-          }
-        } catch {
-          // Keep previously loaded prices if cache is unavailable.
-        }
+        // Keep previously loaded prices if fresh and cached sources are unavailable.
       }
     }
 
@@ -1708,6 +1698,7 @@ export default function NewOrderPage() {
                 <MonthlyPerformance analytics={analytics} />
                 <CategoryPerformance
                   analytics={analytics}
+                  itemCatalog={mergedItemsMaster}
                   expandedCategories={auditExpandedCategories}
                   toggleCategory={toggleAuditCategory}
                   orderQuantities={orderQuantities}

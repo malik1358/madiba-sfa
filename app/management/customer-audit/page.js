@@ -450,6 +450,7 @@ function CustomerAuditPageContent() {
 
         <CategoryPerformance
           analytics={analytics}
+          itemCatalog={itemMaster}
           expandedCategories={expandedCategories}
           toggleCategory={toggleCategory}
           orderQuantities={orderQuantities}

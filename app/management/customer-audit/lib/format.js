@@ -75,6 +75,9 @@ export function monthName(key) {
 }
 
 export function salesUnitQty(row) {
+  const quantity = Number(row?.quantity);
+  if (Number.isFinite(quantity) && quantity !== 0) return quantity;
+
   const salesAmount = Number(row?.sales_amount || 0);
   const rate = Number(row?.rate || 0);
 

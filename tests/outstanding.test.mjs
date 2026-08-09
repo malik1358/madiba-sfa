@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   customerCodeCandidates,
   findOutstandingCustomerCodesForSalesmen,
+  resolveOutstandingCustomerOwnership,
 } from "../app/lib/outstanding.js";
 
 test("findOutstandingCustomerCodesForSalesmen matches normalized salesman identity", () => {
@@ -36,6 +37,18 @@ test("findOutstandingCustomerCodesForSalesmen does not widen unrelated scope", (
     findOutstandingCustomerCodesForSalesmen(dataset, ["AHMED NABIL"]),
     ["1173C"]
   );
+});
+
+test("outstanding ownership records other salesman assignments as authoritative", () => {
+  const ownership = resolveOutstandingCustomerOwnership({
+    invoices: [
+      { customer_code: "1173C", salesman: "Ahmed Nabil" },
+      { customer_code: "1114C", salesman: "Junaid" },
+    ],
+  }, ["AHMED NABIL"]);
+
+  assert.deepEqual([...ownership.assignedCustomerCodes], ["1173C", "1114C"]);
+  assert.deepEqual([...ownership.ownedCustomerCodes], ["1173C"]);
 });
 
 test("customerCodeCandidates extracts code from a combined customer master value", () => {

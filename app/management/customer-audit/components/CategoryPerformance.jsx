@@ -2,7 +2,11 @@ import { Fragment } from 'react';
 import { monthName, numberFormat, qtyFormat, trendClass } from '../lib/format';
 import { isDoNotUseItem } from '../lib/helpers';
 
-export default function CategoryPerformance({ analytics, expandedCategories, toggleCategory, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
+export default function CategoryPerformance({ analytics, itemCatalog = [], expandedCategories, toggleCategory, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
+  const catalogByCode = new Map(
+    itemCatalog.map((item) => [String(item.item_code || '').trim().toUpperCase(), item])
+  );
+
   return (
     <section className="auditSection">
       <div className="auditCategoryTitle">
@@ -106,15 +110,21 @@ export default function CategoryPerformance({ analytics, expandedCategories, tog
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {category.items.filter((item) => !isDoNotUseItem(item.item_name)).map((item) => {
+                                  {category.items.map((item) => {
                                     const orderQty = Number(orderQuantities[item.item_code] || 0);
+                                    const catalogItem = catalogByCode.get(String(item.item_code || '').trim().toUpperCase());
+                                    const currentName = String(catalogItem?.item_name || '').trim();
+                                    const hasCurrentReplacement = Boolean(currentName) && !isDoNotUseItem(currentName);
+                                    const displayName = hasCurrentReplacement ? currentName : item.item_name;
+                                    const isNotOrderable = isDoNotUseItem(displayName);
                                     return (
                                       <Fragment key={item.item_key}>
                                         <tr className="auditItemValueRow">
                                           <th rowSpan="2" className="auditItemNameCell">
                                             <div className="auditItemCode">{item.item_code}</div>
-                                            <div className="auditItemName">{item.item_name}</div>
+                                            <div className="auditItemName">{displayName}</div>
                                             {item.abc_class && <div className="auditItemABC">{item.abc_class}</div>}
+                                            {isNotOrderable && <div className="auditItemABC">Do Not Use</div>}
                                           </th>
                                           <th className="auditItemMetricCell">Value</th>
                                           {analytics.months.map((month, index) => {
@@ -132,12 +142,16 @@ export default function CategoryPerformance({ analytics, expandedCategories, tog
                                               {priceList[String(item.item_code).trim().toUpperCase()] ? `SAR ${Number(priceList[String(item.item_code).trim().toUpperCase()]).toFixed(2)}` : '—'}
                                             </span>
                                           </td>
-                                          <td rowSpan="2" className="auditOrderQtyCell">
-                                            <div className="auditQtyControl">
-                                              <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(item.item_code)}>−</button>
-                                              <input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
-                                              <button type="button" className="auditQtyButton" onClick={() => increaseOrderQty(item.item_code)}>+</button>
-                                            </div>
+                                          <td rowSpan="2" className={isNotOrderable ? "auditOrderQtyCell auditCategoryNoOrder" : "auditOrderQtyCell"}>
+                                            {isNotOrderable ? (
+                                              <span>Not orderable</span>
+                                            ) : (
+                                              <div className="auditQtyControl">
+                                                <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(item.item_code)}>−</button>
+                                                <input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ''} placeholder="0" onChange={(e) => changeOrderQty(item.item_code, e.target.value)} />
+                                                <button type="button" className="auditQtyButton" onClick={() => increaseOrderQty(item.item_code)}>+</button>
+                                              </div>
+                                            )}
                                           </td>
                                         </tr>
                                         <tr className="auditItemQtyRow">

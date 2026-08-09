@@ -10,7 +10,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const HISTORY_MONTHS = 6;
 const HISTORY_LIMIT = 5000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 5;
+const CACHE_VERSION = 6;
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function normalizeCode(value) {
@@ -33,6 +33,12 @@ function normalizeName(value) {
 
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function identitySearchPattern(value) {
+  return normalizeCode(value)
+    .replace(/[^A-Z0-9]+/g, "%")
+    .replace(/^%+|%+$/g, "");
 }
 
 function isSalesTeamRole(role) {
@@ -92,8 +98,17 @@ function isInvoiceMakerRole(role) {
   return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
-function cacheKeyFor(customerCode) {
-  return `customer_history_cache:${normalizeCode(customerCode)}`;
+function cacheKeyFor(customerCode, scope) {
+  const scopeIdentity = scope.hasAllAccess
+    ? "ALL"
+    : [...new Set(scope.visibleSalesmanCodes || [])].sort().join("|");
+  let scopeHash = 0;
+
+  for (let index = 0; index < scopeIdentity.length; index += 1) {
+    scopeHash = ((scopeHash * 31) + scopeIdentity.charCodeAt(index)) >>> 0;
+  }
+
+  return `customer_history_cache:${normalizeCode(customerCode)}:${scopeHash.toString(36)}`;
 }
 
 function monthKey(value) {
@@ -216,20 +231,21 @@ async function resolveScope(admin, token) {
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
   const currentAuthUser = authMap.get(currentProfile.id) || user;
-  const identitySearchPattern = normalizeCode(extractEmailLocalPart(currentAuthUser?.email)).replace(/[._-]+/g, "%");
-
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),
     ...authCodeCandidates(currentAuthUser),
     ...fuzzyMatchedProfileCodes(scopedProfiles, currentAuthUser),
     ...mutualGroupCodes,
   ])];
+  const identitySearchPatterns = [...new Set(
+    visibleSalesmanCodes.map(identitySearchPattern).filter(Boolean),
+  )];
 
   return {
     hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
     visibleSalesmanCodes,
     mutualSalesmanCodes: mutualGroupCodes,
-    identitySearchPattern,
+    identitySearchPatterns,
   };
 }
 
@@ -272,12 +288,16 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
         break;
       }
 
-      if (!hasHistoryAccess && scope.identitySearchPattern) {
+      if (!hasHistoryAccess && scope.identitySearchPatterns.length > 0) {
+        const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
+          `salesman_code.ilike.%${pattern}%`,
+          `salesman_name.ilike.%${pattern}%`,
+        ]);
         const { data: nameHistoryRow, error: nameHistoryError } = await admin
           .from("sales_raw")
           .select("id")
           .eq("customer_code", codeCandidate)
-          .ilike("salesman_name", `%${scope.identitySearchPattern}%`)
+          .or(identityFilters.join(","))
           .limit(1)
           .maybeSingle();
 
@@ -447,8 +467,16 @@ async function fetchPeerTransactions(admin, scope, selectedMonthKeys, customerCo
     .order("id", { ascending: false })
     .limit(PEER_LIMIT);
 
-  if (!scope.hasAllAccess && Array.isArray(scope.visibleSalesmanCodes) && scope.visibleSalesmanCodes.length > 0) {
-    query = query.in("salesman_code", scope.visibleSalesmanCodes);
+  if (!scope.hasAllAccess) {
+    if (!Array.isArray(scope.identitySearchPatterns) || scope.identitySearchPatterns.length === 0) {
+      return [];
+    }
+
+    const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
+      `salesman_code.ilike.%${pattern}%`,
+      `salesman_name.ilike.%${pattern}%`,
+    ]);
+    query = query.or(identityFilters.join(","));
   }
 
   const { data, error } = await query;
@@ -514,7 +542,7 @@ export async function GET(request) {
     const scope = await resolveScope(admin, token);
     await ensureCustomerVisible(admin, customerCode, scope);
 
-    const key = cacheKeyFor(customerCode);
+    const key = cacheKeyFor(customerCode, scope);
     const cached = await loadCached(admin, key);
 
     const isCurrentCacheVersion = Number(cached?.version || 0) === CACHE_VERSION;

@@ -15,6 +15,10 @@ test('salesUnitQty derives quantity from sales_amount and rate', () => {
   assert.equal(salesUnitQty({ sales_amount: 0, rate: 10 }), 0);
 });
 
+test('salesUnitQty uses stored quantity when rate is unavailable', () => {
+  assert.equal(salesUnitQty({ quantity: 7, sales_amount: 140, rate: 0 }), 7);
+});
+
 test('trendClass returns the expected CSS class', () => {
   assert.equal(trendClass(5, 3), 'auditTrendUp');
   assert.equal(trendClass(2, 3), 'auditTrendDown');

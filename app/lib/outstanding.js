@@ -17,24 +17,34 @@ function normalizeComparableName(value) {
     .trim();
 }
 
-export function findOutstandingCustomerCodesForSalesmen(dataset, salesmanIdentities) {
+function outstandingInvoiceCustomerCode(invoice) {
+  const storedCode = normalizeCode(invoice?.customer_code);
+  return normalizeCode(extractLeadingCustomerCodeAndName(storedCode).customer_code)
+    || (storedCode && !/\s/.test(storedCode) ? storedCode : "")
+    || normalizeCode(extractLeadingCustomerCodeAndName(invoice?.customer_name).customer_code);
+}
+
+export function resolveOutstandingCustomerOwnership(dataset, salesmanIdentities) {
   const identityNames = new Set(
     (salesmanIdentities || []).map(normalizeComparableName).filter(Boolean)
   );
-  if (identityNames.size === 0) return [];
+  const assignedCustomerCodes = new Set();
+  const ownedCustomerCodes = new Set();
 
-  const customerCodes = new Set();
   (Array.isArray(dataset?.invoices) ? dataset.invoices : []).forEach((invoice) => {
-    if (!identityNames.has(normalizeComparableName(invoice?.salesman))) return;
+    const salesmanName = normalizeComparableName(invoice?.salesman);
+    const customerCode = outstandingInvoiceCustomerCode(invoice);
+    if (!salesmanName || !customerCode) return;
 
-    const storedCode = normalizeCode(invoice?.customer_code);
-    const customerCode = normalizeCode(extractLeadingCustomerCodeAndName(storedCode).customer_code)
-      || (storedCode && !/\s/.test(storedCode) ? storedCode : "")
-      || normalizeCode(extractLeadingCustomerCodeAndName(invoice?.customer_name).customer_code);
-    if (customerCode) customerCodes.add(customerCode);
+    assignedCustomerCodes.add(customerCode);
+    if (identityNames.has(salesmanName)) ownedCustomerCodes.add(customerCode);
   });
 
-  return [...customerCodes];
+  return { assignedCustomerCodes, ownedCustomerCodes };
+}
+
+export function findOutstandingCustomerCodesForSalesmen(dataset, salesmanIdentities) {
+  return [...resolveOutstandingCustomerOwnership(dataset, salesmanIdentities).ownedCustomerCodes];
 }
 
 export function customerCodeCandidates(value) {

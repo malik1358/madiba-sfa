@@ -8,11 +8,20 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 function normalizeCode(value) {
-  return String(value || "").trim().toUpperCase();
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
 function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function normalizeRole(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isSalesTeamRole(role) {
+  const normalized = normalizeRole(role);
+  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker"].includes(normalized);
 }
 
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
@@ -26,6 +35,10 @@ function resolveMutualGroupCodes(allProfiles, currentProfile) {
     .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
     .map((profile) => normalizeCode(profile.salesman_code))
     .filter(Boolean);
+}
+
+function profileCodeCandidates(profile) {
+  return [normalizeCode(profile?.salesman_code), normalizeCode(profile?.salesman_name)].filter(Boolean);
 }
 
 function settingKeyFor(customerCode) {
@@ -52,14 +65,13 @@ async function resolveScope(admin, token) {
     throw new Error("Profile not found.");
   }
 
-  const role = String(currentProfile.role || "").toLowerCase();
+  const role = normalizeRole(currentProfile.role);
   const currentSalesmanCode = normalizeCode(currentProfile.salesman_code);
 
   const [profilesRes, usersRes] = await Promise.all([
     admin
       .from("profiles")
-      .select("id,role,salesman_code,salesman_name")
-      .in("role", ["salesman", "manager", "admin"]),
+      .select("id,role,salesman_code,salesman_name"),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
 
@@ -79,17 +91,22 @@ async function resolveScope(admin, token) {
   }
 
   const allProfiles = profilesRes.data || [];
-  const visibleProfiles = allProfiles.filter((profile) => {
+  const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
+  let visibleProfiles = scopedProfiles.filter((profile) => {
     if (["admin", "manager"].includes(role)) return true;
     return profile.id === currentProfile.id || subordinateIds.has(profile.id);
   });
+
+  if (!["admin", "manager"].includes(role) && !visibleProfiles.some((profile) => profile.id === currentProfile.id)) {
+    visibleProfiles = [currentProfile, ...visibleProfiles];
+  }
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
 
   return {
     hasAllAccess: ["admin", "manager"].includes(role),
     visibleSalesmanCodes: [...new Set([
-      ...visibleProfiles.map((profile) => normalizeCode(profile.salesman_code)).filter(Boolean),
+      ...visibleProfiles.flatMap((profile) => profileCodeCandidates(profile)),
       ...mutualGroupCodes,
     ])],
   };

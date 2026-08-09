@@ -8,7 +8,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 function normalizeCode(value) {
-  return String(value || "").trim().toUpperCase();
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
 function normalizeName(value) {
@@ -35,6 +35,10 @@ function resolveMutualGroupCodes(allProfiles, currentProfile) {
     .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
     .map((profile) => normalizeCode(profile.salesman_code))
     .filter(Boolean);
+}
+
+function profileCodeCandidates(profile) {
+  return [normalizeCode(profile?.salesman_code), normalizeCode(profile?.salesman_name)].filter(Boolean);
 }
 
 function isInvoiceMakerRole(role) {
@@ -136,7 +140,7 @@ export async function GET(request) {
 
     const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
     const visibleSalesmanCodes = [...new Set([
-      ...visibleMembers.map((member) => normalizeCode(member.salesman_code)).filter(Boolean),
+      ...members.flatMap((member) => profileCodeCandidates(member)),
       ...mutualGroupCodes,
     ])];
     const visibleUserIds = [...new Set(visibleMembers.map((member) => member.id).filter(Boolean))];

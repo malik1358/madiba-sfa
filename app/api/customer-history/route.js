@@ -14,7 +14,7 @@ const CACHE_VERSION = 5;
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function normalizeCode(value) {
-  return String(value || "").trim().toUpperCase();
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
 function normalizeName(value) {
@@ -39,6 +39,10 @@ function resolveMutualGroupCodes(allProfiles, currentProfile) {
     .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
     .map((profile) => normalizeCode(profile.salesman_code))
     .filter(Boolean);
+}
+
+function profileCodeCandidates(profile) {
+  return [normalizeCode(profile?.salesman_code), normalizeCode(profile?.salesman_name)].filter(Boolean);
 }
 
 function isInvoiceMakerRole(role) {
@@ -169,7 +173,7 @@ async function resolveScope(admin, token) {
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
   const visibleSalesmanCodes = [...new Set([
-    ...members.map((member) => normalizeCode(member.salesman_code)).filter(Boolean),
+    ...members.flatMap((member) => profileCodeCandidates(member)),
     ...mutualGroupCodes,
   ])];
 

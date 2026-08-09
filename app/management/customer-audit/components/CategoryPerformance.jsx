@@ -2,7 +2,11 @@ import { Fragment } from 'react';
 import { monthName, numberFormat, qtyFormat, trendClass } from '../lib/format';
 import { isDoNotUseItem } from '../lib/helpers';
 
-export default function CategoryPerformance({ analytics, expandedCategories, toggleCategory, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
+export default function CategoryPerformance({ analytics, itemCatalog = [], expandedCategories, toggleCategory, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
+  const catalogByCode = new Map(
+    itemCatalog.map((item) => [String(item.item_code || '').trim().toUpperCase(), item])
+  );
+
   return (
     <section className="auditSection">
       <div className="auditCategoryTitle">
@@ -108,13 +112,17 @@ export default function CategoryPerformance({ analytics, expandedCategories, tog
                                 <tbody>
                                   {category.items.map((item) => {
                                     const orderQty = Number(orderQuantities[item.item_code] || 0);
-                                    const isNotOrderable = isDoNotUseItem(item.item_name);
+                                    const catalogItem = catalogByCode.get(String(item.item_code || '').trim().toUpperCase());
+                                    const currentName = String(catalogItem?.item_name || '').trim();
+                                    const hasCurrentReplacement = Boolean(currentName) && !isDoNotUseItem(currentName);
+                                    const displayName = hasCurrentReplacement ? currentName : item.item_name;
+                                    const isNotOrderable = isDoNotUseItem(displayName);
                                     return (
                                       <Fragment key={item.item_key}>
                                         <tr className="auditItemValueRow">
                                           <th rowSpan="2" className="auditItemNameCell">
                                             <div className="auditItemCode">{item.item_code}</div>
-                                            <div className="auditItemName">{item.item_name}</div>
+                                            <div className="auditItemName">{displayName}</div>
                                             {item.abc_class && <div className="auditItemABC">{item.abc_class}</div>}
                                             {isNotOrderable && <div className="auditItemABC">Do Not Use</div>}
                                           </th>

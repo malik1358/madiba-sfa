@@ -588,9 +588,12 @@ export default function NewOrderPage() {
       const sheetCategory = normalizeText(sheetItem.category);
       const historyFallback = historyCategoryLookup.get(code) || {};
 
-      const nextName = hasMeaningfulItemName(existingName, code)
-        ? existingName
-        : (hasMeaningfulItemName(sheetName, code) ? sheetName : (historyFallback.item_name || code));
+      const sheetHasCurrentName = hasMeaningfulItemName(sheetName, code) && !isDoNotUseItem(sheetName);
+      const nextName = isDoNotUseItem(existingName) && sheetHasCurrentName
+        ? sheetName
+        : (hasMeaningfulItemName(existingName, code)
+          ? existingName
+          : (sheetHasCurrentName ? sheetName : (historyFallback.item_name || code)));
       const nextCategory = hasMeaningfulValue(sheetCategory)
         ? sheetCategory
         : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));
@@ -1708,6 +1711,7 @@ export default function NewOrderPage() {
                 <MonthlyPerformance analytics={analytics} />
                 <CategoryPerformance
                   analytics={analytics}
+                  itemCatalog={mergedItemsMaster}
                   expandedCategories={auditExpandedCategories}
                   toggleCategory={toggleAuditCategory}
                   orderQuantities={orderQuantities}

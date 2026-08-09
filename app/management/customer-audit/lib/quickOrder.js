@@ -13,20 +13,29 @@ export function buildQuickOrderSuggestions({ analytics, transactions, peerTransa
     return { newItems: [], notBoughtRecently: [], buyingLess: [] };
   }
 
+  const currentCatalogByCode = new Map(
+    (itemMaster || [])
+      .filter((item) => item?.item_code)
+      .map((item) => [normalizeCode(item.item_code), item])
+  );
   const historyByCode = new Map();
 
   transactions.forEach((row) => {
     const code = normalizeCode(row.item_code);
+    const catalogItem = currentCatalogByCode.get(code);
+    const catalogName = String(catalogItem?.item_name || '').trim();
+    const transactionName = String(row.item_name || '').trim();
+    const itemName = catalogName && !isDoNotUseItem(catalogName) ? catalogName : transactionName;
 
-    if (!code || isDoNotUseItem(row.item_name)) {
+    if (!code || isDoNotUseItem(itemName)) {
       return;
     }
 
     if (!historyByCode.has(code)) {
       historyByCode.set(code, {
         item_code: String(row.item_code || '').trim(),
-        item_name: row.item_name || row.item_code || 'Unknown Item',
-        category: row.category || 'Unclassified',
+        item_name: itemName || row.item_code || 'Unknown Item',
+        category: catalogItem?.category || row.category || 'Unclassified',
         lastBought: null,
         months: {},
         totalPositiveQty: 0,
@@ -233,5 +242,10 @@ export function buildQuickOrderSuggestions({ analytics, transactions, peerTransa
     .slice(0, 2)
     .map((item) => ({ ...item, rate: null, recommendationReason: 'Buying Less' }));
 
-  return { newItems, notBoughtRecently, buyingLess };
+  return {
+    newItems,
+    notBoughtRecently,
+    buyingLess,
+    historyMonthCount: visibleMonths.length,
+  };
 }

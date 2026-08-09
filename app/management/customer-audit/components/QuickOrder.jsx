@@ -36,7 +36,11 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
               </div>
 
               {group.items.length === 0 ? (
-                <div className="auditQuickOrderEmpty">No suggestion</div>
+                <div className="auditQuickOrderEmpty">
+                  {group.key === 'buyingLess' && quickOrderSuggestions.historyMonthCount < 2
+                    ? 'At least 2 months of purchase history are required.'
+                    : 'No suggestion'}
+                </div>
               ) : (
                 <div className="auditQuickOrderTableWrap">
                   <table className="auditQuickOrderTable">

@@ -11,6 +11,12 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+function extractEmailLocalPart(email) {
+  const raw = String(email || "").trim().toLowerCase();
+  if (!raw) return "";
+  return raw.includes("@") ? raw.split("@")[0] : raw;
+}
+
 function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
@@ -39,6 +45,20 @@ function resolveMutualGroupCodes(allProfiles, currentProfile) {
 
 function profileCodeCandidates(profile) {
   return [normalizeCode(profile?.salesman_code), normalizeCode(profile?.salesman_name)].filter(Boolean);
+}
+
+function authCodeCandidates(authUser) {
+  const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+  const localPart = extractEmailLocalPart(authUser?.email);
+
+  return [
+    normalizeCode(metadata.salesman_code),
+    normalizeCode(metadata.salesman_name),
+    normalizeCode(metadata.head_salesman_code),
+    normalizeCode(localPart),
+    normalizeCode(localPart.replace(/[._-]+/g, " ")),
+    normalizeCode(localPart.replace(/[._-]+/g, "")),
+  ].filter(Boolean);
 }
 
 function settingKeyFor(customerCode) {
@@ -79,6 +99,7 @@ async function resolveScope(admin, token) {
   if (usersRes.error) throw usersRes.error;
 
   const authUsers = usersRes.data?.users || [];
+  const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
   const subordinateIds = new Set();
 
   if (!["admin", "manager"].includes(role)) {
@@ -102,11 +123,13 @@ async function resolveScope(admin, token) {
   }
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
+  const currentAuthUser = authMap.get(currentProfile.id) || user;
 
   return {
     hasAllAccess: ["admin", "manager"].includes(role),
     visibleSalesmanCodes: [...new Set([
       ...visibleProfiles.flatMap((profile) => profileCodeCandidates(profile)),
+      ...authCodeCandidates(currentAuthUser),
       ...mutualGroupCodes,
     ])],
   };

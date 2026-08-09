@@ -11,6 +11,12 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+function extractEmailLocalPart(email) {
+  const raw = String(email || "").trim().toLowerCase();
+  if (!raw) return "";
+  return raw.includes("@") ? raw.split("@")[0] : raw;
+}
+
 function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
@@ -39,6 +45,20 @@ function resolveMutualGroupCodes(allProfiles, currentProfile) {
 
 function profileCodeCandidates(profile) {
   return [normalizeCode(profile?.salesman_code), normalizeCode(profile?.salesman_name)].filter(Boolean);
+}
+
+function authCodeCandidates(authUser) {
+  const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+  const localPart = extractEmailLocalPart(authUser?.email);
+
+  return [
+    normalizeCode(metadata.salesman_code),
+    normalizeCode(metadata.salesman_name),
+    normalizeCode(metadata.head_salesman_code),
+    normalizeCode(localPart),
+    normalizeCode(localPart.replace(/[._-]+/g, " ")),
+    normalizeCode(localPart.replace(/[._-]+/g, "")),
+  ].filter(Boolean);
 }
 
 function isInvoiceMakerRole(role) {
@@ -119,8 +139,11 @@ async function resolveScope(admin, token) {
   });
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
+  const currentAuthUser = authMap.get(currentProfile.id) || user;
+
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),
+    ...authCodeCandidates(currentAuthUser),
     ...mutualGroupCodes,
   ])];
 

@@ -37,6 +37,12 @@ export function findOutstandingCustomerCodesForSalesmen(dataset, salesmanIdentit
   return [...customerCodes];
 }
 
+export function customerCodeCandidates(value) {
+  const storedCode = normalizeCode(value);
+  const extractedCode = normalizeCode(extractLeadingCustomerCodeAndName(storedCode).customer_code);
+  return [...new Set([storedCode, extractedCode].filter(Boolean))];
+}
+
 export function extractLeadingCustomerCodeAndName(value) {
   const text = String(value || "").trim();
   if (!text) {

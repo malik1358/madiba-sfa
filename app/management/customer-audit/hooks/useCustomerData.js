@@ -6,6 +6,7 @@ const CUSTOMER_HISTORY_API = '/api/customer-history';
 
 async function fetchVisibleCustomers(token) {
   const response = await fetch('/api/customers/visible', {
+    cache: 'no-store',
     headers: {
       Authorization: `Bearer ${token}`,
     },

@@ -210,7 +210,7 @@ async function fetchVisibleCustomers(admin, scope) {
     }
   }
 
-  if (!scope.hasAllAccess && historyVisibleCustomerCodes.size === 0 && scope.identitySearchPattern) {
+  if (!scope.hasAllAccess && scope.identitySearchPattern) {
     const salesPageSize = 2000;
     let salesFrom = 0;
 

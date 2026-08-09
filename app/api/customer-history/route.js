@@ -23,6 +23,10 @@ function extractEmailLocalPart(email) {
   return raw.includes("@") ? raw.split("@")[0] : raw;
 }
 
+function normalizeLooseToken(value) {
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
 function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
@@ -59,10 +63,28 @@ function authCodeCandidates(authUser) {
     normalizeCode(metadata.salesman_code),
     normalizeCode(metadata.salesman_name),
     normalizeCode(metadata.head_salesman_code),
+    normalizeCode(metadata.head_salesman_name),
     normalizeCode(localPart),
     normalizeCode(localPart.replace(/[._-]+/g, " ")),
     normalizeCode(localPart.replace(/[._-]+/g, "")),
   ].filter(Boolean);
+}
+
+function fuzzyMatchedProfileCodes(allProfiles, authUser) {
+  const localPart = extractEmailLocalPart(authUser?.email);
+  const localToken = normalizeLooseToken(localPart);
+  if (!localToken) return [];
+
+  return allProfiles
+    .filter((profile) => {
+      const nameToken = normalizeLooseToken(profile?.salesman_name);
+      const codeToken = normalizeLooseToken(profile?.salesman_code);
+      return (
+        (nameToken && (nameToken.includes(localToken) || localToken.includes(nameToken)))
+        || (codeToken && (codeToken.includes(localToken) || localToken.includes(codeToken)))
+      );
+    })
+    .flatMap((profile) => profileCodeCandidates(profile));
 }
 
 function isInvoiceMakerRole(role) {
@@ -198,6 +220,7 @@ async function resolveScope(admin, token) {
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),
     ...authCodeCandidates(currentAuthUser),
+    ...fuzzyMatchedProfileCodes(scopedProfiles, currentAuthUser),
     ...mutualGroupCodes,
   ])];
 

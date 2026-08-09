@@ -29,6 +29,12 @@ function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function identitySearchPattern(value) {
+  return normalizeCode(value)
+    .replace(/[^A-Z0-9]+/g, "%")
+    .replace(/^%+|%+$/g, "");
+}
+
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
   return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker"].includes(normalized);
@@ -162,7 +168,6 @@ async function resolveScope(admin, token) {
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
   const currentAuthUser = authMap.get(currentProfile.id) || user;
-  const identitySearchPattern = normalizeCode(extractEmailLocalPart(currentAuthUser?.email)).replace(/[._-]+/g, "%");
 
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),
@@ -170,11 +175,14 @@ async function resolveScope(admin, token) {
     ...fuzzyMatchedProfileCodes(scopedProfiles, currentAuthUser),
     ...mutualGroupCodes,
   ])];
+  const identitySearchPatterns = [...new Set(
+    visibleSalesmanCodes.map(identitySearchPattern).filter(Boolean),
+  )];
 
   return {
     hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
     visibleSalesmanCodes,
-    identitySearchPattern,
+    identitySearchPatterns,
   };
 }
 
@@ -210,18 +218,19 @@ async function fetchVisibleCustomers(admin, scope) {
     }
   }
 
-  if (!scope.hasAllAccess && scope.identitySearchPattern) {
+  if (!scope.hasAllAccess && scope.identitySearchPatterns.length > 0) {
     const salesPageSize = 2000;
     let salesFrom = 0;
+    const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
+      `salesman_code.ilike.%${pattern}%`,
+      `salesman_name.ilike.%${pattern}%`,
+    ]);
 
     while (true) {
       const { data: salesRows, error: salesError } = await admin
         .from("sales_raw")
         .select("customer_code,salesman_code,salesman_name")
-        .or([
-          `salesman_code.ilike.%${scope.identitySearchPattern}%`,
-          `salesman_name.ilike.%${scope.identitySearchPattern}%`,
-        ].join(","))
+        .or(identityFilters.join(","))
         .range(salesFrom, salesFrom + salesPageSize - 1);
 
       if (salesError) throw salesError;

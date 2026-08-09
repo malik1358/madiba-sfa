@@ -7,6 +7,7 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
+import { addPdfBuildFooter } from "../../lib/buildInfo";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 
@@ -493,6 +494,8 @@ export default function PendingOrdersPage() {
           rowY += rowH;
         });
       }
+
+      addPdfBuildFooter(doc);
 
       const safeCustomer = String(activeOrder.customer_code || "customer").replace(/[^a-zA-Z0-9_-]/g, "_");
       const safeDate = String(activeOrder.updated_at || activeOrder.created_at || new Date().toISOString())

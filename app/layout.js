@@ -14,7 +14,7 @@ export default function RootLayout({ children }) {
 
   return (
     <html lang="en">
-      <body>
+      <body data-build-id={buildId}>
         {isStaging && (
           <div className="environmentBanner" role="status">
             STAGING / UAT - TEST DATA ONLY

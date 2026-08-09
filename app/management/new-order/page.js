@@ -10,6 +10,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
+import { addPdfBuildFooter } from "../../lib/buildInfo";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
@@ -1161,6 +1162,7 @@ export default function NewOrderPage() {
 
         doc.setFontSize(9);
         doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 28);
+        addPdfBuildFooter(doc);
 
         const safeCustomer = String(snapshot.customerCode || "customer").replace(/[^a-zA-Z0-9_-]/g, "_");
         const safeDate = snapshot.savedAtIso.slice(0, 19).replace(/[:T]/g, "-");

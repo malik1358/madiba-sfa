@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { findOutstandingCustomerCodesForSalesmen } from "../app/lib/outstanding.js";
+import {
+  customerCodeCandidates,
+  findOutstandingCustomerCodesForSalesmen,
+} from "../app/lib/outstanding.js";
 
 test("findOutstandingCustomerCodesForSalesmen matches normalized salesman identity", () => {
   const dataset = {
@@ -32,5 +35,12 @@ test("findOutstandingCustomerCodesForSalesmen does not widen unrelated scope", (
   assert.deepEqual(
     findOutstandingCustomerCodesForSalesmen(dataset, ["AHMED NABIL"]),
     ["1173C"]
+  );
+});
+
+test("customerCodeCandidates extracts code from a combined customer master value", () => {
+  assert.deepEqual(
+    customerCodeCandidates("1173C LOULOAT AL NILE TRADING CO."),
+    ["1173C LOULOAT AL NILE TRADING CO.", "1173C"]
   );
 });

@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   OUTSTANDING_DATASET_KEY,
+  customerCodeCandidates,
   findOutstandingCustomerCodesForSalesmen,
 } from "../../../lib/outstanding";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -286,7 +288,8 @@ async function fetchVisibleCustomers(admin, scope) {
       if (normalizedScopeCodes.has(rowSalesmanCode)) return true;
 
       // Fallback: include customers that have sales history under visible salesman codes.
-      return historyVisibleCustomerCodes.has(normalizeCode(row.customer_code));
+      return customerCodeCandidates(row.customer_code)
+        .some((code) => historyVisibleCustomerCodes.has(normalizeCode(code)));
     });
     rows.push(...chunk);
 
@@ -320,6 +323,8 @@ export async function GET(request) {
       success: true,
       customers,
       count: customers.length,
+    }, {
+      headers: { "Cache-Control": "private, no-store, max-age=0" },
     });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message || "Unable to load visible customers." }, { status: 500 });

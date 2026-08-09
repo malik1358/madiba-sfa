@@ -217,8 +217,11 @@ async function fetchVisibleCustomers(admin, scope) {
     while (true) {
       const { data: salesRows, error: salesError } = await admin
         .from("sales_raw")
-        .select("customer_code,salesman_name")
-        .ilike("salesman_name", `%${scope.identitySearchPattern}%`)
+        .select("customer_code,salesman_code,salesman_name")
+        .or([
+          `salesman_code.ilike.%${scope.identitySearchPattern}%`,
+          `salesman_name.ilike.%${scope.identitySearchPattern}%`,
+        ].join(","))
         .range(salesFrom, salesFrom + salesPageSize - 1);
 
       if (salesError) throw salesError;

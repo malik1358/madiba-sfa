@@ -1,5 +1,5 @@
-import { monthKey, salesUnitQty } from './format';
-import { isDoNotUseItem, normalizeCode } from './helpers';
+import { monthKey, salesUnitQty } from './format.js';
+import { isDoNotUseItem, normalizeCode } from './helpers.js';
 
 function hasPositivePurchase(row) {
   if (Number(row?.sales_amount || 0) > 0) return true;
@@ -72,6 +72,15 @@ export function buildQuickOrderSuggestions({ analytics, transactions, peerTransa
       .map((row) => normalizeCode(row.item_code))
       .filter(Boolean)
   );
+  const categorySales = new Map();
+
+  transactions.forEach((row) => {
+    if (!hasPositivePurchase(row)) return;
+    const category = String(row.category || 'Unclassified').trim() || 'Unclassified';
+    const categoryKey = category.toUpperCase();
+    const salesValue = Number(row.sales_amount || row.line_value || row.amount || 0);
+    categorySales.set(categoryKey, Number(categorySales.get(categoryKey) || 0) + Math.max(salesValue, 0));
+  });
 
   const peerCustomerItems = {};
   peerTransactions.forEach((row) => {
@@ -147,7 +156,7 @@ export function buildQuickOrderSuggestions({ analytics, transactions, peerTransa
   const masterByCode = new Map(cleanMaster.map((item) => [normalizeCode(item.item_code), item]));
   const candidateCodes = Object.keys(candidateStats);
 
-  const newItems = candidateCodes
+  const peerNewItems = candidateCodes
     .map((code) => {
       const item = masterByCode.get(code) || peerItemMeta.get(code);
       if (!item) return null;
@@ -172,6 +181,29 @@ export function buildQuickOrderSuggestions({ analytics, transactions, peerTransa
       return String(a.item_name || '').localeCompare(String(b.item_name || ''));
     })
     .slice(0, 3);
+
+  const peerItemCodes = new Set(peerNewItems.map((item) => normalizeCode(item.item_code)));
+  const fallbackNewItems = cleanMaster
+    .filter((item) => item.is_active !== false)
+    .filter((item) => !selectedBoughtCodes.has(normalizeCode(item.item_code)))
+    .filter((item) => !peerItemCodes.has(normalizeCode(item.item_code)))
+    .map((item) => {
+      const category = String(item.category || 'Unclassified').trim() || 'Unclassified';
+      const categoryScore = Number(categorySales.get(category.toUpperCase()) || 0);
+      return {
+        ...item,
+        categoryScore,
+        recommendationReason: categoryScore > 0
+          ? `Related to ${category} purchases`
+          : 'New catalog item',
+      };
+    })
+    .sort((a, b) => {
+      if (b.categoryScore !== a.categoryScore) return b.categoryScore - a.categoryScore;
+      return String(a.item_name || '').localeCompare(String(b.item_name || ''));
+    });
+
+  const newItems = [...peerNewItems, ...fallbackNewItems].slice(0, 3);
 
   const notBoughtRecently = Array.from(historyByCode.values())
     .filter((item) => item.lastBought)

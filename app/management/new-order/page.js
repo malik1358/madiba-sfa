@@ -8,6 +8,8 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
+import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
+import { loadPricePayload } from "../../lib/pricePayload";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
@@ -1403,38 +1405,12 @@ export default function NewOrderPage() {
     }
 
     async function loadPrices() {
-      const PRICE_CACHE_KEY = "madiba.pricePayload";
-
       try {
-        const response = await fetch(PRICE_CACHE_API, { cache: "no-store" });
-        if (!response.ok) {
-          throw new Error(`Price API failed with ${response.status}`);
-        }
-
-        const data = await response.json();
-        const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
-          ? {
-              priceMap: data.priceMap,
-              sheetItems: Array.isArray(data.sheetItems) ? data.sheetItems : [],
-            }
-          : parsePricePayload(data || {});
-        if (Object.keys(parsed.priceMap || {}).length === 0) {
-          throw new Error("Price cache returned no prices");
-        }
-
-        setPriceList(parsed.priceMap);
-        setPriceSheetItems(parsed.sheetItems);
-        window.localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(parsed));
+        const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
+        setPriceList(parsed.priceMap || {});
+        setPriceSheetItems(parsed.sheetItems || []);
       } catch {
-        try {
-          const cached = JSON.parse(window.localStorage.getItem(PRICE_CACHE_KEY) || "null");
-          if (cached?.priceMap && Object.keys(cached.priceMap).length > 0) {
-            setPriceList(cached.priceMap);
-            setPriceSheetItems(Array.isArray(cached.sheetItems) ? cached.sheetItems : []);
-          }
-        } catch {
-          // Keep previously loaded prices if cache is unavailable.
-        }
+        // Keep previously loaded prices if fresh and cached sources are unavailable.
       }
     }
 

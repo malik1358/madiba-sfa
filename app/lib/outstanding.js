@@ -27,7 +27,9 @@ export function findOutstandingCustomerCodesForSalesmen(dataset, salesmanIdentit
   (Array.isArray(dataset?.invoices) ? dataset.invoices : []).forEach((invoice) => {
     if (!identityNames.has(normalizeComparableName(invoice?.salesman))) return;
 
-    const customerCode = normalizeCode(invoice?.customer_code)
+    const storedCode = normalizeCode(invoice?.customer_code);
+    const customerCode = normalizeCode(extractLeadingCustomerCodeAndName(storedCode).customer_code)
+      || (storedCode && !/\s/.test(storedCode) ? storedCode : "")
       || normalizeCode(extractLeadingCustomerCodeAndName(invoice?.customer_name).customer_code);
     if (customerCode) customerCodes.add(customerCode);
   });

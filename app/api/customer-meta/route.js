@@ -148,7 +148,31 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
   }
 
   if (!scope.hasAllAccess && !scope.visibleSalesmanCodes.includes(normalizeCode(customer.current_salesman_code))) {
-    throw new Error("You do not have access to this customer.");
+    const normalizedInput = normalizeCode(customerCode);
+    const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
+    const leadingCode = normalizeCode(leadingCodeMatch?.[1] || "");
+    const codeCandidates = [...new Set([normalizedInput, leadingCode].filter(Boolean))];
+
+    let hasHistoryAccess = false;
+    for (const codeCandidate of codeCandidates) {
+      const { data: historyRow, error: historyError } = await admin
+        .from("sales_raw")
+        .select("id")
+        .eq("customer_code", codeCandidate)
+        .in("salesman_code", scope.visibleSalesmanCodes || [])
+        .limit(1)
+        .maybeSingle();
+
+      if (historyError) throw historyError;
+      if (historyRow?.id) {
+        hasHistoryAccess = true;
+        break;
+      }
+    }
+
+    if (!hasHistoryAccess) {
+      throw new Error("You do not have access to this customer.");
+    }
   }
 
   return customer;

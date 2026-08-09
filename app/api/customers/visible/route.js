@@ -158,6 +158,32 @@ async function fetchVisibleCustomers(admin, scope) {
   let from = 0;
   const rows = [];
   const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+  const historyVisibleCustomerCodes = new Set();
+
+  if (!scope.hasAllAccess && normalizedScopeCodes.size > 0) {
+    const salesPageSize = 2000;
+    let salesFrom = 0;
+    const visibleCodes = Array.from(normalizedScopeCodes);
+
+    while (true) {
+      const { data: salesRows, error: salesError } = await admin
+        .from("sales_raw")
+        .select("customer_code,salesman_code")
+        .in("salesman_code", visibleCodes)
+        .range(salesFrom, salesFrom + salesPageSize - 1);
+
+      if (salesError) throw salesError;
+
+      const chunk = salesRows || [];
+      chunk.forEach((row) => {
+        const code = normalizeCode(row.customer_code);
+        if (code) historyVisibleCustomerCodes.add(code);
+      });
+
+      if (chunk.length < salesPageSize) break;
+      salesFrom += salesPageSize;
+    }
+  }
 
   while (true) {
     let query = admin
@@ -173,7 +199,11 @@ async function fetchVisibleCustomers(admin, scope) {
     const chunk = (data || []).filter((row) => {
       if (scope.hasAllAccess) return true;
       if (normalizedScopeCodes.size === 0) return false;
-      return normalizedScopeCodes.has(normalizeCode(row.current_salesman_code));
+      const rowSalesmanCode = normalizeCode(row.current_salesman_code);
+      if (normalizedScopeCodes.has(rowSalesmanCode)) return true;
+
+      // Fallback: include customers that have sales history under visible salesman codes.
+      return historyVisibleCustomerCodes.has(normalizeCode(row.customer_code));
     });
     rows.push(...chunk);
 

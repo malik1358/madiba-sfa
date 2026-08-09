@@ -7,7 +7,7 @@ test("findOutstandingCustomerCodesForSalesmen matches normalized salesman identi
   const dataset = {
     invoices: [
       {
-        customer_code: "",
+        customer_code: "1173C LOULOAT AL NILE TRADING CO.",
         customer_name: "1173C LOULOAT AL NILE TRADING CO.",
         salesman: "Ahmed Nabil",
       },

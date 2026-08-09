@@ -249,9 +249,10 @@ function parseOutstandingRows(rows, headerRowIndex) {
     const row = Array.isArray(rows[r]) ? rows[r] : [];
     const rawCustomerCode = columns.customerCode >= 0 ? String(row[columns.customerCode] || "").trim() : "";
     const rawCustomerName = columns.customerName >= 0 ? String(row[columns.customerName] || "").trim() : "";
-    const extracted = extractLeadingCustomerCodeAndName(rawCustomerName);
-    const customerCode = rawCustomerCode || extracted.customer_code;
-    const customerName = extracted.customer_name || rawCustomerName;
+    const extractedCode = extractLeadingCustomerCodeAndName(rawCustomerCode);
+    const extractedName = extractLeadingCustomerCodeAndName(rawCustomerName);
+    const customerCode = extractedCode.customer_code || rawCustomerCode || extractedName.customer_code;
+    const customerName = extractedName.customer_name || extractedCode.customer_name || rawCustomerName;
 
     if (!customerCode && !customerName) continue;
 

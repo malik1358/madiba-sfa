@@ -1357,14 +1357,13 @@ export default function NewOrderPage() {
           draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
         }
 
-        const [loadedCustomers, itemsRes, draftsRes, categoriesRes] = await Promise.all([
+        const [loadedCustomers, itemsRes, draftsRes] = await Promise.all([
           fetchVisibleCustomers(accessToken),
           supabase
             .from("items_master")
             .select("item_code,item_name,category")
             .order("item_name"),
           draftsQuery,
-          fetchItemCategoryLookup(supabase, scope),
         ]);
 
         if (itemsRes.error) throw itemsRes.error;
@@ -1377,7 +1376,10 @@ export default function NewOrderPage() {
         setCustomers(mergedCustomers);
         setItemsMaster(itemsRes.data || []);
         setPreviousDrafts(draftsRes.data || []);
-        setHistoryCategoryLookup(categoriesRes || new Map());
+
+        fetchItemCategoryLookup(supabase, scope)
+          .then((categories) => setHistoryCategoryLookup(categories || new Map()))
+          .catch(() => setHistoryCategoryLookup(new Map()));
       } catch (err) {
         setError(err.message || "Unable to load new order data.");
       } finally {

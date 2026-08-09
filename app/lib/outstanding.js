@@ -17,6 +17,23 @@ function normalizeComparableName(value) {
     .trim();
 }
 
+export function findOutstandingCustomerCodesForSalesmen(dataset, salesmanIdentities) {
+  const identityNames = new Set(
+    (salesmanIdentities || []).map(normalizeComparableName).filter(Boolean)
+  );
+  if (identityNames.size === 0) return [];
+
+  const customerCodes = new Set();
+  (Array.isArray(dataset?.invoices) ? dataset.invoices : []).forEach((invoice) => {
+    if (!identityNames.has(normalizeComparableName(invoice?.salesman))) return;
+
+    const customerCode = normalizeCode(invoice?.customer_code);
+    if (customerCode) customerCodes.add(customerCode);
+  });
+
+  return [...customerCodes];
+}
+
 export function extractLeadingCustomerCodeAndName(value) {
   const text = String(value || "").trim();
   if (!text) {

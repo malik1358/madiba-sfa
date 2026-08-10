@@ -689,8 +689,8 @@ export default function NewOrderPage() {
   }, [customers, customerSearch]);
 
   const customerNameSuggestions = useMemo(
-    () => filteredCustomers.slice(0, 100),
-    [filteredCustomers]
+    () => customerSearch.trim() ? filteredCustomers.slice(0, 10) : [],
+    [customerSearch, filteredCustomers]
   );
 
   const filteredItems = useMemo(() => {
@@ -773,6 +773,16 @@ export default function NewOrderPage() {
       ...current,
       [category]: !current[category],
     }));
+  }
+
+  function selectCustomer(customerCode, customerName = "") {
+    setSelectedCustomerCode(customerCode);
+    if (customerName) setCustomerSearch(customerName);
+    setError("");
+    setMessage("");
+    setLastSavedOrder(null);
+    setShowTransactions(false);
+    setAuditExpandedCategories({});
   }
 
   const analyticsLike = useMemo(() => ({ items: mergedItemsMaster }), [mergedItemsMaster]);
@@ -1643,34 +1653,34 @@ export default function NewOrderPage() {
             {editOrderId && <span>Editing order #{editOrderId}</span>}
           </div>
           <div className="moduleFilterRow">
-            <input
-              className="moduleInput"
-              type="text"
-              placeholder="Search customer by code or name"
-              list="customer-name-suggestions"
-              value={customerSearch}
-              onChange={(event) => setCustomerSearch(event.target.value)}
-            />
-            <datalist id="customer-name-suggestions">
-              {customerNameSuggestions.map((customer) => (
-                <option
-                  key={`name-suggest-${customer.customer_code}`}
-                  value={customer.customer_name || ""}
-                  label={customer.customer_code || ""}
-                />
-              ))}
-            </datalist>
+            <div className="moduleCustomerSearch">
+              <input
+                className="moduleInput"
+                type="text"
+                placeholder="Search customer by code or name"
+                value={customerSearch}
+                onChange={(event) => setCustomerSearch(event.target.value)}
+                autoComplete="off"
+              />
+              {customerNameSuggestions.length > 0 && (
+                <div className="moduleCustomerSuggestions">
+                  {customerNameSuggestions.map((customer) => (
+                    <button
+                      type="button"
+                      key={`name-suggest-${customer.customer_code}`}
+                      onClick={() => selectCustomer(customer.customer_code, customer.customer_name)}
+                    >
+                      <strong>{customer.customer_name || "Unnamed customer"}</strong>
+                      <span>{customer.customer_code || "-"}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <select
               className="moduleInput"
               value={selectedCustomerCode}
-              onChange={(event) => {
-                setSelectedCustomerCode(event.target.value);
-                setError("");
-                setMessage("");
-                setLastSavedOrder(null);
-                setShowTransactions(false);
-                setAuditExpandedCategories({});
-              }}
+              onChange={(event) => selectCustomer(event.target.value)}
             >
               <option value="">Select customer</option>
               {filteredCustomers.map((customer) => (

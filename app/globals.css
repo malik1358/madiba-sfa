@@ -3310,6 +3310,54 @@ table.auditMatrix td.auditTrendSame {
   gap: 10px;
 }
 
+.moduleCustomerSearch {
+  position: relative;
+}
+
+.moduleCustomerSuggestions {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid #b8cdd2;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(6, 47, 58, 0.16);
+}
+
+.moduleCustomerSuggestions button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 0;
+  border-bottom: 1px solid #e2ecee;
+  background: #ffffff;
+  color: #073f4c;
+  text-align: left;
+  cursor: pointer;
+}
+
+.moduleCustomerSuggestions button:last-child {
+  border-bottom: 0;
+}
+
+.moduleCustomerSuggestions button:hover,
+.moduleCustomerSuggestions button:focus-visible {
+  background: #edf6f7;
+}
+
+.moduleCustomerSuggestions span {
+  flex: 0 0 auto;
+  color: #607b82;
+  font-size: 12px;
+}
+
 .moduleInput,
 .moduleTextArea,
 .moduleInlineButton,

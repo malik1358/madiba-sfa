@@ -155,7 +155,7 @@ function hasCurrentItemName(value, itemCode = "") {
   return hasMeaningfulItemName(value, itemCode) && !isDoNotUseItem(value);
 }
 
-const NEEDS_MAPPING_CATEGORY = "Needs Mapping";
+const MISSING_CATEGORY = "Missing Category";
 
 async function fetchItemCategoryLookup(supabase, scope) {
   const pageSize = 1000;
@@ -567,28 +567,19 @@ export default function NewOrderPage() {
         const historyFallback = historyCategoryLookup.get(code) || {};
         const historyName = normalizeText(historyFallback.item_name);
         const sheetName = normalizeText(sheetItem.item_name);
+        const historyCategory = normalizeText(historyFallback.category);
+        const sheetCategory = normalizeText(sheetItem.category);
         const nextName = hasCurrentItemName(historyName, code)
           ? historyName
           : (hasCurrentItemName(sheetName, code) ? sheetName : code);
-        const nextCategory = normalizeText(sheetItem.category) || historyFallback.category || "Unclassified";
-
-        // Keep placeholder-only sheet rows visible, but isolate them for cleanup.
-        const unresolved = !hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory);
-
-        if (!hasMeaningfulItemName(nextName, code) && !hasMeaningfulValue(nextCategory)) {
-          itemMap.set(code, {
-            item_code: code,
-            item_name: nextName,
-            category: NEEDS_MAPPING_CATEGORY,
-            source: "PRICE_SHEET_ONLY",
-          });
-          return;
-        }
+        const nextCategory = hasMeaningfulValue(sheetCategory)
+          ? sheetCategory
+          : (hasMeaningfulValue(historyCategory) ? historyCategory : MISSING_CATEGORY);
 
         itemMap.set(code, {
           item_code: code,
           item_name: nextName,
-          category: unresolved ? NEEDS_MAPPING_CATEGORY : nextCategory,
+          category: nextCategory,
           source: "PRICE_SHEET_ONLY",
         });
         return;
@@ -628,12 +619,10 @@ export default function NewOrderPage() {
         : "";
       const fallbackCategory = historyFallback.category || "";
 
-      const unresolved = !hasMeaningfulItemName(fallbackName, code) && !hasMeaningfulValue(fallbackCategory);
-
       itemMap.set(code, {
         item_code: code,
         item_name: fallbackName || code,
-        category: unresolved ? NEEDS_MAPPING_CATEGORY : (fallbackCategory || "Unclassified"),
+        category: hasMeaningfulValue(fallbackCategory) ? fallbackCategory : MISSING_CATEGORY,
         source: "PRICE_MAP_ONLY",
       });
     });
@@ -695,25 +684,15 @@ export default function NewOrderPage() {
 
   const filteredItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
-    const normalizedQueryCode = normalizeCode(itemSearch);
-    const includeNeedsMapping = categoryFilter === NEEDS_MAPPING_CATEGORY;
 
     return mergedItemsMaster.filter((item) => {
       if (categoryFilter !== "ALL" && normalizeCategoryLabel(normalizeText(item.category) || "Unclassified") !== categoryFilter) return false;
 
-      const matchesQuery = !q || (
+      return !q || (
         String(item.item_code || "").toLowerCase().includes(q) ||
         String(item.item_name || "").toLowerCase().includes(q) ||
         String(item.category || "").toLowerCase().includes(q)
       );
-
-      if (item.category === NEEDS_MAPPING_CATEGORY && !includeNeedsMapping) {
-        // Keep unresolved rows out of normal browsing, but allow direct code lookup.
-        const isExactCodeLookup = normalizedQueryCode && normalizeCode(item.item_code) === normalizedQueryCode;
-        if (!isExactCodeLookup) return false;
-      }
-
-      return matchesQuery;
     });
   }, [mergedItemsMaster, categoryFilter, itemSearch]);
 
@@ -740,20 +719,6 @@ export default function NewOrderPage() {
       (label) => parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]) !== 0
     ),
     [outstandingInfo.bucketLabels, outstandingInfo.customer]
-  );
-
-  const priceSheetOnlyItems = useMemo(
-    () => mergedItemsMaster.filter((item) => {
-      if (!(item.source === "PRICE_SHEET_ONLY" || item.source === "PRICE_MAP_ONLY")) return false;
-
-      // Keep this list focused on items that actually have usable mapping metadata.
-      if (item.category === NEEDS_MAPPING_CATEGORY && !hasMeaningfulItemName(item.item_name, item.item_code)) {
-        return false;
-      }
-
-      return true;
-    }),
-    [mergedItemsMaster]
   );
 
   const canUploadOutstanding = useMemo(() => {
@@ -1891,44 +1856,6 @@ export default function NewOrderPage() {
                 </table>
               </div>
             </section>
-
-            {priceSheetOnlyItems.length > 0 && (
-              <section className="moduleSection">
-                <div className="moduleSectionHeader">
-                  <h2>Price Sheet Items</h2>
-                  <span>{priceSheetOnlyItems.length} sheet-only item(s)</span>
-                </div>
-                <div className="moduleTableWrap">
-                  <table className="moduleTable">
-                    <thead>
-                      <tr>
-                        <th>Category</th>
-                        <th>Item</th>
-                        <th>Price</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {priceSheetOnlyItems.map((item) => (
-                        <tr key={`sheet-only-${item.item_code}`}>
-                          <td>{item.category || "Unclassified"}</td>
-                          <td>
-                            <strong>
-                              {normalizeCode(item.item_name) === normalizeCode(item.item_code)
-                                ? item.item_code
-                                : item.item_name}
-                            </strong>
-                            {normalizeCode(item.item_name) !== normalizeCode(item.item_code) && (
-                              <div className="moduleCode">{item.item_code}</div>
-                            )}
-                          </td>
-                          <td>{priceList[String(item.item_code).trim().toUpperCase()] ? `SAR ${Number(priceList[String(item.item_code).trim().toUpperCase()]).toFixed(2)}` : "NOT FOUND"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
 
             <section className="moduleSection">
               <div className="moduleOrderBar">

@@ -16,6 +16,13 @@ const TEXT = {
   subtitle: { en: "Prospect registration", ar: "تسجيل عميل محتمل" },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading prospect registration...", ar: "جاري تحميل تسجيل العميل المحتمل..." },
+  orderReceived: { en: "Was an order received?", ar: "هل تم استلام طلب؟" },
+  orderReceivedHint: { en: "Choose Yes to create the order, or No to schedule the next follow-up visit.", ar: "اختر نعم لإنشاء الطلب، أو لا لتحديد موعد زيارة المتابعة القادمة." },
+  yesCreateOrder: { en: "Yes, Create Order", ar: "نعم، إنشاء طلب" },
+  noScheduleFollowUp: { en: "No, Schedule Follow-up", ar: "لا، تحديد متابعة" },
+  nextVisitDate: { en: "Next Visit Date", ar: "تاريخ الزيارة القادمة" },
+  saveFollowUp: { en: "Save Follow-up", ar: "حفظ المتابعة" },
+  savingFollowUp: { en: "Saving...", ar: "جاري الحفظ..." },
 };
 
 const INITIAL_FORM = {
@@ -158,6 +165,10 @@ export default function NewCustomerPage() {
   const [gpsPermissionWarning, setGpsPermissionWarning] = useState("");
   const [arabicNameEdited, setArabicNameEdited] = useState(false);
   const [translatingName, setTranslatingName] = useState(false);
+  const [savedProspect, setSavedProspect] = useState(null);
+  const [showFollowUpDate, setShowFollowUpDate] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
 
   useEffect(() => {
     const englishName = String(form.customer_name_en || "").trim();
@@ -194,6 +205,16 @@ export default function NewCustomerPage() {
 
     captureLocation();
   }, [loading, form.gps_location]);
+
+  useEffect(() => {
+    if (!savedProspect) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [savedProspect]);
 
   useEffect(() => {
     async function load() {
@@ -413,27 +434,29 @@ export default function NewCustomerPage() {
         throw new Error("Please login again.");
       }
 
+      const remarks = [
+        form.shop_name && form.shop_name !== form.customer_name_en
+          ? `Customer Name: ${form.customer_name_en}`
+          : "",
+        form.customer_type ? `Customer Type: ${form.customer_type}` : "",
+        form.whatsapp ? `WhatsApp: ${form.whatsapp}` : "",
+        form.email ? `Email: ${form.email}` : "",
+        form.national_address ? `National Address: ${form.national_address}` : "",
+        form.notes,
+        documents.length ? `Documents: ${JSON.stringify(documents)}` : "",
+      ].filter(Boolean).join("\n") || null;
+
       const payload = {
-        customer_name: form.customer_name_en,
         company_name: form.shop_name || form.customer_name_en,
-        customer_name_en: form.customer_name_en,
-        customer_name_ar: form.customer_name_ar || null,
-        shop_name: form.shop_name,
-        owner_name: form.owner_name || null,
+        company_name_ar: form.customer_name_ar || null,
+        contact_person: form.owner_name || null,
         mobile: normalizedMobile,
-        whatsapp: form.whatsapp || null,
-        email: form.email || null,
         city: form.city,
         area: form.area,
-        gps_location: `${parsedGps.lat.toFixed(6)}, ${parsedGps.lng.toFixed(6)}`,
-        customer_type: form.customer_type,
+        latitude: Number(parsedGps.lat.toFixed(7)),
+        longitude: Number(parsedGps.lng.toFixed(7)),
         salesman_code: form.salesman_code,
-        notes: [
-          form.national_address ? `National Address: ${form.national_address}` : "",
-          form.notes,
-          documents.length ? `Documents: ${JSON.stringify(documents)}` : "",
-        ].filter(Boolean).join("\n") || null,
-        created_by: session.user.id,
+        remarks,
       };
 
       const { data, removedColumns } = await insertProspectWithColumnFallback(supabase, payload);
@@ -455,15 +478,60 @@ export default function NewCustomerPage() {
 
       const query = buildProspectOrderParams({
         id: data.id,
-        customerName: data.customer_name || data.shop_name || form.customer_name_en || form.shop_name,
+        customerName: form.customer_name_en || form.shop_name,
         salesmanCode: form.salesman_code,
       });
 
-      router.push(`/management/new-order?${query}`);
+      setSavedProspect({ id: data.id, query });
+      setShowFollowUpDate(false);
+      setFollowUpDate("");
+      setMessage("Prospect saved. Confirm whether an order was received.");
     } catch (err) {
       setError(err.message || "Unable to register prospect.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveFollowUp() {
+    if (!savedProspect?.id || !followUpDate) {
+      setError("Next Visit Date is required.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setSavingFollowUp(true);
+    setError("");
+
+    try {
+      const { error: updateError } = await supabase
+        .from("prospects")
+        .update({ status: "FOLLOW_UP", follow_up_date: followUpDate })
+        .eq("id", savedProspect.id);
+
+      if (updateError) throw updateError;
+
+      setRecent((current) => current.map((row) => (
+        row.id === savedProspect.id
+          ? { ...row, status: "FOLLOW_UP", follow_up_date: followUpDate }
+          : row
+      )));
+      setSavedProspect(null);
+      setShowFollowUpDate(false);
+      setFollowUpDate("");
+      setForm((current) => ({ ...INITIAL_FORM, salesman_code: current.salesman_code }));
+      setDocuments([]);
+      setArabicNameEdited(false);
+      setMessage(`Follow-up visit scheduled for ${followUpDate}.`);
+    } catch (err) {
+      setError(err.message || "Unable to schedule follow-up visit.");
+    } finally {
+      setSavingFollowUp(false);
     }
   }
 
@@ -504,6 +572,44 @@ export default function NewCustomerPage() {
         {message && <div className="moduleSuccess">{message}</div>}
         {schemaWarning && <div className="moduleWarning">{schemaWarning}</div>}
         {gpsPermissionWarning && <div className="moduleWarning">{gpsPermissionWarning}</div>}
+
+        {savedProspect && (
+          <div className="moduleModalOverlay">
+            <section className="moduleModal" role="dialog" aria-modal="true" aria-labelledby="order-received-title">
+              <div className="moduleSectionHeader">
+                <h2 id="order-received-title">{t("orderReceived")}</h2>
+              </div>
+              <p className="moduleHint">{t("orderReceivedHint")}</p>
+              <div className="moduleOrderActions">
+                <button type="button" autoFocus onClick={() => router.push(`/management/new-order?${savedProspect.query}`)}>
+                  {t("yesCreateOrder")}
+                </button>
+                <button type="button" onClick={() => setShowFollowUpDate(true)}>
+                  {t("noScheduleFollowUp")}
+                </button>
+              </div>
+              {showFollowUpDate && (
+                <div className="moduleFormGrid moduleModalForm">
+                  <label>
+                    {t("nextVisitDate")}
+                    <input
+                      className="moduleInput"
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={followUpDate}
+                      onChange={(event) => setFollowUpDate(event.target.value)}
+                    />
+                  </label>
+                  <div className="moduleModalSubmit">
+                    <button type="button" className="modulePrimaryButton" onClick={saveFollowUp} disabled={savingFollowUp || !followUpDate}>
+                      {savingFollowUp ? t("savingFollowUp") : t("saveFollowUp")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
@@ -634,7 +740,7 @@ export default function NewCustomerPage() {
               <textarea className="moduleTextArea" rows={4} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </label>
             <div className="moduleFieldFull">
-              <button className="modulePrimaryButton" type="submit" disabled={saving || !prospectsEnabled}>
+              <button className="modulePrimaryButton" type="submit" disabled={saving || !prospectsEnabled || Boolean(savedProspect)}>
                 {saving ? "Saving..." : "Save Prospect"}
               </button>
             </div>
@@ -663,8 +769,8 @@ export default function NewCustomerPage() {
                 {recent.map((row) => (
                   <tr key={row.id}>
                     <td>{row.id}</td>
-                    <td>{row.shop_name || row.customer_name || "-"}</td>
-                    <td>{row.owner_name || "-"}</td>
+                    <td>{row.company_name || row.shop_name || row.customer_name || "-"}</td>
+                    <td>{row.contact_person || row.owner_name || "-"}</td>
                     <td>{row.mobile || "-"}</td>
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.status || "-"}</td>
@@ -676,7 +782,7 @@ export default function NewCustomerPage() {
                         onClick={() => {
                           const query = buildProspectOrderParams({
                             id: row.id,
-                            customerName: row.customer_name || row.shop_name,
+                            customerName: row.company_name || row.customer_name || row.shop_name,
                             salesmanCode: row.salesman_code || form.salesman_code,
                           });
                           router.push(`/management/new-order?${query}`);

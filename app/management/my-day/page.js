@@ -10,6 +10,7 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
+import { buildRecentSalesByCustomer, filterAndRankVisitCustomers } from "./visitPriority";
 
 const PAGE_TEXT = {
   title: { en: "My Day", ar: "يومي" },
@@ -34,6 +35,8 @@ const PAGE_TEXT = {
   noRoutes: { en: "No routes", ar: "لا توجد مسارات" },
   customersCount: { en: "customers", ar: "عميل" },
   visitStatus: { en: "Visit Status", ar: "حالة الزيارات" },
+  searchCustomer: { en: "Search customer by name or code", ar: "ابحث عن العميل بالاسم أو الرمز" },
+  recentValue: { en: "Recent 6M Value", ar: "قيمة آخر 6 أشهر" },
   customer: { en: "Customer", ar: "العميل" },
   cityArea: { en: "City / Area", ar: "المدينة / المنطقة" },
   daysSinceLastInvoice: { en: "Days From Last Invoice", ar: "الأيام منذ آخر فاتورة" },
@@ -51,6 +54,8 @@ const PAGE_TEXT = {
   visitOutcome: { en: "Visit Outcome", ar: "نتيجة الزيارة" },
   nextVisit: { en: "Next Visit Schedule", ar: "موعد الزيارة القادمة" },
   visitNotes: { en: "Visit Notes", ar: "ملاحظات الزيارة" },
+  startDictation: { en: "Start Dictation", ar: "بدء الإملاء" },
+  stopDictation: { en: "Stop Dictation", ar: "إيقاف الإملاء" },
   stockCheck: { en: "Stock Check", ar: "فحص المخزون" },
   itemName: { en: "Item name", ar: "اسم الصنف" },
   available: { en: "Available", ar: "متوفر" },
@@ -164,6 +169,34 @@ async function fetchAllCustomers(supabase, scope) {
   return rows;
 }
 
+async function fetchRecentCustomerSales(supabase, scope, fromDate) {
+  const pageSize = 1000;
+  let from = 0;
+  const rows = [];
+
+  while (true) {
+    let query = supabase
+      .from("sales_raw")
+      .select("id,customer_code,sales_amount")
+      .gte("transaction_date", fromDate)
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (!scope.hasAllAccess) {
+      query = query.in("salesman_code", scope.visibleSalesmanCodes);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    const chunk = data || [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
 export default function MyDayPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, PAGE_TEXT);
@@ -192,6 +225,10 @@ export default function MyDayPage() {
   const [visitSaving, setVisitSaving] = useState(false);
   const [visitItemsLoading, setVisitItemsLoading] = useState(false);
   const [inactiveCustomerCode, setInactiveCustomerCode] = useState("");
+  const [visitStatusSearch, setVisitStatusSearch] = useState("");
+  const [dictationSupported, setDictationSupported] = useState(false);
+  const [dictationActive, setDictationActive] = useState(false);
+  const speechRecognitionRef = useRef(null);
   const [visitForm, setVisitForm] = useState({
     outcome: "PAYMENT_FOLLOWUP",
     nextVisitAt: "",
@@ -200,6 +237,12 @@ export default function MyDayPage() {
   });
 
   const today = new Date().toISOString().slice(0, 10);
+
+  useEffect(() => {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    setDictationSupported(Boolean(Recognition));
+    return () => speechRecognitionRef.current?.stop?.();
+  }, []);
 
   function readCapturedAt(log) {
     if (!log?.note) return 0;
@@ -313,6 +356,7 @@ export default function MyDayPage() {
           todayOrdersRes,
           customerRows,
           routeRes,
+          recentSalesRows,
         ] = await Promise.all([
           todaySalesQuery,
           pendingOrdersQuery,
@@ -320,6 +364,11 @@ export default function MyDayPage() {
           todayOrdersQuery,
           fetchAllCustomers(supabase, scope),
           routeQuery,
+          fetchRecentCustomerSales(
+            supabase,
+            scope,
+            new Date(new Date().setMonth(new Date().getMonth() - 6)).toISOString().slice(0, 10)
+          ),
         ]);
 
         if (todaySalesRes.error) throw todaySalesRes.error;
@@ -499,6 +548,8 @@ export default function MyDayPage() {
 
         setRouteRows((routeRes.data || []).filter(isVisitStatusCustomer));
 
+        const recentSalesByCustomer = buildRecentSalesByCustomer(recentSalesRows);
+
         setVisitStatusRows(
           customerRows
             .filter(isVisitStatusCustomer)
@@ -512,17 +563,13 @@ export default function MyDayPage() {
               days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
               days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
               next_visit_at: nextVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
+              recent_sales_value: recentSalesByCustomer.get(String(row.customer_code || "").trim().toUpperCase())?.salesValue || 0,
               status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
                 : daysBetween(row.latest_transaction_date) > 21
                 ? "Overdue"
                 : "Planned",
             }))
-            .sort((a, b) => {
-              const byInvoiceDate = getSortTimestamp(a.last_invoice_date) - getSortTimestamp(b.last_invoice_date);
-              if (byInvoiceDate !== 0) return byInvoiceDate;
-              return String(a.customer_name || a.customer_code || "").localeCompare(String(b.customer_name || b.customer_code || ""));
-            })
         );
       } catch (err) {
         setError(err.message || "Unable to load My Day planner.");
@@ -847,6 +894,42 @@ export default function MyDayPage() {
     }
   }
 
+  function toggleVisitNoteDictation() {
+    if (dictationActive) {
+      speechRecognitionRef.current?.stop?.();
+      return;
+    }
+
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) return;
+    const recognition = new Recognition();
+    recognition.lang = language === "ar" ? "ar-SA" : "en-US";
+    recognition.interimResults = false;
+    recognition.continuous = true;
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .slice(event.resultIndex)
+        .map((result) => result[0]?.transcript || "")
+        .join(" ")
+        .trim();
+      if (!transcript) return;
+      setVisitForm((current) => ({
+        ...current,
+        note: [current.note.trim(), transcript].filter(Boolean).join(" "),
+      }));
+    };
+    recognition.onend = () => setDictationActive(false);
+    recognition.onerror = (event) => {
+      setDictationActive(false);
+      if (event?.error !== "aborted") {
+        setError("Voice dictation could not start. Check microphone permission and try again.");
+      }
+    };
+    speechRecognitionRef.current = recognition;
+    recognition.start();
+    setDictationActive(true);
+  }
+
   const routeSummary = useMemo(() => {
     const map = new Map();
     routeRows.forEach((row) => {
@@ -855,6 +938,11 @@ export default function MyDayPage() {
     });
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   }, [routeRows]);
+
+  const rankedVisitStatusRows = useMemo(
+    () => filterAndRankVisitCustomers(visitStatusRows, visitStatusSearch),
+    [visitStatusRows, visitStatusSearch]
+  );
 
   const plannedVisitRows = useMemo(
     () =>
@@ -1106,7 +1194,16 @@ export default function MyDayPage() {
         <section className="moduleSection">
           <div className="moduleSectionHeader">
             <h2>{t("visitStatus")}</h2>
+            <span>{rankedVisitStatusRows.length} {t("customersCount")}</span>
           </div>
+          <input
+            className="moduleInput"
+            style={{ marginBottom: "10px" }}
+            type="search"
+            value={visitStatusSearch}
+            onChange={(event) => setVisitStatusSearch(event.target.value)}
+            placeholder={t("searchCustomer")}
+          />
           <div className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
@@ -1115,12 +1212,13 @@ export default function MyDayPage() {
                   <th>{t("cityArea")}</th>
                   <th>{t("daysSinceLastInvoice")}</th>
                   <th>{t("daysSinceLastVisit")}</th>
+                  <th>{t("recentValue")}</th>
                   <th>{t("status")}</th>
                   <th>{t("actions")}</th>
                 </tr>
               </thead>
               <tbody>
-                {visitStatusRows.map((row) => (
+                {rankedVisitStatusRows.map((row) => (
                   <Fragment key={row.customer_code}>
                   <tr>
                     <td>
@@ -1134,6 +1232,7 @@ export default function MyDayPage() {
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
                     <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>
+                    <td>SAR {Number(row.recent_sales_value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     <td>{row.status === "Visited" ? t("visited") : row.status === "Overdue" ? t("overdue") : t("planned")}</td>
                     <td>
                       <div className="moduleInlineStack">
@@ -1156,7 +1255,7 @@ export default function MyDayPage() {
                   </tr>
                   {activeVisitCustomerCode === row.customer_code && (
                     <tr>
-                      <td colSpan={6}>
+                      <td colSpan={7}>
                         <div className="moduleVisitPanel">
                           <div className="moduleSectionHeader">
                             <h2>{t("visitReport")}</h2>
@@ -1180,6 +1279,11 @@ export default function MyDayPage() {
                             <label className="moduleFieldFull">
                               {t("visitNotes")}
                               <textarea className="moduleTextArea" rows={3} value={visitForm.note} onChange={(event) => setVisitForm((current) => ({ ...current, note: event.target.value }))} />
+                              {dictationSupported && (
+                                <button type="button" className="moduleInlineButton" aria-pressed={dictationActive} onClick={toggleVisitNoteDictation}>
+                                  {dictationActive ? t("stopDictation") : t("startDictation")}
+                                </button>
+                              )}
                             </label>
                             <div className="moduleFieldFull">
                               <div className="moduleSectionHeader">
@@ -1213,9 +1317,9 @@ export default function MyDayPage() {
                   )}
                   </Fragment>
                 ))}
-                {visitStatusRows.length === 0 && (
+                {rankedVisitStatusRows.length === 0 && (
                   <tr>
-                    <td colSpan={6}>{t("noCustomers")}</td>
+                    <td colSpan={7}>{t("noCustomers")}</td>
                   </tr>
                 )}
               </tbody>

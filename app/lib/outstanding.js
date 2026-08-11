@@ -124,12 +124,32 @@ export function isOutstandingCustomerHeader(value) {
 
 export function isOutstandingAmountHeader(value) {
   const header = normalizeOutstandingHeader(value);
-  return header.includes("pending") || header.startsWith("pend") || header.includes("open balance");
+  return header.includes("pending") || header.startsWith("pend") || header.includes("open balance") || header === "balance" || header.includes("outstanding balance") || header.includes("outstanding amount") || header.includes("amount due");
 }
 
 export function isOutstandingAgeHeader(value) {
   const header = normalizeOutstandingHeader(value);
-  return header.includes("invoice day") || header.includes("overdue day") || header.includes("overdue by") || header === "aging" || header === "ageing" || header.includes("aging days") || header.includes("ageing days");
+  return header.includes("invoice day") || header.includes("overdue day") || header.includes("overdue by") || header === "days" || header === "age" || header === "aging" || header === "ageing" || header.includes("aging days") || header.includes("ageing days");
+}
+
+export function combineOutstandingHeaderRows(rows, rowIndex) {
+  const current = Array.isArray(rows?.[rowIndex]) ? rows[rowIndex] : [];
+  const previous = rowIndex > 0 && Array.isArray(rows?.[rowIndex - 1]) ? rows[rowIndex - 1] : [];
+  const width = Math.max(current.length, previous.length);
+
+  return Array.from({ length: width }, (_, columnIndex) => {
+    const parts = [previous[columnIndex], current[columnIndex]]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    return [...new Set(parts)].join(" ");
+  });
+}
+
+function rowMatchesOutstandingHeader(row) {
+  const hasCustomer = row.some(isOutstandingCustomerHeader);
+  const hasBucket = row.some((cell) => Boolean(parseBucketLabelFromHeader(cell)));
+  const hasAmount = row.some(isOutstandingAmountHeader);
+  return hasCustomer && (hasBucket || hasAmount);
 }
 
 export function findOutstandingHeaderRow(rows, maxRows = 50) {
@@ -137,12 +157,8 @@ export function findOutstandingHeaderRow(rows, maxRows = 50) {
 
   for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
     const row = Array.isArray(rows[rowIndex]) ? rows[rowIndex] : [];
-    const hasCustomer = row.some(isOutstandingCustomerHeader);
-    const hasBucket = row.some((cell) => Boolean(parseBucketLabelFromHeader(cell)));
-    const hasAmount = row.some(isOutstandingAmountHeader);
-    const hasAge = row.some(isOutstandingAgeHeader);
-
-    if (hasCustomer && (hasBucket || (hasAmount && hasAge))) return rowIndex;
+    if (rowMatchesOutstandingHeader(row)) return rowIndex;
+    if (rowIndex > 0 && rowMatchesOutstandingHeader(combineOutstandingHeaderRows(rows, rowIndex))) return rowIndex;
   }
 
   return -1;

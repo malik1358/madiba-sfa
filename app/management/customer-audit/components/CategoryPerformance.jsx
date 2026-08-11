@@ -139,7 +139,7 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
                                           <td className="auditItemTotal">{numberFormat(item.total_value)}</td>
                                           <td rowSpan="2" className="auditRateCell">
                                             <span>
-                                              {priceList[String(item.item_code).trim().toUpperCase()] ? `SAR ${Number(priceList[String(item.item_code).trim().toUpperCase()]).toFixed(2)}` : '—'}
+                                                {priceList[String(item.item_code).trim().toUpperCase()] ? Number(priceList[String(item.item_code).trim().toUpperCase()]).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}
                                             </span>
                                           </td>
                                           <td rowSpan="2" className={isNotOrderable ? "auditOrderQtyCell auditCategoryNoOrder" : "auditOrderQtyCell"}>

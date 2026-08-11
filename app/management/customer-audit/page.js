@@ -40,8 +40,8 @@ import { useOrder } from "./hooks/useOrder";
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   });
 }
 

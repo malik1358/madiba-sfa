@@ -88,7 +88,7 @@ async function reverseGeocode(lat, lng) {
     throw new Error("Reverse geocoding request failed.");
   }
 
-  const payload = await response.json();
+  const payload = await response.json().catch(() => ({}));
   const address = payload?.address || {};
   const city = String(address.city || address.town || address.village || address.state || "").trim();
   const area = String(address.suburb || address.neighbourhood || address.city_district || address.county || address.quarter || "").trim();
@@ -110,7 +110,7 @@ async function translateToArabic(text) {
     throw new Error("Translation request failed.");
   }
 
-  const payload = await response.json();
+  const payload = await response.json().catch(() => []);
   const translated = Array.isArray(payload?.[0])
     ? payload[0].map((part) => String(part?.[0] || "")).join("")
     : "";

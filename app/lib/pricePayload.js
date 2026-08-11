@@ -345,7 +345,10 @@ export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KE
         throw new Error(`Price API failed with ${response.status}`);
       }
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
+      if (!data) {
+        throw new Error("Price API returned invalid JSON");
+      }
       const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
         ? {
             priceMap: data.priceMap,

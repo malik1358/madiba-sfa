@@ -42,7 +42,11 @@ const PAGE_TEXT = {
   outstanding0To30: { en: "0-30 Days", ar: "0-30 يوماً" },
   outstanding30To60: { en: "30-60 Days", ar: "30-60 يوماً" },
   outstandingAbove60Column: { en: ">60 Days", ar: ">60 يوماً" },
+  totalOutstanding: { en: "Total Outstanding", ar: "إجمالي المستحقات" },
   searchCustomer: { en: "Search customer by name or code", ar: "ابحث عن العميل بالاسم أو الرمز" },
+  searchSalesman: { en: "Salesman Filter", ar: "فلتر رجل البيع" },
+  allSalesmen: { en: "All salesmen", ar: "كل رجال البيع" },
+  unassignedSalesman: { en: "Unassigned", ar: "غير محدد" },
   recentValue: { en: "Recent 6M Value", ar: "قيمة آخر 6 أشهر" },
   customer: { en: "Customer", ar: "العميل" },
   cityArea: { en: "City / Area", ar: "المدينة / المنطقة" },
@@ -190,6 +194,7 @@ export default function MyDayPage() {
   const [visitItemsLoading, setVisitItemsLoading] = useState(false);
   const [inactiveCustomerCode, setInactiveCustomerCode] = useState("");
   const [visitStatusSearch, setVisitStatusSearch] = useState("");
+  const [selectedVisitStatusSalesmen, setSelectedVisitStatusSalesmen] = useState([]);
   const [dictationSupported, setDictationSupported] = useState(false);
   const [dictationActive, setDictationActive] = useState(false);
   const speechRecognitionRef = useRef(null);
@@ -334,6 +339,28 @@ export default function MyDayPage() {
         if (submittedTodayRes.error) throw submittedTodayRes.error;
         if (todayOrdersRes.error) throw todayOrdersRes.error;
         if (routeRes.error) throw routeRes.error;
+
+        const visibleSalesmanCodes = [...new Set(
+          customerRows
+            .map((row) => String(row.current_salesman_code || "").trim().toUpperCase())
+            .filter(Boolean)
+        )];
+
+        const salesmanNameByCode = new Map();
+        if (visibleSalesmanCodes.length > 0) {
+          const { data: salesmanProfiles, error: salesmanProfilesError } = await supabase
+            .from("profiles")
+            .select("salesman_code,salesman_name")
+            .in("salesman_code", visibleSalesmanCodes);
+
+          if (!salesmanProfilesError) {
+            (salesmanProfiles || []).forEach((profileRow) => {
+              const code = String(profileRow.salesman_code || "").trim().toUpperCase();
+              const name = String(profileRow.salesman_name || "").trim();
+              if (code) salesmanNameByCode.set(code, name);
+            });
+          }
+        }
 
         let newProspectsCount = 0;
         if (prospectsCheck.available) {
@@ -531,6 +558,8 @@ export default function MyDayPage() {
               customer_name: row.customer_name,
               city: row.city,
               area: row.area,
+              salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
+              salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || "",
               last_invoice_date: row.latest_transaction_date || null,
               last_visit_date: latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
@@ -788,7 +817,7 @@ export default function MyDayPage() {
           }),
         });
 
-        const result = await response.json();
+        const result = await response.json().catch(() => ({}));
         if (!response.ok || !result?.success) {
           throw new Error(result?.error || "Unable to save visit report.");
         }
@@ -915,10 +944,32 @@ export default function MyDayPage() {
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   }, [routeRows]);
 
-  const rankedVisitStatusRows = useMemo(
-    () => filterAndRankVisitCustomers(visitStatusRows, visitStatusSearch),
-    [visitStatusRows, visitStatusSearch]
+  const visitStatusSalesmanOptions = useMemo(
+    () => [...new Set(
+      visitStatusRows
+        .map((row) => String(row.salesman_name || "").trim() || "__UNASSIGNED__")
+        .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b)),
+    [visitStatusRows]
   );
+
+  function toggleVisitStatusSalesman(salesmanName) {
+    setSelectedVisitStatusSalesmen((current) => {
+      if (current.includes(salesmanName)) {
+        return current.filter((entry) => entry !== salesmanName);
+      }
+      return [...current, salesmanName];
+    });
+  }
+
+  const rankedVisitStatusRows = useMemo(() => {
+    const customerFiltered = filterAndRankVisitCustomers(visitStatusRows, visitStatusSearch);
+    if (selectedVisitStatusSalesmen.length === 0) return customerFiltered;
+
+    return customerFiltered.filter((row) =>
+      selectedVisitStatusSalesmen.includes(String(row.salesman_name || "").trim() || "__UNASSIGNED__")
+    );
+  }, [visitStatusRows, visitStatusSearch, selectedVisitStatusSalesmen]);
 
   const groupedVisitStatusRows = useMemo(
     () => splitVisitCustomersByOutstanding(rankedVisitStatusRows),
@@ -1196,6 +1247,33 @@ export default function MyDayPage() {
             onChange={(event) => setVisitStatusSearch(event.target.value)}
             placeholder={t("searchCustomer")}
           />
+          <details style={{ marginBottom: "10px" }}>
+            <summary className="moduleInlineButton" style={{ width: "fit-content", cursor: "pointer" }}>
+              {selectedVisitStatusSalesmen.length === 0
+                ? `${t("searchSalesman")}: ${t("allSalesmen")}`
+                : `${t("searchSalesman")}: ${selectedVisitStatusSalesmen.length}`}
+            </summary>
+            <div className="moduleList" style={{ marginTop: "8px" }}>
+              <label style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={selectedVisitStatusSalesmen.length === 0}
+                  onChange={() => setSelectedVisitStatusSalesmen([])}
+                />
+                <span>{t("allSalesmen")}</span>
+              </label>
+              {visitStatusSalesmanOptions.map((salesmanName) => (
+                <label key={salesmanName} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedVisitStatusSalesmen.includes(salesmanName)}
+                    onChange={() => toggleVisitStatusSalesman(salesmanName)}
+                  />
+                  <span>{salesmanName === "__UNASSIGNED__" ? t("unassignedSalesman") : salesmanName}</span>
+                </label>
+              ))}
+            </div>
+          </details>
           {[
             { key: "without-invoice", title: t("visitedWithoutInvoice"), rows: groupedVisitStatusRows.withoutInvoice },
             { key: "under-60", title: t("outstandingUnder60"), rows: groupedVisitStatusRows.under60 },
@@ -1218,6 +1296,7 @@ export default function MyDayPage() {
                   <th>{t("outstanding0To30")}</th>
                   <th>{t("outstanding30To60")}</th>
                   <th>{t("outstandingAbove60Column")}</th>
+                  <th>{t("totalOutstanding")}</th>
                   <th>{t("status")}</th>
                   <th>{t("actions")}</th>
                 </tr>
@@ -1237,10 +1316,11 @@ export default function MyDayPage() {
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
                     <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>
-                    <td>SAR {Number(row.recent_sales_value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
-                    <td>SAR {Number(row.outstanding_0_30 || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td>SAR {Number(row.outstanding_30_60 || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td>SAR {Number(row.outstanding_above_60 || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td>{Number(row.recent_sales_value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number(row.outstanding_0_30 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number(row.outstanding_30_60 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number(row.outstanding_above_60 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number((Number(row.outstanding_0_30 || 0) + Number(row.outstanding_30_60 || 0) + Number(row.outstanding_above_60 || 0))).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     <td>{row.status === "Visited" ? t("visited") : row.status === "Overdue" ? t("overdue") : t("planned")}</td>
                     <td>
                       <div className="moduleInlineStack">
@@ -1263,7 +1343,7 @@ export default function MyDayPage() {
                   </tr>
                   {activeVisitCustomerCode === row.customer_code && (
                     <tr>
-                      <td colSpan={10}>
+                      <td colSpan={11}>
                         <div className="moduleVisitPanel">
                           <div className="moduleSectionHeader">
                             <h2>{t("visitReport")}</h2>

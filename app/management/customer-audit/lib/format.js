@@ -6,7 +6,7 @@ export function numberFormat(value) {
 
 export function qtyFormat(value) {
   return Number(value || 0).toLocaleString('en-SA', {
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 0,
   });
 }
 

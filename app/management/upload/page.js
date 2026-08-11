@@ -74,7 +74,7 @@ export default function UploadSalesPage() {
         body: formData,
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok || !data.success) {
         throw new Error(
@@ -126,7 +126,7 @@ export default function UploadSalesPage() {
         body: formData,
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) {
         throw new Error(data.error || "Outstanding upload failed.");
       }

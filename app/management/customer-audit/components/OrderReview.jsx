@@ -33,7 +33,7 @@ export default function OrderReview({ showOrderReview, orderItems, orderSummary,
               <div className="auditOrderReviewRate">
                 <span>Rate</span>
                 <strong style={{ color: priceList[String(item.item_code).trim().toUpperCase()] ? '#0f766e' : 'red' }}>
-                  {priceList[String(item.item_code).trim().toUpperCase()] ? `SAR ${Number(priceList[String(item.item_code).trim().toUpperCase()]).toFixed(2)}` : 'PRICE NOT FOUND'}
+                  {priceList[String(item.item_code).trim().toUpperCase()] ? Number(priceList[String(item.item_code).trim().toUpperCase()]).toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'PRICE NOT FOUND'}
                 </strong>
               </div>
               <div className="auditOrderReviewQty">
@@ -49,7 +49,7 @@ export default function OrderReview({ showOrderReview, orderItems, orderSummary,
         </div>
 
         <div className="auditOrderGrandTotal">
-          <strong>Grand Total : SAR {calculateGrandTotal(orderItems, priceList).toFixed(2)}</strong>
+          <strong>Grand Total : {calculateGrandTotal(orderItems, priceList).toLocaleString('en-US', { maximumFractionDigits: 0 })}</strong>
         </div>
 
         <div className="auditOrderReviewActions">

@@ -89,7 +89,7 @@ export default function SalesmanHierarchyPage() {
         },
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) {
         throw new Error(data.error || "Unable to load salesman hierarchy.");
       }
@@ -146,7 +146,7 @@ export default function SalesmanHierarchyPage() {
       body: JSON.stringify(payload),
     });
 
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.success) {
       throw new Error(data.error || "Unable to complete request.");
     }

@@ -17,7 +17,7 @@ const TEXT = {
 };
 
 function currency(value) {
-  return `SAR ${Number(value || 0).toLocaleString("en-SA", { maximumFractionDigits: 2 })}`;
+  return Number(value || 0).toLocaleString("en-SA", { maximumFractionDigits: 0 });
 }
 
 function percent(value) {

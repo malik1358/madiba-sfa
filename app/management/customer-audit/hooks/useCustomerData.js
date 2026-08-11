@@ -12,7 +12,7 @@ async function fetchVisibleCustomers(token) {
     },
   });
 
-  const payload = await response.json();
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.success) {
     throw new Error(payload.error || 'Unable to load visible customers.');
   }

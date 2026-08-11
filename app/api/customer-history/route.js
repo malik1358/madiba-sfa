@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  OUTSTANDING_DATASET_KEY,
+  customerCodeCandidates,
+  resolveOutstandingCustomerOwnership,
+} from "../../lib/outstanding";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -168,6 +173,26 @@ function isStaleCache(updatedAt) {
   );
 }
 
+async function hasOutstandingCustomerAccess(admin, customerCode, scope) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", OUTSTANDING_DATASET_KEY)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  try {
+    const dataset = JSON.parse(data?.setting_value || "null");
+    const ownership = resolveOutstandingCustomerOwnership(dataset, scope.visibleSalesmanCodes);
+    return customerCodeCandidates(customerCode)
+      .map(normalizeCode)
+      .some((code) => ownership.ownedCustomerCodes.has(code));
+  } catch {
+    return false;
+  }
+}
+
 async function resolveScope(admin, token) {
   const {
     data: { user },
@@ -307,6 +332,10 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
           break;
         }
       }
+    }
+
+    if (!hasHistoryAccess) {
+      hasHistoryAccess = await hasOutstandingCustomerAccess(admin, customerCode, scope);
     }
 
     if (!hasHistoryAccess) {

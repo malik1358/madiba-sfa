@@ -9,6 +9,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { detectTable } from "../../lib/schemaGuards";
+import { isVisitStatusCustomer } from "./customerEligibility";
 
 const PAGE_TEXT = {
   title: { en: "My Day", ar: "يومي" },
@@ -293,7 +294,7 @@ export default function MyDayPage() {
 
         let routeQuery = supabase
           .from("customers")
-          .select("customer_code,customer_name,city,area,latest_transaction_date")
+          .select("customer_code,customer_name,city,area,latest_transaction_date,is_active")
           .order("city")
           .limit(20);
 
@@ -496,11 +497,11 @@ export default function MyDayPage() {
           completedVisits: productiveCustomers.size,
         });
 
-        setRouteRows(routeRes.data || []);
+        setRouteRows((routeRes.data || []).filter(isVisitStatusCustomer));
 
         setVisitStatusRows(
           customerRows
-            .filter((row) => row.is_active !== false)
+            .filter(isVisitStatusCustomer)
             .map((row) => ({
               customer_code: row.customer_code,
               customer_name: row.customer_name,
@@ -812,12 +813,26 @@ export default function MyDayPage() {
     setMessage("");
 
     try {
-      const { error: updateError } = await supabase
-        .from("customers")
-        .update({ is_active: false })
-        .eq("customer_code", code);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      if (updateError) throw updateError;
+      if (!session?.access_token) {
+        throw new Error("Please login again.");
+      }
+
+      const response = await fetch("/api/visit-reports", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ customerCode: code, isActive: false }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to mark customer inactive.");
+      }
 
       setVisitStatusRows((current) => current.filter((row) => row.customer_code !== code));
       setRouteRows((current) => current.filter((row) => row.customer_code !== code));

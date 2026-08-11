@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  combineOutstandingHeaderRows,
   customerCodeCandidates,
   findOutstandingHeaderRow,
   findOutstandingCustomerCodesForSalesmen,
@@ -76,6 +77,30 @@ test("findOutstandingHeaderRow accepts Pending Amount and Overdue Days without I
   ];
 
   assert.equal(findOutstandingHeaderRow(rows), 0);
+});
+
+test("findOutstandingHeaderRow accepts short Party, Balance, and Days headers", () => {
+  const rows = [
+    ["Party", "Voucher", "Balance", "Days", "Sales Person"],
+    ["1173C Customer", "INV-1", 250, 15, "Ahmed Nabil"],
+  ];
+
+  assert.equal(findOutstandingHeaderRow(rows), 0);
+});
+
+test("combined outstanding headers preserve parent and child labels", () => {
+  const rows = [
+    ["Customer", "", "Outstanding", "Aging"],
+    ["Code", "Name", "Balance", "Days"],
+  ];
+
+  assert.deepEqual(combineOutstandingHeaderRows(rows, 1), [
+    "Customer Code",
+    "Name",
+    "Outstanding Balance",
+    "Aging Days",
+  ]);
+  assert.equal(findOutstandingHeaderRow(rows), 1);
 });
 
 test("findOutstandingHeaderRow scans beyond the old 25-row report preamble", () => {

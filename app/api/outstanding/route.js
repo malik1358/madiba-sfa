@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import {
   OUTSTANDING_DATASET_KEY,
   buildOutstandingRow,
+  combineOutstandingHeaderRows,
   extractLeadingCustomerCodeAndName,
   findOutstandingForCustomer,
   findOutstandingHeaderRow,
@@ -210,7 +211,7 @@ function bucketLabelForInvoiceDay(dayValue) {
 }
 
 function parseOutstandingRows(rows, headerRowIndex) {
-  const headerRow = rows[headerRowIndex] || [];
+  const headerRow = combineOutstandingHeaderRows(rows, headerRowIndex);
   const columns = detectColumnIndexes(headerRow);
   const ageColumnIndex = columns.invoiceDay >= 0 ? columns.invoiceDay : columns.overdueDays;
 
@@ -412,10 +413,16 @@ export async function POST(request) {
     let rows = [];
     let headerRowIndex = -1;
     let workbookHasRows = false;
+    const sheetPreviews = [];
 
     for (const sheetName of candidateSheetNames) {
       const sheetRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
       if (Array.isArray(sheetRows) && sheetRows.length > 0) workbookHasRows = true;
+      const previewRows = (sheetRows || [])
+        .filter((row) => Array.isArray(row) && row.some((cell) => String(cell || "").trim()))
+        .slice(0, 8)
+        .map((row) => row.map((cell) => String(cell || "").trim()).filter(Boolean).slice(0, 12).join(" | "));
+      sheetPreviews.push(`${sheetName}: ${previewRows.join(" / ")}`);
       const sheetHeaderRowIndex = findOutstandingHeaderRow(sheetRows);
       if (sheetHeaderRowIndex < 0) continue;
       rows = sheetRows;
@@ -428,7 +435,8 @@ export async function POST(request) {
     }
 
     if (headerRowIndex < 0) {
-      throw new Error("Unable to detect header row. Ensure file includes customer and bucket columns.");
+      const preview = sheetPreviews.join("; ").slice(0, 1200);
+      throw new Error(`Unable to detect header row. Found: ${preview || "no readable cells"}`);
     }
 
     const parsed = parseOutstandingRows(rows, headerRowIndex);

@@ -207,6 +207,16 @@ export default function NewCustomerPage() {
   }, [loading, form.gps_location]);
 
   useEffect(() => {
+    if (!savedProspect) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [savedProspect]);
+
+  useEffect(() => {
     async function load() {
       const supabase = getSupabaseClient();
       if (!supabase) {
@@ -562,39 +572,41 @@ export default function NewCustomerPage() {
         {gpsPermissionWarning && <div className="moduleWarning">{gpsPermissionWarning}</div>}
 
         {savedProspect && (
-          <section className="moduleSection">
-            <div className="moduleSectionHeader">
-              <h2>{t("orderReceived")}</h2>
-            </div>
-            <p className="moduleHint">{t("orderReceivedHint")}</p>
-            <div className="moduleOrderActions">
-              <button type="button" onClick={() => router.push(`/management/new-order?${savedProspect.query}`)}>
-                {t("yesCreateOrder")}
-              </button>
-              <button type="button" onClick={() => setShowFollowUpDate(true)}>
-                {t("noScheduleFollowUp")}
-              </button>
-            </div>
-            {showFollowUpDate && (
-              <div className="moduleFormGrid" style={{ marginTop: "12px" }}>
-                <label>
-                  {t("nextVisitDate")}
-                  <input
-                    className="moduleInput"
-                    type="date"
-                    min={new Date().toISOString().slice(0, 10)}
-                    value={followUpDate}
-                    onChange={(event) => setFollowUpDate(event.target.value)}
-                  />
-                </label>
-                <div style={{ alignSelf: "end" }}>
-                  <button type="button" className="modulePrimaryButton" onClick={saveFollowUp} disabled={savingFollowUp || !followUpDate}>
-                    {savingFollowUp ? t("savingFollowUp") : t("saveFollowUp")}
-                  </button>
-                </div>
+          <div className="moduleModalOverlay">
+            <section className="moduleModal" role="dialog" aria-modal="true" aria-labelledby="order-received-title">
+              <div className="moduleSectionHeader">
+                <h2 id="order-received-title">{t("orderReceived")}</h2>
               </div>
-            )}
-          </section>
+              <p className="moduleHint">{t("orderReceivedHint")}</p>
+              <div className="moduleOrderActions">
+                <button type="button" autoFocus onClick={() => router.push(`/management/new-order?${savedProspect.query}`)}>
+                  {t("yesCreateOrder")}
+                </button>
+                <button type="button" onClick={() => setShowFollowUpDate(true)}>
+                  {t("noScheduleFollowUp")}
+                </button>
+              </div>
+              {showFollowUpDate && (
+                <div className="moduleFormGrid moduleModalForm">
+                  <label>
+                    {t("nextVisitDate")}
+                    <input
+                      className="moduleInput"
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={followUpDate}
+                      onChange={(event) => setFollowUpDate(event.target.value)}
+                    />
+                  </label>
+                  <div className="moduleModalSubmit">
+                    <button type="button" className="modulePrimaryButton" onClick={saveFollowUp} disabled={savingFollowUp || !followUpDate}>
+                      {savingFollowUp ? t("savingFollowUp") : t("saveFollowUp")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
         )}
 
         <section className="moduleSection">

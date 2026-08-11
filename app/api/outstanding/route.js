@@ -9,8 +9,8 @@ import {
   findOutstandingForCustomer,
   findOutstandingHeaderRow,
   isSameOutstandingCustomer,
-  isOutstandingAgeHeader,
   isOutstandingAmountHeader,
+  isOutstandingInvoiceDayHeader,
   normalizeCode,
   normalizeOutstandingHeader,
   normalizeName,
@@ -179,7 +179,7 @@ function detectColumnIndexes(headerRow) {
       indexes.overdueDays = idx;
     }
 
-    if (indexes.invoiceDay < 0 && isOutstandingAgeHeader(text)) {
+    if (indexes.invoiceDay < 0 && isOutstandingInvoiceDayHeader(text)) {
       indexes.invoiceDay = idx;
     }
 

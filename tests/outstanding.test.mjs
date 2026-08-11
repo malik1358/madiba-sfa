@@ -6,6 +6,7 @@ import {
   customerCodeCandidates,
   findOutstandingHeaderRow,
   findOutstandingCustomerCodesForSalesmen,
+  isOutstandingInvoiceDayHeader,
   prioritizeOutstandingSheets,
   resolveOutstandingCustomerOwnership,
 } from "../app/lib/outstanding.js";
@@ -78,6 +79,12 @@ test("findOutstandingHeaderRow accepts Pending Amount and Overdue Days without I
   ];
 
   assert.equal(findOutstandingHeaderRow(rows), 0);
+});
+
+test("Invoice Day is distinguished from Overdue Days", () => {
+  assert.equal(isOutstandingInvoiceDayHeader("Overdue Days"), false);
+  assert.equal(isOutstandingInvoiceDayHeader("Invoice Day"), true);
+  assert.equal(isOutstandingInvoiceDayHeader("Invoice Days"), true);
 });
 
 test("findOutstandingHeaderRow accepts short Party, Balance, and Days headers", () => {

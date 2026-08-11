@@ -212,8 +212,9 @@ function bucketLabelForInvoiceDay(dayValue) {
 function parseOutstandingRows(rows, headerRowIndex) {
   const headerRow = rows[headerRowIndex] || [];
   const columns = detectColumnIndexes(headerRow);
+  const ageColumnIndex = columns.invoiceDay >= 0 ? columns.invoiceDay : columns.overdueDays;
 
-  const hasInvoiceDayLayout = columns.pendingAmount >= 0 && columns.invoiceDay >= 0;
+  const hasInvoiceDayLayout = columns.pendingAmount >= 0 && ageColumnIndex >= 0;
 
   if (!hasInvoiceDayLayout && columns.buckets.length === 0 && columns.openInvoices < 0) {
     throw new Error("Could not detect bucket columns or open invoices column in uploaded file.");
@@ -241,7 +242,7 @@ function parseOutstandingRows(rows, headerRowIndex) {
 
     if (hasInvoiceDayLayout) {
       const pendingValue = toNumber(row[columns.pendingAmount]);
-      const dayBucket = bucketLabelForInvoiceDay(row[columns.invoiceDay]);
+      const dayBucket = bucketLabelForInvoiceDay(row[ageColumnIndex]);
       bucketLabels.forEach((label) => {
         rowBuckets[label] = label === dayBucket ? pendingValue : 0;
       });
@@ -293,7 +294,7 @@ function parseOutstandingRows(rows, headerRowIndex) {
         pending_amount: pendingAmount,
         due_date: columns.dueDate >= 0 ? formatSheetDateValue(row[columns.dueDate]) : "",
         overdue_days: columns.overdueDays >= 0 ? toNumber(row[columns.overdueDays]) : 0,
-        invoice_day: columns.invoiceDay >= 0 ? toNumber(row[columns.invoiceDay]) : 0,
+        invoice_day: ageColumnIndex >= 0 ? toNumber(row[ageColumnIndex]) : 0,
         salesman: columns.salesman >= 0 ? String(row[columns.salesman] || "").trim() : "",
       });
     }
@@ -410,9 +411,11 @@ export async function POST(request) {
     ].filter((name, index, names) => name && names.indexOf(name) === index);
     let rows = [];
     let headerRowIndex = -1;
+    let workbookHasRows = false;
 
     for (const sheetName of candidateSheetNames) {
       const sheetRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+      if (Array.isArray(sheetRows) && sheetRows.length > 0) workbookHasRows = true;
       const sheetHeaderRowIndex = findOutstandingHeaderRow(sheetRows);
       if (sheetHeaderRowIndex < 0) continue;
       rows = sheetRows;
@@ -420,7 +423,7 @@ export async function POST(request) {
       break;
     }
 
-    if (!Array.isArray(rows) || rows.length === 0) {
+    if (!workbookHasRows) {
       throw new Error("Excel file is empty.");
     }
 

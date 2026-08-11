@@ -434,27 +434,29 @@ export default function NewCustomerPage() {
         throw new Error("Please login again.");
       }
 
+      const remarks = [
+        form.shop_name && form.shop_name !== form.customer_name_en
+          ? `Customer Name: ${form.customer_name_en}`
+          : "",
+        form.customer_type ? `Customer Type: ${form.customer_type}` : "",
+        form.whatsapp ? `WhatsApp: ${form.whatsapp}` : "",
+        form.email ? `Email: ${form.email}` : "",
+        form.national_address ? `National Address: ${form.national_address}` : "",
+        form.notes,
+        documents.length ? `Documents: ${JSON.stringify(documents)}` : "",
+      ].filter(Boolean).join("\n") || null;
+
       const payload = {
-        customer_name: form.customer_name_en,
         company_name: form.shop_name || form.customer_name_en,
-        customer_name_en: form.customer_name_en,
-        customer_name_ar: form.customer_name_ar || null,
-        shop_name: form.shop_name,
-        owner_name: form.owner_name || null,
+        company_name_ar: form.customer_name_ar || null,
+        contact_person: form.owner_name || null,
         mobile: normalizedMobile,
-        whatsapp: form.whatsapp || null,
-        email: form.email || null,
         city: form.city,
         area: form.area,
-        gps_location: `${parsedGps.lat.toFixed(6)}, ${parsedGps.lng.toFixed(6)}`,
-        customer_type: form.customer_type,
+        latitude: Number(parsedGps.lat.toFixed(7)),
+        longitude: Number(parsedGps.lng.toFixed(7)),
         salesman_code: form.salesman_code,
-        notes: [
-          form.national_address ? `National Address: ${form.national_address}` : "",
-          form.notes,
-          documents.length ? `Documents: ${JSON.stringify(documents)}` : "",
-        ].filter(Boolean).join("\n") || null,
-        created_by: session.user.id,
+        remarks,
       };
 
       const { data, removedColumns } = await insertProspectWithColumnFallback(supabase, payload);
@@ -476,7 +478,7 @@ export default function NewCustomerPage() {
 
       const query = buildProspectOrderParams({
         id: data.id,
-        customerName: data.customer_name || data.shop_name || form.customer_name_en || form.shop_name,
+        customerName: form.customer_name_en || form.shop_name,
         salesmanCode: form.salesman_code,
       });
 
@@ -767,8 +769,8 @@ export default function NewCustomerPage() {
                 {recent.map((row) => (
                   <tr key={row.id}>
                     <td>{row.id}</td>
-                    <td>{row.shop_name || row.customer_name || "-"}</td>
-                    <td>{row.owner_name || "-"}</td>
+                    <td>{row.company_name || row.shop_name || row.customer_name || "-"}</td>
+                    <td>{row.contact_person || row.owner_name || "-"}</td>
                     <td>{row.mobile || "-"}</td>
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.status || "-"}</td>
@@ -780,7 +782,7 @@ export default function NewCustomerPage() {
                         onClick={() => {
                           const query = buildProspectOrderParams({
                             id: row.id,
-                            customerName: row.customer_name || row.shop_name,
+                            customerName: row.company_name || row.customer_name || row.shop_name,
                             salesmanCode: row.salesman_code || form.salesman_code,
                           });
                           router.push(`/management/new-order?${query}`);

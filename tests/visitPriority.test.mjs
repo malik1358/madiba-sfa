@@ -1,0 +1,36 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  buildRecentSalesByCustomer,
+  filterAndRankVisitCustomers,
+} from "../app/management/my-day/visitPriority.js";
+
+test("recent customer sales are aggregated by normalized code", () => {
+  const result = buildRecentSalesByCustomer([
+    { customer_code: " c001 ", sales_amount: 100 },
+    { customer_code: "C001", sales_amount: 250 },
+  ]);
+
+  assert.deepEqual(result.get("C001"), { salesValue: 350, transactionCount: 2 });
+});
+
+test("visit customers rank high-value due opportunities before completed visits", () => {
+  const ranked = filterAndRankVisitCustomers([
+    { customer_code: "LOW", customer_name: "Low", recent_sales_value: 100, days_since_last_invoice: 30, status: "Planned" },
+    { customer_code: "HIGH", customer_name: "High", recent_sales_value: 1000, days_since_last_invoice: 45, status: "Planned" },
+    { customer_code: "DONE", customer_name: "Done", recent_sales_value: 5000, days_since_last_invoice: 5, status: "Visited" },
+  ]);
+
+  assert.deepEqual(ranked.map((row) => row.customer_code), ["HIGH", "DONE", "LOW"]);
+});
+
+test("visit customer search matches name and code", () => {
+  const rows = [
+    { customer_code: "1173C", customer_name: "Rawaa Trading", recent_sales_value: 100 },
+    { customer_code: "2000A", customer_name: "Other Customer", recent_sales_value: 200 },
+  ];
+
+  assert.deepEqual(filterAndRankVisitCustomers(rows, "rawaa").map((row) => row.customer_code), ["1173C"]);
+  assert.deepEqual(filterAndRankVisitCustomers(rows, "1173").map((row) => row.customer_code), ["1173C"]);
+});

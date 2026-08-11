@@ -5,6 +5,7 @@ import {
   customerCodeCandidates,
   resolveOutstandingCustomerOwnership,
 } from "../../lib/outstanding";
+import { mergeSalesSnapshots } from "../../lib/salesHistory";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -13,9 +14,9 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const HISTORY_MONTHS = 6;
-const HISTORY_LIMIT = 5000;
+const HISTORY_LIMIT = 30000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 7;
+const CACHE_VERSION = 8;
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function normalizeCode(value) {
@@ -387,39 +388,48 @@ async function fetchCustomerTransactions(admin, customerCode, scope) {
   const target = leadingCode || normalizedInput;
   const targetNoZeros = target.replace(/^0+/, "");
 
-  async function runCustomerQuery(matchValue) {
+  async function fetchHistoryPages(buildQuery) {
+    const pageSize = 1000;
+    const result = [];
+
+    while (result.length < HISTORY_LIMIT) {
+      const from = result.length;
+      const { data, error } = await buildQuery()
+        .range(from, Math.min(from + pageSize, HISTORY_LIMIT) - 1);
+
+      if (error) throw error;
+      const page = data || [];
+      result.push(...page);
+      if (page.length < pageSize) break;
+    }
+
+    return result;
+  }
+
+  function customerQuery(matchValue) {
     return admin
-      .from("active_sales")
-      .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
+      .from("sales_raw")
+      .select("id,import_batch_id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
       .eq("customer_code", matchValue)
       .order("transaction_date", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(HISTORY_LIMIT);
+      .order("id", { ascending: false });
   }
 
   let rows = [];
   for (const codeCandidate of codeCandidates) {
-    const { data, error } = await runCustomerQuery(codeCandidate);
-    if (error) throw error;
-
-    rows = Array.isArray(data) ? data : [];
+    rows = await fetchHistoryPages(() => customerQuery(codeCandidate));
     if (rows.length > 0) break;
   }
 
   if (rows.length === 0 && target) {
     // Fallback for dirty imported codes (different case/spacing/leading zeros or code+suffix text).
     const looseLike = `%${targetNoZeros || target}%`;
-    const fallbackQuery = admin
-      .from("active_sales")
-      .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
+    const fallbackData = await fetchHistoryPages(() => admin
+      .from("sales_raw")
+      .select("id,import_batch_id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
       .ilike("customer_code", looseLike)
       .order("transaction_date", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(HISTORY_LIMIT);
-
-    const { data: fallbackData, error: fallbackError } = await fallbackQuery;
-
-    if (fallbackError) throw fallbackError;
+      .order("id", { ascending: false }));
 
     rows = (Array.isArray(fallbackData) ? fallbackData : []).filter((row) => {
       const rowCode = normalizeCode(row.customer_code);
@@ -434,8 +444,8 @@ async function fetchCustomerTransactions(admin, customerCode, scope) {
     });
   }
 
-  // Sort in JS by parsed date to avoid DB text-order artifacts.
-  const sortedRows = rows
+  // Merge overlapping replacement snapshots before selecting historical months.
+  const sortedRows = mergeSalesSnapshots(rows)
     .map((row) => {
       const parsed = parseDateValue(row.transaction_date);
       return {

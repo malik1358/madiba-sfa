@@ -132,6 +132,11 @@ export function isOutstandingAgeHeader(value) {
   return header.includes("invoice day") || header.includes("overdue day") || header.includes("overdue by") || header === "days" || header === "age" || header === "aging" || header === "ageing" || header.includes("aging days") || header.includes("ageing days");
 }
 
+export function isOutstandingInvoiceDayHeader(value) {
+  const header = normalizeOutstandingHeader(value);
+  return header.includes("invoice day");
+}
+
 export function combineOutstandingHeaderRows(rows, rowIndex) {
   const current = Array.isArray(rows?.[rowIndex]) ? rows[rowIndex] : [];
   const previous = rowIndex > 0 && Array.isArray(rows?.[rowIndex - 1]) ? rows[rowIndex - 1] : [];

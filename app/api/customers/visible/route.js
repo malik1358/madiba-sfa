@@ -7,6 +7,7 @@ import {
   resolveOutstandingCustomerOwnership,
   summarizeOutstandingBuckets,
 } from "../../../lib/outstanding";
+import { mergeSalesSnapshots } from "../../../lib/salesHistory";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -328,11 +329,12 @@ async function attachRecentSalesValues(admin, customers) {
     const codeChunk = candidateCodes.slice(start, start + 200);
     const pageSize = 1000;
     let from = 0;
+    const salesRows = [];
 
     while (true) {
       const { data, error } = await admin
-        .from("active_sales")
-        .select("id,customer_code,sales_amount")
+        .from("sales_raw")
+        .select("id,import_batch_id,transaction_date,voucher_number,reference,customer_code,item_code,quantity,sales_amount,rate")
         .gte("transaction_date", fromDate.toISOString().slice(0, 10))
         .in("customer_code", codeChunk)
         .order("id", { ascending: true })
@@ -341,16 +343,18 @@ async function attachRecentSalesValues(admin, customers) {
       if (error) throw error;
 
       const rows = data || [];
-      rows.forEach((row) => {
-        const canonicalCode = canonicalCodeByCandidate.get(normalizeCode(row.customer_code));
-        if (!canonicalCode) return;
-        const currentValue = salesValueByCustomer.get(canonicalCode) || 0;
-        salesValueByCustomer.set(canonicalCode, currentValue + Math.max(Number(row.sales_amount || 0), 0));
-      });
+      salesRows.push(...rows);
 
       if (rows.length < pageSize) break;
       from += pageSize;
     }
+
+    mergeSalesSnapshots(salesRows).forEach((row) => {
+      const canonicalCode = canonicalCodeByCandidate.get(normalizeCode(row.customer_code));
+      if (!canonicalCode) return;
+      const currentValue = salesValueByCustomer.get(canonicalCode) || 0;
+      salesValueByCustomer.set(canonicalCode, currentValue + Math.max(Number(row.sales_amount || 0), 0));
+    });
   }
 
   return customers.map((customer) => ({

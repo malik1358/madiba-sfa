@@ -77,7 +77,7 @@ export default function ManagementPage() {
         if (profileError) throw profileError;
 
         const role = String(profile?.role || "").toLowerCase();
-        if (!["admin", "manager"].includes(role)) {
+        if (!["admin", "manager", "invoice-maker", "invoice_maker"].includes(role)) {
           setAccessDenied(true);
           setLoading(false);
           return;
@@ -93,7 +93,7 @@ export default function ManagementPage() {
           recentOrdersRes,
         ] = await Promise.all([
           supabase.from("customers").select("customer_code", { count: "exact", head: true }),
-          supabase.from("profiles").select("id", { count: "exact", head: true }).in("role", ["salesman", "manager", "admin"]),
+          supabase.from("profiles").select("id", { count: "exact", head: true }).in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"]),
           supabase.from("sales_orders").select("id,status", { count: "exact" }).order("updated_at", { ascending: false }).limit(1000),
           supabase.from("import_batches").select("id", { count: "exact", head: true }),
           supabase.from("system_settings").select("setting_value").eq("setting_key", "active_sales_batch_id").maybeSingle(),
@@ -194,7 +194,7 @@ export default function ManagementPage() {
             </div>
             <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
-          <div className="moduleError">Only manager/admin users can access this panel.</div>
+          <div className="moduleError">Only manager/admin/invoice-maker users can access this panel.</div>
         </div>
       </main>
     );

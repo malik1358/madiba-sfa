@@ -15,6 +15,11 @@ function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+function isInvoiceMakerRole(role) {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "invoice-maker" || normalized === "invoice_maker";
+}
+
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function resolveMutualGroupCodes(allProfiles, currentProfile) {
@@ -63,7 +68,7 @@ async function resolveScope(admin, token) {
     admin
       .from("profiles")
       .select("id,role,salesman_code,salesman_name")
-      .in("role", ["salesman", "manager", "admin"]),
+      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"]),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
 
@@ -73,7 +78,7 @@ async function resolveScope(admin, token) {
   const authUsers = usersRes.data?.users || [];
   const subordinateIds = new Set();
 
-  if (!["admin", "manager"].includes(role)) {
+  if (!["admin", "manager"].includes(role) && !isInvoiceMakerRole(role)) {
     authUsers.forEach((authUser) => {
       const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
       if (normalizeCode(metadata.head_salesman_code) === currentSalesmanCode) {
@@ -84,7 +89,7 @@ async function resolveScope(admin, token) {
 
   const allProfiles = profilesRes.data || [];
   const visibleProfiles = allProfiles.filter((profile) => {
-    if (["admin", "manager"].includes(role)) return true;
+    if (["admin", "manager"].includes(role) || isInvoiceMakerRole(role)) return true;
     return profile.id === currentProfile.id || subordinateIds.has(profile.id);
   });
 
@@ -92,7 +97,7 @@ async function resolveScope(admin, token) {
 
   return {
     userId: user.id,
-    hasAllAccess: ["admin", "manager"].includes(role),
+    hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
     visibleSalesmanCodes: [...new Set([
       ...visibleProfiles.map((profile) => normalizeCode(profile.salesman_code)).filter(Boolean),
       ...mutualGroupCodes,

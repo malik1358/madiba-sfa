@@ -246,7 +246,7 @@ async function requireManagementAccess(admin, request) {
     .eq("id", user.id)
     .single();
 
-  if (profileError || !profile || !["admin", "manager"].includes(String(profile.role || "").toLowerCase())) {
+  if (profileError || !profile || !["admin", "manager", "invoice-maker", "invoice_maker"].includes(String(profile.role || "").toLowerCase())) {
     return { error: NextResponse.json({ success: false, error: "Only management can access salesman hierarchy." }, { status: 403 }) };
   }
 

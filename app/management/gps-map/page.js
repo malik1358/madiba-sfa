@@ -70,6 +70,11 @@ function toDateValue(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
+function isInvoiceMakerRole(role) {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "invoice-maker" || normalized === "invoice_maker";
+}
+
 export default function GpsMapPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -111,8 +116,8 @@ export default function GpsMapPage() {
 
         const role = String(profile?.role || "").toLowerCase();
         setUserRole(role);
-        if (role !== "admin") {
-          setError("Only administrators can view the GPS map.");
+        if (role !== "admin" && !isInvoiceMakerRole(role)) {
+          setError("Only administrators and invoice-makers can view the GPS map.");
           return;
         }
 
@@ -127,7 +132,7 @@ export default function GpsMapPage() {
         const { data: profiles, error: profilesError } = await supabase
           .from("profiles")
           .select("id,salesman_code,salesman_name")
-          .in("role", ["salesman", "manager", "admin"]);
+          .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"]);
 
         if (profilesError) throw profilesError;
 
@@ -310,7 +315,7 @@ export default function GpsMapPage() {
             <section className="moduleMetricCard"><span>Visible salesmen</span><strong>{new Set(filteredRecords.map((row) => row.user_id)).size}</strong></section>
             <section className="moduleMetricCard"><span>Customer visit points</span><strong>{customerVisitPoints.length}</strong></section>
             <section className="moduleMetricCard"><span>Raw GPS captures</span><strong>{filteredRecords.length}</strong></section>
-            <section className="moduleMetricCard"><span>Administrator only</span><strong>{userRole === "admin" ? "Yes" : "No"}</strong></section>
+            <section className="moduleMetricCard"><span>Admin/Invoice-maker</span><strong>{userRole === "admin" || isInvoiceMakerRole(userRole) ? "Yes" : "No"}</strong></section>
           </div>
 
           <section className="moduleSection">

@@ -202,7 +202,7 @@ export async function POST(request) {
     if (
       profileError ||
       !profile ||
-      !["admin", "manager"].includes(
+      !["admin", "manager", "invoice-maker", "invoice_maker"].includes(
         String(profile.role).toLowerCase()
       )
     ) {
@@ -210,7 +210,7 @@ export async function POST(request) {
         {
           success: false,
           error:
-            "Only management can upload sales data.",
+            "Only management or invoice-maker can upload sales data.",
         },
         {
           status: 403,

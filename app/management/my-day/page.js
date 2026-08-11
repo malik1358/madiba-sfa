@@ -88,7 +88,10 @@ const PAGE_TEXT = {
   completedVisits: { en: "Completed visits", ar: "الزيارات المكتملة" },
 };
 
+function daysBetween(date) {
+  if (!date) return 0;
   const normalized = typeof date === "string" && date.includes("T") ? date : `${date}T00:00:00`;
+  const target = new Date(normalized);
   if (Number.isNaN(target.getTime())) return 0;
   const now = new Date();
   const diff = now.getTime() - target.getTime();
@@ -1194,10 +1197,7 @@ export default function MyDayPage() {
             placeholder={t("searchCustomer")}
           />
           {[
-<<<<<<< HEAD
-=======
             { key: "without-invoice", title: t("visitedWithoutInvoice"), rows: groupedVisitStatusRows.withoutInvoice },
->>>>>>> staging
             { key: "under-60", title: t("outstandingUnder60"), rows: groupedVisitStatusRows.under60 },
             { key: "above-60", title: t("outstandingAbove60"), rows: groupedVisitStatusRows.above60 },
           ].map((group) => (

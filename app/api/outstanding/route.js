@@ -15,6 +15,7 @@ import {
   normalizeOutstandingHeader,
   normalizeName,
   parseBucketLabelFromHeader,
+  prioritizeOutstandingSheets,
   sortBucketLabels,
   toNumber,
 } from "../../lib/outstanding";
@@ -403,13 +404,7 @@ export async function POST(request) {
       throw new Error("Excel file does not contain any sheet.");
     }
 
-    const preferredSheetName = workbook.SheetNames.find(
-      (name) => String(name || "").trim().toLowerCase() === "bills receivable"
-    );
-    const candidateSheetNames = [
-      preferredSheetName,
-      ...workbook.SheetNames,
-    ].filter((name, index, names) => name && names.indexOf(name) === index);
+    const candidateSheetNames = prioritizeOutstandingSheets(workbook.SheetNames);
     let rows = [];
     let headerRowIndex = -1;
     let workbookHasRows = false;

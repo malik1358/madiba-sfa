@@ -559,7 +559,7 @@ export default function MyDayPage() {
               city: row.city,
               area: row.area,
               salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
-              salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || "",
+              salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
               last_invoice_date: row.latest_transaction_date || null,
               last_visit_date: latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),

@@ -10,7 +10,7 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
-import { buildRecentSalesByCustomer, filterAndRankVisitCustomers } from "./visitPriority";
+import { filterAndRankVisitCustomers } from "./visitPriority";
 
 const PAGE_TEXT = {
   title: { en: "My Day", ar: "يومي" },
@@ -138,7 +138,7 @@ function getLogPreview(row) {
 }
 
 async function fetchVisibleCustomers(token) {
-  const response = await fetch("/api/customers/visible", {
+  const response = await fetch("/api/customers/visible?includeRecentSales=1", {
     cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -151,34 +151,6 @@ async function fetchVisibleCustomers(token) {
   }
 
   return payload.customers || [];
-}
-
-async function fetchRecentCustomerSales(supabase, scope, fromDate) {
-  const pageSize = 1000;
-  let from = 0;
-  const rows = [];
-
-  while (true) {
-    let query = supabase
-      .from("sales_raw")
-      .select("id,customer_code,sales_amount")
-      .gte("transaction_date", fromDate)
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-
-    if (!scope.hasAllAccess) {
-      query = query.in("salesman_code", scope.visibleSalesmanCodes);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-    const chunk = data || [];
-    rows.push(...chunk);
-    if (chunk.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return rows;
 }
 
 export default function MyDayPage() {
@@ -340,7 +312,6 @@ export default function MyDayPage() {
           todayOrdersRes,
           customerRows,
           routeRes,
-          recentSalesRows,
         ] = await Promise.all([
           todaySalesQuery,
           pendingOrdersQuery,
@@ -348,11 +319,6 @@ export default function MyDayPage() {
           todayOrdersQuery,
           fetchVisibleCustomers(session.access_token),
           routeQuery,
-          fetchRecentCustomerSales(
-            supabase,
-            scope,
-            new Date(new Date().setMonth(new Date().getMonth() - 6)).toISOString().slice(0, 10)
-          ),
         ]);
 
         if (todaySalesRes.error) throw todaySalesRes.error;
@@ -532,8 +498,6 @@ export default function MyDayPage() {
 
         setRouteRows((routeRes.data || []).filter(isVisitStatusCustomer));
 
-        const recentSalesByCustomer = buildRecentSalesByCustomer(recentSalesRows);
-
         setVisitStatusRows(
           customerRows
             .filter(isVisitStatusCustomer)
@@ -547,7 +511,7 @@ export default function MyDayPage() {
               days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
               days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
               next_visit_at: nextVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
-              recent_sales_value: recentSalesByCustomer.get(String(row.customer_code || "").trim().toUpperCase())?.salesValue || 0,
+              recent_sales_value: Number(row.recent_sales_value || 0),
               status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
                 : daysBetween(row.latest_transaction_date) > 21

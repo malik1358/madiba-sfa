@@ -109,6 +109,45 @@ export function parseBucketLabelFromHeader(headerValue) {
   return null;
 }
 
+export function normalizeOutstandingHeader(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+export function isOutstandingCustomerHeader(value) {
+  const header = normalizeOutstandingHeader(value);
+  return ["customer", "party", "account", "client", "debtor"].some((label) => header.includes(label));
+}
+
+export function isOutstandingAmountHeader(value) {
+  const header = normalizeOutstandingHeader(value);
+  return header.includes("pending") || header.startsWith("pend") || header.includes("open balance");
+}
+
+export function isOutstandingAgeHeader(value) {
+  const header = normalizeOutstandingHeader(value);
+  return header.includes("invoice day") || header === "aging" || header === "ageing" || header.includes("aging days") || header.includes("ageing days");
+}
+
+export function findOutstandingHeaderRow(rows, maxRows = 50) {
+  const limit = Math.min(Array.isArray(rows) ? rows.length : 0, maxRows);
+
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    const row = Array.isArray(rows[rowIndex]) ? rows[rowIndex] : [];
+    const hasCustomer = row.some(isOutstandingCustomerHeader);
+    const hasBucket = row.some((cell) => Boolean(parseBucketLabelFromHeader(cell)));
+    const hasAmount = row.some(isOutstandingAmountHeader);
+    const hasAge = row.some(isOutstandingAgeHeader);
+
+    if (hasCustomer && (hasBucket || (hasAmount && hasAge))) return rowIndex;
+  }
+
+  return -1;
+}
+
 export function isOpenInvoicesLabel(label) {
   return String(label || "").trim().toLowerCase() === "open_invoices";
 }

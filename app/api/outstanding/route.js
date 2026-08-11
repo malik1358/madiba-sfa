@@ -6,8 +6,12 @@ import {
   buildOutstandingRow,
   extractLeadingCustomerCodeAndName,
   findOutstandingForCustomer,
+  findOutstandingHeaderRow,
   isSameOutstandingCustomer,
+  isOutstandingAgeHeader,
+  isOutstandingAmountHeader,
   normalizeCode,
+  normalizeOutstandingHeader,
   normalizeName,
   parseBucketLabelFromHeader,
   sortBucketLabels,
@@ -123,30 +127,6 @@ function formatSheetDateValue(value) {
   return text;
 }
 
-function findHeaderRow(rows) {
-  const maxRows = Math.min(rows.length, 25);
-
-  for (let r = 0; r < maxRows; r += 1) {
-    const row = Array.isArray(rows[r]) ? rows[r] : [];
-    const labels = row.map((cell) => String(cell || "").trim());
-
-    const hasCustomer = labels.some((label) => {
-      const normalized = label.toLowerCase();
-      return normalized.includes("customer") || normalized.includes("party");
-    });
-
-    const hasBucket = labels.some((label) => Boolean(parseBucketLabelFromHeader(label)));
-    const hasPending = labels.some((label) => String(label || "").trim().toLowerCase().includes("pending"));
-    const hasInvoiceDay = labels.some((label) => String(label || "").trim().toLowerCase().includes("invoice day"));
-
-    if (hasCustomer && (hasBucket || (hasPending && hasInvoiceDay))) {
-      return r;
-    }
-  }
-
-  return -1;
-}
-
 function detectColumnIndexes(headerRow) {
   const indexes = {
     customerCode: -1,
@@ -167,7 +147,7 @@ function detectColumnIndexes(headerRow) {
 
   headerRow.forEach((cell, idx) => {
     const text = String(cell || "").trim();
-    const normalized = text.toLowerCase().replace(/[_\-]+/g, " ").replace(/\s+/g, " ");
+    const normalized = normalizeOutstandingHeader(text);
 
     if (indexes.customerCode < 0 && codeAliases.some((alias) => normalized === alias || normalized.includes(alias))) {
       indexes.customerCode = idx;
@@ -177,7 +157,7 @@ function detectColumnIndexes(headerRow) {
       indexes.customerName = idx;
     }
 
-    if (indexes.pendingAmount < 0 && (normalized.includes("pending") || normalized.startsWith("pend"))) {
+    if (indexes.pendingAmount < 0 && isOutstandingAmountHeader(text)) {
       indexes.pendingAmount = idx;
     }
 
@@ -197,7 +177,7 @@ function detectColumnIndexes(headerRow) {
       indexes.overdueDays = idx;
     }
 
-    if (indexes.invoiceDay < 0 && normalized.includes("invoice day")) {
+    if (indexes.invoiceDay < 0 && isOutstandingAgeHeader(text)) {
       indexes.invoiceDay = idx;
     }
 
@@ -424,15 +404,26 @@ export async function POST(request) {
     const preferredSheetName = workbook.SheetNames.find(
       (name) => String(name || "").trim().toLowerCase() === "bills receivable"
     );
-    const selectedSheetName = preferredSheetName || workbook.SheetNames[0];
-    const sheet = workbook.Sheets[selectedSheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    const candidateSheetNames = [
+      preferredSheetName,
+      ...workbook.SheetNames,
+    ].filter((name, index, names) => name && names.indexOf(name) === index);
+    let rows = [];
+    let headerRowIndex = -1;
+
+    for (const sheetName of candidateSheetNames) {
+      const sheetRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+      const sheetHeaderRowIndex = findOutstandingHeaderRow(sheetRows);
+      if (sheetHeaderRowIndex < 0) continue;
+      rows = sheetRows;
+      headerRowIndex = sheetHeaderRowIndex;
+      break;
+    }
 
     if (!Array.isArray(rows) || rows.length === 0) {
       throw new Error("Excel file is empty.");
     }
 
-    const headerRowIndex = findHeaderRow(rows);
     if (headerRowIndex < 0) {
       throw new Error("Unable to detect header row. Ensure file includes customer and bucket columns.");
     }

@@ -39,7 +39,7 @@ const PAGE_TEXT = {
   outstandingUnder60: { en: "Outstanding Under 60 Days", ar: "المبالغ المستحقة لأقل من 60 يوماً" },
   outstandingAbove60: { en: "Outstanding Above 60 Days", ar: "المبالغ المستحقة لأكثر من 60 يوماً" },
   visitedWithoutInvoice: { en: "Visited Without Invoice", ar: "تمت الزيارة بدون فاتورة" },
-  noOutstanding: { en: "No Outstanding", ar: "لا يوجد رصيد مستحق" },
+  inactiveCustomers: { en: "Inactive Customers", ar: "عملاء غير نشطين" },
   outstanding0To30: { en: "0-30 Days", ar: "0-30 يوماً" },
   outstanding30To60: { en: "30-60 Days", ar: "30-60 يوماً" },
   outstandingAbove60Column: { en: ">60 Days", ar: ">60 يوماً" },
@@ -1290,7 +1290,7 @@ export default function MyDayPage() {
             { key: "without-invoice", title: t("visitedWithoutInvoice"), rows: groupedVisitStatusRows.withoutInvoice },
             { key: "under-60", title: t("outstandingUnder60"), rows: groupedVisitStatusRows.under60 },
             { key: "above-60", title: t("outstandingAbove60"), rows: groupedVisitStatusRows.above60 },
-            { key: "no-outstanding", title: t("noOutstanding"), rows: groupedVisitStatusRows.noOutstanding },
+            { key: "inactive-customers", title: t("inactiveCustomers"), rows: groupedVisitStatusRows.noOutstanding },
           ].map((group) => (
           <div key={group.key} style={{ marginTop: "14px" }}>
             <div className="moduleSectionHeader">

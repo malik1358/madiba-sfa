@@ -307,6 +307,56 @@ async function fetchVisibleCustomers(admin, scope) {
   return rows;
 }
 
+async function attachRecentSalesValues(admin, customers) {
+  const canonicalCodeByCandidate = new Map();
+  const salesValueByCustomer = new Map();
+
+  customers.forEach((customer) => {
+    const canonicalCode = normalizeCode(customer.customer_code);
+    customerCodeCandidates(customer.customer_code).forEach((candidate) => {
+      canonicalCodeByCandidate.set(normalizeCode(candidate), canonicalCode);
+    });
+  });
+
+  const candidateCodes = [...canonicalCodeByCandidate.keys()];
+  const fromDate = new Date();
+  fromDate.setUTCMonth(fromDate.getUTCMonth() - 6);
+
+  for (let start = 0; start < candidateCodes.length; start += 200) {
+    const codeChunk = candidateCodes.slice(start, start + 200);
+    const pageSize = 1000;
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await admin
+        .from("sales_raw")
+        .select("id,customer_code,sales_amount")
+        .gte("transaction_date", fromDate.toISOString().slice(0, 10))
+        .in("customer_code", codeChunk)
+        .order("id", { ascending: true })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      const rows = data || [];
+      rows.forEach((row) => {
+        const canonicalCode = canonicalCodeByCandidate.get(normalizeCode(row.customer_code));
+        if (!canonicalCode) return;
+        const currentValue = salesValueByCustomer.get(canonicalCode) || 0;
+        salesValueByCustomer.set(canonicalCode, currentValue + Math.max(Number(row.sales_amount || 0), 0));
+      });
+
+      if (rows.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+
+  return customers.map((customer) => ({
+    ...customer,
+    recent_sales_value: salesValueByCustomer.get(normalizeCode(customer.customer_code)) || 0,
+  }));
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -325,11 +375,15 @@ export async function GET(request) {
     const token = authHeader.replace("Bearer ", "");
     const scope = await resolveScope(admin, token);
     const customers = await fetchVisibleCustomers(admin, scope);
+    const includeRecentSales = new URL(request.url).searchParams.get("includeRecentSales") === "1";
+    const responseCustomers = includeRecentSales
+      ? await attachRecentSalesValues(admin, customers)
+      : customers;
 
     return NextResponse.json({
       success: true,
-      customers,
-      count: customers.length,
+      customers: responseCustomers,
+      count: responseCustomers.length,
     }, {
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     });

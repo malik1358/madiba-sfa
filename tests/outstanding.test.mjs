@@ -10,6 +10,7 @@ import {
   isOutstandingInvoiceDayHeader,
   prioritizeOutstandingSheets,
   resolveOutstandingCustomerOwnership,
+  visibleOutstandingBucketLabels,
 } from "../app/lib/outstanding.js";
 
 test("findOutstandingCustomerCodesForSalesmen matches normalized salesman identity", () => {
@@ -131,6 +132,16 @@ test("Pending Bills is preferred over an older Bills Receivable sheet", () => {
   assert.deepEqual(
     prioritizeOutstandingSheets(["Bills Receivable", "Summary", "Pending Bills"]),
     ["Pending Bills", "Bills Receivable", "Summary"]
+  );
+});
+
+test("visible outstanding buckets keep empty gaps through the oldest balance", () => {
+  assert.deepEqual(
+    visibleOutstandingBucketLabels(
+      ["0-30", "31-60", "61-90", "91-120", ">120"],
+      { "0-30": 61312.25, "31-60": 0, "61-90": 14795.35, "91-120": 0, ">120": 0 }
+    ),
+    ["0-30", "31-60", "61-90"]
   );
 });
 

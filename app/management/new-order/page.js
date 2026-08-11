@@ -23,7 +23,7 @@ import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance"
 import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
-import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
+import { sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -715,8 +715,9 @@ export default function NewOrderPage() {
   }, [filteredItems]);
 
   const visibleOutstandingBuckets = useMemo(
-    () => (outstandingInfo.bucketLabels || []).filter(
-      (label) => parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]) !== 0
+    () => visibleOutstandingBucketLabels(
+      outstandingInfo.bucketLabels,
+      outstandingInfo.customer?.buckets
     ),
     [outstandingInfo.bucketLabels, outstandingInfo.customer]
   );

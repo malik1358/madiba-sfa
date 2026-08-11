@@ -18,7 +18,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
-import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
+import { sortBucketLabels, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 
 import { shortDate } from "./lib/format";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -176,8 +176,9 @@ function CustomerAuditPageContent() {
   }, [selectedCustomer, setError]);
 
   const visibleOutstandingBuckets = useMemo(
-    () => (outstandingInfo.bucketLabels || []).filter(
-      (label) => parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]) !== 0
+    () => visibleOutstandingBucketLabels(
+      outstandingInfo.bucketLabels,
+      outstandingInfo.customer?.buckets
     ),
     [outstandingInfo.bucketLabels, outstandingInfo.customer]
   );

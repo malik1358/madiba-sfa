@@ -227,6 +227,17 @@ export function sortBucketLabels(labels) {
     });
 }
 
+export function visibleOutstandingBucketLabels(labels, buckets) {
+  const sortedLabels = sortBucketLabels(labels);
+  let lastNonZeroIndex = -1;
+
+  sortedLabels.forEach((label, index) => {
+    if (toNumber(buckets?.[label]) !== 0) lastNonZeroIndex = index;
+  });
+
+  return lastNonZeroIndex < 0 ? [] : sortedLabels.slice(0, lastNonZeroIndex + 1);
+}
+
 export function buildOutstandingRow(raw) {
   const row = raw && typeof raw === "object" ? raw : {};
   const buckets = row.buckets && typeof row.buckets === "object" ? row.buckets : {};

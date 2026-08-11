@@ -10,7 +10,7 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
-import { filterAndRankVisitCustomers } from "./visitPriority";
+import { filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 
 const PAGE_TEXT = {
   title: { en: "My Day", ar: "يومي" },
@@ -35,6 +35,11 @@ const PAGE_TEXT = {
   noRoutes: { en: "No routes", ar: "لا توجد مسارات" },
   customersCount: { en: "customers", ar: "عميل" },
   visitStatus: { en: "Visit Status", ar: "حالة الزيارات" },
+  outstandingUnder60: { en: "Outstanding Under 60 Days", ar: "المبالغ المستحقة لأقل من 60 يوماً" },
+  outstandingAbove60: { en: "Outstanding Above 60 Days", ar: "المبالغ المستحقة لأكثر من 60 يوماً" },
+  outstanding0To30: { en: "0-30 Days", ar: "0-30 يوماً" },
+  outstanding30To60: { en: "30-60 Days", ar: "30-60 يوماً" },
+  outstandingAbove60Column: { en: ">60 Days", ar: ">60 يوماً" },
   searchCustomer: { en: "Search customer by name or code", ar: "ابحث عن العميل بالاسم أو الرمز" },
   recentValue: { en: "Recent 6M Value", ar: "قيمة آخر 6 أشهر" },
   customer: { en: "Customer", ar: "العميل" },
@@ -138,7 +143,7 @@ function getLogPreview(row) {
 }
 
 async function fetchVisibleCustomers(token) {
-  const response = await fetch("/api/customers/visible?includeRecentSales=1", {
+  const response = await fetch("/api/customers/visible?includeRecentSales=1&includeOutstanding=1", {
     cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -512,6 +517,9 @@ export default function MyDayPage() {
               days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
               next_visit_at: nextVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               recent_sales_value: Number(row.recent_sales_value || 0),
+              outstanding_0_30: Number(row.outstanding_0_30 || 0),
+              outstanding_30_60: Number(row.outstanding_30_60 || 0),
+              outstanding_above_60: Number(row.outstanding_above_60 || 0),
               status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
                 : daysBetween(row.latest_transaction_date) > 21
@@ -892,6 +900,11 @@ export default function MyDayPage() {
     [visitStatusRows, visitStatusSearch]
   );
 
+  const groupedVisitStatusRows = useMemo(
+    () => splitVisitCustomersByOutstanding(rankedVisitStatusRows),
+    [rankedVisitStatusRows]
+  );
+
   const plannedVisitRows = useMemo(
     () =>
       visitStatusRows
@@ -1152,7 +1165,16 @@ export default function MyDayPage() {
             onChange={(event) => setVisitStatusSearch(event.target.value)}
             placeholder={t("searchCustomer")}
           />
-          <div className="moduleTableWrap">
+          {[
+            { key: "under-60", title: t("outstandingUnder60"), rows: groupedVisitStatusRows.under60 },
+            { key: "above-60", title: t("outstandingAbove60"), rows: groupedVisitStatusRows.above60 },
+          ].map((group) => (
+          <div key={group.key} style={{ marginTop: "14px" }}>
+            <div className="moduleSectionHeader">
+              <h2>{group.title}</h2>
+              <span>{group.rows.length} {t("customersCount")}</span>
+            </div>
+            <div className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
@@ -1161,12 +1183,15 @@ export default function MyDayPage() {
                   <th>{t("daysSinceLastInvoice")}</th>
                   <th>{t("daysSinceLastVisit")}</th>
                   <th>{t("recentValue")}</th>
+                  <th>{t("outstanding0To30")}</th>
+                  <th>{t("outstanding30To60")}</th>
+                  <th>{t("outstandingAbove60Column")}</th>
                   <th>{t("status")}</th>
                   <th>{t("actions")}</th>
                 </tr>
               </thead>
               <tbody>
-                {rankedVisitStatusRows.map((row) => (
+                {group.rows.map((row) => (
                   <Fragment key={row.customer_code}>
                   <tr>
                     <td>
@@ -1181,6 +1206,9 @@ export default function MyDayPage() {
                     <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
                     <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>
                     <td>SAR {Number(row.recent_sales_value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>SAR {Number(row.outstanding_0_30 || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td>SAR {Number(row.outstanding_30_60 || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td>SAR {Number(row.outstanding_above_60 || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td>{row.status === "Visited" ? t("visited") : row.status === "Overdue" ? t("overdue") : t("planned")}</td>
                     <td>
                       <div className="moduleInlineStack">
@@ -1203,7 +1231,7 @@ export default function MyDayPage() {
                   </tr>
                   {activeVisitCustomerCode === row.customer_code && (
                     <tr>
-                      <td colSpan={7}>
+                      <td colSpan={10}>
                         <div className="moduleVisitPanel">
                           <div className="moduleSectionHeader">
                             <h2>{t("visitReport")}</h2>
@@ -1265,14 +1293,16 @@ export default function MyDayPage() {
                   )}
                   </Fragment>
                 ))}
-                {rankedVisitStatusRows.length === 0 && (
+                {group.rows.length === 0 && (
                   <tr>
-                    <td colSpan={7}>{t("noCustomers")}</td>
+                    <td colSpan={10}>{t("noCustomers")}</td>
                   </tr>
                 )}
               </tbody>
             </table>
+            </div>
           </div>
+          ))}
         </section>
       </div>
     </main>

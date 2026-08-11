@@ -137,36 +137,20 @@ function getLogPreview(row) {
   }
 }
 
-async function fetchAllCustomers(supabase, scope) {
-  const pageSize = 1000;
-  let from = 0;
-  const rows = [];
+async function fetchVisibleCustomers(token) {
+  const response = await fetch("/api/customers/visible", {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
 
-  while (true) {
-    let query = supabase
-      .from("customers")
-      .select("customer_code,customer_name,city,area,latest_transaction_date,current_salesman_code,is_active")
-      .order("customer_code", { ascending: true })
-      .range(from, from + pageSize - 1);
-
-    if (!scope.hasAllAccess) {
-      query = query.in("current_salesman_code", scope.visibleSalesmanCodes);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    const chunk = data || [];
-    rows.push(...chunk);
-
-    if (chunk.length < pageSize) {
-      break;
-    }
-
-    from += pageSize;
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.success) {
+    throw new Error(payload.error || "Unable to load visible customers.");
   }
 
-  return rows;
+  return payload.customers || [];
 }
 
 async function fetchRecentCustomerSales(supabase, scope, fromDate) {
@@ -362,7 +346,7 @@ export default function MyDayPage() {
           pendingOrdersQuery,
           submittedOrdersQuery,
           todayOrdersQuery,
-          fetchAllCustomers(supabase, scope),
+          fetchVisibleCustomers(session.access_token),
           routeQuery,
           fetchRecentCustomerSales(
             supabase,

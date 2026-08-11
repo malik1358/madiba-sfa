@@ -208,7 +208,7 @@ async function fetchVisibleCustomers(admin, scope) {
 
     while (true) {
       const { data: salesRows, error: salesError } = await admin
-        .from("sales_raw")
+        .from("active_sales")
         .select("customer_code,salesman_code")
         .in("salesman_code", visibleCodes)
         .range(salesFrom, salesFrom + salesPageSize - 1);
@@ -236,7 +236,7 @@ async function fetchVisibleCustomers(admin, scope) {
 
     while (true) {
       const { data: salesRows, error: salesError } = await admin
-        .from("sales_raw")
+        .from("active_sales")
         .select("customer_code,salesman_code,salesman_name")
         .or(identityFilters.join(","))
         .range(salesFrom, salesFrom + salesPageSize - 1);
@@ -329,7 +329,7 @@ async function attachRecentSalesValues(admin, customers) {
 
     while (true) {
       const { data, error } = await admin
-        .from("sales_raw")
+        .from("active_sales")
         .select("id,customer_code,sales_amount")
         .gte("transaction_date", fromDate.toISOString().slice(0, 10))
         .in("customer_code", codeChunk)

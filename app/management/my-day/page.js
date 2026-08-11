@@ -268,7 +268,7 @@ export default function MyDayPage() {
         setWarnings(nextWarnings);
 
         let todaySalesQuery = supabase
-          .from("sales_raw")
+          .from("active_sales")
           .select("customer_code,sales_amount")
           .eq("transaction_date", today);
 
@@ -649,7 +649,7 @@ export default function MyDayPage() {
       }
 
       let itemsQuery = supabase
-        .from("sales_raw")
+        .from("active_sales")
         .select("item_code,item_name,transaction_date,salesman_code")
         .eq("customer_code", customer.customer_code)
           .order("transaction_date", { ascending: false });

@@ -92,7 +92,7 @@ async function autoCreateExistingSalesmen(admin) {
     const to = from + pageSize - 1;
 
     const { data: rows, error: rowsError } = await admin
-      .from("sales_raw")
+      .from("active_sales")
       .select("salesman_code,salesman_name")
       .not("salesman_code", "is", null)
       .range(from, to);

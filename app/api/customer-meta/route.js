@@ -181,7 +181,7 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
     let hasHistoryAccess = false;
     for (const codeCandidate of codeCandidates) {
       const { data: historyRow, error: historyError } = await admin
-        .from("sales_raw")
+        .from("active_sales")
         .select("id")
         .eq("customer_code", codeCandidate)
         .in("salesman_code", scope.visibleSalesmanCodes || [])
@@ -196,7 +196,7 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
 
       if (!hasHistoryAccess && scope.identitySearchPattern) {
         const { data: nameHistoryRow, error: nameHistoryError } = await admin
-          .from("sales_raw")
+          .from("active_sales")
           .select("id")
           .eq("customer_code", codeCandidate)
           .ilike("salesman_name", `%${scope.identitySearchPattern}%`)

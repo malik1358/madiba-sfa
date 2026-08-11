@@ -164,7 +164,7 @@ async function fetchItemCategoryLookup(supabase, scope) {
 
   while (true) {
     let query = supabase
-      .from("sales_raw")
+      .from("active_sales")
       .select("id,item_code,item_name,category,salesman_code,transaction_date")
       .order("transaction_date", { ascending: false })
       .order("id", { ascending: false })

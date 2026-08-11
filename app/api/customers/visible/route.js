@@ -291,12 +291,14 @@ async function fetchVisibleCustomers(admin, scope) {
       if (scope.hasAllAccess) return true;
       if (normalizedScopeCodes.size === 0) return false;
       const codeCandidates = customerCodeCandidates(row.customer_code).map(normalizeCode);
+      const rowSalesmanCode = normalizeCode(row.current_salesman_code);
+
+      // Always include customers currently assigned to the visible scope.
+      if (normalizedScopeCodes.has(rowSalesmanCode)) return true;
+
       if (codeCandidates.some((code) => outstandingAssignedCustomerCodes.has(code))) {
         return codeCandidates.some((code) => outstandingOwnedCustomerCodes.has(code));
       }
-
-      const rowSalesmanCode = normalizeCode(row.current_salesman_code);
-      if (normalizedScopeCodes.has(rowSalesmanCode)) return true;
 
       // Fallback: include customers that have sales history under visible salesman codes.
       return codeCandidates.some((code) => historyVisibleCustomerCodes.has(code));

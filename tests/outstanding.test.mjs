@@ -6,6 +6,7 @@ import {
   customerCodeCandidates,
   findOutstandingHeaderRow,
   findOutstandingCustomerCodesForSalesmen,
+  prioritizeOutstandingSheets,
   resolveOutstandingCustomerOwnership,
 } from "../app/lib/outstanding.js";
 
@@ -101,6 +102,22 @@ test("combined outstanding headers preserve parent and child labels", () => {
     "Aging Days",
   ]);
   assert.equal(findOutstandingHeaderRow(rows), 1);
+});
+
+test("single-cell report titles are not merged into detail headers", () => {
+  const rows = [
+    ["Pending Bills"],
+    ["Date", "Ref. No.", "Party's Name", "Pending Amount", "Due Date", "Overdue Days", "Invoice Day", "Salesman"],
+  ];
+
+  assert.deepEqual(combineOutstandingHeaderRows(rows, 1), rows[1]);
+});
+
+test("Pending Bills is preferred over an older Bills Receivable sheet", () => {
+  assert.deepEqual(
+    prioritizeOutstandingSheets(["Bills Receivable", "Summary", "Pending Bills"]),
+    ["Pending Bills", "Bills Receivable", "Summary"]
+  );
 });
 
 test("findOutstandingHeaderRow scans beyond the old 25-row report preamble", () => {

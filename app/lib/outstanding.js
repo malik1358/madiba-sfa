@@ -135,6 +135,8 @@ export function isOutstandingAgeHeader(value) {
 export function combineOutstandingHeaderRows(rows, rowIndex) {
   const current = Array.isArray(rows?.[rowIndex]) ? rows[rowIndex] : [];
   const previous = rowIndex > 0 && Array.isArray(rows?.[rowIndex - 1]) ? rows[rowIndex - 1] : [];
+  const previousValues = previous.filter((value) => String(value || "").trim());
+  if (previousValues.length <= 1) return current;
   const width = Math.max(current.length, previous.length);
 
   return Array.from({ length: width }, (_, columnIndex) => {
@@ -142,6 +144,18 @@ export function combineOutstandingHeaderRows(rows, rowIndex) {
       .map((value) => String(value || "").trim())
       .filter(Boolean);
     return [...new Set(parts)].join(" ");
+  });
+}
+
+export function prioritizeOutstandingSheets(sheetNames) {
+  const priorities = ["pending bills", "bills receivable"];
+
+  return [...new Set((sheetNames || []).filter(Boolean))].sort((a, b) => {
+    const aIndex = priorities.indexOf(String(a).trim().toLowerCase());
+    const bIndex = priorities.indexOf(String(b).trim().toLowerCase());
+    const aPriority = aIndex < 0 ? priorities.length : aIndex;
+    const bPriority = bIndex < 0 ? priorities.length : bIndex;
+    return aPriority - bPriority;
   });
 }
 

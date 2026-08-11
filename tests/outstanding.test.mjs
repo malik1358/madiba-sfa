@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   customerCodeCandidates,
+  findOutstandingHeaderRow,
   findOutstandingCustomerCodesForSalesmen,
   resolveOutstandingCustomerOwnership,
 } from "../app/lib/outstanding.js";
@@ -56,4 +57,21 @@ test("customerCodeCandidates extracts code from a combined customer master value
     customerCodeCandidates("1173C LOULOAT AL NILE TRADING CO."),
     ["1173C LOULOAT AL NILE TRADING CO.", "1173C"]
   );
+});
+
+test("findOutstandingHeaderRow accepts Open Balance and Aging invoice detail headers", () => {
+  const rows = [
+    ["Outstanding Report"],
+    ["Date", "Ref No", "Customer Account", "Open Balance", "Due Date", "Aging", "Salesman"],
+    ["10/08/2026", "INV-1", "1173C Customer", 250, "20/08/2026", 15, "Ahmed Nabil"],
+  ];
+
+  assert.equal(findOutstandingHeaderRow(rows), 1);
+});
+
+test("findOutstandingHeaderRow scans beyond the old 25-row report preamble", () => {
+  const rows = Array.from({ length: 30 }, () => [""]);
+  rows.push(["Customer Name", "0-30", "31-60", "Open Invoices"]);
+
+  assert.equal(findOutstandingHeaderRow(rows), 30);
 });

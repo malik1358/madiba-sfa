@@ -67,4 +67,5 @@ test("visit customers are grouped by outstanding balance or a visit without invo
   assert.deepEqual(groups.under60.map((row) => row.customer_code), ["CURRENT"]);
   assert.deepEqual(groups.above60.map((row) => row.customer_code), ["OVERDUE"]);
   assert.deepEqual(groups.withoutInvoice.map((row) => row.customer_code), ["VISITED_NO_INVOICE"]);
+  assert.deepEqual(groups.noOutstanding.map((row) => row.customer_code), ["CLEAR", "NEW_UNVISITED"]);
 });

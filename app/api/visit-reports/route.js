@@ -119,14 +119,60 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
   return customer;
 }
 
+function getBearerToken(request) {
+  const authHeader = request.headers.get("authorization");
+  return authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
+}
+
+export async function PATCH(request) {
+  try {
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
+    }
+
+    const token = getBearerToken(request);
+    if (!token) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const customerCode = normalizeCode(body?.customerCode);
+    if (!customerCode) {
+      return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
+    }
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const scope = await resolveScope(admin, token);
+    await ensureCustomerVisible(admin, customerCode, scope);
+
+    const { data: updatedCustomer, error: updateError } = await admin
+      .from("customers")
+      .update({ is_active: body?.isActive !== false })
+      .eq("customer_code", customerCode)
+      .select("customer_code,is_active")
+      .maybeSingle();
+
+    if (updateError) throw updateError;
+    if (!updatedCustomer) throw new Error("Customer status was not updated.");
+
+    return NextResponse.json({ success: true, customer: updatedCustomer });
+  } catch (error) {
+    const message = error.message || "Unable to update customer status.";
+    const status = /access|session|customer not found|not authenticated/i.test(message) ? 403 : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
+  }
+}
+
 export async function POST(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
       return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
     }
 
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
+    const token = getBearerToken(request);
+    if (!token) {
       return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
     }
 
@@ -140,7 +186,7 @@ export async function POST(request) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const scope = await resolveScope(admin, authHeader.replace("Bearer ", ""));
+    const scope = await resolveScope(admin, token);
     await ensureCustomerVisible(admin, customerCode, scope);
 
     const value = {

@@ -340,8 +340,19 @@ export default function MyDayPage() {
         if (todayOrdersRes.error) throw todayOrdersRes.error;
         if (routeRes.error) throw routeRes.error;
 
+        const normalizedScopeCodes = new Set(
+          (scope.visibleSalesmanCodes || [])
+            .map((code) => String(code || "").trim().toUpperCase())
+            .filter(Boolean)
+        );
+        const scopedCustomerRows = scope.hasAllAccess
+          ? customerRows
+          : customerRows.filter((row) =>
+              normalizedScopeCodes.has(String(row.current_salesman_code || "").trim().toUpperCase())
+            );
+
         const visibleSalesmanCodes = [...new Set(
-          customerRows
+          scopedCustomerRows
             .map((row) => String(row.current_salesman_code || "").trim().toUpperCase())
             .filter(Boolean)
         )];
@@ -487,7 +498,7 @@ export default function MyDayPage() {
             });
           }
         } else {
-          const customerCodes = customerRows
+          const customerCodes = scopedCustomerRows
             .map((row) => String(row.customer_code || "").trim().toUpperCase())
             .filter(Boolean);
 
@@ -526,8 +537,8 @@ export default function MyDayPage() {
           }
         }
 
-        const overdueRows = customerRows.filter((row) => daysBetween(row.latest_transaction_date) > 21);
-        const followUpRows = customerRows.filter((row) => daysBetween(row.latest_transaction_date) > 10);
+        const overdueRows = scopedCustomerRows.filter((row) => daysBetween(row.latest_transaction_date) > 21);
+        const followUpRows = scopedCustomerRows.filter((row) => daysBetween(row.latest_transaction_date) > 10);
 
         const visiblePendingOrders = (pendingOrdersRes.data || []).filter((row) => {
           if (scope.hasAllAccess) return true;
@@ -551,7 +562,7 @@ export default function MyDayPage() {
         setRouteRows((routeRes.data || []).filter(isVisitStatusCustomer));
 
         setVisitStatusRows(
-          customerRows
+          scopedCustomerRows
             .filter(isVisitStatusCustomer)
             .map((row) => ({
               customer_code: row.customer_code,

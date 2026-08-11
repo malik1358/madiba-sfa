@@ -129,7 +129,7 @@ export function isOutstandingAmountHeader(value) {
 
 export function isOutstandingAgeHeader(value) {
   const header = normalizeOutstandingHeader(value);
-  return header.includes("invoice day") || header === "aging" || header === "ageing" || header.includes("aging days") || header.includes("ageing days");
+  return header.includes("invoice day") || header.includes("overdue day") || header.includes("overdue by") || header === "aging" || header === "ageing" || header.includes("aging days") || header.includes("ageing days");
 }
 
 export function findOutstandingHeaderRow(rows, maxRows = 50) {

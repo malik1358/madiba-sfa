@@ -238,6 +238,21 @@ export function visibleOutstandingBucketLabels(labels, buckets) {
   return lastNonZeroIndex < 0 ? [] : sortedLabels.slice(0, lastNonZeroIndex + 1);
 }
 
+export function summarizeOutstandingBuckets(buckets) {
+  const summary = { days0To30: 0, days30To60: 0, daysAbove60: 0 };
+
+  Object.entries(buckets || {}).forEach(([label, value]) => {
+    const amount = toNumber(value);
+    const startDay = bucketSortValue(label);
+
+    if (startDay <= 0) summary.days0To30 += amount;
+    else if (startDay <= 60) summary.days30To60 += amount;
+    else summary.daysAbove60 += amount;
+  });
+
+  return summary;
+}
+
 export function buildOutstandingRow(raw) {
   const row = raw && typeof raw === "object" ? raw : {};
   const buckets = row.buckets && typeof row.buckets === "object" ? row.buckets : {};

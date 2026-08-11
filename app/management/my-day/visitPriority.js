@@ -43,3 +43,11 @@ export function filterAndRankVisitCustomers(rows, search = "") {
       return String(a?.customer_name || a?.customer_code || "").localeCompare(String(b?.customer_name || b?.customer_code || ""));
     });
 }
+
+export function splitVisitCustomersByOutstanding(rows) {
+  return (rows || []).reduce((groups, row) => {
+    if (Number(row?.outstanding_above_60 || 0) > 0) groups.above60.push(row);
+    else groups.under60.push(row);
+    return groups;
+  }, { under60: [], above60: [] });
+}

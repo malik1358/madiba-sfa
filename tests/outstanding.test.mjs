@@ -10,6 +10,7 @@ import {
   isOutstandingInvoiceDayHeader,
   prioritizeOutstandingSheets,
   resolveOutstandingCustomerOwnership,
+  summarizeOutstandingBuckets,
   visibleOutstandingBucketLabels,
 } from "../app/lib/outstanding.js";
 
@@ -142,6 +143,19 @@ test("visible outstanding buckets keep empty gaps through the oldest balance", (
       { "0-30": 61312.25, "31-60": 0, "61-90": 14795.35, "91-120": 0, ">120": 0 }
     ),
     ["0-30", "31-60", "61-90"]
+  );
+});
+
+test("outstanding buckets collapse into the three Visit Status age bands", () => {
+  assert.deepEqual(
+    summarizeOutstandingBuckets({
+      "0-30": 100,
+      "31-60": 200,
+      "61-90": 300,
+      "91-120": 400,
+      ">120": 500,
+    }),
+    { days0To30: 100, days30To60: 200, daysAbove60: 1200 }
   );
 });
 

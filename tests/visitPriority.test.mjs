@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildRecentSalesByCustomer,
   filterAndRankVisitCustomers,
+  splitVisitCustomersByOutstanding,
 } from "../app/management/my-day/visitPriority.js";
 
 test("recent customer sales are aggregated by normalized code", () => {
@@ -33,4 +34,15 @@ test("visit customer search matches name and code", () => {
 
   assert.deepEqual(filterAndRankVisitCustomers(rows, "rawaa").map((row) => row.customer_code), ["1173C"]);
   assert.deepEqual(filterAndRankVisitCustomers(rows, "1173").map((row) => row.customer_code), ["1173C"]);
+});
+
+test("visit customers with any balance above 60 days use the above-60 table", () => {
+  const groups = splitVisitCustomersByOutstanding([
+    { customer_code: "CURRENT", outstanding_0_30: 100, outstanding_above_60: 0 },
+    { customer_code: "OVERDUE", outstanding_30_60: 100, outstanding_above_60: 1 },
+    { customer_code: "CLEAR", outstanding_above_60: 0 },
+  ]);
+
+  assert.deepEqual(groups.under60.map((row) => row.customer_code), ["CURRENT", "CLEAR"]);
+  assert.deepEqual(groups.above60.map((row) => row.customer_code), ["OVERDUE"]);
 });

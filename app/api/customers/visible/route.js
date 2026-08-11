@@ -3,7 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import {
   OUTSTANDING_DATASET_KEY,
   customerCodeCandidates,
+  findOutstandingForCustomer,
   resolveOutstandingCustomerOwnership,
+  summarizeOutstandingBuckets,
 } from "../../../lib/outstanding";
 
 export const runtime = "nodejs";
@@ -357,6 +359,39 @@ async function attachRecentSalesValues(admin, customers) {
   }));
 }
 
+async function attachOutstandingValues(admin, customers) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", OUTSTANDING_DATASET_KEY)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  let dataset = null;
+  try {
+    dataset = JSON.parse(data?.setting_value || "null");
+  } catch {
+    dataset = null;
+  }
+
+  return customers.map((customer) => {
+    const outstanding = findOutstandingForCustomer(
+      dataset,
+      customer.customer_code,
+      customer.customer_name
+    );
+    const summary = summarizeOutstandingBuckets(outstanding?.buckets);
+
+    return {
+      ...customer,
+      outstanding_0_30: summary.days0To30,
+      outstanding_30_60: summary.days30To60,
+      outstanding_above_60: summary.daysAbove60,
+    };
+  });
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -375,10 +410,15 @@ export async function GET(request) {
     const token = authHeader.replace("Bearer ", "");
     const scope = await resolveScope(admin, token);
     const customers = await fetchVisibleCustomers(admin, scope);
-    const includeRecentSales = new URL(request.url).searchParams.get("includeRecentSales") === "1";
-    const responseCustomers = includeRecentSales
+    const searchParams = new URL(request.url).searchParams;
+    const includeRecentSales = searchParams.get("includeRecentSales") === "1";
+    const includeOutstanding = searchParams.get("includeOutstanding") === "1";
+    let responseCustomers = includeRecentSales
       ? await attachRecentSalesValues(admin, customers)
       : customers;
+    if (includeOutstanding) {
+      responseCustomers = await attachOutstandingValues(admin, responseCustomers);
+    }
 
     return NextResponse.json({
       success: true,

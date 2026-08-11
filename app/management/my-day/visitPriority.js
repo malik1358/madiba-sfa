@@ -46,8 +46,11 @@ export function filterAndRankVisitCustomers(rows, search = "") {
 
 export function splitVisitCustomersByOutstanding(rows) {
   return (rows || []).reduce((groups, row) => {
-    if (Number(row?.outstanding_above_60 || 0) > 0) groups.above60.push(row);
-    else groups.under60.push(row);
+    const under60Balance = Number(row?.outstanding_0_30 || 0) + Number(row?.outstanding_30_60 || 0);
+    const above60Balance = Number(row?.outstanding_above_60 || 0);
+
+    if (above60Balance > 0) groups.above60.push(row);
+    else if (under60Balance > 0) groups.under60.push(row);
     return groups;
   }, { under60: [], above60: [] });
 }

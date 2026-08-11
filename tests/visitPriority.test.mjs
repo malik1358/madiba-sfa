@@ -36,13 +36,13 @@ test("visit customer search matches name and code", () => {
   assert.deepEqual(filterAndRankVisitCustomers(rows, "1173").map((row) => row.customer_code), ["1173C"]);
 });
 
-test("visit customers with any balance above 60 days use the above-60 table", () => {
+test("visit customers are grouped only when they have an outstanding balance", () => {
   const groups = splitVisitCustomersByOutstanding([
     { customer_code: "CURRENT", outstanding_0_30: 100, outstanding_above_60: 0 },
     { customer_code: "OVERDUE", outstanding_30_60: 100, outstanding_above_60: 1 },
     { customer_code: "CLEAR", outstanding_above_60: 0 },
   ]);
 
-  assert.deepEqual(groups.under60.map((row) => row.customer_code), ["CURRENT", "CLEAR"]);
+  assert.deepEqual(groups.under60.map((row) => row.customer_code), ["CURRENT"]);
   assert.deepEqual(groups.above60.map((row) => row.customer_code), ["OVERDUE"]);
 });

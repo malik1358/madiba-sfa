@@ -137,6 +137,19 @@ export function isOutstandingInvoiceDayHeader(value) {
   return header.includes("invoice day");
 }
 
+export function findOutstandingInvoiceDayColumn(headerRow, overdueDaysIndex, salesmanIndex) {
+  const explicitIndex = (headerRow || []).findIndex(isOutstandingInvoiceDayHeader);
+  if (explicitIndex >= 0 && explicitIndex !== overdueDaysIndex) return explicitIndex;
+
+  if (overdueDaysIndex >= 0) {
+    const nextIndex = overdueDaysIndex + 1;
+    const beforeSalesman = salesmanIndex < 0 || nextIndex < salesmanIndex;
+    if (beforeSalesman && String(headerRow?.[nextIndex] || "").trim()) return nextIndex;
+  }
+
+  return -1;
+}
+
 export function combineOutstandingHeaderRows(rows, rowIndex) {
   const current = Array.isArray(rows?.[rowIndex]) ? rows[rowIndex] : [];
   const previous = rowIndex > 0 && Array.isArray(rows?.[rowIndex - 1]) ? rows[rowIndex - 1] : [];

@@ -6,6 +6,7 @@ import {
   customerCodeCandidates,
   findOutstandingHeaderRow,
   findOutstandingCustomerCodesForSalesmen,
+  findOutstandingInvoiceDayColumn,
   isOutstandingInvoiceDayHeader,
   prioritizeOutstandingSheets,
   resolveOutstandingCustomerOwnership,
@@ -85,6 +86,12 @@ test("Invoice Day is distinguished from Overdue Days", () => {
   assert.equal(isOutstandingInvoiceDayHeader("Overdue Days"), false);
   assert.equal(isOutstandingInvoiceDayHeader("Invoice Day"), true);
   assert.equal(isOutstandingInvoiceDayHeader("Invoice Days"), true);
+});
+
+test("Invoice Day falls back to the distinct column after Overdue Days", () => {
+  const headers = ["Date", "Ref. No.", "Party's Name", "Pending Amount", "Due Date", "Overdue Days", "Invoice Da", "Salesman"];
+
+  assert.equal(findOutstandingInvoiceDayColumn(headers, 5, 7), 6);
 });
 
 test("findOutstandingHeaderRow accepts short Party, Balance, and Days headers", () => {

@@ -55,3 +55,18 @@ export function splitVisitCustomersByOutstanding(rows) {
     return groups;
   }, { under60: [], above60: [], withoutInvoice: [] });
 }
+
+export function buildProspectScheduleRows(rows) {
+  return (rows || [])
+    .filter((row) => row?.follow_up_date)
+    .map((row) => ({
+      customer_code: `PROSPECT-${row.id}`,
+      customer_name: row.company_name || `Prospect ${row.id}`,
+      city: row.city || "",
+      area: row.area || "",
+      next_visit_at: `${row.follow_up_date}T00:00:00`,
+      schedule_date: row.follow_up_date,
+      salesman_code: row.salesman_code || "",
+      is_prospect: true,
+    }));
+}

@@ -10,7 +10,7 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
-import { filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
+import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 
 const PAGE_TEXT = {
   title: { en: "My Day", ar: "يومي" },
@@ -28,6 +28,7 @@ const PAGE_TEXT = {
   routeSummary: { en: "Route Summary", ar: "ملخص المسار" },
   visitSchedule: { en: "Visit Schedule", ar: "جدول الزيارات" },
   plannedVisitsCount: { en: "scheduled visits", ar: "زيارات مجدولة" },
+  createOrder: { en: "Create Order", ar: "إنشاء طلب" },
   noPlannedVisits: { en: "No planned visits for now.", ar: "لا توجد زيارات مخططة حالياً." },
   calendarDate: { en: "Date", ar: "التاريخ" },
   calendarTime: { en: "Time", ar: "الوقت" },
@@ -179,6 +180,7 @@ export default function MyDayPage() {
   });
   const [routeRows, setRouteRows] = useState([]);
   const [visitStatusRows, setVisitStatusRows] = useState([]);
+  const [prospectScheduleRows, setProspectScheduleRows] = useState([]);
   const [todayLogs, setTodayLogs] = useState([]);
   const [note, setNote] = useState("");
   const [attendanceBusy, setAttendanceBusy] = useState("");
@@ -349,6 +351,23 @@ export default function MyDayPage() {
           if (!newProspectsError) {
             newProspectsCount = (newProspectsData || []).length;
           }
+
+          let scheduledProspectsQuery = supabase
+            .from("prospects")
+            .select("id,company_name,city,area,follow_up_date,salesman_code")
+            .eq("status", "FOLLOW_UP")
+            .not("follow_up_date", "is", null);
+
+          if (!scope.hasAllAccess) {
+            scheduledProspectsQuery = scheduledProspectsQuery.in("salesman_code", scope.visibleSalesmanCodes);
+          }
+
+          const { data: scheduledProspectsData, error: scheduledProspectsError } = await scheduledProspectsQuery;
+          if (!scheduledProspectsError) {
+            setProspectScheduleRows(buildProspectScheduleRows(scheduledProspectsData));
+          }
+        } else {
+          setProspectScheduleRows([]);
         }
 
         if (logsCheck.available) {
@@ -908,14 +927,14 @@ export default function MyDayPage() {
 
   const plannedVisitRows = useMemo(
     () =>
-      visitStatusRows
+      [...visitStatusRows, ...prospectScheduleRows]
         .filter((row) => row.next_visit_at)
         .sort((a, b) => {
           const bySchedule = getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at);
           if (bySchedule !== 0) return bySchedule;
           return String(a.customer_name || a.customer_code || "").localeCompare(String(b.customer_name || b.customer_code || ""));
         }),
-    [visitStatusRows]
+    [visitStatusRows, prospectScheduleRows]
   );
 
   const visitCalendar = useMemo(() => {
@@ -929,7 +948,7 @@ export default function MyDayPage() {
         return;
       }
 
-      const dateKey = new Date(time).toISOString().slice(0, 10);
+      const dateKey = row.schedule_date || new Date(time).toISOString().slice(0, 10);
       const current = dayMap.get(dateKey) || [];
       current.push(row);
       dayMap.set(dateKey, current);
@@ -1083,20 +1102,31 @@ export default function MyDayPage() {
                   <tbody>
                     {day.rows.map((row) => (
                       <tr key={`planned-${day.dateKey}-${row.customer_code}`}>
-                        <td>{row.next_visit_at ? new Date(row.next_visit_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "-"}</td>
+                        <td>{row.is_prospect ? "-" : row.next_visit_at ? new Date(row.next_visit_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "-"}</td>
                         <td>{row.customer_name || row.customer_code}</td>
                         <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                         <td>
                           <div className="moduleInlineStack">
-                            <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
-                              {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
-                            </button>
-                            <Link
-                              href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
-                              className="moduleInlineButton"
-                            >
-                              {t("openAudit")}
-                            </Link>
+                            {row.is_prospect ? (
+                              <Link
+                                href={`/management/new-order?customer_code=${encodeURIComponent(row.customer_code)}&customer_name=${encodeURIComponent(row.customer_name)}&salesman_code=${encodeURIComponent(row.salesman_code)}&source=prospect`}
+                                className="moduleInlineButton"
+                              >
+                                {t("createOrder")}
+                              </Link>
+                            ) : (
+                              <>
+                                <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                                  {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
+                                </button>
+                                <Link
+                                  href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
+                                  className="moduleInlineButton"
+                                >
+                                  {t("openAudit")}
+                                </Link>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>

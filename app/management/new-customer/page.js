@@ -16,6 +16,13 @@ const TEXT = {
   subtitle: { en: "Prospect registration", ar: "تسجيل عميل محتمل" },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading prospect registration...", ar: "جاري تحميل تسجيل العميل المحتمل..." },
+  orderReceived: { en: "Was an order received?", ar: "هل تم استلام طلب؟" },
+  orderReceivedHint: { en: "Choose Yes to create the order, or No to schedule the next follow-up visit.", ar: "اختر نعم لإنشاء الطلب، أو لا لتحديد موعد زيارة المتابعة القادمة." },
+  yesCreateOrder: { en: "Yes, Create Order", ar: "نعم، إنشاء طلب" },
+  noScheduleFollowUp: { en: "No, Schedule Follow-up", ar: "لا، تحديد متابعة" },
+  nextVisitDate: { en: "Next Visit Date", ar: "تاريخ الزيارة القادمة" },
+  saveFollowUp: { en: "Save Follow-up", ar: "حفظ المتابعة" },
+  savingFollowUp: { en: "Saving...", ar: "جاري الحفظ..." },
 };
 
 const INITIAL_FORM = {
@@ -158,6 +165,10 @@ export default function NewCustomerPage() {
   const [gpsPermissionWarning, setGpsPermissionWarning] = useState("");
   const [arabicNameEdited, setArabicNameEdited] = useState(false);
   const [translatingName, setTranslatingName] = useState(false);
+  const [savedProspect, setSavedProspect] = useState(null);
+  const [showFollowUpDate, setShowFollowUpDate] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
 
   useEffect(() => {
     const englishName = String(form.customer_name_en || "").trim();
@@ -459,11 +470,56 @@ export default function NewCustomerPage() {
         salesmanCode: form.salesman_code,
       });
 
-      router.push(`/management/new-order?${query}`);
+      setSavedProspect({ id: data.id, query });
+      setShowFollowUpDate(false);
+      setFollowUpDate("");
+      setMessage("Prospect saved. Confirm whether an order was received.");
     } catch (err) {
       setError(err.message || "Unable to register prospect.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveFollowUp() {
+    if (!savedProspect?.id || !followUpDate) {
+      setError("Next Visit Date is required.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setSavingFollowUp(true);
+    setError("");
+
+    try {
+      const { error: updateError } = await supabase
+        .from("prospects")
+        .update({ status: "FOLLOW_UP", follow_up_date: followUpDate })
+        .eq("id", savedProspect.id);
+
+      if (updateError) throw updateError;
+
+      setRecent((current) => current.map((row) => (
+        row.id === savedProspect.id
+          ? { ...row, status: "FOLLOW_UP", follow_up_date: followUpDate }
+          : row
+      )));
+      setSavedProspect(null);
+      setShowFollowUpDate(false);
+      setFollowUpDate("");
+      setForm((current) => ({ ...INITIAL_FORM, salesman_code: current.salesman_code }));
+      setDocuments([]);
+      setArabicNameEdited(false);
+      setMessage(`Follow-up visit scheduled for ${followUpDate}.`);
+    } catch (err) {
+      setError(err.message || "Unable to schedule follow-up visit.");
+    } finally {
+      setSavingFollowUp(false);
     }
   }
 
@@ -504,6 +560,42 @@ export default function NewCustomerPage() {
         {message && <div className="moduleSuccess">{message}</div>}
         {schemaWarning && <div className="moduleWarning">{schemaWarning}</div>}
         {gpsPermissionWarning && <div className="moduleWarning">{gpsPermissionWarning}</div>}
+
+        {savedProspect && (
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>{t("orderReceived")}</h2>
+            </div>
+            <p className="moduleHint">{t("orderReceivedHint")}</p>
+            <div className="moduleOrderActions">
+              <button type="button" onClick={() => router.push(`/management/new-order?${savedProspect.query}`)}>
+                {t("yesCreateOrder")}
+              </button>
+              <button type="button" onClick={() => setShowFollowUpDate(true)}>
+                {t("noScheduleFollowUp")}
+              </button>
+            </div>
+            {showFollowUpDate && (
+              <div className="moduleFormGrid" style={{ marginTop: "12px" }}>
+                <label>
+                  {t("nextVisitDate")}
+                  <input
+                    className="moduleInput"
+                    type="date"
+                    min={new Date().toISOString().slice(0, 10)}
+                    value={followUpDate}
+                    onChange={(event) => setFollowUpDate(event.target.value)}
+                  />
+                </label>
+                <div style={{ alignSelf: "end" }}>
+                  <button type="button" className="modulePrimaryButton" onClick={saveFollowUp} disabled={savingFollowUp || !followUpDate}>
+                    {savingFollowUp ? t("savingFollowUp") : t("saveFollowUp")}
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
@@ -634,7 +726,7 @@ export default function NewCustomerPage() {
               <textarea className="moduleTextArea" rows={4} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </label>
             <div className="moduleFieldFull">
-              <button className="modulePrimaryButton" type="submit" disabled={saving || !prospectsEnabled}>
+              <button className="modulePrimaryButton" type="submit" disabled={saving || !prospectsEnabled || Boolean(savedProspect)}>
                 {saving ? "Saving..." : "Save Prospect"}
               </button>
             </div>

@@ -10,7 +10,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const HISTORY_MONTHS = 6;
 const HISTORY_LIMIT = 5000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 6;
+const CACHE_VERSION = 7;
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function normalizeCode(value) {
@@ -275,7 +275,7 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
     let hasHistoryAccess = false;
     for (const codeCandidate of codeCandidates) {
       const { data: historyRow, error: historyError } = await admin
-        .from("sales_raw")
+        .from("active_sales")
         .select("id")
         .eq("customer_code", codeCandidate)
         .in("salesman_code", scope.visibleSalesmanCodes || [])
@@ -294,7 +294,7 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
           `salesman_name.ilike.%${pattern}%`,
         ]);
         const { data: nameHistoryRow, error: nameHistoryError } = await admin
-          .from("sales_raw")
+          .from("active_sales")
           .select("id")
           .eq("customer_code", codeCandidate)
           .or(identityFilters.join(","))
@@ -359,19 +359,13 @@ async function fetchCustomerTransactions(admin, customerCode, scope) {
   const targetNoZeros = target.replace(/^0+/, "");
 
   async function runCustomerQuery(matchValue) {
-    let query = admin
-      .from("sales_raw")
+    return admin
+      .from("active_sales")
       .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
       .eq("customer_code", matchValue)
       .order("transaction_date", { ascending: false })
       .order("id", { ascending: false })
       .limit(HISTORY_LIMIT);
-
-    if (!scope?.hasAllAccess && Array.isArray(scope?.visibleSalesmanCodes) && scope.visibleSalesmanCodes.length > 0) {
-      query = query.in("salesman_code", scope.visibleSalesmanCodes);
-    }
-
-    return query;
   }
 
   let rows = [];
@@ -386,23 +380,19 @@ async function fetchCustomerTransactions(admin, customerCode, scope) {
   if (rows.length === 0 && target) {
     // Fallback for dirty imported codes (different case/spacing/leading zeros or code+suffix text).
     const looseLike = `%${targetNoZeros || target}%`;
-    let scopedFallbackQuery = admin
-      .from("sales_raw")
+    const fallbackQuery = admin
+      .from("active_sales")
       .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
       .ilike("customer_code", looseLike)
       .order("transaction_date", { ascending: false })
       .order("id", { ascending: false })
       .limit(HISTORY_LIMIT);
 
-    if (!scope?.hasAllAccess && Array.isArray(scope?.visibleSalesmanCodes) && scope.visibleSalesmanCodes.length > 0) {
-      scopedFallbackQuery = scopedFallbackQuery.in("salesman_code", scope.visibleSalesmanCodes);
-    }
+    const { data: fallbackData, error: fallbackError } = await fallbackQuery;
 
-    const { data: fallbackScopedData, error: fallbackScopedError } = await scopedFallbackQuery;
+    if (fallbackError) throw fallbackError;
 
-    if (fallbackScopedError) throw fallbackScopedError;
-
-    rows = (Array.isArray(fallbackScopedData) ? fallbackScopedData : []).filter((row) => {
+    rows = (Array.isArray(fallbackData) ? fallbackData : []).filter((row) => {
       const rowCode = normalizeCode(row.customer_code);
       if (!rowCode) return false;
       const rowCodeNoZeros = rowCode.replace(/^0+/, "");
@@ -460,7 +450,7 @@ async function fetchPeerTransactions(admin, scope, selectedMonthKeys, customerCo
   if (monthSet.size === 0) return [];
 
   let query = admin
-    .from("sales_raw")
+    .from("active_sales")
     .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
     .neq("customer_code", customerCode)
     .order("transaction_date", { ascending: false })

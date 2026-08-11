@@ -81,18 +81,18 @@ export default function MyPerformancePage() {
         const salesmanCode = profile.salesman_code;
 
         let salesTodayQuery = supabase
-          .from("sales_raw")
+          .from("active_sales")
           .select("sales_amount,customer_code,salesman_code")
           .eq("transaction_date", todayISO);
 
         let salesMonthQuery = supabase
-          .from("sales_raw")
+          .from("active_sales")
           .select("sales_amount,salesman_code")
           .gte("transaction_date", monthStart)
           .lte("transaction_date", todayISO);
 
         let monthRowsQuery = supabase
-          .from("sales_raw")
+          .from("active_sales")
           .select("customer_code,sales_amount,salesman_code")
           .eq("transaction_date", todayISO);
 

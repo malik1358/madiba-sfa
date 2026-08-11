@@ -114,7 +114,7 @@ async function loadItemMetadata(admin, codes) {
 
   for (const chunk of codeChunks) {
     const { data, error } = await admin
-      .from("sales_raw")
+      .from("active_sales")
       .select("item_code,item_name,category,transaction_date")
       .in("item_code", chunk)
       .order("transaction_date", { ascending: false })
@@ -155,7 +155,7 @@ async function loadRateFallback(admin, codes) {
 
   for (const chunk of codeChunks) {
     const { data, error } = await admin
-      .from("sales_raw")
+      .from("active_sales")
       .select("item_code,rate,transaction_date,id")
       .in("item_code", chunk)
       .order("transaction_date", { ascending: false })

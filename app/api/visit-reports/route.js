@@ -41,6 +41,10 @@ function historySettingKey(customerCode) {
   return `visit_report_history:${normalizeCode(customerCode)}:${Date.now()}`;
 }
 
+function inactiveMetaKey(customerCode) {
+  return `customer_inactive_meta:${normalizeCode(customerCode)}`;
+}
+
 async function resolveScope(admin, token) {
   const {
     data: { user },
@@ -161,6 +165,33 @@ export async function PATCH(request) {
 
     if (updateError) throw updateError;
     if (!updatedCustomer) throw new Error("Customer status was not updated.");
+
+    if (updatedCustomer.is_active === false) {
+      const inactiveMetaValue = {
+        customer_code: customerCode,
+        marked_at: new Date().toISOString(),
+        marked_by_user_id: scope.userId,
+      };
+
+      const { error: inactiveMetaError } = await admin
+        .from("system_settings")
+        .upsert(
+          {
+            setting_key: inactiveMetaKey(customerCode),
+            setting_value: JSON.stringify(inactiveMetaValue),
+          },
+          { onConflict: "setting_key" }
+        );
+
+      if (inactiveMetaError) throw inactiveMetaError;
+    } else {
+      const { error: clearMetaError } = await admin
+        .from("system_settings")
+        .delete()
+        .eq("setting_key", inactiveMetaKey(customerCode));
+
+      if (clearMetaError) throw clearMetaError;
+    }
 
     return NextResponse.json({ success: true, customer: updatedCustomer });
   } catch (error) {

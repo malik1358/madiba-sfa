@@ -39,6 +39,7 @@ const PAGE_TEXT = {
   outstandingUnder60: { en: "Outstanding Under 60 Days", ar: "المبالغ المستحقة لأقل من 60 يوماً" },
   outstandingAbove60: { en: "Outstanding Above 60 Days", ar: "المبالغ المستحقة لأكثر من 60 يوماً" },
   visitedWithoutInvoice: { en: "Visited Without Invoice", ar: "تمت الزيارة بدون فاتورة" },
+  noOutstanding: { en: "No Outstanding", ar: "لا يوجد رصيد مستحق" },
   inactiveCustomers: { en: "Inactive Customers", ar: "عملاء غير نشطين" },
   outstanding0To30: { en: "0-30 Days", ar: "0-30 يوماً" },
   outstanding30To60: { en: "30-60 Days", ar: "30-60 يوماً" },
@@ -58,7 +59,11 @@ const PAGE_TEXT = {
   openAudit: { en: "Open Audit", ar: "فتح التدقيق" },
   markInactive: { en: "Mark Inactive", ar: "تعطيل العميل" },
   markingInactive: { en: "Marking...", ar: "جاري التعطيل..." },
+  markActive: { en: "Mark Active", ar: "إعادة التفعيل" },
+  markingActive: { en: "Activating...", ar: "جاري التفعيل..." },
   inactiveSaved: { en: "Customer marked inactive and removed from visit status.", ar: "تم تعطيل العميل وإزالته من حالة الزيارات." },
+  activeSaved: { en: "Customer activated and removed from inactive list.", ar: "تم تفعيل العميل وإزالته من قائمة غير النشطين." },
+  inactiveSince: { en: "Inactive Since", ar: "غير نشط منذ" },
   noCustomers: { en: "No customers available for route status.", ar: "لا يوجد عملاء متاحون لحالة المسار." },
   visitWithoutOrder: { en: "Visit Without Order", ar: "زيارة بدون طلب" },
   closeReport: { en: "Close", ar: "إغلاق" },
@@ -162,7 +167,10 @@ async function fetchVisibleCustomers(token) {
     throw new Error(payload.error || "Unable to load visible customers.");
   }
 
-  return payload.customers || [];
+  return {
+    customers: payload.customers || [],
+    inactiveCustomers: payload.inactiveCustomers || [],
+  };
 }
 
 export default function MyDayPage() {
@@ -185,6 +193,7 @@ export default function MyDayPage() {
   });
   const [routeRows, setRouteRows] = useState([]);
   const [visitStatusRows, setVisitStatusRows] = useState([]);
+  const [inactiveCustomers, setInactiveCustomers] = useState([]);
   const [prospectScheduleRows, setProspectScheduleRows] = useState([]);
   const [todayLogs, setTodayLogs] = useState([]);
   const [note, setNote] = useState("");
@@ -324,7 +333,7 @@ export default function MyDayPage() {
           pendingOrdersRes,
           submittedTodayRes,
           todayOrdersRes,
-          customerRows,
+          visibilityPayload,
           routeRes,
         ] = await Promise.all([
           todaySalesQuery,
@@ -341,6 +350,9 @@ export default function MyDayPage() {
         if (todayOrdersRes.error) throw todayOrdersRes.error;
         if (routeRes.error) throw routeRes.error;
 
+        const customerRows = visibilityPayload.customers || [];
+        const inactiveCustomerRows = visibilityPayload.inactiveCustomers || [];
+
         const normalizedScopeCodes = new Set(
           (scope.visibleSalesmanCodes || [])
             .map((code) => String(code || "").trim().toUpperCase())
@@ -353,7 +365,7 @@ export default function MyDayPage() {
             );
 
         const visibleSalesmanCodes = [...new Set(
-          scopedCustomerRows
+          [...scopedCustomerRows, ...inactiveCustomerRows]
             .map((row) => String(row.current_salesman_code || "").trim().toUpperCase())
             .filter(Boolean)
         )];
@@ -587,6 +599,20 @@ export default function MyDayPage() {
                 ? "Overdue"
                 : "Planned",
             }))
+        );
+
+        setInactiveCustomers(
+          inactiveCustomerRows.map((row) => ({
+            customer_code: row.customer_code,
+            customer_name: row.customer_name,
+            city: row.city,
+            area: row.area,
+            salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
+            salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
+            last_invoice_date: row.latest_transaction_date || null,
+            days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
+            inactive_marked_at: row.inactive_marked_at || null,
+          }))
         );
       } catch (err) {
         setError(err.message || "Unable to load My Day planner.");
@@ -900,12 +926,120 @@ export default function MyDayPage() {
 
       setVisitStatusRows((current) => current.filter((row) => row.customer_code !== code));
       setRouteRows((current) => current.filter((row) => row.customer_code !== code));
+      setInactiveCustomers((current) => [
+        {
+          customer_code: customer.customer_code,
+          customer_name: customer.customer_name,
+          city: customer.city,
+          area: customer.area,
+          salesman_code: customer.salesman_code,
+          salesman_name: customer.salesman_name,
+          last_invoice_date: customer.last_invoice_date || null,
+          days_since_last_invoice: customer.days_since_last_invoice,
+          inactive_marked_at: new Date().toISOString(),
+        },
+        ...current.filter((row) => row.customer_code !== code),
+      ]);
       if (activeVisitCustomerCode === code) {
         setActiveVisitCustomerCode("");
       }
       setMessage(t("inactiveSaved"));
     } catch (err) {
       setError(err.message || "Unable to mark customer inactive.");
+    } finally {
+      setInactiveCustomerCode("");
+    }
+  }
+
+  async function markCustomerActive(customer) {
+    const code = String(customer?.customer_code || "").trim();
+    if (!code) return;
+    const normalizedCode = code.toUpperCase();
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setInactiveCustomerCode(code);
+    setError("");
+    setMessage("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Please login again.");
+      }
+
+      const response = await fetch("/api/visit-reports", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ customerCode: code, isActive: true }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to mark customer active.");
+      }
+
+      const visibilityPayload = await fetchVisibleCustomers(session.access_token);
+      const activatedRow = (visibilityPayload.customers || []).find(
+        (entry) => String(entry.customer_code || "").trim().toUpperCase() === normalizedCode
+      );
+
+      if (activatedRow) {
+        const nextVisitStatusRow = {
+          customer_code: activatedRow.customer_code,
+          customer_name: activatedRow.customer_name,
+          city: activatedRow.city,
+          area: activatedRow.area,
+          salesman_code: String(activatedRow.current_salesman_code || "").trim().toUpperCase(),
+          salesman_name: String(customer.salesman_name || activatedRow.current_salesman_code || "").trim().toUpperCase(),
+          last_invoice_date: activatedRow.latest_transaction_date || null,
+          last_visit_date: null,
+          days_since_last_invoice: daysBetweenNullable(activatedRow.latest_transaction_date),
+          days_since_last_visit: null,
+          next_visit_at: null,
+          recent_sales_value: Number(activatedRow.recent_sales_value || 0),
+          outstanding_0_30: Number(activatedRow.outstanding_0_30 || 0),
+          outstanding_30_60: Number(activatedRow.outstanding_30_60 || 0),
+          outstanding_above_60: Number(activatedRow.outstanding_above_60 || 0),
+          status: daysBetween(activatedRow.latest_transaction_date) > 21 ? "Overdue" : "Planned",
+        };
+
+        setVisitStatusRows((current) => {
+          const filtered = current.filter(
+            (row) => String(row.customer_code || "").trim().toUpperCase() !== normalizedCode
+          );
+          return [...filtered, nextVisitStatusRow];
+        });
+
+        setRouteRows((current) => {
+          const nextRouteRow = {
+            customer_code: activatedRow.customer_code,
+            customer_name: activatedRow.customer_name,
+            city: activatedRow.city,
+            area: activatedRow.area,
+            latest_transaction_date: activatedRow.latest_transaction_date || null,
+            is_active: true,
+          };
+          const filtered = current.filter(
+            (row) => String(row.customer_code || "").trim().toUpperCase() !== normalizedCode
+          );
+          return [...filtered, nextRouteRow];
+        });
+      }
+
+      setInactiveCustomers((current) => current.filter((row) => row.customer_code !== code));
+      setMessage(t("activeSaved"));
+    } catch (err) {
+      setError(err.message || "Unable to mark customer active.");
     } finally {
       setInactiveCustomerCode("");
     }
@@ -987,6 +1121,21 @@ export default function MyDayPage() {
     () => splitVisitCustomersByOutstanding(rankedVisitStatusRows),
     [rankedVisitStatusRows]
   );
+
+  const filteredInactiveCustomers = useMemo(() => {
+    const query = String(visitStatusSearch || "").trim().toLowerCase();
+
+    return (inactiveCustomers || []).filter((row) => {
+      if (selectedVisitStatusSalesmen.length > 0) {
+        const salesmanName = String(row.salesman_name || "").trim() || "__UNASSIGNED__";
+        if (!selectedVisitStatusSalesmen.includes(salesmanName)) return false;
+      }
+
+      if (!query) return true;
+      return [row?.customer_code, row?.customer_name]
+        .some((value) => String(value || "").toLowerCase().includes(query));
+    });
+  }, [inactiveCustomers, visitStatusSearch, selectedVisitStatusSalesmen]);
 
   const plannedVisitRows = useMemo(
     () =>
@@ -1290,7 +1439,7 @@ export default function MyDayPage() {
             { key: "without-invoice", title: t("visitedWithoutInvoice"), rows: groupedVisitStatusRows.withoutInvoice },
             { key: "under-60", title: t("outstandingUnder60"), rows: groupedVisitStatusRows.under60 },
             { key: "above-60", title: t("outstandingAbove60"), rows: groupedVisitStatusRows.above60 },
-            { key: "inactive-customers", title: t("inactiveCustomers"), rows: groupedVisitStatusRows.noOutstanding },
+            { key: "no-outstanding", title: t("noOutstanding"), rows: groupedVisitStatusRows.noOutstanding },
           ].map((group) => (
           <div key={group.key} style={{ marginTop: "14px" }}>
             <div className="moduleSectionHeader">
@@ -1428,6 +1577,59 @@ export default function MyDayPage() {
             </div>
           </div>
           ))}
+
+          <div style={{ marginTop: "14px" }}>
+            <div className="moduleSectionHeader">
+              <h2>{t("inactiveCustomers")}</h2>
+              <span>{filteredInactiveCustomers.length} {t("customersCount")}</span>
+            </div>
+            <div className="moduleTableWrap">
+            <table className="moduleTable">
+              <thead>
+                <tr>
+                  <th>{t("customer")}</th>
+                  <th>{t("cityArea")}</th>
+                  <th>{t("daysSinceLastInvoice")}</th>
+                  <th>{t("inactiveSince")}</th>
+                  <th>{t("actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredInactiveCustomers.map((row) => (
+                  <tr key={`inactive-${row.customer_code}`}>
+                    <td>{row.customer_name || row.customer_code}</td>
+                    <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
+                    <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
+                    <td>{row.inactive_marked_at ? new Date(row.inactive_marked_at).toLocaleString("en-GB") : "-"}</td>
+                    <td>
+                      <div className="moduleInlineStack">
+                        <Link
+                          href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
+                          className="moduleInlineButton"
+                        >
+                          {t("openAudit")}
+                        </Link>
+                        <button
+                          type="button"
+                          className="moduleInlineButton"
+                          onClick={() => markCustomerActive(row)}
+                          disabled={inactiveCustomerCode === row.customer_code}
+                        >
+                          {inactiveCustomerCode === row.customer_code ? t("markingActive") : t("markActive")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {filteredInactiveCustomers.length === 0 && (
+                  <tr>
+                    <td colSpan={5}>{t("noCustomers")}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            </div>
+          </div>
         </section>
       </div>
     </main>

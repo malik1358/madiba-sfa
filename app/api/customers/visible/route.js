@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const INACTIVE_META_PREFIX = "customer_inactive_meta:";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -101,6 +102,25 @@ function fuzzyMatchedProfileCodes(allProfiles, authUser) {
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "invoice_maker" || normalized === "invoice-maker";
+}
+
+function inactiveMetaKey(customerCode) {
+  return `${INACTIVE_META_PREFIX}${normalizeCode(customerCode)}`;
+}
+
+function parseIsoTimestamp(value) {
+  if (!value) return 0;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseInactiveMarkedAt(rawSettingValue) {
+  try {
+    const parsed = JSON.parse(String(rawSettingValue || "null"));
+    return String(parsed?.marked_at || "").trim();
+  } catch {
+    return "";
+  }
 }
 
 async function resolveScope(admin, token) {
@@ -312,6 +332,120 @@ async function fetchVisibleCustomers(admin, scope) {
   return rows;
 }
 
+async function readInactiveMarkedAtMap(admin, customerCodes) {
+  const normalizedCodes = [...new Set((customerCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
+  if (normalizedCodes.length === 0) return new Map();
+
+  const keys = normalizedCodes.map((code) => inactiveMetaKey(code));
+  const map = new Map();
+
+  for (let start = 0; start < keys.length; start += 200) {
+    const keyChunk = keys.slice(start, start + 200);
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_key,setting_value")
+      .in("setting_key", keyChunk);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const code = normalizeCode(String(row.setting_key || "").replace(INACTIVE_META_PREFIX, ""));
+      if (!code) return;
+      map.set(code, parseInactiveMarkedAt(row.setting_value));
+    });
+  }
+
+  return map;
+}
+
+async function autoReactivateCustomers(admin, scope) {
+  const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+
+  let inactiveQuery = admin
+    .from("customers")
+    .select("customer_code,current_salesman_code,latest_transaction_date,updated_at")
+    .eq("is_active", false)
+    .not("latest_transaction_date", "is", null)
+    .limit(5000);
+
+  if (!scope.hasAllAccess) {
+    const scopedCodes = Array.from(normalizedScopeCodes);
+    if (scopedCodes.length === 0) return 0;
+    inactiveQuery = inactiveQuery.in("current_salesman_code", scopedCodes);
+  }
+
+  const { data: inactiveRows, error: inactiveError } = await inactiveQuery;
+  if (inactiveError) throw inactiveError;
+
+  const rows = inactiveRows || [];
+  if (rows.length === 0) return 0;
+
+  const markedAtMap = await readInactiveMarkedAtMap(admin, rows.map((row) => row.customer_code));
+  const codesToReactivate = rows
+    .filter((row) => {
+      const customerCode = normalizeCode(row.customer_code);
+      if (!customerCode) return false;
+      const invoiceAt = parseIsoTimestamp(row.latest_transaction_date);
+      if (!invoiceAt) return false;
+      const markedAt = parseIsoTimestamp(markedAtMap.get(customerCode) || row.updated_at);
+      return markedAt > 0 && invoiceAt > markedAt;
+    })
+    .map((row) => normalizeCode(row.customer_code))
+    .filter(Boolean);
+
+  if (codesToReactivate.length === 0) return 0;
+
+  const { error: reactivateError } = await admin
+    .from("customers")
+    .update({ is_active: true })
+    .in("customer_code", codesToReactivate);
+
+  if (reactivateError) throw reactivateError;
+
+  const clearKeys = codesToReactivate.map((code) => inactiveMetaKey(code));
+  for (let start = 0; start < clearKeys.length; start += 200) {
+    const keyChunk = clearKeys.slice(start, start + 200);
+    const { error: clearError } = await admin
+      .from("system_settings")
+      .delete()
+      .in("setting_key", keyChunk);
+
+    if (clearError) throw clearError;
+  }
+
+  return codesToReactivate.length;
+}
+
+async function fetchInactiveCustomers(admin, scope) {
+  const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+
+  let query = admin
+    .from("customers")
+    .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,city,area,updated_at")
+    .eq("is_active", false)
+    .order("customer_name")
+    .limit(5000);
+
+  if (!scope.hasAllAccess) {
+    const scopedCodes = Array.from(normalizedScopeCodes);
+    if (scopedCodes.length === 0) return [];
+    query = query.in("current_salesman_code", scopedCodes);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const rows = data || [];
+  if (rows.length === 0) return [];
+
+  const markedAtMap = await readInactiveMarkedAtMap(admin, rows.map((row) => row.customer_code));
+
+  return rows.map((row) => ({
+    ...row,
+    inactive_marked_at: markedAtMap.get(normalizeCode(row.customer_code)) || row.updated_at || null,
+  }));
+}
+
 async function attachRecentSalesValues(admin, customers) {
   const canonicalCodeByCandidate = new Map();
   const salesValueByCustomer = new Map();
@@ -415,7 +549,9 @@ export async function GET(request) {
 
     const token = authHeader.replace("Bearer ", "");
     const scope = await resolveScope(admin, token);
+    await autoReactivateCustomers(admin, scope);
     const customers = await fetchVisibleCustomers(admin, scope);
+    const inactiveCustomers = await fetchInactiveCustomers(admin, scope);
     const searchParams = new URL(request.url).searchParams;
     const includeRecentSales = searchParams.get("includeRecentSales") === "1";
     const includeOutstanding = searchParams.get("includeOutstanding") === "1";
@@ -429,6 +565,7 @@ export async function GET(request) {
     return NextResponse.json({
       success: true,
       customers: responseCustomers,
+      inactiveCustomers,
       count: responseCustomers.length,
     }, {
       headers: { "Cache-Control": "private, no-store, max-age=0" },

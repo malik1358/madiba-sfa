@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "./lib/supabase";
 import { useAppLanguage } from "./lib/appLanguage";
 import MorningAttendanceGate from "./components/MorningAttendanceGate";
+import MostVisitedPages from "./components/MostVisitedPages";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
 
 export default function Home() {
@@ -194,12 +195,15 @@ export default function Home() {
             </div>
           </div>
 
-          <button
-            className="logoutButton"
-            onClick={handleLogout}
-          >
-            {ar ? "تسجيل الخروج" : "Logout"}
-          </button>
+          <div className="dashboardHeaderActions">
+            <MostVisitedPages />
+            <button
+              className="logoutButton"
+              onClick={handleLogout}
+            >
+              {ar ? "تسجيل الخروج" : "Logout"}
+            </button>
+          </div>
 
         </header>
 

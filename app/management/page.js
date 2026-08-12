@@ -7,6 +7,7 @@ import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import SupabaseUnavailable from "../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../components/AppLanguageSwitch";
+import MostVisitedPages from "../components/MostVisitedPages";
 
 const TEXT = {
   title: { en: "Management", ar: "الإدارة" },
@@ -192,7 +193,7 @@ export default function ManagementPage() {
               <p className="moduleEyebrow">MADIBA SFA</p>
               <h1>{t("title")}</h1>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
           <div className="moduleError">Only manager/admin/invoice-maker users can access this panel.</div>
         </div>
@@ -210,7 +211,7 @@ export default function ManagementPage() {
             <h1>{t("title")}</h1>
             <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}

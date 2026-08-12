@@ -5,6 +5,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { addPdfBuildFooter } from "../../lib/buildInfo";
@@ -681,7 +682,7 @@ export default function PendingOrdersPage() {
                 {userRole === "admin" || userRole === "manager" || isInvoiceMaker ? t("subtitleTeam") : t("subtitleMine")}
               </p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
 
           {error && <div className="moduleError">{error}</div>}

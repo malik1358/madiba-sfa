@@ -7,6 +7,7 @@ import { fetchSalesScope } from "../../lib/salesScope";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
@@ -1216,6 +1217,7 @@ export default function MyDayPage() {
           </div>
           <div className="moduleHeaderMeta">
             <AppLanguageSwitch language={language} setLanguage={setLanguage} />
+            <MostVisitedPages />
             <Link href="/" className="moduleBackLink">{t("dashboard")}</Link>
           </div>
         </div>

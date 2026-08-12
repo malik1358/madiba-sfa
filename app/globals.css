@@ -137,6 +137,14 @@ select {
   max-width: 1120px;
 }
 
+.dashboardHeaderActions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -3210,6 +3218,61 @@ table.auditMatrix td.auditTrendSame {
   font-weight: 700;
 }
 
+.moduleHeaderMeta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mostVisitedNav {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.mostVisitedLabel {
+  color: #6c838a;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mostVisitedLinks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.mostVisitedLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #cbd8dc;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #073f4c;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mostVisitedLink:hover {
+  background: #edf4f5;
+}
+
+.mostVisitedLinkActive {
+  background: #0d6071;
+  border-color: #0f6172;
+  color: #ffffff;
+}
+
 .moduleSection {
   margin-bottom: 16px;
   padding: 14px;
@@ -3928,6 +3991,15 @@ table.auditMatrix td.auditTrendSame {
   .dashboardHeader {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .dashboardHeaderActions,
+  .moduleHeaderMeta,
+  .mostVisitedNav,
+  .mostVisitedLinks {
+    width: 100%;
+    align-items: flex-start;
+    justify-content: flex-start;
   }
 }
 

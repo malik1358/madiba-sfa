@@ -37,6 +37,10 @@ const TEXT = {
 };
 
 function formatMoney(value) {
+  return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function formatReceivableMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
@@ -63,7 +67,7 @@ function formatHistoryChange(change) {
 
   const baseLabel = `${change.item_code || "-"} ${change.item_name || ""}`.trim();
   if (change.type === "ADDED") {
-    return `${baseLabel}: added ${change.after_quantity || 0} qty at ${Number(change.after_rate || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+    return `${baseLabel}: added ${change.after_quantity || 0} qty at ${formatMoney(change.after_rate || 0)}`;
   }
   if (change.type === "REMOVED") {
     return `${baseLabel}: removed ${change.before_quantity || 0} qty`;
@@ -74,7 +78,7 @@ function formatHistoryChange(change) {
     parts.push(`qty ${change.before_quantity || 0} -> ${change.after_quantity || 0}`);
   }
   if (Number(change.before_rate || 0) !== Number(change.after_rate || 0)) {
-    parts.push(`rate ${Number(change.before_rate || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} -> ${Number(change.after_rate || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`);
+    parts.push(`rate ${formatMoney(change.before_rate || 0)} -> ${formatMoney(change.after_rate || 0)}`);
   }
   return `${baseLabel}: ${parts.join(", ")}`;
 }
@@ -969,7 +973,7 @@ export default function NewOrderPage() {
             item_code: String(line.item_code || "-"),
             item_name: String(line.item_name || "-"),
             quantity: String(line.quantity),
-            rate: Number(line.rate || 0).toFixed(0),
+            rate: formatMoney(line.rate),
             lineTotal: formatMoney(line.lineTotal),
           };
 
@@ -1022,7 +1026,7 @@ export default function NewOrderPage() {
         function formatOutstandingValue(value, digits = 0, withCurrency = true) {
           const number = parseOutstandingNumber(value);
           if (number === 0) return "";
-          if (withCurrency) return formatMoney(number);
+          if (withCurrency) return formatReceivableMoney(number);
           return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
         }
 
@@ -1827,7 +1831,7 @@ export default function NewOrderPage() {
                                       </div>
                                     )}
                                   </td>
-                                  <td>{price ? Number(price).toLocaleString("en-US", { maximumFractionDigits: 0 }) : "NOT FOUND"}</td>
+                                  <td>{price ? formatMoney(price) : "NOT FOUND"}</td>
                                   <td>
                                     <div className="moduleQtyControl">
                                       <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
@@ -1841,7 +1845,7 @@ export default function NewOrderPage() {
                                       <button type="button" onClick={() => increaseQty(item.item_code)}>+</button>
                                     </div>
                                   </td>
-                                  <td>{Number(price * qty).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                                  <td>{formatMoney(price * qty)}</td>
                                 </tr>
                               );
                             })}
@@ -1862,7 +1866,7 @@ export default function NewOrderPage() {
               <div className="moduleOrderBar">
                 <div>
                   <span>Current Order</span>
-                  <strong>{calculateGrandTotal(orderItems, priceList).toLocaleString("en-US", { maximumFractionDigits: 0 })}</strong>
+                  <strong>{formatMoney(calculateGrandTotal(orderItems, priceList))}</strong>
                 </div>
                 <div className="moduleOrderActions">
                   <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>

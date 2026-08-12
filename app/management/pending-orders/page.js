@@ -26,6 +26,10 @@ const INVOICE_STATUS_MADE = "Invoice made";
 const OUTSTANDING_API = "/api/outstanding";
 
 function formatMoney(value) {
+  return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function formatReceivableMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
@@ -359,7 +363,7 @@ export default function PendingOrdersPage() {
         const codeLines = doc.splitTextToSize(String(line.item_code || "-"), 72);
         const nameLines = doc.splitTextToSize(String(line.item_name || "-"), 214);
         const qtyLines = doc.splitTextToSize(String(Number(line.quantity || 0)), 42);
-        const rateLines = doc.splitTextToSize(Number(line.rate || 0).toFixed(0), 72);
+        const rateLines = doc.splitTextToSize(formatMoney(line.rate), 72);
         const totalLines = doc.splitTextToSize(formatMoney(line.line_value), 77);
         const lineCount = Math.max(
           codeLines.length,
@@ -440,7 +444,7 @@ export default function PendingOrdersPage() {
           historyY += Math.max(12, wrappedHeader.length * 10);
 
           (Array.isArray(entry.changes) ? entry.changes : []).forEach((change) => {
-            const changeText = `${change.item_code || "-"}: ${change.type || "UPDATED"} ${Number(change.before_quantity || 0)} -> ${Number(change.after_quantity || 0)} | ${Number(change.before_rate || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} -> ${Number(change.after_rate || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+            const changeText = `${change.item_code || "-"}: ${change.type || "UPDATED"} ${Number(change.before_quantity || 0)} -> ${Number(change.after_quantity || 0)} | ${formatMoney(change.before_rate || 0)} -> ${formatMoney(change.after_rate || 0)}`;
             const wrappedChange = doc.splitTextToSize(changeText, 505);
             wrappedChange.forEach((line, index) => doc.text(line, 48, historyY + index * 10));
             historyY += Math.max(12, wrappedChange.length * 10);
@@ -473,10 +477,10 @@ export default function PendingOrdersPage() {
         const bucketRows = [
           ...outstandingBuckets.map((label) => ({
             label: `${label} days`,
-            value: formatMoney(parseOutstandingNumber(outstandingCustomer?.buckets?.[label])),
+            value: formatReceivableMoney(parseOutstandingNumber(outstandingCustomer?.buckets?.[label])),
           })),
           { label: "Open invoices", value: String(parseOutstandingNumber(outstandingCustomer?.open_invoices)) },
-          { label: "Total outstanding", value: formatMoney(parseOutstandingNumber(outstandingCustomer?.total_outstanding)) },
+          { label: "Total outstanding", value: formatReceivableMoney(parseOutstandingNumber(outstandingCustomer?.total_outstanding)) },
         ];
 
         bucketRows.forEach((row, index) => {
@@ -771,8 +775,8 @@ export default function PendingOrdersPage() {
                                           <td>{line.item_name || "-"}</td>
                                           <td>{line.category || "-"}</td>
                                           <td>{Number(line.quantity || 0)}</td>
-                                          <td>{Number(line.rate || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
-                                          <td>{Number(line.line_value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                                          <td>{formatMoney(line.rate)}</td>
+                                          <td>{formatMoney(line.line_value)}</td>
                                         </tr>
                                       ))}
                                       {!loadingLines && orderLines.length === 0 && (

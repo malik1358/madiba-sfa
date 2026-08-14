@@ -332,6 +332,37 @@ async function fetchVisibleCustomers(admin, scope) {
   return rows;
 }
 
+async function fetchBasicVisibleCustomers(admin, scope) {
+  const rows = [];
+  const pageSize = 1000;
+  let from = 0;
+  const scopedCodes = [...new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
+
+  while (true) {
+    let query = admin
+      .from("customers")
+      .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,customer_type,city,area,mobile")
+      .eq("is_active", true)
+      .order("customer_name")
+      .range(from, from + pageSize - 1);
+
+    if (!scope.hasAllAccess) {
+      if (scopedCodes.length === 0) return [];
+      query = query.in("current_salesman_code", scopedCodes);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const chunk = data || [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
 async function readInactiveMarkedAtMap(admin, customerCodes) {
   const normalizedCodes = [...new Set((customerCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
   if (normalizedCodes.length === 0) return new Map();
@@ -549,23 +580,66 @@ export async function GET(request) {
 
     const token = authHeader.replace("Bearer ", "");
     const scope = await resolveScope(admin, token);
-    await autoReactivateCustomers(admin, scope);
-    const customers = await fetchVisibleCustomers(admin, scope);
-    const inactiveCustomers = await fetchInactiveCustomers(admin, scope);
+    const warnings = [];
+
+    try {
+      await autoReactivateCustomers(admin, scope);
+    } catch (error) {
+      warnings.push("auto-reactivate-unavailable");
+    }
+
+    let customers = [];
+    try {
+      customers = await fetchVisibleCustomers(admin, scope);
+    } catch (error) {
+      warnings.push("basic-visible-fallback");
+      customers = await fetchBasicVisibleCustomers(admin, scope);
+    }
+
+    let inactiveCustomers = [];
+    try {
+      inactiveCustomers = await fetchInactiveCustomers(admin, scope);
+    } catch (error) {
+      warnings.push("inactive-customers-unavailable");
+      inactiveCustomers = [];
+    }
+
     const searchParams = new URL(request.url).searchParams;
     const includeRecentSales = searchParams.get("includeRecentSales") === "1";
     const includeOutstanding = searchParams.get("includeOutstanding") === "1";
-    let responseCustomers = includeRecentSales
-      ? await attachRecentSalesValues(admin, customers)
-      : customers;
+    let responseCustomers = customers;
+
+    if (includeRecentSales) {
+      try {
+        responseCustomers = await attachRecentSalesValues(admin, responseCustomers);
+      } catch (error) {
+        warnings.push("recent-sales-unavailable");
+        responseCustomers = responseCustomers.map((customer) => ({
+          ...customer,
+          recent_sales_value: Number(customer?.recent_sales_value || 0),
+        }));
+      }
+    }
+
     if (includeOutstanding) {
-      responseCustomers = await attachOutstandingValues(admin, responseCustomers);
+      try {
+        responseCustomers = await attachOutstandingValues(admin, responseCustomers);
+      } catch (error) {
+        warnings.push("outstanding-unavailable");
+        responseCustomers = responseCustomers.map((customer) => ({
+          ...customer,
+          outstanding_0_30: Number(customer?.outstanding_0_30 || 0),
+          outstanding_30_60: Number(customer?.outstanding_30_60 || 0),
+          outstanding_above_60: Number(customer?.outstanding_above_60 || 0),
+        }));
+      }
     }
 
     return NextResponse.json({
       success: true,
       customers: responseCustomers,
       inactiveCustomers,
+      warnings,
       count: responseCustomers.length,
     }, {
       headers: { "Cache-Control": "private, no-store, max-age=0" },

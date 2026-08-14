@@ -238,7 +238,7 @@ export default function MyDayPage() {
   }
 
   function isGpsLog(entryType) {
-    return ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY", "NOTE", "GPS_PING"].includes(entryType);
+    return ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY", "NOTE"].includes(entryType);
   }
 
   useEffect(() => {
@@ -435,7 +435,7 @@ export default function MyDayPage() {
           const { data: logsData, error: logsError } = await logsQuery;
 
           if (!logsError) {
-            const rows = logsData || [];
+            const rows = (logsData || []).filter((row) => isGpsLog(row.entry_type));
             setTodayLogs(rows);
 
           } else {
@@ -694,7 +694,7 @@ export default function MyDayPage() {
         .order("created_at", { ascending: false });
 
       if (logsError) throw logsError;
-      const rows = logs || [];
+      const rows = (logs || []).filter((row) => isGpsLog(row.entry_type));
       setTodayLogs(rows);
     } catch (err) {
       setError(err.message || "Unable to save activity log.");

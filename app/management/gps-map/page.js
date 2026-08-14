@@ -554,7 +554,8 @@ export default function GpsMapPage() {
       (a, b) => toTimestamp(a.captured_at || a.created_at) - toTimestamp(b.captured_at || b.created_at)
     );
 
-    const streetMap = new Map();
+    const sessions = [];
+    let currentSession = null;
 
     for (let index = 0; index < sortedPins.length; index += 1) {
       const pin = sortedPins[index];
@@ -563,36 +564,67 @@ export default function GpsMapPage() {
 
       const nextPin = sortedPins[index + 1] || null;
       const nextTs = nextPin ? toTimestamp(nextPin.captured_at || nextPin.created_at) : ts;
-      const intervalMs = Math.max(0, nextTs - ts);
-
       const pinnedStreet = String(pin.street_name || "").trim();
       const coordinateKey = toCoordinateKey(pin.latitude, pin.longitude);
       const geocodedStreet = String(streetByCoordinate[coordinateKey] || "").trim();
       const fallbackStreet = `Near ${Number(pin.latitude).toFixed(4)}, ${Number(pin.longitude).toFixed(4)}`;
       const streetName = pinnedStreet || geocodedStreet || fallbackStreet;
+      const customerLabel = String(pin.customer_name || pin.customer_code || "").trim();
 
-      const current = streetMap.get(streetName) || {
-        streetName,
-        firstTs: ts,
-        lastTs: ts,
-        durationMs: 0,
-        pinCount: 0,
-        latitude: pin.latitude,
-        longitude: pin.longitude,
-      };
+      if (!currentSession || currentSession.streetName !== streetName) {
+        if (currentSession) {
+          currentSession.toTs = ts;
+          currentSession.durationMs = Math.max(0, currentSession.toTs - currentSession.fromTs);
+          currentSession.customers = Array.from(currentSession.customerSet).sort((a, b) => a.localeCompare(b));
+          sessions.push(currentSession);
+        }
 
-      current.firstTs = Math.min(current.firstTs, ts);
-      current.lastTs = Math.max(current.lastTs, ts);
-      current.durationMs += intervalMs;
-      current.pinCount += 1;
-      streetMap.set(streetName, current);
+        currentSession = {
+          streetName,
+          fromTs: ts,
+          toTs: ts,
+          durationMs: 0,
+          pinCount: 0,
+          latitude: pin.latitude,
+          longitude: pin.longitude,
+          customerSet: new Set(),
+          customers: [],
+        };
+      }
+
+      currentSession.pinCount += 1;
+      currentSession.latitude = pin.latitude;
+      currentSession.longitude = pin.longitude;
+      if (customerLabel) {
+        currentSession.customerSet.add(customerLabel);
+      }
+
+      if (!nextPin) {
+        currentSession.toTs = ts;
+        currentSession.durationMs = Math.max(0, currentSession.toTs - currentSession.fromTs);
+        currentSession.customers = Array.from(currentSession.customerSet).sort((a, b) => a.localeCompare(b));
+        sessions.push(currentSession);
+        currentSession = null;
+      } else {
+        currentSession.toTs = nextTs;
+      }
     }
 
-    return Array.from(streetMap.values()).sort((a, b) => b.durationMs - a.durationMs);
+    return sessions.sort((a, b) => a.fromTs - b.fromTs);
   }, [routeWorkingPins, streetByCoordinate]);
 
   const streetsOverThirtyMins = useMemo(
     () => routeStreetSummary.filter((row) => row.durationMs >= 30 * 60 * 1000).length,
+    [routeStreetSummary]
+  );
+
+  const routeStreetTotalDurationMs = useMemo(
+    () => routeStreetSummary.reduce((total, row) => total + Number(row.durationMs || 0), 0),
+    [routeStreetSummary]
+  );
+
+  const routeStreetTotalPins = useMemo(
+    () => routeStreetSummary.reduce((total, row) => total + Number(row.pinCount || 0), 0),
     [routeStreetSummary]
   );
 
@@ -742,7 +774,7 @@ export default function GpsMapPage() {
             <div className="moduleMetricGrid">
               <section className="moduleMetricCard"><span>Route pins (working hours)</span><strong>{routeWorkingPins.length}</strong></section>
               <section className="moduleMetricCard"><span>Total route distance</span><strong>{routeTotalDistanceKm.toFixed(2)} km</strong></section>
-              <section className="moduleMetricCard"><span>Streets over 30 mins</span><strong>{streetsOverThirtyMins}</strong></section>
+              <section className="moduleMetricCard"><span>Street sessions over 30 mins</span><strong>{streetsOverThirtyMins}</strong></section>
               <section className="moduleMetricCard"><span>Working-window mode</span><strong>{routeWorkingWindows.length > 0 ? "Attendance based" : "All day pins"}</strong></section>
             </div>
 
@@ -774,6 +806,7 @@ export default function GpsMapPage() {
                 <thead>
                   <tr>
                     <th>Street</th>
+                    <th>Customer Visited</th>
                     <th>From</th>
                     <th>To</th>
                     <th>Time Spent</th>
@@ -784,10 +817,11 @@ export default function GpsMapPage() {
                 </thead>
                 <tbody>
                   {routeStreetSummary.map((street) => (
-                    <tr key={`${street.streetName}-${street.latitude}-${street.longitude}`}>
+                    <tr key={`${street.streetName}-${street.fromTs}-${street.toTs}-${street.pinCount}`}>
                       <td>{street.streetName}</td>
-                      <td>{new Date(street.firstTs).toLocaleString("en-GB")}</td>
-                      <td>{new Date(street.lastTs).toLocaleString("en-GB")}</td>
+                      <td>{street.customers.length > 0 ? street.customers.join(", ") : "-"}</td>
+                      <td>{new Date(street.fromTs).toLocaleString("en-GB")}</td>
+                      <td>{new Date(street.toTs).toLocaleString("en-GB")}</td>
                       <td>{formatDurationFromMs(street.durationMs)}</td>
                       <td>{street.pinCount}</td>
                       <td>{street.durationMs >= 30 * 60 * 1000 ? "Yes" : "No"}</td>
@@ -803,9 +837,21 @@ export default function GpsMapPage() {
                       </td>
                     </tr>
                   ))}
+                  {routeStreetSummary.length > 0 && (
+                    <tr>
+                      <td><strong>Total</strong></td>
+                      <td>-</td>
+                      <td>-</td>
+                      <td>-</td>
+                      <td><strong>{formatDurationFromMs(routeStreetTotalDurationMs)}</strong></td>
+                      <td><strong>{routeStreetTotalPins}</strong></td>
+                      <td><strong>{streetsOverThirtyMins}</strong></td>
+                      <td>-</td>
+                    </tr>
+                  )}
                   {routeStreetSummary.length === 0 && (
                     <tr>
-                      <td colSpan={7}>No street-level GPS summary available for selected day.</td>
+                      <td colSpan={8}>No street-level GPS summary available for selected day.</td>
                     </tr>
                   )}
                 </tbody>

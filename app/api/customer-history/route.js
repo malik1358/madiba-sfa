@@ -23,9 +23,14 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+function isProductPromoterRole(role) {
+  const normalized = normalizeRole(role);
+  return normalized === "product-promoter" || normalized === "product_promoter";
+}
+
 function extractEmailLocalPart(email) {
   const raw = String(email || "").trim().toLowerCase();
-  if (!raw) return "";
+  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
   return raw.includes("@") ? raw.split("@")[0] : raw;
 }
 
@@ -232,10 +237,28 @@ async function resolveScope(admin, token) {
   const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
   const authUsers = usersRes.data?.users || [];
   const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
+  const currentAuthUser = authMap.get(currentProfile.id) || user;
+  const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
+  const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
 
   let members = [];
   if (["admin", "manager"].includes(role)) {
     members = scopedProfiles;
+  } else if (isProductPromoterRole(role) && inheritedHeadCode) {
+    const subordinateIds = new Set();
+
+    authUsers.forEach((authUser) => {
+      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+      const headCode = normalizeCode(metadata.head_salesman_code);
+      if (headCode && headCode === inheritedHeadCode) {
+        subordinateIds.add(authUser.id);
+      }
+    });
+
+    members = scopedProfiles.filter((profile) => {
+      const profileCode = normalizeCode(profile.salesman_code);
+      return profileCode === inheritedHeadCode || subordinateIds.has(profile.id);
+    });
   } else {
     const subordinateIds = new Set();
 
@@ -256,7 +279,6 @@ async function resolveScope(admin, token) {
   }
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
-  const currentAuthUser = authMap.get(currentProfile.id) || user;
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),
     ...authCodeCandidates(currentAuthUser),

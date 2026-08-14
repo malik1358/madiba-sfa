@@ -41,6 +41,13 @@ function isInvoiceMakerRole(role) {
   return normalized === "invoice-maker" || normalized === "invoice_maker";
 }
 
+function autoCodeHintForRole(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (normalized === "invoice-maker" || normalized === "invoice_maker") return "IV###";
+  if (normalized === "product-promoter" || normalized === "product_promoter") return "PP###";
+  return "SM###";
+}
+
 export default function SalesmanHierarchyPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -304,10 +311,10 @@ export default function SalesmanHierarchyPage() {
               Salesman Code
               <input
                 className="moduleInput"
-                required
-                value={newSalesman.salesmanCode}
-                onChange={(event) => setNewSalesman((current) => ({ ...current, salesmanCode: normalizeCode(event.target.value) }))}
-                placeholder="S001"
+                value={autoCodeHintForRole(newSalesman.role)}
+                disabled
+                readOnly
+                placeholder="Auto generated"
               />
             </label>
 
@@ -331,6 +338,7 @@ export default function SalesmanHierarchyPage() {
                 onChange={(event) => setNewSalesman((current) => ({ ...current, role: event.target.value }))}
               >
                 <option value="salesman">Salesman</option>
+                <option value="product-promoter">Product Promoter</option>
                 <option value="invoice-maker">Invoice Maker</option>
               </select>
             </label>

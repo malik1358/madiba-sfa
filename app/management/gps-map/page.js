@@ -165,6 +165,11 @@ function isInvoiceMakerRole(role) {
   return normalized === "invoice-maker" || normalized === "invoice_maker";
 }
 
+function isProductPromoterRole(role) {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "product-promoter" || normalized === "product_promoter";
+}
+
 export default function GpsMapPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -209,8 +214,8 @@ export default function GpsMapPage() {
 
         const role = String(profile?.role || "").toLowerCase();
         setUserRole(role);
-        if (role !== "admin" && !isInvoiceMakerRole(role)) {
-          setError("Only administrators and invoice-makers can view the GPS map.");
+        if (role !== "admin" && !isInvoiceMakerRole(role) && !isProductPromoterRole(role)) {
+          setError("Only administrators, invoice-makers, and product promoters can view the GPS map.");
           return;
         }
 
@@ -225,7 +230,7 @@ export default function GpsMapPage() {
         const { data: profiles, error: profilesError } = await supabase
           .from("profiles")
           .select("id,salesman_code,salesman_name")
-          .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"]);
+          .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"]);
 
         if (profilesError) throw profilesError;
 

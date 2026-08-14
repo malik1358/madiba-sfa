@@ -15,6 +15,15 @@ function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+function normalizeRole(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isProductPromoterRole(role) {
+  const normalized = normalizeRole(role);
+  return normalized === "product-promoter" || normalized === "product_promoter";
+}
+
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "invoice-maker" || normalized === "invoice_maker";
@@ -65,14 +74,14 @@ async function resolveScope(admin, token) {
     throw new Error("Profile not found.");
   }
 
-  const role = String(currentProfile.role || "").toLowerCase();
+  const role = normalizeRole(currentProfile.role);
   const currentSalesmanCode = normalizeCode(currentProfile.salesman_code);
 
   const [profilesRes, usersRes] = await Promise.all([
     admin
       .from("profiles")
       .select("id,role,salesman_code,salesman_name")
-      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"]),
+      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"]),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
 
@@ -81,8 +90,18 @@ async function resolveScope(admin, token) {
 
   const authUsers = usersRes.data?.users || [];
   const subordinateIds = new Set();
+  const currentAuthUser = authUsers.find((authUser) => authUser.id === currentProfile.id) || user;
+  const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
+  const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
 
-  if (!["admin", "manager"].includes(role) && !isInvoiceMakerRole(role)) {
+  if (isProductPromoterRole(role) && inheritedHeadCode) {
+    authUsers.forEach((authUser) => {
+      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+      if (normalizeCode(metadata.head_salesman_code) === inheritedHeadCode) {
+        subordinateIds.add(authUser.id);
+      }
+    });
+  } else if (!["admin", "manager"].includes(role) && !isInvoiceMakerRole(role)) {
     authUsers.forEach((authUser) => {
       const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
       if (normalizeCode(metadata.head_salesman_code) === currentSalesmanCode) {
@@ -94,6 +113,9 @@ async function resolveScope(admin, token) {
   const allProfiles = profilesRes.data || [];
   const visibleProfiles = allProfiles.filter((profile) => {
     if (["admin", "manager"].includes(role) || isInvoiceMakerRole(role)) return true;
+    if (isProductPromoterRole(role) && inheritedHeadCode) {
+      return normalizeCode(profile.salesman_code) === inheritedHeadCode || subordinateIds.has(profile.id);
+    }
     return profile.id === currentProfile.id || subordinateIds.has(profile.id);
   });
 

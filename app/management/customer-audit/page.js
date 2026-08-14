@@ -4,7 +4,7 @@ const PRICE_CACHE_API = "/api/pricing/cache";
 
 const PAGE_VERSION = "Quick Order V5";
 const TEXT = {
-  title: { en: "Customer Audit", ar: "تدقيق العملاء" },
+  title: { en: "Customer Details", ar: "تفاصيل العميل" },
   subtitle: { en: "Management sales history validation", ar: "مراجعة سجل مبيعات العملاء" },
   home: { en: "← Home", ar: "← الرئيسية" },
   customers: { en: "← Customers", ar: "← العملاء" },
@@ -249,14 +249,14 @@ function CustomerAuditPageContent() {
   if (!supabaseClient) {
     return (
       <SupabaseUnavailable
-        title="Customer audit unavailable"
-        message="The customer audit screen needs Supabase credentials to load customer and sales data."
+        title="Customer details unavailable"
+        message="The customer details screen needs Supabase credentials to load customer and sales data."
       />
     );
   }
 
   if (loading) {
-    return <LoadingScreen title="Customer Audit" subtitle="Loading customer data..." />;
+    return <LoadingScreen title="Customer Details" subtitle="Loading customer data..." />;
   }
 
   if (!selectedCustomer) {
@@ -529,7 +529,7 @@ function CustomerAuditPageContent() {
 
 export default function CustomerAuditPage() {
   return (
-    <Suspense fallback={<LoadingScreen title="Customer Audit" subtitle="Loading customer data..." />}>
+    <Suspense fallback={<LoadingScreen title="Customer Details" subtitle="Loading customer data..." />}>
       <CustomerAuditPageContent />
     </Suspense>
   );

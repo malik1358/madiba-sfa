@@ -57,7 +57,7 @@ const PAGE_TEXT = {
   daysSinceLastVisit: { en: "Days From Last Visit", ar: "الأيام منذ آخر زيارة" },
   status: { en: "Status", ar: "الحالة" },
   actions: { en: "Actions", ar: "الإجراءات" },
-  openAudit: { en: "Open Audit", ar: "فتح التدقيق" },
+  openAudit: { en: "Customer Details", ar: "تفاصيل العميل" },
   markInactive: { en: "Mark Inactive", ar: "تعطيل العميل" },
   markingInactive: { en: "Marking...", ar: "جاري التعطيل..." },
   markActive: { en: "Mark Active", ar: "إعادة التفعيل" },
@@ -1385,22 +1385,22 @@ export default function MyDayPage() {
                         <td>{row.customer_name || row.customer_code}</td>
                         <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                         <td>
-                          <div className="moduleInlineStack">
+                          <div className="moduleInlineStack moduleActionStack">
                             {row.is_prospect ? (
                               <Link
                                 href={`/management/new-order?customer_code=${encodeURIComponent(row.customer_code)}&customer_name=${encodeURIComponent(row.customer_name)}&salesman_code=${encodeURIComponent(row.salesman_code)}&source=prospect`}
-                                className="moduleInlineButton"
+                                className="moduleInlineButton moduleActionButton"
                               >
                                 {t("createOrder")}
                               </Link>
                             ) : (
                               <>
-                                <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                                <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => openVisitReport(row)}>
                                   {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
                                 </button>
                                 <Link
                                   href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
-                                  className="moduleInlineButton"
+                                  className="moduleInlineButton moduleActionButton"
                                 >
                                   {t("openAudit")}
                                 </Link>
@@ -1441,13 +1441,13 @@ export default function MyDayPage() {
                         <td>{row.customer_name || row.customer_code}</td>
                         <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                         <td>
-                          <div className="moduleInlineStack">
-                            <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                          <div className="moduleInlineStack moduleActionStack">
+                            <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => openVisitReport(row)}>
                               {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
                             </button>
                             <Link
                               href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
-                              className="moduleInlineButton"
+                              className="moduleInlineButton moduleActionButton"
                             >
                               {t("openAudit")}
                             </Link>
@@ -1535,9 +1535,9 @@ export default function MyDayPage() {
                   <Fragment key={row.customer_code}>
                   <tr>
                     <td>
-                      <div className="moduleInlineStack">
+                      <div className="moduleInlineStack moduleCustomerActionStack">
                         <span>{row.customer_name || row.customer_code}</span>
-                        <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                        <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => openVisitReport(row)}>
                           {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
                         </button>
                       </div>
@@ -1552,16 +1552,16 @@ export default function MyDayPage() {
                     <td>{Number((Number(row.outstanding_0_30 || 0) + Number(row.outstanding_30_60 || 0) + Number(row.outstanding_above_60 || 0))).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     <td>{row.status === "Visited" ? t("visited") : row.status === "Overdue" ? t("overdue") : t("planned")}</td>
                     <td>
-                      <div className="moduleInlineStack">
+                      <div className="moduleInlineStack moduleActionStack">
                         <Link
                           href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
-                          className="moduleInlineButton"
+                          className="moduleInlineButton moduleActionButton"
                         >
                           {t("openAudit")}
                         </Link>
                         <button
                           type="button"
-                          className="moduleInlineButton"
+                          className="moduleInlineButton moduleActionButton"
                           onClick={() => markCustomerInactive(row)}
                           disabled={inactiveCustomerCode === row.customer_code}
                         >
@@ -1669,16 +1669,16 @@ export default function MyDayPage() {
                     <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
                     <td>{row.inactive_marked_at ? new Date(row.inactive_marked_at).toLocaleString("en-GB") : "-"}</td>
                     <td>
-                      <div className="moduleInlineStack">
+                      <div className="moduleInlineStack moduleActionStack">
                         <Link
                           href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
-                          className="moduleInlineButton"
+                          className="moduleInlineButton moduleActionButton"
                         >
                           {t("openAudit")}
                         </Link>
                         <button
                           type="button"
-                          className="moduleInlineButton"
+                          className="moduleInlineButton moduleActionButton"
                           onClick={() => markCustomerActive(row)}
                           disabled={inactiveCustomerCode === row.customer_code}
                         >

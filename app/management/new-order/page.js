@@ -1443,7 +1443,7 @@ export default function NewOrderPage() {
 
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || !payload.success) {
-            throw new Error(payload.error || "Unable to load customer audit history.");
+            throw new Error(payload.error || "Unable to load customer details history.");
           }
 
           return payload;
@@ -1459,7 +1459,7 @@ export default function NewOrderPage() {
       } catch (err) {
         setTransactions([]);
         setPeerTransactions([]);
-        setError(err.message || "Unable to load customer audit history.");
+        setError(err.message || "Unable to load customer details history.");
       } finally {
         setLoadingCustomerHistory(false);
       }
@@ -1671,7 +1671,7 @@ export default function NewOrderPage() {
           <>
             {loadingCustomerHistory && (
               <section className="moduleSection">
-                <div className="moduleLoading">Loading customer audit sections...</div>
+                <div className="moduleLoading">Loading customer details sections...</div>
               </section>
             )}
 

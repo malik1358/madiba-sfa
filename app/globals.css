@@ -3504,6 +3504,35 @@ table.auditMatrix td.auditTrendSame {
   font-weight: 800;
 }
 
+.moduleInlineStack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.moduleActionStack {
+  display: grid;
+  gap: 6px;
+  align-items: stretch;
+  min-width: 132px;
+}
+
+.moduleCustomerActionStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.moduleActionButton {
+  min-height: 32px;
+  padding: 0 12px;
+  justify-content: center;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .moduleQtyControl {
   display: inline-flex;
   align-items: center;

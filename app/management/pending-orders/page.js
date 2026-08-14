@@ -869,7 +869,7 @@ export default function PendingOrdersPage() {
                                     </Link>
                                   )}
                                   {!isInvoiceMaker && <Link href="/management/new-order" className="moduleInlineButton">Open Order Workflow</Link>}
-                                  {!isInvoiceMaker && <Link href="/management/customer-audit" className="moduleInlineButton">Go to Customer Audit</Link>}
+                                  {!isInvoiceMaker && <Link href="/management/customer-audit" className="moduleInlineButton">Go to Customer Details</Link>}
                                 </div>
 
                                 {orderHistory.length > 0 && (

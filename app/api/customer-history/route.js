@@ -30,7 +30,6 @@ function isProductPromoterRole(role) {
 
 function extractEmailLocalPart(email) {
   const raw = String(email || "").trim().toLowerCase();
-  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
   return raw.includes("@") ? raw.split("@")[0] : raw;
 }
 
@@ -40,6 +39,23 @@ function normalizeLooseToken(value) {
 
 function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function flexibleNameLikePattern(value) {
+  const tokens = String(value || "")
+    .trim()
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/)
+    .filter(Boolean);
+
+  return tokens.length > 0 ? `%${tokens.join("%")}%` : "";
+}
+
+function namesLooselyMatch(left, right) {
+  const leftToken = normalizeLooseToken(left);
+  const rightToken = normalizeLooseToken(right);
+  if (!leftToken || !rightToken) return false;
+  return leftToken === rightToken || leftToken.includes(rightToken) || rightToken.includes(leftToken);
 }
 
 function normalizeRole(value) {
@@ -297,7 +313,7 @@ async function resolveScope(admin, token) {
   };
 }
 
-async function ensureCustomerVisible(admin, customerCode, scope) {
+async function ensureCustomerVisible(admin, customerCode, customerName, scope) {
   const { data: customer, error } = await admin
     .from("customers")
     .select("customer_code,current_salesman_code")
@@ -314,6 +330,69 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
     };
   }
 
+  async function hasHistoricalSalesAccess(codeCandidate) {
+    const scopedSalesmanCodes = scope.visibleSalesmanCodes || [];
+    const baseQuery = () => admin
+      .from("sales_raw")
+      .select("id")
+      .eq("customer_code", codeCandidate)
+      .limit(1);
+
+    if (scopedSalesmanCodes.length > 0) {
+      const { data: scopedRows, error: scopedError } = await baseQuery().in("salesman_code", scopedSalesmanCodes);
+      if (scopedError) throw scopedError;
+      if (Array.isArray(scopedRows) && scopedRows[0]?.id) return true;
+    }
+
+    if (scope.identitySearchPatterns.length > 0) {
+      const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
+        `salesman_code.ilike.%${pattern}%`,
+        `salesman_name.ilike.%${pattern}%`,
+      ]);
+      const { data: nameRows, error: nameError } = await baseQuery().or(identityFilters.join(","));
+      if (nameError) throw nameError;
+      if (Array.isArray(nameRows) && nameRows[0]?.id) return true;
+    }
+
+    const { data: rawRows, error: rawError } = await baseQuery();
+    if (rawError) throw rawError;
+    return Boolean(Array.isArray(rawRows) && rawRows[0]?.id);
+  }
+
+  async function hasHistoricalNameAccess(nameCandidate) {
+    const normalizedName = normalizeName(nameCandidate);
+    if (!normalizedName) return false;
+    const looseLike = flexibleNameLikePattern(normalizedName);
+    if (!looseLike) return false;
+
+    const scopedSalesmanCodes = scope.visibleSalesmanCodes || [];
+    const baseQuery = () => admin
+      .from("sales_raw")
+      .select("id")
+      .ilike("customer_name", looseLike)
+      .limit(1);
+
+    if (scopedSalesmanCodes.length > 0) {
+      const { data: scopedRows, error: scopedError } = await baseQuery().in("salesman_code", scopedSalesmanCodes);
+      if (scopedError) throw scopedError;
+      if (Array.isArray(scopedRows) && scopedRows[0]?.id) return true;
+    }
+
+    if (scope.identitySearchPatterns.length > 0) {
+      const identityFilters = scope.identitySearchPatterns.flatMap((pattern) => [
+        `salesman_code.ilike.%${pattern}%`,
+        `salesman_name.ilike.%${pattern}%`,
+      ]);
+      const { data: nameRows, error: nameError } = await baseQuery().or(identityFilters.join(","));
+      if (nameError) throw nameError;
+      if (Array.isArray(nameRows) && nameRows[0]?.id) return true;
+    }
+
+    const { data: rawRows, error: rawError } = await baseQuery();
+    if (rawError) throw rawError;
+    return Boolean(Array.isArray(rawRows) && rawRows[0]?.id);
+  }
+
   if (!scope.hasAllAccess && !scope.visibleSalesmanCodes.includes(normalizeCode(customer.current_salesman_code))) {
     const normalizedInput = normalizeCode(customerCode);
     const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
@@ -327,13 +406,20 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
         .select("id")
         .eq("customer_code", codeCandidate)
         .in("salesman_code", scope.visibleSalesmanCodes || [])
-        .limit(1)
-        .maybeSingle();
+        .limit(1);
 
       if (historyError) throw historyError;
-      if (historyRow?.id) {
+      if (Array.isArray(historyRow) && historyRow[0]?.id) {
         hasHistoryAccess = true;
         break;
+      }
+
+      if (!hasHistoryAccess) {
+        hasHistoryAccess = await hasHistoricalSalesAccess(codeCandidate);
+      }
+
+      if (!hasHistoryAccess) {
+        hasHistoryAccess = await hasHistoricalNameAccess(customerName);
       }
 
       if (!hasHistoryAccess && scope.identitySearchPatterns.length > 0) {
@@ -346,11 +432,10 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
           .select("id")
           .eq("customer_code", codeCandidate)
           .or(identityFilters.join(","))
-          .limit(1)
-          .maybeSingle();
+          .limit(1);
 
         if (nameHistoryError) throw nameHistoryError;
-        if (nameHistoryRow?.id) {
+        if (Array.isArray(nameHistoryRow) && nameHistoryRow[0]?.id) {
           hasHistoryAccess = true;
           break;
         }
@@ -402,11 +487,12 @@ async function writeCached(admin, cacheKey, payload) {
   if (error) throw error;
 }
 
-async function fetchCustomerTransactions(admin, customerCode, scope) {
+async function fetchCustomerTransactions(admin, customerCode, customerName, scope) {
   const normalizedInput = normalizeCode(customerCode);
   const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
   const leadingCode = normalizeCode(leadingCodeMatch?.[1] || "");
   const codeCandidates = [...new Set([normalizedInput, leadingCode].filter(Boolean))];
+  const normalizedCustomerName = normalizeName(customerName);
   const target = leadingCode || normalizedInput;
   const targetNoZeros = target.replace(/^0+/, "");
 
@@ -464,6 +550,23 @@ async function fetchCustomerTransactions(admin, customerCode, scope) {
         || rowCodeNoZeros.startsWith(`${targetNoZeros} `)
       );
     });
+  }
+
+  if (rows.length === 0 && normalizedCustomerName) {
+    const looseNameLike = flexibleNameLikePattern(normalizedCustomerName);
+    if (looseNameLike) {
+    const fallbackData = await fetchHistoryPages(() => admin
+      .from("sales_raw")
+      .select("id,import_batch_id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
+      .ilike("customer_name", looseNameLike)
+      .order("transaction_date", { ascending: false })
+      .order("id", { ascending: false }));
+
+    rows = (Array.isArray(fallbackData) ? fallbackData : []).filter((row) => {
+      return namesLooselyMatch(row.customer_name, normalizedCustomerName)
+        || namesLooselyMatch(row.customer_code, normalizedCustomerName);
+    });
+    }
   }
 
   // Merge overlapping replacement snapshots before selecting historical months.
@@ -552,7 +655,7 @@ async function fetchPeerTransactions(admin, scope, selectedMonthKeys, customerCo
 }
 
 async function refreshCustomerCache(admin, customerCode, cacheKey, scope) {
-  const fresh = await fetchCustomerTransactions(admin, customerCode, scope);
+  const fresh = await fetchCustomerTransactions(admin, customerCode, "", scope);
   const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
   const payload = {
     version: CACHE_VERSION,
@@ -579,6 +682,7 @@ export async function GET(request) {
 
     const url = new URL(request.url);
     const customerCode = normalizeCode(url.searchParams.get("customerCode"));
+    const customerName = normalizeName(url.searchParams.get("customerName"));
     const forceRefresh = String(url.searchParams.get("refresh") || "").trim() === "1";
 
     if (!customerCode) {
@@ -591,7 +695,7 @@ export async function GET(request) {
 
     const token = authHeader.replace("Bearer ", "");
     const scope = await resolveScope(admin, token);
-    await ensureCustomerVisible(admin, customerCode, scope);
+    await ensureCustomerVisible(admin, customerCode, customerName, scope);
 
     const key = cacheKeyFor(customerCode, scope);
     const cached = await loadCached(admin, key);
@@ -603,7 +707,7 @@ export async function GET(request) {
       const cachedTransactions = Array.isArray(cached.transactions) ? cached.transactions : [];
 
       if (cachedTransactions.length === 0) {
-        const fresh = await fetchCustomerTransactions(admin, customerCode, scope);
+        const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope);
         const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
         const payload = {
           version: CACHE_VERSION,
@@ -645,7 +749,7 @@ export async function GET(request) {
       });
     }
 
-    const fresh = await fetchCustomerTransactions(admin, customerCode, scope);
+    const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope);
     const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
     const payload = {
       version: CACHE_VERSION,

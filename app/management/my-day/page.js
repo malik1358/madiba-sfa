@@ -13,6 +13,8 @@ import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 
+const CUSTOMER_HISTORY_API = "/api/customer-history";
+
 const PAGE_TEXT = {
   title: { en: "My Day", ar: "يومي" },
   subtitle: { en: "Daily planning and visit execution", ar: "تخطيط اليوم وتنفيذ الزيارات" },
@@ -252,6 +254,24 @@ export default function MyDayPage() {
 
   function isGpsLog(entryType) {
     return ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY", "NOTE"].includes(entryType);
+  }
+
+  function buildUniqueStockChecks(rows) {
+    const uniqueItems = [];
+    const seen = new Set();
+
+    (rows || []).forEach((row) => {
+      const key = String(row?.item_code || row?.itemCode || row?.item_name || row?.itemName || "").trim().toUpperCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      uniqueItems.push({
+        itemCode: row?.item_code || row?.itemCode || "",
+        itemName: row?.item_name || row?.itemName || row?.item_code || row?.itemCode || key,
+        status: "",
+      });
+    });
+
+    return uniqueItems;
   }
 
   useEffect(() => {
@@ -757,6 +777,11 @@ export default function MyDayPage() {
         throw new Error("Supabase is not configured.");
       }
 
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token || "";
+
       let itemsQuery = supabase
         .from("active_sales")
         .select("item_code,item_name,transaction_date,salesman_code")
@@ -770,18 +795,57 @@ export default function MyDayPage() {
       const { data, error: itemsError } = await itemsQuery;
       if (itemsError) throw itemsError;
 
-      const uniqueItems = [];
-      const seen = new Set();
-      (data || []).forEach((row) => {
-        const key = String(row.item_code || row.item_name || "").trim().toUpperCase();
-        if (!key || seen.has(key)) return;
-        seen.add(key);
-        uniqueItems.push({
-          itemCode: row.item_code || "",
-          itemName: row.item_name || row.item_code || key,
-          status: "",
-        });
-      });
+      let uniqueItems = buildUniqueStockChecks(data || []);
+
+      if (uniqueItems.length === 0) {
+        let ordersQuery = supabase
+          .from("sales_orders")
+          .select("id,salesman_code,created_at")
+          .eq("customer_code", customer.customer_code)
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (!accessScope?.hasAllAccess) {
+          ordersQuery = ordersQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
+        }
+
+        const { data: orderRows, error: ordersError } = await ordersQuery;
+        if (ordersError) throw ordersError;
+
+        const orderIds = (orderRows || []).map((row) => row.id).filter(Boolean);
+        if (orderIds.length > 0) {
+          const { data: orderItemRows, error: orderItemsError } = await supabase
+            .from("sales_order_items")
+            .select("order_id,item_code,item_name,created_at")
+            .in("order_id", orderIds)
+            .order("created_at", { ascending: false });
+
+          if (orderItemsError) throw orderItemsError;
+          uniqueItems = buildUniqueStockChecks(orderItemRows || []);
+        }
+      }
+
+      if (uniqueItems.length === 0 && accessToken) {
+        const response = await fetch(
+          `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(customer.customer_code)}&customerName=${encodeURIComponent(customer.customer_name || "")}`,
+          {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          }
+        );
+
+        if (response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          uniqueItems = buildUniqueStockChecks(Array.isArray(payload.transactions) ? payload.transactions : []);
+        } else {
+          const payload = await response.json().catch(() => ({}));
+          const message = String(payload?.error || "").trim();
+          if (message) {
+            setError(message);
+          }
+        }
+      }
 
       setVisitForm((current) => ({
         ...current,

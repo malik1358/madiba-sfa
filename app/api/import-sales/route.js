@@ -361,7 +361,7 @@ export async function POST(request) {
         if (partyRaw) {
           const customerMatch =
             partyRaw.match(
-              /^(\d+)\s+(.*)$/
+              /^([A-Za-z0-9]+)\s*[_\-\s]+(.*)$/
             );
 
           if (customerMatch) {

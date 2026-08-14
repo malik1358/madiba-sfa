@@ -8,6 +8,7 @@ const DEFAULT_ITEMS = [
   { href: "/management/customer-audit", label: "Customer Audit" },
   { href: "/management/new-order", label: "New Order" },
   { href: "/management/pending-orders", label: "Pending Orders" },
+  { href: "/management/gps-map", label: "GPS Report" },
 ];
 
 export default function MostVisitedPages({ items = DEFAULT_ITEMS }) {

@@ -71,6 +71,30 @@ function toDateValue(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
+function getSalesmanLabel(row) {
+  return String(row?.salesman_name || row?.salesman_code || row?.user_id || "").trim();
+}
+
+function classifyCaptureType(row) {
+  const normalized = String(row?.action || row?.entry_type || "").trim().toUpperCase();
+  return normalized === "GPS_PING" ? "Regular 15-min capture" : "Event capture";
+}
+
+function toRadians(value) {
+  return (Number(value) * Math.PI) / 180;
+}
+
+function haversineDistanceKm(fromLat, fromLng, toLat, toLng) {
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(toLat - fromLat);
+  const dLng = toRadians(toLng - fromLng);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(fromLat)) * Math.cos(toRadians(toLat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+}
+
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "invoice-maker" || normalized === "invoice_maker";
@@ -83,11 +107,10 @@ export default function GpsMapPage() {
   const [error, setError] = useState("");
   const [records, setRecords] = useState([]);
   const [userRole, setUserRole] = useState("");
-  const [salesmanFilter, setSalesmanFilter] = useState("ALL");
+  const [selectedSalesmen, setSelectedSalesmen] = useState([]);
+  const [selectedDates, setSelectedDates] = useState([]);
   const [actionFilter, setActionFilter] = useState("ALL");
   const [customerFilter, setCustomerFilter] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
   const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
 
   useEffect(() => {
@@ -177,14 +200,12 @@ export default function GpsMapPage() {
   }, []);
 
   const salesmanOptions = useMemo(
-    () => [
-      "ALL",
-      ...new Set(
-        records
-          .map((row) => String(row.salesman_name || row.salesman_code || row.user_id || "").trim())
-          .filter(Boolean)
-      ),
-    ],
+    () => [...new Set(records.map((row) => getSalesmanLabel(row)).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [records]
+  );
+
+  const dateOptions = useMemo(
+    () => [...new Set(records.map((row) => toDateValue(row.captured_at || row.created_at)).filter(Boolean))].sort((a, b) => b.localeCompare(a)),
     [records]
   );
 
@@ -195,15 +216,18 @@ export default function GpsMapPage() {
 
   const filteredRecords = useMemo(() => {
     const query = customerFilter.trim().toLowerCase();
-    const fromTs = dateFrom ? toTimestamp(`${dateFrom}T00:00:00`) : 0;
-    const toTs = dateTo ? toTimestamp(`${dateTo}T23:59:59`) : 0;
+    const selectedSalesmanSet = new Set(selectedSalesmen);
+    const selectedDateSet = new Set(selectedDates);
 
     return records.filter((row) => {
-      const salesmanLabel = String(row.salesman_name || row.salesman_code || row.user_id || "").trim();
-      if (salesmanFilter !== "ALL" && salesmanLabel !== salesmanFilter) return false;
+      const salesmanLabel = getSalesmanLabel(row);
+      if (selectedSalesmanSet.size > 0 && !selectedSalesmanSet.has(salesmanLabel)) return false;
 
       const rowAction = String(row.action || row.entry_type || "").trim();
       if (actionFilter !== "ALL" && rowAction !== actionFilter) return false;
+
+      const rowDate = toDateValue(row.captured_at || row.created_at);
+      if (selectedDateSet.size > 0 && !selectedDateSet.has(rowDate)) return false;
 
       if (query) {
         const haystack = [row.customer_code, row.customer_name, salesmanLabel]
@@ -211,13 +235,44 @@ export default function GpsMapPage() {
           .join(" ");
         if (!haystack.includes(query)) return false;
       }
-
-      const ts = toTimestamp(row.captured_at || row.created_at);
-      if (fromTs && ts < fromTs) return false;
-      if (toTs && ts > toTs) return false;
       return true;
     });
-  }, [records, salesmanFilter, actionFilter, customerFilter, dateFrom, dateTo]);
+  }, [records, selectedSalesmen, selectedDates, actionFilter, customerFilter]);
+
+  const enrichedFilteredRecords = useMemo(() => {
+    const sortedByTimeAsc = [...filteredRecords].sort(
+      (a, b) => toTimestamp(a.captured_at || a.created_at) - toTimestamp(b.captured_at || b.created_at)
+    );
+
+    const previousByUser = new Map();
+    const distanceById = new Map();
+
+    sortedByTimeAsc.forEach((row) => {
+      const previous = previousByUser.get(row.user_id);
+      if (
+        previous &&
+        Number.isFinite(previous.latitude) &&
+        Number.isFinite(previous.longitude) &&
+        Number.isFinite(row.latitude) &&
+        Number.isFinite(row.longitude)
+      ) {
+        distanceById.set(
+          row.id,
+          haversineDistanceKm(previous.latitude, previous.longitude, row.latitude, row.longitude)
+        );
+      } else {
+        distanceById.set(row.id, null);
+      }
+
+      previousByUser.set(row.user_id, row);
+    });
+
+    return filteredRecords.map((row) => ({
+      ...row,
+      capture_type: classifyCaptureType(row),
+      distance_from_previous_km: distanceById.get(row.id),
+    }));
+  }, [filteredRecords]);
 
   const customerVisitPoints = useMemo(() => {
     const latestByCustomer = new Map();
@@ -315,7 +370,7 @@ export default function GpsMapPage() {
           <div className="moduleMetricGrid">
             <section className="moduleMetricCard"><span>Visible salesmen</span><strong>{new Set(filteredRecords.map((row) => row.user_id)).size}</strong></section>
             <section className="moduleMetricCard"><span>Customer visit points</span><strong>{customerVisitPoints.length}</strong></section>
-            <section className="moduleMetricCard"><span>Raw GPS captures</span><strong>{filteredRecords.length}</strong></section>
+            <section className="moduleMetricCard"><span>Raw GPS captures</span><strong>{enrichedFilteredRecords.length}</strong></section>
             <section className="moduleMetricCard"><span>Admin/Invoice-maker</span><strong>{userRole === "admin" || isInvoiceMakerRole(userRole) ? "Yes" : "No"}</strong></section>
           </div>
 
@@ -324,9 +379,16 @@ export default function GpsMapPage() {
               <h2>Filters</h2>
             </div>
             <div className="moduleFilterRow" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
-              <select className="moduleInput" value={salesmanFilter} onChange={(event) => setSalesmanFilter(event.target.value)}>
+              <select
+                className="moduleInput"
+                multiple
+                value={selectedSalesmen}
+                onChange={(event) => setSelectedSalesmen(Array.from(event.target.selectedOptions).map((option) => option.value))}
+                title="Select one or more salesmen"
+                style={{ minHeight: "120px" }}
+              >
                 {salesmanOptions.map((option) => (
-                  <option key={option} value={option}>{option === "ALL" ? "All Salesmen" : option}</option>
+                  <option key={option} value={option}>{option}</option>
                 ))}
               </select>
               <select className="moduleInput" value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}>
@@ -334,8 +396,21 @@ export default function GpsMapPage() {
                   <option key={option} value={option}>{option === "ALL" ? "All Actions" : option}</option>
                 ))}
               </select>
-              <input className="moduleInput" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-              <input className="moduleInput" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+              <select
+                className="moduleInput"
+                multiple
+                value={selectedDates}
+                onChange={(event) => setSelectedDates(Array.from(event.target.selectedOptions).map((option) => option.value))}
+                title="Select one or more dates"
+                style={{ minHeight: "120px" }}
+              >
+                {dateOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+              <div className="moduleHint" style={{ alignSelf: "center" }}>
+                Multi-select help: hold Ctrl (or Cmd) while clicking.
+              </div>
               <input className="moduleInput" type="search" placeholder="Customer code/name" value={customerFilter} onChange={(event) => setCustomerFilter(event.target.value)} />
             </div>
           </section>
@@ -462,20 +537,24 @@ export default function GpsMapPage() {
                     <th>Salesman</th>
                     <th>Customer</th>
                     <th>Action</th>
+                    <th>Capture Type</th>
                     <th>GPS</th>
+                    <th>Distance From Previous</th>
                     <th>Accuracy</th>
                     <th>Google Map</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRecords.map((point) => (
+                  {enrichedFilteredRecords.map((point) => (
                     <tr key={point.id}>
                       <td>{toDateValue(point.captured_at || point.created_at) || "-"}</td>
                       <td>{point.captured_at ? new Date(point.captured_at).toLocaleTimeString("en-GB") : "-"}</td>
                       <td>{point.salesman_name || point.salesman_code || point.user_id}</td>
                       <td>{point.customer_name || point.customer_code || "-"}</td>
                       <td>{point.action || point.entry_type}</td>
+                      <td>{point.capture_type}</td>
                       <td>{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</td>
+                      <td>{Number.isFinite(point.distance_from_previous_km) ? `${point.distance_from_previous_km.toFixed(2)} km` : "-"}</td>
                       <td>{point.accuracy ? `${Number(point.accuracy).toFixed(1)} m` : "-"}</td>
                       <td>
                         <a
@@ -489,9 +568,9 @@ export default function GpsMapPage() {
                       </td>
                     </tr>
                   ))}
-                  {filteredRecords.length === 0 && (
+                  {enrichedFilteredRecords.length === 0 && (
                     <tr>
-                      <td colSpan={8}>No GPS captures found for selected filters.</td>
+                      <td colSpan={10}>No GPS captures found for selected filters.</td>
                     </tr>
                   )}
                 </tbody>

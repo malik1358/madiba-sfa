@@ -32,6 +32,31 @@ function toFiniteNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function extractStreetName(parsed) {
+  if (!parsed || typeof parsed !== "object") return "";
+
+  const location = parsed?.location || {};
+  const locationAddress = location?.address;
+  const payloadAddress = parsed?.address;
+
+  const candidates = [
+    location?.street_name,
+    parsed?.street_name,
+    location?.street,
+    parsed?.street,
+    typeof locationAddress === "object" ? locationAddress?.road : "",
+    typeof locationAddress === "object" ? locationAddress?.pedestrian : "",
+    typeof locationAddress === "object" ? locationAddress?.residential : "",
+    typeof payloadAddress === "object" ? payloadAddress?.road : "",
+    typeof payloadAddress === "object" ? payloadAddress?.pedestrian : "",
+    typeof payloadAddress === "object" ? payloadAddress?.residential : "",
+    typeof locationAddress === "string" ? locationAddress : "",
+    typeof payloadAddress === "string" ? payloadAddress : "",
+  ];
+
+  return String(candidates.find((value) => String(value || "").trim()) || "").trim();
+}
+
 function parseGps(note) {
   const parsed = parseNotePayload(note);
   if (!parsed) return null;
@@ -47,6 +72,7 @@ function parseGps(note) {
     latitude,
     longitude,
     accuracy: toFiniteNumber(location.accuracy ?? parsed.accuracy) || 0,
+    street_name: extractStreetName(parsed),
     action: parsed.action || "ATTENDANCE",
     customer_code: String(parsed.customer_code || parsed.customerCode || "").trim(),
     customer_name: String(parsed.customer_name || parsed.customerName || "").trim(),
@@ -130,6 +156,10 @@ function buildGoogleRouteUrl(points) {
   return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
 
+function toCoordinateKey(latitude, longitude) {
+  return `${Number(latitude).toFixed(4)},${Number(longitude).toFixed(4)}`;
+}
+
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "invoice-maker" || normalized === "invoice_maker";
@@ -149,6 +179,8 @@ export default function GpsMapPage() {
   const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
   const [routeSalesman, setRouteSalesman] = useState("");
   const [routeDate, setRouteDate] = useState("");
+  const [streetByCoordinate, setStreetByCoordinate] = useState({});
+  const [streetLookupBusy, setStreetLookupBusy] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -219,6 +251,7 @@ export default function GpsMapPage() {
               latitude: gps.latitude,
               longitude: gps.longitude,
               accuracy: gps.accuracy,
+              street_name: String(gps.street_name || "").trim(),
               captured_at: capturedAt,
               created_at: log.created_at,
             };
@@ -438,6 +471,72 @@ export default function GpsMapPage() {
     return routeDayRecords.filter((row) => isWithinWorkingWindow(toTimestamp(row.captured_at || row.created_at), routeWorkingWindows));
   }, [routeDayRecords, routeWorkingWindows]);
 
+  useEffect(() => {
+    const missingCoordinates = [...new Set(
+      routeWorkingPins
+        .filter((pin) => !String(pin.street_name || "").trim())
+        .map((pin) => toCoordinateKey(pin.latitude, pin.longitude))
+        .filter((key) => !streetByCoordinate[key])
+    )].slice(0, 40);
+
+    if (missingCoordinates.length === 0) return undefined;
+
+    let active = true;
+
+    async function resolveStreetNames() {
+      setStreetLookupBusy(true);
+      const resolved = {};
+
+      for (const coordinateKey of missingCoordinates) {
+        const [lat, lng] = coordinateKey.split(",");
+
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`,
+            {
+              headers: {
+                Accept: "application/json",
+              },
+            }
+          );
+
+          if (!response.ok) throw new Error("reverse_geocode_failed");
+          const payload = await response.json();
+          const address = payload?.address || {};
+
+          const streetLabel = String(
+            address.road ||
+            address.pedestrian ||
+            address.residential ||
+            address.neighbourhood ||
+            address.suburb ||
+            address.city_district ||
+            payload?.name ||
+            ""
+          ).trim();
+
+          resolved[coordinateKey] = streetLabel || "Street unavailable";
+        } catch {
+          resolved[coordinateKey] = "Street unavailable";
+        }
+      }
+
+      if (!active) return;
+
+      setStreetByCoordinate((current) => ({
+        ...current,
+        ...resolved,
+      }));
+      setStreetLookupBusy(false);
+    }
+
+    resolveStreetNames();
+
+    return () => {
+      active = false;
+    };
+  }, [routeWorkingPins, streetByCoordinate]);
+
   const routeTotalDistanceKm = useMemo(() => {
     let total = 0;
     for (let i = 1; i < routeWorkingPins.length; i += 1) {
@@ -448,59 +547,54 @@ export default function GpsMapPage() {
     return total;
   }, [routeWorkingPins]);
 
-  const routeLongStops = useMemo(() => {
+  const routeStreetSummary = useMemo(() => {
     if (routeWorkingPins.length === 0) return [];
 
-    const minStopDurationMs = 30 * 60 * 1000;
-    const sameLocationRadiusMeters = 120;
-    const clusters = [];
-    let current = null;
+    const sortedPins = [...routeWorkingPins].sort(
+      (a, b) => toTimestamp(a.captured_at || a.created_at) - toTimestamp(b.captured_at || b.created_at)
+    );
 
-    routeWorkingPins.forEach((pin) => {
-      const pinTs = toTimestamp(pin.captured_at || pin.created_at);
-      if (!pinTs) return;
+    const streetMap = new Map();
 
-      if (!current) {
-        current = {
-          startTs: pinTs,
-          endTs: pinTs,
-          startPin: pin,
-          endPin: pin,
-          pointCount: 1,
-        };
-        return;
-      }
+    for (let index = 0; index < sortedPins.length; index += 1) {
+      const pin = sortedPins[index];
+      const ts = toTimestamp(pin.captured_at || pin.created_at);
+      if (!ts) continue;
 
-      const distanceMeters = haversineDistanceKm(current.endPin.latitude, current.endPin.longitude, pin.latitude, pin.longitude) * 1000;
-      if (distanceMeters <= sameLocationRadiusMeters) {
-        current.endTs = pinTs;
-        current.endPin = pin;
-        current.pointCount += 1;
-        return;
-      }
+      const nextPin = sortedPins[index + 1] || null;
+      const nextTs = nextPin ? toTimestamp(nextPin.captured_at || nextPin.created_at) : ts;
+      const intervalMs = Math.max(0, nextTs - ts);
 
-      clusters.push(current);
-      current = {
-        startTs: pinTs,
-        endTs: pinTs,
-        startPin: pin,
-        endPin: pin,
-        pointCount: 1,
+      const pinnedStreet = String(pin.street_name || "").trim();
+      const coordinateKey = toCoordinateKey(pin.latitude, pin.longitude);
+      const geocodedStreet = String(streetByCoordinate[coordinateKey] || "").trim();
+      const fallbackStreet = `Near ${Number(pin.latitude).toFixed(4)}, ${Number(pin.longitude).toFixed(4)}`;
+      const streetName = pinnedStreet || geocodedStreet || fallbackStreet;
+
+      const current = streetMap.get(streetName) || {
+        streetName,
+        firstTs: ts,
+        lastTs: ts,
+        durationMs: 0,
+        pinCount: 0,
+        latitude: pin.latitude,
+        longitude: pin.longitude,
       };
-    });
 
-    if (current) {
-      clusters.push(current);
+      current.firstTs = Math.min(current.firstTs, ts);
+      current.lastTs = Math.max(current.lastTs, ts);
+      current.durationMs += intervalMs;
+      current.pinCount += 1;
+      streetMap.set(streetName, current);
     }
 
-    return clusters
-      .map((cluster) => ({
-        ...cluster,
-        durationMs: cluster.endTs - cluster.startTs,
-      }))
-      .filter((cluster) => cluster.durationMs >= minStopDurationMs)
-      .sort((a, b) => b.durationMs - a.durationMs);
-  }, [routeWorkingPins]);
+    return Array.from(streetMap.values()).sort((a, b) => b.durationMs - a.durationMs);
+  }, [routeWorkingPins, streetByCoordinate]);
+
+  const streetsOverThirtyMins = useMemo(
+    () => routeStreetSummary.filter((row) => row.durationMs >= 30 * 60 * 1000).length,
+    [routeStreetSummary]
+  );
 
   const routeMapLink = useMemo(() => buildGoogleRouteUrl(routeWorkingPins), [routeWorkingPins]);
 
@@ -648,7 +742,7 @@ export default function GpsMapPage() {
             <div className="moduleMetricGrid">
               <section className="moduleMetricCard"><span>Route pins (working hours)</span><strong>{routeWorkingPins.length}</strong></section>
               <section className="moduleMetricCard"><span>Total route distance</span><strong>{routeTotalDistanceKm.toFixed(2)} km</strong></section>
-              <section className="moduleMetricCard"><span>Stops over 30 mins</span><strong>{routeLongStops.length}</strong></section>
+              <section className="moduleMetricCard"><span>Streets over 30 mins</span><strong>{streetsOverThirtyMins}</strong></section>
               <section className="moduleMetricCard"><span>Working-window mode</span><strong>{routeWorkingWindows.length > 0 ? "Attendance based" : "All day pins"}</strong></section>
             </div>
 
@@ -669,31 +763,38 @@ export default function GpsMapPage() {
                 Google Maps route link uses first 25 pins due waypoint limits.
               </div>
             )}
+            {streetLookupBusy && (
+              <div className="moduleHint" style={{ marginTop: "8px" }}>
+                Resolving street names from map data...
+              </div>
+            )}
 
             <div className="moduleTableWrap" style={{ marginTop: "12px" }}>
               <table className="moduleTable">
                 <thead>
                   <tr>
-                    <th>Location</th>
+                    <th>Street</th>
                     <th>From</th>
                     <th>To</th>
-                    <th>Duration</th>
+                    <th>Time Spent</th>
                     <th>Pins</th>
+                    <th>30+ mins</th>
                     <th>Map</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {routeLongStops.map((stop, index) => (
-                    <tr key={`route-stop-${index}`}>
-                      <td>{stop.endPin.latitude.toFixed(6)}, {stop.endPin.longitude.toFixed(6)}</td>
-                      <td>{new Date(stop.startTs).toLocaleString("en-GB")}</td>
-                      <td>{new Date(stop.endTs).toLocaleString("en-GB")}</td>
-                      <td>{formatDurationFromMs(stop.durationMs)}</td>
-                      <td>{stop.pointCount}</td>
+                  {routeStreetSummary.map((street) => (
+                    <tr key={`${street.streetName}-${street.latitude}-${street.longitude}`}>
+                      <td>{street.streetName}</td>
+                      <td>{new Date(street.firstTs).toLocaleString("en-GB")}</td>
+                      <td>{new Date(street.lastTs).toLocaleString("en-GB")}</td>
+                      <td>{formatDurationFromMs(street.durationMs)}</td>
+                      <td>{street.pinCount}</td>
+                      <td>{street.durationMs >= 30 * 60 * 1000 ? "Yes" : "No"}</td>
                       <td>
                         <a
                           className="moduleInlineButton"
-                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${stop.endPin.latitude},${stop.endPin.longitude}`)}`}
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${street.latitude},${street.longitude}`)}`}
                           target="_blank"
                           rel="noreferrer"
                         >
@@ -702,9 +803,9 @@ export default function GpsMapPage() {
                       </td>
                     </tr>
                   ))}
-                  {routeLongStops.length === 0 && (
+                  {routeStreetSummary.length === 0 && (
                     <tr>
-                      <td colSpan={6}>No locations found with 30+ minutes stay in working hours.</td>
+                      <td colSpan={7}>No street-level GPS summary available for selected day.</td>
                     </tr>
                   )}
                 </tbody>

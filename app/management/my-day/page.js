@@ -97,6 +97,11 @@ const PAGE_TEXT = {
   overdueVisits: { en: "Overdue visits", ar: "الزيارات المتأخرة" },
   newCustomers: { en: "New customers assigned", ar: "العملاء الجدد" },
   completedVisits: { en: "Completed visits", ar: "الزيارات المكتملة" },
+  workingHours: { en: "Working Hours", ar: "ساعات العمل" },
+  checkInToLunchOut: { en: "Check-in to Lunch Out", ar: "من تسجيل الحضور إلى خروج الاستراحة" },
+  lunchInToEndOfDay: { en: "Lunch In to End of Day", ar: "من العودة من الاستراحة إلى نهاية اليوم" },
+  totalWorkedHours: { en: "Total Worked Hours", ar: "إجمالي ساعات العمل" },
+  waitingAttendanceLogs: { en: "Waiting for attendance logs to complete working hours.", ar: "بانتظار اكتمال سجلات الحضور لحساب ساعات العمل." },
 };
 
 function daysBetween(date) {
@@ -125,6 +130,14 @@ function getSortTimestamp(date) {
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) return 0;
   return parsed.getTime();
+}
+
+function formatDurationFromMs(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return "-";
+  const totalMinutes = Math.floor(durationMs / (1000 * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 function toDatetimeLocalValue(value) {
@@ -687,7 +700,7 @@ export default function MyDayPage() {
 
       const { data: logs, error: logsError } = await supabase
         .from("daily_activity_logs")
-        .select("id,entry_type,note,created_at")
+        .select("id,user_id,entry_type,note,created_at")
         .eq("user_id", session.user.id)
         .gte("created_at", `${today}T00:00:00`)
         .lte("created_at", `${today}T23:59:59`)
@@ -1091,6 +1104,52 @@ export default function MyDayPage() {
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   }, [routeRows]);
 
+  const attendanceHours = useMemo(() => {
+    const ownLogs = (todayLogs || []).filter((row) => {
+      if (!profile?.id) return true;
+      return !row?.user_id || row.user_id === profile.id;
+    });
+
+    const attendanceRows = ownLogs
+      .filter((row) => ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY"].includes(row.entry_type))
+      .map((row) => ({ ...row, captured_ts: readCapturedAt(row) }))
+      .filter((row) => row.captured_ts > 0)
+      .sort((a, b) => a.captured_ts - b.captured_ts);
+
+    let morningTs = 0;
+    let lunchOutTs = 0;
+    let lunchInTs = 0;
+    let endTs = 0;
+
+    attendanceRows.forEach((row) => {
+      if (row.entry_type === "MORNING_ATTENDANCE" && !morningTs) {
+        morningTs = row.captured_ts;
+        return;
+      }
+      if (row.entry_type === "LUNCH_BREAK_OUT" && morningTs && !lunchOutTs && row.captured_ts >= morningTs) {
+        lunchOutTs = row.captured_ts;
+        return;
+      }
+      if (row.entry_type === "LUNCH_BREAK_IN" && lunchOutTs && !lunchInTs && row.captured_ts >= lunchOutTs) {
+        lunchInTs = row.captured_ts;
+        return;
+      }
+      if (row.entry_type === "END_OF_DAY" && lunchInTs && !endTs && row.captured_ts >= lunchInTs) {
+        endTs = row.captured_ts;
+      }
+    });
+
+    const firstHalfMs = morningTs && lunchOutTs ? lunchOutTs - morningTs : 0;
+    const secondHalfMs = lunchInTs && endTs ? endTs - lunchInTs : 0;
+
+    return {
+      firstHalfLabel: formatDurationFromMs(firstHalfMs),
+      secondHalfLabel: formatDurationFromMs(secondHalfMs),
+      totalLabel: formatDurationFromMs(firstHalfMs + secondHalfMs),
+      hasCompleteLog: Boolean(firstHalfMs > 0 || secondHalfMs > 0),
+    };
+  }, [todayLogs, profile?.id]);
+
   const visitStatusSalesmanOptions = useMemo(
     () => [...new Set(
       visitStatusRows
@@ -1256,6 +1315,12 @@ export default function MyDayPage() {
               {attendanceBusy === "END_OF_DAY" ? t("saving") : t("endOfDay")}
             </button>
           </div>
+          <div className="moduleMetricGrid" style={{ marginBottom: "10px" }}>
+            <section className="moduleMetricCard"><span>{t("checkInToLunchOut")}</span><strong>{attendanceHours.firstHalfLabel}</strong></section>
+            <section className="moduleMetricCard"><span>{t("lunchInToEndOfDay")}</span><strong>{attendanceHours.secondHalfLabel}</strong></section>
+            <section className="moduleMetricCard"><span>{t("totalWorkedHours")}</span><strong>{attendanceHours.totalLabel}</strong></section>
+          </div>
+          {!attendanceHours.hasCompleteLog && <div className="moduleHint">{t("waitingAttendanceLogs")}</div>}
           <div className="moduleFilterRow">
             <input
               className="moduleInput"

@@ -95,6 +95,41 @@ function haversineDistanceKm(fromLat, fromLng, toLat, toLng) {
   return earthRadiusKm * c;
 }
 
+function formatDurationFromMs(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return "-";
+  const totalMinutes = Math.floor(durationMs / (1000 * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function isWithinWorkingWindow(ts, windows) {
+  if (!Number.isFinite(ts)) return false;
+  return windows.some(([startTs, endTs]) => ts >= startTs && ts <= endTs);
+}
+
+function buildGoogleRouteUrl(points) {
+  if (!Array.isArray(points) || points.length < 2) return "#";
+
+  const capped = points.slice(0, 25);
+  const origin = `${capped[0].latitude},${capped[0].longitude}`;
+  const destination = `${capped[capped.length - 1].latitude},${capped[capped.length - 1].longitude}`;
+  const waypoints = capped.slice(1, -1).map((point) => `${point.latitude},${point.longitude}`).join("|");
+
+  const params = new URLSearchParams({
+    api: "1",
+    origin,
+    destination,
+    travelmode: "driving",
+  });
+
+  if (waypoints) {
+    params.set("waypoints", waypoints);
+  }
+
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "invoice-maker" || normalized === "invoice_maker";
@@ -112,6 +147,8 @@ export default function GpsMapPage() {
   const [actionFilter, setActionFilter] = useState("ALL");
   const [customerFilter, setCustomerFilter] = useState("");
   const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
+  const [routeSalesman, setRouteSalesman] = useState("");
+  const [routeDate, setRouteDate] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -322,6 +359,151 @@ export default function GpsMapPage() {
     return preferred || customerVisitPoints[0];
   }, [customerVisitPoints, selectedCustomerCode]);
 
+  const routeSalesmanOptions = useMemo(
+    () => [...new Set(records.map((row) => getSalesmanLabel(row)).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [records]
+  );
+
+  const effectiveRouteSalesman = routeSalesmanOptions.includes(routeSalesman)
+    ? routeSalesman
+    : routeSalesmanOptions[0] || "";
+
+  const routeDateOptions = useMemo(() => {
+    const source = records.filter((row) => {
+      if (!effectiveRouteSalesman) return false;
+      return getSalesmanLabel(row) === effectiveRouteSalesman;
+    });
+    return [...new Set(source.map((row) => toDateValue(row.captured_at || row.created_at)).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+  }, [records, effectiveRouteSalesman]);
+
+  const effectiveRouteDate = routeDateOptions.includes(routeDate)
+    ? routeDate
+    : routeDateOptions[0] || "";
+
+  const routeDayRecords = useMemo(() => {
+    if (!effectiveRouteSalesman || !effectiveRouteDate) return [];
+
+    return records
+      .filter((row) => getSalesmanLabel(row) === effectiveRouteSalesman)
+      .filter((row) => toDateValue(row.captured_at || row.created_at) === effectiveRouteDate)
+      .sort((a, b) => toTimestamp(a.captured_at || a.created_at) - toTimestamp(b.captured_at || b.created_at));
+  }, [records, effectiveRouteSalesman, effectiveRouteDate]);
+
+  const routeWorkingWindows = useMemo(() => {
+    let morningTs = 0;
+    let lunchOutTs = 0;
+    let lunchInTs = 0;
+    let endOfDayTs = 0;
+
+    routeDayRecords.forEach((row) => {
+      const rowAction = String(row.action || row.entry_type || "").trim().toUpperCase();
+      const ts = toTimestamp(row.captured_at || row.created_at);
+      if (!ts) return;
+
+      if (rowAction === "MORNING_ATTENDANCE" && !morningTs) {
+        morningTs = ts;
+        return;
+      }
+      if (rowAction === "LUNCH_BREAK_OUT" && morningTs && !lunchOutTs && ts >= morningTs) {
+        lunchOutTs = ts;
+        return;
+      }
+      if (rowAction === "LUNCH_BREAK_IN" && lunchOutTs && !lunchInTs && ts >= lunchOutTs) {
+        lunchInTs = ts;
+        return;
+      }
+      if (rowAction === "END_OF_DAY" && lunchInTs && !endOfDayTs && ts >= lunchInTs) {
+        endOfDayTs = ts;
+      }
+    });
+
+    const windows = [];
+    if (morningTs && lunchOutTs && lunchOutTs > morningTs) {
+      windows.push([morningTs, lunchOutTs]);
+    }
+    if (lunchInTs && endOfDayTs && endOfDayTs > lunchInTs) {
+      windows.push([lunchInTs, endOfDayTs]);
+    }
+
+    return windows;
+  }, [routeDayRecords]);
+
+  const routeWorkingPins = useMemo(() => {
+    if (routeDayRecords.length === 0) return [];
+
+    if (routeWorkingWindows.length === 0) {
+      return routeDayRecords;
+    }
+
+    return routeDayRecords.filter((row) => isWithinWorkingWindow(toTimestamp(row.captured_at || row.created_at), routeWorkingWindows));
+  }, [routeDayRecords, routeWorkingWindows]);
+
+  const routeTotalDistanceKm = useMemo(() => {
+    let total = 0;
+    for (let i = 1; i < routeWorkingPins.length; i += 1) {
+      const prev = routeWorkingPins[i - 1];
+      const current = routeWorkingPins[i];
+      total += haversineDistanceKm(prev.latitude, prev.longitude, current.latitude, current.longitude);
+    }
+    return total;
+  }, [routeWorkingPins]);
+
+  const routeLongStops = useMemo(() => {
+    if (routeWorkingPins.length === 0) return [];
+
+    const minStopDurationMs = 30 * 60 * 1000;
+    const sameLocationRadiusMeters = 120;
+    const clusters = [];
+    let current = null;
+
+    routeWorkingPins.forEach((pin) => {
+      const pinTs = toTimestamp(pin.captured_at || pin.created_at);
+      if (!pinTs) return;
+
+      if (!current) {
+        current = {
+          startTs: pinTs,
+          endTs: pinTs,
+          startPin: pin,
+          endPin: pin,
+          pointCount: 1,
+        };
+        return;
+      }
+
+      const distanceMeters = haversineDistanceKm(current.endPin.latitude, current.endPin.longitude, pin.latitude, pin.longitude) * 1000;
+      if (distanceMeters <= sameLocationRadiusMeters) {
+        current.endTs = pinTs;
+        current.endPin = pin;
+        current.pointCount += 1;
+        return;
+      }
+
+      clusters.push(current);
+      current = {
+        startTs: pinTs,
+        endTs: pinTs,
+        startPin: pin,
+        endPin: pin,
+        pointCount: 1,
+      };
+    });
+
+    if (current) {
+      clusters.push(current);
+    }
+
+    return clusters
+      .map((cluster) => ({
+        ...cluster,
+        durationMs: cluster.endTs - cluster.startTs,
+      }))
+      .filter((cluster) => cluster.durationMs >= minStopDurationMs)
+      .sort((a, b) => b.durationMs - a.durationMs);
+  }, [routeWorkingPins]);
+
+  const routeMapLink = useMemo(() => buildGoogleRouteUrl(routeWorkingPins), [routeWorkingPins]);
+
   const mapUrl = useMemo(() => {
     if (!selectedPoint) return "";
     return `https://maps.google.com/maps?q=${encodeURIComponent(`${selectedPoint.latitude},${selectedPoint.longitude}`)}&z=15&output=embed`;
@@ -443,6 +625,91 @@ export default function GpsMapPage() {
             ) : (
               <div className="moduleHint">No customer-wise GPS visit points found for current filters.</div>
             )}
+          </section>
+
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>Salesman Route (All GPS Pins)</h2>
+              <span>See full day route and long stays</span>
+            </div>
+            <div className="moduleFilterRow" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+              <select className="moduleInput" value={effectiveRouteSalesman} onChange={(event) => setRouteSalesman(event.target.value)}>
+                {routeSalesmanOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+              <select className="moduleInput" value={effectiveRouteDate} onChange={(event) => setRouteDate(event.target.value)}>
+                {routeDateOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="moduleMetricGrid">
+              <section className="moduleMetricCard"><span>Route pins (working hours)</span><strong>{routeWorkingPins.length}</strong></section>
+              <section className="moduleMetricCard"><span>Total route distance</span><strong>{routeTotalDistanceKm.toFixed(2)} km</strong></section>
+              <section className="moduleMetricCard"><span>Stops over 30 mins</span><strong>{routeLongStops.length}</strong></section>
+              <section className="moduleMetricCard"><span>Working-window mode</span><strong>{routeWorkingWindows.length > 0 ? "Attendance based" : "All day pins"}</strong></section>
+            </div>
+
+            <div className="moduleFilterRow" style={{ marginTop: "10px" }}>
+              <div className="moduleHint">
+                {routeWorkingWindows.length > 0
+                  ? "Pins are filtered to working windows (Check-in->Lunch Out and Lunch In->End of Day)."
+                  : "Attendance pair logs are incomplete for this day, so route uses all captured pins."}
+              </div>
+              {routeWorkingPins.length >= 2 ? (
+                <a className="moduleInlineButton" href={routeMapLink} target="_blank" rel="noreferrer">Open Route in Google Maps</a>
+              ) : (
+                <span className="moduleHint">Need at least 2 pins to open a route.</span>
+              )}
+            </div>
+            {routeWorkingPins.length > 25 && (
+              <div className="moduleHint" style={{ marginTop: "8px" }}>
+                Google Maps route link uses first 25 pins due waypoint limits.
+              </div>
+            )}
+
+            <div className="moduleTableWrap" style={{ marginTop: "12px" }}>
+              <table className="moduleTable">
+                <thead>
+                  <tr>
+                    <th>Location</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>Duration</th>
+                    <th>Pins</th>
+                    <th>Map</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {routeLongStops.map((stop, index) => (
+                    <tr key={`route-stop-${index}`}>
+                      <td>{stop.endPin.latitude.toFixed(6)}, {stop.endPin.longitude.toFixed(6)}</td>
+                      <td>{new Date(stop.startTs).toLocaleString("en-GB")}</td>
+                      <td>{new Date(stop.endTs).toLocaleString("en-GB")}</td>
+                      <td>{formatDurationFromMs(stop.durationMs)}</td>
+                      <td>{stop.pointCount}</td>
+                      <td>
+                        <a
+                          className="moduleInlineButton"
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${stop.endPin.latitude},${stop.endPin.longitude}`)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                  {routeLongStops.length === 0 && (
+                    <tr>
+                      <td colSpan={6}>No locations found with 30+ minutes stay in working hours.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <section className="moduleSection">

@@ -163,7 +163,6 @@ async function resolveScope(admin, token) {
   }
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
-  const currentAuthUser = authMap.get(currentProfile.id) || user;
   const identitySearchPattern = normalizeCode(extractEmailLocalPart(currentAuthUser?.email)).replace(/[._-]+/g, "%");
 
   return {

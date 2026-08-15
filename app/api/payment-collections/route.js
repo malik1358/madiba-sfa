@@ -70,9 +70,17 @@ function isInvoiceMakerRole(role) {
   return normalized === "invoice-maker" || normalized === "invoice_maker";
 }
 
+function isCollectorRole(role) {
+  return normalizeRole(role) === "collector";
+}
+
+function isCollectionOnlyCode(code) {
+  return /^CL\d+$/i.test(String(code || "").trim());
+}
+
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
-  return ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"].includes(normalized);
+  return ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"].includes(normalized);
 }
 
 function resolveMutualGroupCodes(allProfiles, currentProfile) {
@@ -214,6 +222,9 @@ async function resolveScope(admin, token) {
   const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
   const currentAuthUser = authMap.get(currentProfile.id) || user;
   const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
+  const collectionOnlyAccess = Boolean(currentMetadata.collection_only)
+    || isCollectorRole(role)
+    || isCollectionOnlyCode(currentSalesmanCode);
   const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
 
   let members = [];
@@ -262,7 +273,7 @@ async function resolveScope(admin, token) {
   return {
     userId: currentProfile.id,
     role,
-    hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
+    hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role) || collectionOnlyAccess,
     visibleSalesmanCodes,
   };
 }

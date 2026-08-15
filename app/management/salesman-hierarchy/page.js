@@ -338,6 +338,7 @@ export default function SalesmanHierarchyPage() {
                 onChange={(event) => setNewSalesman((current) => ({ ...current, role: event.target.value }))}
               >
                 <option value="salesman">Salesman</option>
+                <option value="collector">Collector</option>
                 <option value="product-promoter">Product Promoter</option>
                 <option value="invoice-maker">Invoice Maker</option>
               </select>

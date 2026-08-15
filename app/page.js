@@ -22,7 +22,10 @@ export default function Home() {
 
   const router = useRouter();
   const role = String(profile?.role || "").toLowerCase();
-  const hasManagementAccess = ["admin", "manager", "invoice_maker", "invoice-maker"].includes(role);
+  const isCollectionOnlyAccess = Boolean(user?.user_metadata?.collection_only)
+    || role === "collector"
+    || /^CL\d+$/i.test(String(profile?.salesman_code || "").trim());
+  const hasManagementAccess = ["admin", "manager", "invoice_maker", "invoice-maker", "collector"].includes(role) || isCollectionOnlyAccess;
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -147,6 +150,12 @@ export default function Home() {
     router.push(path);
   }
 
+  useEffect(() => {
+    if (user && profile && isCollectionOnlyAccess) {
+      router.replace("/management/payment-collections");
+    }
+  }, [user, profile, isCollectionOnlyAccess, router]);
+
   if (loading) {
     return (
       <main className="loginPage">
@@ -174,6 +183,15 @@ export default function Home() {
   // =========================================================
 
   if (user && profile) {
+    if (isCollectionOnlyAccess) {
+      return (
+        <main className="loginPage">
+          <div className="loginCard">
+            <div className="loadingText">Loading MADIBA SFA...</div>
+          </div>
+        </main>
+      );
+    }
     return (
       <MorningAttendanceGate>
       <main
@@ -252,7 +270,16 @@ export default function Home() {
           </h3>
 
           <div className="menuGrid">
-            {([
+            {(isCollectionOnlyAccess ? [
+              {
+                icon: "💰",
+                title: ar ? "التحصيلات" : "Collections",
+                subtitle: ar
+                  ? "متابعة التحصيل والزيارات"
+                  : "Collection queue and visit tracking",
+                href: "/management/payment-collections",
+              },
+            ] : [
               {
                 icon: "📍",
                 title: ar ? "يومي" : "My Day",

@@ -3779,6 +3779,61 @@ table.auditMatrix td.auditTrendSame {
   font-weight: 800;
 }
 
+.moduleCollectorFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.moduleCollectorFilterGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.moduleCollectorCheckbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.moduleCollectorProbability {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.moduleCollectorProbabilityHIGH {
+  background: #dff6df;
+  color: #0d6b2f;
+}
+
+.moduleCollectorProbabilityMEDIUM {
+  background: #fff0cc;
+  color: #8d5a00;
+}
+
+.moduleCollectorProbabilityLOW {
+  background: #fde2de;
+  color: #9a2e22;
+}
+
+.moduleCollectorTabActive {
+  border-color: #0b5364;
+  background: #0b5364;
+  color: #ffffff;
+}
+
+.moduleCollectorInvoiceOverdue td {
+  color: #a11d1d;
+  font-weight: 700;
+}
+
 .moduleHealthGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4034,6 +4089,8 @@ table.auditMatrix td.auditTrendSame {
 
   .moduleFilterRow,
   .moduleFormGrid,
+  .moduleCollectorFormGrid,
+  .moduleCollectorFilterGrid,
   .moduleNavGrid,
   .moduleHealthGrid {
     grid-template-columns: 1fr;

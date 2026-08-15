@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const DEFAULT_ITEMS = [
   { href: "/management/my-day", label: "My Day" },
+  { href: "/management/payment-collections", label: "Collections" },
   { href: "/management/customer-audit", label: "Customer Details" },
   { href: "/management/new-order", label: "New Order" },
   { href: "/management/pending-orders", label: "Pending Orders" },

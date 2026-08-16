@@ -3149,6 +3149,13 @@ table.auditMatrix td.auditTrendSame {
   font-weight: 700;
 }
 
+/* These tables scroll within their own wrappers, so page-relative sticky offsets cover rows. */
+.auditMatrix thead th,
+.auditQuickOrderTable th,
+.auditTransactionTable thead th {
+  position: static !important;
+}
+
 
 /* ==========================================================
    MOBILE

@@ -32,7 +32,7 @@ export function useCustomerData({ setError, setMessage }) {
   const [itemMasterStatus, setItemMasterStatus] = useState('Not loaded');
   const [loading, setLoading] = useState(true);
   const [loadingCustomer, setLoadingCustomer] = useState(false);
-  const [showTransactions, setShowTransactions] = useState(false);
+  const [showTransactions, setShowTransactions] = useState(true);
   const [expandedCategories, setExpandedCategories] = useState({});
   const [accessScope, setAccessScope] = useState(null);
 
@@ -96,7 +96,7 @@ export function useCustomerData({ setError, setMessage }) {
     setTransactions([]);
     setPeerTransactions([]);
     setLoadingCustomer(true);
-    setShowTransactions(false);
+    setShowTransactions(true);
     setExpandedCategories({});
     setError('');
     setMessage('');

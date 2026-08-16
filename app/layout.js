@@ -1,7 +1,6 @@
 import "./globals.css";
 import GlobalAppStatus from "./components/GlobalAppStatus";
 import GlobalLogoutButton from "./components/GlobalLogoutButton";
-import ResponsiveTables from "./components/ResponsiveTables";
 
 export const metadata = {
   title: "MADIBA SFA",
@@ -23,7 +22,6 @@ export default function RootLayout({ children }) {
         )}
         <GlobalAppStatus environment={environment} buildId={buildId} />
         <GlobalLogoutButton />
-        <ResponsiveTables />
         {children}
       </body>
     </html>

@@ -447,6 +447,9 @@ async function runSync(sourcePayload = null) {
     syncedAt: nowIso,
     priceCount,
     sheetItemCount: enrichedSheetItems.length,
+    sourceUrlUsed: PRICE_SOURCE_URL,
+    sourceGeneratedAt: normalizeText(payload?.generatedAt) || null,
+    sourceMode: sourcePayload ? "provided_payload" : "fetched_from_source",
   };
 }
 

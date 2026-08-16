@@ -13,6 +13,7 @@ export default function FullItemList({ itemCatalog, orderQuantities, decreaseOrd
   const query = normalizedText(deferredSearch);
 
   const items = (itemCatalog || [])
+    .filter((item) => !isDoNotUseItem(item.item_name))
     .filter((item) => {
       if (!query) return true;
       return [item.item_code, item.item_name, item.category]
@@ -52,7 +53,6 @@ export default function FullItemList({ itemCatalog, orderQuantities, decreaseOrd
             {items.map((item) => {
               const code = String(item.item_code || "").trim();
               const name = String(item.item_name || code).trim();
-              const notOrderable = isDoNotUseItem(name);
               const orderQty = Number(orderQuantities[code] || 0);
               const rate = priceList[String(code).toUpperCase()];
 
@@ -65,15 +65,11 @@ export default function FullItemList({ itemCatalog, orderQuantities, decreaseOrd
                   <td>{item.category || "Unclassified"}</td>
                   <td className="auditQuickRate">{rate ? Number(rate).toLocaleString("en-US", { maximumFractionDigits: 0 }) : "NOT FOUND"}</td>
                   <td>
-                    {notOrderable ? (
-                      <span className="auditQuickBadge">Not orderable</span>
-                    ) : (
-                      <div className="auditQtyControl">
-                        <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(code)}>−</button>
-                        <input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} />
-                        <button type="button" className="auditQtyButton" onClick={() => increaseOrderQty(code)}>+</button>
-                      </div>
-                    )}
+                    <div className="auditQtyControl">
+                      <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(code)}>−</button>
+                      <input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} />
+                      <button type="button" className="auditQtyButton" onClick={() => increaseOrderQty(code)}>+</button>
+                    </div>
                   </td>
                 </tr>
               );

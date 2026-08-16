@@ -43,6 +43,28 @@ test('parsePricePayload applies alias fallback for missing target code', () => {
   assert.equal(priceMap.A005425, 51.3);
 });
 
+test('parsePricePayload reads nested priceMap objects from source payload', () => {
+  const payload = {
+    success: true,
+    generatedAt: '2026-08-16T10:24:08.496Z',
+    priceMap: {
+      A005425: 76,
+      A000057: 71.74,
+    },
+    sheetItems: [
+      {
+        item_code: 'A005425',
+        item_name: 'PHOTOCOPY PAPER A4',
+        category: 'Stationery',
+      },
+    ],
+  };
+
+  const { priceMap } = parsePricePayload(payload);
+  assert.equal(priceMap.A005425, 76);
+  assert.equal(priceMap.A000057, 71.74);
+});
+
 test('loadPricePayload clears stale browser cache before loading fresh prices', async () => {
   const cacheKey = 'madiba.pricePayload.v2';
   const storage = new Map();

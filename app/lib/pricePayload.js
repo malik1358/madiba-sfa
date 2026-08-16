@@ -329,7 +329,12 @@ export function parsePricePayload(payload) {
     }
 
     Object.entries(value).forEach(([key, entry]) => {
-      if (["priceMap", "prices", "data", "rows", "result", "items", "sheetData", "values"].includes(key)) {
+      if (["priceMap", "prices"].includes(key) && entry && typeof entry === "object" && !Array.isArray(entry)) {
+        Object.entries(entry).forEach(([code, rate]) => addRate(code, rate));
+        return;
+      }
+
+      if (["data", "rows", "result", "items", "sheetItems", "sheetData", "values"].includes(key)) {
         walk(entry);
         return;
       }

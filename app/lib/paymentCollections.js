@@ -184,7 +184,15 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       return;
     }
 
-    // Add ALL customers to due queue (not just those with due invoices)
+    const totalOutstanding = toNumber(record?.outstanding_cash)
+      + toNumber(record?.outstanding_0_30)
+      + toNumber(record?.outstanding_30_60)
+      + toNumber(record?.outstanding_61_90)
+      + toNumber(record?.outstanding_91_120)
+      + toNumber(record?.outstanding_above_120);
+
+    if (totalOutstanding <= 0 && allPendingInvoices.length === 0) return;
+
     dueCustomers.push(next);
   });
 

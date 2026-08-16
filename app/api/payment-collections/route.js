@@ -39,13 +39,48 @@ async function getSalesScope(admin, userId) {
   let hasAllAccess = false;
 
   const userRole = String(profile?.role || "").toLowerCase();
+  const normalizedProfileCode = String(profile.salesman_code || "").trim().toUpperCase();
+  
+  // Admins and managers see all customers
   if (userRole === "admin" || userRole === "manager") {
     hasAllAccess = true;
     visibleSalesmanCodes = [];
+  } else {
+    // For regular salesmen, check if they have subordinates
+    try {
+      const { data: allAuthUsers, error: usersError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      
+      if (!usersError && allAuthUsers?.users) {
+        const subordinateCodes = [normalizedProfileCode];
+        
+        // Find all users who report to this salesman
+        for (const authU of allAuthUsers.users) {
+          const metadata = authU?.user_metadata || authU?.app_metadata || {};
+          const subHeadCode = String(metadata.head_salesman_code || "").trim().toUpperCase();
+          
+          if (subHeadCode === normalizedProfileCode) {
+            const { data: subProfile } = await admin
+              .from("profiles")
+              .select("salesman_code")
+              .eq("id", authU.id)
+              .maybeSingle();
+            
+            if (subProfile?.salesman_code) {
+              subordinateCodes.push(subProfile.salesman_code);
+            }
+          }
+        }
+        
+        visibleSalesmanCodes = subordinateCodes;
+      }
+    } catch (e) {
+      // If subordinate lookup fails, just use their own code
+      visibleSalesmanCodes = [normalizedProfileCode];
+    }
   }
 
   return {
-    visibleSalesmanCodes,
+    visibleSalesmanCodes: [...new Set(visibleSalesmanCodes.filter(Boolean))],
     identitySearchPatterns: [profile.salesman_code],
     hasAllAccess,
     userRole,

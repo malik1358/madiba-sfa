@@ -1,11 +1,43 @@
 import { createClient } from "@supabase/supabase-js";
 import { buildCollectionQueues } from "../../lib/paymentCollections.js";
+import {
+  OUTSTANDING_DATASET_KEY,
+  extractLeadingCustomerCodeAndName,
+  toNumber,
+} from "../../lib/outstanding.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
+}
+
+// Customer codes in uploads are sometimes stored as "1114C SOME NAME".
+function canonicalCustomerCode(value) {
+  const raw = normalizeCode(value);
+  if (!raw) return "";
+  const extracted = normalizeCode(extractLeadingCustomerCodeAndName(raw).customer_code);
+  return extracted || raw.split(/\s+/)[0] || raw;
+}
+
+async function readOutstandingInvoices(admin) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", OUTSTANDING_DATASET_KEY)
+    .maybeSingle();
+
+  if (error) return [];
+
+  let parsed = null;
+  try {
+    parsed = typeof data?.setting_value === "string" ? JSON.parse(data.setting_value) : data?.setting_value;
+  } catch {
+    return [];
+  }
+
+  return Array.isArray(parsed?.invoices) ? parsed.invoices : [];
 }
 
 function isMissingTableError(error) {
@@ -127,16 +159,7 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
     salesmanMap.set(normalizedCode, salesman.salesman_name);
   });
 
-  // Fetch all invoices
-  let invoices = [];
-  {
-    const { data, error } = await admin
-      .from("invoices")
-      .select("customer_code,invoice_number,due_date,pending_amount,ref_no");
-
-    if (error && !isMissingTableError(error)) throw error;
-    invoices = Array.isArray(data) ? data : [];
-  }
+  const outstandingInvoices = await readOutstandingInvoices(admin);
 
   // Fetch collection visit history
   let visits = [];
@@ -167,27 +190,52 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
   const legalTransfersByCustomer = new Map();
 
   (visits || []).forEach((visit) => {
-    if (!visitsByCustomer.has(visit.customer_code)) {
-      visitsByCustomer.set(visit.customer_code, []);
+    const key = canonicalCustomerCode(visit.customer_code);
+    if (!visitsByCustomer.has(key)) {
+      visitsByCustomer.set(key, []);
     }
-    visitsByCustomer.get(visit.customer_code).push(visit);
+    visitsByCustomer.get(key).push(visit);
   });
 
   (legalTransfers || []).forEach((transfer) => {
-    if (!legalTransfersByCustomer.has(transfer.customer_code)) {
-      legalTransfersByCustomer.set(transfer.customer_code, transfer);
+    const key = canonicalCustomerCode(transfer.customer_code);
+    if (!legalTransfersByCustomer.has(key)) {
+      legalTransfersByCustomer.set(key, transfer);
     }
   });
 
   const invoicesByCustomer = new Map();
-  (invoices || []).forEach((invoice) => {
-    if (!invoicesByCustomer.has(invoice.customer_code)) {
-      invoicesByCustomer.set(invoice.customer_code, []);
+  outstandingInvoices.forEach((invoice) => {
+    const key = canonicalCustomerCode(invoice.customer_code)
+      || canonicalCustomerCode(invoice.customer_name);
+    if (!key) return;
+
+    if (!invoicesByCustomer.has(key)) {
+      invoicesByCustomer.set(key, []);
     }
-    invoicesByCustomer.get(invoice.customer_code).push(invoice);
+    invoicesByCustomer.get(key).push({
+      invoice_number: String(invoice.ref_no || "").trim(),
+      ref_no: String(invoice.ref_no || "").trim(),
+      invoice_date: invoice.invoice_date || "",
+      due_date: invoice.due_date || "",
+      pending_amount: toNumber(invoice.pending_amount),
+      overdue_days: toNumber(invoice.overdue_days),
+      salesman: String(invoice.salesman || "").trim(),
+    });
   });
 
-  const records = (customers || []).map((customer) => {
+  const uniqueCustomers = new Map();
+  (customers || []).forEach((customer) => {
+    const key = canonicalCustomerCode(customer.customer_code);
+    if (!key) return;
+    const existing = uniqueCustomers.get(key);
+    // Prefer the record that carries a salesman assignment.
+    if (!existing || (!existing.current_salesman_code && customer.current_salesman_code)) {
+      uniqueCustomers.set(key, { ...customer, customer_code: key });
+    }
+  });
+
+  const records = Array.from(uniqueCustomers.values()).map((customer) => {
     const customerInvoices = invoicesByCustomer.get(customer.customer_code) || [];
     const visits = visitsByCustomer.get(customer.customer_code) || [];
     const legalTransfer = legalTransfersByCustomer.get(customer.customer_code);
@@ -207,12 +255,14 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
       const pendingAmount = Number(invoice.pending_amount || 0);
       if (pendingAmount <= 0) return;
 
-      const dueDate = new Date(invoice.due_date);
-      const daysOverdue = Math.floor((today - dueDate) / (1000 * 60 * 60 * 24));
+      const dueDate = invoice.due_date ? new Date(invoice.due_date) : null;
+      const daysOverdue = Number.isFinite(invoice.overdue_days) && invoice.overdue_days
+        ? invoice.overdue_days
+        : (dueDate && !Number.isNaN(dueDate.getTime())
+          ? Math.floor((today - dueDate) / (1000 * 60 * 60 * 24))
+          : 0);
 
-      if (/C/i.test(String(invoice.ref_no || ""))) {
-        outstanding.outstanding_cash += pendingAmount;
-      } else if (daysOverdue <= 30) {
+      if (daysOverdue <= 30) {
         outstanding.outstanding_0_30 += pendingAmount;
       } else if (daysOverdue <= 60) {
         outstanding.outstanding_30_60 += pendingAmount;

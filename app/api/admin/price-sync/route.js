@@ -378,6 +378,10 @@ async function runSync(sourcePayload = null) {
     const currentRate = toPositiveNumber(parsed.priceMap[rawCode]);
     if (currentRate > 0) return;
 
+    // A zero from the price service means no current selling price is published.
+    // Do not silently substitute an old transaction rate for an orderable price.
+    if (Object.prototype.hasOwnProperty.call(parsed.priceMap, rawCode)) return;
+
     const fallbackRate = fallbackRatesByCode.get(code) || 0;
     if (fallbackRate > 0) {
       parsed.priceMap[rawCode] = fallbackRate;

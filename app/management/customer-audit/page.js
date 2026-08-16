@@ -61,6 +61,7 @@ function CustomerAuditPageContent() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [priceList, setPriceList] = useState({});
+  const [priceSheetItems, setPriceSheetItems] = useState([]);
   const [requestedCustomerCode, setRequestedCustomerCode] = useState("");
   const [outstandingLoading, setOutstandingLoading] = useState(false);
   const [outstandingInfo, setOutstandingInfo] = useState({
@@ -188,6 +189,7 @@ function CustomerAuditPageContent() {
       try {
         const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
         setPriceList(parsed.priceMap || {});
+        setPriceSheetItems(parsed.sheetItems || []);
       } catch {
         // Keep previous prices if fresh fetch fails.
       }
@@ -472,6 +474,7 @@ function CustomerAuditPageContent() {
 
         <FullItemList
           itemCatalog={itemMaster}
+          priceSheetItems={priceSheetItems}
           orderQuantities={orderQuantities}
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}

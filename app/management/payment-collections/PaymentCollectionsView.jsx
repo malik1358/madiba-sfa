@@ -714,9 +714,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                           </td>
                         </tr>
                         {isOpen ? (
-                          <tr>
+                          <tr className="moduleCollectorDetailRow">
                             <td colSpan={17}>
-                              <div className="moduleTableWrap" style={{ marginBottom: "10px" }}>
+                              <div className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "10px" }}>
                                 <table className="moduleTable">
                                   <thead>
                                     <tr>
@@ -752,8 +752,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   </tbody>
                                 </table>
                               </div>
-                              <div className="moduleTableWrap" style={{ marginBottom: "12px" }}>
-                                <table className="moduleTable">
+                              <div className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "12px" }}>
+                                <table className="moduleTable moduleCollectorInvoiceTable">
                                   <thead>
                                     <tr>
                                       <th>Date</th>

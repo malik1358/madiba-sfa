@@ -3929,6 +3929,33 @@ table.auditMatrix td.auditTrendSame {
   .moduleCollectorTable > tbody > tr > td[colspan]::before {
     display: none;
   }
+
+  .moduleCollectorTable > tbody > tr.moduleCollectorDetailRow {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .moduleCollectorTable > tbody > tr.moduleCollectorDetailRow > td[colspan] {
+    padding: 0;
+  }
+
+  .moduleCollectorSubTableWrap {
+    overflow-x: auto;
+  }
+
+  .moduleCollectorSubTableWrap .moduleTable th {
+    position: static;
+  }
+
+  .moduleCollectorInvoiceTable {
+    min-width: 460px;
+  }
+
+  .moduleCollectorFormGrid label,
+  .moduleCollectorFilterGrid label {
+    font-size: 13px;
+  }
 }
 
 .moduleHealthGrid {

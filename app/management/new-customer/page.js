@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
@@ -88,7 +89,7 @@ async function reverseGeocode(lat, lng) {
     throw new Error("Reverse geocoding request failed.");
   }
 
-  const payload = await response.json();
+  const payload = await response.json().catch(() => ({}));
   const address = payload?.address || {};
   const city = String(address.city || address.town || address.village || address.state || "").trim();
   const area = String(address.suburb || address.neighbourhood || address.city_district || address.county || address.quarter || "").trim();
@@ -110,7 +111,7 @@ async function translateToArabic(text) {
     throw new Error("Translation request failed.");
   }
 
-  const payload = await response.json();
+  const payload = await response.json().catch(() => []);
   const translated = Array.isArray(payload?.[0])
     ? payload[0].map((part) => String(part?.[0] || "")).join("")
     : "";
@@ -565,7 +566,7 @@ export default function NewCustomerPage() {
             <h1>{t("title")}</h1>
             <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}

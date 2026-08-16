@@ -7,6 +7,7 @@ body {
   background: #f3f7f8;
   color: #062f3a;
   font-family: Arial, Helvetica, sans-serif;
+  --sticky-table-top: 68px;
 }
 
 @media print {
@@ -135,6 +136,14 @@ select {
   gap: 16px;
   margin: 0 auto 24px;
   max-width: 1120px;
+}
+
+.dashboardHeaderActions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .brand {
@@ -1303,6 +1312,9 @@ button {
 }
 
 .auditQuickOrderTable th {
+  position: sticky;
+  top: var(--sticky-table-top);
+  z-index: 6;
   padding: 12px;
   color: #073f4c;
   font-size: 11px;
@@ -1917,12 +1929,15 @@ table.auditMatrix td {
 }
 
 table.auditMatrix thead th {
+  position: sticky;
   font-weight: 800 !important;
+  z-index: 6;
 }
 
 /* ================= YEAR ================= */
 
 table.auditMatrix .auditYearRow th {
+  top: var(--sticky-table-top);
   background: #0d5666 !important;
   color: #fff !important;
   text-align: center !important;
@@ -1939,6 +1954,7 @@ table.auditMatrix .auditYearHeader {
 /* ================= MONTH ================= */
 
 table.auditMatrix .auditMonthRow th {
+  top: calc(var(--sticky-table-top) + 36px);
   background: #eaf1f3 !important;
   color: #254e59 !important;
   text-align: center !important;
@@ -2992,6 +3008,9 @@ table.auditMatrix td.auditTrendSame {
 /* HEADER */
 
 .auditTransactionTable thead th {
+  position: sticky;
+  top: var(--sticky-table-top);
+  z-index: 6;
   background: #eaf1f3;
   color: #073f4c;
 
@@ -3210,6 +3229,61 @@ table.auditMatrix td.auditTrendSame {
   font-weight: 700;
 }
 
+.moduleHeaderMeta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mostVisitedNav {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.mostVisitedLabel {
+  color: #6c838a;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mostVisitedLinks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.mostVisitedLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #cbd8dc;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #073f4c;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mostVisitedLink:hover {
+  background: #edf4f5;
+}
+
+.mostVisitedLinkActive {
+  background: #0d6071;
+  border-color: #0f6172;
+  color: #ffffff;
+}
+
 .moduleSection {
   margin-bottom: 16px;
   padding: 14px;
@@ -3384,15 +3458,18 @@ table.auditMatrix td.auditTrendSame {
 }
 
 .moduleTableWrap {
-  overflow-x: auto;
+  overflow: visible;
   -webkit-overflow-scrolling: touch;
+  position: relative;
+  background: #ffffff;
   border: 1px solid #d5e1e4;
   border-radius: 10px;
 }
 
 .moduleTable {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .moduleTable th,
@@ -3404,7 +3481,11 @@ table.auditMatrix td.auditTrendSame {
 }
 
 .moduleTable th {
+  position: sticky;
+  top: var(--sticky-table-top);
+  z-index: 6;
   background: #edf4f5;
+  box-shadow: inset 0 -1px 0 #d5e1e4;
   color: #073f4c;
   font-size: 11px;
   font-weight: 800;
@@ -3421,6 +3502,35 @@ table.auditMatrix td.auditTrendSame {
   color: #0b6173;
   font-size: 10px;
   font-weight: 800;
+}
+
+.moduleInlineStack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.moduleActionStack {
+  display: grid;
+  gap: 6px;
+  align-items: stretch;
+  min-width: 132px;
+}
+
+.moduleCustomerActionStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.moduleActionButton {
+  min-height: 32px;
+  padding: 0 12px;
+  justify-content: center;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .moduleQtyControl {
@@ -3600,6 +3710,26 @@ table.auditMatrix td.auditTrendSame {
   border-color: #10623d;
 }
 
+.moduleChipButton {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #bfd2d8;
+  border-radius: 999px;
+  background: #f6fbfc;
+  color: #45656e;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.moduleChipButton.active {
+  background: #147347;
+  border-color: #10623d;
+  color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(20, 115, 71, 0.18);
+}
+
 .moduleFormGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3647,6 +3777,61 @@ table.auditMatrix td.auditTrendSame {
   text-decoration: none;
   font-size: 13px;
   font-weight: 800;
+}
+
+.moduleCollectorFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.moduleCollectorFilterGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.moduleCollectorCheckbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.moduleCollectorProbability {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.moduleCollectorProbabilityHIGH {
+  background: #dff6df;
+  color: #0d6b2f;
+}
+
+.moduleCollectorProbabilityMEDIUM {
+  background: #fff0cc;
+  color: #8d5a00;
+}
+
+.moduleCollectorProbabilityLOW {
+  background: #fde2de;
+  color: #9a2e22;
+}
+
+.moduleCollectorTabActive {
+  border-color: #0b5364;
+  background: #0b5364;
+  color: #ffffff;
+}
+
+.moduleCollectorInvoiceOverdue td {
+  color: #a11d1d;
+  font-weight: 700;
 }
 
 .moduleHealthGrid {
@@ -3904,6 +4089,8 @@ table.auditMatrix td.auditTrendSame {
 
   .moduleFilterRow,
   .moduleFormGrid,
+  .moduleCollectorFormGrid,
+  .moduleCollectorFilterGrid,
   .moduleNavGrid,
   .moduleHealthGrid {
     grid-template-columns: 1fr;
@@ -3928,6 +4115,20 @@ table.auditMatrix td.auditTrendSame {
   .dashboardHeader {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .moduleTableWrap {
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  .dashboardHeaderActions,
+  .moduleHeaderMeta,
+  .mostVisitedNav,
+  .mostVisitedLinks {
+    width: 100%;
+    align-items: flex-start;
+    justify-content: flex-start;
   }
 }
 

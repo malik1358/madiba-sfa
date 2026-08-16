@@ -42,29 +42,43 @@ function normalizeHeaderCell(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
+    .replace(/[()]/g, " ")
     .replace(/[_\-]+/g, " ")
     .replace(/\s+/g, " ");
 }
 
+function headerCellMatches(cell, alias) {
+  const normalizedCell = normalizeHeaderCell(cell);
+  const normalizedAlias = normalizeHeaderCell(alias);
+
+  if (!normalizedCell || !normalizedAlias) return false;
+  if (normalizedCell === normalizedAlias) return true;
+  return normalizedCell.includes(normalizedAlias) || normalizedAlias.includes(normalizedCell);
+}
+
 function findHeaderIndex(rows, aliases, maxRows = 5) {
   if (!Array.isArray(rows) || rows.length === 0) return -1;
-  const normalizedAliases = aliases.map((alias) => normalizeHeaderCell(alias));
   const limit = Math.min(maxRows, rows.length);
+  let bestIndex = -1;
+  let bestScore = Number.NEGATIVE_INFINITY;
 
   for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
     const row = rows[rowIndex];
     if (!Array.isArray(row)) continue;
 
     for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
-      const cell = normalizeHeaderCell(row[columnIndex]);
-      if (!cell) continue;
-      if (normalizedAliases.includes(cell)) {
-        return columnIndex;
+      const matchedAliasIndex = aliases.findIndex((alias) => headerCellMatches(row[columnIndex], alias));
+      if (matchedAliasIndex < 0) continue;
+
+      const score = (aliases.length - matchedAliasIndex) * 1000 + (row.length - columnIndex);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = columnIndex;
       }
     }
   }
 
-  return -1;
+  return bestIndex;
 }
 
 function sheetCell(row, index) {
@@ -205,11 +219,17 @@ export function parsePricePayload(payload) {
           "product group",
         ]);
         const headerRateIndex = findHeaderIndex(value, [
+          "wholesale price",
+          "wholesale price riyal",
+          "wholesale price rial",
+          "wholesale price saudi riyal",
+          "selling price",
+          "approx selling price",
+          "approx selling price w o vat",
           "rate",
           "price",
           "unit price",
           "mrp",
-          "selling price",
         ]);
 
         const codeIndex = sheetColumnIndex("B");

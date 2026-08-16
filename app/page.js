@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "./lib/supabase";
 import { useAppLanguage } from "./lib/appLanguage";
 import MorningAttendanceGate from "./components/MorningAttendanceGate";
+import MostVisitedPages from "./components/MostVisitedPages";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
 
 export default function Home() {
@@ -21,7 +22,10 @@ export default function Home() {
 
   const router = useRouter();
   const role = String(profile?.role || "").toLowerCase();
-  const isInvoiceMaker = role === "invoice_maker" || role === "invoice-maker";
+  const isCollectionOnlyAccess = Boolean(user?.user_metadata?.collection_only)
+    || role === "collector"
+    || /^CL\d+$/i.test(String(profile?.salesman_code || "").trim());
+  const hasManagementAccess = ["admin", "manager", "invoice_maker", "invoice-maker", "collector"].includes(role) || isCollectionOnlyAccess;
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -92,12 +96,6 @@ export default function Home() {
     }
   }
 
-  useEffect(() => {
-    if (isInvoiceMaker) {
-      router.replace("/management/pending-orders");
-    }
-  }, [isInvoiceMaker, router]);
-
   async function handleLogin(e) {
     e.preventDefault();
 
@@ -152,6 +150,12 @@ export default function Home() {
     router.push(path);
   }
 
+  useEffect(() => {
+    if (user && profile && isCollectionOnlyAccess) {
+      router.replace("/management/payment-collections");
+    }
+  }, [user, profile, isCollectionOnlyAccess, router]);
+
   if (loading) {
     return (
       <main className="loginPage">
@@ -179,16 +183,15 @@ export default function Home() {
   // =========================================================
 
   if (user && profile) {
-    if (isInvoiceMaker) {
+    if (isCollectionOnlyAccess) {
       return (
         <main className="loginPage">
           <div className="loginCard">
-            <div className="loadingText">Opening pending orders...</div>
+            <div className="loadingText">Loading MADIBA SFA...</div>
           </div>
         </main>
       );
     }
-
     return (
       <MorningAttendanceGate>
       <main
@@ -210,12 +213,15 @@ export default function Home() {
             </div>
           </div>
 
-          <button
-            className="logoutButton"
-            onClick={handleLogout}
-          >
-            {ar ? "تسجيل الخروج" : "Logout"}
-          </button>
+          <div className="dashboardHeaderActions">
+            <MostVisitedPages />
+            <button
+              className="logoutButton"
+              onClick={handleLogout}
+            >
+              {ar ? "تسجيل الخروج" : "Logout"}
+            </button>
+          </div>
 
         </header>
 
@@ -264,19 +270,16 @@ export default function Home() {
           </h3>
 
           <div className="menuGrid">
-            {(
-              isInvoiceMaker
-                ? [
-                    {
-                      icon: "⏳",
-                      title: ar ? "الطلبات المعلقة" : "Pending Orders",
-                      subtitle: ar
-                        ? "عرض الطلبات وطباعتها وتصديرها"
-                        : "View, print, and export pending orders",
-                      href: "/management/pending-orders",
-                    },
-                  ]
-                : [
+            {(isCollectionOnlyAccess ? [
+              {
+                icon: "💰",
+                title: ar ? "التحصيلات" : "Collections",
+                subtitle: ar
+                  ? "متابعة التحصيل والزيارات"
+                  : "Collection queue and visit tracking",
+                href: "/management/payment-collections",
+              },
+            ] : [
               {
                 icon: "📍",
                 title: ar ? "يومي" : "My Day",
@@ -325,8 +328,7 @@ export default function Home() {
                   : "KRA & KPI progress",
                 href: "/management/my-performance",
               },
-                ]
-            ).map((item) => (
+            ]).map((item) => (
               <button
                 key={item.title}
                 type="button"
@@ -339,7 +341,7 @@ export default function Home() {
               </button>
             ))}
 
-            {profile.role === "admin" && (
+            {hasManagementAccess && (
               <button
                 type="button"
                 className="menuCard adminCard"

@@ -694,7 +694,7 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     CONSTRAINT "profiles_preferred_language_check" CHECK (("preferred_language" = ANY (ARRAY['en'::"text", 'ar'::"text"]))),
-    CONSTRAINT "profiles_role_check" CHECK ((("role" IS NULL) OR ("lower"("role") = ANY (ARRAY['admin'::"text", 'manager'::"text", 'salesman'::"text", 'invoice-maker'::"text", 'invoice_maker'::"text"]))))
+    CONSTRAINT "profiles_role_check" CHECK ((("role" IS NULL) OR ("lower"("role") = ANY (ARRAY['admin'::"text", 'manager'::"text", 'salesman'::"text", 'invoice-maker'::"text", 'invoice_maker'::"text", 'product-promoter'::"text", 'product_promoter'::"text"]))))
 );
 
 

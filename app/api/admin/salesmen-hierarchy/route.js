@@ -13,6 +13,10 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function hasMeaningfulCode(value) {
+  return Boolean(normalizeCode(value));
+}
+
 function normalizeCredentialToken(value) {
   return normalizeCode(value)
     .replace(/[^A-Z0-9]+/g, ".")
@@ -59,6 +63,7 @@ function getStoredPassword(metadata) {
 function normalizeRole(value) {
   const role = String(value || "").trim().toLowerCase();
   if (role === "invoice-maker" || role === "invoice_maker") return "invoice-maker";
+  if (role === "product-promoter" || role === "product_promoter") return "product-promoter";
   if (["salesman", "manager", "admin"].includes(role)) return role;
   return "salesman";
 }
@@ -66,6 +71,71 @@ function normalizeRole(value) {
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").trim().toLowerCase();
   return normalized === "invoice-maker" || normalized === "invoice_maker";
+}
+
+function isProductPromoterRole(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  return normalized === "product-promoter" || normalized === "product_promoter";
+}
+
+function codePrefixForRole(role) {
+  const normalized = normalizeRole(role);
+  if (isInvoiceMakerRole(normalized)) return "IV";
+  if (isProductPromoterRole(normalized)) return "PP";
+  if (normalized === "collector") return "CL";
+  if (normalized === "manager") return "MG";
+  if (normalized === "admin") return "AD";
+  return "SM";
+}
+
+function generateAutoSalesmanCode(existingCodes, role) {
+  const prefix = codePrefixForRole(role);
+  const usedCodes = new Set((existingCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+  let maxSequence = 0;
+
+  usedCodes.forEach((code) => {
+    if (!code.startsWith(prefix)) return;
+    const suffix = Number.parseInt(code.slice(prefix.length), 10);
+    if (Number.isFinite(suffix)) {
+      maxSequence = Math.max(maxSequence, suffix);
+    }
+  });
+
+  let nextSequence = maxSequence + 1;
+  let candidate = `${prefix}${String(nextSequence).padStart(3, "0")}`;
+  while (usedCodes.has(candidate)) {
+    nextSequence += 1;
+    candidate = `${prefix}${String(nextSequence).padStart(3, "0")}`;
+  }
+
+  return candidate;
+}
+
+async function syncGeneratedSalesmanCodes(admin) {
+  const { data: profiles, error } = await admin
+    .from("profiles")
+    .select("id,salesman_code,role")
+    .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"])
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+
+  const existingCodes = (profiles || []).map((profile) => profile.salesman_code);
+
+  for (const profile of profiles || []) {
+    if (hasMeaningfulCode(profile.salesman_code)) {
+      continue;
+    }
+
+    const generatedCode = generateAutoSalesmanCode(existingCodes, profile.role);
+    const { error: updateError } = await admin
+      .from("profiles")
+      .update({ salesman_code: generatedCode })
+      .eq("id", profile.id);
+
+    if (updateError) throw updateError;
+    existingCodes.push(generatedCode);
+  }
 }
 
 async function setGeneratedPassword(admin, userId, metadata = {}) {
@@ -246,7 +316,7 @@ async function requireManagementAccess(admin, request) {
     .eq("id", user.id)
     .single();
 
-  if (profileError || !profile || !["admin", "manager"].includes(String(profile.role || "").toLowerCase())) {
+  if (profileError || !profile || !["admin", "manager", "invoice-maker", "invoice_maker"].includes(String(profile.role || "").toLowerCase())) {
     return { error: NextResponse.json({ success: false, error: "Only management can access salesman hierarchy." }, { status: 403 }) };
   }
 
@@ -258,7 +328,7 @@ async function loadSalesmen(admin) {
     admin
       .from("profiles")
       .select("id,salesman_code,salesman_name,role")
-      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"])
+      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"])
       .order("salesman_name"),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
@@ -292,7 +362,7 @@ async function syncGeneratedSalesmanPasswords(admin) {
     admin
       .from("profiles")
       .select("id,salesman_code,role")
-      .in("role", ["salesman", "invoice-maker", "invoice_maker"]),
+      .in("role", ["salesman", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"]),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
 
@@ -331,6 +401,7 @@ export async function GET(request) {
 
     const autoCreateSummary = await autoCreateExistingSalesmen(admin);
     await syncGeneratedSalesmanPasswords(admin);
+    await syncGeneratedSalesmanCodes(admin);
 
     const salesmen = await loadSalesmen(admin);
 
@@ -339,7 +410,7 @@ export async function GET(request) {
       salesmen,
       autoCreateSummary,
       headOptions: salesmen
-        .filter((salesman) => !isInvoiceMakerRole(salesman.role))
+        .filter((salesman) => !isInvoiceMakerRole(salesman.role) && !isProductPromoterRole(salesman.role))
         .map((salesman) => ({
           id: salesman.id,
           salesman_code: salesman.salesman_code,
@@ -374,27 +445,32 @@ export async function POST(request) {
 
     if (mode === "create-salesman") {
       const inputLogin = String(body?.email || body?.loginName || "").trim().toLowerCase();
-      const selectedRole = normalizeRole(body?.role || "salesman");
-      const salesmanCode = normalizeCode(body?.salesmanCode || "");
+      const requestedRole = String(body?.role || "salesman").trim().toLowerCase();
+      const isCollectionOnly = requestedRole === "collector";
+      const selectedRole = isCollectionOnly ? "salesman" : normalizeRole(requestedRole);
       const salesmanName = String(body?.salesmanName || "").trim();
       const headSalesmanCode = normalizeCode(body?.headSalesmanCode || "");
       const loginName = normalizeLoginName(inputLogin);
       const email = inputLogin.includes("@") ? inputLogin : buildEmailFromLoginName(loginName);
 
-      if (!loginName || !salesmanCode || !salesmanName) {
-        return NextResponse.json({ success: false, error: "Username, salesman code, and salesman name are required." }, { status: 400 });
+      if (!loginName || !salesmanName) {
+        return NextResponse.json({ success: false, error: "Username and salesman name are required." }, { status: 400 });
       }
 
-      const { data: existingCode, error: existingCodeError } = await admin
+      if (isProductPromoterRole(selectedRole) && !headSalesmanCode) {
+        return NextResponse.json({ success: false, error: "Product promoter must be assigned under a head salesman." }, { status: 400 });
+      }
+
+      const { data: existingProfiles, error: existingProfilesError } = await admin
         .from("profiles")
-        .select("id")
-        .eq("salesman_code", salesmanCode)
-        .maybeSingle();
+        .select("salesman_code")
+        .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"]);
 
-      if (existingCodeError) throw existingCodeError;
-      if (existingCode) {
-        return NextResponse.json({ success: false, error: `Salesman code ${salesmanCode} already exists.` }, { status: 409 });
-      }
+      if (existingProfilesError) throw existingProfilesError;
+      const salesmanCode = generateAutoSalesmanCode(
+        (existingProfiles || []).map((profile) => profile.salesman_code),
+        isCollectionOnly ? "collector" : selectedRole
+      );
 
       let headSalesmanName = "";
       if (headSalesmanCode && !isInvoiceMakerRole(selectedRole)) {
@@ -418,6 +494,7 @@ export async function POST(request) {
         password,
         email_confirm: true,
         user_metadata: {
+          collection_only: isCollectionOnly,
           head_salesman_code: isInvoiceMakerRole(selectedRole) ? null : (headSalesmanCode || null),
           head_salesman_name: isInvoiceMakerRole(selectedRole) ? null : (headSalesmanName || null),
           generated_password: password,
@@ -448,14 +525,14 @@ export async function POST(request) {
 
       return NextResponse.json({
         success: true,
-        message: `${isInvoiceMakerRole(selectedRole) ? "Invoice maker" : "Salesman"} ${salesmanName} created successfully.`,
+        message: `${isCollectionOnly ? "Collector" : isInvoiceMakerRole(selectedRole) ? "Invoice maker" : selectedRole === "product-promoter" ? "Product promoter" : "Salesman"} ${salesmanName} created successfully.`,
         created: {
           id: userId,
           email,
           login_name: loginName,
           salesman_code: salesmanCode,
           salesman_name: salesmanName,
-          role: selectedRole,
+          role: isCollectionOnly ? "collector" : selectedRole,
           password,
         },
       });

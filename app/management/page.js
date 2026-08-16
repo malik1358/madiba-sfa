@@ -7,6 +7,7 @@ import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import SupabaseUnavailable from "../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../components/AppLanguageSwitch";
+import MostVisitedPages from "../components/MostVisitedPages";
 
 const TEXT = {
   title: { en: "Management", ar: "الإدارة" },
@@ -28,6 +29,7 @@ export default function ManagementPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [accessDenied, setAccessDenied] = useState(false);
+  const [userRole, setUserRole] = useState("");
   const [summary, setSummary] = useState({
     customers: 0,
     salesmen: 0,
@@ -63,6 +65,8 @@ export default function ManagementPage() {
           throw new Error("Please login again.");
         }
 
+        const collectionOnlyMetadata = Boolean(session.user.user_metadata?.collection_only);
+
         setHealth((current) => ({
           ...current,
           sessionUser: session.user.email || session.user.id,
@@ -70,15 +74,39 @@ export default function ManagementPage() {
 
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
-          .select("role")
+          .select("role,salesman_code")
           .eq("id", session.user.id)
           .single();
 
         if (profileError) throw profileError;
 
         const role = String(profile?.role || "").toLowerCase();
-        if (!["admin", "manager"].includes(role)) {
+        const collectionOnlyAccess = collectionOnlyMetadata
+          || role === "collector"
+          || /^CL\d+$/i.test(String(profile?.salesman_code || "").trim());
+        setUserRole(role);
+        if (!["admin", "manager", "invoice-maker", "invoice_maker", "collector"].includes(role) && !collectionOnlyAccess) {
           setAccessDenied(true);
+          setLoading(false);
+          return;
+        }
+
+        if (collectionOnlyAccess) {
+          setUserRole("collector");
+          setSummary({
+            customers: 0,
+            salesmen: 0,
+            orders: 0,
+            drafts: 0,
+            submitted: 0,
+            imports: 0,
+          });
+          setHealth((current) => ({
+            ...current,
+            activeBatch: "-",
+            latestImportAt: "-",
+          }));
+          setRecentOrders([]);
           setLoading(false);
           return;
         }
@@ -93,7 +121,7 @@ export default function ManagementPage() {
           recentOrdersRes,
         ] = await Promise.all([
           supabase.from("customers").select("customer_code", { count: "exact", head: true }),
-          supabase.from("profiles").select("id", { count: "exact", head: true }).in("role", ["salesman", "manager", "admin"]),
+          supabase.from("profiles").select("id", { count: "exact", head: true }).in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker"]),
           supabase.from("sales_orders").select("id,status", { count: "exact" }).order("updated_at", { ascending: false }).limit(1000),
           supabase.from("import_batches").select("id", { count: "exact", head: true }),
           supabase.from("system_settings").select("setting_value").eq("setting_key", "active_sales_batch_id").maybeSingle(),
@@ -192,9 +220,9 @@ export default function ManagementPage() {
               <p className="moduleEyebrow">MADIBA SFA</p>
               <h1>{t("title")}</h1>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
-          <div className="moduleError">Only manager/admin users can access this panel.</div>
+          <div className="moduleError">Only manager/admin/invoice-maker/collector users can access this panel.</div>
         </div>
       </main>
     );
@@ -210,7 +238,7 @@ export default function ManagementPage() {
             <h1>{t("title")}</h1>
             <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}
@@ -229,63 +257,72 @@ export default function ManagementPage() {
             <h2>{t("modules")}</h2>
           </div>
           <div className="moduleNavGrid">
-            <Link href="/management/customer-audit" className="moduleNavCard">Customers Audit</Link>
-            <Link href="/management/new-order" className="moduleNavCard">Orders Workflow</Link>
-            <Link href="/management/salesman-hierarchy" className="moduleNavCard">Salesman Hierarchy</Link>
-            <Link href="/management/gps-map" className="moduleNavCard">GPS Map</Link>
-            <Link href="/management/pending-orders" className="moduleNavCard">Old Pending Orders</Link>
-            <Link href="/management/new-customer" className="moduleNavCard">New Customers</Link>
-            <Link href="/management/my-performance" className="moduleNavCard">Performance</Link>
-            <Link href="/management/my-day" className="moduleNavCard">My Day Planner</Link>
-            <Link href="/management/upload" className="moduleNavCard">Imports</Link>
+            <Link href="/management/payment-collections" className="moduleNavCard">Payment Collections</Link>
+            {userRole !== "collector" ? (
+              <>
+                <Link href="/management/customer-audit" className="moduleNavCard">Customers Audit</Link>
+                <Link href="/management/new-order" className="moduleNavCard">Orders Workflow</Link>
+                <Link href="/management/salesman-hierarchy" className="moduleNavCard">Salesman Hierarchy</Link>
+                <Link href="/management/gps-map" className="moduleNavCard">GPS Map</Link>
+                <Link href="/management/pending-orders" className="moduleNavCard">Old Pending Orders</Link>
+                <Link href="/management/new-customer" className="moduleNavCard">New Customers</Link>
+                <Link href="/management/my-performance" className="moduleNavCard">Performance</Link>
+                <Link href="/management/my-day" className="moduleNavCard">My Day Planner</Link>
+                <Link href="/management/upload" className="moduleNavCard">Imports</Link>
+              </>
+            ) : null}
           </div>
         </section>
 
-        <section className="moduleSection">
-          <div className="moduleSectionHeader">
-            <h2>{t("health")}</h2>
-          </div>
-          <div className="moduleHealthGrid">
-            <div><span>Session User</span><strong>{health.sessionUser}</strong></div>
-            <div><span>Active Sales Batch</span><strong>{health.activeBatch}</strong></div>
-            <div><span>Latest Import</span><strong>{health.latestImportAt === "-" ? "-" : new Date(health.latestImportAt).toLocaleString("en-GB")}</strong></div>
-          </div>
-        </section>
+        {userRole !== "collector" ? (
+          <>
+            <section className="moduleSection">
+              <div className="moduleSectionHeader">
+                <h2>{t("health")}</h2>
+              </div>
+              <div className="moduleHealthGrid">
+                <div><span>Session User</span><strong>{health.sessionUser}</strong></div>
+                <div><span>Active Sales Batch</span><strong>{health.activeBatch}</strong></div>
+                <div><span>Latest Import</span><strong>{health.latestImportAt === "-" ? "-" : new Date(health.latestImportAt).toLocaleString("en-GB")}</strong></div>
+              </div>
+            </section>
 
-        <section className="moduleSection">
-          <div className="moduleSectionHeader">
-            <h2>{t("recentOrders")}</h2>
-          </div>
-          <div className="moduleTableWrap">
-            <table className="moduleTable">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Customer</th>
-                  <th>Salesman</th>
-                  <th>Status</th>
-                  <th>Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentOrders.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.id}</td>
-                    <td>{row.customer_name || row.customer_code}</td>
-                    <td>{row.salesman_code || "-"}</td>
-                    <td>{row.status || "-"}</td>
-                    <td>{row.updated_at ? new Date(row.updated_at).toLocaleString("en-GB") : "-"}</td>
-                  </tr>
-                ))}
-                {recentOrders.length === 0 && (
-                  <tr>
-                    <td colSpan={5}>No orders found.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+            <section className="moduleSection">
+              <div className="moduleSectionHeader">
+                <h2>{t("recentOrders")}</h2>
+              </div>
+              <div className="moduleTableWrap">
+                <table className="moduleTable">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Customer</th>
+                      <th>Salesman</th>
+                      <th>Status</th>
+                      <th>Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentOrders.map((row) => (
+                      <tr key={row.id}>
+                        <td>{row.id}</td>
+                        <td>{row.customer_name || row.customer_code}</td>
+                        <td>{row.salesman_code || "-"}</td>
+                        <td>{row.status || "-"}</td>
+                        <td>{row.updated_at ? new Date(row.updated_at).toLocaleString("en-GB") : "-"}</td>
+                      </tr>
+                    ))}
+                    {recentOrders.length === 0 && (
+                      <tr>
+                        <td colSpan={5}>No orders found.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        ) : null}
       </div>
     </main>
     </MorningAttendanceGate>

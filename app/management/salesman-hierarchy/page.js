@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -38,6 +39,13 @@ function isRandomPassword(value) {
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").trim().toLowerCase();
   return normalized === "invoice-maker" || normalized === "invoice_maker";
+}
+
+function autoCodeHintForRole(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (normalized === "invoice-maker" || normalized === "invoice_maker") return "IV###";
+  if (normalized === "product-promoter" || normalized === "product_promoter") return "PP###";
+  return "SM###";
 }
 
 export default function SalesmanHierarchyPage() {
@@ -89,7 +97,7 @@ export default function SalesmanHierarchyPage() {
         },
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) {
         throw new Error(data.error || "Unable to load salesman hierarchy.");
       }
@@ -146,7 +154,7 @@ export default function SalesmanHierarchyPage() {
       body: JSON.stringify(payload),
     });
 
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.success) {
       throw new Error(data.error || "Unable to complete request.");
     }
@@ -269,7 +277,7 @@ export default function SalesmanHierarchyPage() {
             <h1>{t("title")}</h1>
             <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/management" className="moduleBackLink">{t("management")}</Link></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/management" className="moduleBackLink">{t("management")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}
@@ -303,10 +311,10 @@ export default function SalesmanHierarchyPage() {
               Salesman Code
               <input
                 className="moduleInput"
-                required
-                value={newSalesman.salesmanCode}
-                onChange={(event) => setNewSalesman((current) => ({ ...current, salesmanCode: normalizeCode(event.target.value) }))}
-                placeholder="S001"
+                value={autoCodeHintForRole(newSalesman.role)}
+                disabled
+                readOnly
+                placeholder="Auto generated"
               />
             </label>
 
@@ -330,6 +338,8 @@ export default function SalesmanHierarchyPage() {
                 onChange={(event) => setNewSalesman((current) => ({ ...current, role: event.target.value }))}
               >
                 <option value="salesman">Salesman</option>
+                <option value="collector">Collector</option>
+                <option value="product-promoter">Product Promoter</option>
                 <option value="invoice-maker">Invoice Maker</option>
               </select>
             </label>

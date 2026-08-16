@@ -29,9 +29,14 @@ function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function isProductPromoterRole(role) {
+  const normalized = normalizeRole(role);
+  return normalized === "product-promoter" || normalized === "product_promoter";
+}
+
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
-  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker"].includes(normalized);
+  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
 }
 
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
@@ -146,10 +151,28 @@ export async function GET(request) {
     const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
     const authUsers = usersRes.data?.users || [];
     const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
+    const currentAuthUser = authMap.get(currentProfile.id) || user;
+    const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
+    const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
 
     let members = [];
     if (["admin", "manager"].includes(role)) {
       members = scopedProfiles;
+    } else if (isProductPromoterRole(role) && inheritedHeadCode) {
+      const subordinateIds = new Set();
+
+      authUsers.forEach((authUser) => {
+        const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+        const headCode = normalizeCode(metadata.head_salesman_code);
+        if (headCode && headCode === inheritedHeadCode) {
+          subordinateIds.add(authUser.id);
+        }
+      });
+
+      members = scopedProfiles.filter((profile) => {
+        const profileCode = normalizeCode(profile.salesman_code);
+        return profileCode === inheritedHeadCode || subordinateIds.has(profile.id);
+      });
     } else {
       const subordinateIds = new Set();
 
@@ -181,7 +204,6 @@ export async function GET(request) {
     });
 
     const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
-    const currentAuthUser = authMap.get(currentProfile.id) || user;
 
     const visibleSalesmanCodes = [...new Set([
       ...members.flatMap((member) => profileCodeCandidates(member)),
@@ -189,7 +211,9 @@ export async function GET(request) {
       ...fuzzyMatchedProfileCodes(scopedProfiles, currentAuthUser),
       ...mutualGroupCodes,
     ])];
-    const visibleUserIds = [...new Set(visibleMembers.map((member) => member.id).filter(Boolean))];
+    const visibleUserIds = isProductPromoterRole(role)
+      ? [...new Set([currentProfile.id].filter(Boolean))]
+      : [...new Set(visibleMembers.map((member) => member.id).filter(Boolean))];
 
     const hasAllAccess = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role) || isSoyebProfile(currentProfile);
 

@@ -8,6 +8,7 @@ import { fetchSalesScope } from "../../lib/salesScope";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MostVisitedPages from "../../components/MostVisitedPages";
 
 const TEXT = {
   title: { en: "My Performance", ar: "أدائي" },
@@ -17,7 +18,7 @@ const TEXT = {
 };
 
 function currency(value) {
-  return `SAR ${Number(value || 0).toLocaleString("en-SA", { maximumFractionDigits: 2 })}`;
+  return Number(value || 0).toLocaleString("en-SA", { maximumFractionDigits: 0 });
 }
 
 function percent(value) {
@@ -237,7 +238,7 @@ export default function MyPerformancePage() {
             <h1>{t("title")}</h1>
             <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}

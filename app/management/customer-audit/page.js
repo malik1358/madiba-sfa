@@ -4,7 +4,7 @@ const PRICE_CACHE_API = "/api/pricing/cache";
 
 const PAGE_VERSION = "Quick Order V5";
 const TEXT = {
-  title: { en: "Customer Audit", ar: "تدقيق العملاء" },
+  title: { en: "Customer Details", ar: "تفاصيل العميل" },
   subtitle: { en: "Management sales history validation", ar: "مراجعة سجل مبيعات العملاء" },
   home: { en: "← Home", ar: "← الرئيسية" },
   customers: { en: "← Customers", ar: "← العملاء" },
@@ -13,6 +13,7 @@ const TEXT = {
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -40,8 +41,8 @@ import { useOrder } from "./hooks/useOrder";
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   });
 }
 
@@ -248,14 +249,14 @@ function CustomerAuditPageContent() {
   if (!supabaseClient) {
     return (
       <SupabaseUnavailable
-        title="Customer audit unavailable"
-        message="The customer audit screen needs Supabase credentials to load customer and sales data."
+        title="Customer details unavailable"
+        message="The customer details screen needs Supabase credentials to load customer and sales data."
       />
     );
   }
 
   if (loading) {
-    return <LoadingScreen title="Customer Audit" subtitle="Loading customer data..." />;
+    return <LoadingScreen title="Customer Details" subtitle="Loading customer data..." />;
   }
 
   if (!selectedCustomer) {
@@ -268,7 +269,7 @@ function CustomerAuditPageContent() {
               <h1>{t("title")}</h1>
               <p className="auditSubtitle">{t("subtitle")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
 
           {error && <div className="auditError">{error}</div>}
@@ -299,7 +300,7 @@ function CustomerAuditPageContent() {
               <h1>{t("title")}</h1>
               <p className="auditSubtitle">{t("loadingCustomer")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
           <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
         </div>
@@ -317,7 +318,7 @@ function CustomerAuditPageContent() {
               <h1>{t("title")}</h1>
               <p className="auditSubtitle">{t("subtitle")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
           <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
           {error && <div className="auditError">{error}</div>}
@@ -338,7 +339,7 @@ function CustomerAuditPageContent() {
             <h1>{t("title")}</h1>
             <p className="auditSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
         </div>
 
         <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
@@ -528,7 +529,7 @@ function CustomerAuditPageContent() {
 
 export default function CustomerAuditPage() {
   return (
-    <Suspense fallback={<LoadingScreen title="Customer Audit" subtitle="Loading customer data..." />}>
+    <Suspense fallback={<LoadingScreen title="Customer Details" subtitle="Loading customer data..." />}>
       <CustomerAuditPageContent />
     </Suspense>
   );

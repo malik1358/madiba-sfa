@@ -15,6 +15,20 @@ function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+function normalizeRole(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isProductPromoterRole(role) {
+  const normalized = normalizeRole(role);
+  return normalized === "product-promoter" || normalized === "product_promoter";
+}
+
+function isInvoiceMakerRole(role) {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "invoice-maker" || normalized === "invoice_maker";
+}
+
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function resolveMutualGroupCodes(allProfiles, currentProfile) {
@@ -34,6 +48,10 @@ function latestSettingKey(customerCode) {
 
 function historySettingKey(customerCode) {
   return `visit_report_history:${normalizeCode(customerCode)}:${Date.now()}`;
+}
+
+function inactiveMetaKey(customerCode) {
+  return `customer_inactive_meta:${normalizeCode(customerCode)}`;
 }
 
 async function resolveScope(admin, token) {
@@ -56,14 +74,14 @@ async function resolveScope(admin, token) {
     throw new Error("Profile not found.");
   }
 
-  const role = String(currentProfile.role || "").toLowerCase();
+  const role = normalizeRole(currentProfile.role);
   const currentSalesmanCode = normalizeCode(currentProfile.salesman_code);
 
   const [profilesRes, usersRes] = await Promise.all([
     admin
       .from("profiles")
       .select("id,role,salesman_code,salesman_name")
-      .in("role", ["salesman", "manager", "admin"]),
+      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"]),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
 
@@ -72,8 +90,18 @@ async function resolveScope(admin, token) {
 
   const authUsers = usersRes.data?.users || [];
   const subordinateIds = new Set();
+  const currentAuthUser = authUsers.find((authUser) => authUser.id === currentProfile.id) || user;
+  const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
+  const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
 
-  if (!["admin", "manager"].includes(role)) {
+  if (isProductPromoterRole(role) && inheritedHeadCode) {
+    authUsers.forEach((authUser) => {
+      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+      if (normalizeCode(metadata.head_salesman_code) === inheritedHeadCode) {
+        subordinateIds.add(authUser.id);
+      }
+    });
+  } else if (!["admin", "manager"].includes(role) && !isInvoiceMakerRole(role)) {
     authUsers.forEach((authUser) => {
       const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
       if (normalizeCode(metadata.head_salesman_code) === currentSalesmanCode) {
@@ -84,7 +112,10 @@ async function resolveScope(admin, token) {
 
   const allProfiles = profilesRes.data || [];
   const visibleProfiles = allProfiles.filter((profile) => {
-    if (["admin", "manager"].includes(role)) return true;
+    if (["admin", "manager"].includes(role) || isInvoiceMakerRole(role)) return true;
+    if (isProductPromoterRole(role) && inheritedHeadCode) {
+      return normalizeCode(profile.salesman_code) === inheritedHeadCode || subordinateIds.has(profile.id);
+    }
     return profile.id === currentProfile.id || subordinateIds.has(profile.id);
   });
 
@@ -92,7 +123,7 @@ async function resolveScope(admin, token) {
 
   return {
     userId: user.id,
-    hasAllAccess: ["admin", "manager"].includes(role),
+    hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
     visibleSalesmanCodes: [...new Set([
       ...visibleProfiles.map((profile) => normalizeCode(profile.salesman_code)).filter(Boolean),
       ...mutualGroupCodes,
@@ -156,6 +187,33 @@ export async function PATCH(request) {
 
     if (updateError) throw updateError;
     if (!updatedCustomer) throw new Error("Customer status was not updated.");
+
+    if (updatedCustomer.is_active === false) {
+      const inactiveMetaValue = {
+        customer_code: customerCode,
+        marked_at: new Date().toISOString(),
+        marked_by_user_id: scope.userId,
+      };
+
+      const { error: inactiveMetaError } = await admin
+        .from("system_settings")
+        .upsert(
+          {
+            setting_key: inactiveMetaKey(customerCode),
+            setting_value: JSON.stringify(inactiveMetaValue),
+          },
+          { onConflict: "setting_key" }
+        );
+
+      if (inactiveMetaError) throw inactiveMetaError;
+    } else {
+      const { error: clearMetaError } = await admin
+        .from("system_settings")
+        .delete()
+        .eq("setting_key", inactiveMetaKey(customerCode));
+
+      if (clearMetaError) throw clearMetaError;
+    }
 
     return NextResponse.json({ success: true, customer: updatedCustomer });
   } catch (error) {

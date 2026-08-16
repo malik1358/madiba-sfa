@@ -29,9 +29,14 @@ function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function isProductPromoterRole(role) {
+  const normalized = normalizeRole(role);
+  return normalized === "product-promoter" || normalized === "product_promoter";
+}
+
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
-  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker"].includes(normalized);
+  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
 }
 
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
@@ -122,9 +127,19 @@ async function resolveScope(admin, token) {
 
   const authUsers = usersRes.data?.users || [];
   const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
+  const currentAuthUser = authMap.get(currentProfile.id) || user;
+  const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
+  const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
   const subordinateIds = new Set();
 
-  if (!["admin", "manager"].includes(role)) {
+  if (isProductPromoterRole(role) && inheritedHeadCode) {
+    authUsers.forEach((authUser) => {
+      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+      if (normalizeCode(metadata.head_salesman_code) === inheritedHeadCode) {
+        subordinateIds.add(authUser.id);
+      }
+    });
+  } else if (!["admin", "manager"].includes(role)) {
     authUsers.forEach((authUser) => {
       const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
       if (normalizeCode(metadata.head_salesman_code) === currentSalesmanCode) {
@@ -137,6 +152,9 @@ async function resolveScope(admin, token) {
   const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
   let visibleProfiles = scopedProfiles.filter((profile) => {
     if (["admin", "manager"].includes(role)) return true;
+    if (isProductPromoterRole(role) && inheritedHeadCode) {
+      return normalizeCode(profile.salesman_code) === inheritedHeadCode || subordinateIds.has(profile.id);
+    }
     return profile.id === currentProfile.id || subordinateIds.has(profile.id);
   });
 
@@ -145,7 +163,6 @@ async function resolveScope(admin, token) {
   }
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
-  const currentAuthUser = authMap.get(currentProfile.id) || user;
   const identitySearchPattern = normalizeCode(extractEmailLocalPart(currentAuthUser?.email)).replace(/[._-]+/g, "%");
 
   return {

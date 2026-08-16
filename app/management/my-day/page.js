@@ -7,10 +7,13 @@ import { fetchSalesScope } from "../../lib/salesScope";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
+
+const CUSTOMER_HISTORY_API = "/api/customer-history";
 
 const PAGE_TEXT = {
   title: { en: "My Day", ar: "يومي" },
@@ -39,10 +42,16 @@ const PAGE_TEXT = {
   outstandingUnder60: { en: "Outstanding Under 60 Days", ar: "المبالغ المستحقة لأقل من 60 يوماً" },
   outstandingAbove60: { en: "Outstanding Above 60 Days", ar: "المبالغ المستحقة لأكثر من 60 يوماً" },
   visitedWithoutInvoice: { en: "Visited Without Invoice", ar: "تمت الزيارة بدون فاتورة" },
+  noOutstanding: { en: "No Outstanding", ar: "لا يوجد رصيد مستحق" },
+  inactiveCustomers: { en: "Inactive Customers", ar: "عملاء غير نشطين" },
   outstanding0To30: { en: "0-30 Days", ar: "0-30 يوماً" },
   outstanding30To60: { en: "30-60 Days", ar: "30-60 يوماً" },
   outstandingAbove60Column: { en: ">60 Days", ar: ">60 يوماً" },
+  totalOutstanding: { en: "Total Outstanding", ar: "إجمالي المستحقات" },
   searchCustomer: { en: "Search customer by name or code", ar: "ابحث عن العميل بالاسم أو الرمز" },
+  searchSalesman: { en: "Salesman Filter", ar: "فلتر رجل البيع" },
+  allSalesmen: { en: "All salesmen", ar: "كل رجال البيع" },
+  unassignedSalesman: { en: "Unassigned", ar: "غير محدد" },
   recentValue: { en: "Recent 6M Value", ar: "قيمة آخر 6 أشهر" },
   customer: { en: "Customer", ar: "العميل" },
   cityArea: { en: "City / Area", ar: "المدينة / المنطقة" },
@@ -50,10 +59,14 @@ const PAGE_TEXT = {
   daysSinceLastVisit: { en: "Days From Last Visit", ar: "الأيام منذ آخر زيارة" },
   status: { en: "Status", ar: "الحالة" },
   actions: { en: "Actions", ar: "الإجراءات" },
-  openAudit: { en: "Open Audit", ar: "فتح التدقيق" },
+  openAudit: { en: "Customer Details", ar: "تفاصيل العميل" },
   markInactive: { en: "Mark Inactive", ar: "تعطيل العميل" },
   markingInactive: { en: "Marking...", ar: "جاري التعطيل..." },
+  markActive: { en: "Mark Active", ar: "إعادة التفعيل" },
+  markingActive: { en: "Activating...", ar: "جاري التفعيل..." },
   inactiveSaved: { en: "Customer marked inactive and removed from visit status.", ar: "تم تعطيل العميل وإزالته من حالة الزيارات." },
+  activeSaved: { en: "Customer activated and removed from inactive list.", ar: "تم تفعيل العميل وإزالته من قائمة غير النشطين." },
+  inactiveSince: { en: "Inactive Since", ar: "غير نشط منذ" },
   noCustomers: { en: "No customers available for route status.", ar: "لا يوجد عملاء متاحون لحالة المسار." },
   visitWithoutOrder: { en: "Visit Without Order", ar: "زيارة بدون طلب" },
   closeReport: { en: "Close", ar: "إغلاق" },
@@ -86,6 +99,11 @@ const PAGE_TEXT = {
   overdueVisits: { en: "Overdue visits", ar: "الزيارات المتأخرة" },
   newCustomers: { en: "New customers assigned", ar: "العملاء الجدد" },
   completedVisits: { en: "Completed visits", ar: "الزيارات المكتملة" },
+  workingHours: { en: "Working Hours", ar: "ساعات العمل" },
+  checkInToLunchOut: { en: "Check-in to Lunch Out", ar: "من تسجيل الحضور إلى خروج الاستراحة" },
+  lunchInToEndOfDay: { en: "Lunch In to End of Day", ar: "من العودة من الاستراحة إلى نهاية اليوم" },
+  totalWorkedHours: { en: "Total Worked Hours", ar: "إجمالي ساعات العمل" },
+  waitingAttendanceLogs: { en: "Waiting for attendance logs to complete working hours.", ar: "بانتظار اكتمال سجلات الحضور لحساب ساعات العمل." },
 };
 
 function daysBetween(date) {
@@ -114,6 +132,14 @@ function getSortTimestamp(date) {
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) return 0;
   return parsed.getTime();
+}
+
+function formatDurationFromMs(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return "-";
+  const totalMinutes = Math.floor(durationMs / (1000 * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 function toDatetimeLocalValue(value) {
@@ -157,7 +183,10 @@ async function fetchVisibleCustomers(token) {
     throw new Error(payload.error || "Unable to load visible customers.");
   }
 
-  return payload.customers || [];
+  return {
+    customers: payload.customers || [],
+    inactiveCustomers: payload.inactiveCustomers || [],
+  };
 }
 
 export default function MyDayPage() {
@@ -180,6 +209,7 @@ export default function MyDayPage() {
   });
   const [routeRows, setRouteRows] = useState([]);
   const [visitStatusRows, setVisitStatusRows] = useState([]);
+  const [inactiveCustomers, setInactiveCustomers] = useState([]);
   const [prospectScheduleRows, setProspectScheduleRows] = useState([]);
   const [todayLogs, setTodayLogs] = useState([]);
   const [note, setNote] = useState("");
@@ -190,6 +220,7 @@ export default function MyDayPage() {
   const [visitItemsLoading, setVisitItemsLoading] = useState(false);
   const [inactiveCustomerCode, setInactiveCustomerCode] = useState("");
   const [visitStatusSearch, setVisitStatusSearch] = useState("");
+  const [selectedVisitStatusSalesmen, setSelectedVisitStatusSalesmen] = useState([]);
   const [dictationSupported, setDictationSupported] = useState(false);
   const [dictationActive, setDictationActive] = useState(false);
   const speechRecognitionRef = useRef(null);
@@ -222,7 +253,25 @@ export default function MyDayPage() {
   }
 
   function isGpsLog(entryType) {
-    return ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY", "NOTE", "GPS_PING"].includes(entryType);
+    return ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY", "NOTE"].includes(entryType);
+  }
+
+  function buildUniqueStockChecks(rows) {
+    const uniqueItems = [];
+    const seen = new Set();
+
+    (rows || []).forEach((row) => {
+      const key = String(row?.item_code || row?.itemCode || row?.item_name || row?.itemName || "").trim().toUpperCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      uniqueItems.push({
+        itemCode: row?.item_code || row?.itemCode || "",
+        itemName: row?.item_name || row?.itemName || row?.item_code || row?.itemCode || key,
+        status: "",
+      });
+    });
+
+    return uniqueItems;
   }
 
   useEffect(() => {
@@ -318,7 +367,7 @@ export default function MyDayPage() {
           pendingOrdersRes,
           submittedTodayRes,
           todayOrdersRes,
-          customerRows,
+          visibilityPayload,
           routeRes,
         ] = await Promise.all([
           todaySalesQuery,
@@ -334,6 +383,42 @@ export default function MyDayPage() {
         if (submittedTodayRes.error) throw submittedTodayRes.error;
         if (todayOrdersRes.error) throw todayOrdersRes.error;
         if (routeRes.error) throw routeRes.error;
+
+        const customerRows = visibilityPayload.customers || [];
+        const inactiveCustomerRows = visibilityPayload.inactiveCustomers || [];
+
+        const normalizedScopeCodes = new Set(
+          (scope.visibleSalesmanCodes || [])
+            .map((code) => String(code || "").trim().toUpperCase())
+            .filter(Boolean)
+        );
+        const scopedCustomerRows = scope.hasAllAccess
+          ? customerRows
+          : customerRows.filter((row) =>
+              normalizedScopeCodes.has(String(row.current_salesman_code || "").trim().toUpperCase())
+            );
+
+        const visibleSalesmanCodes = [...new Set(
+          [...scopedCustomerRows, ...inactiveCustomerRows]
+            .map((row) => String(row.current_salesman_code || "").trim().toUpperCase())
+            .filter(Boolean)
+        )];
+
+        const salesmanNameByCode = new Map();
+        if (visibleSalesmanCodes.length > 0) {
+          const { data: salesmanProfiles, error: salesmanProfilesError } = await supabase
+            .from("profiles")
+            .select("salesman_code,salesman_name")
+            .in("salesman_code", visibleSalesmanCodes);
+
+          if (!salesmanProfilesError) {
+            (salesmanProfiles || []).forEach((profileRow) => {
+              const code = String(profileRow.salesman_code || "").trim().toUpperCase();
+              const name = String(profileRow.salesman_name || "").trim();
+              if (code) salesmanNameByCode.set(code, name);
+            });
+          }
+        }
 
         let newProspectsCount = 0;
         if (prospectsCheck.available) {
@@ -383,7 +468,7 @@ export default function MyDayPage() {
           const { data: logsData, error: logsError } = await logsQuery;
 
           if (!logsError) {
-            const rows = logsData || [];
+            const rows = (logsData || []).filter((row) => isGpsLog(row.entry_type));
             setTodayLogs(rows);
 
           } else {
@@ -460,7 +545,7 @@ export default function MyDayPage() {
             });
           }
         } else {
-          const customerCodes = customerRows
+          const customerCodes = scopedCustomerRows
             .map((row) => String(row.customer_code || "").trim().toUpperCase())
             .filter(Boolean);
 
@@ -499,8 +584,8 @@ export default function MyDayPage() {
           }
         }
 
-        const overdueRows = customerRows.filter((row) => daysBetween(row.latest_transaction_date) > 21);
-        const followUpRows = customerRows.filter((row) => daysBetween(row.latest_transaction_date) > 10);
+        const overdueRows = scopedCustomerRows.filter((row) => daysBetween(row.latest_transaction_date) > 21);
+        const followUpRows = scopedCustomerRows.filter((row) => daysBetween(row.latest_transaction_date) > 10);
 
         const visiblePendingOrders = (pendingOrdersRes.data || []).filter((row) => {
           if (scope.hasAllAccess) return true;
@@ -524,13 +609,15 @@ export default function MyDayPage() {
         setRouteRows((routeRes.data || []).filter(isVisitStatusCustomer));
 
         setVisitStatusRows(
-          customerRows
+          scopedCustomerRows
             .filter(isVisitStatusCustomer)
             .map((row) => ({
               customer_code: row.customer_code,
               customer_name: row.customer_name,
               city: row.city,
               area: row.area,
+              salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
+              salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
               last_invoice_date: row.latest_transaction_date || null,
               last_visit_date: latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
@@ -546,6 +633,20 @@ export default function MyDayPage() {
                 ? "Overdue"
                 : "Planned",
             }))
+        );
+
+        setInactiveCustomers(
+          inactiveCustomerRows.map((row) => ({
+            customer_code: row.customer_code,
+            customer_name: row.customer_name,
+            city: row.city,
+            area: row.area,
+            salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
+            salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
+            last_invoice_date: row.latest_transaction_date || null,
+            days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
+            inactive_marked_at: row.inactive_marked_at || null,
+          }))
         );
       } catch (err) {
         setError(err.message || "Unable to load My Day planner.");
@@ -619,14 +720,14 @@ export default function MyDayPage() {
 
       const { data: logs, error: logsError } = await supabase
         .from("daily_activity_logs")
-        .select("id,entry_type,note,created_at")
+        .select("id,user_id,entry_type,note,created_at")
         .eq("user_id", session.user.id)
         .gte("created_at", `${today}T00:00:00`)
         .lte("created_at", `${today}T23:59:59`)
         .order("created_at", { ascending: false });
 
       if (logsError) throw logsError;
-      const rows = logs || [];
+      const rows = (logs || []).filter((row) => isGpsLog(row.entry_type));
       setTodayLogs(rows);
     } catch (err) {
       setError(err.message || "Unable to save activity log.");
@@ -676,6 +777,11 @@ export default function MyDayPage() {
         throw new Error("Supabase is not configured.");
       }
 
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token || "";
+
       let itemsQuery = supabase
         .from("active_sales")
         .select("item_code,item_name,transaction_date,salesman_code")
@@ -689,18 +795,57 @@ export default function MyDayPage() {
       const { data, error: itemsError } = await itemsQuery;
       if (itemsError) throw itemsError;
 
-      const uniqueItems = [];
-      const seen = new Set();
-      (data || []).forEach((row) => {
-        const key = String(row.item_code || row.item_name || "").trim().toUpperCase();
-        if (!key || seen.has(key)) return;
-        seen.add(key);
-        uniqueItems.push({
-          itemCode: row.item_code || "",
-          itemName: row.item_name || row.item_code || key,
-          status: "",
-        });
-      });
+      let uniqueItems = buildUniqueStockChecks(data || []);
+
+      if (uniqueItems.length === 0) {
+        let ordersQuery = supabase
+          .from("sales_orders")
+          .select("id,salesman_code,created_at")
+          .eq("customer_code", customer.customer_code)
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (!accessScope?.hasAllAccess) {
+          ordersQuery = ordersQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
+        }
+
+        const { data: orderRows, error: ordersError } = await ordersQuery;
+        if (ordersError) throw ordersError;
+
+        const orderIds = (orderRows || []).map((row) => row.id).filter(Boolean);
+        if (orderIds.length > 0) {
+          const { data: orderItemRows, error: orderItemsError } = await supabase
+            .from("sales_order_items")
+            .select("order_id,item_code,item_name,created_at")
+            .in("order_id", orderIds)
+            .order("created_at", { ascending: false });
+
+          if (orderItemsError) throw orderItemsError;
+          uniqueItems = buildUniqueStockChecks(orderItemRows || []);
+        }
+      }
+
+      if (uniqueItems.length === 0 && accessToken) {
+        const response = await fetch(
+          `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(customer.customer_code)}&customerName=${encodeURIComponent(customer.customer_name || "")}`,
+          {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          }
+        );
+
+        if (response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          uniqueItems = buildUniqueStockChecks(Array.isArray(payload.transactions) ? payload.transactions : []);
+        } else {
+          const payload = await response.json().catch(() => ({}));
+          const message = String(payload?.error || "").trim();
+          if (message) {
+            setError(message);
+          }
+        }
+      }
 
       setVisitForm((current) => ({
         ...current,
@@ -788,7 +933,7 @@ export default function MyDayPage() {
           }),
         });
 
-        const result = await response.json();
+        const result = await response.json().catch(() => ({}));
         if (!response.ok || !result?.success) {
           throw new Error(result?.error || "Unable to save visit report.");
         }
@@ -859,12 +1004,120 @@ export default function MyDayPage() {
 
       setVisitStatusRows((current) => current.filter((row) => row.customer_code !== code));
       setRouteRows((current) => current.filter((row) => row.customer_code !== code));
+      setInactiveCustomers((current) => [
+        {
+          customer_code: customer.customer_code,
+          customer_name: customer.customer_name,
+          city: customer.city,
+          area: customer.area,
+          salesman_code: customer.salesman_code,
+          salesman_name: customer.salesman_name,
+          last_invoice_date: customer.last_invoice_date || null,
+          days_since_last_invoice: customer.days_since_last_invoice,
+          inactive_marked_at: new Date().toISOString(),
+        },
+        ...current.filter((row) => row.customer_code !== code),
+      ]);
       if (activeVisitCustomerCode === code) {
         setActiveVisitCustomerCode("");
       }
       setMessage(t("inactiveSaved"));
     } catch (err) {
       setError(err.message || "Unable to mark customer inactive.");
+    } finally {
+      setInactiveCustomerCode("");
+    }
+  }
+
+  async function markCustomerActive(customer) {
+    const code = String(customer?.customer_code || "").trim();
+    if (!code) return;
+    const normalizedCode = code.toUpperCase();
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setInactiveCustomerCode(code);
+    setError("");
+    setMessage("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Please login again.");
+      }
+
+      const response = await fetch("/api/visit-reports", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ customerCode: code, isActive: true }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to mark customer active.");
+      }
+
+      const visibilityPayload = await fetchVisibleCustomers(session.access_token);
+      const activatedRow = (visibilityPayload.customers || []).find(
+        (entry) => String(entry.customer_code || "").trim().toUpperCase() === normalizedCode
+      );
+
+      if (activatedRow) {
+        const nextVisitStatusRow = {
+          customer_code: activatedRow.customer_code,
+          customer_name: activatedRow.customer_name,
+          city: activatedRow.city,
+          area: activatedRow.area,
+          salesman_code: String(activatedRow.current_salesman_code || "").trim().toUpperCase(),
+          salesman_name: String(customer.salesman_name || activatedRow.current_salesman_code || "").trim().toUpperCase(),
+          last_invoice_date: activatedRow.latest_transaction_date || null,
+          last_visit_date: null,
+          days_since_last_invoice: daysBetweenNullable(activatedRow.latest_transaction_date),
+          days_since_last_visit: null,
+          next_visit_at: null,
+          recent_sales_value: Number(activatedRow.recent_sales_value || 0),
+          outstanding_0_30: Number(activatedRow.outstanding_0_30 || 0),
+          outstanding_30_60: Number(activatedRow.outstanding_30_60 || 0),
+          outstanding_above_60: Number(activatedRow.outstanding_above_60 || 0),
+          status: daysBetween(activatedRow.latest_transaction_date) > 21 ? "Overdue" : "Planned",
+        };
+
+        setVisitStatusRows((current) => {
+          const filtered = current.filter(
+            (row) => String(row.customer_code || "").trim().toUpperCase() !== normalizedCode
+          );
+          return [...filtered, nextVisitStatusRow];
+        });
+
+        setRouteRows((current) => {
+          const nextRouteRow = {
+            customer_code: activatedRow.customer_code,
+            customer_name: activatedRow.customer_name,
+            city: activatedRow.city,
+            area: activatedRow.area,
+            latest_transaction_date: activatedRow.latest_transaction_date || null,
+            is_active: true,
+          };
+          const filtered = current.filter(
+            (row) => String(row.customer_code || "").trim().toUpperCase() !== normalizedCode
+          );
+          return [...filtered, nextRouteRow];
+        });
+      }
+
+      setInactiveCustomers((current) => current.filter((row) => row.customer_code !== code));
+      setMessage(t("activeSaved"));
+    } catch (err) {
+      setError(err.message || "Unable to mark customer active.");
     } finally {
       setInactiveCustomerCode("");
     }
@@ -915,15 +1168,98 @@ export default function MyDayPage() {
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   }, [routeRows]);
 
-  const rankedVisitStatusRows = useMemo(
-    () => filterAndRankVisitCustomers(visitStatusRows, visitStatusSearch),
-    [visitStatusRows, visitStatusSearch]
+  const attendanceHours = useMemo(() => {
+    const ownLogs = (todayLogs || []).filter((row) => {
+      if (!profile?.id) return true;
+      return !row?.user_id || row.user_id === profile.id;
+    });
+
+    const attendanceRows = ownLogs
+      .filter((row) => ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY"].includes(row.entry_type))
+      .map((row) => ({ ...row, captured_ts: readCapturedAt(row) }))
+      .filter((row) => row.captured_ts > 0)
+      .sort((a, b) => a.captured_ts - b.captured_ts);
+
+    let morningTs = 0;
+    let lunchOutTs = 0;
+    let lunchInTs = 0;
+    let endTs = 0;
+
+    attendanceRows.forEach((row) => {
+      if (row.entry_type === "MORNING_ATTENDANCE" && !morningTs) {
+        morningTs = row.captured_ts;
+        return;
+      }
+      if (row.entry_type === "LUNCH_BREAK_OUT" && morningTs && !lunchOutTs && row.captured_ts >= morningTs) {
+        lunchOutTs = row.captured_ts;
+        return;
+      }
+      if (row.entry_type === "LUNCH_BREAK_IN" && lunchOutTs && !lunchInTs && row.captured_ts >= lunchOutTs) {
+        lunchInTs = row.captured_ts;
+        return;
+      }
+      if (row.entry_type === "END_OF_DAY" && lunchInTs && !endTs && row.captured_ts >= lunchInTs) {
+        endTs = row.captured_ts;
+      }
+    });
+
+    const firstHalfMs = morningTs && lunchOutTs ? lunchOutTs - morningTs : 0;
+    const secondHalfMs = lunchInTs && endTs ? endTs - lunchInTs : 0;
+
+    return {
+      firstHalfLabel: formatDurationFromMs(firstHalfMs),
+      secondHalfLabel: formatDurationFromMs(secondHalfMs),
+      totalLabel: formatDurationFromMs(firstHalfMs + secondHalfMs),
+      hasCompleteLog: Boolean(firstHalfMs > 0 || secondHalfMs > 0),
+    };
+  }, [todayLogs, profile?.id]);
+
+  const visitStatusSalesmanOptions = useMemo(
+    () => [...new Set(
+      visitStatusRows
+        .map((row) => String(row.salesman_name || "").trim() || "__UNASSIGNED__")
+        .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b)),
+    [visitStatusRows]
   );
+
+  function toggleVisitStatusSalesman(salesmanName) {
+    setSelectedVisitStatusSalesmen((current) => {
+      if (current.includes(salesmanName)) {
+        return current.filter((entry) => entry !== salesmanName);
+      }
+      return [...current, salesmanName];
+    });
+  }
+
+  const rankedVisitStatusRows = useMemo(() => {
+    const customerFiltered = filterAndRankVisitCustomers(visitStatusRows, visitStatusSearch);
+    if (selectedVisitStatusSalesmen.length === 0) return customerFiltered;
+
+    return customerFiltered.filter((row) =>
+      selectedVisitStatusSalesmen.includes(String(row.salesman_name || "").trim() || "__UNASSIGNED__")
+    );
+  }, [visitStatusRows, visitStatusSearch, selectedVisitStatusSalesmen]);
 
   const groupedVisitStatusRows = useMemo(
     () => splitVisitCustomersByOutstanding(rankedVisitStatusRows),
     [rankedVisitStatusRows]
   );
+
+  const filteredInactiveCustomers = useMemo(() => {
+    const query = String(visitStatusSearch || "").trim().toLowerCase();
+
+    return (inactiveCustomers || []).filter((row) => {
+      if (selectedVisitStatusSalesmen.length > 0) {
+        const salesmanName = String(row.salesman_name || "").trim() || "__UNASSIGNED__";
+        if (!selectedVisitStatusSalesmen.includes(salesmanName)) return false;
+      }
+
+      if (!query) return true;
+      return [row?.customer_code, row?.customer_name]
+        .some((value) => String(value || "").toLowerCase().includes(query));
+    });
+  }, [inactiveCustomers, visitStatusSearch, selectedVisitStatusSalesmen]);
 
   const plannedVisitRows = useMemo(
     () =>
@@ -1004,6 +1340,7 @@ export default function MyDayPage() {
           </div>
           <div className="moduleHeaderMeta">
             <AppLanguageSwitch language={language} setLanguage={setLanguage} />
+            <MostVisitedPages />
             <Link href="/" className="moduleBackLink">{t("dashboard")}</Link>
           </div>
         </div>
@@ -1042,6 +1379,12 @@ export default function MyDayPage() {
               {attendanceBusy === "END_OF_DAY" ? t("saving") : t("endOfDay")}
             </button>
           </div>
+          <div className="moduleMetricGrid" style={{ marginBottom: "10px" }}>
+            <section className="moduleMetricCard"><span>{t("checkInToLunchOut")}</span><strong>{attendanceHours.firstHalfLabel}</strong></section>
+            <section className="moduleMetricCard"><span>{t("lunchInToEndOfDay")}</span><strong>{attendanceHours.secondHalfLabel}</strong></section>
+            <section className="moduleMetricCard"><span>{t("totalWorkedHours")}</span><strong>{attendanceHours.totalLabel}</strong></section>
+          </div>
+          {!attendanceHours.hasCompleteLog && <div className="moduleHint">{t("waitingAttendanceLogs")}</div>}
           <div className="moduleFilterRow">
             <input
               className="moduleInput"
@@ -1106,22 +1449,22 @@ export default function MyDayPage() {
                         <td>{row.customer_name || row.customer_code}</td>
                         <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                         <td>
-                          <div className="moduleInlineStack">
+                          <div className="moduleInlineStack moduleActionStack">
                             {row.is_prospect ? (
                               <Link
                                 href={`/management/new-order?customer_code=${encodeURIComponent(row.customer_code)}&customer_name=${encodeURIComponent(row.customer_name)}&salesman_code=${encodeURIComponent(row.salesman_code)}&source=prospect`}
-                                className="moduleInlineButton"
+                                className="moduleInlineButton moduleActionButton"
                               >
                                 {t("createOrder")}
                               </Link>
                             ) : (
                               <>
-                                <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                                <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => openVisitReport(row)}>
                                   {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
                                 </button>
                                 <Link
                                   href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
-                                  className="moduleInlineButton"
+                                  className="moduleInlineButton moduleActionButton"
                                 >
                                   {t("openAudit")}
                                 </Link>
@@ -1162,13 +1505,13 @@ export default function MyDayPage() {
                         <td>{row.customer_name || row.customer_code}</td>
                         <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                         <td>
-                          <div className="moduleInlineStack">
-                            <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                          <div className="moduleInlineStack moduleActionStack">
+                            <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => openVisitReport(row)}>
                               {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
                             </button>
                             <Link
                               href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
-                              className="moduleInlineButton"
+                              className="moduleInlineButton moduleActionButton"
                             >
                               {t("openAudit")}
                             </Link>
@@ -1196,10 +1539,38 @@ export default function MyDayPage() {
             onChange={(event) => setVisitStatusSearch(event.target.value)}
             placeholder={t("searchCustomer")}
           />
+          <details style={{ marginBottom: "10px" }}>
+            <summary className="moduleInlineButton" style={{ width: "fit-content", cursor: "pointer" }}>
+              {selectedVisitStatusSalesmen.length === 0
+                ? `${t("searchSalesman")}: ${t("allSalesmen")}`
+                : `${t("searchSalesman")}: ${selectedVisitStatusSalesmen.length}`}
+            </summary>
+            <div className="moduleList" style={{ marginTop: "8px" }}>
+              <label style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={selectedVisitStatusSalesmen.length === 0}
+                  onChange={() => setSelectedVisitStatusSalesmen([])}
+                />
+                <span>{t("allSalesmen")}</span>
+              </label>
+              {visitStatusSalesmanOptions.map((salesmanName) => (
+                <label key={salesmanName} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedVisitStatusSalesmen.includes(salesmanName)}
+                    onChange={() => toggleVisitStatusSalesman(salesmanName)}
+                  />
+                  <span>{salesmanName === "__UNASSIGNED__" ? t("unassignedSalesman") : salesmanName}</span>
+                </label>
+              ))}
+            </div>
+          </details>
           {[
             { key: "without-invoice", title: t("visitedWithoutInvoice"), rows: groupedVisitStatusRows.withoutInvoice },
             { key: "under-60", title: t("outstandingUnder60"), rows: groupedVisitStatusRows.under60 },
             { key: "above-60", title: t("outstandingAbove60"), rows: groupedVisitStatusRows.above60 },
+            { key: "no-outstanding", title: t("noOutstanding"), rows: groupedVisitStatusRows.noOutstanding },
           ].map((group) => (
           <div key={group.key} style={{ marginTop: "14px" }}>
             <div className="moduleSectionHeader">
@@ -1218,6 +1589,7 @@ export default function MyDayPage() {
                   <th>{t("outstanding0To30")}</th>
                   <th>{t("outstanding30To60")}</th>
                   <th>{t("outstandingAbove60Column")}</th>
+                  <th>{t("totalOutstanding")}</th>
                   <th>{t("status")}</th>
                   <th>{t("actions")}</th>
                 </tr>
@@ -1227,9 +1599,9 @@ export default function MyDayPage() {
                   <Fragment key={row.customer_code}>
                   <tr>
                     <td>
-                      <div className="moduleInlineStack">
+                      <div className="moduleInlineStack moduleCustomerActionStack">
                         <span>{row.customer_name || row.customer_code}</span>
-                        <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                        <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => openVisitReport(row)}>
                           {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}
                         </button>
                       </div>
@@ -1237,22 +1609,23 @@ export default function MyDayPage() {
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
                     <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>
-                    <td>SAR {Number(row.recent_sales_value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
-                    <td>SAR {Number(row.outstanding_0_30 || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td>SAR {Number(row.outstanding_30_60 || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td>SAR {Number(row.outstanding_above_60 || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td>{Number(row.recent_sales_value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number(row.outstanding_0_30 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number(row.outstanding_30_60 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number(row.outstanding_above_60 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number((Number(row.outstanding_0_30 || 0) + Number(row.outstanding_30_60 || 0) + Number(row.outstanding_above_60 || 0))).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     <td>{row.status === "Visited" ? t("visited") : row.status === "Overdue" ? t("overdue") : t("planned")}</td>
                     <td>
-                      <div className="moduleInlineStack">
+                      <div className="moduleInlineStack moduleActionStack">
                         <Link
                           href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
-                          className="moduleInlineButton"
+                          className="moduleInlineButton moduleActionButton"
                         >
                           {t("openAudit")}
                         </Link>
                         <button
                           type="button"
-                          className="moduleInlineButton"
+                          className="moduleInlineButton moduleActionButton"
                           onClick={() => markCustomerInactive(row)}
                           disabled={inactiveCustomerCode === row.customer_code}
                         >
@@ -1263,7 +1636,7 @@ export default function MyDayPage() {
                   </tr>
                   {activeVisitCustomerCode === row.customer_code && (
                     <tr>
-                      <td colSpan={10}>
+                      <td colSpan={11}>
                         <div className="moduleVisitPanel">
                           <div className="moduleSectionHeader">
                             <h2>{t("visitReport")}</h2>
@@ -1327,7 +1700,7 @@ export default function MyDayPage() {
                 ))}
                 {group.rows.length === 0 && (
                   <tr>
-                    <td colSpan={10}>{t("noCustomers")}</td>
+                    <td colSpan={11}>{t("noCustomers")}</td>
                   </tr>
                 )}
               </tbody>
@@ -1335,6 +1708,59 @@ export default function MyDayPage() {
             </div>
           </div>
           ))}
+
+          <div style={{ marginTop: "14px" }}>
+            <div className="moduleSectionHeader">
+              <h2>{t("inactiveCustomers")}</h2>
+              <span>{filteredInactiveCustomers.length} {t("customersCount")}</span>
+            </div>
+            <div className="moduleTableWrap">
+            <table className="moduleTable">
+              <thead>
+                <tr>
+                  <th>{t("customer")}</th>
+                  <th>{t("cityArea")}</th>
+                  <th>{t("daysSinceLastInvoice")}</th>
+                  <th>{t("inactiveSince")}</th>
+                  <th>{t("actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredInactiveCustomers.map((row) => (
+                  <tr key={`inactive-${row.customer_code}`}>
+                    <td>{row.customer_name || row.customer_code}</td>
+                    <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
+                    <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
+                    <td>{row.inactive_marked_at ? new Date(row.inactive_marked_at).toLocaleString("en-GB") : "-"}</td>
+                    <td>
+                      <div className="moduleInlineStack moduleActionStack">
+                        <Link
+                          href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}
+                          className="moduleInlineButton moduleActionButton"
+                        >
+                          {t("openAudit")}
+                        </Link>
+                        <button
+                          type="button"
+                          className="moduleInlineButton moduleActionButton"
+                          onClick={() => markCustomerActive(row)}
+                          disabled={inactiveCustomerCode === row.customer_code}
+                        >
+                          {inactiveCustomerCode === row.customer_code ? t("markingActive") : t("markActive")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {filteredInactiveCustomers.length === 0 && (
+                  <tr>
+                    <td colSpan={5}>{t("noCustomers")}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            </div>
+          </div>
         </section>
       </div>
     </main>

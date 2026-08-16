@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
@@ -37,7 +38,11 @@ const TEXT = {
 };
 
 function formatMoney(value) {
-  return `SAR ${Number(value || 0).toFixed(2)}`;
+  return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function formatReceivableMoney(value) {
+  return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
 async function waitForAccessToken(supabase, attempts = 8, delayMs = 250) {
@@ -63,7 +68,7 @@ function formatHistoryChange(change) {
 
   const baseLabel = `${change.item_code || "-"} ${change.item_name || ""}`.trim();
   if (change.type === "ADDED") {
-    return `${baseLabel}: added ${change.after_quantity || 0} qty at SAR ${Number(change.after_rate || 0).toFixed(2)}`;
+    return `${baseLabel}: added ${change.after_quantity || 0} qty at ${formatMoney(change.after_rate || 0)}`;
   }
   if (change.type === "REMOVED") {
     return `${baseLabel}: removed ${change.before_quantity || 0} qty`;
@@ -74,7 +79,7 @@ function formatHistoryChange(change) {
     parts.push(`qty ${change.before_quantity || 0} -> ${change.after_quantity || 0}`);
   }
   if (Number(change.before_rate || 0) !== Number(change.after_rate || 0)) {
-    parts.push(`rate SAR ${Number(change.before_rate || 0).toFixed(2)} -> SAR ${Number(change.after_rate || 0).toFixed(2)}`);
+    parts.push(`rate ${formatMoney(change.before_rate || 0)} -> ${formatMoney(change.after_rate || 0)}`);
   }
   return `${baseLabel}: ${parts.join(", ")}`;
 }
@@ -212,7 +217,7 @@ async function fetchVisibleCustomers(token) {
     },
   });
 
-  const payload = await response.json();
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.success) {
     throw new Error(payload.error || "Unable to load visible customers.");
   }
@@ -969,7 +974,7 @@ export default function NewOrderPage() {
             item_code: String(line.item_code || "-"),
             item_name: String(line.item_name || "-"),
             quantity: String(line.quantity),
-            rate: Number(line.rate || 0).toFixed(2),
+            rate: formatMoney(line.rate),
             lineTotal: formatMoney(line.lineTotal),
           };
 
@@ -1019,10 +1024,10 @@ export default function NewOrderPage() {
         const outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
         const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
 
-        function formatOutstandingValue(value, digits = 2, withCurrency = true) {
+        function formatOutstandingValue(value, digits = 0, withCurrency = true) {
           const number = parseOutstandingNumber(value);
           if (number === 0) return "";
-          if (withCurrency) return formatMoney(number);
+          if (withCurrency) return formatReceivableMoney(number);
           return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
         }
 
@@ -1044,10 +1049,10 @@ export default function NewOrderPage() {
           const bucketRows = [
             ...outstandingBuckets.map((label) => ({
               label: `${label} days`,
-              value: formatOutstandingValue(outstandingCustomer?.buckets?.[label], 2, true),
+              value: formatOutstandingValue(outstandingCustomer?.buckets?.[label], 0, true),
             })),
             { label: "Open invoices", value: formatOutstandingValue(outstandingCustomer?.open_invoices, 0, false) },
-            { label: "Total outstanding", value: formatOutstandingValue(outstandingCustomer?.total_outstanding, 2, true) },
+            { label: "Total outstanding", value: formatOutstandingValue(outstandingCustomer?.total_outstanding, 0, true) },
           ];
 
           bucketRows.forEach((row, index) => {
@@ -1112,7 +1117,7 @@ export default function NewOrderPage() {
               const values = [
                 String(invoice?.invoice_date || "-"),
                 String(invoice?.ref_no || "-"),
-                formatOutstandingValue(invoice?.pending_amount ?? invoice?.amount, 2, false),
+                formatOutstandingValue(invoice?.pending_amount ?? invoice?.amount, 0, false),
                 String(invoice?.due_date || "-"),
                 formatOutstandingValue(invoice?.overdue_days, 0, false),
                 formatOutstandingValue(invoice?.invoice_day, 0, false),
@@ -1438,7 +1443,7 @@ export default function NewOrderPage() {
 
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || !payload.success) {
-            throw new Error(payload.error || "Unable to load customer audit history.");
+            throw new Error(payload.error || "Unable to load customer details history.");
           }
 
           return payload;
@@ -1454,7 +1459,7 @@ export default function NewOrderPage() {
       } catch (err) {
         setTransactions([]);
         setPeerTransactions([]);
-        setError(err.message || "Unable to load customer audit history.");
+        setError(err.message || "Unable to load customer details history.");
       } finally {
         setLoadingCustomerHistory(false);
       }
@@ -1497,7 +1502,7 @@ export default function NewOrderPage() {
             <h1>{t("title")}</h1>
             <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         {error && <div className="moduleError">{error}</div>}
@@ -1559,10 +1564,10 @@ export default function NewOrderPage() {
                     <tr>
                       <td>{selectedCustomer.customer_code} - {selectedCustomer.customer_name}</td>
                       {visibleOutstandingBuckets.map((label) => (
-                        <td key={`bucket-val-${label}`}>{parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td key={`bucket-val-${label}`}>{parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                       ))}
                       <td>{parseOutstandingNumber(outstandingInfo.customer?.open_invoices).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
-                      <td>{parseOutstandingNumber(outstandingInfo.customer?.total_outstanding).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td>{parseOutstandingNumber(outstandingInfo.customer?.total_outstanding).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1586,7 +1591,7 @@ export default function NewOrderPage() {
                       <tr key={`${invoice.ref_no || "no-ref"}-${invoice.due_date || "no-due"}-${index}`}>
                         <td>{invoice.invoice_date || "-"}</td>
                         <td>{invoice.ref_no || "-"}</td>
-                        <td>{parseOutstandingNumber(invoice.pending_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td>{parseOutstandingNumber(invoice.pending_amount).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                         <td>{invoice.due_date || "-"}</td>
                         <td>{parseOutstandingNumber(invoice.overdue_days).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
                         <td>{parseOutstandingNumber(invoice.invoice_day).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</td>
@@ -1666,7 +1671,7 @@ export default function NewOrderPage() {
           <>
             {loadingCustomerHistory && (
               <section className="moduleSection">
-                <div className="moduleLoading">Loading customer audit sections...</div>
+                <div className="moduleLoading">Loading customer details sections...</div>
               </section>
             )}
 
@@ -1827,7 +1832,7 @@ export default function NewOrderPage() {
                                       </div>
                                     )}
                                   </td>
-                                  <td>{price ? `SAR ${price.toFixed(2)}` : "NOT FOUND"}</td>
+                                  <td>{price ? formatMoney(price) : "NOT FOUND"}</td>
                                   <td>
                                     <div className="moduleQtyControl">
                                       <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
@@ -1841,7 +1846,7 @@ export default function NewOrderPage() {
                                       <button type="button" onClick={() => increaseQty(item.item_code)}>+</button>
                                     </div>
                                   </td>
-                                  <td>SAR {(price * qty).toFixed(2)}</td>
+                                  <td>{formatMoney(price * qty)}</td>
                                 </tr>
                               );
                             })}
@@ -1862,7 +1867,7 @@ export default function NewOrderPage() {
               <div className="moduleOrderBar">
                 <div>
                   <span>Current Order</span>
-                  <strong>SAR {calculateGrandTotal(orderItems, priceList).toFixed(2)}</strong>
+                  <strong>{formatMoney(calculateGrandTotal(orderItems, priceList))}</strong>
                 </div>
                 <div className="moduleOrderActions">
                   <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>

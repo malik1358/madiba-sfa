@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const INACTIVE_META_PREFIX = "customer_inactive_meta:";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -38,6 +39,11 @@ function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function isProductPromoterRole(role) {
+  const normalized = normalizeRole(role);
+  return normalized === "product-promoter" || normalized === "product_promoter";
+}
+
 function identitySearchPattern(value) {
   return normalizeCode(value)
     .replace(/[^A-Z0-9]+/g, "%")
@@ -46,7 +52,7 @@ function identitySearchPattern(value) {
 
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
-  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker"].includes(normalized);
+  return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
 }
 
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
@@ -103,6 +109,25 @@ function isInvoiceMakerRole(role) {
   return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
+function inactiveMetaKey(customerCode) {
+  return `${INACTIVE_META_PREFIX}${normalizeCode(customerCode)}`;
+}
+
+function parseIsoTimestamp(value) {
+  if (!value) return 0;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseInactiveMarkedAt(rawSettingValue) {
+  try {
+    const parsed = JSON.parse(String(rawSettingValue || "null"));
+    return String(parsed?.marked_at || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 async function resolveScope(admin, token) {
   const {
     data: { user },
@@ -141,10 +166,28 @@ async function resolveScope(admin, token) {
   const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
   const authUsers = usersRes.data?.users || [];
   const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
+  const currentAuthUser = authMap.get(currentProfile.id) || user;
+  const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
+  const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
 
   let members = [];
   if (["admin", "manager"].includes(role)) {
     members = scopedProfiles;
+  } else if (isProductPromoterRole(role) && inheritedHeadCode) {
+    const subordinateIds = new Set();
+
+    authUsers.forEach((authUser) => {
+      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+      const headCode = normalizeCode(metadata.head_salesman_code);
+      if (headCode && headCode === inheritedHeadCode) {
+        subordinateIds.add(authUser.id);
+      }
+    });
+
+    members = scopedProfiles.filter((profile) => {
+      const profileCode = normalizeCode(profile.salesman_code);
+      return profileCode === inheritedHeadCode || subordinateIds.has(profile.id);
+    });
   } else {
     const subordinateIds = new Set();
 
@@ -176,7 +219,6 @@ async function resolveScope(admin, token) {
   });
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
-  const currentAuthUser = authMap.get(currentProfile.id) || user;
 
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),
@@ -291,12 +333,14 @@ async function fetchVisibleCustomers(admin, scope) {
       if (scope.hasAllAccess) return true;
       if (normalizedScopeCodes.size === 0) return false;
       const codeCandidates = customerCodeCandidates(row.customer_code).map(normalizeCode);
+      const rowSalesmanCode = normalizeCode(row.current_salesman_code);
+
+      // Always include customers currently assigned to the visible scope.
+      if (normalizedScopeCodes.has(rowSalesmanCode)) return true;
+
       if (codeCandidates.some((code) => outstandingAssignedCustomerCodes.has(code))) {
         return codeCandidates.some((code) => outstandingOwnedCustomerCodes.has(code));
       }
-
-      const rowSalesmanCode = normalizeCode(row.current_salesman_code);
-      if (normalizedScopeCodes.has(rowSalesmanCode)) return true;
 
       // Fallback: include customers that have sales history under visible salesman codes.
       return codeCandidates.some((code) => historyVisibleCustomerCodes.has(code));
@@ -308,6 +352,151 @@ async function fetchVisibleCustomers(admin, scope) {
   }
 
   return rows;
+}
+
+async function fetchBasicVisibleCustomers(admin, scope) {
+  const rows = [];
+  const pageSize = 1000;
+  let from = 0;
+  const scopedCodes = [...new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
+
+  while (true) {
+    let query = admin
+      .from("customers")
+      .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,customer_type,city,area,mobile")
+      .eq("is_active", true)
+      .order("customer_name")
+      .range(from, from + pageSize - 1);
+
+    if (!scope.hasAllAccess) {
+      if (scopedCodes.length === 0) return [];
+      query = query.in("current_salesman_code", scopedCodes);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const chunk = data || [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+}
+
+async function readInactiveMarkedAtMap(admin, customerCodes) {
+  const normalizedCodes = [...new Set((customerCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
+  if (normalizedCodes.length === 0) return new Map();
+
+  const keys = normalizedCodes.map((code) => inactiveMetaKey(code));
+  const map = new Map();
+
+  for (let start = 0; start < keys.length; start += 200) {
+    const keyChunk = keys.slice(start, start + 200);
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_key,setting_value")
+      .in("setting_key", keyChunk);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const code = normalizeCode(String(row.setting_key || "").replace(INACTIVE_META_PREFIX, ""));
+      if (!code) return;
+      map.set(code, parseInactiveMarkedAt(row.setting_value));
+    });
+  }
+
+  return map;
+}
+
+async function autoReactivateCustomers(admin, scope) {
+  const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+
+  let inactiveQuery = admin
+    .from("customers")
+    .select("customer_code,current_salesman_code,latest_transaction_date,updated_at")
+    .eq("is_active", false)
+    .not("latest_transaction_date", "is", null)
+    .limit(5000);
+
+  if (!scope.hasAllAccess) {
+    const scopedCodes = Array.from(normalizedScopeCodes);
+    if (scopedCodes.length === 0) return 0;
+    inactiveQuery = inactiveQuery.in("current_salesman_code", scopedCodes);
+  }
+
+  const { data: inactiveRows, error: inactiveError } = await inactiveQuery;
+  if (inactiveError) throw inactiveError;
+
+  const rows = inactiveRows || [];
+  if (rows.length === 0) return 0;
+
+  const markedAtMap = await readInactiveMarkedAtMap(admin, rows.map((row) => row.customer_code));
+  const codesToReactivate = rows
+    .filter((row) => {
+      const customerCode = normalizeCode(row.customer_code);
+      if (!customerCode) return false;
+      const invoiceAt = parseIsoTimestamp(row.latest_transaction_date);
+      if (!invoiceAt) return false;
+      const markedAt = parseIsoTimestamp(markedAtMap.get(customerCode) || row.updated_at);
+      return markedAt > 0 && invoiceAt > markedAt;
+    })
+    .map((row) => normalizeCode(row.customer_code))
+    .filter(Boolean);
+
+  if (codesToReactivate.length === 0) return 0;
+
+  const { error: reactivateError } = await admin
+    .from("customers")
+    .update({ is_active: true })
+    .in("customer_code", codesToReactivate);
+
+  if (reactivateError) throw reactivateError;
+
+  const clearKeys = codesToReactivate.map((code) => inactiveMetaKey(code));
+  for (let start = 0; start < clearKeys.length; start += 200) {
+    const keyChunk = clearKeys.slice(start, start + 200);
+    const { error: clearError } = await admin
+      .from("system_settings")
+      .delete()
+      .in("setting_key", keyChunk);
+
+    if (clearError) throw clearError;
+  }
+
+  return codesToReactivate.length;
+}
+
+async function fetchInactiveCustomers(admin, scope) {
+  const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+
+  let query = admin
+    .from("customers")
+    .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,city,area,updated_at")
+    .eq("is_active", false)
+    .order("customer_name")
+    .limit(5000);
+
+  if (!scope.hasAllAccess) {
+    const scopedCodes = Array.from(normalizedScopeCodes);
+    if (scopedCodes.length === 0) return [];
+    query = query.in("current_salesman_code", scopedCodes);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const rows = data || [];
+  if (rows.length === 0) return [];
+
+  const markedAtMap = await readInactiveMarkedAtMap(admin, rows.map((row) => row.customer_code));
+
+  return rows.map((row) => ({
+    ...row,
+    inactive_marked_at: markedAtMap.get(normalizeCode(row.customer_code)) || row.updated_at || null,
+  }));
 }
 
 async function attachRecentSalesValues(admin, customers) {
@@ -413,20 +602,66 @@ export async function GET(request) {
 
     const token = authHeader.replace("Bearer ", "");
     const scope = await resolveScope(admin, token);
-    const customers = await fetchVisibleCustomers(admin, scope);
+    const warnings = [];
+
+    try {
+      await autoReactivateCustomers(admin, scope);
+    } catch (error) {
+      warnings.push("auto-reactivate-unavailable");
+    }
+
+    let customers = [];
+    try {
+      customers = await fetchVisibleCustomers(admin, scope);
+    } catch (error) {
+      warnings.push("basic-visible-fallback");
+      customers = await fetchBasicVisibleCustomers(admin, scope);
+    }
+
+    let inactiveCustomers = [];
+    try {
+      inactiveCustomers = await fetchInactiveCustomers(admin, scope);
+    } catch (error) {
+      warnings.push("inactive-customers-unavailable");
+      inactiveCustomers = [];
+    }
+
     const searchParams = new URL(request.url).searchParams;
     const includeRecentSales = searchParams.get("includeRecentSales") === "1";
     const includeOutstanding = searchParams.get("includeOutstanding") === "1";
-    let responseCustomers = includeRecentSales
-      ? await attachRecentSalesValues(admin, customers)
-      : customers;
+    let responseCustomers = customers;
+
+    if (includeRecentSales) {
+      try {
+        responseCustomers = await attachRecentSalesValues(admin, responseCustomers);
+      } catch (error) {
+        warnings.push("recent-sales-unavailable");
+        responseCustomers = responseCustomers.map((customer) => ({
+          ...customer,
+          recent_sales_value: Number(customer?.recent_sales_value || 0),
+        }));
+      }
+    }
+
     if (includeOutstanding) {
-      responseCustomers = await attachOutstandingValues(admin, responseCustomers);
+      try {
+        responseCustomers = await attachOutstandingValues(admin, responseCustomers);
+      } catch (error) {
+        warnings.push("outstanding-unavailable");
+        responseCustomers = responseCustomers.map((customer) => ({
+          ...customer,
+          outstanding_0_30: Number(customer?.outstanding_0_30 || 0),
+          outstanding_30_60: Number(customer?.outstanding_30_60 || 0),
+          outstanding_above_60: Number(customer?.outstanding_above_60 || 0),
+        }));
+      }
     }
 
     return NextResponse.json({
       success: true,
       customers: responseCustomers,
+      inactiveCustomers,
+      warnings,
       count: responseCustomers.length,
     }, {
       headers: { "Cache-Control": "private, no-store, max-age=0" },

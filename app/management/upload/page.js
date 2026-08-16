@@ -3,6 +3,7 @@
 import { useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -74,7 +75,7 @@ export default function UploadSalesPage() {
         body: formData,
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok || !data.success) {
         throw new Error(
@@ -126,7 +127,7 @@ export default function UploadSalesPage() {
         body: formData,
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) {
         throw new Error(data.error || "Outstanding upload failed.");
       }
@@ -151,7 +152,7 @@ export default function UploadSalesPage() {
             <p>{t("subtitle")}</p>
           </div>
 
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/" className="backButton">{t("dashboard")}</a></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/" className="backButton">{t("dashboard")}</a></div>
         </div>
 
         <div className="uploadWarning">

@@ -8,6 +8,13 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function isMissingTableError(error) {
+  const message = String(error?.message || error?.details || "").toLowerCase();
+  return error?.code === "42P01"
+    || message.includes("could not find the table")
+    || message.includes("relation") && message.includes("does not exist");
+}
+
 async function getAuthUser(request) {
   const authHeader = request.headers.get("authorization") || "";
   if (!authHeader.startsWith("Bearer ")) {
@@ -121,27 +128,39 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
   });
 
   // Fetch all invoices
-  const { data: invoices, error: invoicesError } = await admin
-    .from("invoices")
-    .select("customer_code,invoice_number,due_date,pending_amount,ref_no");
+  let invoices = [];
+  {
+    const { data, error } = await admin
+      .from("invoices")
+      .select("customer_code,invoice_number,due_date,pending_amount,ref_no");
 
-  if (invoicesError) throw invoicesError;
+    if (error && !isMissingTableError(error)) throw error;
+    invoices = Array.isArray(data) ? data : [];
+  }
 
   // Fetch collection visit history
-  const { data: visits, error: visitsError } = await admin
-    .from("collection_visits")
-    .select("customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at")
-    .order("customer_code")
-    .order("saved_at", { ascending: false });
+  let visits = [];
+  {
+    const { data, error } = await admin
+      .from("collection_visits")
+      .select("customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at")
+      .order("customer_code")
+      .order("saved_at", { ascending: false });
 
-  if (visitsError) throw visitsError;
+    if (error && !isMissingTableError(error)) throw error;
+    visits = Array.isArray(data) ? data : [];
+  }
 
   // Fetch legal transfers
-  const { data: legalTransfers, error: legalError } = await admin
-    .from("legal_transfers")
-    .select("customer_code,is_transferred,transferred_at,note");
+  let legalTransfers = [];
+  {
+    const { data, error } = await admin
+      .from("legal_transfers")
+      .select("customer_code,is_transferred,transferred_at,note");
 
-  if (legalError) throw legalError;
+    if (error && !isMissingTableError(error)) throw error;
+    legalTransfers = Array.isArray(data) ? data : [];
+  }
 
   // Build customer records with outstanding and collection data
   const visitsByCustomer = new Map();
@@ -356,7 +375,12 @@ export async function POST(request) {
       .select("id")
       .maybeSingle();
 
-    if (insertError) throw insertError;
+    if (insertError) {
+      if (isMissingTableError(insertError)) {
+        throw new Error("Collection tables are not initialized in this environment yet.");
+      }
+      throw insertError;
+    }
 
     // Update legal transfer if needed
     if (visitOutcome === "TRANSFER_TO_LEGAL") {
@@ -370,7 +394,12 @@ export async function POST(request) {
           note: legalNote,
         }, { onConflict: "customer_code" });
 
-      if (legalError) throw legalError;
+      if (legalError) {
+        if (isMissingTableError(legalError)) {
+          throw new Error("Collection tables are not initialized in this environment yet.");
+        }
+        throw legalError;
+      }
     }
 
     return Response.json({

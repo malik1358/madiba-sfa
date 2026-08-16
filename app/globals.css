@@ -3937,10 +3937,13 @@ table.auditMatrix td.auditTrendSame {
   }
 
   .moduleCollectorTable > tbody > tr.moduleCollectorDetailRow > td[colspan] {
+    display: block;
+    width: 100%;
     padding: 0;
   }
 
   .moduleCollectorSubTableWrap {
+    width: 100%;
     overflow-x: visible;
     border: 1px solid #d5e1e4;
     border-radius: 10px;

@@ -3941,7 +3941,7 @@ table.auditMatrix td.auditTrendSame {
   }
 
   .moduleCollectorSubTableWrap {
-    overflow-x: auto;
+    overflow-x: visible;
     border: 1px solid #d5e1e4;
     border-radius: 10px;
     background: #ffffff;
@@ -3950,14 +3950,51 @@ table.auditMatrix td.auditTrendSame {
   .moduleCollectorSubTableWrap .moduleTable {
     display: table;
     width: 100%;
+    min-width: 0;
   }
 
   .moduleCollectorSubTableWrap .moduleTable th {
     position: static;
   }
 
-  .moduleCollectorInvoiceTable {
-    min-width: 460px;
+  /* Invoice rows also become cards so nothing needs sideways scrolling. */
+  .moduleCollectorInvoiceTable,
+  .moduleCollectorInvoiceTable > tbody,
+  .moduleCollectorInvoiceTable > tbody > tr,
+  .moduleCollectorInvoiceTable > tbody > tr > td {
+    display: block;
+  }
+
+  .moduleCollectorInvoiceTable > thead {
+    display: none;
+  }
+
+  .moduleCollectorInvoiceTable > tbody > tr {
+    padding: 4px 0;
+    border-bottom: 1px solid #d5e1e4;
+  }
+
+  .moduleCollectorInvoiceTable > tbody > tr:last-child {
+    border-bottom: 0;
+  }
+
+  .moduleCollectorInvoiceTable > tbody > tr > td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 12px;
+    border: 0;
+    text-align: right;
+  }
+
+  .moduleCollectorInvoiceTable > tbody > tr > td::before {
+    content: attr(data-label);
+    color: #4b6b73;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    text-align: left;
   }
 
   .moduleCollectorFormGrid label,

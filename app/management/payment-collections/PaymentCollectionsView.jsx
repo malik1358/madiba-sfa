@@ -769,11 +769,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                         key={`${key}-${invoice.ref_no || invoice.invoice_date || index}-${index}`}
                                         className={Number(invoice.overdue_days || 0) > 0 ? "moduleCollectorInvoiceOverdue" : ""}
                                       >
-                                        <td>{invoice.invoice_date || "-"}</td>
-                                        <td>{invoice.ref_no || "-"}</td>
-                                        <td>{formatMoney(invoice.pending_amount)}</td>
-                                        <td>{invoice.due_date || "-"}</td>
-                                        <td>{invoice.overdue_days || 0}</td>
+                                        <td data-label="Date">{invoice.invoice_date || "-"}</td>
+                                        <td data-label="Ref">{invoice.ref_no || "-"}</td>
+                                        <td data-label="Pending">{formatMoney(invoice.pending_amount)}</td>
+                                        <td data-label="Due">{invoice.due_date || "-"}</td>
+                                        <td data-label="Overdue">{invoice.overdue_days || 0}</td>
                                       </tr>
                                     ))}
                                   </tbody>

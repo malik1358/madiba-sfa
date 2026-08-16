@@ -28,8 +28,8 @@ async function getAuthUser(request) {
 async function getSalesScope(admin, userId) {
   const { data: profile, error } = await admin
     .from("profiles")
-    .select("id,user_id,salesman_code,salesman_name,user_role,role")
-    .eq("user_id", userId)
+    .select("id,salesman_code,salesman_name,role")
+    .eq("id", userId)
     .maybeSingle();
 
   if (error) throw error;
@@ -38,7 +38,7 @@ async function getSalesScope(admin, userId) {
   let visibleSalesmanCodes = [profile.salesman_code];
   let hasAllAccess = false;
 
-  const userRole = String(profile?.role || profile?.user_role || "").toLowerCase();
+  const userRole = String(profile?.role || "").toLowerCase();
   if (userRole === "admin" || userRole === "manager") {
     hasAllAccess = true;
     visibleSalesmanCodes = [];

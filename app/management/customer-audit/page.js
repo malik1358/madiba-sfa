@@ -29,6 +29,7 @@ import CustomerHeader from "./components/CustomerHeader";
 import MonthlyPerformance from "./components/MonthlyPerformance";
 import CategoryPerformance from "./components/CategoryPerformance";
 import QuickOrder from "./components/QuickOrder";
+import FullItemList from "./components/FullItemList";
 import OrderBar from "./components/OrderBar";
 import OrderReview from "./components/OrderReview";
 import TransactionHistory from "./components/TransactionHistory";
@@ -462,6 +463,15 @@ function CustomerAuditPageContent() {
 
         <QuickOrder
           quickOrderSuggestions={quickOrderSuggestions}
+          orderQuantities={orderQuantities}
+          decreaseOrderQty={decreaseQty}
+          increaseOrderQty={increaseQty}
+          changeOrderQty={updateQty}
+          priceList={priceList}
+        />
+
+        <FullItemList
+          itemCatalog={itemMaster}
           orderQuantities={orderQuantities}
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}

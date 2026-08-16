@@ -3849,26 +3849,35 @@ table.auditMatrix td.auditTrendSame {
 }
 
 @media (max-width: 900px) {
-  /* Too many columns for a phone, so each row becomes a labelled card. */
-  .moduleCollectorTableWrap {
+  /* Sticky headers stick to the scrolling wrapper on phones and hide the first row. */
+  .moduleTable th {
+    position: static;
+  }
+
+  .moduleCollectorTable {
+    min-width: 0;
+  }
+
+  /* Wide tables become stacked cards; ResponsiveTables adds the class and the labels. */
+  .moduleTableWrap:has(> .moduleCardTable) {
     overflow-x: visible;
     border: 0;
     background: transparent;
   }
 
-  .moduleCollectorTable,
-  .moduleCollectorTable > tbody,
-  .moduleCollectorTable > tbody > tr,
-  .moduleCollectorTable > tbody > tr > td {
+  .moduleCardTable,
+  .moduleCardTable > tbody,
+  .moduleCardTable > tbody > tr,
+  .moduleCardTable > tbody > tr > td {
     display: block;
     min-width: 0;
   }
 
-  .moduleCollectorTable > thead {
+  .moduleCardTable > thead {
     display: none;
   }
 
-  .moduleCollectorTable > tbody > tr {
+  .moduleCardTable > tbody > tr {
     margin-bottom: 10px;
     padding: 4px 0;
     border: 1px solid #d5e1e4;
@@ -3876,7 +3885,11 @@ table.auditMatrix td.auditTrendSame {
     background: #ffffff;
   }
 
-  .moduleCollectorTable > tbody > tr > td {
+  .moduleCardTable > tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .moduleCardTable > tbody > tr > td {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3888,11 +3901,11 @@ table.auditMatrix td.auditTrendSame {
     text-align: right;
   }
 
-  .moduleCollectorTable > tbody > tr > td:last-child {
+  .moduleCardTable > tbody > tr > td:last-child {
     border-bottom: 0;
   }
 
-  .moduleCollectorTable > tbody > tr > td::before {
+  .moduleCardTable > tbody > tr > td::before {
     content: attr(data-label);
     flex: 0 0 auto;
     color: #4b6b73;
@@ -3902,31 +3915,51 @@ table.auditMatrix td.auditTrendSame {
     text-align: left;
   }
 
-  .moduleCollectorTable > tbody > tr > td.moduleCollectorCellPrimary {
-    font-size: 15px;
-    font-weight: 700;
-  }
-
-  .moduleCollectorTable > tbody > tr > td.moduleCollectorCellActions {
+  /* Controls and button groups need the full width rather than sitting in a value column. */
+  .moduleCardTable > tbody > tr > td:has(.moduleActionRow),
+  .moduleCardTable > tbody > tr > td:has(.moduleActionStack),
+  .moduleCardTable > tbody > tr > td:has(select),
+  .moduleCardTable > tbody > tr > td:has(textarea),
+  .moduleCardTable > tbody > tr > td.moduleCollectorCellActions {
     display: block;
+    text-align: left;
   }
 
-  .moduleCollectorTable > tbody > tr > td.moduleCollectorCellActions::before {
+  .moduleCardTable > tbody > tr > td:has(.moduleActionRow)::before,
+  .moduleCardTable > tbody > tr > td:has(.moduleActionStack)::before,
+  .moduleCardTable > tbody > tr > td.moduleCollectorCellActions::before {
     display: none;
   }
 
-  .moduleCollectorTable .moduleActionStack {
+  .moduleCardTable > tbody > tr > td:has(select)::before,
+  .moduleCardTable > tbody > tr > td:has(textarea)::before {
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .moduleCardTable .moduleActionRow,
+  .moduleCardTable .moduleActionStack {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
   }
 
-  /* The expanded detail panel keeps its own tables scrollable. */
-  .moduleCollectorTable > tbody > tr > td[colspan] {
-    padding: 10px;
+  .moduleCardTable > tbody > tr > td.moduleCollectorCellPrimary {
+    font-size: 15px;
+    font-weight: 700;
   }
 
-  .moduleCollectorTable > tbody > tr > td[colspan]::before {
+  /* Expanded detail rows span every column, so they get the full card width. */
+  .moduleCardTable > tbody > tr > td.moduleCardTableDetailCell,
+  .moduleCardTable > tbody > tr > td[colspan] {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    text-align: left;
+  }
+
+  .moduleCardTable > tbody > tr > td.moduleCardTableDetailCell::before,
+  .moduleCardTable > tbody > tr > td[colspan]::before {
     display: none;
   }
 
@@ -3937,8 +3970,6 @@ table.auditMatrix td.auditTrendSame {
   }
 
   .moduleCollectorTable > tbody > tr.moduleCollectorDetailRow > td[colspan] {
-    display: block;
-    width: 100%;
     padding: 0;
   }
 
@@ -3950,54 +3981,20 @@ table.auditMatrix td.auditTrendSame {
     background: #ffffff;
   }
 
-  .moduleCollectorSubTableWrap .moduleTable {
-    display: table;
-    width: 100%;
-    min-width: 0;
-  }
-
   .moduleCollectorSubTableWrap .moduleTable th {
     position: static;
   }
 
-  /* Invoice rows also become cards so nothing needs sideways scrolling. */
-  .moduleCollectorInvoiceTable,
-  .moduleCollectorInvoiceTable > tbody,
-  .moduleCollectorInvoiceTable > tbody > tr,
-  .moduleCollectorInvoiceTable > tbody > tr > td {
-    display: block;
-  }
-
-  .moduleCollectorInvoiceTable > thead {
-    display: none;
-  }
-
-  .moduleCollectorInvoiceTable > tbody > tr {
-    padding: 4px 0;
-    border-bottom: 1px solid #d5e1e4;
-  }
-
-  .moduleCollectorInvoiceTable > tbody > tr:last-child {
-    border-bottom: 0;
-  }
-
-  .moduleCollectorInvoiceTable > tbody > tr > td {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 5px 12px;
+  /* The nested tables sit inside a framed wrapper already. */
+  .moduleCollectorSubTableWrap .moduleCardTable > tbody > tr {
+    margin-bottom: 0;
     border: 0;
-    text-align: right;
+    border-bottom: 1px solid #d5e1e4;
+    border-radius: 0;
   }
 
-  .moduleCollectorInvoiceTable > tbody > tr > td::before {
-    content: attr(data-label);
-    color: #4b6b73;
-    font-size: 11px;
-    font-weight: 800;
-    text-transform: uppercase;
-    text-align: left;
+  .moduleCollectorSubTableWrap .moduleCardTable > tbody > tr:last-child {
+    border-bottom: 0;
   }
 
   .moduleCollectorFormGrid label,

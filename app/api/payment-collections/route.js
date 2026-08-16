@@ -21,6 +21,15 @@ function canonicalCustomerCode(value) {
   return extracted || raw.split(/\s+/)[0] || raw;
 }
 
+function comparableName(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function readOutstandingInvoices(admin) {
   const { data, error } = await admin
     .from("system_settings")
@@ -154,9 +163,14 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
   if (salesmenError) throw salesmenError;
 
   const salesmanMap = new Map();
+  const visibleSalesmanNames = new Set();
   (salesmen || []).forEach((salesman) => {
     const normalizedCode = normalizeCode(salesman.salesman_code);
     salesmanMap.set(normalizedCode, salesman.salesman_name);
+    if (scope.hasAllAccess || normalizedScopeCodes.has(normalizedCode)) {
+      const name = comparableName(salesman.salesman_name);
+      if (name) visibleSalesmanNames.add(name);
+    }
   });
 
   const outstandingInvoices = await readOutstandingInvoices(admin);
@@ -205,6 +219,7 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
   });
 
   const invoicesByCustomer = new Map();
+  const nameByCustomer = new Map();
   outstandingInvoices.forEach((invoice) => {
     const key = canonicalCustomerCode(invoice.customer_code)
       || canonicalCustomerCode(invoice.customer_name);
@@ -222,6 +237,11 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
       overdue_days: toNumber(invoice.overdue_days),
       salesman: String(invoice.salesman || "").trim(),
     });
+
+    if (!nameByCustomer.has(key)) {
+      const label = String(invoice.customer_name || invoice.customer_code || "").trim();
+      nameByCustomer.set(key, extractLeadingCustomerCodeAndName(label).customer_name || label);
+    }
   });
 
   const uniqueCustomers = new Map();
@@ -233,6 +253,23 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
     if (!existing || (!existing.current_salesman_code && customer.current_salesman_code)) {
       uniqueCustomers.set(key, { ...customer, customer_code: key });
     }
+  });
+
+  // Outstanding files often contain codes that are missing or inactive in the customers table.
+  invoicesByCustomer.forEach((customerInvoices, key) => {
+    if (uniqueCustomers.has(key)) return;
+
+    const invoiceSalesman = customerInvoices.map((invoice) => invoice.salesman).find(Boolean) || "";
+    if (!scope.hasAllAccess && !visibleSalesmanNames.has(comparableName(invoiceSalesman))) return;
+
+    uniqueCustomers.set(key, {
+      customer_code: key,
+      customer_name: nameByCustomer.get(key) || key,
+      current_salesman_code: "",
+      city: "",
+      area: "",
+      fallback_salesman_name: invoiceSalesman,
+    });
   });
 
   const records = Array.from(uniqueCustomers.values()).map((customer) => {
@@ -279,7 +316,9 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
       customer_code: customer.customer_code,
       customer_name: customer.customer_name,
       current_salesman_code: customer.current_salesman_code,
-      salesman_name: salesmanMap.get(normalizeCode(customer.current_salesman_code)) || customer.current_salesman_code,
+      salesman_name: salesmanMap.get(normalizeCode(customer.current_salesman_code))
+        || customer.fallback_salesman_name
+        || customer.current_salesman_code,
       city: customer.city,
       area: customer.area,
       invoices: customerInvoices,

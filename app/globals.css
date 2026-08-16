@@ -3843,6 +3843,11 @@ table.auditMatrix td.auditTrendSame {
   min-width: 1180px;
 }
 
+/* Sticky headers resolve against the scrolling wrapper and would cover the first row. */
+.moduleCollectorTable th {
+  position: static;
+}
+
 .moduleHealthGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

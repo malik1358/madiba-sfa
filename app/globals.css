@@ -3848,6 +3848,89 @@ table.auditMatrix td.auditTrendSame {
   position: static;
 }
 
+@media (max-width: 900px) {
+  /* Too many columns for a phone, so each row becomes a labelled card. */
+  .moduleCollectorTableWrap {
+    overflow-x: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .moduleCollectorTable,
+  .moduleCollectorTable tbody,
+  .moduleCollectorTable tr,
+  .moduleCollectorTable td {
+    display: block;
+    min-width: 0;
+  }
+
+  .moduleCollectorTable thead {
+    display: none;
+  }
+
+  .moduleCollectorTable > tbody > tr {
+    margin-bottom: 10px;
+    padding: 4px 0;
+    border: 1px solid #d5e1e4;
+    border-radius: 10px;
+    background: #ffffff;
+  }
+
+  .moduleCollectorTable > tbody > tr > td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 12px;
+    border: 0;
+    border-bottom: 1px solid #eef4f5;
+    font-size: 13px;
+    text-align: right;
+  }
+
+  .moduleCollectorTable > tbody > tr > td:last-child {
+    border-bottom: 0;
+  }
+
+  .moduleCollectorTable > tbody > tr > td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    color: #4b6b73;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    text-align: left;
+  }
+
+  .moduleCollectorTable > tbody > tr > td.moduleCollectorCellPrimary {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .moduleCollectorTable > tbody > tr > td.moduleCollectorCellActions {
+    display: block;
+  }
+
+  .moduleCollectorTable > tbody > tr > td.moduleCollectorCellActions::before {
+    display: none;
+  }
+
+  .moduleCollectorTable .moduleActionStack {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  /* The expanded detail panel keeps its own tables scrollable. */
+  .moduleCollectorTable > tbody > tr > td[colspan] {
+    padding: 10px;
+  }
+
+  .moduleCollectorTable > tbody > tr > td[colspan]::before {
+    display: none;
+  }
+}
+
 .moduleHealthGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

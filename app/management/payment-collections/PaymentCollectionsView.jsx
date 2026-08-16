@@ -678,25 +678,25 @@ export default function PaymentCollectionsView({ view = "due" }) {
                     return (
                       <Fragment key={key}>
                         <tr key={key}>
-                          <td>{row.customer_code || "-"}</td>
-                          <td>{row.customer_name || row.customer_code}</td>
-                          <td>{row.salesman_name || row.salesman_code || "-"}</td>
-                          <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
-                          <td>{formatMoney(row.total_due_amount)}</td>
-                          <td>{formatMoney(row.outstanding_cash)}</td>
-                          <td>{formatMoney(row.outstanding_0_30)}</td>
-                          <td>{formatMoney(row.outstanding_30_60)}</td>
-                          <td>{formatMoney(row.outstanding_61_90)}</td>
-                          <td>{formatMoney(row.outstanding_91_120)}</td>
-                          <td>{formatMoney(row.outstanding_above_120)}</td>
-                          <td>{row.max_overdue_days || 0}</td>
-                          <td>{row.due_invoice_count || 0}</td>
-                          <td>
+                          <td data-label={t("customerCode")}>{row.customer_code || "-"}</td>
+                          <td data-label={t("customer")} className="moduleCollectorCellPrimary">{row.customer_name || row.customer_code}</td>
+                          <td data-label={t("salesman")}>{row.salesman_name || row.salesman_code || "-"}</td>
+                          <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
+                          <td data-label={t("amount")} className="moduleCollectorCellPrimary">{formatMoney(row.total_due_amount)}</td>
+                          <td data-label={t("cashBucket")}>{formatMoney(row.outstanding_cash)}</td>
+                          <td data-label={t("bucket30")}>{formatMoney(row.outstanding_0_30)}</td>
+                          <td data-label={t("bucket31to60")}>{formatMoney(row.outstanding_30_60)}</td>
+                          <td data-label={t("bucket61to90")}>{formatMoney(row.outstanding_61_90)}</td>
+                          <td data-label={t("bucket91to120")}>{formatMoney(row.outstanding_91_120)}</td>
+                          <td data-label={t("bucket120plus")}>{formatMoney(row.outstanding_above_120)}</td>
+                          <td data-label={t("overdue")}>{row.max_overdue_days || 0}</td>
+                          <td data-label={t("invoices")}>{row.due_invoice_count || 0}</td>
+                          <td data-label={t("probability")}>
                             <span className={`moduleCollectorProbability moduleCollectorProbability${String(row.probability_label || "").toUpperCase()}`}>{row.probability_label}</span>
                           </td>
-                          <td>{row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status || "-"}</td>
-                          <td>{formatLastUpdateText(row)}</td>
-                          <td>
+                          <td data-label={t("lastOutcome")}>{row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status || "-"}</td>
+                          <td data-label={t("lastUpdate")}>{formatLastUpdateText(row)}</td>
+                          <td data-label={t("actions")} className="moduleCollectorCellActions">
                             <div className="moduleInlineStack moduleActionStack">
                               <button
                                 type="button"

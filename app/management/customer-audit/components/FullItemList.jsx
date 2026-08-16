@@ -7,6 +7,15 @@ function normalizedText(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function hasCatalogMetadata(item) {
+  const code = normalizedText(item?.item_code);
+  const name = normalizedText(item?.item_name);
+  const category = normalizedText(item?.category);
+  const unresolvedCategory = ["", "unclassified", "to_map", "tbd", "todo", "n/a", "na", "-"].includes(category);
+
+  return Boolean(name) && name !== code && !unresolvedCategory;
+}
+
 export default function FullItemList({ itemCatalog, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
@@ -14,6 +23,7 @@ export default function FullItemList({ itemCatalog, orderQuantities, decreaseOrd
 
   const items = (itemCatalog || [])
     .filter((item) => !isDoNotUseItem(item.item_name))
+    .filter(hasCatalogMetadata)
     .filter((item) => {
       if (!query) return true;
       return [item.item_code, item.item_name, item.category]

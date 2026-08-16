@@ -42,7 +42,7 @@ async function getSalesScope(admin, userId) {
   if (error) throw error;
   if (!profile) throw new Error("No profile found for this user");
 
-  let visibleSalesmanCodes = [profile.salesman_code];
+  let visibleSalesmanCodes = [];
   let hasAllAccess = false;
 
   const userRole = String(profile?.role || "").toLowerCase();
@@ -52,8 +52,13 @@ async function getSalesScope(admin, userId) {
   if (userRole === "admin" || userRole === "manager") {
     hasAllAccess = true;
     visibleSalesmanCodes = [];
-  } else {
-    // For regular salesmen, check if they have subordinates
+  } 
+  // Collectors with a salesman code see their customers
+  else if (userRole === "collector" && normalizedProfileCode) {
+    visibleSalesmanCodes = [normalizedProfileCode];
+  }
+  // Regular salesmen - check if they have subordinates
+  else if (normalizedProfileCode) {
     try {
       const { data: allAuthUsers, error: usersError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
       
@@ -79,6 +84,8 @@ async function getSalesScope(admin, userId) {
         }
         
         visibleSalesmanCodes = subordinateCodes;
+      } else {
+        visibleSalesmanCodes = [normalizedProfileCode];
       }
     } catch (e) {
       // If subordinate lookup fails, just use their own code

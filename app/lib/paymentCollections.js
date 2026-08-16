@@ -135,19 +135,14 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
   const legalCustomers = [];
 
   (records || []).forEach((record) => {
-    // Calculate due invoices (only past-due and cash)
+    // An invoice is collectable only once it is actually past its due date.
     const dueInvoices = Array.isArray(record?.invoices)
       ? record.invoices.filter((invoice) => {
-          const dueDate = dateOnly(invoice?.due_date);
           if (toNumber(invoice?.pending_amount) <= 0) return false;
-          if (invoiceHasCashRef(invoice)) return true;
-          return Boolean(dueDate) && dueDate <= today;
+          if (toNumber(invoice?.overdue_days) > 0) return true;
+          const dueDate = dateOnly(invoice?.due_date);
+          return Boolean(dueDate) && dueDate < today;
         })
-      : [];
-
-    // Calculate all invoices with pending amounts (for display)
-    const allPendingInvoices = Array.isArray(record?.invoices)
-      ? record.invoices.filter((invoice) => toNumber(invoice?.pending_amount) > 0)
       : [];
 
     const totalDueAmount = dueInvoices.reduce((sum, invoice) => sum + toNumber(invoice?.pending_amount), 0);
@@ -184,25 +179,16 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       return;
     }
 
-    const totalOutstanding = toNumber(record?.outstanding_cash)
-      + toNumber(record?.outstanding_0_30)
-      + toNumber(record?.outstanding_30_60)
-      + toNumber(record?.outstanding_61_90)
-      + toNumber(record?.outstanding_91_120)
-      + toNumber(record?.outstanding_above_120);
-
-    if (totalOutstanding <= 0 && allPendingInvoices.length === 0) return;
+    // Only customers with at least one past-due invoice belong in the queue.
+    if (dueInvoices.length === 0) return;
 
     dueCustomers.push(next);
   });
 
-  // Sort: customers with due amounts first, then by priority
   dueCustomers.sort((left, right) => {
-    // Priority 1: Has due invoices vs no due invoices
     const leftHasDue = Number(left.due_invoice_count > 0);
     const rightHasDue = Number(right.due_invoice_count > 0);
-    const byDueStatus = rightHasDue - leftHasDue;
-    if (byDueStatus !== 0) return byDueStatus;
+    const byDueStatus = rightHasDue - leftHasDue;    if (byDueStatus !== 0) return byDueStatus;
 
     // Priority 2: Cash presence
     const leftCash = toNumber(left?.outstanding_cash);

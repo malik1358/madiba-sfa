@@ -21,7 +21,7 @@ test("buildCollectionPriority favors recent due accounts over stale non-payment"
   assert.ok(low.score > high.score);
 });
 
-test("buildCollectionQueues prioritizes due customers but shows all non-legal customers", () => {
+test("buildCollectionQueues lists only past-due customers and routes legal ones separately", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "C1",
@@ -46,12 +46,11 @@ test("buildCollectionQueues prioritizes due customers but shows all non-legal cu
     },
   ], "2026-08-14T10:00:00Z");
 
-  // C1 should be first (has due invoices), C2 second (no due invoices), C3 in legal queue
-  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["C1", "C2"]);
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["C1"]);
   assert.deepEqual(queues.legalCustomers.map((row) => row.customer_code), ["C3"]);
 });
 
-test("buildCollectionQueues keeps 0-30 customer when invoice reference marks cash", () => {
+test("buildCollectionQueues excludes customers whose invoices are not yet due", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "1538",
@@ -61,13 +60,13 @@ test("buildCollectionQueues keeps 0-30 customer when invoice reference marks cas
       outstanding_61_90: 0,
       outstanding_91_120: 0,
       outstanding_above_120: 0,
-      invoices: [{ pending_amount: 1000, due_date: "2026-08-20", overdue_days: -5, ref: "INV-9283-C" }],
+      invoices: [{ pending_amount: 1000, due_date: "2026-08-20", overdue_days: 0, ref_no: "INV-9283-C" }],
       latest_collection: { payment_status: "NOT_PAID" },
       legal_transfer: null,
     },
   ], "2026-08-14T10:00:00Z");
 
-  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["1538"]);
+  assert.deepEqual(queues.dueCustomers, []);
 });
 
 test("buildCollectionQueues prioritizes cash-bucket customers at top", () => {
@@ -84,7 +83,7 @@ test("buildCollectionQueues prioritizes cash-bucket customers at top", () => {
       customer_code: "CASH",
       customer_name: "Cash Customer",
       outstanding_cash: 500,
-      invoices: [{ pending_amount: 500, due_date: "2026-09-30", overdue_days: -10, ref_no: "DC/008" }],
+      invoices: [{ pending_amount: 500, due_date: "2026-08-12", overdue_days: 2, ref_no: "DC/008" }],
       latest_collection: { payment_status: "NOT_PAID" },
       legal_transfer: null,
     },

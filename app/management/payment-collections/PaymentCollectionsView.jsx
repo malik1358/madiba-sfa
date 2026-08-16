@@ -648,8 +648,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
               />
             </div>
 
-            <div className="moduleTableWrap">
-              <table className="moduleTable">
+            <div className="moduleTableWrap moduleCollectorTableWrap">
+              <table className="moduleTable moduleCollectorTable">
                 <thead>
                   <tr>
                     <th>{t("customerCode")}</th>

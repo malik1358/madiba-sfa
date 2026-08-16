@@ -3834,6 +3834,15 @@ table.auditMatrix td.auditTrendSame {
   font-weight: 700;
 }
 
+.moduleCollectorTableWrap {
+  overflow-x: auto;
+}
+
+/* The queue has 17 columns, so let it scroll instead of crushing cells to nothing. */
+.moduleCollectorTable {
+  min-width: 1180px;
+}
+
 .moduleHealthGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

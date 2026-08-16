@@ -72,7 +72,7 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
   const { data: customers, error: customersError } = await customerQuery;
   if (customersError) throw customersError;
 
-  // Fetch invoices and outstanding data
+  // Fetch all invoices
   const { data: invoices, error: invoicesError } = await admin
     .from("invoices")
     .select("customer_code,invoice_number,due_date,pending_amount,ref_no");

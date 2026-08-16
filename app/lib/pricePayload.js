@@ -1,5 +1,9 @@
 import { PRICE_CACHE_KEY as DEFAULT_PRICE_CACHE_KEY } from "./priceApiConfig.js";
 
+const PRICE_CODE_ALIASES = {
+  A005425: ["A004555", "A000057"],
+};
+
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
@@ -36,6 +40,31 @@ function toNumber(value) {
     .trim();
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function applyPriceCodeAliases(priceMap) {
+  const next = { ...(priceMap || {}) };
+
+  Object.entries(PRICE_CODE_ALIASES).forEach(([targetCode, sourceCodes]) => {
+    const target = normalizeCode(targetCode);
+    if (!target) return;
+
+    const currentRate = toNumber(next[target]);
+    if (currentRate > 0) return;
+
+    for (const sourceCode of sourceCodes) {
+      const source = normalizeCode(sourceCode);
+      if (!source) continue;
+
+      const sourceRate = toNumber(next[source]);
+      if (sourceRate > 0) {
+        next[target] = sourceRate;
+        break;
+      }
+    }
+  });
+
+  return next;
 }
 
 function normalizeHeaderCell(value) {
@@ -313,7 +342,7 @@ export function parsePricePayload(payload) {
 
   if (Array.isArray(payload)) {
     walk(payload);
-    return { priceMap, sheetItems };
+    return { priceMap: applyPriceCodeAliases(priceMap), sheetItems };
   }
 
   if (payload && typeof payload === "object") {
@@ -326,7 +355,7 @@ export function parsePricePayload(payload) {
     });
   }
 
-  return { priceMap, sheetItems };
+  return { priceMap: applyPriceCodeAliases(priceMap), sheetItems };
 }
 
 function readCached(cacheKey) {
@@ -371,7 +400,7 @@ export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KE
       }
       const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
         ? {
-            priceMap: data.priceMap,
+            priceMap: applyPriceCodeAliases(data.priceMap),
             sheetItems: Array.isArray(data.sheetItems) ? data.sheetItems : [],
           }
         : parsePricePayload(data || {});

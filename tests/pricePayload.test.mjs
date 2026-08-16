@@ -32,3 +32,13 @@ test('parsePricePayload reads wholesale price headers from pricing sheets', () =
   const { priceMap } = parsePricePayload(payload);
   assert.equal(priceMap.A005425, 52.83);
 });
+
+test('parsePricePayload applies alias fallback for missing target code', () => {
+  const payload = {
+    A004555: 51.3,
+    A000057: 71.74,
+  };
+
+  const { priceMap } = parsePricePayload(payload);
+  assert.equal(priceMap.A005425, 51.3);
+});

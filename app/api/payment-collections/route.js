@@ -155,13 +155,9 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
   const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
 
   // Deactivated customers can still owe money, so they stay in the collection queue.
-  let customerQuery = admin
+  const customerQuery = admin
     .from("customers")
     .select("customer_code,customer_name,current_salesman_code,city,area");
-
-  if (!scope.hasAllAccess && normalizedScopeCodes.size > 0) {
-    customerQuery = customerQuery.in("current_salesman_code", Array.from(normalizedScopeCodes));
-  }
 
   const { data: customers, error: customersError } = await customerQuery;
   if (customersError) throw customersError;
@@ -272,24 +268,29 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
   invoicesByCustomer.forEach((customerInvoices, key) => {
     if (uniqueCustomers.has(key)) return;
 
-    const invoiceSalesmen = customerInvoices.map((invoice) => invoice.salesman).filter(Boolean);
-    const invoiceSalesman = invoiceSalesmen[0] || "";
-    if (!scope.hasAllAccess && !invoiceSalesmen.some((name) => visibleSalesmanNames.has(loosePersonName(name)))) return;
-
     uniqueCustomers.set(key, {
       customer_code: key,
       customer_name: nameByCustomer.get(key) || key,
       current_salesman_code: "",
       city: "",
       area: "",
-      fallback_salesman_name: invoiceSalesman,
     });
   });
 
-  const records = Array.from(uniqueCustomers.values()).map((customer) => {
+  const records = [];
+  uniqueCustomers.forEach((customer) => {
     const customerInvoices = invoicesByCustomer.get(customer.customer_code) || [];
     const visits = visitsByCustomer.get(customer.customer_code) || [];
     const legalTransfer = legalTransfersByCustomer.get(customer.customer_code);
+
+    // The uploaded file decides who collects, since customer assignments drift out of date.
+    const invoiceSalesmen = customerInvoices.map((invoice) => invoice.salesman).filter(Boolean);
+    if (!scope.hasAllAccess) {
+      const owned = invoiceSalesmen.length > 0
+        ? invoiceSalesmen.some((name) => visibleSalesmanNames.has(loosePersonName(name)))
+        : normalizedScopeCodes.has(normalizeCode(customer.current_salesman_code));
+      if (!owned) return;
+    }
 
     // Calculate outstanding amounts
     const outstanding = {
@@ -326,12 +327,12 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
       }
     });
 
-    return {
+    records.push({
       customer_code: customer.customer_code,
       customer_name: customer.customer_name,
       current_salesman_code: customer.current_salesman_code,
-      salesman_name: salesmanMap.get(normalizeCode(customer.current_salesman_code))
-        || customer.fallback_salesman_name
+      salesman_name: invoiceSalesmen[0]
+        || salesmanMap.get(normalizeCode(customer.current_salesman_code))
         || customer.current_salesman_code,
       city: customer.city,
       area: customer.area,
@@ -339,7 +340,7 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
       latest_collection: visits[0] || null,
       legal_transfer: legalTransfer || null,
       ...outstanding,
-    };
+    });
   });
 
   return records;
@@ -415,18 +416,12 @@ export async function POST(request) {
     });
 
     const scope = await getSalesScope(admin, user.id);
-    const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
 
     // Verify user has access to this customer
-    if (!scope.hasAllAccess && normalizedScopeCodes.size > 0) {
-      const { data: customer, error: customerError } = await admin
-        .from("customers")
-        .select("current_salesman_code")
-        .eq("customer_code", customerCode)
-        .maybeSingle();
-
-      if (customerError) throw customerError;
-      if (!customer || !normalizedScopeCodes.has(normalizeCode(customer.current_salesman_code))) {
+    if (!scope.hasAllAccess) {
+      const records = await fetchOutstandingAndCollectionRecords(admin, scope);
+      const target = canonicalCustomerCode(customerCode);
+      if (!records.some((record) => record.customer_code === target)) {
         throw new Error("You do not have access to this customer");
       }
     }

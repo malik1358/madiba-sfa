@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parsePricePayload } from '../app/lib/pricePayload.js';
+import { loadPricePayload, parsePricePayload } from '../app/lib/pricePayload.js';
 
 test('parsePricePayload reads wholesale price headers from pricing sheets', () => {
   const payload = [
@@ -41,4 +41,36 @@ test('parsePricePayload applies alias fallback for missing target code', () => {
 
   const { priceMap } = parsePricePayload(payload);
   assert.equal(priceMap.A005425, 51.3);
+});
+
+test('loadPricePayload clears stale browser cache before loading fresh prices', async () => {
+  const cacheKey = 'madiba.pricePayload.v2';
+  const storage = new Map();
+  let cleared = false;
+
+  globalThis.window = {
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: (key) => {
+        if (key === cacheKey) cleared = true;
+        storage.delete(key);
+      },
+    },
+  };
+
+  storage.set(cacheKey, JSON.stringify({ priceMap: { A000057: 9.99 }, sheetItems: [] }));
+
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ priceMap: { A000057: 71.74 }, sheetItems: [] }),
+  });
+
+  const result = await loadPricePayload('/api/pricing/cache', cacheKey);
+
+  assert.equal(cleared, true);
+  assert.equal(result.priceMap.A000057, 71.74);
+
+  delete globalThis.window;
+  delete globalThis.fetch;
 });

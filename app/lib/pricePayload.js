@@ -384,8 +384,18 @@ function writeCached(cacheKey, data) {
   }
 }
 
+function clearCached(cacheKey) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(cacheKey);
+  } catch {
+    // Ignore storage removal failures.
+  }
+}
+
 export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KEY) {
   const cached = readCached(cacheKey);
+  clearCached(cacheKey);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {

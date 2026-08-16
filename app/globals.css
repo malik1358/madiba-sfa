@@ -3857,14 +3857,14 @@ table.auditMatrix td.auditTrendSame {
   }
 
   .moduleCollectorTable,
-  .moduleCollectorTable tbody,
-  .moduleCollectorTable tr,
-  .moduleCollectorTable td {
+  .moduleCollectorTable > tbody,
+  .moduleCollectorTable > tbody > tr,
+  .moduleCollectorTable > tbody > tr > td {
     display: block;
     min-width: 0;
   }
 
-  .moduleCollectorTable thead {
+  .moduleCollectorTable > thead {
     display: none;
   }
 
@@ -3942,6 +3942,14 @@ table.auditMatrix td.auditTrendSame {
 
   .moduleCollectorSubTableWrap {
     overflow-x: auto;
+    border: 1px solid #d5e1e4;
+    border-radius: 10px;
+    background: #ffffff;
+  }
+
+  .moduleCollectorSubTableWrap .moduleTable {
+    display: table;
+    width: 100%;
   }
 
   .moduleCollectorSubTableWrap .moduleTable th {

@@ -135,11 +135,14 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
   const legalCustomers = [];
 
   (records || []).forEach((record) => {
-    // An invoice is collectable only once it is actually past its due date.
+    // The outstanding file's overdue column is authoritative; due dates are only a fallback.
     const dueInvoices = Array.isArray(record?.invoices)
       ? record.invoices.filter((invoice) => {
           if (toNumber(invoice?.pending_amount) <= 0) return false;
-          if (toNumber(invoice?.overdue_days) > 0) return true;
+          const overdue = invoice?.overdue_days;
+          if (overdue !== null && overdue !== undefined && overdue !== "") {
+            return toNumber(overdue) > 0;
+          }
           const dueDate = dateOnly(invoice?.due_date);
           return Boolean(dueDate) && dueDate < today;
         })

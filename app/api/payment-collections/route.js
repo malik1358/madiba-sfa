@@ -234,7 +234,9 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
       invoice_date: invoice.invoice_date || "",
       due_date: invoice.due_date || "",
       pending_amount: toNumber(invoice.pending_amount),
-      overdue_days: toNumber(invoice.overdue_days),
+      overdue_days: invoice.overdue_days === undefined || invoice.overdue_days === null || invoice.overdue_days === ""
+        ? null
+        : toNumber(invoice.overdue_days),
       salesman: String(invoice.salesman || "").trim(),
     });
 

@@ -112,7 +112,12 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
   }
 
   const { data: customers, error: customersError } = await customerQuery;
-  if (customersError) throw customersError;
+  if (customersError) {
+    console.error("Customer query error:", customersError);
+    throw customersError;
+  }
+
+  console.log(`[DEBUG] fetched ${customers?.length || 0} customers, hasAllAccess=${scope.hasAllAccess}, visibleCodes=${Array.from(normalizedScopeCodes).join(',')}`);
 
   // Fetch salesman names from profiles
   const { data: salesmen, error: salesmenError } = await admin
@@ -260,10 +265,13 @@ export async function GET(request) {
     const records = await fetchOutstandingAndCollectionRecords(admin, scope);
     const queues = buildCollectionQueues(records);
 
+    console.log(`[RESPONSE] dueCustomers=${queues.dueCustomers.length}, legalCustomers=${queues.legalCustomers.length}, records=${records.length}`);
+
     return Response.json({
       success: true,
       dueCustomers: queues.dueCustomers,
       legalCustomers: queues.legalCustomers,
+      debug: { recordsCount: records.length, hasAllAccess: scope.hasAllAccess }
     });
   } catch (error) {
     console.error("Error fetching payment collections:", error);

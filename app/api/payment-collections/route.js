@@ -72,6 +72,19 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
   const { data: customers, error: customersError } = await customerQuery;
   if (customersError) throw customersError;
 
+  // Fetch salesman names from profiles
+  const { data: salesmen, error: salesmenError } = await admin
+    .from("profiles")
+    .select("salesman_code,salesman_name");
+
+  if (salesmenError) throw salesmenError;
+
+  const salesmanMap = new Map();
+  (salesmen || []).forEach((salesman) => {
+    const normalizedCode = normalizeCode(salesman.salesman_code);
+    salesmanMap.set(normalizedCode, salesman.salesman_name);
+  });
+
   // Fetch all invoices
   const { data: invoices, error: invoicesError } = await admin
     .from("invoices")
@@ -162,6 +175,7 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
       customer_code: customer.customer_code,
       customer_name: customer.customer_name,
       current_salesman_code: customer.current_salesman_code,
+      salesman_name: salesmanMap.get(normalizeCode(customer.current_salesman_code)) || customer.current_salesman_code,
       city: customer.city,
       area: customer.area,
       invoices: customerInvoices,

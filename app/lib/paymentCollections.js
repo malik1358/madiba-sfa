@@ -135,6 +135,7 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
   const legalCustomers = [];
 
   (records || []).forEach((record) => {
+    // Calculate due invoices (only past-due and cash)
     const dueInvoices = Array.isArray(record?.invoices)
       ? record.invoices.filter((invoice) => {
           const dueDate = dateOnly(invoice?.due_date);
@@ -142,6 +143,11 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
           if (invoiceHasCashRef(invoice)) return true;
           return Boolean(dueDate) && dueDate <= today;
         })
+      : [];
+
+    // Calculate all invoices with pending amounts (for display)
+    const allPendingInvoices = Array.isArray(record?.invoices)
+      ? record.invoices.filter((invoice) => toNumber(invoice?.pending_amount) > 0)
       : [];
 
     const totalDueAmount = dueInvoices.reduce((sum, invoice) => sum + toNumber(invoice?.pending_amount), 0);
@@ -172,31 +178,43 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       recommended_visit: dueInvoices.length > 0 && latestStatus !== "PAID" && !record?.legal_transfer?.is_transferred,
     };
 
+    // Add to legal queue if transferred
     if (record?.legal_transfer?.is_transferred) {
       legalCustomers.push(next);
       return;
     }
 
-    if (only0to30Outstanding(record) && !hasCreditRef(record)) {
-      return;
-    }
-
-    if (dueInvoices.length > 0 && latestStatus !== "PAID") {
-      dueCustomers.push(next);
-    }
+    // Add ALL customers to due queue (not just those with due invoices)
+    dueCustomers.push(next);
   });
 
+  // Sort: customers with due amounts first, then by priority
   dueCustomers.sort((left, right) => {
+    // Priority 1: Has due invoices vs no due invoices
+    const leftHasDue = Number(left.due_invoice_count > 0);
+    const rightHasDue = Number(right.due_invoice_count > 0);
+    const byDueStatus = rightHasDue - leftHasDue;
+    if (byDueStatus !== 0) return byDueStatus;
+
+    // Priority 2: Cash presence
     const leftCash = toNumber(left?.outstanding_cash);
     const rightCash = toNumber(right?.outstanding_cash);
     const byCashPresence = Number(rightCash > 0) - Number(leftCash > 0);
     if (byCashPresence !== 0) return byCashPresence;
+
+    // Priority 3: Cash amount
     const byCashAmount = rightCash - leftCash;
     if (byCashAmount !== 0) return byCashAmount;
+
+    // Priority 4: Probability score
     const byScore = Number(right.probability_score || 0) - Number(left.probability_score || 0);
     if (byScore !== 0) return byScore;
+
+    // Priority 5: Days overdue
     const byOverdue = Number(right.max_overdue_days || 0) - Number(left.max_overdue_days || 0);
     if (byOverdue !== 0) return byOverdue;
+
+    // Priority 6: Earliest due date
     const byOldestDue = compareDateText(left?.earliest_due_date, right?.earliest_due_date);
     if (byOldestDue !== 0) return byOldestDue;
     const byAmount = Number(right.total_due_amount || 0) - Number(left.total_due_amount || 0);

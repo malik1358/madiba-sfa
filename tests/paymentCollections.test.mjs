@@ -21,7 +21,7 @@ test("buildCollectionPriority favors recent due accounts over stale non-payment"
   assert.ok(low.score > high.score);
 });
 
-test("buildCollectionQueues keeps only due non-legal rows in the visit queue", () => {
+test("buildCollectionQueues prioritizes due customers but shows all non-legal customers", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "C1",
@@ -46,7 +46,8 @@ test("buildCollectionQueues keeps only due non-legal rows in the visit queue", (
     },
   ], "2026-08-14T10:00:00Z");
 
-  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["C1"]);
+  // C1 should be first (has due invoices), C2 second (no due invoices), C3 in legal queue
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["C1", "C2"]);
   assert.deepEqual(queues.legalCustomers.map((row) => row.customer_code), ["C3"]);
 });
 

@@ -3143,6 +3143,12 @@ table.auditMatrix td.auditTrendSame {
   background: #edf4f6;
 }
 
+.auditTransactionCount {
+  color: #4b6b73;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 
 /* ==========================================================
    MOBILE

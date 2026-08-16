@@ -1,6 +1,6 @@
 import { numberFormat, qtyFormat, shortDate } from '../lib/format';
 
-export default function TransactionHistory({ transactions, showTransactions, setShowTransactions, analytics }) {
+export default function TransactionHistory({ transactions, analytics }) {
   return (
     <section className="auditSection">
       <div className="auditTransactionHeader">
@@ -8,41 +8,42 @@ export default function TransactionHistory({ transactions, showTransactions, set
           <h3>Transaction History</h3>
           <p className="auditSectionNote">Full source transaction history for this customer.</p>
         </div>
-        <button type="button" className="auditTransactionToggle" onClick={() => setShowTransactions((current) => !current)}>
-          {showTransactions ? 'Hide Transactions' : `Show Transactions (${analytics.transactionCount})`}
-        </button>
+        <span className="auditTransactionCount">{analytics.transactionCount} transactions</span>
       </div>
 
-      {showTransactions && (
-        <div className="auditTableScroll">
-          <table className="auditTransactionTable">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Voucher</th>
-                <th>Item Code</th>
-                <th>Item</th>
-                <th>Category</th>
-                <th>Qty</th>
-                <th>Sales</th>
+      <div className="auditTableScroll">
+        <table className="auditTransactionTable">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Voucher</th>
+              <th>Item Code</th>
+              <th>Item</th>
+              <th>Category</th>
+              <th>Qty</th>
+              <th>Sales</th>
+            </tr>
+          </thead>
+          <tbody>
+            {transactions.map((row) => (
+              <tr key={row.id}>
+                <td>{shortDate(row.transaction_date)}</td>
+                <td>{row.voucher_number || row.reference || '—'}</td>
+                <td>{row.item_code || '—'}</td>
+                <td>{row.item_name || '—'}</td>
+                <td>{row.category || 'Unclassified'}</td>
+                <td className={`auditNumberCell ${Number(row.quantity) < 0 ? 'auditNegativeValue' : ''}`}>{qtyFormat(row.quantity)}</td>
+                <td className={`auditNumberCell ${Number(row.sales_amount) < 0 ? 'auditNegativeValue' : ''}`}>{numberFormat(row.sales_amount)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {transactions.map((row) => (
-                <tr key={row.id}>
-                  <td>{shortDate(row.transaction_date)}</td>
-                  <td>{row.voucher_number || row.reference || '—'}</td>
-                  <td>{row.item_code || '—'}</td>
-                  <td>{row.item_name || '—'}</td>
-                  <td>{row.category || 'Unclassified'}</td>
-                  <td className={`auditNumberCell ${Number(row.quantity) < 0 ? 'auditNegativeValue' : ''}`}>{qtyFormat(row.quantity)}</td>
-                  <td className={`auditNumberCell ${Number(row.sales_amount) < 0 ? 'auditNegativeValue' : ''}`}>{numberFormat(row.sales_amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            ))}
+            {transactions.length === 0 && (
+              <tr>
+                <td colSpan={7}>No transactions found for this customer.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

@@ -85,8 +85,6 @@ function CustomerAuditPageContent() {
     itemMasterStatus,
     loading,
     loadingCustomer,
-    showTransactions,
-    setShowTransactions,
     expandedCategories,
     toggleCategory,
     openCustomer,
@@ -507,8 +505,6 @@ function CustomerAuditPageContent() {
 
         <TransactionHistory
           transactions={transactions}
-          showTransactions={showTransactions}
-          setShowTransactions={setShowTransactions}
           analytics={analytics}
         />
 

@@ -13,10 +13,14 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
-// Customer codes in uploads are sometimes stored as "1114C SOME NAME".
+// Customer codes in uploads appear as "1114C SOME NAME" or "1442-MADAR SOME NAME".
 function canonicalCustomerCode(value) {
   const raw = normalizeCode(value);
   if (!raw) return "";
+
+  const numericPrefix = raw.match(/^(\d{3,6}[A-Z]?)[-\s]/);
+  if (numericPrefix) return numericPrefix[1];
+
   const extracted = normalizeCode(extractLeadingCustomerCodeAndName(raw).customer_code);
   return extracted || raw.split(/\s+/)[0] || raw;
 }
@@ -28,6 +32,14 @@ function comparableName(value) {
     .replace(/[^A-Z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// Uploads spell names inconsistently (e.g. ABDALLA vs ABADALLA), so compare consonant skeletons.
+function loosePersonName(value) {
+  return comparableName(value)
+    .replace(/[^A-Z]/g, "")
+    .replace(/[AEIOU]/g, "")
+    .replace(/(.)\1+/g, "$1");
 }
 
 async function readOutstandingInvoices(admin) {
@@ -142,11 +154,10 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
   const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
 
-  // Fetch customers assigned to the salesman
+  // Deactivated customers can still owe money, so they stay in the collection queue.
   let customerQuery = admin
     .from("customers")
-    .select("customer_code,customer_name,current_salesman_code,city,area")
-    .eq("is_active", true);
+    .select("customer_code,customer_name,current_salesman_code,city,area");
 
   if (!scope.hasAllAccess && normalizedScopeCodes.size > 0) {
     customerQuery = customerQuery.in("current_salesman_code", Array.from(normalizedScopeCodes));
@@ -168,7 +179,7 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
     const normalizedCode = normalizeCode(salesman.salesman_code);
     salesmanMap.set(normalizedCode, salesman.salesman_name);
     if (scope.hasAllAccess || normalizedScopeCodes.has(normalizedCode)) {
-      const name = comparableName(salesman.salesman_name);
+      const name = loosePersonName(salesman.salesman_name);
       if (name) visibleSalesmanNames.add(name);
     }
   });
@@ -261,8 +272,9 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
   invoicesByCustomer.forEach((customerInvoices, key) => {
     if (uniqueCustomers.has(key)) return;
 
-    const invoiceSalesman = customerInvoices.map((invoice) => invoice.salesman).find(Boolean) || "";
-    if (!scope.hasAllAccess && !visibleSalesmanNames.has(comparableName(invoiceSalesman))) return;
+    const invoiceSalesmen = customerInvoices.map((invoice) => invoice.salesman).filter(Boolean);
+    const invoiceSalesman = invoiceSalesmen[0] || "";
+    if (!scope.hasAllAccess && !invoiceSalesmen.some((name) => visibleSalesmanNames.has(loosePersonName(name)))) return;
 
     uniqueCustomers.set(key, {
       customer_code: key,

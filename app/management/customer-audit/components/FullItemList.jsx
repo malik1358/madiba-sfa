@@ -129,7 +129,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
       </div>
 
       <div className="auditTableScroll" style={{ marginTop: "10px" }}>
-        <table className="moduleTable moduleOrderTable">
+        <table className="moduleTable moduleOrderTable auditFullItemListTable">
           <thead>
             <tr>
               <th>Category</th>

@@ -3588,6 +3588,10 @@ table.auditMatrix td.auditTrendSame {
   min-width: 760px;
 }
 
+.auditFullItemListTable th {
+  position: static !important;
+}
+
 .moduleCategoryRow td {
   background: #f8fbfc;
   border-left: 1px solid #d5e1e4;

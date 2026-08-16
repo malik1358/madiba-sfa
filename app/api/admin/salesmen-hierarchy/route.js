@@ -8,6 +8,14 @@ export const maxDuration = 60;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const LOCAL_LOGIN_DOMAIN = "@madiba-sfa.local";
+const ASSIGNABLE_ROLES = [
+  "salesman",
+  "manager",
+  "admin",
+  "invoice-maker",
+  "product-promoter",
+  "collector",
+];
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -582,6 +590,43 @@ export async function POST(request) {
       return NextResponse.json({
         success: true,
         message: `Assigned ${salesmen.salesman_name || salesmen.salesman_code || salesmanId} to ${headSalesmanCode || "no head"}.`,
+      });
+    }
+
+    if (mode === "update-role") {
+      const salesmanId = String(body?.salesmanId || "").trim();
+      const requestedRole = String(body?.role || "").trim().toLowerCase();
+
+      if (!salesmanId) {
+        return NextResponse.json({ success: false, error: "Missing salesman id." }, { status: 400 });
+      }
+
+      if (!ASSIGNABLE_ROLES.includes(requestedRole)) {
+        return NextResponse.json({ success: false, error: "Unsupported role." }, { status: 400 });
+      }
+
+      const { data: target, error: targetError } = await admin
+        .from("profiles")
+        .select("id,salesman_code,salesman_name,role")
+        .eq("id", salesmanId)
+        .single();
+
+      if (targetError) throw targetError;
+
+      const { error: roleUpdateError } = await admin
+        .from("profiles")
+        .update({ role: requestedRole })
+        .eq("id", salesmanId);
+
+      if (roleUpdateError) throw roleUpdateError;
+
+      await admin.auth.admin.updateUserById(salesmanId, {
+        user_metadata: { collection_only: requestedRole === "collector" },
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `${target.salesman_name || target.salesman_code || salesmanId} is now ${requestedRole}.`,
       });
     }
 

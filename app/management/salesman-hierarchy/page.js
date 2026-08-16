@@ -48,6 +48,20 @@ function autoCodeHintForRole(role) {
   return "SM###";
 }
 
+const ROLE_OPTIONS = [
+  { value: "salesman", label: "Salesman" },
+  { value: "manager", label: "Manager" },
+  { value: "admin", label: "Admin" },
+  { value: "invoice-maker", label: "Invoice Maker" },
+  { value: "product-promoter", label: "Product Promoter" },
+  { value: "collector", label: "Collector" },
+];
+
+function normalizeRoleValue(role) {
+  const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
+  return ROLE_OPTIONS.some((option) => option.value === normalized) ? normalized : "salesman";
+}
+
 export default function SalesmanHierarchyPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -61,6 +75,7 @@ export default function SalesmanHierarchyPage() {
   const [salesmen, setSalesmen] = useState([]);
   const [headOptions, setHeadOptions] = useState([]);
   const [headSelections, setHeadSelections] = useState({});
+  const [roleSelections, setRoleSelections] = useState({});
   const [newSalesman, setNewSalesman] = useState({
     salesmanName: "",
     salesmanCode: "",
@@ -106,6 +121,9 @@ export default function SalesmanHierarchyPage() {
       setHeadOptions(data.headOptions || []);
       setHeadSelections(
         Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.head_salesman_code || ""]))
+      );
+      setRoleSelections(
+        Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, normalizeRoleValue(salesman.role)]))
       );
     } catch (err) {
       setError(err.message || "Unable to load salesman hierarchy.");
@@ -168,13 +186,26 @@ export default function SalesmanHierarchyPage() {
     setMessage("");
 
     try {
+      const nextRole = normalizeRoleValue(roleSelections[salesman.id]);
+      const messages = [];
+
+      if (nextRole !== normalizeRoleValue(salesman.role)) {
+        const roleResult = await postAction({
+          mode: "update-role",
+          salesmanId: salesman.id,
+          role: nextRole,
+        });
+        messages.push(roleResult.message || "Role updated.");
+      }
+
       const result = await postAction({
         mode: "assign-head",
         salesmanId: salesman.id,
         headSalesmanCode: headSelections[salesman.id] || "",
       });
+      messages.push(result.message || "Head salesman saved.");
 
-      setMessage(result.message || "Head salesman saved.");
+      setMessage(messages.join(" "));
       await loadHierarchy(false);
     } catch (err) {
       setError(err.message || "Unable to save assignment.");
@@ -402,7 +433,19 @@ export default function SalesmanHierarchyPage() {
                         <strong>{salesman.salesman_name || salesman.salesman_code || salesman.id}</strong>
                         <div className="moduleCode">{salesman.salesman_code || salesman.id}</div>
                       </td>
-                      <td>{String(salesman.role || "-").replace("_", " ").toUpperCase()}</td>
+                      <td>
+                        <select
+                          className="moduleInput"
+                          value={roleSelections[salesman.id] || normalizeRoleValue(salesman.role)}
+                          onChange={(event) => setRoleSelections((current) => ({ ...current, [salesman.id]: event.target.value }))}
+                        >
+                          {ROLE_OPTIONS.map((option) => (
+                            <option key={`${salesman.id}-${option.value}`} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td>{loginName || "No username"}</td>
                       <td>{currentHead ? `${currentHead.salesman_name || currentHead.salesman_code} (${currentHead.salesman_code})` : "-"}</td>
                       <td>

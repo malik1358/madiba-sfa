@@ -18,6 +18,7 @@ const PAGE_LABELS = {
   "/management/gps-map": "GPS Map",
   "/management/salesman-hierarchy": "Salesman Hierarchy",
   "/management/payment-collections": "Collections",
+  "/management/my-collections": "My Collections",
 };
 
 function readStoredPages() {

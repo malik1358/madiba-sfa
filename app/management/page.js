@@ -257,7 +257,11 @@ export default function ManagementPage() {
             <h2>{t("modules")}</h2>
           </div>
           <div className="moduleNavGrid">
-            <Link href="/management/payment-collections" className="moduleNavCard">Payment Collections</Link>
+            {userRole === "salesman" ? (
+              <Link href="/management/my-collections" className="moduleNavCard">My Customer Collections</Link>
+            ) : (
+              <Link href="/management/payment-collections" className="moduleNavCard">Payment Collections</Link>
+            )}
             {userRole !== "collector" ? (
               <>
                 <Link href="/management/customer-audit" className="moduleNavCard">Customers Audit</Link>

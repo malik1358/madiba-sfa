@@ -262,6 +262,9 @@ export default function ManagementPage() {
             ) : (
               <Link href="/management/payment-collections" className="moduleNavCard">Payment Collections</Link>
             )}
+            {(userRole === "admin" || userRole === "manager" || userRole === "collector") && (
+              <Link href="/management/collection-report" className="moduleNavCard">Collection Route Report</Link>
+            )}
             {userRole !== "collector" ? (
               <>
                 <Link href="/management/customer-audit" className="moduleNavCard">Customers Audit</Link>

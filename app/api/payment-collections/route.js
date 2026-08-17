@@ -488,6 +488,18 @@ export async function POST(request) {
     const remarkEnglish = String(formData.get("remarkEnglish") || "").trim();
     const nonPaymentReason = String(formData.get("nonPaymentReason") || "").trim();
     const legalNote = String(formData.get("legalNote") || "").trim();
+    const latitudeRaw = formData.get("latitude");
+    const longitudeRaw = formData.get("longitude");
+    const gpsAccuracyRaw = formData.get("gpsAccuracyMeters");
+    const latitude = latitudeRaw === null || latitudeRaw === undefined || latitudeRaw === ""
+      ? null
+      : Number(latitudeRaw);
+    const longitude = longitudeRaw === null || longitudeRaw === undefined || longitudeRaw === ""
+      ? null
+      : Number(longitudeRaw);
+    const gpsAccuracyMeters = gpsAccuracyRaw === null || gpsAccuracyRaw === undefined || gpsAccuracyRaw === ""
+      ? null
+      : Number(gpsAccuracyRaw);
 
     if (!customerCode) throw new Error("Customer code is required");
     if (!visitOutcome) throw new Error("Please select visit outcome");
@@ -555,6 +567,9 @@ export async function POST(request) {
         non_payment_reason: nonPaymentReason,
         payment_copy_url: paymentCopyUrl,
         receipt_copy_url: receiptCopyUrl,
+        latitude: Number.isFinite(latitude) ? latitude : null,
+        longitude: Number.isFinite(longitude) ? longitude : null,
+        gps_accuracy_meters: Number.isFinite(gpsAccuracyMeters) ? gpsAccuracyMeters : null,
         created_by: user.id,
         saved_at: new Date().toISOString(),
       })

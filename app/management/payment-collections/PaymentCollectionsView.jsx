@@ -8,6 +8,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
+import { captureGpsLocation } from "../../lib/geo";
 import { getSupabaseClient } from "../../lib/supabase";
 
 const TEXT = {
@@ -509,6 +510,16 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("sendWhatsapp", "1");
       formData.append("whatsappMessage", summaryText);
       formData.append("legalNote", form.legalNote || "Transferred during visit report");
+
+      try {
+        const gps = await captureGpsLocation();
+        formData.append("latitude", String(gps.latitude));
+        formData.append("longitude", String(gps.longitude));
+        formData.append("gpsAccuracyMeters", String(gps.accuracy));
+      } catch {
+        // Visit can still be saved when GPS is unavailable.
+      }
+
       if (form.paymentCopy) formData.append("paymentCopy", form.paymentCopy);
       if (form.receiptCopy) formData.append("receiptCopy", form.receiptCopy);
 
@@ -668,6 +679,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           <div className="moduleInlineStack" style={{ marginBottom: "12px" }}>
             <Link href="/management/payment-collections" className={`moduleInlineButton moduleActionButton${view === "due" ? " moduleCollectorTabActive" : ""}`}>{t("dueQueue")}</Link>
             <Link href="/management/payment-collections/legal" className={`moduleInlineButton moduleActionButton${view === "legal" ? " moduleCollectorTabActive" : ""}`}>{t("legalQueue")}</Link>
+            <Link href="/management/collection-report" className="moduleInlineButton moduleActionButton">Collection Route Report</Link>
           </div>
 
           <section className="moduleSection">

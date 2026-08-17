@@ -23,6 +23,8 @@ export function hasGpsCoordinates(record) {
   return Number.isFinite(latitude) && Number.isFinite(longitude);
 }
 
+export const GPS_REQUIRED_ERROR = "GPS is required. Allow location access in the browser and try again.";
+
 export function captureGpsLocation() {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     return Promise.reject(new Error("Geolocation is not supported on this device."));
@@ -37,10 +39,32 @@ export function captureGpsLocation() {
           accuracy: Number(position.coords.accuracy.toFixed(1)),
         });
       },
-      () => reject(new Error("Unable to read GPS location.")),
+      () => reject(new Error(GPS_REQUIRED_ERROR)),
       { enableHighAccuracy: true, timeout: 10000 },
     );
   });
+}
+
+export function requireGpsLocation() {
+  return captureGpsLocation();
+}
+
+export function buildGpsActivityNote(action, location, extra = {}) {
+  return JSON.stringify({
+    action,
+    captured_at: new Date().toISOString(),
+    location,
+    ...extra,
+  });
+}
+
+export async function insertGpsActivityLog(supabase, userId, entryType, location, extra = {}) {
+  const { error } = await supabase.from("daily_activity_logs").insert({
+    user_id: userId,
+    entry_type: entryType,
+    note: buildGpsActivityNote(entryType, location, extra),
+  });
+  if (error) throw error;
 }
 
 export function enrichVisitsWithDistances(visits) {

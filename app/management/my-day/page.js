@@ -989,13 +989,15 @@ export default function MyDayPage() {
         throw new Error("Please login again.");
       }
 
+      const location = await captureLocation();
+
       const response = await fetch("/api/visit-reports", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ customerCode: code, isActive: false }),
+        body: JSON.stringify({ customerCode: code, isActive: false, location }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) {
@@ -1053,13 +1055,15 @@ export default function MyDayPage() {
         throw new Error("Please login again.");
       }
 
+      const location = await captureLocation();
+
       const response = await fetch("/api/visit-reports", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ customerCode: code, isActive: true }),
+        body: JSON.stringify({ customerCode: code, isActive: true, location }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) {

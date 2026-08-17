@@ -8,7 +8,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
-import { captureGpsLocation } from "../../lib/geo";
+import { captureGpsLocation, GPS_REQUIRED_ERROR } from "../../lib/geo";
 import { getSupabaseClient } from "../../lib/supabase";
 
 const TEXT = {
@@ -89,7 +89,7 @@ const TEXT = {
   msgNextVisitRequired: { en: "Next visit date is required when full overdue is not received.", ar: "تاريخ الزيارة القادمة مطلوب عند عدم استلام كامل المبلغ المستحق." },
   msgSaveFailed: { en: "Unable to save collection visit.", ar: "تعذر حفظ زيارة التحصيل." },
   msgVisitSaved: { en: "Visit saved successfully.", ar: "تم حفظ الزيارة بنجاح." },
-  msgGpsNotCaptured: { en: "GPS was not captured. Allow location access in the browser before saving.", ar: "لم يتم التقاط GPS. اسمح بالموقع في المتصفح قبل الحفظ." },
+  msgGpsRequired: { en: "GPS is required. Allow location access in the browser before saving.", ar: "GPS مطلوب. اسمح بالموقع في المتصفح قبل الحفظ." },
   msgWhatsappNotSent: { en: "WhatsApp not sent", ar: "لم يتم إرسال واتساب" },
   msgSpeechUnsupported: { en: "Speech dictation is not supported in this browser.", ar: "الإملاء الصوتي غير مدعوم في هذا المتصفح." },
   msgSupabaseMissing: { en: "Supabase is not configured.", ar: "Supabase غير مُعد." },
@@ -303,6 +303,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (text.includes("Mode of receipt is required")) return t("msgModeRequired");
     if (text.includes("Receipt copy is compulsory")) return t("msgReceiptRequired");
     if (text.includes("Next visit date is required") || text.includes("Next visit is required")) return t("msgNextVisitRequired");
+    if (text.includes("GPS is required") || text === GPS_REQUIRED_ERROR) return t("msgGpsRequired");
     if (text.includes("Unable to save collection visit")) return t("msgSaveFailed");
     if (text.includes("Unable to update legal transfer status")) return t("msgLegalUpdateFailed");
     return text;
@@ -512,15 +513,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("whatsappMessage", summaryText);
       formData.append("legalNote", form.legalNote || "Transferred during visit report");
 
-      let gpsCaptured = false;
-      try {
-        const gps = await captureGpsLocation();
-        formData.append("latitude", String(gps.latitude));
-        formData.append("longitude", String(gps.longitude));
-        formData.append("gpsAccuracyMeters", String(gps.accuracy));
-      } catch {
-        // Visit can still be saved when GPS is unavailable.
-      }
+      const gps = await captureGpsLocation();
+      formData.append("latitude", String(gps.latitude));
+      formData.append("longitude", String(gps.longitude));
+      formData.append("gpsAccuracyMeters", String(gps.accuracy));
 
       if (form.paymentCopy) formData.append("paymentCopy", form.paymentCopy);
       if (form.receiptCopy) formData.append("receiptCopy", form.receiptCopy);
@@ -540,9 +536,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       const popupMessage = payload?.whatsapp?.error
         ? `${t("msgVisitSaved")} ${t("msgWhatsappNotSent")}: ${payload.whatsapp.error}`
-        : !payload?.gpsCaptured
-          ? `${t("msgVisitSaved")} ${t("msgGpsNotCaptured")}`
-          : t("msgVisitSaved");
+        : t("msgVisitSaved");
       const copied = await copyTextToClipboard(summaryText);
       showPopup(popupMessage);
       setSummaryForWhatsApp(summaryText);
@@ -634,6 +628,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (!session?.access_token) throw new Error(t("msgLoginAgain"));
 
+      const gps = await captureGpsLocation();
+
       const response = await fetch("/api/payment-collections", {
         method: "PATCH",
         headers: {
@@ -645,6 +641,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerName: row.customer_name,
           note: form.legalNote,
           action,
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          gpsAccuracyMeters: gps.accuracy,
         }),
       });
 
@@ -668,7 +667,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }
 
   return (
-    <MorningAttendanceGate requireMorningAttendance={false}>
+    <MorningAttendanceGate requireMorningAttendance={false} enableBackgroundGps>
       <main className="modulePage" dir={dir}>
         <div className="moduleShell">
           <div className="moduleHeader">

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   enrichVisitsWithDistances,
   formatCollectorDisplayName,
+  GPS_REQUIRED_ERROR,
   haversineDistanceKm,
   nearestActivityGps,
   parseGpsFromActivityNote,
@@ -88,4 +89,8 @@ test("formatCollectorDisplayName prefers email over generic role name", () => {
     formatCollectorDisplayName({ email: "collector@example.com", salesman_name: "collector", role: "collector" }),
     "collector@example.com",
   );
+});
+
+test("captureGpsLocation exposes a consistent required GPS error", async () => {
+  assert.match(GPS_REQUIRED_ERROR, /GPS is required/i);
 });

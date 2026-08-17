@@ -75,7 +75,11 @@ async function getSessionWithTimeout(supabase, timeoutMs = 10000) {
   return data?.session || null;
 }
 
-export default function MorningAttendanceGate({ children, requireMorningAttendance = true }) {
+export default function MorningAttendanceGate({
+  children,
+  requireMorningAttendance = true,
+  enableBackgroundGps = true,
+}) {
   const { language, dir } = useAppLanguage();
   const t = translate(language, TEXT);
   const [checking, setChecking] = useState(requireMorningAttendance);
@@ -310,14 +314,37 @@ export default function MorningAttendanceGate({ children, requireMorningAttendan
   }, [requireMorningAttendance]);
 
   useEffect(() => {
-    if (!requireMorningAttendance || !ready) return undefined;
+    if (!enableBackgroundGps) return undefined;
 
-    if (!loginPingAttemptedRef.current) {
-      loginPingAttemptedRef.current = true;
-      maybeCaptureBackgroundPing({ force: true });
+    const backgroundGpsReady = requireMorningAttendance ? ready : true;
+    if (!backgroundGpsReady) return undefined;
+
+    let cancelled = false;
+
+    async function startBackgroundGps() {
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      try {
+        const session = await getSessionWithTimeout(supabase);
+        const userId = session?.user?.id;
+        if (!userId || cancelled) return;
+
+        await hydrateLastCapture(userId);
+        if (cancelled) return;
+
+        if (!loginPingAttemptedRef.current) {
+          loginPingAttemptedRef.current = true;
+          await maybeCaptureBackgroundPing({ force: true });
+        }
+      } catch {
+        // Background GPS should not block page access.
+      }
     }
 
-    // Keep GPS fresh across all authenticated pages with a max 15-minute cadence.
+    startBackgroundGps();
+
+    // Keep GPS fresh across authenticated pages with a max 15-minute cadence.
     const timer = window.setInterval(() => {
       maybeCaptureBackgroundPing();
     }, 60 * 1000);
@@ -338,6 +365,7 @@ export default function MorningAttendanceGate({ children, requireMorningAttendan
     }
 
     return () => {
+      cancelled = true;
       window.clearInterval(timer);
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", handleVisibleOrFocused);
@@ -347,7 +375,7 @@ export default function MorningAttendanceGate({ children, requireMorningAttendan
         window.removeEventListener("online", handleVisibleOrFocused);
       }
     };
-  }, [ready]);
+  }, [enableBackgroundGps, requireMorningAttendance, ready]);
 
   if (ready) {
     return children;

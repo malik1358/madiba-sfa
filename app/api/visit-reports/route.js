@@ -172,6 +172,16 @@ export async function PATCH(request) {
       return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
     }
 
+    const location = body?.location || {};
+    const latitude = Number(location.latitude ?? body?.latitude);
+    const longitude = Number(location.longitude ?? body?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return NextResponse.json(
+        { success: false, error: "GPS is required. Allow location access in the browser and try again." },
+        { status: 400 },
+      );
+    }
+
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
@@ -215,6 +225,30 @@ export async function PATCH(request) {
       if (clearMetaError) throw clearMetaError;
     }
 
+    const activityNote = JSON.stringify({
+      action: updatedCustomer.is_active === false ? "CUSTOMER_INACTIVE" : "CUSTOMER_ACTIVE",
+      customer_code: customerCode,
+      captured_at: new Date().toISOString(),
+      location: {
+        latitude,
+        longitude,
+        accuracy: Number(location.accuracy) || null,
+      },
+    });
+
+    const { error: gpsLogError } = await admin.from("daily_activity_logs").insert({
+      user_id: scope.userId,
+      entry_type: "GPS_PING",
+      note: activityNote,
+    });
+
+    if (gpsLogError) {
+      const message = String(gpsLogError.message || "").toLowerCase();
+      if (!message.includes("does not exist") && gpsLogError.code !== "42P01") {
+        throw gpsLogError;
+      }
+    }
+
     return NextResponse.json({ success: true, customer: updatedCustomer });
   } catch (error) {
     const message = error.message || "Unable to update customer status.";
@@ -238,6 +272,16 @@ export async function POST(request) {
     const customerCode = normalizeCode(body?.customerCode);
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
+    }
+
+    const visitLocation = body?.location || {};
+    const visitLatitude = Number(visitLocation.latitude ?? body?.latitude);
+    const visitLongitude = Number(visitLocation.longitude ?? body?.longitude);
+    if (!Number.isFinite(visitLatitude) || !Number.isFinite(visitLongitude)) {
+      return NextResponse.json(
+        { success: false, error: "GPS is required. Allow location access in the browser and try again." },
+        { status: 400 },
+      );
     }
 
     const admin = createClient(supabaseUrl, serviceKey, {

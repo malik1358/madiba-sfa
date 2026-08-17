@@ -508,6 +508,9 @@ export async function POST(request) {
 
     if (!customerCode) throw new Error("Customer code is required");
     if (!visitOutcome) throw new Error("Please select visit outcome");
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      throw new Error("GPS is required. Allow location access in the browser and try again.");
+    }
 
     if (visitOutcome === "FUNDS_RECEIVED" && amountReceived <= 0) {
       throw new Error("Amount received is required for funds received outcome");
@@ -597,6 +600,9 @@ export async function POST(request) {
       .maybeSingle());
 
     if (insertError && isMissingColumnError(insertError)) {
+      if (hadGpsInput) {
+        throw new Error("GPS columns are not applied in Supabase yet. Run sql/add_collection_visit_gps.sql in SQL Editor.");
+      }
       ({
         data: insertData,
         error: insertError,
@@ -665,8 +671,17 @@ export async function PATCH(request) {
     const customerCode = canonicalCustomerCode(body.customerCode || "");
     const action = String(body.action || "transfer").trim().toLowerCase();
     const note = String(body.note || "").trim();
+    const latitude = body.latitude === null || body.latitude === undefined || body.latitude === ""
+      ? null
+      : Number(body.latitude);
+    const longitude = body.longitude === null || body.longitude === undefined || body.longitude === ""
+      ? null
+      : Number(body.longitude);
 
     if (!customerCode) throw new Error("Customer code is required");
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      throw new Error("GPS is required. Allow location access in the browser and try again.");
+    }
 
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -711,6 +726,27 @@ export async function PATCH(request) {
       }
     } else {
       throw new Error("Unsupported legal transfer action");
+    }
+
+    const gpsNote = JSON.stringify({
+      action: action === "remove" ? "LEGAL_TRANSFER_REMOVE" : "LEGAL_TRANSFER",
+      customer_code: customerCode,
+      captured_at: new Date().toISOString(),
+      location: {
+        latitude,
+        longitude,
+        accuracy: Number(body.gpsAccuracyMeters) || null,
+      },
+    });
+
+    const { error: gpsLogError } = await admin.from("daily_activity_logs").insert({
+      user_id: user.id,
+      entry_type: "GPS_PING",
+      note: gpsNote,
+    });
+
+    if (gpsLogError && !isMissingTableError(gpsLogError)) {
+      throw gpsLogError;
     }
 
     return Response.json({ success: true });

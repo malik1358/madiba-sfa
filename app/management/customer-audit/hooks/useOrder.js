@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
+import { insertGpsActivityLog, requireGpsLocation } from '../../../lib/geo';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
 
@@ -259,6 +260,7 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please login again.');
 
+      const location = await requireGpsLocation();
       const nowIso = new Date().toISOString();
 
       let existingLines = [];
@@ -351,6 +353,18 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
         setOrderHistory(Array.isArray(historyPayload.history) ? historyPayload.history : []);
       }
 
+      await insertGpsActivityLog(
+        supabase,
+        session.user.id,
+        draftOrderId ? 'ORDER_EDITED' : 'ORDER_DRAFT',
+        location,
+        {
+          order_id: orderId,
+          customer_code: selectedCustomer.customer_code,
+          customer_name: selectedCustomer.customer_name,
+        },
+      );
+
       setMessage('Draft order saved successfully.');
       return orderId;
     } catch (err) {
@@ -399,6 +413,14 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
       if (submitError) throw submitError;
 
       const { data: { session } } = await supabase.auth.getSession();
+      const location = await requireGpsLocation();
+      if (session?.user?.id) {
+        await insertGpsActivityLog(supabase, session.user.id, 'ORDER_SUBMITTED', location, {
+          order_id: orderId,
+          customer_code: selectedCustomer?.customer_code || '',
+        });
+      }
+
       if (session?.access_token) {
         const historyResponse = await fetch('/api/order-history', {
           method: 'POST',
@@ -432,7 +454,7 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
     } finally {
       setSubmittingOrder(false);
     }
-  }, [loadedOrderStatus, orderItems.length, saveDraft, selectedQuantityCount, setError, setMessage]);
+  }, [loadedOrderStatus, orderItems.length, saveDraft, selectedCustomer, selectedQuantityCount, setError, setMessage]);
 
   return {
     draftOrderId,

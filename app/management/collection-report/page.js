@@ -144,7 +144,7 @@ export default function CollectionReportPage() {
   }
 
   return (
-    <MorningAttendanceGate requireMorningAttendance={false}>
+    <MorningAttendanceGate requireMorningAttendance={false} enableBackgroundGps>
       <main className="modulePage" dir={dir}>
         <div className="moduleShell">
           <div className="moduleHeader">

@@ -11,6 +11,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { detectTable } from "../../lib/schemaGuards";
+import { insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
 
 const TEXT = {
   title: { en: "New Customer", ar: "عميل جديد" },
@@ -510,12 +511,24 @@ export default function NewCustomerPage() {
     setError("");
 
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) throw new Error("Please login again.");
+
+      const location = await requireGpsLocation();
+
       const { error: updateError } = await supabase
         .from("prospects")
         .update({ status: "FOLLOW_UP", follow_up_date: followUpDate })
         .eq("id", savedProspect.id);
 
       if (updateError) throw updateError;
+
+      await insertGpsActivityLog(supabase, session.user.id, "PROSPECT_FOLLOW_UP", location, {
+        prospect_id: savedProspect.id,
+        follow_up_date: followUpDate,
+      });
 
       setRecent((current) => current.map((row) => (
         row.id === savedProspect.id

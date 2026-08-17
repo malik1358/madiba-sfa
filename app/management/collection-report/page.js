@@ -35,8 +35,14 @@ const TEXT = {
   totalVisits: { en: "Total visits", ar: "إجمالي الزيارات" },
   totalDistance: { en: "Total route distance", ar: "إجمالي مسافة المسار" },
   collectorsActive: { en: "Collectors active", ar: "المحصلون النشطون" },
-  sequence: { en: "#", ar: "#" },
+  userName: { en: "User name", ar: "اسم المستخدم" },
+  gpsEstimated: { en: "Estimated", ar: "تقديري" },
+  gpsWhyNone: {
+    en: "No GPS usually means: (1) visit saved before GPS feature was live, (2) browser location was blocked, or (3) Supabase GPS columns were not applied yet. New visits after allowing location should capture GPS.",
+    ar: "غياب GPS يعني عادة: (1) الزيارة قبل تفعيل GPS، (2) المتصفح منع الموقع، أو (3) أعمدة GPS غير مُطبقة في Supabase.",
+  },
   time: { en: "Time", ar: "الوقت" },
+  sequence: { en: "#", ar: "#" },
   customer: { en: "Customer", ar: "العميل" },
   outcome: { en: "Outcome", ar: "النتيجة" },
   amount: { en: "Amount", ar: "المبلغ" },
@@ -156,6 +162,9 @@ export default function CollectionReportPage() {
           </div>
 
           <div className="moduleHint">{t("gpsNote")}</div>
+          {!loading && report && report.gpsVisitCount === 0 && report.visitCount > 0 && (
+            <div className="moduleHint">{t("gpsWhyNone")}</div>
+          )}
 
           <section className="moduleSection">
             <div className="moduleCollectorFilterGrid">
@@ -231,6 +240,7 @@ export default function CollectionReportPage() {
                         <tr>
                           <th>{t("sequence")}</th>
                           <th>{t("time")}</th>
+                          <th>{t("userName")}</th>
                           <th>{t("customer")}</th>
                           <th>{t("outcome")}</th>
                           <th>{t("amount")}</th>
@@ -244,6 +254,7 @@ export default function CollectionReportPage() {
                           <tr key={visit.id}>
                             <td>{visit.visitSequence}</td>
                             <td>{formatTime(visit.savedAt)}</td>
+                            <td>{visit.userName || collector.collectorName}</td>
                             <td>
                               {visit.customerName}
                               <div className="moduleCode">{visit.customerCode}</div>
@@ -252,7 +263,7 @@ export default function CollectionReportPage() {
                             <td>{formatAmount(visit.amountReceived)}</td>
                             <td>
                               {visit.hasGps
-                                ? `${Number(visit.latitude).toFixed(5)}, ${Number(visit.longitude).toFixed(5)}`
+                                ? `${Number(visit.latitude).toFixed(5)}, ${Number(visit.longitude).toFixed(5)}${visit.gpsSource === "activity_log_fallback" ? ` (${t("gpsEstimated")})` : ""}`
                                 : t("noGps")}
                             </td>
                             <td>
@@ -276,7 +287,7 @@ export default function CollectionReportPage() {
                         ))}
                         {(collector.visits || []).length === 0 && (
                           <tr>
-                            <td colSpan={8}>{t("noVisits")}</td>
+                            <td colSpan={9}>{t("noVisits")}</td>
                           </tr>
                         )}
                       </tbody>

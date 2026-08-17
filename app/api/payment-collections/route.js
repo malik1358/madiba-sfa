@@ -584,6 +584,9 @@ export async function POST(request) {
     let insertData = null;
     let insertError = null;
 
+    let gpsCaptured = false;
+    const hadGpsInput = Number.isFinite(latitude) && Number.isFinite(longitude);
+
     ({
       data: insertData,
       error: insertError,
@@ -602,6 +605,8 @@ export async function POST(request) {
         .insert(visitInsertBase)
         .select("id")
         .maybeSingle());
+    } else if (!insertError && hadGpsInput) {
+      gpsCaptured = true;
     }
 
     if (insertError) {
@@ -635,6 +640,7 @@ export async function POST(request) {
       success: true,
       message: "Collection visit saved successfully",
       visitId: insertData?.id,
+      gpsCaptured,
     });
   } catch (error) {
     console.error("Error saving collection visit:", error);

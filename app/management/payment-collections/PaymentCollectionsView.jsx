@@ -89,6 +89,7 @@ const TEXT = {
   msgNextVisitRequired: { en: "Next visit date is required when full overdue is not received.", ar: "تاريخ الزيارة القادمة مطلوب عند عدم استلام كامل المبلغ المستحق." },
   msgSaveFailed: { en: "Unable to save collection visit.", ar: "تعذر حفظ زيارة التحصيل." },
   msgVisitSaved: { en: "Visit saved successfully.", ar: "تم حفظ الزيارة بنجاح." },
+  msgGpsNotCaptured: { en: "GPS was not captured. Allow location access in the browser before saving.", ar: "لم يتم التقاط GPS. اسمح بالموقع في المتصفح قبل الحفظ." },
   msgWhatsappNotSent: { en: "WhatsApp not sent", ar: "لم يتم إرسال واتساب" },
   msgSpeechUnsupported: { en: "Speech dictation is not supported in this browser.", ar: "الإملاء الصوتي غير مدعوم في هذا المتصفح." },
   msgSupabaseMissing: { en: "Supabase is not configured.", ar: "Supabase غير مُعد." },
@@ -511,6 +512,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("whatsappMessage", summaryText);
       formData.append("legalNote", form.legalNote || "Transferred during visit report");
 
+      let gpsCaptured = false;
       try {
         const gps = await captureGpsLocation();
         formData.append("latitude", String(gps.latitude));
@@ -538,7 +540,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       const popupMessage = payload?.whatsapp?.error
         ? `${t("msgVisitSaved")} ${t("msgWhatsappNotSent")}: ${payload.whatsapp.error}`
-        : t("msgVisitSaved");
+        : !payload?.gpsCaptured
+          ? `${t("msgVisitSaved")} ${t("msgGpsNotCaptured")}`
+          : t("msgVisitSaved");
       const copied = await copyTextToClipboard(summaryText);
       showPopup(popupMessage);
       setSummaryForWhatsApp(summaryText);

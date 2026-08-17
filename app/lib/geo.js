@@ -89,3 +89,73 @@ export function summarizeRouteDistanceKm(visits) {
 export function buildGoogleMapsPointUrl(latitude, longitude) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
 }
+
+export function parseGpsFromActivityNote(note) {
+  if (!note) return null;
+
+  let parsed = note;
+  if (typeof note === "string") {
+    try {
+      parsed = JSON.parse(note);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const location = parsed.location || parsed;
+  const latitudeRaw = location.latitude ?? location.lat ?? parsed.latitude ?? parsed.lat;
+  const longitudeRaw = location.longitude ?? location.lng ?? parsed.longitude ?? parsed.lng;
+  if (latitudeRaw === null || latitudeRaw === undefined || latitudeRaw === "") return null;
+  if (longitudeRaw === null || longitudeRaw === undefined || longitudeRaw === "") return null;
+
+  const latitude = Number(latitudeRaw);
+  const longitude = Number(longitudeRaw);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  const capturedAt = parsed.captured_at || parsed.capturedAt || null;
+  const capturedTs = capturedAt ? new Date(capturedAt).getTime() : NaN;
+
+  return {
+    latitude,
+    longitude,
+    accuracy: Number(location.accuracy ?? parsed.accuracy) || null,
+    capturedAt: Number.isFinite(capturedTs) ? capturedAt : null,
+    capturedTs: Number.isFinite(capturedTs) ? capturedTs : 0,
+  };
+}
+
+export function nearestActivityGps(activityPoints, savedAt, windowMs = 10 * 60 * 1000) {
+  const savedTs = new Date(savedAt).getTime();
+  if (!Number.isFinite(savedTs) || !Array.isArray(activityPoints) || activityPoints.length === 0) {
+    return null;
+  }
+
+  let best = null;
+  let bestDelta = Infinity;
+
+  activityPoints.forEach((point) => {
+    if (!Number.isFinite(point.capturedTs)) return;
+    const delta = Math.abs(point.capturedTs - savedTs);
+    if (delta <= windowMs && delta < bestDelta) {
+      best = point;
+      bestDelta = delta;
+    }
+  });
+
+  return best;
+}
+
+export function formatCollectorDisplayName(profile) {
+  const email = String(profile?.email || "").trim();
+  const salesmanName = String(profile?.salesman_name || "").trim();
+  const salesmanCode = String(profile?.salesman_code || "").trim();
+  const role = String(profile?.role || "").trim();
+
+  if (email) return email;
+  if (salesmanName && salesmanCode) return `${salesmanName} (${salesmanCode})`;
+  if (salesmanName && salesmanName.toLowerCase() !== role.toLowerCase()) return salesmanName;
+  if (salesmanCode) return salesmanCode;
+  return role || "Unknown user";
+}

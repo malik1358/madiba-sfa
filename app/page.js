@@ -58,16 +58,25 @@ export default function Home() {
       return;
     }
 
-    const {
-      data: { session },
-    } = await supabaseClient.auth.getSession();
+    try {
+      const sessionResult = await Promise.race([
+        supabaseClient.auth.getSession(),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error("Session check timed out")), 10000);
+        }),
+      ]);
 
-    if (session?.user) {
-      setUser(session.user);
-      await loadProfile(session.user.id);
+      const session = sessionResult?.data?.session;
+      if (session?.user) {
+        setUser(session.user);
+        await loadProfile(session.user.id);
+      }
+    } catch {
+      setUser(null);
+      setProfile(null);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   async function loadProfile(userId) {

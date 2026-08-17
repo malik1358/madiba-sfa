@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
@@ -12,7 +12,19 @@ const TEXT = {
   title: { en: "Upload Sales Data", ar: "رفع بيانات المبيعات" },
   subtitle: { en: "Replace the current sales snapshot with the latest complete Excel export.", ar: "استبدال لقطة المبيعات الحالية بآخر ملف إكسل كامل." },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
+  lastSalesUpload: { en: "Last sales upload", ar: "آخر رفع للمبيعات" },
+  lastOutstandingUpload: { en: "Last outstanding upload", ar: "آخر رفع للمتأخرات" },
+  noSalesUploadYet: { en: "No sales upload yet.", ar: "لا يوجد رفع للمبيعات بعد." },
+  noOutstandingUploadYet: { en: "No outstanding upload yet.", ar: "لا يوجد رفع للمتأخرات بعد." },
+  loadingLastUploads: { en: "Loading last upload dates...", ar: "جاري تحميل تواريخ آخر رفع..." },
 };
+
+function formatUploadTimestamp(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-GB");
+}
 
 export default function UploadSalesPage() {
   const { language, dir, setLanguage } = useAppLanguage();
@@ -25,8 +37,79 @@ export default function UploadSalesPage() {
   const [outstandingUploading, setOutstandingUploading] = useState(false);
   const [outstandingResult, setOutstandingResult] = useState(null);
   const [outstandingError, setOutstandingError] = useState("");
+  const [lastSalesUpload, setLastSalesUpload] = useState(null);
+  const [lastOutstandingUpload, setLastOutstandingUpload] = useState(null);
+  const [loadingLastUploads, setLoadingLastUploads] = useState(true);
 
   const supabaseClient = getSupabaseClient();
+
+  async function loadLastUploadInfo() {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setLoadingLastUploads(false);
+      return;
+    }
+
+    setLoadingLastUploads(true);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        setLastSalesUpload(null);
+        setLastOutstandingUpload(null);
+        return;
+      }
+
+      const [salesBatchResult, outstandingResponse] = await Promise.all([
+        supabase
+          .from("import_batches")
+          .select("file_name,completed_at,started_at,status,customer_count,total_rows")
+          .eq("status", "ACTIVE")
+          .order("completed_at", { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle(),
+        fetch("/api/outstanding", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }),
+      ]);
+
+      if (salesBatchResult.error) throw salesBatchResult.error;
+
+      setLastSalesUpload(salesBatchResult.data ? {
+        fileName: salesBatchResult.data.file_name || "",
+        uploadedAt: salesBatchResult.data.completed_at || salesBatchResult.data.started_at || "",
+        rowsCount: salesBatchResult.data.total_rows || 0,
+        customersCount: salesBatchResult.data.customer_count || 0,
+      } : null);
+
+      const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
+      setLastOutstandingUpload(
+        outstandingResponse.ok
+        && outstandingPayload.success
+        && outstandingPayload.uploadedAt
+          ? {
+              fileName: outstandingPayload.fileName || "",
+              uploadedAt: outstandingPayload.uploadedAt,
+              rowsCount: outstandingPayload.rowsCount || 0,
+            }
+          : null,
+      );
+    } catch {
+      setLastSalesUpload(null);
+      setLastOutstandingUpload(null);
+    } finally {
+      setLoadingLastUploads(false);
+    }
+  }
+
+  useEffect(() => {
+    loadLastUploadInfo();
+  }, []);
 
   if (!supabaseClient) {
     return (
@@ -84,6 +167,7 @@ export default function UploadSalesPage() {
       }
 
       setResult(data);
+      await loadLastUploadInfo();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -133,6 +217,7 @@ export default function UploadSalesPage() {
       }
 
       setOutstandingResult(data);
+      await loadLastUploadInfo();
     } catch (err) {
       setOutstandingError(err.message || "Outstanding upload failed.");
     } finally {
@@ -162,6 +247,21 @@ export default function UploadSalesPage() {
             The existing live dataset will only be replaced
             after the new file has been successfully processed.
           </p>
+        </div>
+
+        <div className="uploadMeta">
+          {loadingLastUploads ? (
+            <p>{t("loadingLastUploads")}</p>
+          ) : lastSalesUpload ? (
+            <p>
+              <strong>{t("lastSalesUpload")}:</strong>{" "}
+              {formatUploadTimestamp(lastSalesUpload.uploadedAt)}
+              {lastSalesUpload.fileName ? ` | ${lastSalesUpload.fileName}` : ""}
+              {lastSalesUpload.rowsCount ? ` | ${Number(lastSalesUpload.rowsCount).toLocaleString()} rows` : ""}
+            </p>
+          ) : (
+            <p>{t("noSalesUploadYet")}</p>
+          )}
         </div>
 
         <div className="uploadCard">
@@ -316,6 +416,21 @@ export default function UploadSalesPage() {
             <p>
               Upload the evening outstanding file. Previous outstanding data is cleared and replaced with this file.
             </p>
+          </div>
+
+          <div className="uploadMeta">
+            {loadingLastUploads ? (
+              <p>{t("loadingLastUploads")}</p>
+            ) : lastOutstandingUpload ? (
+              <p>
+                <strong>{t("lastOutstandingUpload")}:</strong>{" "}
+                {formatUploadTimestamp(lastOutstandingUpload.uploadedAt)}
+                {lastOutstandingUpload.fileName ? ` | ${lastOutstandingUpload.fileName}` : ""}
+                {lastOutstandingUpload.rowsCount ? ` | ${Number(lastOutstandingUpload.rowsCount).toLocaleString()} customers` : ""}
+              </p>
+            ) : (
+              <p>{t("noOutstandingUploadYet")}</p>
+            )}
           </div>
 
           <label className="fileDrop">

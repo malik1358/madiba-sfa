@@ -4262,6 +4262,25 @@ table.auditMatrix td.auditTrendSame {
   font-size: 12px;
 }
 
+.uploadMeta {
+  margin: -6px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #d1dde0;
+  border-radius: 10px;
+  background: #f8fbfc;
+}
+
+.uploadMeta p {
+  margin: 0;
+  color: #4f666d;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.uploadMeta strong {
+  color: #0b5364;
+}
+
 .fileDrop {
   display: grid;
   gap: 6px;

@@ -75,12 +75,12 @@ async function getSessionWithTimeout(supabase, timeoutMs = 10000) {
   return data?.session || null;
 }
 
-export default function MorningAttendanceGate({ children }) {
+export default function MorningAttendanceGate({ children, requireMorningAttendance = true }) {
   const { language, dir } = useAppLanguage();
   const t = translate(language, TEXT);
-  const [checking, setChecking] = useState(true);
+  const [checking, setChecking] = useState(requireMorningAttendance);
   const [capturing, setCapturing] = useState(false);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(!requireMorningAttendance);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const attemptedAutoRef = useRef(false);
@@ -193,6 +193,12 @@ export default function MorningAttendanceGate({ children }) {
   }
 
   async function checkAttendance(triggerAutoCapture = false) {
+    if (!requireMorningAttendance) {
+      setReady(true);
+      setChecking(false);
+      return;
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) {
       setReady(true);
@@ -283,13 +289,28 @@ export default function MorningAttendanceGate({ children }) {
   }
 
   useEffect(() => {
+    if (!requireMorningAttendance) {
+      setReady(true);
+      setChecking(false);
+      return undefined;
+    }
+
     const shouldAutoAttempt = !attemptedAutoRef.current;
     attemptedAutoRef.current = true;
     checkAttendance(shouldAutoAttempt);
-  }, []);
+
+    const safetyTimer = window.setTimeout(() => {
+      setWarning((current) => current || t("sessionCheckFailed"));
+      setReady(true);
+      setChecking(false);
+      setCapturing(false);
+    }, 12000);
+
+    return () => window.clearTimeout(safetyTimer);
+  }, [requireMorningAttendance]);
 
   useEffect(() => {
-    if (!ready) return undefined;
+    if (!requireMorningAttendance || !ready) return undefined;
 
     if (!loginPingAttemptedRef.current) {
       loginPingAttemptedRef.current = true;

@@ -475,7 +475,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
       }
 
       const paymentStatus = determinePaymentStatus(selectedOutcome, form.amountReceived, row.total_due_amount);
-      if (paymentStatus !== "PAID" && !form.nextVisitAt) {
+      const requiresNextVisit = !transferToLegal
+        && selectedOutcome !== "TRANSFER_TO_LEGAL"
+        && paymentStatus !== "PAID";
+      if (requiresNextVisit && !form.nextVisitAt) {
         throw new Error(t("msgNextVisitRequired"));
       }
 
@@ -670,7 +673,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }
 
   return (
-    <MorningAttendanceGate>
+    <MorningAttendanceGate requireMorningAttendance={false}>
       <main className="modulePage" dir={dir}>
         <div className="moduleShell">
           <div className="moduleHeader">

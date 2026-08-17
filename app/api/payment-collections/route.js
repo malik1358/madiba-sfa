@@ -178,17 +178,25 @@ async function getSalesScope(admin, userId) {
   const userRole = String(profile?.role || "").toLowerCase();
   const normalizedProfileCode = String(profile.salesman_code || "").trim().toUpperCase();
 
+  const isCollectorCode = /^CL\d+$/i.test(normalizedProfileCode);
+  const likelyFullAccess = userRole === "admin"
+    || userRole === "manager"
+    || userRole === "collector"
+    || isCollectorCode;
+
   let collectionOnlyAccess = false;
-  try {
-    const { data: authData } = await admin.auth.admin.getUserById(userId);
-    collectionOnlyAccess = Boolean(authData?.user?.user_metadata?.collection_only);
-  } catch {
-    // Ignore auth metadata lookup failures and fall back to profile role checks.
+  if (!likelyFullAccess) {
+    try {
+      const { data: authData } = await Promise.race([
+        admin.auth.admin.getUserById(userId),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("AUTH_METADATA_TIMEOUT")), 4000)),
+      ]);
+      collectionOnlyAccess = Boolean(authData?.user?.user_metadata?.collection_only);
+    } catch {
+      // Ignore auth metadata lookup failures and fall back to profile role checks.
+    }
   }
 
-  const isCollectorCode = /^CL\d+$/i.test(normalizedProfileCode);
-
-  // Match UI access rules: admins, managers, collectors and collection-only users see all customers.
   if (
     userRole === "admin"
     || userRole === "manager"
@@ -199,35 +207,38 @@ async function getSalesScope(admin, userId) {
     hasAllAccess = true;
     visibleSalesmanCodes = [];
   } else {
-    // For regular salesmen, check if they have subordinates
     try {
       const { data: allAuthUsers, error: usersError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-      
+
       if (!usersError && allAuthUsers?.users) {
         const subordinateCodes = [normalizedProfileCode];
-        
-        // Find all users who report to this salesman
+        const subordinateUserIds = [];
+
         for (const authU of allAuthUsers.users) {
           const metadata = authU?.user_metadata || authU?.app_metadata || {};
           const subHeadCode = String(metadata.head_salesman_code || "").trim().toUpperCase();
-          
+
           if (subHeadCode === normalizedProfileCode) {
-            const { data: subProfile } = await admin
-              .from("profiles")
-              .select("salesman_code")
-              .eq("id", authU.id)
-              .maybeSingle();
-            
+            subordinateUserIds.push(authU.id);
+          }
+        }
+
+        if (subordinateUserIds.length > 0) {
+          const { data: subProfiles } = await admin
+            .from("profiles")
+            .select("salesman_code")
+            .in("id", subordinateUserIds);
+
+          (subProfiles || []).forEach((subProfile) => {
             if (subProfile?.salesman_code) {
               subordinateCodes.push(subProfile.salesman_code);
             }
-          }
+          });
         }
-        
+
         visibleSalesmanCodes = subordinateCodes;
       }
-    } catch (e) {
-      // If subordinate lookup fails, just use their own code
+    } catch {
       visibleSalesmanCodes = [normalizedProfileCode];
     }
   }
@@ -240,6 +251,36 @@ async function getSalesScope(admin, userId) {
   };
 }
 
+async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
+  const lookupCodes = new Set();
+  (outstandingInvoices || []).forEach((invoice) => {
+    const key = canonicalCustomerCode(invoice.customer_code)
+      || canonicalCustomerCode(invoice.customer_name);
+    if (key) lookupCodes.add(key);
+    const rawCode = String(invoice.customer_code || "").trim();
+    if (rawCode) lookupCodes.add(rawCode);
+  });
+
+  if (lookupCodes.size === 0) return [];
+
+  const codes = [...lookupCodes];
+  const batchSize = 200;
+  const rows = [];
+
+  for (let index = 0; index < codes.length; index += batchSize) {
+    const batch = codes.slice(index, index + batchSize);
+    const { data, error } = await admin
+      .from("customers")
+      .select("customer_code,customer_name,current_salesman_code,city,area")
+      .in("customer_code", batch);
+
+    if (error) throw error;
+    if (Array.isArray(data)) rows.push(...data);
+  }
+
+  return rows;
+}
+
 async function fetchOutstandingAndCollectionRecords(admin, scope) {
   if (!supabaseUrl || !serviceKey) {
     throw new Error("Server configuration is incomplete");
@@ -247,20 +288,40 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
   const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
 
-  // Deactivated customers can still owe money, so they stay in the collection queue.
-  const customerQuery = admin
-    .from("customers")
-    .select("customer_code,customer_name,current_salesman_code,city,area");
-
-  const { data: customers, error: customersError } = await customerQuery;
-  if (customersError) throw customersError;
-
-  // Fetch salesman names from profiles
-  const { data: salesmen, error: salesmenError } = await admin
+  const salesmenQuery = admin
     .from("profiles")
     .select("salesman_code,salesman_name");
 
+  const visitsQuery = admin
+    .from("collection_visits")
+    .select("customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at")
+    .order("saved_at", { ascending: false })
+    .limit(3000);
+
+  const legalQuery = admin
+    .from("legal_transfers")
+    .select("customer_code,is_transferred,transferred_at,note");
+
+  const [
+    outstandingInvoices,
+    { data: salesmen, error: salesmenError },
+    { data: visitsData, error: visitsError },
+    { data: legalData, error: legalError },
+  ] = await Promise.all([
+    readOutstandingInvoices(admin),
+    salesmenQuery,
+    visitsQuery,
+    legalQuery,
+  ]);
+
   if (salesmenError) throw salesmenError;
+  if (visitsError && !isMissingTableError(visitsError)) throw visitsError;
+  if (legalError && !isMissingTableError(legalError)) throw legalError;
+
+  const customers = await fetchCustomersForOutstanding(admin, outstandingInvoices);
+
+  const visits = Array.isArray(visitsData) ? visitsData : [];
+  const legalTransfers = Array.isArray(legalData) ? legalData : [];
 
   const salesmanMap = new Map();
   const visibleSalesmanNames = new Set();
@@ -273,42 +334,14 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
     }
   });
 
-  const outstandingInvoices = await readOutstandingInvoices(admin);
-
-  // Fetch collection visit history
-  let visits = [];
-  {
-    const { data, error } = await admin
-      .from("collection_visits")
-      .select("customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at")
-      .order("customer_code")
-      .order("saved_at", { ascending: false });
-
-    if (error && !isMissingTableError(error)) throw error;
-    visits = Array.isArray(data) ? data : [];
-  }
-
-  // Fetch legal transfers
-  let legalTransfers = [];
-  {
-    const { data, error } = await admin
-      .from("legal_transfers")
-      .select("customer_code,is_transferred,transferred_at,note");
-
-    if (error && !isMissingTableError(error)) throw error;
-    legalTransfers = Array.isArray(data) ? data : [];
-  }
-
   // Build customer records with outstanding and collection data
   const visitsByCustomer = new Map();
   const legalTransfersByCustomer = new Map();
 
   (visits || []).forEach((visit) => {
     const key = canonicalCustomerCode(visit.customer_code);
-    if (!visitsByCustomer.has(key)) {
-      visitsByCustomer.set(key, []);
-    }
-    visitsByCustomer.get(key).push(visit);
+    if (!key || visitsByCustomer.has(key)) return;
+    visitsByCustomer.set(key, [visit]);
   });
 
   (legalTransfers || []).forEach((transfer) => {
@@ -460,6 +493,7 @@ export async function GET(request) {
     return Response.json({
       success: true,
       dueCustomers: queues.dueCustomers,
+      notDueCustomers: queues.notDueCustomers,
       legalCustomers: queues.legalCustomers,
     });
   } catch (error) {

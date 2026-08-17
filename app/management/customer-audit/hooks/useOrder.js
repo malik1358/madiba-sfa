@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
 import { insertGpsActivityLog, requireGpsLocation } from '../../../lib/geo';
+import { maybePromptCustomerLocationUpdate } from '../../../lib/customerLocation';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
 
@@ -262,6 +263,15 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
 
       const location = await requireGpsLocation();
       const nowIso = new Date().toISOString();
+
+      if (session.access_token) {
+        await maybePromptCustomerLocationUpdate({
+          customerCode: selectedCustomer.customer_code,
+          customerName: selectedCustomer.customer_name,
+          entryLocation: location,
+          accessToken: session.access_token,
+        });
+      }
 
       let existingLines = [];
       if (draftOrderId) {

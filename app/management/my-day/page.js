@@ -12,6 +12,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
+import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
 
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 
@@ -893,6 +894,13 @@ export default function MyDayPage() {
       }
 
       const location = await captureLocation();
+      await maybePromptCustomerLocationUpdate({
+        customerCode: customer.customer_code,
+        customerName: customer.customer_name,
+        entryLocation: location,
+        accessToken: session.access_token,
+        language,
+      });
       const capturedAt = new Date().toISOString();
 
       if (logsEnabled) {

@@ -263,7 +263,10 @@ export default function ManagementPage() {
               <Link href="/management/payment-collections" className="moduleNavCard">Payment Collections</Link>
             )}
             {(userRole === "admin" || userRole === "manager" || userRole === "collector") && (
-              <Link href="/management/collection-report" className="moduleNavCard">Collection Route Report</Link>
+              <>
+                <Link href="/management/collection-report" className="moduleNavCard">Collection Route Report</Link>
+                <Link href="/management/daily-visit-report" className="moduleNavCard">Daily Visit Report</Link>
+              </>
             )}
             {userRole !== "collector" ? (
               <>
@@ -275,6 +278,7 @@ export default function ManagementPage() {
                 <Link href="/management/new-customer" className="moduleNavCard">New Customers</Link>
                 <Link href="/management/my-performance" className="moduleNavCard">Performance</Link>
                 <Link href="/management/my-day" className="moduleNavCard">My Day Planner</Link>
+                <Link href="/management/daily-visit-report" className="moduleNavCard">Daily Visit Report</Link>
                 <Link href="/management/upload" className="moduleNavCard">Imports</Link>
               </>
             ) : null}

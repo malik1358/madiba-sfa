@@ -47,10 +47,11 @@ test("buildCollectionQueues lists only past-due customers and routes legal ones 
   ], "2026-08-14T10:00:00Z");
 
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["C1"]);
+  assert.deepEqual(queues.notDueCustomers.map((row) => row.customer_code), ["C2"]);
   assert.deepEqual(queues.legalCustomers.map((row) => row.customer_code), ["C3"]);
 });
 
-test("buildCollectionQueues excludes customers whose invoices are not yet due", () => {
+test("buildCollectionQueues places not-yet-due customers in notDueCustomers queue", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "1538",
@@ -67,6 +68,10 @@ test("buildCollectionQueues excludes customers whose invoices are not yet due", 
   ], "2026-08-14T10:00:00Z");
 
   assert.deepEqual(queues.dueCustomers, []);
+  assert.equal(queues.notDueCustomers.length, 1);
+  assert.equal(queues.notDueCustomers[0].customer_code, "1538");
+  assert.equal(queues.notDueCustomers[0].total_not_due_amount, 1000);
+  assert.equal(queues.notDueCustomers[0].invoices.length, 1);
 });
 
 test("buildCollectionQueues prioritizes cash-bucket customers at top", () => {

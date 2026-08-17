@@ -129,23 +129,34 @@ function only0to30Outstanding(record) {
   return b0to30 > 0 && b31to60 <= 0 && b61to90 <= 0 && b91to120 <= 0 && b120plus <= 0;
 }
 
+export function isInvoicePastDue(invoice, today) {
+  if (toNumber(invoice?.pending_amount) <= 0) return false;
+  const overdue = invoice?.overdue_days;
+  if (overdue !== null && overdue !== undefined && overdue !== "") {
+    return toNumber(overdue) > 0;
+  }
+  const dueDate = dateOnly(invoice?.due_date);
+  return Boolean(dueDate) && dueDate < today;
+}
+
+export function isInvoiceNotYetDue(invoice, today) {
+  if (toNumber(invoice?.pending_amount) <= 0) return false;
+  return !isInvoicePastDue(invoice, today);
+}
+
 export function buildCollectionQueues(records, todayIso = new Date().toISOString()) {
   const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
   const dueCustomers = [];
+  const notDueCustomers = [];
   const legalCustomers = [];
 
   (records || []).forEach((record) => {
-    // The outstanding file's overdue column is authoritative; due dates are only a fallback.
     const dueInvoices = Array.isArray(record?.invoices)
-      ? record.invoices.filter((invoice) => {
-          if (toNumber(invoice?.pending_amount) <= 0) return false;
-          const overdue = invoice?.overdue_days;
-          if (overdue !== null && overdue !== undefined && overdue !== "") {
-            return toNumber(overdue) > 0;
-          }
-          const dueDate = dateOnly(invoice?.due_date);
-          return Boolean(dueDate) && dueDate < today;
-        })
+      ? record.invoices.filter((invoice) => isInvoicePastDue(invoice, today))
+      : [];
+
+    const notDueInvoices = Array.isArray(record?.invoices)
+      ? record.invoices.filter((invoice) => isInvoiceNotYetDue(invoice, today))
       : [];
 
     const totalDueAmount = dueInvoices.reduce((sum, invoice) => sum + toNumber(invoice?.pending_amount), 0);
@@ -182,10 +193,33 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       return;
     }
 
-    // Only customers with at least one past-due invoice belong in the queue.
-    if (dueInvoices.length === 0) return;
+    if (dueInvoices.length > 0) {
+      dueCustomers.push(next);
+      return;
+    }
 
-    dueCustomers.push(next);
+    if (notDueInvoices.length === 0) return;
+
+    const totalNotDueAmount = notDueInvoices.reduce((sum, invoice) => sum + toNumber(invoice?.pending_amount), 0);
+    const earliestFutureDueDate = notDueInvoices
+      .map((invoice) => dateOnly(invoice?.due_date))
+      .filter(Boolean)
+      .sort()[0] || "";
+
+    notDueCustomers.push({
+      ...next,
+      queue_kind: "not_due",
+      due_invoice_count: notDueInvoices.length,
+      not_due_invoice_count: notDueInvoices.length,
+      total_due_amount: totalNotDueAmount,
+      total_not_due_amount: totalNotDueAmount,
+      max_overdue_days: 0,
+      earliest_due_date: earliestFutureDueDate,
+      invoices: notDueInvoices,
+      probability_score: 0,
+      probability_label: "N/A",
+      recommended_visit: false,
+    });
   });
 
   dueCustomers.sort((left, right) => {
@@ -225,5 +259,13 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
     return Number(right.total_due_amount || 0) - Number(left.total_due_amount || 0);
   });
 
-  return { dueCustomers, legalCustomers };
+  notDueCustomers.sort((left, right) => {
+    const byDueDate = compareDateText(left?.earliest_due_date, right?.earliest_due_date);
+    if (byDueDate !== 0) return byDueDate;
+    const byAmount = Number(right.total_not_due_amount || 0) - Number(left.total_not_due_amount || 0);
+    if (byAmount !== 0) return byAmount;
+    return String(left.customer_name || left.customer_code || "").localeCompare(String(right.customer_name || right.customer_code || ""));
+  });
+
+  return { dueCustomers, notDueCustomers, legalCustomers };
 }

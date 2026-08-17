@@ -9,6 +9,8 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { captureGpsLocation, GPS_REQUIRED_ERROR } from "../../lib/geo";
+import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
+import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
 
 const TEXT = {
@@ -41,6 +43,14 @@ const TEXT = {
   open: { en: "Open", ar: "فتح" },
   close: { en: "Close", ar: "إغلاق" },
   noDue: { en: "No due customers available for collection.", ar: "لا يوجد عملاء مستحقون للتحصيل حالياً." },
+  notDueQueue: { en: "Not Yet Due Invoices", ar: "فواتير غير مستحقة بعد" },
+  notDueHint: {
+    en: "Customers with pending invoices that are not overdue yet. Collect early payments here if needed.",
+    ar: "عملاء لديهم فواتير معلقة غير مستحقة بعد. يمكن تحصيل دفعات مبكرة من هنا.",
+  },
+  notDueAmount: { en: "Pending Amount", ar: "المبلغ المعلق" },
+  notDueInvoices: { en: "Pending Invoices", ar: "الفواتير المعلقة" },
+  noNotDue: { en: "No not-yet-due invoices in the outstanding file.", ar: "لا توجد فواتير غير مستحقة في ملف المديونية." },
   noLegal: { en: "No customers transferred to legal department.", ar: "لا يوجد عملاء محولون إلى القسم القانوني." },
   visitForm: { en: "Collection Visit", ar: "زيارة تحصيل" },
   visitOutcome: { en: "Visit Outcome", ar: "نتيجة الزيارة" },
@@ -136,6 +146,16 @@ function buildSalesmanOptions(rows) {
 function rowMatchesSalesmanSelection(row, selectedKeys) {
   if (!selectedKeys.size) return true;
   return selectedKeys.has(normalizeSalesmanKey(getSalesmanLabel(row)));
+}
+
+function filterQueueRows(rows, customerFilter, selectedSalesmen) {
+  const customerQuery = String(customerFilter || "").trim().toLowerCase();
+  const selectedSalesmanSet = new Set(selectedSalesmen);
+  return (rows || []).filter((row) => {
+    const customerMatch = !customerQuery || [row.customer_code, row.customer_name]
+      .some((value) => String(value || "").toLowerCase().includes(customerQuery));
+    return customerMatch && rowMatchesSalesmanSelection(row, selectedSalesmanSet);
+  });
 }
 
 function formatMoney(value) {
@@ -277,6 +297,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dueCustomers, setDueCustomers] = useState([]);
+  const [notDueCustomers, setNotDueCustomers] = useState([]);
   const [legalCustomers, setLegalCustomers] = useState([]);
   const [form, setForm] = useState(buildInitialForm(null));
   const [savingCustomerCode, setSavingCustomerCode] = useState("");
@@ -289,6 +310,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [isTranslating, setIsTranslating] = useState(false);
   const [isDictating, setIsDictating] = useState(false);
   const recognitionRef = useRef(null);
+  const loadSeqRef = useRef(0);
 
   const showPopup = (message) => {
     if (typeof window !== "undefined" && message) window.alert(message);
@@ -329,8 +351,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   const supabaseClient = getSupabaseClient();
   const activeRow = useMemo(() => {
-    return [...dueCustomers, ...legalCustomers].find((row) => rowKey(row) === activeRowKey) || null;
-  }, [activeRowKey, dueCustomers, legalCustomers]);
+    return [...dueCustomers, ...notDueCustomers, ...legalCustomers].find((row) => rowKey(row) === activeRowKey) || null;
+  }, [activeRowKey, dueCustomers, legalCustomers, notDueCustomers]);
 
   useEffect(() => {
     if (activeRow) {
@@ -341,72 +363,116 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   async function loadQueue(preferredKey = "") {
     const supabase = getSupabaseClient();
+    const seq = ++loadSeqRef.current;
+
     if (!supabase) {
       setLoading(false);
       showPopup(t("msgSupabaseMissing"));
-      return { dueCustomers: [], legalCustomers: [] };
+      return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
     }
 
     setLoading(true);
     setError("");
 
+    const safetyTimer = window.setTimeout(() => {
+      if (loadSeqRef.current !== seq) return;
+      setLoading(false);
+      setError((current) => current || "Queue load timed out. Please login and refresh the page.");
+    }, 15000);
+
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await resolveAuthSession(supabase, 8000);
+      if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
 
-      if (!session?.access_token) throw new Error(t("msgLoginAgain"));
+      if (!session?.access_token) throw new Error("Please login again.");
 
-      const response = await fetch("/api/payment-collections", {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
+      const { response, payload } = await fetchJsonWithTimeout(
+        "/api/payment-collections",
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
         },
-      });
+        30000,
+      );
 
-      const payload = await response.json().catch(() => ({}));
+      if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
+
       if (!response.ok || !payload.success) {
         throw new Error(localizeApiMessage(payload.error || "Unable to load payment collection queue."));
       }
 
       const due = Array.isArray(payload.dueCustomers) ? payload.dueCustomers : [];
+      const notDue = Array.isArray(payload.notDueCustomers) ? payload.notDueCustomers : [];
       const legal = Array.isArray(payload.legalCustomers) ? payload.legalCustomers : [];
       setDueCustomers(due);
+      setNotDueCustomers(notDue);
       setLegalCustomers(legal);
 
-      const allRows = [...due, ...legal];
+      const allRows = [...due, ...notDue, ...legal];
       if (preferredKey) {
         const preferred = allRows.find((row) => rowKey(row) === preferredKey);
         setActiveRowKey(preferred ? preferredKey : rowKey(allRows[0] || {}));
       }
 
-      return { dueCustomers: due, legalCustomers: legal };
+      return { dueCustomers: due, notDueCustomers: notDue, legalCustomers: legal };
     } catch (err) {
-      showPopup(localizeApiMessage(err.message || "Unable to load payment collection queue."));
-      return { dueCustomers: [], legalCustomers: [] };
+      if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
+
+      const message = String(err.message || "");
+      if (message === "SESSION_TIMEOUT") {
+        setError("Session check timed out. Please refresh the page or login again.");
+      } else if (message.includes("timed out")) {
+        setError(message);
+      } else {
+        setError(localizeApiMessage(message || "Unable to load payment collection queue."));
+      }
+      setDueCustomers([]);
+      setNotDueCustomers([]);
+      setLegalCustomers([]);
+      return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
     } finally {
-      setLoading(false);
+      window.clearTimeout(safetyTimer);
+      if (loadSeqRef.current === seq) {
+        setLoading(false);
+      }
     }
   }
 
   useEffect(() => {
     loadQueue();
+    return () => {
+      loadSeqRef.current += 1;
+    };
   }, []);
 
   const salesmanOptions = useMemo(
-    () => buildSalesmanOptions([...dueCustomers, ...legalCustomers]),
-    [dueCustomers, legalCustomers],
+    () => buildSalesmanOptions([...dueCustomers, ...notDueCustomers, ...legalCustomers]),
+    [dueCustomers, legalCustomers, notDueCustomers],
   );
 
-  const visibleRows = useMemo(() => {
-    const rows = view === "legal" ? legalCustomers : dueCustomers;
-    const customerQuery = String(customerFilter || "").trim().toLowerCase();
-    const selectedSalesmanSet = new Set(selectedSalesmen);
-    return rows.filter((row) => {
-      const customerMatch = !customerQuery || [row.customer_code, row.customer_name]
-        .some((value) => String(value || "").toLowerCase().includes(customerQuery));
-      return customerMatch && rowMatchesSalesmanSelection(row, selectedSalesmanSet);
-    });
-  }, [dueCustomers, legalCustomers, customerFilter, selectedSalesmen, view]);
+  const visibleRows = useMemo(
+    () => filterQueueRows(view === "legal" ? legalCustomers : dueCustomers, customerFilter, selectedSalesmen),
+    [dueCustomers, legalCustomers, customerFilter, selectedSalesmen, view],
+  );
+
+  const visibleNotDueRows = useMemo(
+    () => (view === "due" ? filterQueueRows(notDueCustomers, customerFilter, selectedSalesmen) : []),
+    [notDueCustomers, customerFilter, selectedSalesmen, view],
+  );
+
+  const tableRows = useMemo(() => {
+    if (view !== "due") {
+      return visibleRows.map((row) => ({ type: "customer", row }));
+    }
+
+    const items = visibleRows.map((row) => ({ type: "customer", row }));
+    if (visibleNotDueRows.length > 0) {
+      items.push({ type: "separator" });
+      visibleNotDueRows.forEach((row) => items.push({ type: "customer", row }));
+    }
+    return items;
+  }, [visibleRows, visibleNotDueRows, view]);
 
   const allSalesmenSelected = salesmanOptions.length > 0 && selectedSalesmen.length === salesmanOptions.length;
 
@@ -456,9 +522,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     setError("");
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await resolveAuthSession(supabase, 8000);
 
       if (!session?.access_token) throw new Error(t("msgLoginAgain"));
 
@@ -514,6 +578,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("legalNote", form.legalNote || "Transferred during visit report");
 
       const gps = await captureGpsLocation();
+      await maybePromptCustomerLocationUpdate({
+        customerCode: row.customer_code,
+        customerName: row.customer_name,
+        entryLocation: gps,
+        accessToken: session.access_token,
+        language,
+      });
+
       formData.append("latitude", String(gps.latitude));
       formData.append("longitude", String(gps.longitude));
       formData.append("gpsAccuracyMeters", String(gps.accuracy));
@@ -622,13 +694,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
     setError("");
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await resolveAuthSession(supabase, 8000);
 
       if (!session?.access_token) throw new Error(t("msgLoginAgain"));
 
       const gps = await captureGpsLocation();
+      await maybePromptCustomerLocationUpdate({
+        customerCode: row.customer_code,
+        customerName: row.customer_name,
+        entryLocation: gps,
+        accessToken: session.access_token,
+        language,
+      });
 
       const response = await fetch("/api/payment-collections", {
         method: "PATCH",
@@ -667,7 +744,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }
 
   return (
-    <MorningAttendanceGate requireMorningAttendance={false} enableBackgroundGps>
+    <MorningAttendanceGate requireMorningAttendance={false}>
       <main className="modulePage" dir={dir}>
         <div className="moduleShell">
           <div className="moduleHeader">
@@ -679,10 +756,28 @@ export default function PaymentCollectionsView({ view = "due" }) {
             <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/management" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
 
+          {error ? (
+            <div className="moduleError" style={{ marginBottom: "12px" }}>
+              {error}
+              {error.toLowerCase().includes("login") ? (
+                <div style={{ marginTop: "8px" }}>
+                  <Link href="/" className="moduleInlineButton moduleActionButton">Go to login</Link>
+                </div>
+              ) : (
+                <div style={{ marginTop: "8px" }}>
+                  <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => loadQueue()} disabled={loading}>
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : null}
+
           <div className="moduleInlineStack" style={{ marginBottom: "12px" }}>
             <Link href="/management/payment-collections" className={`moduleInlineButton moduleActionButton${view === "due" ? " moduleCollectorTabActive" : ""}`}>{t("dueQueue")}</Link>
             <Link href="/management/payment-collections/legal" className={`moduleInlineButton moduleActionButton${view === "legal" ? " moduleCollectorTabActive" : ""}`}>{t("legalQueue")}</Link>
             <Link href="/management/collection-report" className="moduleInlineButton moduleActionButton">Collection Route Report</Link>
+            <Link href="/management/daily-visit-report" className="moduleInlineButton moduleActionButton">Daily Visit Report</Link>
           </div>
 
           <section className="moduleSection">
@@ -763,17 +858,30 @@ export default function PaymentCollectionsView({ view = "due" }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleRows.map((row) => {
+                  {tableRows.map((item, tableIndex) => {
+                    if (item.type === "separator") {
+                      return (
+                        <tr key="not-due-separator" className="moduleCollectorSectionRow">
+                          <td colSpan={17}>
+                            <strong>{t("notDueQueue")}</strong>
+                            <div className="moduleHint">{t("notDueHint")}</div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    const row = item.row;
                     const key = rowKey(row);
                     const isOpen = activeRowKey === key;
+                    const isNotDue = row.queue_kind === "not_due";
                     return (
-                      <Fragment key={key}>
+                      <Fragment key={`${key}-${tableIndex}`}>
                         <tr key={key}>
                           <td data-label={t("customerCode")}>{row.customer_code || "-"}</td>
                           <td data-label={t("customer")} className="moduleCollectorCellPrimary">{row.customer_name || row.customer_code}</td>
                           <td data-label={t("salesman")}>{row.salesman_name || row.salesman_code || "-"}</td>
                           <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
-                          <td data-label={t("amount")} className="moduleCollectorCellPrimary">{formatMoney(row.total_due_amount)}</td>
+                          <td data-label={t("amount")} className="moduleCollectorCellPrimary">{formatMoney(isNotDue ? row.total_not_due_amount : row.total_due_amount)}</td>
                           <td data-label={t("cashBucket")}>{formatMoney(row.outstanding_cash)}</td>
                           <td data-label={t("bucket30")}>{formatMoney(row.outstanding_0_30)}</td>
                           <td data-label={t("bucket31to60")}>{formatMoney(row.outstanding_30_60)}</td>
@@ -781,9 +889,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
                           <td data-label={t("bucket91to120")}>{formatMoney(row.outstanding_91_120)}</td>
                           <td data-label={t("bucket120plus")}>{formatMoney(row.outstanding_above_120)}</td>
                           <td data-label={t("overdue")}>{row.max_overdue_days || 0}</td>
-                          <td data-label={t("invoices")}>{row.due_invoice_count || 0}</td>
+                          <td data-label={t("invoices")}>{isNotDue ? row.not_due_invoice_count || 0 : row.due_invoice_count || 0}</td>
                           <td data-label={t("probability")}>
-                            <span className={`moduleCollectorProbability moduleCollectorProbability${String(row.probability_label || "").toUpperCase()}`}>{row.probability_label}</span>
+                            {isNotDue ? (
+                              <span className="moduleHint">N/A</span>
+                            ) : (
+                              <span className={`moduleCollectorProbability moduleCollectorProbability${String(row.probability_label || "").toUpperCase()}`}>{row.probability_label}</span>
+                            )}
                           </td>
                           <td data-label={t("lastOutcome")}>{row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status || "-"}</td>
                           <td data-label={t("lastUpdate")}>{formatLastUpdateText(row)}</td>
@@ -858,7 +970,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     {(row.invoices || []).map((invoice, index) => (
                                       <tr
                                         key={`${key}-${invoice.ref_no || invoice.invoice_date || index}-${index}`}
-                                        className={Number(invoice.overdue_days || 0) > 0 ? "moduleCollectorInvoiceOverdue" : ""}
+                                        className={Number(invoice.overdue_days || 0) > 0 ? "moduleCollectorInvoiceOverdue" : (isNotDue ? "moduleCollectorInvoiceNotDue" : "")}
                                       >
                                         <td data-label="Date">{invoice.invoice_date || "-"}</td>
                                         <td data-label="Ref">{invoice.ref_no || "-"}</td>
@@ -878,9 +990,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                 </div>
 
                                 <div className="moduleMetricGrid" style={{ marginBottom: "10px" }}>
-                                  <section className="moduleMetricCard"><span>{t("amount")}</span><strong>{formatMoney(row.total_due_amount)}</strong></section>
-                                  <section className="moduleMetricCard"><span>{t("invoices")}</span><strong>{row.due_invoice_count || 0}</strong></section>
-                                  <section className="moduleMetricCard"><span>{t("probability")}</span><strong>{row.probability_label}</strong></section>
+                                  <section className="moduleMetricCard"><span>{isNotDue ? t("notDueAmount") : t("amount")}</span><strong>{formatMoney(isNotDue ? row.total_not_due_amount : row.total_due_amount)}</strong></section>
+                                  <section className="moduleMetricCard"><span>{isNotDue ? t("notDueInvoices") : t("invoices")}</span><strong>{isNotDue ? row.not_due_invoice_count || 0 : row.due_invoice_count || 0}</strong></section>
+                                  <section className="moduleMetricCard"><span>{t("probability")}</span><strong>{isNotDue ? "N/A" : row.probability_label}</strong></section>
                                 </div>
 
                                 <div className="moduleFilterRow moduleCollectorFormGrid">
@@ -1043,7 +1155,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
               </table>
             </div>
 
-            {visibleRows.length === 0 && <div className="moduleHint">{view === "legal" ? t("noLegal") : t("noDue")}</div>}
+            {!loading && visibleRows.length === 0 && visibleNotDueRows.length === 0 && (
+              <div className="moduleHint">{view === "legal" ? t("noLegal") : t("noDue")}</div>
+            )}
+            {!loading && view === "due" && visibleRows.length === 0 && visibleNotDueRows.length > 0 && (
+              <div className="moduleHint">{t("noDue")}</div>
+            )}
           </section>
 
           {loading && <div className="moduleLoading">{t("loading")}</div>}

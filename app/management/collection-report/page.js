@@ -9,6 +9,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { buildGoogleMapsPointUrl } from "../../lib/geo";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
+import { fetchJsonWithTimeout, waitForInitialSession } from "../../lib/authSession";
 
 const TEXT = {
   title: { en: "Collection Route Report", ar: "تقرير مسار التحصيل" },
@@ -89,6 +90,14 @@ export default function CollectionReportPage() {
   );
 
   useEffect(() => {
+    let cancelled = false;
+
+    const safetyTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      setLoading(false);
+      setError((current) => current || "Report load timed out. Please login and refresh the page.");
+    }, 12000);
+
     async function loadReport() {
       const supabase = getSupabaseClient();
       if (!supabase) {
@@ -100,9 +109,8 @@ export default function CollectionReportPage() {
       setError("");
 
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        const session = await waitForInitialSession(supabase);
+        if (cancelled) return;
 
         if (!session?.access_token) {
           throw new Error("Please login again.");
@@ -111,27 +119,42 @@ export default function CollectionReportPage() {
         const params = new URLSearchParams({ date: reportDate });
         if (collectorId) params.set("collectorId", collectorId);
 
-        const response = await fetch(`/api/payment-collections/report?${params.toString()}`, {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
+        const { response, payload } = await fetchJsonWithTimeout(
+          `/api/payment-collections/report?${params.toString()}`,
+          {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
           },
-        });
+        );
 
-        const payload = await response.json().catch(() => ({}));
+        if (cancelled) return;
+
         if (!response.ok || !payload.success) {
           throw new Error(payload.error || "Unable to load collection route report.");
         }
 
         setReport(payload);
       } catch (err) {
-        setError(err.message || "Unable to load collection route report.");
+        if (cancelled) return;
+        const message = String(err.message || "");
+        if (message === "SESSION_TIMEOUT") {
+          setError("Session check timed out. Please refresh the page or login again.");
+        } else {
+          setError(err.message || "Unable to load collection route report.");
+        }
         setReport(null);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     loadReport();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(safetyTimer);
+    };
   }, [reportDate, collectorId]);
 
   if (!supabaseClient) {
@@ -144,7 +167,7 @@ export default function CollectionReportPage() {
   }
 
   return (
-    <MorningAttendanceGate requireMorningAttendance={false} enableBackgroundGps>
+    <MorningAttendanceGate requireMorningAttendance={false}>
       <main className="modulePage" dir={dir}>
         <div className="moduleShell">
           <div className="moduleHeader">
@@ -198,7 +221,16 @@ export default function CollectionReportPage() {
             </div>
           </section>
 
-          {error && <div className="moduleError">{error}</div>}
+          {error && (
+            <div className="moduleError">
+              {error}
+              {error.includes("login") ? (
+                <div style={{ marginTop: "8px" }}>
+                  <Link href="/" className="moduleInlineButton">Go to login</Link>
+                </div>
+              ) : null}
+            </div>
+          )}
           {!loading && report?.migrationHint && (
             <div className="moduleWarning">{report.migrationHint}</div>
           )}

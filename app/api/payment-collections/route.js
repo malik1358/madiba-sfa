@@ -601,3 +601,75 @@ export async function POST(request) {
     );
   }
 }
+
+export async function PATCH(request) {
+  try {
+    if (!supabaseUrl || !serviceKey) {
+      return Response.json(
+        { success: false, error: "Server configuration is incomplete" },
+        { status: 500 },
+      );
+    }
+
+    const user = await getAuthUser(request);
+    const body = await request.json();
+    const customerCode = canonicalCustomerCode(body.customerCode || "");
+    const action = String(body.action || "transfer").trim().toLowerCase();
+    const note = String(body.note || "").trim();
+
+    if (!customerCode) throw new Error("Customer code is required");
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const scope = await getSalesScope(admin, user.id);
+    if (!scope.hasAllAccess) {
+      const records = await fetchOutstandingAndCollectionRecords(admin, scope);
+      if (!records.some((record) => record.customer_code === customerCode)) {
+        throw new Error("You do not have access to this customer");
+      }
+    }
+
+    if (action === "remove") {
+      const { error } = await admin
+        .from("legal_transfers")
+        .delete()
+        .eq("customer_code", customerCode);
+
+      if (error) {
+        if (isMissingTableError(error)) {
+          throw new Error("Collection tables are not initialized in this environment yet.");
+        }
+        throw error;
+      }
+    } else if (action === "transfer") {
+      const { error } = await admin
+        .from("legal_transfers")
+        .upsert({
+          customer_code: customerCode,
+          is_transferred: true,
+          transferred_at: new Date().toISOString(),
+          transferred_by: user.id,
+          note: note || "Transferred to legal",
+        }, { onConflict: "customer_code" });
+
+      if (error) {
+        if (isMissingTableError(error)) {
+          throw new Error("Collection tables are not initialized in this environment yet.");
+        }
+        throw error;
+      }
+    } else {
+      throw new Error("Unsupported legal transfer action");
+    }
+
+    return Response.json({ success: true });
+  } catch (error) {
+    console.error("Error updating legal transfer:", error);
+    return Response.json(
+      { success: false, error: error.message || "Unable to update legal transfer status" },
+      { status: 400 },
+    );
+  }
+}

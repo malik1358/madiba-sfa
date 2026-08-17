@@ -508,6 +508,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("summaryText", summaryText);
       formData.append("sendWhatsapp", "1");
       formData.append("whatsappMessage", summaryText);
+      formData.append("legalNote", form.legalNote || "Transferred during visit report");
       if (form.paymentCopy) formData.append("paymentCopy", form.paymentCopy);
       if (form.receiptCopy) formData.append("receiptCopy", form.receiptCopy);
 
@@ -522,27 +523,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success) {
         throw new Error(payload.error || "Unable to save collection visit.");
-      }
-
-      if (selectedOutcome === "TRANSFER_TO_LEGAL") {
-        const legalResponse = await fetch("/api/payment-collections", {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            customerCode: row.customer_code,
-            customerName: row.customer_name,
-            note: form.legalNote || "Transferred during visit report",
-            action: "transfer",
-          }),
-        });
-
-        const legalPayload = await legalResponse.json().catch(() => ({}));
-        if (!legalResponse.ok || !legalPayload.success) {
-          throw new Error(legalPayload.error || "Visit saved, but legal transfer failed.");
-        }
       }
 
       const popupMessage = payload?.whatsapp?.error

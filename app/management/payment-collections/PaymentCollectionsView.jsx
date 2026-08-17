@@ -98,13 +98,42 @@ const TEXT = {
   salesmanFilterHint: { en: "Tap to select one or more salesmen", ar: "اضغط لاختيار مندوب واحد أو أكثر" },
   allSalesmen: { en: "All salesmen", ar: "كل المندوبين" },
   clearSalesmanFilter: { en: "Clear selection", ar: "مسح التحديد" },
+  selectAllSalesmen: { en: "Select all", ar: "تحديد الكل" },
 };
+
+function normalizeSalesmanKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
 
 function getSalesmanLabel(row) {
   const name = String(row?.salesman_name || "").trim();
   const code = String(row?.salesman_code || "").trim();
   if (code && name) return `${code} - ${name}`;
   return name || code || "";
+}
+
+function buildSalesmanOptions(rows) {
+  const byKey = new Map();
+
+  (rows || []).forEach((row) => {
+    const label = getSalesmanLabel(row);
+    const key = normalizeSalesmanKey(label);
+    if (!key) return;
+
+    const existing = byKey.get(key);
+    if (!existing || label.length > existing.length) {
+      byKey.set(key, label);
+    }
+  });
+
+  return [...byKey.entries()]
+    .map(([key, label]) => ({ key, label }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function rowMatchesSalesmanSelection(row, selectedKeys) {
+  if (!selectedKeys.size) return true;
+  return selectedKeys.has(normalizeSalesmanKey(getSalesmanLabel(row)));
 }
 
 function formatMoney(value) {
@@ -279,11 +308,19 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   const rowKey = (row) => String(row?.queue_key || row?.customer_code || row?.customer_name || "").trim();
 
-  function toggleSalesman(option) {
+  function toggleSalesman(optionKey) {
     setSelectedSalesmen((current) => (
-      current.includes(option)
-        ? current.filter((value) => value !== option)
-        : [...current, option]
+      current.includes(optionKey)
+        ? current.filter((value) => value !== optionKey)
+        : [...current, optionKey]
+    ));
+  }
+
+  function toggleAllSalesmen() {
+    setSelectedSalesmen((current) => (
+      current.length === salesmanOptions.length
+        ? []
+        : salesmanOptions.map((option) => option.key)
     ));
   }
 
@@ -352,13 +389,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
     loadQueue();
   }, []);
 
-  const salesmanOptions = useMemo(() => {
-    return [...new Set(
-      [...dueCustomers, ...legalCustomers]
-        .map((row) => getSalesmanLabel(row))
-        .filter(Boolean),
-    )].sort((left, right) => left.localeCompare(right));
-  }, [dueCustomers, legalCustomers]);
+  const salesmanOptions = useMemo(
+    () => buildSalesmanOptions([...dueCustomers, ...legalCustomers]),
+    [dueCustomers, legalCustomers],
+  );
 
   const visibleRows = useMemo(() => {
     const rows = view === "legal" ? legalCustomers : dueCustomers;
@@ -367,11 +401,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
     return rows.filter((row) => {
       const customerMatch = !customerQuery || [row.customer_code, row.customer_name]
         .some((value) => String(value || "").toLowerCase().includes(customerQuery));
-      const salesmanMatch = selectedSalesmanSet.size === 0
-        || selectedSalesmanSet.has(getSalesmanLabel(row));
-      return customerMatch && salesmanMatch;
+      return customerMatch && rowMatchesSalesmanSelection(row, selectedSalesmanSet);
     });
   }, [dueCustomers, legalCustomers, customerFilter, selectedSalesmen, view]);
+
+  const allSalesmenSelected = salesmanOptions.length > 0 && selectedSalesmen.length === salesmanOptions.length;
 
   useEffect(() => {
     const text = String(form.remarkArabic || "").trim();
@@ -670,16 +704,28 @@ export default function PaymentCollectionsView({ view = "due" }) {
                 <div className="moduleCollectorCheckboxList" role="group" aria-label={t("salesmanFilter")}>
                   {salesmanOptions.length === 0 ? (
                     <div className="moduleHint">{t("allSalesmen")}</div>
-                  ) : salesmanOptions.map((option) => (
-                    <label key={option} className="moduleCollectorCheckbox">
-                      <input
-                        type="checkbox"
-                        checked={selectedSalesmen.includes(option)}
-                        onChange={() => toggleSalesman(option)}
-                      />
-                      <span>{option}</span>
-                    </label>
-                  ))}
+                  ) : (
+                    <>
+                      <label className="moduleCollectorCheckbox moduleCollectorCheckboxSelectAll">
+                        <input
+                          type="checkbox"
+                          checked={allSalesmenSelected}
+                          onChange={toggleAllSalesmen}
+                        />
+                        <span>{t("selectAllSalesmen")}</span>
+                      </label>
+                      {salesmanOptions.map((option) => (
+                        <label key={option.key} className="moduleCollectorCheckbox">
+                          <input
+                            type="checkbox"
+                            checked={selectedSalesmen.includes(option.key)}
+                            onChange={() => toggleSalesman(option.key)}
+                          />
+                          <span>{option.label}</span>
+                        </label>
+                      ))}
+                    </>
+                  )}
                 </div>
                 <div className="moduleHint" style={{ marginTop: "4px" }}>{t("salesmanFilterHint")}</div>
                 {selectedSalesmen.length > 0 ? (

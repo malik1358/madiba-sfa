@@ -3829,6 +3829,13 @@ table.auditMatrix td.auditTrendSame {
   line-height: 1.3;
 }
 
+.moduleCollectorCheckboxSelectAll {
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #e3ecef;
+  font-weight: 700;
+}
+
 .moduleCollectorCheckbox {
   display: flex;
   align-items: center;

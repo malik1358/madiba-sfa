@@ -18,6 +18,10 @@ const TEXT = {
     en: "Attendance log table is unavailable. Access is allowed, but attendance logging is temporarily disabled.",
     ar: "جدول سجلات الحضور غير متاح. تم السماح بالدخول، لكن تسجيل الحضور معطل مؤقتاً.",
   },
+  sessionCheckFailed: {
+    en: "Unable to verify attendance status right now. You can continue, but attendance may not be recorded.",
+    ar: "تعذر التحقق من حضور الصباح الآن. يمكنك المتابعة، لكن قد لا يتم تسجيل الحضور.",
+  },
 };
 
 function captureLocation() {
@@ -50,6 +54,25 @@ function readCapturedAt(note, fallbackDate) {
     const ts = new Date(fallbackDate || "").getTime();
     return Number.isFinite(ts) ? ts : 0;
   }
+}
+
+function withTimeout(promise, timeoutMs, timeoutMessage = "REQUEST_TIMEOUT") {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    }),
+  ]);
+}
+
+async function getSessionWithTimeout(supabase, timeoutMs = 10000) {
+  const { data, error } = await withTimeout(
+    supabase.auth.getSession(),
+    timeoutMs,
+    "SESSION_TIMEOUT",
+  );
+  if (error) throw error;
+  return data?.session || null;
 }
 
 export default function MorningAttendanceGate({ children }) {
@@ -146,7 +169,11 @@ export default function MorningAttendanceGate({ children }) {
     try {
       const {
         data: { session },
-      } = await supabase.auth.getSession();
+      } = await withTimeout(
+        supabase.auth.getSession(),
+        10000,
+        "SESSION_TIMEOUT",
+      );
 
       const userId = session?.user?.id;
       if (!userId) return;
@@ -178,16 +205,18 @@ export default function MorningAttendanceGate({ children }) {
     setWarning("");
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await getSessionWithTimeout(supabase);
 
       if (!session?.user?.id) {
         setReady(true);
         return;
       }
 
-      const logsTable = await detectTable(supabase, "daily_activity_logs");
+      const logsTable = await withTimeout(
+        detectTable(supabase, "daily_activity_logs"),
+        10000,
+        "ATTENDANCE_CHECK_TIMEOUT",
+      );
       if (!logsTable.available) {
         setWarning(t("logsUnavailableBypass"));
         setReady(true);
@@ -199,15 +228,19 @@ export default function MorningAttendanceGate({ children }) {
       const end = new Date();
       end.setHours(23, 59, 59, 999);
 
-      const { data, error: attendanceError } = await supabase
-        .from("daily_activity_logs")
-        .select("id")
-        .eq("user_id", session.user.id)
-        .eq("entry_type", "MORNING_ATTENDANCE")
-        .gte("created_at", start.toISOString())
-        .lte("created_at", end.toISOString())
-        .limit(1)
-        .maybeSingle();
+      const { data, error: attendanceError } = await withTimeout(
+        supabase
+          .from("daily_activity_logs")
+          .select("id")
+          .eq("user_id", session.user.id)
+          .eq("entry_type", "MORNING_ATTENDANCE")
+          .gte("created_at", start.toISOString())
+          .lte("created_at", end.toISOString())
+          .limit(1)
+          .maybeSingle(),
+        10000,
+        "ATTENDANCE_CHECK_TIMEOUT",
+      );
 
       if (attendanceError) throw attendanceError;
 
@@ -231,10 +264,15 @@ export default function MorningAttendanceGate({ children }) {
 
       setReady(false);
     } catch (err) {
-      if (String(err.message || "") === "UNSUPPORTED") {
+      const message = String(err.message || "");
+      if (message === "UNSUPPORTED") {
         setError(t("locationUnsupported"));
-      } else if (String(err.message || "") === "LOCATION_FAILED") {
+      } else if (message === "LOCATION_FAILED") {
         setError(t("locationFailed"));
+      } else if (message === "SESSION_TIMEOUT" || message === "ATTENDANCE_CHECK_TIMEOUT") {
+        setWarning(t("sessionCheckFailed"));
+        setReady(true);
+        return;
       } else {
         setError(err.message || t("locationFailed"));
       }

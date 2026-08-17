@@ -3898,6 +3898,116 @@ table.auditMatrix td.auditTrendSame {
   overflow-x: auto;
 }
 
+.moduleCustomerMasterTableWrap {
+  overflow-x: auto;
+}
+
+.moduleCustomerMasterTable {
+  min-width: 1080px;
+}
+
+.moduleCustomerMasterTable th.moduleCustomerMasterSticky,
+.moduleCustomerMasterTable td.moduleCustomerMasterSticky {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #ffffff;
+  box-shadow: 1px 0 0 #d5e1e4;
+}
+
+.moduleCustomerMasterTable th.moduleCustomerMasterName,
+.moduleCustomerMasterTable td.moduleCustomerMasterName {
+  left: 110px;
+  min-width: 220px;
+}
+
+.moduleCustomerMasterTable th.moduleCustomerMasterCode,
+.moduleCustomerMasterTable td.moduleCustomerMasterCode {
+  min-width: 110px;
+}
+
+.moduleCustomerMasterTable th.moduleCustomerMasterSticky {
+  z-index: 7;
+  background: #edf4f5;
+}
+
+.moduleCustomerMasterTable td.moduleCustomerMasterName {
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .moduleCustomerMasterTableWrap {
+    overflow-x: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .moduleCustomerMasterTable,
+  .moduleCustomerMasterTable > tbody,
+  .moduleCustomerMasterTable > tbody > tr,
+  .moduleCustomerMasterTable > tbody > tr > td {
+    display: block;
+    min-width: 0;
+  }
+
+  .moduleCustomerMasterTable {
+    min-width: 0;
+  }
+
+  .moduleCustomerMasterTable > thead {
+    display: none;
+  }
+
+  .moduleCustomerMasterTable > tbody > tr {
+    margin-bottom: 10px;
+    padding: 4px 0;
+    border: 1px solid #d5e1e4;
+    border-radius: 10px;
+    background: #ffffff;
+  }
+
+  .moduleCustomerMasterTable > tbody > tr > td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 12px;
+    border: 0;
+    border-bottom: 1px solid #eef4f5;
+    position: static;
+    left: auto;
+    box-shadow: none;
+    font-size: 13px;
+    text-align: right;
+  }
+
+  .moduleCustomerMasterTable > tbody > tr > td:last-child {
+    border-bottom: 0;
+  }
+
+  .moduleCustomerMasterTable > tbody > tr > td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    color: #4b6b73;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    text-align: left;
+  }
+
+  .moduleCustomerMasterTable > tbody > tr > td.moduleCustomerMasterName {
+    font-size: 15px;
+  }
+
+  .moduleCustomerMasterTable > tbody > tr > td.moduleCustomerMasterActions {
+    display: block;
+  }
+
+  .moduleCustomerMasterTable > tbody > tr > td.moduleCustomerMasterActions::before {
+    display: none;
+  }
+}
+
 /* The queue has 17 columns, so let it scroll instead of crushing cells to nothing. */
 .moduleCollectorTable {
   min-width: 1180px;

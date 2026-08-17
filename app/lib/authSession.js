@@ -114,6 +114,9 @@ export async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 30000)
     if (error?.name === "AbortError") {
       throw new Error("Request timed out. Please refresh and try again.");
     }
+    if (error instanceof TypeError || String(error?.message || "").includes("NetworkError")) {
+      throw new Error("Unable to reach the server. Restart dev server and refresh the page.");
+    }
     throw error;
   } finally {
     clearTimeout(timer);

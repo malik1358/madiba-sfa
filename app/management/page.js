@@ -271,6 +271,9 @@ export default function ManagementPage() {
             {userRole !== "collector" ? (
               <>
                 <Link href="/management/customer-audit" className="moduleNavCard">Customers Audit</Link>
+                {(userRole === "admin" || userRole === "manager") && (
+                  <Link href="/management/customer-master" className="moduleNavCard">Customer Master</Link>
+                )}
                 <Link href="/management/new-order" className="moduleNavCard">Orders Workflow</Link>
                 <Link href="/management/salesman-hierarchy" className="moduleNavCard">Salesman Hierarchy</Link>
                 <Link href="/management/gps-map" className="moduleNavCard">GPS Map</Link>

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "dev:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "import:customer-locations": "node scripts/import-customer-locations.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",

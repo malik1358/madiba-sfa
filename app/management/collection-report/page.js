@@ -28,6 +28,10 @@ const TEXT = {
     en: "GPS is captured automatically when a collection visit is saved. Older visits saved before this update may not have GPS.",
     ar: "يتم التقاط GPS تلقائياً عند حفظ زيارة التحصيل. الزيارات القديمة قد لا تحتوي GPS.",
   },
+  migrationPending: {
+    en: "GPS columns are not applied in Supabase yet. Run sql/add_collection_visit_gps.sql in SQL Editor to enable GPS distances.",
+    ar: "أعمدة GPS غير مُطبقة في Supabase بعد. نفّذ sql/add_collection_visit_gps.sql في SQL Editor لتفعيل مسافات GPS.",
+  },
   totalVisits: { en: "Total visits", ar: "إجمالي الزيارات" },
   totalDistance: { en: "Total route distance", ar: "إجمالي مسافة المسار" },
   collectorsActive: { en: "Collectors active", ar: "المحصلون النشطون" },
@@ -186,6 +190,9 @@ export default function CollectionReportPage() {
           </section>
 
           {error && <div className="moduleError">{error}</div>}
+          {!loading && report?.migrationHint && (
+            <div className="moduleWarning">{report.migrationHint}</div>
+          )}
           {loading && <div className="moduleLoading">{t("loading")}</div>}
 
           {!loading && report && (

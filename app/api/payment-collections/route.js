@@ -140,6 +140,11 @@ function isMissingTableError(error) {
     || message.includes("relation") && message.includes("does not exist");
 }
 
+function isMissingColumnError(error) {
+  const message = String(error?.message || error?.details || "").toLowerCase();
+  return error?.code === "42703" || (message.includes("column") && message.includes("does not exist"));
+}
+
 async function getAuthUser(request) {
   const authHeader = request.headers.get("authorization") || "";
   if (!authHeader.startsWith("Bearer ")) {
@@ -553,28 +558,51 @@ export async function POST(request) {
     }
 
     // Insert new collection visit
-    const { data: insertData, error: insertError } = await admin
+    const visitInsertBase = {
+      customer_code: customerCode,
+      visit_outcome: visitOutcome,
+      payment_status: paymentStatus,
+      amount_received: amountReceived,
+      receipt_mode: receiptMode,
+      next_visit_at: nextVisitAt || null,
+      remark_arabic: remarkArabic,
+      remark_english: remarkEnglish,
+      non_payment_reason: nonPaymentReason,
+      payment_copy_url: paymentCopyUrl,
+      receipt_copy_url: receiptCopyUrl,
+      created_by: user.id,
+      saved_at: new Date().toISOString(),
+    };
+
+    const visitInsertWithGps = {
+      ...visitInsertBase,
+      latitude: Number.isFinite(latitude) ? latitude : null,
+      longitude: Number.isFinite(longitude) ? longitude : null,
+      gps_accuracy_meters: Number.isFinite(gpsAccuracyMeters) ? gpsAccuracyMeters : null,
+    };
+
+    let insertData = null;
+    let insertError = null;
+
+    ({
+      data: insertData,
+      error: insertError,
+    } = await admin
       .from("collection_visits")
-      .insert({
-        customer_code: customerCode,
-        visit_outcome: visitOutcome,
-        payment_status: paymentStatus,
-        amount_received: amountReceived,
-        receipt_mode: receiptMode,
-        next_visit_at: nextVisitAt || null,
-        remark_arabic: remarkArabic,
-        remark_english: remarkEnglish,
-        non_payment_reason: nonPaymentReason,
-        payment_copy_url: paymentCopyUrl,
-        receipt_copy_url: receiptCopyUrl,
-        latitude: Number.isFinite(latitude) ? latitude : null,
-        longitude: Number.isFinite(longitude) ? longitude : null,
-        gps_accuracy_meters: Number.isFinite(gpsAccuracyMeters) ? gpsAccuracyMeters : null,
-        created_by: user.id,
-        saved_at: new Date().toISOString(),
-      })
+      .insert(visitInsertWithGps)
       .select("id")
-      .maybeSingle();
+      .maybeSingle());
+
+    if (insertError && isMissingColumnError(insertError)) {
+      ({
+        data: insertData,
+        error: insertError,
+      } = await admin
+        .from("collection_visits")
+        .insert(visitInsertBase)
+        .select("id")
+        .maybeSingle());
+    }
 
     if (insertError) {
       if (isMissingTableError(insertError)) {

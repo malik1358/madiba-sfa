@@ -73,6 +73,35 @@ function formatOutcome(value) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+const VISIT_SELECT_WITH_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,saved_at,latitude,longitude,gps_accuracy_meters,created_by";
+const VISIT_SELECT_WITHOUT_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,saved_at,created_by";
+
+async function queryCollectionVisits(admin, {
+  startIso,
+  endIso,
+  collectorId,
+  userId,
+  restrictToUser,
+  includeGps,
+}) {
+  const selectFields = includeGps ? VISIT_SELECT_WITH_GPS : VISIT_SELECT_WITHOUT_GPS;
+  let visitQuery = admin
+    .from("collection_visits")
+    .select(selectFields)
+    .gte("saved_at", startIso)
+    .lte("saved_at", endIso)
+    .order("saved_at", { ascending: true });
+
+  if (collectorId) {
+    visitQuery = visitQuery.eq("created_by", collectorId);
+  } else if (restrictToUser) {
+    visitQuery = visitQuery.eq("created_by", userId);
+  }
+
+  const { data, error } = await visitQuery;
+  return { data, error };
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -101,26 +130,33 @@ export async function GET(request) {
     const startIso = `${date}T00:00:00.000Z`;
     const endIso = `${date}T23:59:59.999Z`;
 
-    let visitQuery = admin
-      .from("collection_visits")
-      .select("id,customer_code,visit_outcome,payment_status,amount_received,saved_at,latitude,longitude,gps_accuracy_meters,created_by")
-      .gte("saved_at", startIso)
-      .lte("saved_at", endIso)
-      .order("saved_at", { ascending: true });
+    let gpsColumnsAvailable = true;
 
-    if (collectorId) {
-      visitQuery = visitQuery.eq("created_by", collectorId);
-    } else if (String(profile.role || "").toLowerCase() === "collector") {
-      visitQuery = visitQuery.eq("created_by", user.id);
+    let visitQueryResult = await queryCollectionVisits(admin, {
+      startIso,
+      endIso,
+      collectorId,
+      userId: user.id,
+      restrictToUser: String(profile.role || "").toLowerCase() === "collector" && !collectorId,
+      includeGps: true,
+    });
+
+    if (visitQueryResult.error && isMissingColumnError(visitQueryResult.error)) {
+      gpsColumnsAvailable = false;
+      visitQueryResult = await queryCollectionVisits(admin, {
+        startIso,
+        endIso,
+        collectorId,
+        userId: user.id,
+        restrictToUser: String(profile.role || "").toLowerCase() === "collector" && !collectorId,
+        includeGps: false,
+      });
     }
 
-    const { data: visits, error: visitsError } = await visitQuery;
+    const { data: visits, error: visitsError } = visitQueryResult;
     if (visitsError) {
       if (isMissingTableError(visitsError)) {
         throw new Error("Collection tables are not initialized in this environment yet.");
-      }
-      if (isMissingColumnError(visitsError)) {
-        throw new Error("Collection visit GPS columns are missing. Apply migration 20260817000000_add_collection_visit_gps.sql.");
       }
       throw visitsError;
     }
@@ -143,9 +179,6 @@ export async function GET(request) {
     if (allDayError) {
       if (isMissingTableError(allDayError)) {
         throw new Error("Collection tables are not initialized in this environment yet.");
-      }
-      if (isMissingColumnError(allDayError)) {
-        throw new Error("Collection visit GPS columns are missing. Apply migration 20260817000000_add_collection_visit_gps.sql.");
       }
       throw allDayError;
     }
@@ -219,6 +252,10 @@ export async function GET(request) {
     return Response.json({
       success: true,
       date,
+      gpsColumnsAvailable,
+      migrationHint: gpsColumnsAvailable
+        ? null
+        : "Apply sql/add_collection_visit_gps.sql in Supabase SQL Editor to enable GPS distance reporting.",
       visitCount: visitRows.length,
       collectorCount: collectors.length,
       totalDistanceKm: collectors.reduce((sum, collector) => sum + Number(collector.totalDistanceKm || 0), 0),

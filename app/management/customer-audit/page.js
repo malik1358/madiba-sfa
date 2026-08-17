@@ -29,6 +29,7 @@ import CustomerHeader from "./components/CustomerHeader";
 import MonthlyPerformance from "./components/MonthlyPerformance";
 import CategoryPerformance from "./components/CategoryPerformance";
 import QuickOrder from "./components/QuickOrder";
+import FullItemList from "./components/FullItemList";
 import OrderBar from "./components/OrderBar";
 import OrderReview from "./components/OrderReview";
 import TransactionHistory from "./components/TransactionHistory";
@@ -60,6 +61,7 @@ function CustomerAuditPageContent() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [priceList, setPriceList] = useState({});
+  const [priceSheetItems, setPriceSheetItems] = useState([]);
   const [requestedCustomerCode, setRequestedCustomerCode] = useState("");
   const [outstandingLoading, setOutstandingLoading] = useState(false);
   const [outstandingInfo, setOutstandingInfo] = useState({
@@ -85,8 +87,6 @@ function CustomerAuditPageContent() {
     itemMasterStatus,
     loading,
     loadingCustomer,
-    showTransactions,
-    setShowTransactions,
     expandedCategories,
     toggleCategory,
     openCustomer,
@@ -189,6 +189,7 @@ function CustomerAuditPageContent() {
       try {
         const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
         setPriceList(parsed.priceMap || {});
+        setPriceSheetItems(parsed.sheetItems || []);
       } catch {
         // Keep previous prices if fresh fetch fails.
       }
@@ -471,6 +472,16 @@ function CustomerAuditPageContent() {
           priceList={priceList}
         />
 
+        <FullItemList
+          itemCatalog={itemMaster}
+          priceSheetItems={priceSheetItems}
+          orderQuantities={orderQuantities}
+          decreaseOrderQty={decreaseQty}
+          increaseOrderQty={increaseQty}
+          changeOrderQty={updateQty}
+          priceList={priceList}
+        />
+
         <OrderBar
           orderItems={orderItems}
           orderSummary={orderSummary}
@@ -507,8 +518,6 @@ function CustomerAuditPageContent() {
 
         <TransactionHistory
           transactions={transactions}
-          showTransactions={showTransactions}
-          setShowTransactions={setShowTransactions}
           analytics={analytics}
         />
 

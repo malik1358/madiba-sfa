@@ -3143,6 +3143,19 @@ table.auditMatrix td.auditTrendSame {
   background: #edf4f6;
 }
 
+.auditTransactionCount {
+  color: #4b6b73;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* These tables scroll within their own wrappers, so page-relative sticky offsets cover rows. */
+.auditMatrix thead th,
+.auditQuickOrderTable th,
+.auditTransactionTable thead th {
+  position: static !important;
+}
+
 
 /* ==========================================================
    MOBILE
@@ -3575,6 +3588,10 @@ table.auditMatrix td.auditTrendSame {
   min-width: 760px;
 }
 
+.auditFullItemListTable th {
+  position: static !important;
+}
+
 .moduleCategoryRow td {
   background: #f8fbfc;
   border-left: 1px solid #d5e1e4;
@@ -3853,6 +3870,178 @@ table.auditMatrix td.auditTrendSame {
 .moduleCollectorInvoiceOverdue td {
   color: #a11d1d;
   font-weight: 700;
+}
+
+.moduleCollectorTableWrap {
+  overflow-x: auto;
+}
+
+/* The queue has 17 columns, so let it scroll instead of crushing cells to nothing. */
+.moduleCollectorTable {
+  min-width: 1180px;
+}
+
+/* Sticky headers resolve against the scrolling wrapper and would cover the first row. */
+.moduleCollectorTable th {
+  position: static;
+}
+
+@media (max-width: 900px) {
+  /* Too many columns for a phone, so each row becomes a labelled card. */
+  .moduleCollectorTableWrap {
+    overflow-x: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .moduleCollectorTable,
+  .moduleCollectorTable > tbody,
+  .moduleCollectorTable > tbody > tr,
+  .moduleCollectorTable > tbody > tr > td {
+    display: block;
+    min-width: 0;
+  }
+
+  .moduleCollectorTable > thead {
+    display: none;
+  }
+
+  .moduleCollectorTable > tbody > tr {
+    margin-bottom: 10px;
+    padding: 4px 0;
+    border: 1px solid #d5e1e4;
+    border-radius: 10px;
+    background: #ffffff;
+  }
+
+  .moduleCollectorTable > tbody > tr > td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 12px;
+    border: 0;
+    border-bottom: 1px solid #eef4f5;
+    font-size: 13px;
+    text-align: right;
+  }
+
+  .moduleCollectorTable > tbody > tr > td:last-child {
+    border-bottom: 0;
+  }
+
+  .moduleCollectorTable > tbody > tr > td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    color: #4b6b73;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    text-align: left;
+  }
+
+  .moduleCollectorTable > tbody > tr > td.moduleCollectorCellPrimary {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .moduleCollectorTable > tbody > tr > td.moduleCollectorCellActions {
+    display: block;
+  }
+
+  .moduleCollectorTable > tbody > tr > td.moduleCollectorCellActions::before {
+    display: none;
+  }
+
+  .moduleCollectorTable .moduleActionStack {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  /* The expanded detail panel keeps its own tables scrollable. */
+  .moduleCollectorTable > tbody > tr > td[colspan] {
+    padding: 10px;
+  }
+
+  .moduleCollectorTable > tbody > tr > td[colspan]::before {
+    display: none;
+  }
+
+  .moduleCollectorTable > tbody > tr.moduleCollectorDetailRow {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .moduleCollectorTable > tbody > tr.moduleCollectorDetailRow > td[colspan] {
+    display: block;
+    width: 100%;
+    padding: 0;
+  }
+
+  .moduleCollectorSubTableWrap {
+    width: 100%;
+    overflow-x: visible;
+    border: 1px solid #d5e1e4;
+    border-radius: 10px;
+    background: #ffffff;
+  }
+
+  .moduleCollectorSubTableWrap .moduleTable {
+    display: table;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .moduleCollectorSubTableWrap .moduleTable th {
+    position: static;
+  }
+
+  /* Invoice rows also become cards so nothing needs sideways scrolling. */
+  .moduleCollectorInvoiceTable,
+  .moduleCollectorInvoiceTable > tbody,
+  .moduleCollectorInvoiceTable > tbody > tr,
+  .moduleCollectorInvoiceTable > tbody > tr > td {
+    display: block;
+  }
+
+  .moduleCollectorInvoiceTable > thead {
+    display: none;
+  }
+
+  .moduleCollectorInvoiceTable > tbody > tr {
+    padding: 4px 0;
+    border-bottom: 1px solid #d5e1e4;
+  }
+
+  .moduleCollectorInvoiceTable > tbody > tr:last-child {
+    border-bottom: 0;
+  }
+
+  .moduleCollectorInvoiceTable > tbody > tr > td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 12px;
+    border: 0;
+    text-align: right;
+  }
+
+  .moduleCollectorInvoiceTable > tbody > tr > td::before {
+    content: attr(data-label);
+    color: #4b6b73;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    text-align: left;
+  }
+
+  .moduleCollectorFormGrid label,
+  .moduleCollectorFilterGrid label {
+    font-size: 13px;
+  }
 }
 
 .moduleHealthGrid {

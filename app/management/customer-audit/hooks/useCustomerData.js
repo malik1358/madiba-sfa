@@ -12,7 +12,7 @@ async function fetchVisibleCustomers(token) {
     },
   });
 
-  const payload = await response.json();
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.success) {
     throw new Error(payload.error || 'Unable to load visible customers.');
   }
@@ -32,7 +32,6 @@ export function useCustomerData({ setError, setMessage }) {
   const [itemMasterStatus, setItemMasterStatus] = useState('Not loaded');
   const [loading, setLoading] = useState(true);
   const [loadingCustomer, setLoadingCustomer] = useState(false);
-  const [showTransactions, setShowTransactions] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState({});
   const [accessScope, setAccessScope] = useState(null);
 
@@ -96,7 +95,6 @@ export function useCustomerData({ setError, setMessage }) {
     setTransactions([]);
     setPeerTransactions([]);
     setLoadingCustomer(true);
-    setShowTransactions(false);
     setExpandedCategories({});
     setError('');
     setMessage('');
@@ -141,7 +139,6 @@ export function useCustomerData({ setError, setMessage }) {
     setSelectedCustomer(null);
     setTransactions([]);
     setPeerTransactions([]);
-    setShowTransactions(false);
     setExpandedCategories({});
     setError('');
     setMessage('');
@@ -165,8 +162,6 @@ export function useCustomerData({ setError, setMessage }) {
     itemMasterStatus,
     loading,
     loadingCustomer,
-    showTransactions,
-    setShowTransactions,
     expandedCategories,
     toggleCategory,
     openCustomer,

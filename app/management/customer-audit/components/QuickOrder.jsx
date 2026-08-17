@@ -85,7 +85,7 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
                               )}
                             </td>
                             <td className="auditQuickRate">
-                              {priceList[String(item.item_code).trim().toUpperCase()] ? `SAR ${Number(priceList[String(item.item_code).trim().toUpperCase()]).toFixed(2)}` : 'NOT FOUND'}
+                              {priceList[String(item.item_code).trim().toUpperCase()] ? Number(priceList[String(item.item_code).trim().toUpperCase()]).toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'NOT FOUND'}
                             </td>
                             <td>
                               <div className="auditQtyControl">

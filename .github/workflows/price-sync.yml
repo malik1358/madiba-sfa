@@ -9,36 +9,6 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch upstream price payload
-        run: |
-          SOURCE_URL='https://script.google.com/macros/s/AKfycbwmgoTXNLgIVM_HyVl3iwnfmhqmqjvJcIriCDtZAc0FDgvBbslYmmmC8-h2P2I0RH6f/exec'
-          status_code="$(curl -sS -L -o upstream-price.json -w "%{http_code}" "$SOURCE_URL")" || {
-            echo "ERROR: curl failed to fetch upstream price data (HTTP error or network failure)."
-            echo "Response body (first 500 chars):"
-            head -c 500 upstream-price.json 2>/dev/null || true
-            exit 1
-          }
-
-          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
-            echo "Upstream fetch failed with HTTP $status_code"
-            cat upstream-price.json
-            exit 1
-          fi
-
-          node -e '
-            const fs = require("fs");
-            const raw = fs.readFileSync("upstream-price.json", "utf8");
-            let payload;
-            try {
-              payload = JSON.parse(raw);
-            } catch (e) {
-              console.error("Upstream response is not valid JSON. Response body:");
-              console.error(raw.slice(0, 2000));
-              process.exit(1);
-            }
-            fs.writeFileSync("price-sync-body.json", JSON.stringify({ payload }));
-          '
-
       - name: Trigger price sync endpoint
         env:
           PRICE_SYNC_URL: ${{ secrets.PRICE_SYNC_URL }}
@@ -69,7 +39,7 @@ jobs:
             curl -sS -L --post301 --post302 --post303 -o response.json -w "%{http_code}" -X POST "$target_url" \
               -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
               -H "Content-Type: application/json" \
-              --data-binary @price-sync-body.json
+              --data '{}'
           }
 
           status_code="$(post_sync "$PRICE_SYNC_URL_EFFECTIVE")"

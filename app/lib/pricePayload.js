@@ -1,5 +1,9 @@
 import { PRICE_CACHE_KEY as DEFAULT_PRICE_CACHE_KEY } from "./priceApiConfig.js";
 
+const PRICE_CODE_ALIASES = {
+  A005425: ["A004555", "A000057"],
+};
+
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
@@ -36,6 +40,31 @@ function toNumber(value) {
     .trim();
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function applyPriceCodeAliases(priceMap) {
+  const next = { ...(priceMap || {}) };
+
+  Object.entries(PRICE_CODE_ALIASES).forEach(([targetCode, sourceCodes]) => {
+    const target = normalizeCode(targetCode);
+    if (!target) return;
+
+    const currentRate = toNumber(next[target]);
+    if (currentRate > 0) return;
+
+    for (const sourceCode of sourceCodes) {
+      const source = normalizeCode(sourceCode);
+      if (!source) continue;
+
+      const sourceRate = toNumber(next[source]);
+      if (sourceRate > 0) {
+        next[target] = sourceRate;
+        break;
+      }
+    }
+  });
+
+  return next;
 }
 
 function normalizeHeaderCell(value) {
@@ -300,7 +329,12 @@ export function parsePricePayload(payload) {
     }
 
     Object.entries(value).forEach(([key, entry]) => {
-      if (["priceMap", "prices", "data", "rows", "result", "items", "sheetData", "values"].includes(key)) {
+      if (["priceMap", "prices"].includes(key) && entry && typeof entry === "object" && !Array.isArray(entry)) {
+        Object.entries(entry).forEach(([code, rate]) => addRate(code, rate));
+        return;
+      }
+
+      if (["data", "rows", "result", "items", "sheetItems", "sheetData", "values"].includes(key)) {
         walk(entry);
         return;
       }
@@ -313,7 +347,7 @@ export function parsePricePayload(payload) {
 
   if (Array.isArray(payload)) {
     walk(payload);
-    return { priceMap, sheetItems };
+    return { priceMap: applyPriceCodeAliases(priceMap), sheetItems };
   }
 
   if (payload && typeof payload === "object") {
@@ -326,7 +360,7 @@ export function parsePricePayload(payload) {
     });
   }
 
-  return { priceMap, sheetItems };
+  return { priceMap: applyPriceCodeAliases(priceMap), sheetItems };
 }
 
 function readCached(cacheKey) {
@@ -355,8 +389,18 @@ function writeCached(cacheKey, data) {
   }
 }
 
+function clearCached(cacheKey) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(cacheKey);
+  } catch {
+    // Ignore storage removal failures.
+  }
+}
+
 export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KEY) {
   const cached = readCached(cacheKey);
+  clearCached(cacheKey);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -365,10 +409,13 @@ export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KE
         throw new Error(`Price API failed with ${response.status}`);
       }
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
+      if (!data) {
+        throw new Error("Price API returned invalid JSON");
+      }
       const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
         ? {
-            priceMap: data.priceMap,
+            priceMap: applyPriceCodeAliases(data.priceMap),
             sheetItems: Array.isArray(data.sheetItems) ? data.sheetItems : [],
           }
         : parsePricePayload(data || {});

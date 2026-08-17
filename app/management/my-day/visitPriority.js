@@ -52,8 +52,9 @@ export function splitVisitCustomersByOutstanding(rows) {
     if (above60Balance > 0) groups.above60.push(row);
     else if (under60Balance > 0) groups.under60.push(row);
     else if (row?.last_visit_date && !row?.last_invoice_date) groups.withoutInvoice.push(row);
+    else groups.noOutstanding.push(row);
     return groups;
-  }, { under60: [], above60: [], withoutInvoice: [] });
+  }, { under60: [], above60: [], withoutInvoice: [], noOutstanding: [] });
 }
 
 export function buildProspectScheduleRows(rows) {

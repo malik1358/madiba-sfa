@@ -181,6 +181,41 @@ async function loadRateFallback(admin, codes) {
   return rateByCode;
 }
 
+async function loadAllItemCodes(admin) {
+  const codes = new Set();
+  let from = 0;
+  const pageSize = 1000;
+
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await admin
+      .from("items_master")
+      .select("item_code")
+      .range(from, to);
+
+    if (error) {
+      throw new Error(`items_master code lookup failed: ${error.message}`);
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+      break;
+    }
+
+    data.forEach((row) => {
+      const code = normalizeCode(row?.item_code);
+      if (code) codes.add(code);
+    });
+
+    if (data.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  return Array.from(codes);
+}
+
 function buildEnrichedSheetItems(parsed, metadataByCode) {
   const byCode = new Map();
 
@@ -343,6 +378,10 @@ async function runSync(sourcePayload = null) {
     const currentRate = toPositiveNumber(parsed.priceMap[rawCode]);
     if (currentRate > 0) return;
 
+    // A zero from the price service means no current selling price is published.
+    // Do not silently substitute an old transaction rate for an orderable price.
+    if (Object.prototype.hasOwnProperty.call(parsed.priceMap, rawCode)) return;
+
     const fallbackRate = fallbackRatesByCode.get(code) || 0;
     if (fallbackRate > 0) {
       parsed.priceMap[rawCode] = fallbackRate;
@@ -354,6 +393,27 @@ async function runSync(sourcePayload = null) {
       parsed.priceMap[rawCode] = existingRate;
     }
   });
+
+  const parsedCodeSet = new Set(
+    Object.keys(parsed.priceMap || {}).map((value) => normalizeCode(value)).filter(Boolean)
+  );
+
+  const allItemCodes = await loadAllItemCodes(admin);
+  const missingCodes = allItemCodes.filter((code) => !parsedCodeSet.has(code));
+  const missingRateByCode = await loadRateFallback(admin, missingCodes);
+
+  missingRateByCode.forEach((rate, code) => {
+    if (!Number.isFinite(rate) || rate <= 0) return;
+    parsed.priceMap[code] = rate;
+  });
+
+  const missingCodesWithRate = Array.from(missingRateByCode.keys());
+  if (missingCodesWithRate.length > 0) {
+    const missingMetadata = await loadItemMetadata(admin, missingCodesWithRate);
+    missingMetadata.forEach((value, code) => {
+      metadataByCode.set(code, value);
+    });
+  }
 
   const enrichedSheetItems = buildEnrichedSheetItems(parsed, metadataByCode);
 
@@ -391,6 +451,9 @@ async function runSync(sourcePayload = null) {
     syncedAt: nowIso,
     priceCount,
     sheetItemCount: enrichedSheetItems.length,
+    sourceUrlUsed: PRICE_SOURCE_URL,
+    sourceGeneratedAt: normalizeText(payload?.generatedAt) || null,
+    sourceMode: sourcePayload ? "provided_payload" : "fetched_from_source",
   };
 }
 

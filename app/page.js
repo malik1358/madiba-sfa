@@ -337,6 +337,14 @@ export default function Home() {
                   : "KRA & KPI progress",
                 href: "/management/my-performance",
               },
+              {
+                icon: "💰",
+                title: ar ? "التحصيلات" : "My Collections",
+                subtitle: ar
+                  ? "متابعة التحصيل والزيارات"
+                  : "Collection queue and visit tracking",
+                href: "/management/my-collections",
+              },
             ]).map((item) => (
               <button
                 key={item.title}

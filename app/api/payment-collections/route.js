@@ -42,6 +42,7 @@ function loosePersonName(value) {
     .replace(/(.)\1+/g, "$1");
 }
 
+
 async function readOutstandingInvoicesFromTable(admin) {
   const { data: invoiceRows, error } = await admin
     .from("invoices")

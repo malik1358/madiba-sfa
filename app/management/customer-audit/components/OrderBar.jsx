@@ -11,7 +11,7 @@ export default function OrderBar({ orderItems, orderSummary, savingOrder, submit
         <span>Current Order</span>
         <strong>
           {orderSummary.itemCount} {orderSummary.itemCount === 1 ? 'item' : 'items'} • {qtyFormat(orderSummary.totalQuantity)} units<br />
-          <strong>SAR {grandTotal.toFixed(2)}</strong>
+          <strong>{grandTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}</strong>
         </strong>
       </div>
 

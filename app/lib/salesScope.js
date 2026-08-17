@@ -20,7 +20,7 @@ export async function fetchSalesScope() {
     },
   });
 
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.success) {
     throw new Error(data.error || "Unable to load access scope.");
   }

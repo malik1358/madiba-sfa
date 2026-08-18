@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
-  applyCustomerMasterFilters,
+  fetchAllFilteredCustomers,
   normalizeCustomerMasterGpsFilter,
   normalizeCustomerMasterSearch,
 } from "../../../lib/customerMasterQuery.js";
@@ -60,21 +60,13 @@ export async function GET(request) {
     const page = Math.max(1, Number(url.searchParams.get("page") || 1));
     const limit = Math.min(200, Math.max(10, Number(url.searchParams.get("limit") || 50)));
     const from = (page - 1) * limit;
-    const to = from + limit - 1;
 
-    let query = admin
-      .from("customers")
-      .select("customer_code,customer_name,current_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date", { count: "exact" })
-      .order("customer_name", { ascending: true });
-
-    query = applyCustomerMasterFilters(query, { search, gpsFilter });
-
-    const { data, error, count } = await query.range(from, to);
-    if (error) throw error;
+    const customers = await fetchAllFilteredCustomers(admin, { search, gpsFilter });
+    const pageRows = customers.slice(from, from + limit);
 
     return NextResponse.json({
       success: true,
-      customers: data || [],
+      customers: pageRows,
       filters: {
         search,
         gpsFilter,
@@ -82,8 +74,8 @@ export async function GET(request) {
       pagination: {
         page,
         limit,
-        total: count || 0,
-        totalPages: Math.max(1, Math.ceil((count || 0) / limit)),
+        total: customers.length,
+        totalPages: Math.max(1, Math.ceil(customers.length / limit)),
       },
     });
   } catch (error) {

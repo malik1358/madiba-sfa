@@ -47,3 +47,52 @@ export function normalizeCustomerNameKey(value) {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+export function firstWordLooksLikeCustomerCode(word) {
+  return /\d/.test(String(word || ""));
+}
+
+export function splitPartyByLeadingCode(partyRaw) {
+  const text = String(partyRaw || "").trim();
+  if (!text) {
+    return { customer_code: "", customer_name: "" };
+  }
+
+  const [firstWord, ...restWords] = text.split(/\s+/);
+  if (firstWordLooksLikeCustomerCode(firstWord)) {
+    return {
+      customer_code: normalizeCode(firstWord),
+      customer_name: restWords.join(" ").trim(),
+    };
+  }
+
+  return { customer_code: "", customer_name: text };
+}
+
+export function buildCustomerPartyRaw(row) {
+  const code = String(row?.customer_code || "").trim();
+  const name = String(row?.customer_name || "").trim();
+
+  if (!code && !name) return "";
+  if (!code) return name;
+  if (!name) return code;
+  if (code === name) return code;
+  if (name.startsWith(`${code} `) || name.startsWith(`${code}_`) || name.startsWith(`${code}-`)) {
+    return name;
+  }
+  if (code.includes(" ")) return code;
+  return `${code} ${name}`.trim();
+}
+
+export function resolveCustomerMasterExportFields(row) {
+  const partyRaw = buildCustomerPartyRaw(row);
+  const parsed = splitPartyByLeadingCode(partyRaw);
+  const customer_code = parsed.customer_code;
+  const customer_name = parsed.customer_name || (customer_code ? "" : partyRaw);
+
+  return {
+    partyName: customer_code ? `${customer_code} ${customer_name}`.trim() : (customer_name || partyRaw),
+    customer_code,
+    customer_name,
+  };
+}

@@ -9,6 +9,16 @@ import {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const COLLECTION_FILES_BUCKET = "payment-collections";
+const COLLECTION_FILE_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "application/pdf",
+];
+
+export const maxDuration = 60;
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -151,10 +161,14 @@ function storageExtension(file) {
   if (name.endsWith(".pdf")) return "pdf";
   if (name.endsWith(".png")) return "png";
   if (name.endsWith(".webp")) return "webp";
+  if (name.endsWith(".heic")) return "heic";
+  if (name.endsWith(".heif")) return "heif";
   const mime = String(file?.type || "").toLowerCase();
   if (mime === "application/pdf") return "pdf";
   if (mime === "image/png") return "png";
   if (mime === "image/webp") return "webp";
+  if (mime === "image/heic") return "heic";
+  if (mime === "image/heif") return "heif";
   return "jpg";
 }
 
@@ -165,27 +179,87 @@ function uploadContentType(file) {
   if (ext === "pdf") return "application/pdf";
   if (ext === "png") return "image/png";
   if (ext === "webp") return "image/webp";
+  if (ext === "heic") return "image/heic";
+  if (ext === "heif") return "image/heif";
   return "image/jpeg";
 }
 
 async function ensureCollectionFilesBucket(admin) {
-  const { data: bucket, error: bucketError } = await admin.storage.getBucket(COLLECTION_FILES_BUCKET);
-  if (!bucketError && bucket) return;
-
-  const { error: createError } = await admin.storage.createBucket(COLLECTION_FILES_BUCKET, {
+  const bucketConfig = {
     public: true,
     fileSizeLimit: 20 * 1024 * 1024,
-    allowedMimeTypes: [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "application/pdf",
-    ],
-  });
+    allowedMimeTypes: COLLECTION_FILE_MIME_TYPES,
+  };
 
-  if (createError && !String(createError.message || "").toLowerCase().includes("already exists")) {
-    throw createError;
+  const { data: bucket, error: bucketError } = await admin.storage.getBucket(COLLECTION_FILES_BUCKET);
+  if (bucketError && !String(bucketError.message || "").toLowerCase().includes("not found")) {
+    throw bucketError;
   }
+
+  if (!bucket) {
+    const { error: createError } = await admin.storage.createBucket(COLLECTION_FILES_BUCKET, bucketConfig);
+    if (createError && !String(createError.message || "").toLowerCase().includes("already exists")) {
+      throw createError;
+    }
+    return;
+  }
+
+  const { error: updateError } = await admin.storage.updateBucket(COLLECTION_FILES_BUCKET, bucketConfig);
+  if (updateError) throw updateError;
+}
+
+function formatRouteError(error) {
+  const message = String(
+    error?.message
+    || error?.details
+    || error?.error
+    || error?.hint
+    || "",
+  ).trim();
+  const lower = message.toLowerCase();
+
+  if (lower.includes("foreign key") || lower.includes("collection_visits_customer_code_fkey")) {
+    return "Customer record is missing in the master list. Ask admin to add this customer in Customer Master.";
+  }
+  if (lower.includes("mime type") || lower.includes("invalid file type") || lower.includes("not allowed")) {
+    return "This photo format is not supported. Retake the photo or choose JPG/PNG/PDF.";
+  }
+  if (lower.includes("payload too large") || lower.includes("entity too large") || lower.includes("too large")) {
+    return "The uploaded file is too large. Retake the photo or choose a smaller file.";
+  }
+  if (message) return message;
+  return "Unable to save collection visit";
+}
+
+async function ensureCollectionCustomerRecord(admin, customerCode, customerName) {
+  const code = canonicalCustomerCode(customerCode);
+  if (!code) throw new Error("Customer code is required");
+
+  const { data: existing, error: lookupError } = await admin
+    .from("customers")
+    .select("customer_code")
+    .eq("customer_code", code)
+    .maybeSingle();
+
+  if (lookupError) throw lookupError;
+  if (existing) return code;
+
+  const name = String(customerName || code).trim() || code;
+  const { error: insertError } = await admin
+    .from("customers")
+    .insert({
+      customer_code: code,
+      customer_name: name,
+      is_active: true,
+    });
+
+  if (insertError) {
+    const duplicate = String(insertError.message || "").toLowerCase().includes("duplicate");
+    if (duplicate) return code;
+    throw insertError;
+  }
+
+  return code;
 }
 
 function normalizeStorageError(error) {
@@ -193,7 +267,10 @@ function normalizeStorageError(error) {
   if (msg.includes("bucket not found")) {
     return new Error("File storage is not configured for payment collection uploads. Please contact your administrator.");
   }
-  return error instanceof Error ? error : new Error(String(error));
+  if (msg.includes("mime type") || msg.includes("invalid file type") || msg.includes("not allowed")) {
+    return new Error("This photo format is not supported. Retake the photo or choose JPG/PNG/PDF.");
+  }
+  return error instanceof Error ? error : new Error(formatRouteError(error));
 }
 
 async function getAuthUser(request) {
@@ -568,7 +645,9 @@ export async function POST(request) {
     const user = await getAuthUser(request);
     const formData = await request.formData();
 
-    const customerCode = normalizeCode(formData.get("customerCode") || "");
+    const customerCodeRaw = String(formData.get("customerCode") || "");
+    const customerName = String(formData.get("customerName") || "").trim();
+    const customerCode = canonicalCustomerCode(customerCodeRaw);
     const visitOutcome = String(formData.get("visitOutcome") || "").trim();
     const paymentStatus = String(formData.get("paymentStatus") || "").trim();
     const amountReceived = Number(formData.get("amountReceived") || 0);
@@ -607,6 +686,8 @@ export async function POST(request) {
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    await ensureCollectionCustomerRecord(admin, customerCode, customerName);
 
     const scope = await getSalesScope(admin, user.id);
 
@@ -719,7 +800,7 @@ export async function POST(request) {
       if (isMissingTableError(insertError)) {
         throw new Error("Collection tables are not initialized in this environment yet.");
       }
-      throw insertError;
+      throw new Error(formatRouteError(insertError));
     }
 
     // Update legal transfer if needed
@@ -751,7 +832,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("Error saving collection visit:", error);
     return Response.json(
-      { success: false, error: error.message || "Unable to save collection visit" },
+      { success: false, error: formatRouteError(error) },
       { status: 400 }
     );
   }

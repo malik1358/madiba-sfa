@@ -10,6 +10,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { captureGpsLocation, GPS_REQUIRED_ERROR } from "../../lib/geo";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
+import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
 
@@ -101,6 +102,18 @@ const TEXT = {
   msgStorageUnavailable: {
     en: "File storage is not configured for payment collection uploads. Please contact your administrator.",
     ar: "تخزين الملفات غير مُعد لرفع مستندات التحصيل. يرجى التواصل مع المسؤول.",
+  },
+  msgUploadTooLarge: {
+    en: "The uploaded file is too large. Retake the photo or choose a smaller file.",
+    ar: "الملف المرفوع كبير جداً. أعد التقاط الصورة أو اختر ملفاً أصغر.",
+  },
+  msgUnsupportedPhoto: {
+    en: "This photo format is not supported. Retake the photo or choose JPG/PNG/PDF.",
+    ar: "صيغة الصورة غير مدعومة. أعد التقاط الصورة أو اختر JPG/PNG/PDF.",
+  },
+  msgCustomerMissing: {
+    en: "Customer record is missing in the master list. Ask admin to add this customer in Customer Master.",
+    ar: "سجل العميل غير موجود في القائمة الرئيسية. اطلب من المسؤول إضافة العميل في Customer Master.",
   },
   msgVisitSaved: { en: "Visit saved successfully.", ar: "تم حفظ الزيارة بنجاح." },
   msgGpsRequired: { en: "GPS is required. Allow location access in the browser before saving.", ar: "GPS مطلوب. اسمح بالموقع في المتصفح قبل الحفظ." },
@@ -387,6 +400,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (text.toLowerCase().includes("bucket not found") || text.includes("File storage is not configured")) {
       return t("msgStorageUnavailable");
     }
+    if (text.includes("too large") || text.includes("Payload Too Large")) return t("msgUploadTooLarge");
+    if (text.includes("photo format is not supported") || text.includes("Unable to read this photo")) {
+      return t("msgUnsupportedPhoto");
+    }
+    if (text.includes("Customer record is missing")) return t("msgCustomerMissing");
     if (text.includes("Unable to update legal transfer status")) return t("msgLegalUpdateFailed");
     return text;
   };
@@ -649,8 +667,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("longitude", String(gps.longitude));
       formData.append("gpsAccuracyMeters", String(gps.accuracy));
 
-      if (form.paymentCopy) formData.append("paymentCopy", form.paymentCopy);
-      if (form.receiptCopy) formData.append("receiptCopy", form.receiptCopy);
+      if (form.paymentCopy) {
+        formData.append("paymentCopy", await prepareUploadFile(form.paymentCopy));
+      }
+      if (form.receiptCopy) {
+        formData.append("receiptCopy", await prepareUploadFile(form.receiptCopy));
+      }
 
       const response = await fetch("/api/payment-collections", {
         method: "POST",
@@ -662,7 +684,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to save collection visit.");
+        const fallback = response.status === 413
+          ? t("msgUploadTooLarge")
+          : t("msgSaveFailed");
+        throw new Error(payload.error || fallback);
       }
 
       const popupMessage = payload?.whatsapp?.error

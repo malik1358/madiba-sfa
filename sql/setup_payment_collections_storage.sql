@@ -7,7 +7,7 @@ VALUES (
   'payment-collections',
   true,
   20971520,
-  ARRAY['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+  ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf']
 )
 ON CONFLICT (id) DO NOTHING;
 

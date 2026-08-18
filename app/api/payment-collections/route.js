@@ -8,6 +8,7 @@ import {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const COLLECTION_FILES_BUCKET = "payment-collections";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -143,6 +144,56 @@ function isMissingTableError(error) {
 function isMissingColumnError(error) {
   const message = String(error?.message || error?.details || "").toLowerCase();
   return error?.code === "42703" || (message.includes("column") && message.includes("does not exist"));
+}
+
+function storageExtension(file) {
+  const name = String(file?.name || "").toLowerCase();
+  if (name.endsWith(".pdf")) return "pdf";
+  if (name.endsWith(".png")) return "png";
+  if (name.endsWith(".webp")) return "webp";
+  const mime = String(file?.type || "").toLowerCase();
+  if (mime === "application/pdf") return "pdf";
+  if (mime === "image/png") return "png";
+  if (mime === "image/webp") return "webp";
+  return "jpg";
+}
+
+function uploadContentType(file) {
+  const mime = String(file?.type || "").trim();
+  if (mime) return mime;
+  const ext = storageExtension(file);
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  return "image/jpeg";
+}
+
+async function ensureCollectionFilesBucket(admin) {
+  const { data: bucket, error: bucketError } = await admin.storage.getBucket(COLLECTION_FILES_BUCKET);
+  if (!bucketError && bucket) return;
+
+  const { error: createError } = await admin.storage.createBucket(COLLECTION_FILES_BUCKET, {
+    public: true,
+    fileSizeLimit: 20 * 1024 * 1024,
+    allowedMimeTypes: [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/pdf",
+    ],
+  });
+
+  if (createError && !String(createError.message || "").toLowerCase().includes("already exists")) {
+    throw createError;
+  }
+}
+
+function normalizeStorageError(error) {
+  const msg = String(error?.message || error || "").toLowerCase();
+  if (msg.includes("bucket not found")) {
+    return new Error("File storage is not configured for payment collection uploads. Please contact your administrator.");
+  }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 async function getAuthUser(request) {
@@ -573,25 +624,40 @@ export async function POST(request) {
     let receiptCopyUrl = null;
 
     const paymentCopyFile = formData.get("paymentCopy");
-    if (paymentCopyFile && paymentCopyFile.size > 0) {
-      const paymentCopyPath = `payment-copies/${customerCode}-${Date.now()}-payment.jpg`;
-      const { data: paymentData, error: paymentError } = await admin.storage
-        .from("payment-collections")
-        .upload(paymentCopyPath, paymentCopyFile, { upsert: true });
+    const receiptCopyFile = formData.get("receiptCopy");
+    const hasFileUpload = (paymentCopyFile && paymentCopyFile.size > 0)
+      || (receiptCopyFile && receiptCopyFile.size > 0);
 
-      if (paymentError) throw paymentError;
-      paymentCopyUrl = `${supabaseUrl}/storage/v1/object/public/payment-collections/${paymentData.path}`;
+    if (hasFileUpload) {
+      await ensureCollectionFilesBucket(admin);
     }
 
-    const receiptCopyFile = formData.get("receiptCopy");
-    if (receiptCopyFile && receiptCopyFile.size > 0) {
-      const receiptCopyPath = `receipt-copies/${customerCode}-${Date.now()}-receipt.jpg`;
-      const { data: receiptData, error: receiptError } = await admin.storage
-        .from("payment-collections")
-        .upload(receiptCopyPath, receiptCopyFile, { upsert: true });
+    if (paymentCopyFile && paymentCopyFile.size > 0) {
+      const ext = storageExtension(paymentCopyFile);
+      const paymentCopyPath = `payment-copies/${customerCode}-${Date.now()}-payment.${ext}`;
+      const { data: paymentData, error: paymentError } = await admin.storage
+        .from(COLLECTION_FILES_BUCKET)
+        .upload(paymentCopyPath, paymentCopyFile, {
+          upsert: true,
+          contentType: uploadContentType(paymentCopyFile),
+        });
 
-      if (receiptError) throw receiptError;
-      receiptCopyUrl = `${supabaseUrl}/storage/v1/object/public/payment-collections/${receiptData.path}`;
+      if (paymentError) throw normalizeStorageError(paymentError);
+      paymentCopyUrl = `${supabaseUrl}/storage/v1/object/public/${COLLECTION_FILES_BUCKET}/${paymentData.path}`;
+    }
+
+    if (receiptCopyFile && receiptCopyFile.size > 0) {
+      const ext = storageExtension(receiptCopyFile);
+      const receiptCopyPath = `receipt-copies/${customerCode}-${Date.now()}-receipt.${ext}`;
+      const { data: receiptData, error: receiptError } = await admin.storage
+        .from(COLLECTION_FILES_BUCKET)
+        .upload(receiptCopyPath, receiptCopyFile, {
+          upsert: true,
+          contentType: uploadContentType(receiptCopyFile),
+        });
+
+      if (receiptError) throw normalizeStorageError(receiptError);
+      receiptCopyUrl = `${supabaseUrl}/storage/v1/object/public/${COLLECTION_FILES_BUCKET}/${receiptData.path}`;
     }
 
     // Insert new collection visit

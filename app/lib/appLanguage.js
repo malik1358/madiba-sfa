@@ -21,6 +21,7 @@ export function useAppLanguage() {
     window.localStorage.setItem(STORAGE_KEY, language);
     document.documentElement.lang = language;
     document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
+    document.body.dir = language === "ar" ? "rtl" : "ltr";
   }, [language]);
 
   const setLanguage = useCallback(async (nextLanguage) => {

@@ -98,6 +98,10 @@ const TEXT = {
   msgReceiptRequired: { en: "Receipt copy is compulsory when funds are received.", ar: "صورة الإيصال إلزامية عند استلام مبلغ." },
   msgNextVisitRequired: { en: "Next visit date is required when full overdue is not received.", ar: "تاريخ الزيارة القادمة مطلوب عند عدم استلام كامل المبلغ المستحق." },
   msgSaveFailed: { en: "Unable to save collection visit.", ar: "تعذر حفظ زيارة التحصيل." },
+  msgStorageUnavailable: {
+    en: "File storage is not configured for payment collection uploads. Please contact your administrator.",
+    ar: "تخزين الملفات غير مُعد لرفع مستندات التحصيل. يرجى التواصل مع المسؤول.",
+  },
   msgVisitSaved: { en: "Visit saved successfully.", ar: "تم حفظ الزيارة بنجاح." },
   msgGpsRequired: { en: "GPS is required. Allow location access in the browser before saving.", ar: "GPS مطلوب. اسمح بالموقع في المتصفح قبل الحفظ." },
   msgWhatsappNotSent: { en: "WhatsApp not sent", ar: "لم يتم إرسال واتساب" },
@@ -111,7 +115,109 @@ const TEXT = {
   allSalesmen: { en: "All salesmen", ar: "كل المندوبين" },
   clearSalesmanFilter: { en: "Clear selection", ar: "مسح التحديد" },
   selectAllSalesmen: { en: "Select all", ar: "تحديد الكل" },
+  probHigh: { en: "High", ar: "مرتفع" },
+  probMedium: { en: "Medium", ar: "متوسط" },
+  probLow: { en: "Low", ar: "منخفض" },
+  probNA: { en: "N/A", ar: "غير متاح" },
+  summaryCustomer: { en: "Customer", ar: "العميل" },
+  summaryCode: { en: "Code", ar: "الكود" },
+  summarySalesman: { en: "Salesman", ar: "المندوب" },
+  summaryOutcome: { en: "Outcome", ar: "النتيجة" },
+  summaryAmountReceived: { en: "Amount received", ar: "المبلغ المستلم" },
+  summaryReceiptMode: { en: "Receipt mode", ar: "طريقة الاستلام" },
+  summaryNextVisit: { en: "Next visit", ar: "الزيارة القادمة" },
+  summaryOutstanding: { en: "Outstanding", ar: "المديونية" },
+  summaryNotSpecified: { en: "not specified", ar: "غير محدد" },
+  viewPaymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
+  viewReceiptCopy: { en: "Receipt Copy", ar: "صورة الإيصال" },
+  customerFilterPlaceholder: { en: "Filter customer name/code", ar: "تصفية اسم/كود العميل" },
+  invDate: { en: "Date", ar: "التاريخ" },
+  invRef: { en: "Ref", ar: "المرجع" },
+  invPending: { en: "Pending", ar: "المعلق" },
+  invDue: { en: "Due", ar: "الاستحقاق" },
+  invOverdue: { en: "Overdue", ar: "التأخير" },
+  defaultLegalNote: { en: "Transferred during visit report", ar: "تم التحويل أثناء تقرير الزيارة" },
 };
+
+const OUTCOME_KEYS = {
+  FUNDS_RECEIVED: "fundsReceived",
+  ASKED_COME_LATER: "askedComeLater",
+  RESPONSIBLE_NOT_AVAILABLE: "responsibleAbsent",
+  WRONG_CREDIT_DAYS: "wrongCreditDays",
+  NO_DUE_AS_PER_CUSTOMER: "noDueAsPerCustomer",
+  TRANSFER_TO_LEGAL: "outcomeTransferLegal",
+  PAID: "paid",
+  PARTIAL: "partial",
+  NOT_PAID: "notPaid",
+  PROMISED: "promised",
+};
+
+const RECEIPT_MODE_KEYS = {
+  CASH: "cash",
+  CHEQUE: "cheque",
+  BANK_TRANSFER: "bankTransfer",
+  ATM_MACHINE: "atmMachine",
+};
+
+function formatOutcomeLabel(outcome, t) {
+  const key = OUTCOME_KEYS[String(outcome || "").trim().toUpperCase()];
+  return key ? t(key) : String(outcome || "-");
+}
+
+function formatReceiptModeLabel(mode, t) {
+  const key = RECEIPT_MODE_KEYS[String(mode || "").trim().toUpperCase()];
+  return key ? t(key) : String(mode || "");
+}
+
+function formatProbabilityLabel(label, t) {
+  const normalized = String(label || "").trim().toLowerCase();
+  if (normalized === "high") return t("probHigh");
+  if (normalized === "medium") return t("probMedium");
+  if (normalized === "low") return t("probLow");
+  if (!normalized || normalized === "n/a") return t("probNA");
+  return String(label || t("probNA"));
+}
+
+function buildVisitSummary(row, form, translatedRemark, t) {
+  const amount = Number(form.amountReceived || 0);
+  const nextVisit = formatDateOnly(form.nextVisitAt);
+  const outcomeText = formatOutcomeLabel(form.visitOutcome, t);
+  const arabicRemark = String(form.remarkArabic || "").trim();
+  const englishRemark = String(translatedRemark || form.remarkEnglish || "").trim();
+  const lines = [
+    `${t("summaryCustomer")}: ${row.customer_name || row.customer_code}`,
+    `${t("summaryCode")}: ${row.customer_code || "-"}`,
+    `${t("summarySalesman")}: ${row.salesman_name || row.salesman_code || "-"}`,
+    `${t("summaryOutcome")}: ${outcomeText || t("summaryNotSpecified")}`,
+  ];
+
+  if (amount > 0) lines.push(`${t("summaryAmountReceived")}: ${formatMoney(amount)}.`);
+  if (form.receiptMode) lines.push(`${t("summaryReceiptMode")}: ${formatReceiptModeLabel(form.receiptMode, t)}.`);
+  if (arabicRemark) lines.push(`${t("remarkArabic")}: ${arabicRemark}.`);
+  if (englishRemark) lines.push(`${t("remarkEnglish")}: ${englishRemark}.`);
+  if (nextVisit) lines.push(`${t("summaryNextVisit")}: ${nextVisit}.`);
+  lines.push(`${t("summaryOutstanding")}:`);
+  lines.push(`${t("bucket30")}: ${formatMoney(row.outstanding_0_30)}`);
+  lines.push(`${t("bucket31to60")}: ${formatMoney(row.outstanding_30_60)}`);
+  lines.push(`${t("bucket61to90")}: ${formatMoney(row.outstanding_61_90)}`);
+  lines.push(`${t("bucket91to120")}: ${formatMoney(row.outstanding_91_120)}`);
+  lines.push(`${t("bucket120plus")}: ${formatMoney(row.outstanding_above_120)}`);
+  return lines.join("\n");
+}
+
+function formatLastUpdateText(row, t) {
+  const savedAt = row?.latest_collection?.saved_at ? new Date(row.latest_collection.saved_at).toLocaleString("en-GB") : "-";
+  const amount = Number(row?.latest_collection?.amount_received || 0);
+  const amountText = amount > 0 ? formatMoney(amount) : "0";
+  return `${savedAt} | ${t("amount")}: ${amountText}`;
+}
+
+function formatVisitHistoryItem(visit, t) {
+  const savedAt = visit?.saved_at ? formatDateOnly(visit.saved_at) : "-";
+  const outcome = formatOutcomeLabel(visit?.visit_outcome || visit?.payment_status, t);
+  const amount = Number(visit?.amount_received || 0);
+  return `${savedAt} | ${outcome} | ${t("amount")}: ${formatMoney(amount)}`;
+}
 
 function normalizeSalesmanKey(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -188,55 +294,6 @@ function determinePaymentStatus(visitOutcome, amountReceived, totalDueAmount) {
   }
   if (visitOutcome === "ASKED_COME_LATER") return "PROMISED";
   return "NOT_PAID";
-}
-
-function outcomeReasonText(outcome) {
-  if (outcome === "RESPONSIBLE_NOT_AVAILABLE") return "Responsible not available";
-  if (outcome === "WRONG_CREDIT_DAYS") return "Wrong credit days";
-  if (outcome === "NO_DUE_AS_PER_CUSTOMER") return "No due according to customer";
-  if (outcome === "TRANSFER_TO_LEGAL") return "Transferred to legal";
-  return "";
-}
-
-function buildVisitSummary(row, form, translatedRemark) {
-  const amount = Number(form.amountReceived || 0);
-  const nextVisit = formatDateOnly(form.nextVisitAt);
-  const outcomeText = String(form.visitOutcome || "").replace(/_/g, " ").toLowerCase();
-  const arabicRemark = String(form.remarkArabic || "").trim();
-  const englishRemark = String(translatedRemark || form.remarkEnglish || "").trim();
-  const lines = [
-    `Customer: ${row.customer_name || row.customer_code}`,
-    `Code: ${row.customer_code || "-"}`,
-    `Salesman: ${row.salesman_name || row.salesman_code || "-"}`,
-    `Outcome: ${outcomeText || "not specified"}`,
-  ];
-
-  if (amount > 0) lines.push(`Amount received: ${formatMoney(amount)}.`);
-  if (form.receiptMode) lines.push(`Receipt mode: ${form.receiptMode}.`);
-  if (arabicRemark) lines.push(`Remark (Arabic): ${arabicRemark}.`);
-  if (englishRemark) lines.push(`Remark (English): ${englishRemark}.`);
-  if (nextVisit) lines.push(`Next visit: ${nextVisit}.`);
-  lines.push("Outstanding:");
-  lines.push(`0-30: ${formatMoney(row.outstanding_0_30)}`);
-  lines.push(`31-60: ${formatMoney(row.outstanding_30_60)}`);
-  lines.push(`61-90: ${formatMoney(row.outstanding_61_90)}`);
-  lines.push(`91-120: ${formatMoney(row.outstanding_91_120)}`);
-  lines.push(`>120: ${formatMoney(row.outstanding_above_120)}`);
-  return lines.join("\n");
-}
-
-function formatLastUpdateText(row) {
-  const savedAt = row?.latest_collection?.saved_at ? new Date(row.latest_collection.saved_at).toLocaleString("en-GB") : "-";
-  const amount = Number(row?.latest_collection?.amount_received || 0);
-  const amountText = amount > 0 ? formatMoney(amount) : "0";
-  return `${savedAt} | Amount: ${amountText}`;
-}
-
-function formatVisitHistoryItem(visit) {
-  const savedAt = visit?.saved_at ? formatDateOnly(visit.saved_at) : "-";
-  const outcome = visit?.visit_outcome || visit?.payment_status || "-";
-  const amount = Number(visit?.amount_received || 0);
-  return `${savedAt} | ${outcome} | Amount: ${formatMoney(amount)}`;
 }
 
 async function copyTextToClipboard(text) {
@@ -327,6 +384,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (text.includes("Next visit date is required") || text.includes("Next visit is required")) return t("msgNextVisitRequired");
     if (text.includes("GPS is required") || text === GPS_REQUIRED_ERROR) return t("msgGpsRequired");
     if (text.includes("Unable to save collection visit")) return t("msgSaveFailed");
+    if (text.toLowerCase().includes("bucket not found") || text.includes("File storage is not configured")) {
+      return t("msgStorageUnavailable");
+    }
     if (text.includes("Unable to update legal transfer status")) return t("msgLegalUpdateFailed");
     return text;
   };
@@ -360,6 +420,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
       setSummaryForWhatsApp("");
     }
   }, [activeRow]);
+
+  useEffect(() => {
+    setSummaryForWhatsApp("");
+    setCopyStatus("");
+  }, [language]);
 
   async function loadQueue(preferredKey = "") {
     const supabase = getSupabaseClient();
@@ -549,17 +614,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
         throw new Error(t("msgNextVisitRequired"));
       }
 
-      const outcomeReason = selectedOutcome === "RESPONSIBLE_NOT_AVAILABLE"
-        ? "Responsible not available"
-        : selectedOutcome === "WRONG_CREDIT_DAYS"
-          ? "Wrong credit days"
-          : selectedOutcome === "NO_DUE_AS_PER_CUSTOMER"
-            ? "No due according to customer"
-        : selectedOutcome === "TRANSFER_TO_LEGAL"
-          ? "Transferred to legal"
-          : "";
+      const outcomeReason = ["RESPONSIBLE_NOT_AVAILABLE", "WRONG_CREDIT_DAYS", "NO_DUE_AS_PER_CUSTOMER", "TRANSFER_TO_LEGAL"].includes(selectedOutcome)
+        ? formatOutcomeLabel(selectedOutcome, t)
+        : "";
       const effectiveEnglishRemark = form.remarkEnglish || (form.remarkArabic ? form.remarkArabic : "");
-      const summaryText = buildVisitSummary(row, { ...form, visitOutcome: selectedOutcome }, effectiveEnglishRemark);
+      const summaryText = buildVisitSummary(row, { ...form, visitOutcome: selectedOutcome }, effectiveEnglishRemark, t);
 
       const formData = new FormData();
       formData.append("customerCode", row.customer_code);
@@ -575,7 +634,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("summaryText", summaryText);
       formData.append("sendWhatsapp", "1");
       formData.append("whatsappMessage", summaryText);
-      formData.append("legalNote", form.legalNote || "Transferred during visit report");
+      formData.append("legalNote", form.legalNote || t("defaultLegalNote"));
 
       const gps = await captureGpsLocation();
       await maybePromptCustomerLocationUpdate({
@@ -669,7 +728,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }
 
   async function copySummaryText() {
-    const summaryText = String(summaryForWhatsApp || (activeRow ? buildVisitSummary(activeRow, form, form.remarkEnglish) : "") || "").trim();
+    const summaryText = String(summaryForWhatsApp || (activeRow ? buildVisitSummary(activeRow, form, form.remarkEnglish, t) : "") || "").trim();
     if (!summaryText) return;
     try {
       const copied = await copyTextToClipboard(summaryText);
@@ -791,7 +850,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                 className="moduleInput"
                 value={customerFilter}
                 onChange={(event) => setCustomerFilter(event.target.value)}
-                placeholder={language === "ar" ? t("customerFilter") : "Filter customer name/code"}
+                placeholder={t("customerFilterPlaceholder")}
               />
               <div>
                 <div className="moduleCollectorCheckboxList" role="group" aria-label={t("salesmanFilter")}>
@@ -892,13 +951,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
                           <td data-label={t("invoices")}>{isNotDue ? row.not_due_invoice_count || 0 : row.due_invoice_count || 0}</td>
                           <td data-label={t("probability")}>
                             {isNotDue ? (
-                              <span className="moduleHint">N/A</span>
+                              <span className="moduleHint">{t("probNA")}</span>
                             ) : (
-                              <span className={`moduleCollectorProbability moduleCollectorProbability${String(row.probability_label || "").toUpperCase()}`}>{row.probability_label}</span>
+                              <span className={`moduleCollectorProbability moduleCollectorProbability${String(row.probability_label || "").toUpperCase()}`}>{formatProbabilityLabel(row.probability_label, t)}</span>
                             )}
                           </td>
-                          <td data-label={t("lastOutcome")}>{row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status || "-"}</td>
-                          <td data-label={t("lastUpdate")}>{formatLastUpdateText(row)}</td>
+                          <td data-label={t("lastOutcome")}>{formatOutcomeLabel(row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status, t)}</td>
+                          <td data-label={t("lastUpdate")}>{formatLastUpdateText(row, t)}</td>
                           <td data-label={t("actions")} className="moduleCollectorCellActions">
                             <div className="moduleInlineStack moduleActionStack">
                               <button
@@ -959,11 +1018,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                 <table className="moduleTable moduleCollectorInvoiceTable">
                                   <thead>
                                     <tr>
-                                      <th>Date</th>
-                                      <th>Ref</th>
-                                      <th>Pending</th>
-                                      <th>Due</th>
-                                      <th>Overdue</th>
+                                      <th>{t("invDate")}</th>
+                                      <th>{t("invRef")}</th>
+                                      <th>{t("invPending")}</th>
+                                      <th>{t("invDue")}</th>
+                                      <th>{t("invOverdue")}</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -972,11 +1031,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                         key={`${key}-${invoice.ref_no || invoice.invoice_date || index}-${index}`}
                                         className={Number(invoice.overdue_days || 0) > 0 ? "moduleCollectorInvoiceOverdue" : (isNotDue ? "moduleCollectorInvoiceNotDue" : "")}
                                       >
-                                        <td data-label="Date">{invoice.invoice_date || "-"}</td>
-                                        <td data-label="Ref">{invoice.ref_no || "-"}</td>
-                                        <td data-label="Pending">{formatMoney(invoice.pending_amount)}</td>
-                                        <td data-label="Due">{invoice.due_date || "-"}</td>
-                                        <td data-label="Overdue">{invoice.overdue_days || 0}</td>
+                                        <td data-label={t("invDate")}>{invoice.invoice_date || "-"}</td>
+                                        <td data-label={t("invRef")}>{invoice.ref_no || "-"}</td>
+                                        <td data-label={t("invPending")}>{formatMoney(invoice.pending_amount)}</td>
+                                        <td data-label={t("invDue")}>{invoice.due_date || "-"}</td>
+                                        <td data-label={t("invOverdue")}>{invoice.overdue_days || 0}</td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -1116,7 +1175,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
                                 <label className="moduleFieldFull" style={{ marginTop: "12px", display: "block" }}>
                                   {t("summary")}
-                                  <textarea className="moduleTextArea" rows={7} value={summaryForWhatsApp || buildVisitSummary(row, form, form.remarkEnglish)} readOnly />
+                                  <textarea className="moduleTextArea" rows={7} value={summaryForWhatsApp || buildVisitSummary(row, form, form.remarkEnglish, t)} readOnly />
                                 </label>
                                 <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
                                   <button type="button" className="moduleInlineButton moduleActionButton" onClick={copySummaryText}>{t("copySummary")}</button>
@@ -1131,17 +1190,17 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     <strong>{t("lastThreeVisits")}</strong>
                                     {row.collection_history.map((visit, index) => (
                                       <div key={`${row.customer_code || key}-visit-${visit.saved_at || index}`} style={{ marginTop: index === 0 ? "8px" : "4px" }}>
-                                        {formatVisitHistoryItem(visit)}
+                                        {formatVisitHistoryItem(visit, t)}
                                       </div>
                                     ))}
-                                    {row.latest_collection?.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">Payment Copy</a></div> : null}
-                                    {row.latest_collection?.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">Receipt Copy</a></div> : null}
+                                    {row.latest_collection?.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
+                                    {row.latest_collection?.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
                                   </div>
                                 ) : row.latest_collection ? (
                                   <div className="moduleHint">
-                                    {formatVisitHistoryItem(row.latest_collection)}
-                                    {row.latest_collection.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">Payment Copy</a></div> : null}
-                                    {row.latest_collection.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">Receipt Copy</a></div> : null}
+                                    {formatVisitHistoryItem(row.latest_collection, t)}
+                                    {row.latest_collection.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
+                                    {row.latest_collection.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
                                   </div>
                                 ) : <div className="moduleHint">{t("noLatestVisit")}</div>}
                               </div>

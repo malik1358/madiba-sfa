@@ -12,6 +12,7 @@ import {
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
 } from "../../lib/geo.js";
+import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -272,7 +273,7 @@ export async function GET(request) {
 
     const user = await getAuthUser(request);
     const url = new URL(request.url);
-    const date = parseReportDate(url.searchParams.get("date") || new Date().toISOString().slice(0, 10));
+    const date = parseReportDate(url.searchParams.get("date") || getKsaDateString());
     const userId = String(url.searchParams.get("userId") || "").trim();
 
     const admin = createClient(supabaseUrl, serviceKey, {
@@ -288,8 +289,7 @@ export async function GET(request) {
       throw new Error("You do not have access to other users' visit reports.");
     }
 
-    const startIso = `${date}T00:00:00.000Z`;
-    const endIso = `${date}T23:59:59.999Z`;
+    const { startIso, endIso } = ksaDayBounds(date);
 
     const [collectionEntries, activityResult, allCollectionEntries, allActivityResult] = await Promise.all([
       loadCollectionVisitEntries(admin, startIso, endIso, userIdFilter || null),

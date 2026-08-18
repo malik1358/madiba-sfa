@@ -3903,7 +3903,87 @@ table.auditMatrix td.auditTrendSame {
 }
 
 .moduleUserActivityTable {
-  min-width: 1180px;
+  min-width: 1320px;
+}
+
+.moduleUserActivityTable tr.moduleUserActivityRow--red td {
+  background: #fde8e8;
+}
+
+.moduleUserActivityTable tr.moduleUserActivityRow--orange td {
+  background: #fff3e0;
+}
+
+.moduleUserActivityTable tr.moduleUserActivityRow--green td {
+  background: #e8f5e9;
+}
+
+.moduleUserActivityUserLink {
+  display: inline-block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #0d4f6c;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.moduleUserActivityUserLink:hover,
+.moduleUserActivityUserLink:focus-visible {
+  color: #083547;
+}
+
+.moduleUserActivityLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #d5e1e4;
+  border-radius: 8px;
+  background: #f8fbfc;
+  font-size: 0.92rem;
+}
+
+.moduleUserActivityLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.moduleUserActivityLegendItem::before {
+  content: "";
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.moduleUserActivityLegendItem--red::before {
+  background: #fde8e8;
+}
+
+.moduleUserActivityLegendItem--orange::before {
+  background: #fff3e0;
+}
+
+.moduleUserActivityLegendItem--green::before {
+  background: #e8f5e9;
+}
+
+.moduleUserActivityMetric--red strong {
+  color: #b42318;
+}
+
+.moduleUserActivityMetric--orange strong {
+  color: #b54708;
+}
+
+.moduleUserActivityMetric--green strong {
+  color: #067647;
 }
 
 .moduleCustomerMasterTable {

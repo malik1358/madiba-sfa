@@ -99,6 +99,11 @@ export function clearAuthSessionCache() {
   sharedSessionPromise = null;
 }
 
+export function startReportSafetyTimer(onTimeout, timeoutMs = 45000) {
+  const timer = setTimeout(onTimeout, timeoutMs);
+  return () => clearTimeout(timer);
+}
+
 export async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 30000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

@@ -8,8 +8,9 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { buildGoogleMapsPointUrl } from "../../lib/geo";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
+import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
+import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
-import { fetchJsonWithTimeout, waitForInitialSession } from "../../lib/authSession";
 
 const TEXT = {
   title: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومي" },
@@ -63,9 +64,26 @@ export default function DailyVisitReportPage() {
   const supabaseClient = getSupabaseClient();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reportDate, setReportDate] = useState(() => getKsaDateString());
   const [userId, setUserId] = useState("");
   const [report, setReport] = useState(null);
+  const [urlParamsApplied, setUrlParamsApplied] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const dateParam = params.get("date");
+    const userParam = params.get("userId");
+
+    if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      setReportDate(dateParam);
+    }
+    if (userParam) {
+      setUserId(userParam);
+    }
+    setUrlParamsApplied(true);
+  }, []);
 
   const userOptions = useMemo(
     () => (Array.isArray(report?.availableUsers) ? report.availableUsers : []),
@@ -73,17 +91,20 @@ export default function DailyVisitReportPage() {
   );
 
   useEffect(() => {
+    if (!urlParamsApplied) return undefined;
+
     let cancelled = false;
 
-    const safetyTimer = window.setTimeout(() => {
+    const stopSafetyTimer = startReportSafetyTimer(() => {
       if (cancelled) return;
       setLoading(false);
       setError((current) => current || "Report load timed out. Please login and refresh the page.");
-    }, 12000);
+    });
 
     async function loadReport() {
       const supabase = getSupabaseClient();
       if (!supabase) {
+        stopSafetyTimer();
         setLoading(false);
         return;
       }
@@ -92,7 +113,7 @@ export default function DailyVisitReportPage() {
       setError("");
 
       try {
-        const session = await waitForInitialSession(supabase);
+        const session = await resolveAuthSession(supabase, 12000);
         if (cancelled) return;
 
         if (!session?.access_token) {
@@ -109,6 +130,7 @@ export default function DailyVisitReportPage() {
               Authorization: `Bearer ${session.access_token}`,
             },
           },
+          45000,
         );
 
         if (cancelled) return;
@@ -128,6 +150,7 @@ export default function DailyVisitReportPage() {
         }
         setReport(null);
       } finally {
+        stopSafetyTimer();
         if (!cancelled) setLoading(false);
       }
     }
@@ -136,9 +159,9 @@ export default function DailyVisitReportPage() {
 
     return () => {
       cancelled = true;
-      window.clearTimeout(safetyTimer);
+      stopSafetyTimer();
     };
-  }, [reportDate, userId]);
+  }, [reportDate, userId, urlParamsApplied]);
 
   if (!supabaseClient) {
     return (

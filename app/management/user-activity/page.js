@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
-import { fetchJsonWithTimeout, waitForInitialSession } from "../../lib/authSession";
+import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
+import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 
 const TEXT = {
@@ -43,6 +45,17 @@ const TEXT = {
   colProspects: { en: "Prospects", ar: "العملاء المحتملون" },
   colDistance: { en: "Distance (km)", ar: "المسافة (كم)" },
   colGpsPings: { en: "GPS pings", ar: "نبضات GPS" },
+  colLunchOut: { en: "Lunch out", ar: "خروج الغداء" },
+  colLunchIn: { en: "Lunch in", ar: "عودة الغداء" },
+  legendTitle: { en: "Status (today, working hours)", ar: "الحالة (اليوم، ساعات العمل)" },
+  legendRed: { en: "Red — not logged in today", ar: "أحمر — لم يسجل الدخول اليوم" },
+  legendOrange: { en: "Orange — no transaction in last 30 min", ar: "برتقالي — لا معاملات خلال آخر 30 دقيقة" },
+  legendGreen: { en: "Green — transaction in last 30 min", ar: "أخضر — معاملة خلال آخر 30 دقيقة" },
+  autoClosed: { en: "Auto-closed", ar: "إغلاق تلقائي" },
+  openVisitReport: { en: "Open daily visit report", ar: "فتح تقرير الزيارات اليومي" },
+  notLoggedIn: { en: "Not logged in", ar: "لم يسجل الدخول" },
+  idleNow: { en: "Idle now", ar: "خامل الآن" },
+  activeNow: { en: "Active now", ar: "نشط الآن" },
 };
 
 function formatNumber(value, digits = 2) {
@@ -61,13 +74,21 @@ function formatDateTime(value) {
   });
 }
 
+function activityRowClass(status) {
+  if (status === "not_logged_in") return "moduleUserActivityRow--red";
+  if (status === "idle") return "moduleUserActivityRow--orange";
+  if (status === "active") return "moduleUserActivityRow--green";
+  return "";
+}
+
 export default function UserActivityPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
+  const router = useRouter();
   const supabaseClient = getSupabaseClient();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reportDate, setReportDate] = useState(() => getKsaDateString());
   const [userId, setUserId] = useState("");
   const [report, setReport] = useState(null);
 
@@ -76,18 +97,24 @@ export default function UserActivityPage() {
     [report],
   );
 
+  function openUserVisitReport(row) {
+    const params = new URLSearchParams({ date: reportDate, userId: row.userId });
+    router.push(`/management/daily-visit-report?${params.toString()}`);
+  }
+
   useEffect(() => {
     let cancelled = false;
 
-    const safetyTimer = window.setTimeout(() => {
+    const stopSafetyTimer = startReportSafetyTimer(() => {
       if (cancelled) return;
       setLoading(false);
       setError((current) => current || "Report load timed out. Please login and refresh the page.");
-    }, 15000);
+    });
 
     async function loadReport() {
       const supabase = getSupabaseClient();
       if (!supabase) {
+        stopSafetyTimer();
         setLoading(false);
         return;
       }
@@ -96,7 +123,7 @@ export default function UserActivityPage() {
       setError("");
 
       try {
-        const session = await waitForInitialSession(supabase);
+        const session = await resolveAuthSession(supabase, 12000);
         if (cancelled) return;
 
         if (!session?.access_token) {
@@ -113,6 +140,7 @@ export default function UserActivityPage() {
               Authorization: `Bearer ${session.access_token}`,
             },
           },
+          45000,
         );
 
         if (cancelled) return;
@@ -132,6 +160,7 @@ export default function UserActivityPage() {
         }
         setReport(null);
       } finally {
+        stopSafetyTimer();
         if (!cancelled) setLoading(false);
       }
     }
@@ -140,7 +169,7 @@ export default function UserActivityPage() {
 
     return () => {
       cancelled = true;
-      window.clearTimeout(safetyTimer);
+      stopSafetyTimer();
     };
   }, [reportDate, userId]);
 
@@ -216,6 +245,22 @@ export default function UserActivityPage() {
                   <span>{t("usersActive")}</span>
                   <strong>{report.userCount || 0}</strong>
                 </section>
+                {report.isToday && (
+                  <>
+                    <section className="moduleMetricCard moduleUserActivityMetric--red">
+                      <span>{t("notLoggedIn")}</span>
+                      <strong>{report.totals?.notLoggedIn || 0}</strong>
+                    </section>
+                    <section className="moduleMetricCard moduleUserActivityMetric--orange">
+                      <span>{t("idleNow")}</span>
+                      <strong>{report.totals?.idleNow || 0}</strong>
+                    </section>
+                    <section className="moduleMetricCard moduleUserActivityMetric--green">
+                      <span>{t("activeNow")}</span>
+                      <strong>{report.totals?.activeNow || 0}</strong>
+                    </section>
+                  </>
+                )}
                 <section className="moduleMetricCard">
                   <span>{t("totalVisits")}</span>
                   <strong>{report.totals?.visitReports || 0}</strong>
@@ -234,6 +279,15 @@ export default function UserActivityPage() {
                 </section>
               </div>
 
+              {report.isToday && (
+                <div className="moduleUserActivityLegend">
+                  <strong>{t("legendTitle")}</strong>
+                  <span className="moduleUserActivityLegendItem moduleUserActivityLegendItem--red">{t("legendRed")}</span>
+                  <span className="moduleUserActivityLegendItem moduleUserActivityLegendItem--orange">{t("legendOrange")}</span>
+                  <span className="moduleUserActivityLegendItem moduleUserActivityLegendItem--green">{t("legendGreen")}</span>
+                </div>
+              )}
+
               <section className="moduleSection">
                 <div className="moduleTableWrap">
                   <table className="moduleTable moduleUserActivityTable">
@@ -243,6 +297,8 @@ export default function UserActivityPage() {
                         <th>{t("colRole")}</th>
                         <th>{t("colLogin")}</th>
                         <th>{t("colLogout")}</th>
+                        <th>{t("colLunchOut")}</th>
+                        <th>{t("colLunchIn")}</th>
                         <th>{t("colLastActivity")}</th>
                         <th>{t("colVisits")}</th>
                         <th>{t("colCollections")}</th>
@@ -255,15 +311,29 @@ export default function UserActivityPage() {
                     </thead>
                     <tbody>
                       {(report.users || []).map((row) => (
-                        <tr key={row.userId}>
+                        <tr key={row.userId} className={activityRowClass(row.activityStatus)}>
                           <td>
-                            <strong>{row.userName}</strong>
+                            <button
+                              type="button"
+                              className="moduleUserActivityUserLink"
+                              title={t("openVisitReport")}
+                              onClick={() => openUserVisitReport(row)}
+                            >
+                              <strong>{row.userName}</strong>
+                            </button>
                             {row.salesmanCode ? <div className="moduleCode">{row.salesmanCode}</div> : null}
                             {row.email ? <div className="moduleCode">{row.email}</div> : null}
                           </td>
                           <td>{row.role || "-"}</td>
                           <td>{formatDateTime(row.loginAt)}</td>
-                          <td>{formatDateTime(row.logoutAt)}</td>
+                          <td>
+                            {formatDateTime(row.logoutAt)}
+                            {row.logoutAutoClosed ? (
+                              <div className="moduleCode">{t("autoClosed")}</div>
+                            ) : null}
+                          </td>
+                          <td>{formatDateTime(row.lunchOutAt)}</td>
+                          <td>{formatDateTime(row.lunchInAt)}</td>
                           <td>{formatDateTime(row.lastActivityAt)}</td>
                           <td>{row.visitReports || 0}</td>
                           <td>{row.collections || 0}</td>
@@ -276,7 +346,7 @@ export default function UserActivityPage() {
                       ))}
                       {(report.users || []).length === 0 && (
                         <tr>
-                          <td colSpan={12}>{t("noEntries")}</td>
+                          <td colSpan={14}>{t("noEntries")}</td>
                         </tr>
                       )}
                     </tbody>

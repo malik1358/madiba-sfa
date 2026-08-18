@@ -4,9 +4,28 @@ import {
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
 } from "../../lib/geo.js";
+import {
+  deriveActivityStatus,
+  extractLunchTimes,
+  getKsaDateString,
+  ksaDayBounds,
+  logEventIso,
+  logEventTimestamp,
+} from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const FIELD_ROLES = new Set([
+  "admin",
+  "manager",
+  "salesman",
+  "collector",
+  "invoice-maker",
+  "invoice_maker",
+  "product-promoter",
+  "product_promoter",
+]);
 
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
@@ -72,7 +91,7 @@ function gpsPointFromLog(row) {
   };
 }
 
-function buildUserActivityRow(profile, authUser, logs, collections, orders) {
+function buildUserActivityRow(profile, logs, collections, orders, reportDate) {
   const userId = profile.id;
   const userLogs = logs.filter((row) => row.user_id === userId);
   const userCollections = collections.filter((row) => row.created_by === userId);
@@ -80,8 +99,16 @@ function buildUserActivityRow(profile, authUser, logs, collections, orders) {
 
   const loginLog = userLogs.find((row) => row.entry_type === "MORNING_ATTENDANCE");
   const logoutLog = [...userLogs].reverse().find((row) => row.entry_type === "END_OF_DAY");
-  const firstLog = userLogs[0] || null;
-  const lastLog = userLogs[userLogs.length - 1] || null;
+  const autoLogoutLog = logoutLog && (() => {
+    try {
+      const parsed = JSON.parse(String(logoutLog.note || ""));
+      return Boolean(parsed?.autoClosed);
+    } catch {
+      return false;
+    }
+  })();
+
+  const { lunchOutAt, lunchInAt } = extractLunchTimes(userLogs);
 
   const visitReports = userLogs.filter((row) => row.entry_type === "VISIT_REPORT").length;
   const orderDraftEvents = userLogs.filter((row) => ["ORDER_DRAFT", "ORDER_EDITED"].includes(row.entry_type)).length;
@@ -101,15 +128,27 @@ function buildUserActivityRow(profile, authUser, logs, collections, orders) {
     })),
   );
 
-  const loginAt = loginLog?.created_at
-    || authUser?.last_sign_in_at
-    || firstLog?.created_at
-    || null;
-  const logoutAt = logoutLog?.created_at || null;
-  const lastActivityAt = lastLog?.created_at
-    || userCollections[userCollections.length - 1]?.saved_at
-    || userOrders[userOrders.length - 1]?.updated_at
-    || null;
+  const loginAt = loginLog
+    ? logEventIso(loginLog)
+    : null;
+  const logoutAt = logoutLog ? logEventIso(logoutLog) : null;
+
+  const lastActivityTs = Math.max(
+    ...userLogs.map((row) => logEventTimestamp(row)),
+    ...userCollections.map((row) => Date.parse(String(row.saved_at || "")) || 0),
+    ...userOrders.map((row) => Date.parse(String(row.updated_at || row.submitted_at || row.created_at || "")) || 0),
+    0,
+  );
+  const lastActivityAt = lastActivityTs ? new Date(lastActivityTs).toISOString() : null;
+
+  const activityStatus = deriveActivityStatus({
+    loginAt,
+    logoutAt,
+    userLogs,
+    collections: userCollections,
+    orders: userOrders,
+    reportDate,
+  });
 
   const hasActivity = userLogs.length > 0
     || userCollections.length > 0
@@ -120,11 +159,13 @@ function buildUserActivityRow(profile, authUser, logs, collections, orders) {
     userId,
     userName: formatCollectorDisplayName(profile),
     role: profile.role || "",
-    email: profile.email || authUser?.email || "",
+    email: profile.email || "",
     salesmanCode: profile.salesman_code || "",
     loginAt,
     logoutAt,
-    lastSignInAt: authUser?.last_sign_in_at || null,
+    logoutAutoClosed: autoLogoutLog,
+    lunchOutAt,
+    lunchInAt,
     lastActivityAt,
     visitReports,
     collections: userCollections.length,
@@ -134,6 +175,7 @@ function buildUserActivityRow(profile, authUser, logs, collections, orders) {
     gpsPingCount: userLogs.filter((row) => row.entry_type === "GPS_PING").length,
     routeDistanceKm,
     totalActivities: userLogs.length,
+    activityStatus,
     hasActivity,
   };
 }
@@ -193,18 +235,25 @@ async function loadSalesOrders(admin, startIso, endIso, userIdFilter) {
   return data || [];
 }
 
-async function loadAuthUsersForIds(admin, userIds) {
-  const map = new Map();
-  const ids = [...new Set((userIds || []).filter(Boolean))];
+async function loadFieldProfiles(admin, userIdFilter) {
+  if (userIdFilter) {
+    const { data, error } = await admin
+      .from("profiles")
+      .select("id,role,salesman_code,salesman_name,email,is_active")
+      .eq("id", userIdFilter)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? [data] : [];
+  }
 
-  await Promise.all(ids.map(async (id) => {
-    const { data, error } = await admin.auth.admin.getUserById(id);
-    if (!error && data?.user) {
-      map.set(id, data.user);
-    }
-  }));
+  const { data, error } = await admin
+    .from("profiles")
+    .select("id,role,salesman_code,salesman_name,email,is_active")
+    .eq("is_active", true);
 
-  return map;
+  if (error) throw error;
+
+  return (data || []).filter((row) => FIELD_ROLES.has(normalizeRole(row.role)));
 }
 
 export async function GET(request) {
@@ -218,7 +267,7 @@ export async function GET(request) {
 
     const user = await getAuthUser(request);
     const url = new URL(request.url);
-    const date = parseReportDate(url.searchParams.get("date") || new Date().toISOString().slice(0, 10));
+    const date = parseReportDate(url.searchParams.get("date") || getKsaDateString());
     const userId = String(url.searchParams.get("userId") || "").trim();
 
     const admin = createClient(supabaseUrl, serviceKey, {
@@ -234,47 +283,48 @@ export async function GET(request) {
       throw new Error("You do not have access to other users' activity.");
     }
 
-    const startIso = `${date}T00:00:00.000Z`;
-    const endIso = `${date}T23:59:59.999Z`;
+    const { startIso, endIso } = ksaDayBounds(date);
 
-    const [logs, collections, orders] = await Promise.all([
+    const [logs, collections, orders, profiles] = await Promise.all([
       loadActivityLogs(admin, startIso, endIso, userIdFilter || null),
       loadCollectionVisits(admin, startIso, endIso, userIdFilter || null),
       loadSalesOrders(admin, startIso, endIso, userIdFilter || null),
+      loadFieldProfiles(admin, userIdFilter || null),
     ]);
 
-    const activeUserIds = [...new Set([
-      ...logs.map((row) => row.user_id),
-      ...collections.map((row) => row.created_by),
-      ...orders.map((row) => row.created_by),
-      ...(userIdFilter ? [userIdFilter] : []),
-    ].filter(Boolean))];
+    const users = profiles
+      .map((row) => buildUserActivityRow(row, logs, collections, orders, date))
+      .sort((left, right) => {
+        const rank = {
+          not_logged_in: 0,
+          idle: 1,
+          active: 2,
+          on_lunch: 3,
+          logged_in: 4,
+          ended: 5,
+        };
+        const leftRank = rank[left.activityStatus] ?? 9;
+        const rightRank = rank[right.activityStatus] ?? 9;
+        if (leftRank !== rightRank) return leftRank - rightRank;
+        return left.userName.localeCompare(right.userName);
+      });
 
-    const { data: profiles, error: profilesError } = activeUserIds.length
-      ? await admin
-        .from("profiles")
-        .select("id,role,salesman_code,salesman_name,email,is_active")
-        .in("id", activeUserIds)
-      : { data: [], error: null };
-
-    if (profilesError) throw profilesError;
-
-    const authUserMap = await loadAuthUsersForIds(admin, activeUserIds);
-
-    const users = (profiles || [])
-      .map((row) => buildUserActivityRow(row, authUserMap.get(row.id), logs, collections, orders))
-      .filter((row) => row.hasActivity)
-      .sort((left, right) => left.userName.localeCompare(right.userName));
+    const activeUsers = users.filter((row) => row.hasActivity);
 
     return Response.json({
       success: true,
       date,
-      userCount: users.length,
+      timezone: "Asia/Riyadh",
+      isToday: date === getKsaDateString(),
+      userCount: activeUsers.length,
       totals: {
-        visitReports: users.reduce((sum, row) => sum + row.visitReports, 0),
-        collections: users.reduce((sum, row) => sum + row.collections, 0),
-        ordersSubmitted: users.reduce((sum, row) => sum + row.ordersSubmitted, 0),
-        routeDistanceKm: users.reduce((sum, row) => sum + Number(row.routeDistanceKm || 0), 0),
+        visitReports: activeUsers.reduce((sum, row) => sum + row.visitReports, 0),
+        collections: activeUsers.reduce((sum, row) => sum + row.collections, 0),
+        ordersSubmitted: activeUsers.reduce((sum, row) => sum + row.ordersSubmitted, 0),
+        routeDistanceKm: activeUsers.reduce((sum, row) => sum + Number(row.routeDistanceKm || 0), 0),
+        notLoggedIn: users.filter((row) => row.activityStatus === "not_logged_in").length,
+        idleNow: users.filter((row) => row.activityStatus === "idle").length,
+        activeNow: users.filter((row) => row.activityStatus === "active").length,
       },
       availableUsers: users.map((row) => ({
         userId: row.userId,

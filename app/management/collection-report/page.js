@@ -8,14 +8,15 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { buildGoogleMapsPointUrl } from "../../lib/geo";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
+import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
+import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
-import { fetchJsonWithTimeout, waitForInitialSession } from "../../lib/authSession";
 
 const TEXT = {
   title: { en: "Collection Route Report", ar: "تقرير مسار التحصيل" },
   subtitle: {
-    en: "Date-wise collection visits with GPS distance between customers",
-    ar: "زيارات التحصيل حسب التاريخ مع المسافة بين العملاء",
+    en: "Payment collection visits only (from Collections screen). For salesman visit reports and orders, use Daily Visit Report.",
+    ar: "زيارات تحصيل المدفوعات فقط (من شاشة التحصيل). لتقارير زيارات المندوبين والطلبات، استخدم تقرير الزيارات اليومي.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   collections: { en: "Collections", ar: "التحصيلات" },
@@ -24,7 +25,10 @@ const TEXT = {
   collector: { en: "Collector", ar: "المحصل" },
   allCollectors: { en: "All collectors", ar: "كل المحصلين" },
   refresh: { en: "Refresh", ar: "تحديث" },
-  noVisits: { en: "No collection visits found for this date.", ar: "لا توجد زيارات تحصيل في هذا التاريخ." },
+  noVisits: {
+    en: "No payment collection visits found for this date. Salesman visits and orders appear on Daily Visit Report.",
+    ar: "لا توجد زيارات تحصيل مدفوعات في هذا التاريخ. زيارات المندوبين والطلبات تظهر في تقرير الزيارات اليومي.",
+  },
   gpsNote: {
     en: "GPS is captured automatically when a collection visit is saved. Older visits saved before this update may not have GPS.",
     ar: "يتم التقاط GPS تلقائياً عند حفظ زيارة التحصيل. الزيارات القديمة قد لا تحتوي GPS.",
@@ -80,7 +84,7 @@ export default function CollectionReportPage() {
   const supabaseClient = getSupabaseClient();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reportDate, setReportDate] = useState(() => getKsaDateString());
   const [collectorId, setCollectorId] = useState("");
   const [report, setReport] = useState(null);
 
@@ -92,15 +96,16 @@ export default function CollectionReportPage() {
   useEffect(() => {
     let cancelled = false;
 
-    const safetyTimer = window.setTimeout(() => {
+    const stopSafetyTimer = startReportSafetyTimer(() => {
       if (cancelled) return;
       setLoading(false);
       setError((current) => current || "Report load timed out. Please login and refresh the page.");
-    }, 12000);
+    });
 
     async function loadReport() {
       const supabase = getSupabaseClient();
       if (!supabase) {
+        stopSafetyTimer();
         setLoading(false);
         return;
       }
@@ -109,7 +114,7 @@ export default function CollectionReportPage() {
       setError("");
 
       try {
-        const session = await waitForInitialSession(supabase);
+        const session = await resolveAuthSession(supabase, 12000);
         if (cancelled) return;
 
         if (!session?.access_token) {
@@ -126,6 +131,7 @@ export default function CollectionReportPage() {
               Authorization: `Bearer ${session.access_token}`,
             },
           },
+          45000,
         );
 
         if (cancelled) return;
@@ -145,6 +151,7 @@ export default function CollectionReportPage() {
         }
         setReport(null);
       } finally {
+        stopSafetyTimer();
         if (!cancelled) setLoading(false);
       }
     }
@@ -153,7 +160,7 @@ export default function CollectionReportPage() {
 
     return () => {
       cancelled = true;
-      window.clearTimeout(safetyTimer);
+      stopSafetyTimer();
     };
   }, [reportDate, collectorId]);
 
@@ -179,6 +186,7 @@ export default function CollectionReportPage() {
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
               <MostVisitedPages />
+              <Link href="/management/daily-visit-report" className="moduleBackLink">Daily Visit Report</Link>
               <Link href="/management/payment-collections" className="moduleBackLink">{t("collections")}</Link>
               <Link href="/management" className="moduleBackLink">{t("back")}</Link>
             </div>

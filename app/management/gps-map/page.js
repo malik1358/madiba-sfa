@@ -11,7 +11,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 
 const TEXT = {
   title: { en: "GPS Map", ar: "خريطة GPS" },
-  subtitle: { en: "Customer-wise salesman visit map and raw GPS capture logs", ar: "خريطة زيارات العملاء للمندوبين مع سجلات GPS الخام" },
+  subtitle: { en: "Customer-wise field user GPS map including salesmen and collectors", ar: "خريطة GPS للمندوبين والمحصلين مع سجلات GPS الخام" },
   management: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading GPS map...", ar: "جاري تحميل خريطة GPS..." },
 };
@@ -97,8 +97,10 @@ function toDateValue(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function getSalesmanLabel(row) {
-  return String(row?.salesman_name || row?.salesman_code || row?.user_id || "").trim();
+function getUserLabel(row) {
+  const name = String(row?.salesman_name || row?.salesman_code || "").trim();
+  if (name) return name;
+  return String(row?.user_id || "").trim();
 }
 
 function classifyCaptureType(row) {
@@ -170,6 +172,17 @@ function isProductPromoterRole(role) {
   return normalized === "product-promoter" || normalized === "product_promoter";
 }
 
+function getUserRoleLabel(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (normalized === "collector") return "Collector";
+  if (normalized === "salesman") return "Salesman";
+  if (normalized === "manager") return "Manager";
+  if (normalized === "admin") return "Admin";
+  if (isInvoiceMakerRole(normalized)) return "Invoice maker";
+  if (isProductPromoterRole(normalized)) return "Product promoter";
+  return normalized ? normalized : "-";
+}
+
 export default function GpsMapPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -177,7 +190,8 @@ export default function GpsMapPage() {
   const [error, setError] = useState("");
   const [records, setRecords] = useState([]);
   const [userRole, setUserRole] = useState("");
-  const [selectedSalesmen, setSelectedSalesmen] = useState([]);
+  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [roleFilter, setRoleFilter] = useState("ALL");
   const [selectedDates, setSelectedDates] = useState([]);
   const [actionFilter, setActionFilter] = useState("ALL");
   const [customerFilter, setCustomerFilter] = useState("");
@@ -229,14 +243,14 @@ export default function GpsMapPage() {
 
         const { data: profiles, error: profilesError } = await supabase
           .from("profiles")
-          .select("id,salesman_code,salesman_name")
-          .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"]);
+          .select("id,salesman_code,salesman_name,role")
+          .in("role", ["salesman", "manager", "admin", "collector", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"]);
 
         if (profilesError) throw profilesError;
 
         const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
 
-        const rows = (logs || [])
+        const logRows = (logs || [])
           .map((log) => {
             const gps = parseGps(log.note);
             if (!gps) return null;
@@ -247,6 +261,7 @@ export default function GpsMapPage() {
             return {
               id: log.id,
               user_id: log.user_id,
+              role: String(profileRow?.role || "").trim(),
               salesman_code: String(profileRow?.salesman_code || "").trim(),
               salesman_name: String(profileRow?.salesman_name || "").trim(),
               entry_type: String(log.entry_type || "").trim(),
@@ -263,6 +278,48 @@ export default function GpsMapPage() {
           })
           .filter((row) => row && Number.isFinite(row.latitude) && Number.isFinite(row.longitude));
 
+        let collectionRows = [];
+        const { data: collectionVisits, error: collectionError } = await supabase
+          .from("collection_visits")
+          .select("id,customer_code,visit_outcome,saved_at,latitude,longitude,gps_accuracy_meters,created_by")
+          .not("latitude", "is", null)
+          .not("longitude", "is", null)
+          .order("saved_at", { ascending: false })
+          .limit(5000);
+
+        if (!collectionError) {
+          collectionRows = (collectionVisits || [])
+            .map((visit) => {
+              const latitude = toFiniteNumber(visit.latitude);
+              const longitude = toFiniteNumber(visit.longitude);
+              if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+              const profileRow = profileMap.get(visit.created_by) || null;
+              const capturedAt = visit.saved_at;
+
+              return {
+                id: `collection-${visit.id}`,
+                user_id: visit.created_by,
+                role: String(profileRow?.role || "collector").trim(),
+                salesman_code: String(profileRow?.salesman_code || "").trim(),
+                salesman_name: String(profileRow?.salesman_name || "").trim(),
+                entry_type: "COLLECTION_VISIT",
+                action: "COLLECTION_VISIT",
+                customer_code: String(visit.customer_code || "").trim(),
+                customer_name: "",
+                latitude,
+                longitude,
+                accuracy: toFiniteNumber(visit.gps_accuracy_meters) || 0,
+                street_name: "",
+                captured_at: capturedAt,
+                created_at: capturedAt,
+              };
+            })
+            .filter(Boolean);
+        }
+
+        const rows = [...logRows, ...collectionRows];
+
         setRecords(rows);
       } catch (err) {
         setError(err.message || "Unable to load GPS map.");
@@ -274,8 +331,13 @@ export default function GpsMapPage() {
     load();
   }, []);
 
-  const salesmanOptions = useMemo(
-    () => [...new Set(records.map((row) => getSalesmanLabel(row)).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+  const userOptions = useMemo(
+    () => [...new Set(records.map((row) => getUserLabel(row)).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [records]
+  );
+
+  const roleOptions = useMemo(
+    () => ["ALL", ...new Set(records.map((row) => getUserRoleLabel(row.role)).filter((value) => value && value !== "-"))],
     [records]
   );
 
@@ -291,12 +353,15 @@ export default function GpsMapPage() {
 
   const filteredRecords = useMemo(() => {
     const query = customerFilter.trim().toLowerCase();
-    const selectedSalesmanSet = new Set(selectedSalesmen);
+    const selectedUserSet = new Set(selectedUsers);
     const selectedDateSet = new Set(selectedDates);
 
     return records.filter((row) => {
-      const salesmanLabel = getSalesmanLabel(row);
-      if (selectedSalesmanSet.size > 0 && !selectedSalesmanSet.has(salesmanLabel)) return false;
+      const userLabel = getUserLabel(row);
+      if (selectedUserSet.size > 0 && !selectedUserSet.has(userLabel)) return false;
+
+      const rowRole = getUserRoleLabel(row.role);
+      if (roleFilter !== "ALL" && rowRole !== roleFilter) return false;
 
       const rowAction = String(row.action || row.entry_type || "").trim();
       if (actionFilter !== "ALL" && rowAction !== actionFilter) return false;
@@ -305,14 +370,14 @@ export default function GpsMapPage() {
       if (selectedDateSet.size > 0 && !selectedDateSet.has(rowDate)) return false;
 
       if (query) {
-        const haystack = [row.customer_code, row.customer_name, salesmanLabel]
+        const haystack = [row.customer_code, row.customer_name, userLabel, rowRole]
           .map((value) => String(value || "").toLowerCase())
           .join(" ");
         if (!haystack.includes(query)) return false;
       }
       return true;
     });
-  }, [records, selectedSalesmen, selectedDates, actionFilter, customerFilter]);
+  }, [records, selectedUsers, selectedDates, roleFilter, actionFilter, customerFilter]);
 
   const enrichedFilteredRecords = useMemo(() => {
     const sortedByTimeAsc = [...filteredRecords].sort(
@@ -397,19 +462,19 @@ export default function GpsMapPage() {
     return preferred || customerVisitPoints[0];
   }, [customerVisitPoints, selectedCustomerCode]);
 
-  const routeSalesmanOptions = useMemo(
-    () => [...new Set(records.map((row) => getSalesmanLabel(row)).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+  const routeUserOptions = useMemo(
+    () => [...new Set(records.map((row) => getUserLabel(row)).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [records]
   );
 
-  const effectiveRouteSalesman = routeSalesmanOptions.includes(routeSalesman)
+  const effectiveRouteSalesman = routeUserOptions.includes(routeSalesman)
     ? routeSalesman
-    : routeSalesmanOptions[0] || "";
+    : routeUserOptions[0] || "";
 
   const routeDateOptions = useMemo(() => {
     const source = records.filter((row) => {
       if (!effectiveRouteSalesman) return false;
-      return getSalesmanLabel(row) === effectiveRouteSalesman;
+      return getUserLabel(row) === effectiveRouteSalesman;
     });
     return [...new Set(source.map((row) => toDateValue(row.captured_at || row.created_at)).filter(Boolean))].sort((a, b) => b.localeCompare(a));
   }, [records, effectiveRouteSalesman]);
@@ -422,7 +487,7 @@ export default function GpsMapPage() {
     if (!effectiveRouteSalesman || !effectiveRouteDate) return [];
 
     return records
-      .filter((row) => getSalesmanLabel(row) === effectiveRouteSalesman)
+      .filter((row) => getUserLabel(row) === effectiveRouteSalesman)
       .filter((row) => toDateValue(row.captured_at || row.created_at) === effectiveRouteDate)
       .sort((a, b) => toTimestamp(a.captured_at || a.created_at) - toTimestamp(b.captured_at || b.created_at));
   }, [records, effectiveRouteSalesman, effectiveRouteDate]);
@@ -681,27 +746,32 @@ export default function GpsMapPage() {
           {error && <div className="moduleError">{error}</div>}
 
           <div className="moduleMetricGrid">
-            <section className="moduleMetricCard"><span>Visible salesmen</span><strong>{new Set(filteredRecords.map((row) => row.user_id)).size}</strong></section>
+            <section className="moduleMetricCard"><span>Visible field users</span><strong>{new Set(filteredRecords.map((row) => row.user_id)).size}</strong></section>
+            <section className="moduleMetricCard"><span>Collectors visible</span><strong>{new Set(filteredRecords.filter((row) => String(row.role || "").toLowerCase() === "collector").map((row) => row.user_id)).size}</strong></section>
             <section className="moduleMetricCard"><span>Customer visit points</span><strong>{customerVisitPoints.length}</strong></section>
             <section className="moduleMetricCard"><span>Raw GPS captures</span><strong>{enrichedFilteredRecords.length}</strong></section>
-            <section className="moduleMetricCard"><span>Admin/Invoice-maker</span><strong>{userRole === "admin" || isInvoiceMakerRole(userRole) ? "Yes" : "No"}</strong></section>
           </div>
 
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>Filters</h2>
             </div>
-            <div className="moduleFilterRow" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+            <div className="moduleFilterRow" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
               <select
                 className="moduleInput"
                 multiple
-                value={selectedSalesmen}
-                onChange={(event) => setSelectedSalesmen(Array.from(event.target.selectedOptions).map((option) => option.value))}
-                title="Select one or more salesmen"
+                value={selectedUsers}
+                onChange={(event) => setSelectedUsers(Array.from(event.target.selectedOptions).map((option) => option.value))}
+                title="Select one or more users"
                 style={{ minHeight: "120px" }}
               >
-                {salesmanOptions.map((option) => (
+                {userOptions.map((option) => (
                   <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+              <select className="moduleInput" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+                {roleOptions.map((option) => (
+                  <option key={option} value={option}>{option === "ALL" ? "All roles" : option}</option>
                 ))}
               </select>
               <select className="moduleInput" value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}>
@@ -748,7 +818,7 @@ export default function GpsMapPage() {
                 </div>
                 <div className="moduleFilterRow" style={{ marginTop: "10px" }}>
                   <div className="moduleHint">
-                    Showing: {selectedPoint.customer_name || selectedPoint.customer_code} ({selectedPoint.customer_code || "-"}) • {selectedPoint.salesman_name || selectedPoint.salesman_code || selectedPoint.user_id}
+                    Showing: {selectedPoint.customer_name || selectedPoint.customer_code} ({selectedPoint.customer_code || "-"}) • {getUserLabel(selectedPoint)} ({getUserRoleLabel(selectedPoint.role)})
                   </div>
                   <a className="moduleInlineButton" href={openMapUrl} target="_blank" rel="noreferrer">Open in Google Maps</a>
                 </div>
@@ -760,12 +830,12 @@ export default function GpsMapPage() {
 
           <section className="moduleSection">
             <div className="moduleSectionHeader">
-              <h2>Salesman Route (All GPS Pins)</h2>
-              <span>See full day route and long stays</span>
+              <h2>Field User Route (All GPS Pins)</h2>
+              <span>Salesman or collector day route and long stays</span>
             </div>
             <div className="moduleFilterRow" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
               <select className="moduleInput" value={effectiveRouteSalesman} onChange={(event) => setRouteSalesman(event.target.value)}>
-                {routeSalesmanOptions.map((option) => (
+                {routeUserOptions.map((option) => (
                   <option key={option} value={option}>{option}</option>
                 ))}
               </select>
@@ -873,7 +943,8 @@ export default function GpsMapPage() {
                 <thead>
                   <tr>
                     <th>Customer</th>
-                    <th>Salesman</th>
+                    <th>User</th>
+                    <th>Role</th>
                     <th>Action</th>
                     <th>GPS</th>
                     <th>Captured At</th>
@@ -884,7 +955,8 @@ export default function GpsMapPage() {
                   {customerVisitPoints.map((point) => (
                     <tr key={`${point.customer_code}-${point.id}`}>
                       <td>{point.customer_name || point.customer_code || "-"}<div className="moduleCode">{point.customer_code || "-"}</div></td>
-                      <td>{point.salesman_name || point.salesman_code || point.user_id}</td>
+                      <td>{getUserLabel(point)}</td>
+                      <td>{getUserRoleLabel(point.role)}</td>
                       <td>{point.action || point.entry_type}</td>
                       <td>{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</td>
                       <td>{point.captured_at ? new Date(point.captured_at).toLocaleString("en-GB") : "-"}</td>
@@ -898,7 +970,7 @@ export default function GpsMapPage() {
                   ))}
                   {customerVisitPoints.length === 0 && (
                     <tr>
-                      <td colSpan={6}>No customer-wise visit points found.</td>
+                      <td colSpan={7}>No customer-wise visit points found.</td>
                     </tr>
                   )}
                 </tbody>
@@ -908,14 +980,15 @@ export default function GpsMapPage() {
 
           <section className="moduleSection">
             <div className="moduleSectionHeader">
-              <h2>Last Seen by Salesman</h2>
-              <span>Latest record per user for current filters</span>
+              <h2>Last Seen by User</h2>
+              <span>Latest record per salesman or collector for current filters</span>
             </div>
             <div className="moduleTableWrap">
               <table className="moduleTable">
                 <thead>
                   <tr>
-                    <th>Salesman</th>
+                    <th>User</th>
+                    <th>Role</th>
                     <th>User ID</th>
                     <th>Last Action</th>
                     <th>Last Seen</th>
@@ -925,7 +998,8 @@ export default function GpsMapPage() {
                 <tbody>
                   {salesmanLastSeen.map((row) => (
                     <tr key={`last-seen-${row.user_id}`}>
-                      <td>{row.salesman_name || row.salesman_code || row.user_id}</td>
+                      <td>{getUserLabel(row)}</td>
+                      <td>{getUserRoleLabel(row.role)}</td>
                       <td><span className="moduleCode">{row.user_id}</span></td>
                       <td>{row.action || row.entry_type || "-"}</td>
                       <td>{row.captured_at ? new Date(row.captured_at).toLocaleString("en-GB") : "-"}</td>
@@ -934,7 +1008,7 @@ export default function GpsMapPage() {
                   ))}
                   {salesmanLastSeen.length === 0 && (
                     <tr>
-                      <td colSpan={5}>No salesman activity found for selected filters.</td>
+                      <td colSpan={6}>No field user activity found for selected filters.</td>
                     </tr>
                   )}
                 </tbody>
@@ -953,7 +1027,8 @@ export default function GpsMapPage() {
                   <tr>
                     <th>Captured Date</th>
                     <th>Captured Time</th>
-                    <th>Salesman</th>
+                    <th>Salesman / Collector</th>
+                    <th>Role</th>
                     <th>Customer</th>
                     <th>Action</th>
                     <th>Capture Type</th>
@@ -968,7 +1043,8 @@ export default function GpsMapPage() {
                     <tr key={point.id}>
                       <td>{toDateValue(point.captured_at || point.created_at) || "-"}</td>
                       <td>{point.captured_at ? new Date(point.captured_at).toLocaleTimeString("en-GB") : "-"}</td>
-                      <td>{point.salesman_name || point.salesman_code || point.user_id}</td>
+                      <td>{getUserLabel(point)}</td>
+                      <td>{getUserRoleLabel(point.role)}</td>
                       <td>{point.customer_name || point.customer_code || "-"}</td>
                       <td>{point.action || point.entry_type}</td>
                       <td>{point.capture_type}</td>
@@ -989,7 +1065,7 @@ export default function GpsMapPage() {
                   ))}
                   {enrichedFilteredRecords.length === 0 && (
                     <tr>
-                      <td colSpan={10}>No GPS captures found for selected filters.</td>
+                      <td colSpan={11}>No GPS captures found for selected filters.</td>
                     </tr>
                   )}
                 </tbody>

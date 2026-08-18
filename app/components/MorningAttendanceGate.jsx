@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { detectTable } from "../lib/schemaGuards";
+import { autoCloseForgottenWorkdays } from "../lib/workdayActivity";
+import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
 
 const TEXT = {
   checking: { en: "Checking morning attendance...", ar: "جاري التحقق من حضور الصباح..." },
@@ -222,6 +224,12 @@ export default function MorningAttendanceGate({
         return;
       }
 
+      try {
+        await autoCloseForgottenWorkdays(supabase, session.user.id);
+      } catch {
+        // Do not block access if auto-close fails.
+      }
+
       const logsTable = await withTimeout(
         detectTable(supabase, "daily_activity_logs"),
         10000,
@@ -294,9 +302,29 @@ export default function MorningAttendanceGate({
 
   useEffect(() => {
     if (!requireMorningAttendance) {
+      let cancelled = false;
+
+      async function runAutoClose() {
+        const supabase = getSupabaseClient();
+        if (!supabase || cancelled) return;
+
+        try {
+          const session = await getSessionWithTimeout(supabase);
+          if (session?.user?.id && !cancelled) {
+            await autoCloseForgottenWorkdays(supabase, session.user.id);
+          }
+        } catch {
+          // Do not block access if auto-close fails.
+        }
+      }
+
+      runAutoClose();
       setReady(true);
       setChecking(false);
-      return undefined;
+
+      return () => {
+        cancelled = true;
+      };
     }
 
     const shouldAutoAttempt = !attemptedAutoRef.current;
@@ -378,7 +406,12 @@ export default function MorningAttendanceGate({
   }, [enableBackgroundGps, requireMorningAttendance, ready]);
 
   if (ready) {
-    return children;
+    return (
+      <>
+        {requireMorningAttendance ? <WorkdayInactivityPrompt /> : null}
+        {children}
+      </>
+    );
   }
 
   return (

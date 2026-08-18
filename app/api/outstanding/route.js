@@ -17,6 +17,7 @@ import {
   parseBucketLabelFromHeader,
   prioritizeOutstandingSheets,
   sortBucketLabels,
+  sanitizeStoredOverdueDays,
   toNumber,
 } from "../../lib/outstanding";
 
@@ -297,7 +298,12 @@ function parseOutstandingRows(rows, headerRowIndex) {
         ref_no: columns.refNo >= 0 ? String(row[columns.refNo] || "").trim() : "",
         pending_amount: pendingAmount,
         due_date: columns.dueDate >= 0 ? formatSheetDateValue(row[columns.dueDate]) : "",
-        overdue_days: columns.overdueDays >= 0 ? toNumber(row[columns.overdueDays]) : 0,
+        overdue_days: columns.overdueDays >= 0
+          ? sanitizeStoredOverdueDays(
+            row[columns.overdueDays],
+            ageColumnIndex >= 0 ? toNumber(row[ageColumnIndex]) : 0,
+          )
+          : 0,
         invoice_day: ageColumnIndex >= 0 ? toNumber(row[ageColumnIndex]) : 0,
         salesman: columns.salesman >= 0 ? String(row[columns.salesman] || "").trim() : "",
       });

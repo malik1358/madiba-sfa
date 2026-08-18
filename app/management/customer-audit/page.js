@@ -19,7 +19,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
-import { sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { resolveOverdueDaysFromDueDate, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 
 import { shortDate } from "./lib/format";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -412,7 +412,7 @@ function CustomerAuditPageContent() {
                         <td>{invoice.ref_no || "-"}</td>
                         <td>{formatAmount(parseOutstandingNumber(invoice.pending_amount))}</td>
                         <td>{invoice.due_date || "-"}</td>
-                        <td>{formatCount(parseOutstandingNumber(invoice.overdue_days))}</td>
+                        <td>{formatCount(resolveOverdueDaysFromDueDate(invoice))}</td>
                         <td>{formatCount(parseOutstandingNumber(invoice.invoice_day))}</td>
                         <td>{invoice.salesman || "-"}</td>
                       </tr>

@@ -1,3 +1,5 @@
+import { resolveInvoiceAgingDays } from "./outstanding.js";
+
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
@@ -19,6 +21,31 @@ function dateOnly(value) {
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return "";
   return parsed.toISOString().slice(0, 10);
+}
+
+export function scheduledRevisitDate(record) {
+  return dateOnly(record?.latest_collection?.next_visit_at);
+}
+
+function scheduledRevisitTier(record, today) {
+  const revisitAt = scheduledRevisitDate(record);
+  if (!revisitAt) return 2;
+  if (revisitAt > today) return 0;
+  return 1;
+}
+
+function compareScheduledRevisitPriority(left, right, today) {
+  const byTier = scheduledRevisitTier(left, today) - scheduledRevisitTier(right, today);
+  if (byTier !== 0) return byTier;
+
+  const leftDate = scheduledRevisitDate(left);
+  const rightDate = scheduledRevisitDate(right);
+  if (leftDate && rightDate) {
+    const byDate = compareDateText(leftDate, rightDate);
+    if (byDate !== 0) return byDate;
+  }
+
+  return 0;
 }
 
 function compareDateText(left, right) {
@@ -131,12 +158,9 @@ function only0to30Outstanding(record) {
 
 export function isInvoicePastDue(invoice, today) {
   if (toNumber(invoice?.pending_amount) <= 0) return false;
-  const overdue = invoice?.overdue_days;
-  if (overdue !== null && overdue !== undefined && overdue !== "") {
-    return toNumber(overdue) > 0;
-  }
   const dueDate = dateOnly(invoice?.due_date);
-  return Boolean(dueDate) && dueDate < today;
+  if (dueDate && dueDate < today) return true;
+  return resolveInvoiceAgingDays(invoice, `${today}T00:00:00`) > 0;
 }
 
 export function isInvoiceNotYetDue(invoice, today) {
@@ -160,7 +184,10 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       : [];
 
     const totalDueAmount = dueInvoices.reduce((sum, invoice) => sum + toNumber(invoice?.pending_amount), 0);
-    const maxOverdueDays = dueInvoices.reduce((max, invoice) => Math.max(max, toNumber(invoice?.overdue_days)), 0);
+    const maxOverdueDays = dueInvoices.reduce(
+      (max, invoice) => Math.max(max, resolveInvoiceAgingDays(invoice, `${today}T00:00:00`)),
+      0,
+    );
     const earliestDueDate = dueInvoices
       .map((invoice) => dateOnly(invoice?.due_date))
       .filter(Boolean)
@@ -181,6 +208,7 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       total_due_amount: totalDueAmount,
       max_overdue_days: maxOverdueDays,
       earliest_due_date: earliestDueDate,
+      scheduled_revisit_at: scheduledRevisitDate(record),
       invoices: Array.isArray(record?.invoices) ? record.invoices : [],
       probability_score: priority.score,
       probability_label: priority.label,
@@ -223,6 +251,9 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
   });
 
   dueCustomers.sort((left, right) => {
+    const byScheduled = compareScheduledRevisitPriority(left, right, today);
+    if (byScheduled !== 0) return byScheduled;
+
     const leftHasDue = Number(left.due_invoice_count > 0);
     const rightHasDue = Number(right.due_invoice_count > 0);
     const byDueStatus = rightHasDue - leftHasDue;    if (byDueStatus !== 0) return byDueStatus;

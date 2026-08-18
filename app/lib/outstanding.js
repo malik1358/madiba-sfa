@@ -79,6 +79,67 @@ export function toNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+const EXCEL_SERIAL_MIN = 10000;
+const MAX_PLAUSIBLE_AGING_DAYS = 999;
+
+function dateOnlyFromIso(value) {
+  const text = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+}
+
+function daysBetweenDates(laterIso, earlierIso) {
+  const later = new Date(`${dateOnlyFromIso(laterIso)}T00:00:00`);
+  const earlier = new Date(`${dateOnlyFromIso(earlierIso)}T00:00:00`);
+  if (Number.isNaN(later.getTime()) || Number.isNaN(earlier.getTime())) return 0;
+  return Math.max(0, Math.floor((later - earlier) / (24 * 60 * 60 * 1000)));
+}
+
+export function isPlausibleAgingDayCount(value) {
+  const days = toNumber(value);
+  return days > 0 && days <= MAX_PLAUSIBLE_AGING_DAYS;
+}
+
+export function isExcelSerialDayValue(value) {
+  return toNumber(value) >= EXCEL_SERIAL_MIN;
+}
+
+export function resolveInvoiceAgingDays(invoice, todayIso = new Date().toISOString()) {
+  const invoiceDay = toNumber(invoice?.invoice_day);
+  if (isPlausibleAgingDayCount(invoiceDay)) return invoiceDay;
+
+  const rawOverdue = toNumber(invoice?.overdue_days);
+  if (isPlausibleAgingDayCount(rawOverdue)) return rawOverdue;
+
+  const dueDate = dateOnlyFromIso(invoice?.due_date);
+  if (dueDate) {
+    return daysBetweenDates(todayIso, dueDate);
+  }
+
+  return 0;
+}
+
+export function resolveOverdueDaysFromDueDate(invoice, todayIso = new Date().toISOString()) {
+  const dueDate = dateOnlyFromIso(invoice?.due_date);
+  if (dueDate) {
+    return daysBetweenDates(todayIso, dueDate);
+  }
+
+  const rawOverdue = toNumber(invoice?.overdue_days);
+  if (isPlausibleAgingDayCount(rawOverdue)) return rawOverdue;
+  return 0;
+}
+
+export function sanitizeStoredOverdueDays(rawValue, invoiceDay = 0) {
+  if (isExcelSerialDayValue(rawValue)) return 0;
+  const overdue = toNumber(rawValue);
+  if (isPlausibleAgingDayCount(overdue)) return overdue;
+  if (isPlausibleAgingDayCount(invoiceDay)) return 0;
+  return 0;
+}
+
 export function parseBucketLabelFromHeader(headerValue) {
   const header = String(headerValue || "").trim().toLowerCase();
   if (!header) return null;

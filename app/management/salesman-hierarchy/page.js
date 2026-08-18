@@ -14,6 +14,16 @@ const TEXT = {
   subtitle: { en: "Assign salesmen under a head salesman and manage default testing passwords", ar: "تعيين المندوبين تحت رئيس مندوبين وإدارة كلمات المرور الافتراضية" },
   management: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading salesman hierarchy...", ar: "جاري تحميل هيكل المندوبين..." },
+  statusActive: { en: "Active", ar: "نشط" },
+  statusInactive: { en: "Inactive", ar: "غير نشط" },
+  deactivate: { en: "Deactivate", ar: "إيقاف" },
+  activate: { en: "Activate", ar: "تفعيل" },
+  activeUsers: { en: "Active users", ar: "المستخدمون النشطون" },
+  inactiveUsers: { en: "Inactive users", ar: "المستخدمون غير النشطين" },
+  inactiveHint: {
+    en: "Inactive users are hidden from User Activity but remain in the hierarchy for reference.",
+    ar: "المستخدمون غير النشطين لا يظهرون في نشاط المستخدمين لكنهم يبقون في الهيكل للرجوع إليهم.",
+  },
 };
 
 function normalizeCode(value) {
@@ -69,6 +79,7 @@ export default function SalesmanHierarchyPage() {
   const [creating, setCreating] = useState(false);
   const [savingId, setSavingId] = useState("");
   const [resettingId, setResettingId] = useState("");
+  const [togglingActiveId, setTogglingActiveId] = useState("");
   const [bulkResetting, setBulkResetting] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -139,9 +150,12 @@ export default function SalesmanHierarchyPage() {
   const summary = useMemo(() => {
     const assigned = salesmen.filter((salesman) => Boolean(salesman.head_salesman_code)).length;
     const heads = new Set(salesmen.map((salesman) => salesman.head_salesman_code).filter(Boolean));
+    const active = salesmen.filter((salesman) => salesman.is_active !== false).length;
 
     return {
       total: salesmen.length,
+      active,
+      inactive: salesmen.length - active,
       assigned,
       heads: heads.size,
     };
@@ -263,6 +277,26 @@ export default function SalesmanHierarchyPage() {
     }
   }
 
+  async function toggleActiveStatus(salesman) {
+    setTogglingActiveId(salesman.id);
+    setError("");
+    setMessage("");
+
+    try {
+      const result = await postAction({
+        mode: "set-active",
+        salesmanId: salesman.id,
+        isActive: salesman.is_active === false,
+      });
+      setMessage(result.message || "User status updated.");
+      await loadHierarchy(false);
+    } catch (err) {
+      setError(err.message || "Unable to update user status.");
+    } finally {
+      setTogglingActiveId("");
+    }
+  }
+
   async function resetAllPasswords() {
     setBulkResetting(true);
     setError("");
@@ -316,6 +350,8 @@ export default function SalesmanHierarchyPage() {
 
         <div className="moduleMetricGrid">
           <section className="moduleMetricCard"><span>Total salesmen</span><strong>{summary.total}</strong></section>
+          <section className="moduleMetricCard"><span>{t("activeUsers")}</span><strong>{summary.active}</strong></section>
+          <section className="moduleMetricCard"><span>{t("inactiveUsers")}</span><strong>{summary.inactive}</strong></section>
           <section className="moduleMetricCard"><span>Assigned under head</span><strong>{summary.assigned}</strong></section>
           <section className="moduleMetricCard"><span>Head salesmen in use</span><strong>{summary.heads}</strong></section>
         </div>
@@ -407,12 +443,14 @@ export default function SalesmanHierarchyPage() {
               {bulkResetting ? "Resetting..." : "Reset All Passwords"}
             </button>
           </div>
+          <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("inactiveHint")}</div>
 
           <div className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
                   <th>Salesman</th>
+                  <th>Status</th>
                   <th>Role</th>
                   <th>Username</th>
                   <th>Current Head</th>
@@ -428,10 +466,15 @@ export default function SalesmanHierarchyPage() {
                   const password = isRandomPassword(salesman.default_password) ? salesman.default_password : "Pending reset";
 
                   return (
-                    <tr key={salesman.id}>
+                    <tr key={salesman.id} style={salesman.is_active === false ? { opacity: 0.72 } : undefined}>
                       <td>
                         <strong>{salesman.salesman_name || salesman.salesman_code || salesman.id}</strong>
                         <div className="moduleCode">{salesman.salesman_code || salesman.id}</div>
+                      </td>
+                      <td>
+                        <span className={salesman.is_active === false ? "moduleHint" : undefined}>
+                          {salesman.is_active === false ? t("statusInactive") : t("statusActive")}
+                        </span>
                       </td>
                       <td>
                         <select
@@ -484,6 +527,16 @@ export default function SalesmanHierarchyPage() {
                           >
                             {resettingId === salesman.id ? "Resetting..." : "Reset Password"}
                           </button>
+                          <button
+                            type="button"
+                            className="moduleInlineButton"
+                            onClick={() => toggleActiveStatus(salesman)}
+                            disabled={togglingActiveId === salesman.id}
+                          >
+                            {togglingActiveId === salesman.id
+                              ? "Saving..."
+                              : (salesman.is_active === false ? t("activate") : t("deactivate"))}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -492,7 +545,7 @@ export default function SalesmanHierarchyPage() {
 
                 {salesmen.length === 0 && (
                   <tr>
-                    <td colSpan={7}>No users found.</td>
+                    <td colSpan={8}>No users found.</td>
                   </tr>
                 )}
               </tbody>

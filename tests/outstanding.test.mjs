@@ -10,6 +10,9 @@ import {
   isOutstandingInvoiceDayHeader,
   prioritizeOutstandingSheets,
   resolveOutstandingCustomerOwnership,
+  resolveInvoiceAgingDays,
+  resolveOverdueDaysFromDueDate,
+  sanitizeStoredOverdueDays,
   summarizeOutstandingBuckets,
   visibleOutstandingBucketLabels,
 } from "../app/lib/outstanding.js";
@@ -164,4 +167,21 @@ test("findOutstandingHeaderRow scans beyond the old 25-row report preamble", () 
   rows.push(["Customer Name", "0-30", "31-60", "Open Invoices"]);
 
   assert.equal(findOutstandingHeaderRow(rows), 30);
+});
+
+test("resolveInvoiceAgingDays prefers invoice day over excel serial overdue values", () => {
+  const invoice = {
+    invoice_day: 41,
+    overdue_days: 46241,
+    due_date: "2026-08-07",
+    pending_amount: 46211,
+  };
+
+  assert.equal(resolveInvoiceAgingDays(invoice, "2026-08-18T12:00:00"), 41);
+  assert.equal(resolveOverdueDaysFromDueDate(invoice, "2026-08-18T12:00:00"), 11);
+});
+
+test("sanitizeStoredOverdueDays drops excel serial values from uploads", () => {
+  assert.equal(sanitizeStoredOverdueDays(46241, 41), 0);
+  assert.equal(sanitizeStoredOverdueDays(15, 41), 15);
 });

@@ -3,6 +3,7 @@ import { buildCollectionQueues } from "../../lib/paymentCollections.js";
 import {
   OUTSTANDING_DATASET_KEY,
   extractLeadingCustomerCodeAndName,
+  resolveInvoiceAgingDays,
   toNumber,
 } from "../../lib/outstanding.js";
 
@@ -556,17 +557,12 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
       outstanding_above_120: 0,
     };
 
-    const today = new Date();
+    const todayIso = new Date().toISOString();
     customerInvoices.forEach((invoice) => {
       const pendingAmount = Number(invoice.pending_amount || 0);
       if (pendingAmount <= 0) return;
 
-      const dueDate = invoice.due_date ? new Date(invoice.due_date) : null;
-      const daysOverdue = Number.isFinite(invoice.overdue_days) && invoice.overdue_days
-        ? invoice.overdue_days
-        : (dueDate && !Number.isNaN(dueDate.getTime())
-          ? Math.floor((today - dueDate) / (1000 * 60 * 60 * 24))
-          : 0);
+      const daysOverdue = resolveInvoiceAgingDays(invoice, todayIso);
 
       if (daysOverdue <= 30) {
         outstanding.outstanding_0_30 += pendingAmount;

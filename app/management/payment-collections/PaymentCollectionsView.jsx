@@ -8,6 +8,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
+import { resolveInvoiceAgingDays, resolveOverdueDaysFromDueDate } from "../../lib/outstanding";
 import { captureGpsLocation, GPS_REQUIRED_ERROR } from "../../lib/geo";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
@@ -49,6 +50,13 @@ const TEXT = {
     en: "Customers with pending invoices that are not overdue yet. Collect early payments here if needed.",
     ar: "عملاء لديهم فواتير معلقة غير مستحقة بعد. يمكن تحصيل دفعات مبكرة من هنا.",
   },
+  scheduledRevisitsTitle: { en: "Scheduled Revisits", ar: "زيارات التحصيل المجدولة" },
+  scheduledRevisitsHint: {
+    en: "Customers with a future collection revisit date saved from the last visit. Nearest dates appear first.",
+    ar: "عملاء لديهم موعد زيارة تحصيل قادم من آخر زيارة. أقرب المواعيد تظهر أولاً.",
+  },
+  scheduledRevisitDate: { en: "Revisit Date", ar: "موعد الزيارة" },
+  noScheduledRevisits: { en: "No upcoming collection revisits scheduled.", ar: "لا توجد زيارات تحصيل مجدولة قادمة." },
   notDueAmount: { en: "Pending Amount", ar: "المبلغ المعلق" },
   notDueInvoices: { en: "Pending Invoices", ar: "الفواتير المعلقة" },
   noNotDue: { en: "No not-yet-due invoices in the outstanding file.", ar: "لا توجد فواتير غير مستحقة في ملف المديونية." },
@@ -544,6 +552,20 @@ export default function PaymentCollectionsView({ view = "due" }) {
     [notDueCustomers, customerFilter, selectedSalesmen, view],
   );
 
+  const scheduledRevisitRows = useMemo(() => {
+    if (view !== "due") return [];
+    const today = new Date().toISOString().slice(0, 10);
+    return filterQueueRows([...dueCustomers, ...notDueCustomers], customerFilter, selectedSalesmen)
+      .filter((row) => {
+        const revisitAt = toDateInputValue(row?.latest_collection?.next_visit_at);
+        return revisitAt && revisitAt >= today;
+      })
+      .sort((left, right) => (
+        toDateInputValue(left?.latest_collection?.next_visit_at)
+          .localeCompare(toDateInputValue(right?.latest_collection?.next_visit_at))
+      ));
+  }, [customerFilter, dueCustomers, notDueCustomers, selectedSalesmen, view]);
+
   const tableRows = useMemo(() => {
     if (view !== "due") {
       return visibleRows.map((row) => ({ type: "customer", row }));
@@ -864,6 +886,57 @@ export default function PaymentCollectionsView({ view = "due" }) {
             <Link href="/management/daily-visit-report" className="moduleInlineButton moduleActionButton">Daily Visit Report</Link>
           </div>
 
+          {view === "due" ? (
+            <section className="moduleSection" style={{ marginBottom: "12px" }}>
+              <div className="moduleSectionHeader">
+                <h2>{t("scheduledRevisitsTitle")}</h2>
+                <span>{scheduledRevisitRows.length}</span>
+              </div>
+              <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("scheduledRevisitsHint")}</div>
+              {scheduledRevisitRows.length === 0 ? (
+                <div className="moduleHint">{t("noScheduledRevisits")}</div>
+              ) : (
+                <div className="moduleTableWrap">
+                  <table className="moduleTable moduleCollectorInvoiceTable">
+                    <thead>
+                      <tr>
+                        <th>{t("scheduledRevisitDate")}</th>
+                        <th>{t("customerCode")}</th>
+                        <th>{t("customer")}</th>
+                        <th>{t("salesman")}</th>
+                        <th>{t("amount")}</th>
+                        <th>{t("actions")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scheduledRevisitRows.map((row) => {
+                        const key = rowKey(row);
+                        return (
+                          <tr key={`revisit-${key}`}>
+                            <td data-label={t("scheduledRevisitDate")}>{formatDateOnly(row?.latest_collection?.next_visit_at)}</td>
+                            <td data-label={t("customerCode")}>{row.customer_code}</td>
+                            <td data-label={t("customer")}>{row.customer_name}</td>
+                            <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>
+                            <td data-label={t("amount")}>{formatMoney(row.total_due_amount || row.total_not_due_amount)}</td>
+                            <td data-label={t("actions")}>
+                              <button
+                                type="button"
+                                className="moduleInlineButton moduleActionButton"
+                                onClick={() => setActiveRowKey(key)}
+                              >
+                                {activeRowKey === key ? t("close") : t("open")}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          ) : null}
+
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>{view === "legal" ? t("legalQueue") : t("dueQueue")}</h2>
@@ -1054,13 +1127,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     {(row.invoices || []).map((invoice, index) => (
                                       <tr
                                         key={`${key}-${invoice.ref_no || invoice.invoice_date || index}-${index}`}
-                                        className={Number(invoice.overdue_days || 0) > 0 ? "moduleCollectorInvoiceOverdue" : (isNotDue ? "moduleCollectorInvoiceNotDue" : "")}
+                                        className={resolveOverdueDaysFromDueDate(invoice) > 0 ? "moduleCollectorInvoiceOverdue" : (isNotDue ? "moduleCollectorInvoiceNotDue" : "")}
                                       >
                                         <td data-label={t("invDate")}>{invoice.invoice_date || "-"}</td>
                                         <td data-label={t("invRef")}>{invoice.ref_no || "-"}</td>
                                         <td data-label={t("invPending")}>{formatMoney(invoice.pending_amount)}</td>
                                         <td data-label={t("invDue")}>{invoice.due_date || "-"}</td>
-                                        <td data-label={t("invOverdue")}>{invoice.overdue_days || 0}</td>
+                                        <td data-label={t("invOverdue")}>{resolveInvoiceAgingDays(invoice)}</td>
                                       </tr>
                                     ))}
                                   </tbody>

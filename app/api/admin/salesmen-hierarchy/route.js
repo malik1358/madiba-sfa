@@ -335,7 +335,7 @@ async function loadSalesmen(admin) {
   const [profilesRes, usersRes] = await Promise.all([
     admin
       .from("profiles")
-      .select("id,salesman_code,salesman_name,role")
+      .select("id,salesman_code,salesman_name,role,is_active")
       .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"])
       .order("salesman_name"),
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
@@ -356,6 +356,7 @@ async function loadSalesmen(admin) {
       salesman_code: profile.salesman_code || "",
       salesman_name: profile.salesman_name || "",
       role: profile.role || "",
+      is_active: profile.is_active !== false,
       email: authUser?.email || "",
       login_name: displayLoginName(authUser?.email || ""),
       head_salesman_code: metadata.head_salesman_code || "",
@@ -418,7 +419,7 @@ export async function GET(request) {
       salesmen,
       autoCreateSummary,
       headOptions: salesmen
-        .filter((salesman) => !isInvoiceMakerRole(salesman.role) && !isProductPromoterRole(salesman.role))
+        .filter((salesman) => salesman.is_active !== false && !isInvoiceMakerRole(salesman.role) && !isProductPromoterRole(salesman.role))
         .map((salesman) => ({
           id: salesman.id,
           salesman_code: salesman.salesman_code,
@@ -590,6 +591,37 @@ export async function POST(request) {
       return NextResponse.json({
         success: true,
         message: `Assigned ${salesmen.salesman_name || salesmen.salesman_code || salesmanId} to ${headSalesmanCode || "no head"}.`,
+      });
+    }
+
+    if (mode === "set-active") {
+      const salesmanId = String(body?.salesmanId || "").trim();
+      const isActive = body?.isActive !== false;
+
+      if (!salesmanId) {
+        return NextResponse.json({ success: false, error: "Missing salesman id." }, { status: 400 });
+      }
+
+      const { data: target, error: targetError } = await admin
+        .from("profiles")
+        .select("id,salesman_code,salesman_name,is_active")
+        .eq("id", salesmanId)
+        .single();
+
+      if (targetError) throw targetError;
+
+      const { error: updateError } = await admin
+        .from("profiles")
+        .update({ is_active: isActive })
+        .eq("id", salesmanId);
+
+      if (updateError) throw updateError;
+
+      return NextResponse.json({
+        success: true,
+        message: isActive
+          ? `${target.salesman_name || target.salesman_code || salesmanId} is active again and will appear in User Activity.`
+          : `${target.salesman_name || target.salesman_code || salesmanId} is inactive and hidden from User Activity.`,
       });
     }
 

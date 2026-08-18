@@ -96,3 +96,34 @@ test("buildCollectionQueues prioritizes cash-bucket customers at top", () => {
 
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["CASH", "NONCASH"]);
 });
+
+test("buildCollectionQueues prioritizes scheduled future revisits at top", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "LATE",
+      customer_name: "No Schedule",
+      invoices: [{ pending_amount: 900, due_date: "2026-08-01", overdue_days: 17 }],
+      latest_collection: { payment_status: "NOT_PAID" },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "SOON",
+      customer_name: "Future Revisit",
+      invoices: [{ pending_amount: 500, due_date: "2026-08-01", overdue_days: 17 }],
+      latest_collection: { payment_status: "PROMISED", next_visit_at: "2026-08-25" },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "NEXT",
+      customer_name: "Earlier Future Revisit",
+      invoices: [{ pending_amount: 300, due_date: "2026-08-05", overdue_days: 13 }],
+      latest_collection: { payment_status: "PROMISED", next_visit_at: "2026-08-20" },
+      legal_transfer: null,
+    },
+  ], "2026-08-18T10:00:00Z");
+
+  assert.deepEqual(
+    queues.dueCustomers.map((row) => row.customer_code),
+    ["NEXT", "SOON", "LATE"],
+  );
+});

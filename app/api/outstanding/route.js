@@ -18,7 +18,6 @@ import {
   parseBucketLabelFromHeader,
   prioritizeOutstandingSheets,
   sortBucketLabels,
-  detectOutstandingPendingAmountColumn,
   sanitizeStoredOverdueDays,
   toNumber,
 } from "../../lib/outstanding";

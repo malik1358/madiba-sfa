@@ -266,6 +266,7 @@ export default function ManagementPage() {
               <>
                 <Link href="/management/collection-report" className="moduleNavCard">Collection Route Report</Link>
                 <Link href="/management/daily-visit-report" className="moduleNavCard">Daily Visit Report</Link>
+                <Link href="/management/user-activity" className="moduleNavCard">User Activity</Link>
               </>
             )}
             {userRole !== "collector" ? (

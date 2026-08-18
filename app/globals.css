@@ -3902,6 +3902,10 @@ table.auditMatrix td.auditTrendSame {
   overflow-x: auto;
 }
 
+.moduleUserActivityTable {
+  min-width: 1180px;
+}
+
 .moduleCustomerMasterTable {
   min-width: 1080px;
 }

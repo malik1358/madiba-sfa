@@ -1,3 +1,4 @@
+import { isProspectCustomerCode } from "./customerCode.js";
 import {
   GPS_REQUIRED_ERROR,
   haversineDistanceKm,
@@ -77,6 +78,10 @@ export async function maybePromptCustomerLocationUpdate({
   accessToken,
   language = "en",
 }) {
+  if (isProspectCustomerCode(customerCode)) {
+    return;
+  }
+
   if (!hasGpsCoordinates(entryLocation)) {
     throw new Error(GPS_REQUIRED_ERROR);
   }

@@ -118,6 +118,7 @@ function CustomerAuditPageContent() {
       ...quickOrderSuggestions.notBoughtRecently,
       ...quickOrderSuggestions.buyingLess,
     ],
+    catalogItems: itemMaster,
     selectedCustomer,
     priceList,
     setError,

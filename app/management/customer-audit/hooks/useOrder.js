@@ -93,7 +93,17 @@ function buildChangeSet(beforeLines = [], afterLines = []) {
   return changes.sort((a, b) => String(a.item_code).localeCompare(String(b.item_code)));
 }
 
-export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, priceList, setError, setMessage, accessScope = null, editOrderId = '' }) {
+export function useOrder({
+  analytics,
+  quickOrderAllItems,
+  catalogItems = [],
+  selectedCustomer,
+  priceList,
+  setError,
+  setMessage,
+  accessScope = null,
+  editOrderId = '',
+}) {
   const [draftOrderId, setDraftOrderId] = useState(null);
   const [orderQuantities, setOrderQuantities] = useState({});
   const [savingOrder, setSavingOrder] = useState(false);
@@ -108,8 +118,8 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
   );
 
   const orderItems = useMemo(
-    () => buildOrderItems(orderQuantities, analytics, quickOrderAllItems),
-    [analytics, orderQuantities, quickOrderAllItems]
+    () => buildOrderItems(orderQuantities, analytics, quickOrderAllItems, catalogItems),
+    [analytics, catalogItems, orderQuantities, quickOrderAllItems]
   );
 
   const orderSummary = useMemo(() => buildOrderSummary(orderItems), [orderItems]);
@@ -402,12 +412,11 @@ export function useOrder({ analytics, quickOrderAllItems, selectedCustomer, pric
     }
 
     setSubmittingOrder(true);
-    setError('');
     setMessage('');
 
     try {
       const orderId = await saveDraft();
-      if (!orderId) throw new Error('Unable to save the order before submission.');
+      if (!orderId) return null;
 
       const nowIso = new Date().toISOString();
 

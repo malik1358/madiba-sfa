@@ -48,6 +48,10 @@ export function normalizeCustomerNameKey(value) {
     .trim();
 }
 
+export function isProspectCustomerCode(value) {
+  return /^PROSPECT-\d+$/i.test(String(value || "").trim());
+}
+
 export function firstWordLooksLikeCustomerCode(word) {
   return /\d/.test(String(word || ""));
 }

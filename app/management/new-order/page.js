@@ -756,7 +756,10 @@ export default function NewOrderPage() {
     setAuditExpandedCategories({});
   }
 
-  const analyticsLike = useMemo(() => ({ items: mergedItemsMaster }), [mergedItemsMaster]);
+  const orderAnalytics = useMemo(
+    () => (analytics ? { ...analytics, items: analytics.items || mergedItemsMaster } : null),
+    [analytics, mergedItemsMaster],
+  );
 
   const {
     draftOrderId,
@@ -773,8 +776,9 @@ export default function NewOrderPage() {
     saveDraft,
     submitOrder,
   } = useOrder({
-    analytics: analyticsLike,
+    analytics: orderAnalytics,
     quickOrderAllItems,
+    catalogItems: mergedItemsMaster,
     selectedCustomer,
     priceList,
     setError,

@@ -4,22 +4,22 @@ function normalizeCode(value) {
   return String(value || '').trim().toUpperCase();
 }
 
-export function buildOrderItems(orderQuantities, analytics, quickOrderAllItems) {
-  if (!analytics) return [];
+function addItemsToLookup(itemLookup, rows) {
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const code = normalizeCode(row?.item_code);
+    if (!code || itemLookup.has(code)) return;
+    itemLookup.set(code, row);
+  });
+}
 
+export function buildOrderItems(orderQuantities, analytics, quickOrderAllItems, catalogItems = []) {
   const itemLookup = new Map();
 
-  (Array.isArray(analytics.items) ? analytics.items : []).forEach((row) => {
-    const code = normalizeCode(row?.item_code);
-    if (!code || itemLookup.has(code)) return;
-    itemLookup.set(code, row);
-  });
+  addItemsToLookup(itemLookup, analytics?.items);
+  addItemsToLookup(itemLookup, quickOrderAllItems);
+  addItemsToLookup(itemLookup, catalogItems);
 
-  (Array.isArray(quickOrderAllItems) ? quickOrderAllItems : []).forEach((row) => {
-    const code = normalizeCode(row?.item_code);
-    if (!code || itemLookup.has(code)) return;
-    itemLookup.set(code, row);
-  });
+  if (itemLookup.size === 0) return [];
 
   return Object.entries(orderQuantities)
     .filter(([, quantity]) => Number(quantity) > 0)

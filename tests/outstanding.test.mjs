@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   combineOutstandingHeaderRows,
   customerCodeCandidates,
+  detectOutstandingPendingAmountColumn,
   findOutstandingHeaderRow,
   findOutstandingCustomerCodesForSalesmen,
   findOutstandingInvoiceDayColumn,
@@ -121,6 +122,27 @@ test("combined outstanding headers preserve parent and child labels", () => {
     "Aging Days",
   ]);
   assert.equal(findOutstandingHeaderRow(rows), 1);
+});
+
+test("pending bills banner rows do not merge into bills receivable detail headers", () => {
+  const rows = [
+    ["Pending Bills", "", "", "", "", "", 46252, "Overdue Above 90 Days"],
+    ["Date", "Ref. No.", "Party's Name", "Sales Person", "City Name", "State Name", "Pending", "Due on", "Overdue", "Invoice Days", "Salesman"],
+    [46053, 2825, "1126C  Five Trend Trading Company", "Osama", "", "Riyadh", 4362.23, 46083, 169, 199, "Osama"],
+  ];
+
+  const header = combineOutstandingHeaderRows(rows, 1);
+  assert.deepEqual(header.slice(0, 8), [
+    "Date",
+    "Ref. No.",
+    "Party's Name",
+    "Sales Person",
+    "City Name",
+    "State Name",
+    "Pending",
+    "Due on",
+  ]);
+  assert.equal(detectOutstandingPendingAmountColumn(header), 6);
 });
 
 test("single-cell report titles are not merged into detail headers", () => {

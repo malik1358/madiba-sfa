@@ -5,6 +5,7 @@ import {
   OUTSTANDING_DATASET_KEY,
   buildOutstandingRow,
   combineOutstandingHeaderRows,
+  detectOutstandingPendingAmountColumn,
   extractLeadingCustomerCodeAndName,
   findOutstandingForCustomer,
   findOutstandingHeaderRow,
@@ -17,6 +18,7 @@ import {
   parseBucketLabelFromHeader,
   prioritizeOutstandingSheets,
   sortBucketLabels,
+  detectOutstandingPendingAmountColumn,
   sanitizeStoredOverdueDays,
   toNumber,
 } from "../../lib/outstanding";
@@ -160,10 +162,6 @@ function detectColumnIndexes(headerRow) {
       indexes.customerName = idx;
     }
 
-    if (indexes.pendingAmount < 0 && isOutstandingAmountHeader(text)) {
-      indexes.pendingAmount = idx;
-    }
-
     if (indexes.date < 0 && (normalized === "date" || normalized.startsWith("date "))) {
       indexes.date = idx;
     }
@@ -200,6 +198,8 @@ function detectColumnIndexes(headerRow) {
     indexes.overdueDays,
     indexes.salesman
   );
+
+  indexes.pendingAmount = detectOutstandingPendingAmountColumn(headerRow);
 
   return indexes;
 }

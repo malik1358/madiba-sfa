@@ -7,6 +7,7 @@ import {
 import {
   deriveActivityStatus,
   extractLunchTimes,
+  filterLogsByKsaEventDate,
   getKsaDateString,
   ksaDayBounds,
   logEventIso,
@@ -93,7 +94,7 @@ function gpsPointFromLog(row) {
 
 function buildUserActivityRow(profile, logs, collections, orders, reportDate) {
   const userId = profile.id;
-  const userLogs = logs.filter((row) => row.user_id === userId);
+  const userLogs = filterLogsByKsaEventDate(logs.filter((row) => row.user_id === userId), reportDate);
   const userCollections = collections.filter((row) => row.created_by === userId);
   const userOrders = orders.filter((row) => row.created_by === userId);
 
@@ -180,12 +181,17 @@ function buildUserActivityRow(profile, logs, collections, orders, reportDate) {
   };
 }
 
-async function loadActivityLogs(admin, startIso, endIso, userIdFilter) {
+async function loadActivityLogs(admin, startIso, endIso, userIdFilter, reportDate) {
+  const widenedStart = new Date(startIso);
+  widenedStart.setUTCDate(widenedStart.getUTCDate() - 1);
+  const widenedEnd = new Date(endIso);
+  widenedEnd.setUTCDate(widenedEnd.getUTCDate() + 1);
+
   let query = admin
     .from("daily_activity_logs")
     .select("id,user_id,entry_type,note,created_at")
-    .gte("created_at", startIso)
-    .lte("created_at", endIso)
+    .gte("created_at", widenedStart.toISOString())
+    .lte("created_at", widenedEnd.toISOString())
     .order("created_at", { ascending: true });
 
   if (userIdFilter) query = query.eq("user_id", userIdFilter);
@@ -196,7 +202,7 @@ async function loadActivityLogs(admin, startIso, endIso, userIdFilter) {
     throw error;
   }
 
-  return data || [];
+  return filterLogsByKsaEventDate(data || [], reportDate);
 }
 
 async function loadCollectionVisits(admin, startIso, endIso, userIdFilter) {
@@ -286,7 +292,7 @@ export async function GET(request) {
     const { startIso, endIso } = ksaDayBounds(date);
 
     const [logs, collections, orders, profiles] = await Promise.all([
-      loadActivityLogs(admin, startIso, endIso, userIdFilter || null),
+      loadActivityLogs(admin, startIso, endIso, userIdFilter || null, date),
       loadCollectionVisits(admin, startIso, endIso, userIdFilter || null),
       loadSalesOrders(admin, startIso, endIso, userIdFilter || null),
       loadFieldProfiles(admin, userIdFilter || null),

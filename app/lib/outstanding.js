@@ -185,7 +185,30 @@ export function isOutstandingCustomerHeader(value) {
 
 export function isOutstandingAmountHeader(value) {
   const header = normalizeOutstandingHeader(value);
-  return header.includes("pending") || header.startsWith("pend") || header.includes("open balance") || header === "balance" || header.includes("outstanding balance") || header.includes("outstanding amount") || header.includes("amount due");
+  if (!header) return false;
+  if (header.includes("pending bills")) return false;
+  if (header.includes(" date")) return false;
+  if (header === "pending" || header === "pend") return true;
+  return header.startsWith("pending amount")
+    || header.startsWith("pend ")
+    || header.includes("open balance")
+    || header === "balance"
+    || header.includes("outstanding balance")
+    || header.includes("outstanding amount")
+    || header.includes("amount due");
+}
+
+export function detectOutstandingPendingAmountColumn(headerRow) {
+  const exactIdx = (headerRow || []).findIndex((cell) => {
+    const normalized = normalizeOutstandingHeader(cell);
+    return normalized === "pending"
+      || normalized === "pending amount"
+      || normalized === "open balance"
+      || normalized === "balance";
+  });
+  if (exactIdx >= 0) return exactIdx;
+
+  return (headerRow || []).findIndex((cell) => isOutstandingAmountHeader(cell));
 }
 
 export function isOutstandingAgeHeader(value) {
@@ -216,6 +239,13 @@ export function combineOutstandingHeaderRows(rows, rowIndex) {
   const previous = rowIndex > 0 && Array.isArray(rows?.[rowIndex - 1]) ? rows[rowIndex - 1] : [];
   const previousValues = previous.filter((value) => String(value || "").trim());
   if (previousValues.length <= 1) return current;
+
+  // Report banner rows like "Pending Bills" must not merge into detail column headers.
+  const bannerText = normalizeOutstandingHeader(String(previous[0] || ""));
+  if (bannerText.includes("pending bills") && !isOutstandingCustomerHeader(previous[0])) {
+    return current;
+  }
+
   const width = Math.max(current.length, previous.length);
 
   return Array.from({ length: width }, (_, columnIndex) => {

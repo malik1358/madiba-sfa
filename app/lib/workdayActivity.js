@@ -91,7 +91,34 @@ export function ksaMidnightEndIso(dateString) {
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
+  // 23:59:59.999 KSA = 20:59:59.999 UTC on the same calendar date.
   return new Date(Date.UTC(year, month - 1, day, 20, 59, 59, 999)).toISOString();
+}
+
+export function ksaEventDate(row) {
+  const ts = logEventTimestamp(row) || Date.parse(String(row?.created_at || ""));
+  if (!Number.isFinite(ts) || ts <= 0) return "";
+  return getKsaDateString(new Date(ts));
+}
+
+export function filterLogsByKsaEventDate(logs, reportDate) {
+  const target = String(reportDate || "").trim();
+  if (!target) return logs || [];
+  return (logs || []).filter((row) => ksaEventDate(row) === target);
+}
+
+export function formatKsaDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("en-GB", {
+    timeZone: KSA_TIMEZONE,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export function logEventTimestamp(row) {
@@ -241,7 +268,12 @@ export async function autoCloseForgottenWorkdays(supabase, userId) {
 
   for (const day of morningDays) {
     if (closedDays.has(day)) continue;
-    if (day >= todayKsa) continue;
+    if (day > todayKsa) continue;
+
+    const { hour, minute } = getKsaDateTimeParts();
+    const isPastDay = day < todayKsa;
+    const isTodayAfterCutoff = day === todayKsa && hour === 23 && minute >= 59;
+    if (!isPastDay && !isTodayAfterCutoff) continue;
 
     const capturedAt = ksaMidnightEndIso(day);
     if (!capturedAt) continue;
@@ -249,10 +281,11 @@ export async function autoCloseForgottenWorkdays(supabase, userId) {
     const payload = {
       user_id: userId,
       entry_type: "END_OF_DAY",
+      created_at: capturedAt,
       note: JSON.stringify({
         action: "END_OF_DAY",
         autoClosed: true,
-        reason: "Forgotten end of day auto-closed at midnight KSA",
+        reason: "Forgotten end of day auto-closed at 11:59 PM KSA",
         captured_at: capturedAt,
       }),
     };

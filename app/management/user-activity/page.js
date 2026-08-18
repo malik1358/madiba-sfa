@@ -9,7 +9,7 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
-import { getKsaDateString } from "../../lib/workdayActivity";
+import { formatKsaDateTime, getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 
 const TEXT = {
@@ -64,14 +64,7 @@ function formatNumber(value, digits = 2) {
 }
 
 function formatDateTime(value) {
-  if (!value) return "-";
-  return new Date(value).toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatKsaDateTime(value);
 }
 
 function activityRowClass(status) {

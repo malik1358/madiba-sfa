@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  calculateWorkingHoursMinutes,
   deriveActivityStatus,
   extractLunchTimes,
   filterLogsByKsaEventDate,
   formatKsaDateTime,
+  formatWorkingHours,
   getKsaDateString,
   isOnLunchBreak,
   ksaDayBounds,
@@ -171,4 +173,45 @@ test("shouldWarnInactivity ignores lunch break and ended workdays", () => {
     }),
     false,
   );
+});
+
+test("calculateWorkingHoursMinutes sums login to lunch out and lunch in to logout", () => {
+  const minutes = calculateWorkingHoursMinutes({
+    loginAt: "2026-08-18T03:00:00.000Z",
+    lunchOutAt: "2026-08-18T09:00:00.000Z",
+    lunchInAt: "2026-08-18T09:45:00.000Z",
+    logoutAt: "2026-08-18T13:00:00.000Z",
+  });
+
+  assert.equal(minutes, 555);
+  assert.equal(formatWorkingHours(minutes), "9h 15m");
+});
+
+test("calculateWorkingHoursMinutes uses openEndedAt when logout is missing", () => {
+  const minutes = calculateWorkingHoursMinutes({
+    loginAt: "2026-08-18T03:00:00.000Z",
+    lunchOutAt: "2026-08-18T09:00:00.000Z",
+    lunchInAt: "2026-08-18T09:45:00.000Z",
+    logoutAt: null,
+    openEndedAt: "2026-08-18T12:00:00.000Z",
+  });
+
+  assert.equal(minutes, 495);
+});
+
+test("calculateWorkingHoursMinutes falls back to login to logout without lunch", () => {
+  const minutes = calculateWorkingHoursMinutes({
+    loginAt: "2026-08-18T03:00:00.000Z",
+    lunchOutAt: null,
+    lunchInAt: null,
+    logoutAt: "2026-08-18T13:00:00.000Z",
+  });
+
+  assert.equal(minutes, 600);
+  assert.equal(formatWorkingHours(minutes), "10h");
+});
+
+test("formatWorkingHours returns dash when no minutes", () => {
+  assert.equal(formatWorkingHours(null), "-");
+  assert.equal(formatWorkingHours(0), "-");
 });

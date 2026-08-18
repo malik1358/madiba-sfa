@@ -5,9 +5,11 @@ import {
   summarizeRouteDistanceKm,
 } from "../../lib/geo.js";
 import {
+  calculateWorkingHoursMinutes,
   deriveActivityStatus,
   extractLunchTimes,
   filterLogsByKsaEventDate,
+  formatWorkingHours,
   getKsaDateString,
   ksaDayBounds,
   logEventIso,
@@ -92,7 +94,7 @@ function gpsPointFromLog(row) {
   };
 }
 
-function buildUserActivityRow(profile, logs, collections, orders, reportDate) {
+function buildUserActivityRow(profile, logs, collections, orders, reportDate, options = {}) {
   const userId = profile.id;
   const userLogs = filterLogsByKsaEventDate(logs.filter((row) => row.user_id === userId), reportDate);
   const userCollections = collections.filter((row) => row.created_by === userId);
@@ -156,6 +158,14 @@ function buildUserActivityRow(profile, logs, collections, orders, reportDate) {
     || userOrders.length > 0
     || Boolean(loginAt);
 
+  const workingHoursMinutes = calculateWorkingHoursMinutes({
+    loginAt,
+    lunchOutAt,
+    lunchInAt,
+    logoutAt,
+    openEndedAt: !logoutAt && options.isToday ? new Date().toISOString() : null,
+  });
+
   return {
     userId,
     userName: formatCollectorDisplayName(profile),
@@ -167,6 +177,8 @@ function buildUserActivityRow(profile, logs, collections, orders, reportDate) {
     logoutAutoClosed: autoLogoutLog,
     lunchOutAt,
     lunchInAt,
+    workingHoursMinutes,
+    workingHoursLabel: formatWorkingHours(workingHoursMinutes),
     lastActivityAt,
     visitReports,
     collections: userCollections.length,
@@ -298,8 +310,10 @@ export async function GET(request) {
       loadFieldProfiles(admin, userIdFilter || null),
     ]);
 
+    const isToday = date === getKsaDateString();
+
     const users = profiles
-      .map((row) => buildUserActivityRow(row, logs, collections, orders, date))
+      .map((row) => buildUserActivityRow(row, logs, collections, orders, date, { isToday }))
       .sort((left, right) => {
         const rank = {
           not_logged_in: 0,
@@ -328,6 +342,7 @@ export async function GET(request) {
         collections: activeUsers.reduce((sum, row) => sum + row.collections, 0),
         ordersSubmitted: activeUsers.reduce((sum, row) => sum + row.ordersSubmitted, 0),
         routeDistanceKm: activeUsers.reduce((sum, row) => sum + Number(row.routeDistanceKm || 0), 0),
+        workingHoursMinutes: activeUsers.reduce((sum, row) => sum + Number(row.workingHoursMinutes || 0), 0),
         notLoggedIn: users.filter((row) => row.activityStatus === "not_logged_in").length,
         idleNow: users.filter((row) => row.activityStatus === "idle").length,
         activeNow: users.filter((row) => row.activityStatus === "active").length,

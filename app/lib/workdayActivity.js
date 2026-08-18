@@ -121,6 +121,52 @@ export function formatKsaDateTime(value) {
   });
 }
 
+function parseEventTimestamp(value) {
+  const ts = Date.parse(String(value || ""));
+  return Number.isFinite(ts) ? ts : null;
+}
+
+export function calculateWorkingHoursMinutes({
+  loginAt,
+  lunchOutAt,
+  lunchInAt,
+  logoutAt,
+  openEndedAt = null,
+}) {
+  const loginTs = parseEventTimestamp(loginAt);
+  const lunchOutTs = parseEventTimestamp(lunchOutAt);
+  const lunchInTs = parseEventTimestamp(lunchInAt);
+  const logoutTs = parseEventTimestamp(logoutAt);
+  const endTs = logoutTs ?? parseEventTimestamp(openEndedAt);
+
+  let totalMs = 0;
+
+  if (loginTs && lunchOutTs && lunchOutTs > loginTs) {
+    totalMs += lunchOutTs - loginTs;
+  }
+
+  if (lunchInTs && endTs && endTs > lunchInTs) {
+    totalMs += endTs - lunchInTs;
+  }
+
+  if (totalMs === 0 && loginTs && endTs && endTs > loginTs) {
+    totalMs = endTs - loginTs;
+  }
+
+  return totalMs > 0 ? Math.round(totalMs / (60 * 1000)) : null;
+}
+
+export function formatWorkingHours(minutes) {
+  if (minutes === null || minutes === undefined || !Number.isFinite(minutes) || minutes <= 0) {
+    return "-";
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours <= 0) return `${mins}m`;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
 export function logEventTimestamp(row) {
   const parsed = parseNote(row?.note);
   const raw = parsed?.captured_at || parsed?.capturedAt || row?.created_at || row?.saved_at || null;

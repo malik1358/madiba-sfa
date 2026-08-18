@@ -9,7 +9,7 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
-import { formatKsaDateTime, getKsaDateString } from "../../lib/workdayActivity";
+import { formatKsaDateTime, formatWorkingHours, getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 
 const TEXT = {
@@ -29,9 +29,10 @@ const TEXT = {
   totalCollections: { en: "Collections", ar: "التحصيل" },
   totalOrders: { en: "Orders submitted", ar: "الطلبات المرسلة" },
   totalDistance: { en: "Total distance", ar: "إجمالي المسافة" },
+  totalWorkingHours: { en: "Total working hours", ar: "إجمالي ساعات العمل" },
   note: {
-    en: "Login time uses morning attendance when available, otherwise last sign-in or first activity. Distance is straight-line GPS route, not road distance.",
-    ar: "وقت الدخول يعتمد على حضور الصباح عند توفره، وإلا آخر تسجيل دخول أو أول نشاط. المسافة خط مستقيم GPS وليست مسافة الطريق.",
+    en: "Login time uses morning attendance when available, otherwise last sign-in or first activity. Working hours = login to lunch out plus lunch in to logout. Distance is straight-line GPS route, not road distance.",
+    ar: "وقت الدخول يعتمد على حضور الصباح عند توفره، وإلا آخر تسجيل دخول أو أول نشاط. ساعات العمل = من تسجيل الدخول إلى خروج الغداء، ومن عودة الغداء إلى تسجيل الخروج. المسافة خط مستقيم GPS وليست مسافة الطريق.",
   },
   colUser: { en: "User", ar: "المستخدم" },
   colRole: { en: "Role", ar: "الدور" },
@@ -47,6 +48,7 @@ const TEXT = {
   colGpsPings: { en: "GPS pings", ar: "نبضات GPS" },
   colLunchOut: { en: "Lunch out", ar: "خروج الغداء" },
   colLunchIn: { en: "Lunch in", ar: "عودة الغداء" },
+  colWorkingHours: { en: "Working hours", ar: "ساعات العمل" },
   legendTitle: { en: "Status (today, working hours)", ar: "الحالة (اليوم، ساعات العمل)" },
   legendRed: { en: "Red — not logged in today", ar: "أحمر — لم يسجل الدخول اليوم" },
   legendOrange: { en: "Orange — no transaction in last 30 min", ar: "برتقالي — لا معاملات خلال آخر 30 دقيقة" },
@@ -270,6 +272,10 @@ export default function UserActivityPage() {
                   <span>{t("totalDistance")}</span>
                   <strong>{formatNumber(report.totals?.routeDistanceKm)} km</strong>
                 </section>
+                <section className="moduleMetricCard">
+                  <span>{t("totalWorkingHours")}</span>
+                  <strong>{formatWorkingHours(report.totals?.workingHoursMinutes)}</strong>
+                </section>
               </div>
 
               {report.isToday && (
@@ -292,6 +298,7 @@ export default function UserActivityPage() {
                         <th>{t("colLogout")}</th>
                         <th>{t("colLunchOut")}</th>
                         <th>{t("colLunchIn")}</th>
+                        <th>{t("colWorkingHours")}</th>
                         <th>{t("colLastActivity")}</th>
                         <th>{t("colVisits")}</th>
                         <th>{t("colCollections")}</th>
@@ -327,6 +334,7 @@ export default function UserActivityPage() {
                           </td>
                           <td>{formatDateTime(row.lunchOutAt)}</td>
                           <td>{formatDateTime(row.lunchInAt)}</td>
+                          <td>{row.workingHoursLabel || formatWorkingHours(row.workingHoursMinutes)}</td>
                           <td>{formatDateTime(row.lastActivityAt)}</td>
                           <td>{row.visitReports || 0}</td>
                           <td>{row.collections || 0}</td>
@@ -339,7 +347,7 @@ export default function UserActivityPage() {
                       ))}
                       {(report.users || []).length === 0 && (
                         <tr>
-                          <td colSpan={14}>{t("noEntries")}</td>
+                          <td colSpan={15}>{t("noEntries")}</td>
                         </tr>
                       )}
                     </tbody>

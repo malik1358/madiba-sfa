@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  applyReverseGeocoding,
   computeSpeedKmh,
+  coordinateCacheKey,
   enrichVisitsWithDistances,
   extractAreaFromActivityNote,
   extractStreetFromActivityNote,
@@ -11,6 +13,7 @@ import {
   haversineDistanceKm,
   nearestActivityGps,
   parseGpsFromActivityNote,
+  parseReverseGeocodeAddress,
   summarizeRouteDistanceKm,
 } from "../app/lib/geo.js";
 
@@ -126,4 +129,37 @@ test("computeSpeedKmh converts distance and elapsed time", () => {
   );
 
   assert.equal(speed, 10);
+});
+
+test("parseReverseGeocodeAddress maps OpenStreetMap fields", () => {
+  const parsed = parseReverseGeocodeAddress({
+    address: {
+      road: "King Fahd Road",
+      suburb: "Al Olaya",
+    },
+  });
+
+  assert.equal(parsed.street, "King Fahd Road");
+  assert.equal(parsed.area, "Al Olaya");
+});
+
+test("applyReverseGeocoding fills missing area and street from cache", () => {
+  const cache = new Map([
+    ["24.71360,46.67530", { area: "Al Olaya", street: "King Fahd Road" }],
+  ]);
+
+  const enriched = applyReverseGeocoding({
+    hasEntryGps: true,
+    entryLatitude: 24.7136,
+    entryLongitude: 46.6753,
+    area: "",
+    street: "",
+  }, cache);
+
+  assert.equal(enriched.area, "Al Olaya");
+  assert.equal(enriched.street, "King Fahd Road");
+});
+
+test("coordinateCacheKey rounds coordinates for lookup dedupe", () => {
+  assert.equal(coordinateCacheKey(24.713551, 46.675301), "24.71355,46.67530");
 });

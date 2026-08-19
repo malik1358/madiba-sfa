@@ -6,6 +6,9 @@ import {
   isFarFromCustomer,
 } from "../../lib/customerLocation.js";
 import {
+  applyReverseGeocoding,
+  buildReverseGeocodeCache,
+  coordinateCacheKey,
   enrichVisitsWithDistances,
   extractAreaFromActivityNote,
   extractStreetFromActivityNote,
@@ -392,6 +395,17 @@ export async function GET(request) {
       };
     }).sort((left, right) => left.userName.localeCompare(right.userName));
 
+    const geocodeKeys = users
+      .flatMap((entryUser) => entryUser.entries || [])
+      .filter((entry) => entry.hasEntryGps && (!entry.area || !entry.street))
+      .map((entry) => coordinateCacheKey(entry.entryLatitude, entry.entryLongitude))
+      .filter(Boolean);
+    const geocodeCache = await buildReverseGeocodeCache(geocodeKeys);
+    const usersWithGeocoding = users.map((entryUser) => ({
+      ...entryUser,
+      entries: (entryUser.entries || []).map((entry) => applyReverseGeocoding(entry, geocodeCache)),
+    }));
+
     const allDayUserIds = [...new Set([
       ...allCollectionEntries.map((entry) => entry.user_id),
       ...allActivityResult.entries.map((entry) => entry.user_id),
@@ -405,18 +419,18 @@ export async function GET(request) {
       userName: formatCollectorDisplayName(row),
     })).sort((left, right) => left.userName.localeCompare(right.userName));
 
-    const flatEntries = users.flatMap((entryUser) => entryUser.entries || []);
+    const flatEntries = usersWithGeocoding.flatMap((entryUser) => entryUser.entries || []);
 
     return Response.json({
       success: true,
       date,
       thresholdKm: CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM,
       visitCount: flatEntries.length,
-      userCount: users.length,
+      userCount: usersWithGeocoding.length,
       farFromCustomerCount: flatEntries.filter((entry) => entry.isFarFromCustomer).length,
-      totalRouteDistanceKm: users.reduce((sum, entryUser) => sum + Number(entryUser.totalRouteDistanceKm || 0), 0),
+      totalRouteDistanceKm: usersWithGeocoding.reduce((sum, entryUser) => sum + Number(entryUser.totalRouteDistanceKm || 0), 0),
       availableUsers,
-      users,
+      users: usersWithGeocoding,
     });
   } catch (error) {
     console.error("Error building daily visit report:", error);

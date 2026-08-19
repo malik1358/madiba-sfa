@@ -223,6 +223,91 @@ export function computeSpeedKmh(distanceKm, fromSavedAt, toSavedAt) {
   return distanceKm / hours;
 }
 
+export function coordinateCacheKey(latitude, longitude, precision = 5) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
+  return `${lat.toFixed(precision)},${lng.toFixed(precision)}`;
+}
+
+export function parseReverseGeocodeAddress(payload) {
+  const address = payload?.address || {};
+  const street = String(
+    address.road
+    || address.pedestrian
+    || address.residential
+    || payload?.name
+    || "",
+  ).trim();
+  const area = String(
+    address.suburb
+    || address.neighbourhood
+    || address.city_district
+    || address.county
+    || address.quarter
+    || "",
+  ).trim();
+
+  return { area, street };
+}
+
+export async function reverseGeocodeCoordinates(latitude, longitude) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { area: "", street: "" };
+  }
+
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=en&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`;
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "MadibaSFA/1.0 (daily-visit-report)",
+      },
+    });
+    if (!response.ok) return { area: "", street: "" };
+
+    const payload = await response.json().catch(() => ({}));
+    return parseReverseGeocodeAddress(payload);
+  } catch {
+    return { area: "", street: "" };
+  }
+}
+
+export async function buildReverseGeocodeCache(coordinateKeys, options = {}) {
+  const maxLookups = Number(options.maxLookups) > 0 ? Number(options.maxLookups) : 25;
+  const delayMs = Number.isFinite(Number(options.delayMs)) ? Number(options.delayMs) : 1100;
+  const cache = new Map();
+  const uniqueKeys = [...new Set((coordinateKeys || []).filter(Boolean))].slice(0, maxLookups);
+
+  for (const key of uniqueKeys) {
+    if (cache.has(key)) continue;
+    const [lat, lng] = key.split(",").map(Number);
+    cache.set(key, await reverseGeocodeCoordinates(lat, lng));
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  return cache;
+}
+
+export function applyReverseGeocoding(entry, cache) {
+  if (!entry?.hasEntryGps || !cache?.size) return entry;
+
+  const key = coordinateCacheKey(entry.entryLatitude, entry.entryLongitude);
+  const geocoded = cache.get(key);
+  if (!geocoded) return entry;
+
+  return {
+    ...entry,
+    area: entry.area || geocoded.area || "",
+    street: entry.street || geocoded.street || "",
+  };
+}
+
 export function nearestActivityGps(activityPoints, savedAt, windowMs = 10 * 60 * 1000) {
   const savedTs = new Date(savedAt).getTime();
   if (!Number.isFinite(savedTs) || !Array.isArray(activityPoints) || activityPoints.length === 0) {

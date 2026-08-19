@@ -7,12 +7,15 @@ import {
 } from "../../lib/customerLocation.js";
 import {
   enrichVisitsWithDistances,
+  extractAreaFromActivityNote,
+  extractStreetFromActivityNote,
   formatCollectorDisplayName,
+  computeSpeedKmh,
   hasGpsCoordinates,
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
 } from "../../lib/geo.js";
-import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
+import { filterLogsByKsaEventDate, getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -22,7 +25,20 @@ const ACTIVITY_ENTRY_TYPES = [
   "ORDER_DRAFT",
   "ORDER_EDITED",
   "ORDER_SUBMITTED",
+  "GPS_PING",
+  "MORNING_ATTENDANCE",
+  "LUNCH_BREAK_OUT",
+  "LUNCH_BREAK_IN",
+  "END_OF_DAY",
 ];
+
+const WORKDAY_GPS_ENTRY_TYPES = new Set([
+  "GPS_PING",
+  "MORNING_ATTENDANCE",
+  "LUNCH_BREAK_OUT",
+  "LUNCH_BREAK_IN",
+  "END_OF_DAY",
+]);
 
 const TRANSACTION_LABELS = {
   COLLECTION_VISIT: "Collection visit",
@@ -30,6 +46,11 @@ const TRANSACTION_LABELS = {
   ORDER_DRAFT: "Order draft",
   ORDER_EDITED: "Order edited",
   ORDER_SUBMITTED: "Order submitted",
+  MORNING_ATTENDANCE: "Login",
+  END_OF_DAY: "Logout",
+  LUNCH_BREAK_OUT: "Lunch out",
+  LUNCH_BREAK_IN: "Lunch in",
+  GPS_PING: "Idle GPS ping",
 };
 
 function normalizeCode(value) {
@@ -161,13 +182,18 @@ async function loadCollectionVisitEntries(admin, startIso, endIso, userIdFilter)
   }));
 }
 
-async function loadActivityLogEntries(admin, startIso, endIso, userIdFilter) {
+async function loadActivityLogEntries(admin, startIso, endIso, userIdFilter, reportDate) {
+  const widenedStart = new Date(startIso);
+  widenedStart.setUTCDate(widenedStart.getUTCDate() - 1);
+  const widenedEnd = new Date(endIso);
+  widenedEnd.setUTCDate(widenedEnd.getUTCDate() + 1);
+
   let query = admin
     .from("daily_activity_logs")
     .select("id,user_id,entry_type,note,created_at")
     .in("entry_type", ACTIVITY_ENTRY_TYPES)
-    .gte("created_at", startIso)
-    .lte("created_at", endIso)
+    .gte("created_at", widenedStart.toISOString())
+    .lte("created_at", widenedEnd.toISOString())
     .order("created_at", { ascending: true });
 
   if (userIdFilter) query = query.eq("user_id", userIdFilter);
@@ -178,9 +204,10 @@ async function loadActivityLogEntries(admin, startIso, endIso, userIdFilter) {
     throw error;
   }
 
+  const filteredLogs = filterLogsByKsaEventDate(data || [], reportDate);
   const orderIds = [];
 
-  const entries = (data || []).map((row) => {
+  const entries = filteredLogs.map((row) => {
     const parsed = parseActivityNote(row.note) || {};
     const gps = parseGpsFromActivityNote(row.note) || {};
     const customerCode = parsed.customer_code || parsed.customerCode || "";
@@ -190,7 +217,7 @@ async function loadActivityLogEntries(admin, startIso, endIso, userIdFilter) {
     return buildEntryBase({
       id: `activity-${row.id}`,
       userId: row.user_id,
-      savedAt: parsed.captured_at || row.created_at,
+      savedAt: parsed.captured_at || parsed.capturedAt || row.created_at,
       customerCode,
       transactionType: String(row.entry_type || parsed.action || "ACTIVITY").toUpperCase(),
       latitude: gps.latitude,
@@ -198,6 +225,8 @@ async function loadActivityLogEntries(admin, startIso, endIso, userIdFilter) {
       meta: {
         orderId,
         outcome: parsed.outcome || null,
+        activityNote: row.note,
+        autoClosed: Boolean(parsed.autoClosed),
       },
     });
   });
@@ -228,12 +257,18 @@ function enrichEntries(entries, customerMap, profileMap) {
 
   const withRoute = enrichVisitsWithDistances(sorted);
 
-  return withRoute.map((entry) => {
+  return withRoute.map((entry, index) => {
     const customer = customerMap.get(normalizeCode(entry.customer_code)) || {};
     const profile = profileMap.get(entry.user_id) || {};
     const entryLocation = { latitude: entry.latitude, longitude: entry.longitude };
     const distanceKm = distanceFromCustomerKm(entryLocation, customer);
     const farFromCustomer = isFarFromCustomer(entryLocation, customer);
+    const previous = index > 0 ? withRoute[index - 1] : null;
+    const speedKmh = previous
+      ? computeSpeedKmh(entry.distanceFromPreviousKm, previous.saved_at, entry.saved_at)
+      : null;
+    const area = String(customer.area || extractAreaFromActivityNote(entry.meta?.activityNote) || "").trim();
+    const street = extractStreetFromActivityNote(entry.meta?.activityNote);
 
     return {
       id: entry.id,
@@ -242,12 +277,13 @@ function enrichEntries(entries, customerMap, profileMap) {
       userId: entry.user_id,
       userName: formatCollectorDisplayName(profile),
       customerCode: entry.customer_code,
-      customerName: customer.customer_name || entry.customer_code,
+      customerName: customer.customer_name || entry.customer_code || "",
       transactionType: entry.transaction_type,
       transactionLabel: TRANSACTION_LABELS[entry.transaction_type] || entry.transaction_type,
       visitOutcome: entry.meta?.visitOutcome || entry.meta?.outcome || null,
       amountReceived: Number(entry.meta?.amountReceived || 0),
       orderId: entry.meta?.orderId || null,
+      logoutAutoClosed: entry.transaction_type === "END_OF_DAY" && entry.meta?.autoClosed,
       entryLatitude: entry.latitude,
       entryLongitude: entry.longitude,
       customerLatitude: customer.latitude,
@@ -256,6 +292,9 @@ function enrichEntries(entries, customerMap, profileMap) {
       hasCustomerLocation: customerHasSavedLocation(customer),
       distanceFromCustomerKm: distanceKm,
       distanceFromPreviousKm: entry.distanceFromPreviousKm,
+      speedKmh,
+      area,
+      street,
       isFarFromCustomer: farFromCustomer,
       farThresholdKm: CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM,
     };
@@ -293,9 +332,9 @@ export async function GET(request) {
 
     const [collectionEntries, activityResult, allCollectionEntries, allActivityResult] = await Promise.all([
       loadCollectionVisitEntries(admin, startIso, endIso, userIdFilter || null),
-      loadActivityLogEntries(admin, startIso, endIso, userIdFilter || null),
+      loadActivityLogEntries(admin, startIso, endIso, userIdFilter || null, date),
       loadCollectionVisitEntries(admin, startIso, endIso, null),
-      loadActivityLogEntries(admin, startIso, endIso, null),
+      loadActivityLogEntries(admin, startIso, endIso, null, date),
     ]);
 
     const orderMap = await hydrateOrderCustomers(admin, activityResult.orderIds);
@@ -313,7 +352,9 @@ export async function GET(request) {
       };
     });
 
-    const rawEntries = [...collectionEntries, ...activityEntries].filter((entry) => entry.customer_code);
+    const rawEntries = [...collectionEntries, ...activityEntries].filter((entry) => (
+      entry.customer_code || WORKDAY_GPS_ENTRY_TYPES.has(entry.transaction_type)
+    ));
     const userIds = [...new Set(rawEntries.map((entry) => entry.user_id).filter(Boolean))];
     const customerCodes = [...new Set(rawEntries.map((entry) => normalizeCode(entry.customer_code)).filter(Boolean))];
 
@@ -322,7 +363,7 @@ export async function GET(request) {
         ? admin.from("profiles").select("id,salesman_code,salesman_name,role,email").in("id", userIds)
         : Promise.resolve({ data: [], error: null }),
       customerCodes.length
-        ? admin.from("customers").select("customer_code,customer_name,latitude,longitude").in("customer_code", customerCodes)
+        ? admin.from("customers").select("customer_code,customer_name,latitude,longitude,area").in("customer_code", customerCodes)
         : Promise.resolve({ data: [], error: null }),
     ]);
 

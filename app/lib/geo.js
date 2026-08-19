@@ -150,6 +150,79 @@ export function parseGpsFromActivityNote(note) {
   };
 }
 
+function parseActivityNoteObject(note) {
+  if (!note) return null;
+  if (typeof note === "object") return note;
+  try {
+    return JSON.parse(note);
+  } catch {
+    return null;
+  }
+}
+
+export function extractStreetFromActivityNote(note) {
+  const parsed = parseActivityNoteObject(note);
+  if (!parsed) return "";
+
+  const location = parsed?.location || {};
+  const locationAddress = location?.address;
+  const payloadAddress = parsed?.address;
+
+  const candidates = [
+    location?.street_name,
+    parsed?.street_name,
+    location?.street,
+    parsed?.street,
+    typeof locationAddress === "object" ? locationAddress?.road : "",
+    typeof locationAddress === "object" ? locationAddress?.pedestrian : "",
+    typeof locationAddress === "object" ? locationAddress?.residential : "",
+    typeof payloadAddress === "object" ? payloadAddress?.road : "",
+    typeof payloadAddress === "object" ? payloadAddress?.pedestrian : "",
+    typeof payloadAddress === "object" ? payloadAddress?.residential : "",
+    typeof locationAddress === "string" ? locationAddress : "",
+    typeof payloadAddress === "string" ? payloadAddress : "",
+  ];
+
+  return String(candidates.find((value) => String(value || "").trim()) || "").trim();
+}
+
+export function extractAreaFromActivityNote(note) {
+  const parsed = parseActivityNoteObject(note);
+  if (!parsed) return "";
+
+  const location = parsed?.location || {};
+  const locationAddress = location?.address;
+  const payloadAddress = parsed?.address;
+
+  const candidates = [
+    location?.area,
+    parsed?.area,
+    typeof locationAddress === "object" ? locationAddress?.suburb : "",
+    typeof locationAddress === "object" ? locationAddress?.neighbourhood : "",
+    typeof locationAddress === "object" ? locationAddress?.city_district : "",
+    typeof locationAddress === "object" ? locationAddress?.county : "",
+    typeof locationAddress === "object" ? locationAddress?.quarter : "",
+    typeof payloadAddress === "object" ? payloadAddress?.suburb : "",
+    typeof payloadAddress === "object" ? payloadAddress?.neighbourhood : "",
+    typeof payloadAddress === "object" ? payloadAddress?.city_district : "",
+    typeof payloadAddress === "object" ? payloadAddress?.county : "",
+    typeof payloadAddress === "object" ? payloadAddress?.quarter : "",
+  ];
+
+  return String(candidates.find((value) => String(value || "").trim()) || "").trim();
+}
+
+export function computeSpeedKmh(distanceKm, fromSavedAt, toSavedAt) {
+  const fromTs = new Date(fromSavedAt).getTime();
+  const toTs = new Date(toSavedAt).getTime();
+  if (!Number.isFinite(fromTs) || !Number.isFinite(toTs) || toTs <= fromTs) return null;
+  if (distanceKm === null || distanceKm === undefined || !Number.isFinite(distanceKm)) return null;
+
+  const hours = (toTs - fromTs) / (3600 * 1000);
+  if (hours <= 0) return null;
+  return distanceKm / hours;
+}
+
 export function nearestActivityGps(activityPoints, savedAt, windowMs = 10 * 60 * 1000) {
   const savedTs = new Date(savedAt).getTime();
   if (!Number.isFinite(savedTs) || !Array.isArray(activityPoints) || activityPoints.length === 0) {

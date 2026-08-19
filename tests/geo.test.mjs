@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  computeSpeedKmh,
   enrichVisitsWithDistances,
+  extractAreaFromActivityNote,
+  extractStreetFromActivityNote,
   formatCollectorDisplayName,
   GPS_REQUIRED_ERROR,
   haversineDistanceKm,
@@ -93,4 +96,34 @@ test("formatCollectorDisplayName prefers email over generic role name", () => {
 
 test("captureGpsLocation exposes a consistent required GPS error", async () => {
   assert.match(GPS_REQUIRED_ERROR, /GPS is required/i);
+});
+
+test("extractStreetFromActivityNote reads nested address fields", () => {
+  const street = extractStreetFromActivityNote(JSON.stringify({
+    location: {
+      address: { road: "King Fahd Road" },
+    },
+  }));
+
+  assert.equal(street, "King Fahd Road");
+});
+
+test("extractAreaFromActivityNote reads suburb and area fields", () => {
+  const area = extractAreaFromActivityNote(JSON.stringify({
+    location: {
+      address: { suburb: "Al Olaya" },
+    },
+  }));
+
+  assert.equal(area, "Al Olaya");
+});
+
+test("computeSpeedKmh converts distance and elapsed time", () => {
+  const speed = computeSpeedKmh(
+    10,
+    "2026-08-17T08:00:00.000Z",
+    "2026-08-17T09:00:00.000Z",
+  );
+
+  assert.equal(speed, 10);
 });

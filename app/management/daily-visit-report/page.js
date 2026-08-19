@@ -15,8 +15,8 @@ import { getSupabaseClient } from "../../lib/supabase";
 const TEXT = {
   title: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومي" },
   subtitle: {
-    en: "User-wise visits and orders with GPS distance from customer location",
-    ar: "زيارات وطلبات حسب المستخدم مع مسافة GPS من موقع العميل",
+    en: "User timeline with login, lunch, idle GPS pings, visits, orders, and movement",
+    ar: "الجدول الزمني للمستخدم مع تسجيل الدخول والغداء ونبضات GPS والزيارات والطلبات والحركة",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading daily visit report...", ar: "جاري تحميل تقرير الزيارات اليومي..." },
@@ -39,6 +39,9 @@ const TEXT = {
   transaction: { en: "Transaction", ar: "المعاملة" },
   distanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
   distanceFromPrevious: { en: "Distance from previous", ar: "المسافة من السابق" },
+  area: { en: "Area", ar: "المنطقة" },
+  street: { en: "Street", ar: "الشارع" },
+  speed: { en: "Speed (km/h)", ar: "السرعة (كم/س)" },
   map: { en: "Map", ar: "الخريطة" },
   openMap: { en: "Open", ar: "فتح" },
   noCustomerLocation: { en: "No customer location", ar: "لا موقع للعميل" },
@@ -46,6 +49,7 @@ const TEXT = {
   farBadge: { en: "Far", ar: "بعيد" },
   entries: { en: "entries", ar: "إدخالات" },
   routeTotal: { en: "Route total", ar: "إجمالي المسار" },
+  autoClosed: { en: "Auto-closed", ar: "إغلاق تلقائي" },
 };
 
 function formatNumber(value, digits = 2) {
@@ -272,6 +276,9 @@ export default function DailyVisitReportPage() {
                           <th>{t("transaction")}</th>
                           <th>{t("distanceFromCustomer")}</th>
                           <th>{t("distanceFromPrevious")}</th>
+                          <th>{t("area")}</th>
+                          <th>{t("street")}</th>
+                          <th>{t("speed")}</th>
                           <th>{t("map")}</th>
                         </tr>
                       </thead>
@@ -282,11 +289,20 @@ export default function DailyVisitReportPage() {
                             <td>{formatTime(entry.savedAt)}</td>
                             <td>{entry.userName || entryUser.userName}</td>
                             <td>
-                              {entry.customerName}
-                              <div className="moduleCode">{entry.customerCode}</div>
+                              {entry.customerName ? (
+                                <>
+                                  {entry.customerName}
+                                  {entry.customerCode ? (
+                                    <div className="moduleCode">{entry.customerCode}</div>
+                                  ) : null}
+                                </>
+                              ) : "-"}
                             </td>
                             <td>
                               {entry.transactionLabel}
+                              {entry.logoutAutoClosed ? (
+                                <div className="moduleCode">{t("autoClosed")}</div>
+                              ) : null}
                               {entry.isFarFromCustomer ? (
                                 <div className="moduleCode">{t("farBadge")}</div>
                               ) : null}
@@ -302,6 +318,13 @@ export default function DailyVisitReportPage() {
                               {entry.distanceFromPreviousKm === null
                                 ? "-"
                                 : `${formatNumber(entry.distanceFromPreviousKm)} km`}
+                            </td>
+                            <td>{entry.area || "-"}</td>
+                            <td>{entry.street || "-"}</td>
+                            <td>
+                              {entry.speedKmh === null || entry.speedKmh === undefined
+                                ? "-"
+                                : `${formatNumber(entry.speedKmh, 1)} km/h`}
                             </td>
                             <td>
                               {entry.hasEntryGps ? (
@@ -319,7 +342,7 @@ export default function DailyVisitReportPage() {
                         ))}
                         {(entryUser.entries || []).length === 0 && (
                           <tr>
-                            <td colSpan={8}>{t("noEntries")}</td>
+                            <td colSpan={11}>{t("noEntries")}</td>
                           </tr>
                         )}
                       </tbody>

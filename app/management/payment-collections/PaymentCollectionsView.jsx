@@ -58,6 +58,9 @@ const TEXT = {
     ar: "عملاء لديهم موعد زيارة تحصيل قادم من آخر زيارة. أقرب المواعيد تظهر أولاً.",
   },
   scheduledRevisitDate: { en: "Revisit Date", ar: "موعد الزيارة" },
+  lastVisitDate: { en: "Last Visit", ar: "آخر زيارة" },
+  visitRemark: { en: "Visit Remark", ar: "ملاحظة الزيارة" },
+  noVisitRemark: { en: "No remark saved", ar: "لا توجد ملاحظة محفوظة" },
   noScheduledRevisits: { en: "No upcoming collection revisits scheduled.", ar: "لا توجد زيارات تحصيل مجدولة قادمة." },
   notDueAmount: { en: "Pending Amount", ar: "المبلغ المعلق" },
   notDueInvoices: { en: "Pending Invoices", ar: "الفواتير المعلقة" },
@@ -347,6 +350,28 @@ function formatDateOnly(value) {
   const date = new Date(input);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString("en-GB");
+}
+
+function formatLastVisitDate(row) {
+  const savedAt = row?.latest_collection?.saved_at;
+  if (!savedAt) return "-";
+  return formatDateOnly(savedAt) || new Date(savedAt).toLocaleDateString("en-GB");
+}
+
+function formatVisitRemarkParts(row) {
+  const visit = row?.latest_collection;
+  const arabic = String(visit?.remark_arabic || "").trim();
+  const english = String(visit?.remark_english || "").trim();
+
+  if (!arabic && !english) {
+    return { arabic: "", english: "" };
+  }
+
+  if (arabic && english && english !== arabic) {
+    return { arabic, english };
+  }
+
+  return { arabic: arabic || english, english: "" };
 }
 
 function determinePaymentStatus(visitOutcome, amountReceived, totalDueAmount) {
@@ -996,6 +1021,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
                         <th>{t("customerCode")}</th>
                         <th>{t("customer")}</th>
                         <th>{t("salesman")}</th>
+                        <th>{t("lastVisitDate")}</th>
+                        <th>{t("visitRemark")}</th>
                         <th>{t("amount")}</th>
                         <th>{t("actions")}</th>
                       </tr>
@@ -1004,7 +1031,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                       {scheduledRevisitGroups.map((group) => (
                         <Fragment key={`revisit-group-${group.dateKey}`}>
                           <tr className="moduleCollectorSectionRow">
-                            <td colSpan={5}>
+                            <td colSpan={7}>
                               <strong>{group.dateLabel}</strong>
                               <span className="moduleHint" style={{ marginInlineStart: "8px" }}>
                                 {group.rows.length}
@@ -1013,11 +1040,25 @@ export default function PaymentCollectionsView({ view = "due" }) {
                           </tr>
                           {group.rows.map((row) => {
                             const key = rowKey(row);
+                            const remarkParts = formatVisitRemarkParts(row);
                             return (
                               <tr key={`revisit-${key}`}>
                                 <td data-label={t("customerCode")}>{row.customer_code}</td>
                                 <td data-label={t("customer")}>{row.customer_name}</td>
                                 <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>
+                                <td data-label={t("lastVisitDate")}>{formatLastVisitDate(row)}</td>
+                                <td data-label={t("visitRemark")}>
+                                  {remarkParts.arabic || remarkParts.english ? (
+                                    <>
+                                      <div>{remarkParts.arabic}</div>
+                                      {remarkParts.english ? (
+                                        <div className="moduleCode">{remarkParts.english}</div>
+                                      ) : null}
+                                    </>
+                                  ) : (
+                                    t("noVisitRemark")
+                                  )}
+                                </td>
                                 <td data-label={t("amount")}>{formatMoney(row.total_due_amount || row.total_not_due_amount)}</td>
                                 <td data-label={t("actions")}>
                                   <div className="moduleInlineStack moduleActionStack">

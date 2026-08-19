@@ -16,15 +16,19 @@ import { getSupabaseClient } from "../../lib/supabase";
 const TEXT = {
   title: { en: "Collection Route Report", ar: "تقرير مسار التحصيل" },
   subtitle: {
-    en: "Payment collection visits only (from Collections screen). For salesman visit reports and orders, use Daily Visit Report.",
-    ar: "زيارات تحصيل المدفوعات فقط (من شاشة التحصيل). لتقارير زيارات المندوبين والطلبات، استخدم تقرير الزيارات اليومي.",
+    en: "Payment collection visits from the Collections screen, including both collectors and salesmen.",
+    ar: "زيارات تحصيل المدفوعات من شاشة التحصيل، تشمل المحصلين والمندوبين.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   collections: { en: "Collections", ar: "التحصيلات" },
   loading: { en: "Loading collection route report...", ar: "جاري تحميل تقرير مسار التحصيل..." },
   date: { en: "Report date", ar: "تاريخ التقرير" },
-  collector: { en: "Collector", ar: "المحصل" },
-  allCollectors: { en: "All collectors", ar: "كل المحصلين" },
+  collector: { en: "Collector / Salesman", ar: "المحصل / المندوب" },
+  allCollectors: { en: "All collectors and salesmen", ar: "كل المحصلين والمندوبين" },
+  userRole: { en: "User type", ar: "نوع المستخدم" },
+  allUserRoles: { en: "All user types", ar: "كل أنواع المستخدمين" },
+  collectorsOnly: { en: "Collectors only", ar: "المحصلون فقط" },
+  salesmenOnly: { en: "Salesmen only", ar: "المندوبون فقط" },
   refresh: { en: "Refresh", ar: "تحديث" },
   noVisits: {
     en: "No payment collection visits found for this date. Salesman visits and orders appear on Daily Visit Report.",
@@ -40,7 +44,7 @@ const TEXT = {
   },
   totalVisits: { en: "Total visits", ar: "إجمالي الزيارات" },
   totalDistance: { en: "Total route distance", ar: "إجمالي مسافة المسار" },
-  collectorsActive: { en: "Collectors active", ar: "المحصلون النشطون" },
+  collectorsActive: { en: "Users active", ar: "المستخدمون النشطون" },
   userName: { en: "User name", ar: "اسم المستخدم" },
   gpsEstimated: { en: "Estimated", ar: "تقديري" },
   gpsWhyNone: {
@@ -87,6 +91,7 @@ export default function CollectionReportPage() {
   const [error, setError] = useState("");
   const [reportDate, setReportDate] = useState(() => getKsaDateString());
   const [collectorId, setCollectorId] = useState("");
+  const [userRole, setUserRole] = useState("");
   const [report, setReport] = useState(null);
 
   const collectorOptions = useMemo(
@@ -124,6 +129,7 @@ export default function CollectionReportPage() {
 
         const params = new URLSearchParams({ date: reportDate });
         if (collectorId) params.set("collectorId", collectorId);
+        if (userRole) params.set("userRole", userRole);
 
         const { response, payload } = await fetchJsonWithTimeout(
           `/api/payment-collections/report?${params.toString()}`,
@@ -163,7 +169,7 @@ export default function CollectionReportPage() {
       cancelled = true;
       stopSafetyTimer();
     };
-  }, [reportDate, collectorId]);
+  }, [reportDate, collectorId, userRole]);
 
   if (!supabaseClient) {
     return (
@@ -215,6 +221,21 @@ export default function CollectionReportPage() {
                     setReportDate(event.target.value);
                   }}
                 />
+              </label>
+              <label className="moduleField">
+                {t("userRole")}
+                <select
+                  className="moduleInput"
+                  value={userRole}
+                  onChange={(event) => {
+                    setCollectorId("");
+                    setUserRole(event.target.value);
+                  }}
+                >
+                  <option value="">{t("allUserRoles")}</option>
+                  <option value="collector">{t("collectorsOnly")}</option>
+                  <option value="salesman">{t("salesmenOnly")}</option>
+                </select>
               </label>
               <label className="moduleField">
                 {t("collector")}
@@ -269,7 +290,10 @@ export default function CollectionReportPage() {
               {(report.collectors || []).map((collector) => (
                 <section key={collector.collectorId} className="moduleSection">
                   <div className="moduleSectionHeader">
-                    <h2>{collector.collectorName}</h2>
+                    <h2>
+                      {collector.collectorName}
+                      {collector.userRoleLabel ? ` · ${collector.userRoleLabel}` : ""}
+                    </h2>
                     <span>
                       {collector.visitCount} {t("visits")}
                       {" · "}

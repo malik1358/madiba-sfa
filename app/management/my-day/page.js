@@ -4,6 +4,12 @@ import Link from "next/link";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
+import {
+  fetchVisibleCustomersCached,
+  invalidateVisibleCustomersCache,
+  readMyDaySnapshot,
+  writeMyDaySnapshot,
+} from "../../lib/mobileDataCache";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
@@ -21,6 +27,7 @@ const PAGE_TEXT = {
   subtitle: { en: "Daily planning and visit execution", ar: "تخطيط اليوم وتنفيذ الزيارات" },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading daily planner...", ar: "جاري تحميل خطة اليوم..." },
+  cacheRefreshing: { en: "Showing saved data. Refreshing in background...", ar: "عرض البيانات المحفوظة. جاري التحديث في الخلفية..." },
   attendance: { en: "Attendance", ar: "الحضور" },
   morningAttendance: { en: "Morning Attendance", ar: "حضور الصباح" },
   lunchBreakOut: { en: "Lunch Break Out", ar: "خروج استراحة الغداء" },
@@ -171,29 +178,19 @@ function getLogPreview(row) {
   }
 }
 
-async function fetchVisibleCustomers(token) {
-  const response = await fetch("/api/customers/visible?includeRecentSales=1&includeOutstanding=1", {
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+async function loadVisibleCustomers(accessToken, scope, options = {}) {
+  const result = await fetchVisibleCustomersCached(accessToken, scope, {
+    enriched: true,
+    ...options,
   });
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.success) {
-    throw new Error(payload.error || "Unable to load visible customers.");
-  }
-
-  return {
-    customers: payload.customers || [],
-    inactiveCustomers: payload.inactiveCustomers || [],
-  };
+  return result.data;
 }
 
 export default function MyDayPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, PAGE_TEXT);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [warnings, setWarnings] = useState([]);
@@ -296,6 +293,17 @@ export default function MyDayPage() {
           throw new Error("Please login again.");
         }
 
+        const cachedSnapshot = await readMyDaySnapshot(session.user.id, today);
+        if (cachedSnapshot) {
+          setSummary(cachedSnapshot.summary || summary);
+          setRouteRows(cachedSnapshot.routeRows || []);
+          setVisitStatusRows(cachedSnapshot.visitStatusRows || []);
+          setInactiveCustomers(cachedSnapshot.inactiveCustomers || []);
+          setProspectScheduleRows(cachedSnapshot.prospectScheduleRows || []);
+          setLoading(false);
+          setRefreshing(true);
+        }
+
         const scope = await fetchSalesScope();
         setAccessScope(scope);
 
@@ -375,7 +383,7 @@ export default function MyDayPage() {
           pendingOrdersQuery,
           submittedOrdersQuery,
           todayOrdersQuery,
-          fetchVisibleCustomers(session.access_token),
+          fetchVisibleCustomersCached(session.access_token, scope, { enriched: true }).then((result) => result.data),
           routeQuery,
         ]);
 
@@ -421,6 +429,8 @@ export default function MyDayPage() {
           }
         }
 
+        let loadedProspectScheduleRows = [];
+
         let newProspectsCount = 0;
         if (prospectsCheck.available) {
           let prospectsQuery = supabase
@@ -450,9 +460,11 @@ export default function MyDayPage() {
 
           const { data: scheduledProspectsData, error: scheduledProspectsError } = await scheduledProspectsQuery;
           if (!scheduledProspectsError) {
-            setProspectScheduleRows(buildProspectScheduleRows(scheduledProspectsData));
+            loadedProspectScheduleRows = buildProspectScheduleRows(scheduledProspectsData);
+            setProspectScheduleRows(loadedProspectScheduleRows);
           }
         } else {
+          loadedProspectScheduleRows = [];
           setProspectScheduleRows([]);
         }
 
@@ -649,9 +661,58 @@ export default function MyDayPage() {
             inactive_marked_at: row.inactive_marked_at || null,
           }))
         );
+
+        await writeMyDaySnapshot(session.user.id, today, {
+          summary: {
+            visitsToday: todayCustomers.size,
+            followUps: followUpRows.length,
+            pendingOrders: visiblePendingOrders.length,
+            overdueVisits: overdueRows.length,
+            newCustomersAssigned: newProspectsCount,
+            completedVisits: productiveCustomers.size,
+          },
+          routeRows: (routeRes.data || []).filter(isVisitStatusCustomer),
+          visitStatusRows: scopedCustomerRows
+            .filter(isVisitStatusCustomer)
+            .map((row) => ({
+              customer_code: row.customer_code,
+              customer_name: row.customer_name,
+              city: row.city,
+              area: row.area,
+              salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
+              salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
+              last_invoice_date: row.latest_transaction_date || null,
+              last_visit_date: latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
+              days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
+              days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
+              next_visit_at: nextVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
+              recent_sales_value: Number(row.recent_sales_value || 0),
+              outstanding_0_30: Number(row.outstanding_0_30 || 0),
+              outstanding_30_60: Number(row.outstanding_30_60 || 0),
+              outstanding_above_60: Number(row.outstanding_above_60 || 0),
+              status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
+                ? "Visited"
+                : daysBetween(row.latest_transaction_date) > 21
+                ? "Overdue"
+                : "Planned",
+            })),
+          inactiveCustomers: inactiveCustomerRows.map((row) => ({
+            customer_code: row.customer_code,
+            customer_name: row.customer_name,
+            city: row.city,
+            area: row.area,
+            salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
+            salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
+            last_invoice_date: row.latest_transaction_date || null,
+            days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
+            inactive_marked_at: row.inactive_marked_at || null,
+          })),
+          prospectScheduleRows: loadedProspectScheduleRows,
+        });
       } catch (err) {
         setError(err.message || "Unable to load My Day planner.");
       } finally {
+        setRefreshing(false);
         setLoading(false);
       }
     }
@@ -1078,7 +1139,11 @@ export default function MyDayPage() {
         throw new Error(result?.error || "Unable to mark customer active.");
       }
 
-      const visibilityPayload = await fetchVisibleCustomers(session.access_token);
+      if (accessScope) {
+        await invalidateVisibleCustomersCache(accessScope);
+      }
+
+      const visibilityPayload = await loadVisibleCustomers(session.access_token, accessScope || await fetchSalesScope());
       const activatedRow = (visibilityPayload.customers || []).find(
         (entry) => String(entry.customer_code || "").trim().toUpperCase() === normalizedCode
       );
@@ -1358,6 +1423,7 @@ export default function MyDayPage() {
         </div>
 
         {error && <div className="moduleError">{error}</div>}
+        {refreshing && <div className="moduleHint">{t("cacheRefreshing")}</div>}
         {message && <div className="moduleSuccess">{message}</div>}
         {warnings.map((warning) => (
           <div key={warning} className="moduleWarning">{warning}</div>
@@ -1444,8 +1510,8 @@ export default function MyDayPage() {
                 <h2>{day.label}</h2>
                 <span>{day.rows.length} {t("plannedVisitsCount")}</span>
               </div>
-              <div className="moduleTableWrap">
-                <table className="moduleTable">
+              <div className="moduleTableWrap moduleScheduleTableWrap">
+                <table className="moduleTable moduleScheduleTable">
                   <thead>
                     <tr>
                       <th>{t("calendarTime")}</th>
@@ -1457,10 +1523,10 @@ export default function MyDayPage() {
                   <tbody>
                     {day.rows.map((row) => (
                       <tr key={`planned-${day.dateKey}-${row.customer_code}`}>
-                        <td>{row.is_prospect ? "-" : row.next_visit_at ? new Date(row.next_visit_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "-"}</td>
-                        <td>{row.customer_name || row.customer_code}</td>
-                        <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
-                        <td>
+                        <td data-label={t("calendarTime")}>{row.is_prospect ? "-" : row.next_visit_at ? new Date(row.next_visit_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "-"}</td>
+                        <td data-label={t("customer")} className="moduleScheduleCellPrimary">{row.customer_name || row.customer_code}</td>
+                        <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
+                        <td data-label={t("actions")} className="moduleScheduleCellActions">
                           <div className="moduleInlineStack moduleActionStack">
                             {row.is_prospect ? (
                               <Link
@@ -1502,8 +1568,8 @@ export default function MyDayPage() {
                 <h2>{t("unscheduledVisits")}</h2>
                 <span>{visitCalendar.unscheduled.length}</span>
               </div>
-              <div className="moduleTableWrap">
-                <table className="moduleTable">
+              <div className="moduleTableWrap moduleScheduleTableWrap">
+                <table className="moduleTable moduleScheduleTable">
                   <thead>
                     <tr>
                       <th>{t("customer")}</th>
@@ -1514,9 +1580,9 @@ export default function MyDayPage() {
                   <tbody>
                     {visitCalendar.unscheduled.map((row) => (
                       <tr key={`unscheduled-${row.customer_code}`}>
-                        <td>{row.customer_name || row.customer_code}</td>
-                        <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
-                        <td>
+                        <td data-label={t("customer")} className="moduleScheduleCellPrimary">{row.customer_name || row.customer_code}</td>
+                        <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
+                        <td data-label={t("actions")} className="moduleScheduleCellActions">
                           <div className="moduleInlineStack moduleActionStack">
                             <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => openVisitReport(row)}>
                               {activeVisitCustomerCode === row.customer_code ? t("closeReport") : t("visitWithoutOrder")}

@@ -9,6 +9,10 @@ import {
   extractAreaFromActivityNote,
   extractStreetFromActivityNote,
   formatCollectorDisplayName,
+  formatCollectionUserDisplayName,
+  formatCollectionUserRoleLabel,
+  isCollectionReportCollector,
+  isCollectionReportSalesman,
   GPS_REQUIRED_ERROR,
   haversineDistanceKm,
   nearestActivityGps,
@@ -95,6 +99,20 @@ test("formatCollectorDisplayName prefers email over generic role name", () => {
     formatCollectorDisplayName({ email: "collector@example.com", salesman_name: "collector", role: "collector" }),
     "collector@example.com",
   );
+});
+
+test("formatCollectionUserDisplayName can include role label", () => {
+  assert.equal(
+    formatCollectionUserDisplayName({ salesman_name: "PARVEZ", salesman_code: "SM001", role: "salesman" }, { includeRole: true }),
+    "PARVEZ (SM001) · Salesman",
+  );
+});
+
+test("collection report role helpers distinguish salesmen and collectors", () => {
+  assert.equal(isCollectionReportSalesman({ role: "salesman" }), true);
+  assert.equal(isCollectionReportCollector({ role: "collector" }), true);
+  assert.equal(isCollectionReportCollector({ role: "salesman", salesman_code: "CL001" }), true);
+  assert.equal(formatCollectionUserRoleLabel("salesman"), "Salesman");
 });
 
 test("captureGpsLocation exposes a consistent required GPS error", async () => {

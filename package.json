@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "dev:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next dev",
+    "dev": "node scripts/dev-server.mjs",
+    "dev:clean": "node scripts/dev-server.mjs --clean",
+    "dev:stop": "node scripts/stop-dev-server.mjs",
     "build": "next build",
     "start": "next start",
     "import:customer-locations": "node scripts/import-customer-locations.mjs"

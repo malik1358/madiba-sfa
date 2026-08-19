@@ -4258,6 +4258,78 @@ table.auditMatrix td.auditTrendSame {
   .moduleCollectorFilterGrid label {
     font-size: 13px;
   }
+
+  /* My Day visit schedule: card rows on phone instead of sticky overlapping headers. */
+  .moduleScheduleTableWrap {
+    overflow-x: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .moduleScheduleTable,
+  .moduleScheduleTable > tbody,
+  .moduleScheduleTable > tbody > tr,
+  .moduleScheduleTable > tbody > tr > td {
+    display: block;
+    min-width: 0;
+  }
+
+  .moduleScheduleTable > thead {
+    display: none;
+  }
+
+  .moduleScheduleTable > tbody > tr {
+    margin-bottom: 10px;
+    padding: 4px 0;
+    border: 1px solid #d5e1e4;
+    border-radius: 10px;
+    background: #ffffff;
+  }
+
+  .moduleScheduleTable > tbody > tr > td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 12px;
+    border: 0;
+    border-bottom: 1px solid #eef4f5;
+    font-size: 13px;
+    text-align: right;
+  }
+
+  .moduleScheduleTable > tbody > tr > td:last-child {
+    border-bottom: 0;
+  }
+
+  .moduleScheduleTable > tbody > tr > td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    color: #4b6b73;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    text-align: left;
+  }
+
+  .moduleScheduleTable > tbody > tr > td.moduleScheduleCellPrimary {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .moduleScheduleTable > tbody > tr > td.moduleScheduleCellActions {
+    display: block;
+  }
+
+  .moduleScheduleTable > tbody > tr > td.moduleScheduleCellActions::before {
+    display: none;
+  }
+
+  .moduleScheduleTable .moduleActionStack {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
 }
 
 .moduleHealthGrid {
@@ -4565,6 +4637,11 @@ table.auditMatrix td.auditTrendSame {
   .moduleTableWrap {
     overflow-x: auto;
     overflow-y: visible;
+  }
+
+  .moduleTable th {
+    position: static;
+    box-shadow: none;
   }
 
   .dashboardHeaderActions,

@@ -9,6 +9,7 @@ const TEXT = {
   home: { en: "← Home", ar: "← الرئيسية" },
   customers: { en: "← Customers", ar: "← العملاء" },
   loadingCustomer: { en: "Loading customer history...", ar: "جاري تحميل سجل العميل..." },
+  cacheRefreshing: { en: "Showing saved data. Refreshing in background...", ar: "عرض البيانات المحفوظة. جاري التحديث في الخلفية..." },
 };
 
 import { Suspense, useEffect, useMemo, useState } from "react";
@@ -20,6 +21,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
 import { resolveOverdueDaysFromDueDate, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { fetchOutstandingCached } from "../../lib/mobileDataCache";
 
 import { shortDate } from "./lib/format";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -87,6 +89,7 @@ function CustomerAuditPageContent() {
     itemMasterStatus,
     loading,
     loadingCustomer,
+    refreshing,
     expandedCategories,
     toggleCategory,
     openCustomer,
@@ -144,20 +147,25 @@ function CustomerAuditPageContent() {
 
         if (!session?.access_token) throw new Error("Please login again.");
 
-        const response = await fetch(
-          `/api/outstanding?customerCode=${encodeURIComponent(selectedCustomer.customer_code || "")}&customerName=${encodeURIComponent(selectedCustomer.customer_name || "")}`,
+        const outstandingResult = await fetchOutstandingCached(
+          session.access_token,
+          selectedCustomer.customer_code,
+          selectedCustomer.customer_name,
           {
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
+            onUpdate: (fresh) => {
+              setOutstandingInfo({
+                uploadedAt: String(fresh.uploadedAt || ""),
+                fileName: String(fresh.fileName || ""),
+                bucketLabels: sortBucketLabels(fresh.bucketLabels || []),
+                customer: fresh.customer || null,
+                customerInvoices: Array.isArray(fresh.customerInvoices) ? fresh.customerInvoices : [],
+                needsInvoiceRowsReupload: Boolean(fresh.needsInvoiceRowsReupload),
+              });
             },
-          }
+          },
         );
 
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.error || "Unable to load outstanding data.");
-        }
-
+        const payload = outstandingResult.data;
         setOutstandingInfo({
           uploadedAt: String(payload.uploadedAt || ""),
           fileName: String(payload.fileName || ""),
@@ -275,6 +283,7 @@ function CustomerAuditPageContent() {
           </div>
 
           {error && <div className="auditError">{error}</div>}
+          {refreshing && <div className="moduleHint">{t("cacheRefreshing")}</div>}
 
           <CustomerList
             customers={filteredCustomers}

@@ -1,8 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
 import {
   enrichVisitsWithDistances,
+  formatCollectionUserDisplayName,
+  formatCollectionUserRoleLabel,
   formatCollectorDisplayName,
   hasGpsCoordinates,
+  isCollectionReportCollector,
+  isCollectionReportSalesman,
   nearestActivityGps,
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
@@ -70,12 +74,35 @@ function parseReportDate(value) {
   return date;
 }
 
+function parseUserRoleFilter(value) {
+  const role = String(value || "").trim().toLowerCase().replace(/_/g, "-");
+  if (role === "collector" || role === "salesman") return role;
+  return "";
+}
+
 function formatOutcome(value) {
   return String(value || "")
     .trim()
     .replace(/_/g, " ")
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function profileMatchesUserRoleFilter(profile, userRoleFilter) {
+  if (!userRoleFilter) return true;
+  if (userRoleFilter === "salesman") return isCollectionReportSalesman(profile);
+  if (userRoleFilter === "collector") return isCollectionReportCollector(profile);
+  return true;
+}
+
+async function loadCollectionFieldUsers(admin) {
+  const { data, error } = await admin
+    .from("profiles")
+    .select("id,salesman_code,salesman_name,role,email")
+    .in("role", ["collector", "salesman"]);
+
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
 }
 
 async function loadActivityGpsByUser(admin, userIds, startIso, endIso) {
@@ -170,6 +197,7 @@ export async function GET(request) {
     const url = new URL(request.url);
     const date = parseReportDate(url.searchParams.get("date") || getKsaDateString());
     const collectorId = String(url.searchParams.get("collectorId") || "").trim();
+    const userRoleFilter = parseUserRoleFilter(url.searchParams.get("userRole"));
 
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -240,7 +268,8 @@ export async function GET(request) {
     const allCollectorIds = [...new Set((allDayVisits || []).map((row) => row.created_by).filter(Boolean))];
     const customerCodes = [...new Set(visitRows.map((row) => normalizeCode(row.customer_code)).filter(Boolean))];
 
-    const [{ data: profiles, error: profilesError }, { data: customers, error: customersError }] = await Promise.all([
+    const [fieldUsers, { data: visitDayProfiles, error: visitDayProfilesError }, { data: customers, error: customersError }] = await Promise.all([
+      loadCollectionFieldUsers(admin),
       allCollectorIds.length
         ? admin.from("profiles").select("id,salesman_code,salesman_name,role,email").in("id", allCollectorIds)
         : Promise.resolve({ data: [], error: null }),
@@ -249,16 +278,25 @@ export async function GET(request) {
         : Promise.resolve({ data: [], error: null }),
     ]);
 
-    if (profilesError) throw profilesError;
+    if (visitDayProfilesError) throw visitDayProfilesError;
     if (customersError && !isMissingTableError(customersError)) throw customersError;
 
-    const activityGpsByUser = await loadActivityGpsByUser(admin, allCollectorIds, startIso, endIso);
-    const visitRowsWithGpsFallback = visitRows.map((visit) => applyNearestActivityGpsFallback(visit, activityGpsByUser));
-
-    const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
+    const profileMap = new Map();
+    [...fieldUsers, ...(visitDayProfiles || [])].forEach((row) => {
+      if (row?.id) profileMap.set(row.id, row);
+    });
     const customerMap = new Map(
       (customers || []).map((row) => [normalizeCode(row.customer_code), row.customer_name || ""]),
     );
+
+    const activityGpsByUser = await loadActivityGpsByUser(admin, allCollectorIds, startIso, endIso);
+    const visitRowsWithGpsFallback = visitRows
+      .filter((visit) => {
+        if (!userRoleFilter) return true;
+        const visitProfile = profileMap.get(visit.created_by) || {};
+        return profileMatchesUserRoleFilter(visitProfile, userRoleFilter);
+      })
+      .map((visit) => applyNearestActivityGpsFallback(visit, activityGpsByUser));
 
     const grouped = new Map();
     visitRowsWithGpsFallback.forEach((visit) => {
@@ -270,6 +308,8 @@ export async function GET(request) {
     const collectors = [...grouped.entries()].map(([createdBy, rows]) => {
       const collectorProfile = profileMap.get(createdBy) || {};
       const userName = formatCollectorDisplayName(collectorProfile);
+      const userRole = String(collectorProfile.role || "").trim().toLowerCase().replace(/_/g, "-");
+      const userRoleLabel = formatCollectionUserRoleLabel(collectorProfile.role);
       const enrichedVisits = enrichVisitsWithDistances(rows).map((visit) => ({
         id: visit.id,
         visitSequence: visit.visitSequence,
@@ -292,6 +332,8 @@ export async function GET(request) {
       return {
         collectorId: createdBy,
         collectorName: userName,
+        userRole,
+        userRoleLabel,
         salesmanCode: collectorProfile.salesman_code || "",
         visitCount: enrichedVisits.length,
         gpsVisitCount: enrichedVisits.filter((visit) => visit.hasGps).length,
@@ -300,14 +342,41 @@ export async function GET(request) {
       };
     }).sort((left, right) => left.collectorName.localeCompare(right.collectorName));
 
-    const availableCollectors = allCollectorIds.map((id) => {
-      const collectorProfile = profileMap.get(id) || {};
+    const availableUserIds = new Set([
+      ...fieldUsers.map((row) => row.id),
+      ...allCollectorIds,
+    ]);
+    if (collectorId) availableUserIds.add(collectorId);
+
+    const availableCollectors = [...availableUserIds].map((id) => {
+      const collectorProfile = profileMap.get(id) || { id, role: "unknown" };
       return {
         collectorId: id,
-        collectorName: formatCollectorDisplayName(collectorProfile),
+        collectorName: formatCollectionUserDisplayName(collectorProfile, { includeRole: true }),
         salesmanCode: collectorProfile.salesman_code || "",
+        userRole: String(collectorProfile.role || "").trim().toLowerCase().replace(/_/g, "-"),
+        userRoleLabel: formatCollectionUserRoleLabel(collectorProfile.role),
       };
-    }).sort((left, right) => left.collectorName.localeCompare(right.collectorName));
+    })
+      .filter((row) => profileMatchesUserRoleFilter(profileMap.get(row.collectorId) || {}, userRoleFilter))
+      .sort((left, right) => left.collectorName.localeCompare(right.collectorName));
+
+    let visibleCollectors = collectors;
+    if (collectorId) {
+      const selectedProfile = profileMap.get(collectorId) || {};
+      const selectedSection = collectors.find((row) => row.collectorId === collectorId) || {
+        collectorId,
+        collectorName: formatCollectorDisplayName(selectedProfile),
+        userRole: String(selectedProfile.role || "").trim().toLowerCase().replace(/_/g, "-"),
+        userRoleLabel: formatCollectionUserRoleLabel(selectedProfile.role),
+        salesmanCode: selectedProfile.salesman_code || "",
+        visitCount: 0,
+        gpsVisitCount: 0,
+        totalDistanceKm: 0,
+        visits: [],
+      };
+      visibleCollectors = [selectedSection];
+    }
 
     return Response.json({
       success: true,
@@ -316,12 +385,13 @@ export async function GET(request) {
       migrationHint: gpsColumnsAvailable
         ? null
         : "Apply sql/add_collection_visit_gps.sql in Supabase SQL Editor to enable GPS distance reporting.",
-      visitCount: visitRows.length,
-      collectorCount: collectors.length,
-      gpsVisitCount: collectors.reduce((sum, collector) => sum + Number(collector.gpsVisitCount || 0), 0),
-      totalDistanceKm: collectors.reduce((sum, collector) => sum + Number(collector.totalDistanceKm || 0), 0),
+      visitCount: visitRowsWithGpsFallback.length,
+      collectorCount: visibleCollectors.length,
+      gpsVisitCount: visibleCollectors.reduce((sum, collector) => sum + Number(collector.gpsVisitCount || 0), 0),
+      totalDistanceKm: visibleCollectors.reduce((sum, collector) => sum + Number(collector.totalDistanceKm || 0), 0),
+      userRoleFilter: userRoleFilter || null,
       availableCollectors,
-      collectors,
+      collectors: visibleCollectors,
     });
   } catch (error) {
     console.error("Error building collection route report:", error);

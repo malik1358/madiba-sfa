@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import {
   buildCollectionPriority,
   buildCollectionQueues,
+  filterCollectionQueueInvoices,
   hasCollectionVisit,
+  isExcludedCollectionQueueSalesman,
   normalizeWhatsappNumber,
 } from "../app/lib/paymentCollections.js";
 
@@ -159,4 +161,40 @@ test("buildCollectionQueues prioritizes unvisited customers over visited ones", 
     queues.dueCustomers.map((row) => row.customer_code),
     ["UNVISITED", "VISITED"],
   );
+});
+
+test("isExcludedCollectionQueueSalesman matches Zia and Asrar Ahmed with loose spelling", () => {
+  assert.equal(isExcludedCollectionQueueSalesman("Zia"), true);
+  assert.equal(isExcludedCollectionQueueSalesman("ZIA "), true);
+  assert.equal(isExcludedCollectionQueueSalesman("Asrar Ahmed"), true);
+  assert.equal(isExcludedCollectionQueueSalesman("ASRAR  AHMED"), true);
+  assert.equal(isExcludedCollectionQueueSalesman("PARVEZ"), false);
+});
+
+test("filterCollectionQueueInvoices removes excluded salesman invoices only", () => {
+  const filtered = filterCollectionQueueInvoices([
+    { pending_amount: 100, salesman: "Zia" },
+    { pending_amount: 200, salesman: "PARVEZ" },
+    { pending_amount: 300, salesman: "Asrar Ahmed" },
+  ]);
+
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].salesman, "PARVEZ");
+});
+
+test("buildCollectionQueues drops customers with only excluded salesman invoices", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "C-ZIA",
+      customer_name: "Zia Customer",
+      invoices: [{ pending_amount: 200, due_date: "2026-08-01", salesman: "Zia" }],
+    },
+    {
+      customer_code: "C-KEEP",
+      customer_name: "Other Customer",
+      invoices: [{ pending_amount: 200, due_date: "2026-08-01", salesman: "PARVEZ" }],
+    },
+  ], "2026-08-14T10:00:00Z");
+
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["C-KEEP"]);
 });

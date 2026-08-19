@@ -8,6 +8,52 @@ function normalizeLooseToken(value) {
   return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
 }
 
+function comparableName(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function loosePersonName(value) {
+  return comparableName(value)
+    .replace(/[^A-Z]/g, "")
+    .replace(/[AEIOU]/g, "")
+    .replace(/(.)\1+/g, "$1");
+}
+
+export const COLLECTION_QUEUE_EXCLUDED_SALESMEN = [
+  "Zia",
+  "Asrar Ahmed",
+];
+
+export function isExcludedCollectionQueueSalesman(value, {
+  excludedNames = COLLECTION_QUEUE_EXCLUDED_SALESMEN,
+} = {}) {
+  const key = loosePersonName(value);
+  if (!key) return false;
+  return excludedNames.some((name) => loosePersonName(name) === key);
+}
+
+export function filterCollectionQueueInvoices(invoices, options = {}) {
+  return (invoices || []).filter((invoice) => !isExcludedCollectionQueueSalesman(invoice?.salesman, options));
+}
+
+export function shouldExcludeCollectionQueueRecord(record, options = {}) {
+  const invoices = filterCollectionQueueInvoices(record?.invoices, options);
+  if (invoices.length > 0) return false;
+
+  const candidateNames = [
+    record?.salesman_name,
+    record?.salesman_code,
+    record?.current_salesman_code,
+  ].filter(Boolean);
+
+  return candidateNames.some((name) => isExcludedCollectionQueueSalesman(name, options));
+}
+
 function toNumber(value) {
   const cleaned = String(value ?? "").replace(/,/g, "").trim();
   const parsed = Number(cleaned);
@@ -183,12 +229,20 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
   const legalCustomers = [];
 
   (records || []).forEach((record) => {
-    const dueInvoices = Array.isArray(record?.invoices)
-      ? record.invoices.filter((invoice) => isInvoicePastDue(invoice, today))
+    const filteredInvoices = filterCollectionQueueInvoices(record?.invoices);
+    if (filteredInvoices.length === 0) return;
+
+    const queueRecord = {
+      ...record,
+      invoices: filteredInvoices,
+    };
+
+    const dueInvoices = Array.isArray(queueRecord?.invoices)
+      ? queueRecord.invoices.filter((invoice) => isInvoicePastDue(invoice, today))
       : [];
 
-    const notDueInvoices = Array.isArray(record?.invoices)
-      ? record.invoices.filter((invoice) => isInvoiceNotYetDue(invoice, today))
+    const notDueInvoices = Array.isArray(queueRecord?.invoices)
+      ? queueRecord.invoices.filter((invoice) => isInvoiceNotYetDue(invoice, today))
       : [];
 
     const totalDueAmount = dueInvoices.reduce((sum, invoice) => sum + toNumber(invoice?.pending_amount), 0);
@@ -200,9 +254,9 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       .map((invoice) => dateOnly(invoice?.due_date))
       .filter(Boolean)
       .sort()[0] || "";
-    const latestStatus = String(record?.latest_collection?.payment_status || "").trim().toUpperCase();
+    const latestStatus = String(queueRecord?.latest_collection?.payment_status || "").trim().toUpperCase();
     const priority = buildCollectionPriority({
-      ...record,
+      ...queueRecord,
       total_due_amount: totalDueAmount,
       max_overdue_days: maxOverdueDays,
       due_invoice_count: dueInvoices.length,
@@ -210,21 +264,21 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
     });
 
     const next = {
-      ...record,
-      queue_key: queueKeyFor(record),
+      ...queueRecord,
+      queue_key: queueKeyFor(queueRecord),
       due_invoice_count: dueInvoices.length,
       total_due_amount: totalDueAmount,
       max_overdue_days: maxOverdueDays,
       earliest_due_date: earliestDueDate,
-      scheduled_revisit_at: scheduledRevisitDate(record),
-      invoices: Array.isArray(record?.invoices) ? record.invoices : [],
+      scheduled_revisit_at: scheduledRevisitDate(queueRecord),
+      invoices: Array.isArray(queueRecord?.invoices) ? queueRecord.invoices : [],
       probability_score: priority.score,
       probability_label: priority.label,
-      recommended_visit: dueInvoices.length > 0 && latestStatus !== "PAID" && !record?.legal_transfer?.is_transferred,
+      recommended_visit: dueInvoices.length > 0 && latestStatus !== "PAID" && !queueRecord?.legal_transfer?.is_transferred,
     };
 
     // Add to legal queue if transferred
-    if (record?.legal_transfer?.is_transferred) {
+    if (queueRecord?.legal_transfer?.is_transferred) {
       legalCustomers.push(next);
       return;
     }

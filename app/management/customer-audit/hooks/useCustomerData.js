@@ -1,24 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
-import { fetchSalesScope } from '../../../lib/salesScope';
-
-const CUSTOMER_HISTORY_API = '/api/customer-history';
-
-async function fetchVisibleCustomers(token) {
-  const response = await fetch('/api/customers/visible', {
-    cache: 'no-store',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.success) {
-    throw new Error(payload.error || 'Unable to load visible customers.');
-  }
-
-  return payload.customers || [];
-}
+import {
+  fetchCustomerHistoryCached,
+  fetchItemsMasterCached,
+  fetchSalesScopeCached,
+  fetchVisibleCustomersCached,
+  hydrateFoundationFromCache,
+} from '../../../lib/mobileDataCache';
 
 export function useCustomerData({ setError, setMessage }) {
   const [customers, setCustomers] = useState([]);
@@ -32,6 +20,7 @@ export function useCustomerData({ setError, setMessage }) {
   const [itemMasterStatus, setItemMasterStatus] = useState('Not loaded');
   const [loading, setLoading] = useState(true);
   const [loadingCustomer, setLoadingCustomer] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState({});
   const [accessScope, setAccessScope] = useState(null);
 
@@ -45,6 +34,7 @@ export function useCustomerData({ setError, setMessage }) {
     }
 
     setLoading(true);
+    setRefreshing(false);
     setError('');
 
     try {
@@ -53,23 +43,48 @@ export function useCustomerData({ setError, setMessage }) {
         throw new Error('Please login again.');
       }
 
-      const scope = await fetchSalesScope();
-      setAccessScope(scope);
-
-      const list = await fetchVisibleCustomers(session.access_token);
-      setCustomers(list);
-
-      const { data: masterData, error: masterError } = await supabase
-        .from('items_master')
-        .select('*');
-
-      if (masterError) {
-        setItemMasterStatus(`ERROR: ${masterError.message}`);
-        setItemMaster([]);
-      } else {
-        setItemMasterStatus(`SUCCESS: ${masterData?.length || 0} rows`);
-        setItemMaster(masterData || []);
+      const hydrated = await hydrateFoundationFromCache(session.user.id);
+      if (hydrated) {
+        setAccessScope(hydrated.scope);
+        setCustomers(hydrated.customers);
+        setItemMaster(hydrated.itemsMaster);
+        setItemMasterStatus(hydrated.itemMasterStatus);
+        setSalesmen([
+          ...new Set((hydrated.scope.visibleMembers || []).map((member) => member.salesman_code).filter(Boolean)),
+        ].sort());
+        setLoading(false);
+        setRefreshing(true);
       }
+
+      const scopeResult = await fetchSalesScopeCached({
+        onUpdate: (freshScope) => {
+          setAccessScope(freshScope);
+          setRefreshing(false);
+        },
+      });
+      const scope = scopeResult.scope;
+      setAccessScope(scope);
+      if (scopeResult.fromCache) {
+        setRefreshing(true);
+      }
+
+      const customersResult = await fetchVisibleCustomersCached(session.access_token, scope, {
+        onUpdate: (freshCustomers) => {
+          setCustomers(Array.isArray(freshCustomers) ? freshCustomers : []);
+          setRefreshing(false);
+        },
+      });
+      setCustomers(Array.isArray(customersResult.data) ? customersResult.data : []);
+
+      const itemsResult = await fetchItemsMasterCached({
+        onUpdate: (freshItems) => {
+          setItemMaster(freshItems.rows || []);
+          setItemMasterStatus(freshItems.status || 'Not loaded');
+          setRefreshing(false);
+        },
+      });
+      setItemMaster(itemsResult.data.rows || []);
+      setItemMasterStatus(itemsResult.data.status || 'Not loaded');
 
       const salesmanCodes = [
         ...new Set((scope.visibleMembers || []).map((member) => member.salesman_code).filter(Boolean)),
@@ -79,6 +94,7 @@ export function useCustomerData({ setError, setMessage }) {
     } catch (err) {
       setError(err.message || 'Unable to load customer data.');
     } finally {
+      setRefreshing(false);
       setLoading(false);
     }
   }, [setError]);
@@ -105,22 +121,21 @@ export function useCustomerData({ setError, setMessage }) {
         throw new Error('Please login again.');
       }
 
-      const response = await fetch(
-        `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(customer.customer_code)}`,
+      const scope = accessScope || (await fetchSalesScopeCached()).scope;
+      const historyResult = await fetchCustomerHistoryCached(
+        session.access_token,
+        scope,
+        customer.customer_code,
         {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
+          onUpdate: (freshHistory) => {
+            setTransactions(freshHistory.transactions || []);
+            setPeerTransactions(freshHistory.peerTransactions || []);
           },
-        }
+        },
       );
 
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || 'Unable to load customer history.');
-      }
-
-      setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);
-      setPeerTransactions(Array.isArray(payload.peerTransactions) ? payload.peerTransactions : []);
+      setTransactions(historyResult.data.transactions || []);
+      setPeerTransactions(historyResult.data.peerTransactions || []);
     } catch (err) {
       setError(err.message || 'Unable to load customer history.');
     } finally {
@@ -162,6 +177,7 @@ export function useCustomerData({ setError, setMessage }) {
     itemMasterStatus,
     loading,
     loadingCustomer,
+    refreshing,
     expandedCategories,
     toggleCategory,
     openCustomer,

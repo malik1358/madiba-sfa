@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildCollectionQueues } from "../../lib/paymentCollections.js";
+import { buildCollectionQueues, filterCollectionQueueInvoices } from "../../lib/paymentCollections.js";
 import { resolveMutualGroupCodes } from "../../lib/mutualSalesmanGroups.js";
 import {
   OUTSTANDING_DATASET_KEY,
@@ -547,7 +547,10 @@ async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
   const records = [];
   uniqueCustomers.forEach((customer) => {
-    const customerInvoices = invoicesByCustomer.get(customer.customer_code) || [];
+    const allCustomerInvoices = invoicesByCustomer.get(customer.customer_code) || [];
+    const customerInvoices = filterCollectionQueueInvoices(allCustomerInvoices);
+    if (customerInvoices.length === 0) return;
+
     const visits = visitsByCustomer.get(customer.customer_code) || [];
     const legalTransfer = legalTransfersByCustomer.get(customer.customer_code);
 

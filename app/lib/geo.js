@@ -341,3 +341,27 @@ export function formatCollectorDisplayName(profile) {
   if (salesmanCode) return salesmanCode;
   return role || "Unknown user";
 }
+
+export function formatCollectionUserRoleLabel(role) {
+  const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "salesman") return "Salesman";
+  if (normalized === "collector") return "Collector";
+  if (normalized === "manager") return "Manager";
+  if (normalized === "admin") return "Admin";
+  return normalized ? normalized.replace(/\b\w/g, (char) => char.toUpperCase()) : "User";
+}
+
+export function isCollectionReportSalesman(profile) {
+  return String(profile?.role || "").trim().toLowerCase().replace(/_/g, "-") === "salesman";
+}
+
+export function isCollectionReportCollector(profile) {
+  const role = String(profile?.role || "").trim().toLowerCase().replace(/_/g, "-");
+  return role === "collector" || /^CL\d+$/i.test(String(profile?.salesman_code || "").trim());
+}
+
+export function formatCollectionUserDisplayName(profile, { includeRole = false } = {}) {
+  const baseName = formatCollectorDisplayName(profile);
+  if (!includeRole) return baseName;
+  return `${baseName} · ${formatCollectionUserRoleLabel(profile?.role)}`;
+}

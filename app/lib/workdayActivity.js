@@ -1,5 +1,6 @@
 export const KSA_TIMEZONE = "Asia/Riyadh";
 export const INACTIVITY_MS = 30 * 60 * 1000;
+export const BACKGROUND_GPS_IDLE_MS = 15 * 60 * 1000;
 export const WORKDAY_START_HOUR = 6;
 export const WORKDAY_END_HOUR = 22;
 
@@ -11,6 +12,14 @@ export const TRANSACTION_ENTRY_TYPES = new Set([
   "PROSPECT_FOLLOW_UP",
   "NOTE",
 ]);
+
+export const IDLE_GPS_ACTIVITY_ENTRY_TYPES = [
+  ...TRANSACTION_ENTRY_TYPES,
+  "MORNING_ATTENDANCE",
+  "LUNCH_BREAK_OUT",
+  "LUNCH_BREAK_IN",
+  "END_OF_DAY",
+];
 
 export const GPS_ONLY_ENTRY_TYPES = new Set([
   "GPS_PING",
@@ -362,4 +371,16 @@ export function shouldWarnInactivity({
   if (!referenceTs) return false;
 
   return now.getTime() - referenceTs >= INACTIVITY_MS;
+}
+
+export function shouldCaptureIdleGpsPing({
+  now = Date.now(),
+  lastActivityTs = 0,
+  lastGpsPingTs = 0,
+  idleMs = BACKGROUND_GPS_IDLE_MS,
+} = {}) {
+  if (!lastActivityTs) return false;
+  if (now - lastActivityTs < idleMs) return false;
+  if (lastGpsPingTs && now - lastGpsPingTs < idleMs) return false;
+  return true;
 }

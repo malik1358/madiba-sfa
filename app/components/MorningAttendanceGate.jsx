@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { detectTable } from "../lib/schemaGuards";
-import { autoCloseForgottenWorkdays } from "../lib/workdayActivity";
+import { autoCloseForgottenWorkdays, BACKGROUND_GPS_IDLE_MS, IDLE_GPS_ACTIVITY_ENTRY_TYPES, shouldCaptureIdleGpsPing } from "../lib/workdayActivity";
 import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
 
 const TEXT = {
@@ -58,6 +58,31 @@ function readCapturedAt(note, fallbackDate) {
   }
 }
 
+const BACKGROUND_GPS_CHECK_MS = 5 * 60 * 1000;
+
+function backgroundGpsStorageKey(userId, suffix) {
+  return `madiba-sfa:bg-gps:${userId}:${suffix}`;
+}
+
+function readStoredTimestamp(userId, suffix) {
+  if (typeof window === "undefined" || !userId) return 0;
+  try {
+    const ts = Number(window.sessionStorage.getItem(backgroundGpsStorageKey(userId, suffix)) || 0);
+    return Number.isFinite(ts) ? ts : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeStoredTimestamp(userId, suffix, value) {
+  if (typeof window === "undefined" || !userId) return;
+  try {
+    window.sessionStorage.setItem(backgroundGpsStorageKey(userId, suffix), String(value));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function withTimeout(promise, timeoutMs, timeoutMessage = "REQUEST_TIMEOUT") {
   return Promise.race([
     promise,
@@ -91,8 +116,8 @@ export default function MorningAttendanceGate({
   const [warning, setWarning] = useState("");
   const attemptedAutoRef = useRef(false);
   const autoPingInFlightRef = useRef(false);
-  const lastGpsCaptureAtRef = useRef(0);
-  const loginPingAttemptedRef = useRef(false);
+  const lastGpsPingAtRef = useRef(0);
+  const lastActivityAtRef = useRef(0);
 
   async function insertAttendance(sessionUserId) {
     const supabase = getSupabaseClient();
@@ -136,10 +161,12 @@ export default function MorningAttendanceGate({
     const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
     if (insertError) throw insertError;
 
-    lastGpsCaptureAtRef.current = new Date(nowIso).getTime();
+    const capturedTs = new Date(nowIso).getTime();
+    lastGpsPingAtRef.current = capturedTs;
+    writeStoredTimestamp(sessionUserId, "lastPing", capturedTs);
   }
 
-  async function hydrateLastCapture(sessionUserId) {
+  async function hydrateActivityTimestamps(sessionUserId) {
     const supabase = getSupabaseClient();
     if (!supabase) return;
 
@@ -148,24 +175,35 @@ export default function MorningAttendanceGate({
 
     const { data, error: latestError } = await supabase
       .from("daily_activity_logs")
-      .select("note,created_at")
+      .select("entry_type,note,created_at")
       .eq("user_id", sessionUserId)
-      .in("entry_type", ["MORNING_ATTENDANCE", "LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY", "NOTE", "GPS_PING", "VISIT_REPORT"])
+      .in("entry_type", [...IDLE_GPS_ACTIVITY_ENTRY_TYPES, "GPS_PING"])
       .gte("created_at", start.toISOString())
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(200);
 
     if (latestError) return;
 
-    const latest = (data || []).reduce((maxTs, row) => {
-      const ts = readCapturedAt(row?.note, row?.created_at);
-      return Math.max(maxTs, ts);
-    }, 0);
+    let lastGpsPingTs = readStoredTimestamp(sessionUserId, "lastPing");
+    let lastActivityTs = 0;
 
-    lastGpsCaptureAtRef.current = latest;
+    (data || []).forEach((row) => {
+      const ts = readCapturedAt(row?.note, row?.created_at);
+      if (row.entry_type === "GPS_PING") {
+        lastGpsPingTs = Math.max(lastGpsPingTs, ts);
+      }
+      if (IDLE_GPS_ACTIVITY_ENTRY_TYPES.includes(row.entry_type)) {
+        lastActivityTs = Math.max(lastActivityTs, ts);
+      }
+    });
+
+    lastGpsPingAtRef.current = lastGpsPingTs;
+    lastActivityAtRef.current = lastActivityTs;
+    writeStoredTimestamp(sessionUserId, "lastPing", lastGpsPingTs);
+    writeStoredTimestamp(sessionUserId, "lastActivity", lastActivityTs);
   }
 
-  async function maybeCaptureBackgroundPing({ force = false } = {}) {
+  async function maybeCaptureBackgroundPing() {
     if (autoPingInFlightRef.current) return;
 
     const supabase = getSupabaseClient();
@@ -184,9 +222,19 @@ export default function MorningAttendanceGate({
       const userId = session?.user?.id;
       if (!userId) return;
 
+      await hydrateActivityTimestamps(userId);
+
       const now = Date.now();
-      const last = lastGpsCaptureAtRef.current || 0;
-      if (!force && last && now - last < 15 * 60 * 1000) {
+      const lastActivityTs = Math.max(
+        lastActivityAtRef.current || 0,
+        readStoredTimestamp(userId, "lastActivity"),
+      );
+      const lastGpsPingTs = Math.max(
+        lastGpsPingAtRef.current || 0,
+        readStoredTimestamp(userId, "lastPing"),
+      );
+
+      if (!shouldCaptureIdleGpsPing({ now, lastActivityTs, lastGpsPingTs, idleMs: BACKGROUND_GPS_IDLE_MS })) {
         return;
       }
 
@@ -263,7 +311,7 @@ export default function MorningAttendanceGate({
       if (attendanceError) throw attendanceError;
 
       if (data?.id) {
-        await hydrateLastCapture(session.user.id);
+        await hydrateActivityTimestamps(session.user.id);
         setReady(true);
         return;
       }
@@ -272,7 +320,11 @@ export default function MorningAttendanceGate({
         setCapturing(true);
         try {
           await insertAttendance(session.user.id);
-          lastGpsCaptureAtRef.current = Date.now();
+          const loginTs = Date.now();
+          lastActivityAtRef.current = loginTs;
+          lastGpsPingAtRef.current = loginTs;
+          writeStoredTimestamp(session.user.id, "lastActivity", loginTs);
+          writeStoredTimestamp(session.user.id, "lastPing", loginTs);
           setReady(true);
           return;
         } finally {
@@ -358,13 +410,7 @@ export default function MorningAttendanceGate({
         const userId = session?.user?.id;
         if (!userId || cancelled) return;
 
-        await hydrateLastCapture(userId);
-        if (cancelled) return;
-
-        if (!loginPingAttemptedRef.current) {
-          loginPingAttemptedRef.current = true;
-          await maybeCaptureBackgroundPing({ force: true });
-        }
+        await hydrateActivityTimestamps(userId);
       } catch {
         // Background GPS should not block page access.
       }
@@ -372,16 +418,19 @@ export default function MorningAttendanceGate({
 
     startBackgroundGps();
 
-    // Keep GPS fresh across authenticated pages with a max 15-minute cadence.
     const timer = window.setInterval(() => {
       maybeCaptureBackgroundPing();
-    }, 60 * 1000);
+    }, BACKGROUND_GPS_CHECK_MS);
 
+    let focusTimer = 0;
     const handleVisibleOrFocused = () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") {
         return;
       }
-      maybeCaptureBackgroundPing();
+      window.clearTimeout(focusTimer);
+      focusTimer = window.setTimeout(() => {
+        maybeCaptureBackgroundPing();
+      }, 1000);
     };
 
     if (typeof document !== "undefined") {
@@ -395,6 +444,7 @@ export default function MorningAttendanceGate({
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      window.clearTimeout(focusTimer);
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", handleVisibleOrFocused);
       }

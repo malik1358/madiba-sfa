@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  BACKGROUND_GPS_IDLE_MS,
   calculateWorkingHoursMinutes,
   deriveActivityStatus,
   extractLunchTimes,
@@ -12,6 +13,7 @@ import {
   isOnLunchBreak,
   ksaDayBounds,
   ksaMidnightEndIso,
+  shouldCaptureIdleGpsPing,
   shouldWarnInactivity,
 } from "../app/lib/workdayActivity.js";
 
@@ -214,4 +216,43 @@ test("calculateWorkingHoursMinutes falls back to login to logout without lunch",
 test("formatWorkingHours returns dash when no minutes", () => {
   assert.equal(formatWorkingHours(null), "-");
   assert.equal(formatWorkingHours(0), "-");
+});
+
+test("shouldCaptureIdleGpsPing waits for 15 minutes of inactivity", () => {
+  const loginTs = Date.parse("2026-08-19T09:00:00.000Z");
+
+  assert.equal(
+    shouldCaptureIdleGpsPing({
+      now: loginTs + 10 * 60 * 1000,
+      lastActivityTs: loginTs,
+      lastGpsPingTs: loginTs,
+      idleMs: BACKGROUND_GPS_IDLE_MS,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldCaptureIdleGpsPing({
+      now: loginTs + 16 * 60 * 1000,
+      lastActivityTs: loginTs,
+      lastGpsPingTs: loginTs,
+      idleMs: BACKGROUND_GPS_IDLE_MS,
+    }),
+    true,
+  );
+});
+
+test("shouldCaptureIdleGpsPing skips when a recent ping already happened", () => {
+  const loginTs = Date.parse("2026-08-19T09:00:00.000Z");
+  const pingTs = loginTs + 16 * 60 * 1000;
+
+  assert.equal(
+    shouldCaptureIdleGpsPing({
+      now: pingTs + 5 * 60 * 1000,
+      lastActivityTs: loginTs,
+      lastGpsPingTs: pingTs,
+      idleMs: BACKGROUND_GPS_IDLE_MS,
+    }),
+    false,
+  );
 });

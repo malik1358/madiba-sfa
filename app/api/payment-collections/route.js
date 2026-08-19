@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { buildCollectionQueues } from "../../lib/paymentCollections.js";
+import { resolveMutualGroupCodes } from "../../lib/mutualSalesmanGroups.js";
 import {
   OUTSTANDING_DATASET_KEY,
   extractLeadingCustomerCodeAndName,
@@ -369,6 +370,17 @@ async function getSalesScope(admin, userId) {
       }
     } catch {
       visibleSalesmanCodes = [normalizedProfileCode];
+    }
+
+    try {
+      const { data: teamProfiles } = await admin
+        .from("profiles")
+        .select("salesman_code,salesman_name");
+
+      const mutualCodes = resolveMutualGroupCodes(teamProfiles || [], profile);
+      visibleSalesmanCodes = [...new Set([...visibleSalesmanCodes, ...mutualCodes])];
+    } catch {
+      // Keep the existing scope if team profile lookup fails.
     }
   }
 

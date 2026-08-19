@@ -358,20 +358,47 @@ function formatLastVisitDate(row) {
   return formatDateOnly(savedAt) || new Date(savedAt).toLocaleDateString("en-GB");
 }
 
-function formatVisitRemarkParts(row) {
+function VisitRemarkCell({ row, t }) {
   const visit = row?.latest_collection;
   const arabic = String(visit?.remark_arabic || "").trim();
-  const english = String(visit?.remark_english || "").trim();
+  const storedEnglish = String(visit?.remark_english || "").trim();
+  const [english, setEnglish] = useState(() => (
+    storedEnglish && storedEnglish !== arabic ? storedEnglish : ""
+  ));
 
-  if (!arabic && !english) {
-    return { arabic: "", english: "" };
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadEnglishRemark() {
+      if (!arabic) {
+        if (!cancelled) setEnglish(storedEnglish);
+        return;
+      }
+
+      const resolved = await resolveEnglishRemark(arabic, storedEnglish);
+      if (cancelled) return;
+
+      setEnglish(resolved && resolved !== arabic ? resolved : "");
+    }
+
+    loadEnglishRemark();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [arabic, storedEnglish, visit?.saved_at]);
+
+  const primaryText = arabic || storedEnglish;
+  if (!primaryText && !english) {
+    return t("noVisitRemark");
   }
 
-  if (arabic && english && english !== arabic) {
-    return { arabic, english };
-  }
-
-  return { arabic: arabic || english, english: "" };
+  return (
+    <>
+      <div>{primaryText}</div>
+      {english ? <div className="moduleCode">{english}</div> : null}
+    </>
+  );
 }
 
 function determinePaymentStatus(visitOutcome, amountReceived, totalDueAmount) {
@@ -1040,7 +1067,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
                           </tr>
                           {group.rows.map((row) => {
                             const key = rowKey(row);
-                            const remarkParts = formatVisitRemarkParts(row);
                             return (
                               <tr key={`revisit-${key}`}>
                                 <td data-label={t("customerCode")}>{row.customer_code}</td>
@@ -1048,16 +1074,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                 <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>
                                 <td data-label={t("lastVisitDate")}>{formatLastVisitDate(row)}</td>
                                 <td data-label={t("visitRemark")}>
-                                  {remarkParts.arabic || remarkParts.english ? (
-                                    <>
-                                      <div>{remarkParts.arabic}</div>
-                                      {remarkParts.english ? (
-                                        <div className="moduleCode">{remarkParts.english}</div>
-                                      ) : null}
-                                    </>
-                                  ) : (
-                                    t("noVisitRemark")
-                                  )}
+                                  <VisitRemarkCell row={row} t={t} />
                                 </td>
                                 <td data-label={t("amount")}>{formatMoney(row.total_due_amount || row.total_not_due_amount)}</td>
                                 <td data-label={t("actions")}>

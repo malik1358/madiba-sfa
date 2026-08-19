@@ -8,6 +8,7 @@ import { translate, useAppLanguage } from "../lib/appLanguage";
 import SupabaseUnavailable from "../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../components/AppLanguageSwitch";
 import MostVisitedPages from "../components/MostVisitedPages";
+import { buildModuleAccess, listAccessibleModules } from "../lib/moduleAccess";
 
 const TEXT = {
   title: { en: "Management", ar: "الإدارة" },
@@ -29,7 +30,7 @@ export default function ManagementPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [accessDenied, setAccessDenied] = useState(false);
-  const [userRole, setUserRole] = useState("");
+  const [moduleAccess, setModuleAccess] = useState(() => buildModuleAccess({}));
   const [summary, setSummary] = useState({
     customers: 0,
     salesmen: 0,
@@ -84,7 +85,11 @@ export default function ManagementPage() {
         const collectionOnlyAccess = collectionOnlyMetadata
           || role === "collector"
           || /^CL\d+$/i.test(String(profile?.salesman_code || "").trim());
-        setUserRole(role);
+        setModuleAccess(buildModuleAccess({
+          role,
+          salesmanCode: profile?.salesman_code,
+          collectionOnlyMetadata: collectionOnlyMetadata,
+        }));
         if (!["admin", "manager", "invoice-maker", "invoice_maker", "collector"].includes(role) && !collectionOnlyAccess) {
           setAccessDenied(true);
           setLoading(false);
@@ -92,7 +97,11 @@ export default function ManagementPage() {
         }
 
         if (collectionOnlyAccess) {
-          setUserRole("collector");
+          setModuleAccess(buildModuleAccess({
+            role: "collector",
+            salesmanCode: profile?.salesman_code,
+            collectionOnlyMetadata: true,
+          }));
           setSummary({
             customers: 0,
             salesmen: 0,
@@ -179,6 +188,27 @@ export default function ManagementPage() {
     load();
   }, []);
 
+  const managementModules = useMemo(
+    () => listAccessibleModules(moduleAccess, [
+      "myCollections",
+      "paymentCollections",
+      "collectionReport",
+      "dailyVisitReport",
+      "userActivity",
+      "customerAudit",
+      "customerMaster",
+      "newOrder",
+      "salesmanHierarchy",
+      "gpsMap",
+      "pendingOrders",
+      "newCustomer",
+      "myPerformance",
+      "myDay",
+      "upload",
+    ]),
+    [moduleAccess],
+  );
+
   const cards = useMemo(
     () => [
       { label: "Customers", value: number(summary.customers) },
@@ -188,7 +218,7 @@ export default function ManagementPage() {
       { label: "Submitted Orders", value: number(summary.submitted) },
       { label: "Imports", value: number(summary.imports) },
     ],
-    [summary]
+    [summary],
   );
 
   const supabaseClient = getSupabaseClient();
@@ -257,39 +287,15 @@ export default function ManagementPage() {
             <h2>{t("modules")}</h2>
           </div>
           <div className="moduleNavGrid">
-            {userRole === "salesman" ? (
-              <Link href="/management/my-collections" className="moduleNavCard">My Customer Collections</Link>
-            ) : (
-              <Link href="/management/payment-collections" className="moduleNavCard">Payment Collections</Link>
-            )}
-            {(userRole === "admin" || userRole === "manager" || userRole === "collector") && (
-              <>
-                <Link href="/management/collection-report" className="moduleNavCard">Collection Route Report</Link>
-                <Link href="/management/daily-visit-report" className="moduleNavCard">Daily Visit Report</Link>
-                <Link href="/management/user-activity" className="moduleNavCard">User Activity</Link>
-              </>
-            )}
-            {userRole !== "collector" ? (
-              <>
-                <Link href="/management/customer-audit" className="moduleNavCard">Customers Audit</Link>
-                {(userRole === "admin" || userRole === "manager") && (
-                  <Link href="/management/customer-master" className="moduleNavCard">Customer Master</Link>
-                )}
-                <Link href="/management/new-order" className="moduleNavCard">Orders Workflow</Link>
-                <Link href="/management/salesman-hierarchy" className="moduleNavCard">Salesman Hierarchy</Link>
-                <Link href="/management/gps-map" className="moduleNavCard">GPS Map</Link>
-                <Link href="/management/pending-orders" className="moduleNavCard">Old Pending Orders</Link>
-                <Link href="/management/new-customer" className="moduleNavCard">New Customers</Link>
-                <Link href="/management/my-performance" className="moduleNavCard">Performance</Link>
-                <Link href="/management/my-day" className="moduleNavCard">My Day Planner</Link>
-                <Link href="/management/daily-visit-report" className="moduleNavCard">Daily Visit Report</Link>
-                <Link href="/management/upload" className="moduleNavCard">Imports</Link>
-              </>
-            ) : null}
+            {managementModules.map((module) => (
+              <Link key={module.moduleKey} href={module.href} className="moduleNavCard">
+                {module.label}
+              </Link>
+            ))}
           </div>
         </section>
 
-        {userRole !== "collector" ? (
+        {!moduleAccess.collectionOnly ? (
           <>
             <section className="moduleSection">
               <div className="moduleSectionHeader">

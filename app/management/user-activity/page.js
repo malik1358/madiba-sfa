@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
+import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
@@ -190,8 +191,12 @@ export default function UserActivityPage() {
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
               <MostVisitedPages />
-              <Link href="/management/daily-visit-report" className="moduleBackLink">Daily Visit Report</Link>
-              <Link href="/management/gps-map" className="moduleBackLink">GPS Map</Link>
+              <AccessibleHeaderLink moduleKey="dailyVisitReport" href="/management/daily-visit-report" className="moduleBackLink">
+                Daily Visit Report
+              </AccessibleHeaderLink>
+              <AccessibleHeaderLink moduleKey="gpsMap" href="/management/gps-map" className="moduleBackLink">
+                GPS Map
+              </AccessibleHeaderLink>
               <Link href="/management" className="moduleBackLink">{t("back")}</Link>
             </div>
           </div>

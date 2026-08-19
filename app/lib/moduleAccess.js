@@ -1,0 +1,101 @@
+export const MODULES = {
+  dashboard: { href: "/", label: "Dashboard" },
+  management: { href: "/management", label: "Management" },
+  myDay: { href: "/management/my-day", label: "My Day" },
+  customerAudit: { href: "/management/customer-audit", label: "Customers Audit" },
+  newOrder: { href: "/management/new-order", label: "Orders Workflow" },
+  pendingOrders: { href: "/management/pending-orders", label: "Old Pending Orders" },
+  newCustomer: { href: "/management/new-customer", label: "New Customers" },
+  myPerformance: { href: "/management/my-performance", label: "Performance" },
+  myCollections: { href: "/management/my-collections", label: "My Customer Collections" },
+  paymentCollections: { href: "/management/payment-collections", label: "Payment Collections" },
+  collectionReport: { href: "/management/collection-report", label: "Collection Report" },
+  dailyVisitReport: { href: "/management/daily-visit-report", label: "Daily Visit Report" },
+  userActivity: { href: "/management/user-activity", label: "User Activity" },
+  customerMaster: { href: "/management/customer-master", label: "Customer Master" },
+  salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
+  gpsMap: { href: "/management/gps-map", label: "GPS Map" },
+  upload: { href: "/management/upload", label: "Imports" },
+};
+
+export function normalizeAccessRole(role) {
+  return String(role || "").trim().toLowerCase().replace(/_/g, "-");
+}
+
+export function isInvoiceMakerRole(role) {
+  const normalized = normalizeAccessRole(role);
+  return normalized === "invoice-maker";
+}
+
+export function isProductPromoterRole(role) {
+  const normalized = normalizeAccessRole(role);
+  return normalized === "product-promoter";
+}
+
+export function isCollectionOnlyAccess({ role, salesmanCode, collectionOnlyMetadata = false }) {
+  const normalizedRole = normalizeAccessRole(role);
+  return Boolean(collectionOnlyMetadata)
+    || normalizedRole === "collector"
+    || /^CL\d+$/i.test(String(salesmanCode || "").trim());
+}
+
+export function buildModuleAccess(context = {}) {
+  const role = normalizeAccessRole(context.role);
+  const collectionOnly = isCollectionOnlyAccess(context);
+  const isAdmin = role === "admin";
+  const isManager = role === "manager";
+  const isSalesman = role === "salesman";
+  const isInvoiceMaker = isInvoiceMakerRole(role);
+  const isProductPromoter = isProductPromoterRole(role);
+  const isCollector = collectionOnly;
+  const isFieldSales = isSalesman || isManager || isAdmin || isInvoiceMaker || isProductPromoter;
+
+  const access = {
+    role,
+    collectionOnly: isCollector,
+    hasManagementPanel: isAdmin || isManager || isInvoiceMaker || isCollector,
+    modules: {
+      dashboard: true,
+      management: isAdmin || isManager || isInvoiceMaker || isCollector,
+      myDay: isFieldSales && !isCollector,
+      customerAudit: isFieldSales && !isCollector,
+      newOrder: isFieldSales && !isCollector,
+      pendingOrders: isFieldSales && !isCollector,
+      newCustomer: isFieldSales && !isCollector,
+      myPerformance: isFieldSales && !isCollector,
+      myCollections: isSalesman,
+      paymentCollections: isAdmin || isManager || isCollector || isInvoiceMaker,
+      collectionReport: isAdmin || isManager || isCollector,
+      dailyVisitReport: isAdmin || isManager || isCollector || isSalesman,
+      userActivity: isAdmin || isManager || isCollector,
+      customerMaster: isAdmin || isManager,
+      salesmanHierarchy: isAdmin || isManager || isInvoiceMaker,
+      gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
+      upload: isAdmin || isManager || isInvoiceMaker,
+    },
+  };
+
+  access.canAccess = (moduleKey) => Boolean(access.modules[moduleKey]);
+  access.canAccessPath = (href) => {
+    const normalizedHref = String(href || "").trim();
+    const match = Object.entries(MODULES).find(([, module]) => module.href === normalizedHref);
+    return match ? access.canAccess(match[0]) : true;
+  };
+
+  return access;
+}
+
+export function listAccessibleModules(access, moduleKeys) {
+  return (moduleKeys || Object.keys(MODULES))
+    .filter((moduleKey) => access.canAccess(moduleKey))
+    .map((moduleKey) => ({
+      moduleKey,
+      ...MODULES[moduleKey],
+    }));
+}
+
+export function moduleLabelForPath(href) {
+  const normalizedHref = String(href || "").trim();
+  const match = Object.values(MODULES).find((module) => module.href === normalizedHref);
+  return match?.label || null;
+}

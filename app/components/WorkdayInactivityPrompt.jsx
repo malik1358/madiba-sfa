@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { getSupabaseClient } from "../lib/supabase";
 import {
   getKsaDateString,
+  INACTIVITY_PROMPT_DISMISS_SNOOZE_MS,
+  INACTIVITY_PROMPT_SHOWN_SNOOZE_MS,
+  isInactivityPromptSnoozed,
   ksaDayBounds,
   logEventTimestamp,
   shouldWarnInactivity,
+  snoozeInactivityPrompt,
 } from "../lib/workdayActivity";
 
 const TEXT = {
@@ -21,17 +26,17 @@ const TEXT = {
 };
 
 export default function WorkdayInactivityPrompt() {
+  const router = useRouter();
   const { language, dir } = useAppLanguage();
   const t = translate(language, TEXT);
   const [visible, setVisible] = useState(false);
-  const snoozeUntilRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
 
     async function evaluateInactivity() {
       if (typeof window === "undefined") return;
-      if (Date.now() < snoozeUntilRef.current) return;
+      if (isInactivityPromptSnoozed()) return;
 
       const supabase = getSupabaseClient();
       if (!supabase) return;
@@ -66,7 +71,7 @@ export default function WorkdayInactivityPrompt() {
             .lte("updated_at", endIso),
         ]);
 
-        if (cancelled) return;
+        if (cancelled || isInactivityPromptSnoozed()) return;
 
         const logs = logsRes.data || [];
         const loginLog = logs.find((row) => row.entry_type === "MORNING_ATTENDANCE");
@@ -80,7 +85,13 @@ export default function WorkdayInactivityPrompt() {
           orders: ordersRes.data || [],
         });
 
-        setVisible(warn);
+        if (!warn) {
+          setVisible(false);
+          return;
+        }
+
+        snoozeInactivityPrompt(INACTIVITY_PROMPT_SHOWN_SNOOZE_MS);
+        setVisible(true);
       } catch {
         // Ignore prompt failures.
       }
@@ -107,7 +118,9 @@ export default function WorkdayInactivityPrompt() {
             type="button"
             className="modulePrimaryButton"
             onClick={() => {
-              window.location.href = "/management/my-day";
+              snoozeInactivityPrompt(INACTIVITY_PROMPT_SHOWN_SNOOZE_MS);
+              setVisible(false);
+              router.push("/management/my-day");
             }}
           >
             {t("myDay")}
@@ -116,7 +129,7 @@ export default function WorkdayInactivityPrompt() {
             type="button"
             className="moduleSecondaryButton"
             onClick={() => {
-              snoozeUntilRef.current = Date.now() + 15 * 60 * 1000;
+              snoozeInactivityPrompt(INACTIVITY_PROMPT_DISMISS_SNOOZE_MS);
               setVisible(false);
             }}
           >

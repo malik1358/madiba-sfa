@@ -7,6 +7,7 @@ import { useAppLanguage } from "./lib/appLanguage";
 import MorningAttendanceGate from "./components/MorningAttendanceGate";
 import MostVisitedPages from "./components/MostVisitedPages";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
+import { buildModuleAccess, listAccessibleModules } from "./lib/moduleAccess";
 
 export default function Home() {
   const { language, ar, dir, setLanguage } = useAppLanguage();
@@ -21,11 +22,56 @@ export default function Home() {
   const [error, setError] = useState("");
 
   const router = useRouter();
-  const role = String(profile?.role || "").toLowerCase();
-  const isCollectionOnlyAccess = Boolean(user?.user_metadata?.collection_only)
-    || role === "collector"
-    || /^CL\d+$/i.test(String(profile?.salesman_code || "").trim());
-  const hasManagementAccess = ["admin", "manager", "invoice_maker", "invoice-maker", "collector"].includes(role) || isCollectionOnlyAccess;
+  const moduleAccess = buildModuleAccess({
+    role: profile?.role,
+    salesmanCode: profile?.salesman_code,
+    collectionOnlyMetadata: Boolean(user?.user_metadata?.collection_only),
+  });
+  const isCollectionOnlyAccess = moduleAccess.collectionOnly;
+  const hasManagementAccess = moduleAccess.hasManagementPanel;
+
+  const dashboardModules = listAccessibleModules(moduleAccess, [
+    "myDay",
+    "customerAudit",
+    "newOrder",
+    "pendingOrders",
+    "newCustomer",
+    "myPerformance",
+    "myCollections",
+    "paymentCollections",
+  ]).map((module) => ({
+    ...module,
+    icon: {
+      myDay: "📍",
+      customerAudit: "👥",
+      newOrder: "🛒",
+      pendingOrders: "⏳",
+      newCustomer: "➕",
+      myPerformance: "🎯",
+      myCollections: "💰",
+      paymentCollections: "💰",
+    }[module.moduleKey] || "•",
+    title: {
+      myDay: ar ? "يومي" : "My Day",
+      customerAudit: ar ? "عملائي" : "My Customers",
+      newOrder: ar ? "طلب جديد" : "New Order",
+      pendingOrders: ar ? "طلبات معلقة قديمة" : "Old Pending Orders",
+      newCustomer: ar ? "عميل جديد" : "New Customer",
+      myPerformance: ar ? "أدائي" : "My Performance",
+      myCollections: ar ? "التحصيلات" : "My Collections",
+      paymentCollections: ar ? "التحصيلات" : "Collections",
+    }[module.moduleKey] || module.label,
+    subtitle: {
+      myDay: ar ? "زيارات ومتابعات اليوم" : "Today's visits & follow-ups",
+      customerAudit: ar ? "بحث وسجل العملاء" : "Search & customer history",
+      newOrder: ar ? "إنشاء طلب للعميل" : "Create customer order",
+      pendingOrders: ar ? "عرض الطلبات غير المكتملة" : "View unfinished draft orders",
+      newCustomer: ar ? "تسجيل عميل محتمل" : "Register a new prospect",
+      myPerformance: ar ? "الأهداف والنتائج" : "KRA & KPI progress",
+      myCollections: ar ? "متابعة التحصيل والزيارات" : "Collection queue and visit tracking",
+      paymentCollections: ar ? "متابعة التحصيل والزيارات" : "Collection queue and visit tracking",
+    }[module.moduleKey] || "",
+  }));
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -279,75 +325,9 @@ export default function Home() {
           </h3>
 
           <div className="menuGrid">
-            {(isCollectionOnlyAccess ? [
-              {
-                icon: "💰",
-                title: ar ? "التحصيلات" : "Collections",
-                subtitle: ar
-                  ? "متابعة التحصيل والزيارات"
-                  : "Collection queue and visit tracking",
-                href: "/management/payment-collections",
-              },
-            ] : [
-              {
-                icon: "📍",
-                title: ar ? "يومي" : "My Day",
-                subtitle: ar
-                  ? "زيارات ومتابعات اليوم"
-                  : "Today's visits & follow-ups",
-                href: "/management/my-day",
-              },
-              {
-                icon: "👥",
-                title: ar ? "عملائي" : "My Customers",
-                subtitle: ar
-                  ? "بحث وسجل العملاء"
-                  : "Search & customer history",
-                href: "/management/customer-audit",
-              },
-              {
-                icon: "🛒",
-                title: ar ? "طلب جديد" : "New Order",
-                subtitle: ar
-                  ? "إنشاء طلب للعميل"
-                  : "Create customer order",
-                href: "/management/new-order",
-              },
-              {
-                icon: "⏳",
-                title: ar ? "طلبات معلقة قديمة" : "Old Pending Orders",
-                subtitle: ar
-                  ? "عرض الطلبات غير المكتملة"
-                  : "View unfinished draft orders",
-                href: "/management/pending-orders",
-              },
-              {
-                icon: "➕",
-                title: ar ? "عميل جديد" : "New Customer",
-                subtitle: ar
-                  ? "تسجيل عميل محتمل"
-                  : "Register a new prospect",
-                href: "/management/new-customer",
-              },
-              {
-                icon: "🎯",
-                title: ar ? "أدائي" : "My Performance",
-                subtitle: ar
-                  ? "الأهداف والنتائج"
-                  : "KRA & KPI progress",
-                href: "/management/my-performance",
-              },
-              {
-                icon: "💰",
-                title: ar ? "التحصيلات" : "My Collections",
-                subtitle: ar
-                  ? "متابعة التحصيل والزيارات"
-                  : "Collection queue and visit tracking",
-                href: "/management/my-collections",
-              },
-            ]).map((item) => (
+            {dashboardModules.map((item) => (
               <button
-                key={item.title}
+                key={item.moduleKey}
                 type="button"
                 className="menuCard"
                 onClick={() => handleNavigate(item.href)}

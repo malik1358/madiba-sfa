@@ -5,10 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
+import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
-import { buildGoogleMapsPointUrl } from "../../lib/geo";
+import { applyReverseGeocoding, buildGoogleMapsPointUrl } from "../../lib/geo";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
+import { useReverseGeocodeCache } from "../../hooks/useReverseGeocodeCache";
 import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 
@@ -93,6 +95,18 @@ export default function DailyVisitReportPage() {
     () => (Array.isArray(report?.availableUsers) ? report.availableUsers : []),
     [report],
   );
+
+  const geocodeCache = useReverseGeocodeCache(report);
+
+  const displayUsers = useMemo(() => {
+    if (!report?.users?.length) return [];
+    if (!geocodeCache?.size) return report.users;
+
+    return report.users.map((entryUser) => ({
+      ...entryUser,
+      entries: (entryUser.entries || []).map((entry) => applyReverseGeocoding(entry, geocodeCache)),
+    }));
+  }, [report, geocodeCache]);
 
   useEffect(() => {
     if (!urlParamsApplied) return undefined;
@@ -189,7 +203,9 @@ export default function DailyVisitReportPage() {
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
               <MostVisitedPages />
-              <Link href="/management/collection-report" className="moduleBackLink">Collection Report</Link>
+              <AccessibleHeaderLink moduleKey="collectionReport" href="/management/collection-report" className="moduleBackLink">
+                Collection Report
+              </AccessibleHeaderLink>
               <Link href="/management" className="moduleBackLink">{t("back")}</Link>
             </div>
           </div>
@@ -252,7 +268,7 @@ export default function DailyVisitReportPage() {
                 </section>
               </div>
 
-              {(report.users || []).map((entryUser) => (
+              {displayUsers.map((entryUser) => (
                 <section key={entryUser.userId} className="moduleSection">
                   <div className="moduleSectionHeader">
                     <h2>{entryUser.userName}</h2>
@@ -351,7 +367,7 @@ export default function DailyVisitReportPage() {
                 </section>
               ))}
 
-              {(report.users || []).length === 0 && (
+              {displayUsers.length === 0 && (
                 <section className="moduleSection">
                   <div className="moduleHint">{t("noEntries")}</div>
                 </section>

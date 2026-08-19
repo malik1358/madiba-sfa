@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
+import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveInvoiceAgingDays, resolveOverdueDaysFromDueDate } from "../../lib/outstanding";
@@ -882,8 +883,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
           <div className="moduleInlineStack" style={{ marginBottom: "12px" }}>
             <Link href="/management/payment-collections" className={`moduleInlineButton moduleActionButton${view === "due" ? " moduleCollectorTabActive" : ""}`}>{t("dueQueue")}</Link>
             <Link href="/management/payment-collections/legal" className={`moduleInlineButton moduleActionButton${view === "legal" ? " moduleCollectorTabActive" : ""}`}>{t("legalQueue")}</Link>
-            <Link href="/management/collection-report" className="moduleInlineButton moduleActionButton">Collection Route Report</Link>
-            <Link href="/management/daily-visit-report" className="moduleInlineButton moduleActionButton">Daily Visit Report</Link>
+            <AccessibleHeaderLink moduleKey="collectionReport" href="/management/collection-report" className="moduleInlineButton moduleActionButton">
+              Collection Route Report
+            </AccessibleHeaderLink>
+            <AccessibleHeaderLink moduleKey="dailyVisitReport" href="/management/daily-visit-report" className="moduleInlineButton moduleActionButton">
+              Daily Visit Report
+            </AccessibleHeaderLink>
           </div>
 
           {view === "due" ? (

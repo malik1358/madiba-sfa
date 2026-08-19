@@ -1,5 +1,8 @@
 export const KSA_TIMEZONE = "Asia/Riyadh";
 export const INACTIVITY_MS = 30 * 60 * 1000;
+export const INACTIVITY_PROMPT_SHOWN_SNOOZE_MS = 5 * 60 * 1000;
+export const INACTIVITY_PROMPT_DISMISS_SNOOZE_MS = 15 * 60 * 1000;
+export const INACTIVITY_PROMPT_SNOOZE_STORAGE_KEY = "madiba_inactivity_prompt_snooze_until";
 export const BACKGROUND_GPS_IDLE_MS = 15 * 60 * 1000;
 export const WORKDAY_START_HOUR = 6;
 export const WORKDAY_END_HOUR = 22;
@@ -371,6 +374,36 @@ export function shouldWarnInactivity({
   if (!referenceTs) return false;
 
   return now.getTime() - referenceTs >= INACTIVITY_MS;
+}
+
+export function readInactivityPromptSnoozeUntil(storage = null) {
+  if (typeof window === "undefined" && !storage) return 0;
+
+  try {
+    const raw = (storage || window.sessionStorage).getItem(INACTIVITY_PROMPT_SNOOZE_STORAGE_KEY);
+    const value = Number(raw || 0);
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function writeInactivityPromptSnoozeUntil(untilMs, storage = null) {
+  if (typeof window === "undefined" && !storage) return;
+
+  try {
+    (storage || window.sessionStorage).setItem(INACTIVITY_PROMPT_SNOOZE_STORAGE_KEY, String(untilMs));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function isInactivityPromptSnoozed(now = Date.now(), storage = null) {
+  return now < readInactivityPromptSnoozeUntil(storage);
+}
+
+export function snoozeInactivityPrompt(durationMs, now = Date.now(), storage = null) {
+  writeInactivityPromptSnoozeUntil(now + durationMs, storage);
 }
 
 export function shouldCaptureIdleGpsPing({

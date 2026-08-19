@@ -3,24 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
+import { moduleLabelForPath } from "../lib/moduleAccess";
+import { useModuleAccess } from "../hooks/useModuleAccess";
 
 const STORAGE_KEY = "madiba.mostVisitedPages.v1";
-
-const PAGE_LABELS = {
-  "/": "Dashboard",
-  "/management": "Management",
-  "/management/new-order": "New Order",
-  "/management/pending-orders": "Pending Orders",
-  "/management/my-day": "My Day",
-  "/management/my-performance": "My Performance",
-  "/management/new-customer": "New Customer",
-  "/management/upload": "Upload",
-  "/management/gps-map": "GPS Map",
-  "/management/salesman-hierarchy": "Salesman Hierarchy",
-  "/management/payment-collections": "Collections",
-  "/management/collection-report": "Collection Report",
-  "/management/my-collections": "My Collections",
-};
 
 function readStoredPages() {
   if (typeof window === "undefined") return [];
@@ -47,27 +33,18 @@ function writeStoredPages(items) {
 
 export default function MostVisitedPages() {
   const pathname = usePathname();
-  const [visitedPages, setVisitedPages] = useState(() => {
-    const stored = readStoredPages();
-    return stored.length ? stored : [
-      { href: "/management", label: "Management" },
-      { href: "/management/new-order", label: "New Order" },
-      { href: "/management/my-day", label: "My Day" },
-    ];
-  });
+  const { access } = useModuleAccess();
+  const [visitedPages, setVisitedPages] = useState([]);
 
   useEffect(() => {
-    const stored = readStoredPages();
-    if (stored.length) {
-      setVisitedPages(stored);
-    }
+    setVisitedPages(readStoredPages());
   }, []);
 
   useEffect(() => {
     if (!pathname || typeof window === "undefined") return;
 
-    const label = PAGE_LABELS[pathname] || null;
-    if (!label) return;
+    const label = moduleLabelForPath(pathname);
+    if (!label || !access.canAccessPath(pathname)) return;
 
     const nextEntry = { href: pathname, label };
     const stored = readStoredPages();
@@ -76,16 +53,16 @@ export default function MostVisitedPages() {
 
     setVisitedPages(unique);
     writeStoredPages(unique);
-  }, [pathname]);
+  }, [pathname, access]);
 
-  const items = useMemo(() => {
-    if (visitedPages.length) return visitedPages;
-    return [
-      { href: "/management", label: "Management" },
-      { href: "/management/new-order", label: "New Order" },
-      { href: "/management/my-day", label: "My Day" },
-    ];
-  }, [visitedPages]);
+  const items = useMemo(
+    () => (visitedPages.length ? visitedPages : [])
+      .filter((item) => access.canAccessPath(item.href))
+      .slice(0, 4),
+    [visitedPages, access],
+  );
+
+  if (!items.length) return null;
 
   return (
     <nav

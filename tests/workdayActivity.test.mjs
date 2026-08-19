@@ -12,9 +12,13 @@ import {
   getKsaDateString,
   isOnLunchBreak,
   ksaDayBounds,
+  isInactivityPromptSnoozed,
   ksaMidnightEndIso,
+  readInactivityPromptSnoozeUntil,
   shouldCaptureIdleGpsPing,
   shouldWarnInactivity,
+  snoozeInactivityPrompt,
+  writeInactivityPromptSnoozeUntil,
 } from "../app/lib/workdayActivity.js";
 
 test("ksaDayBounds covers the full KSA calendar day", () => {
@@ -255,4 +259,24 @@ test("shouldCaptureIdleGpsPing skips when a recent ping already happened", () =>
     }),
     false,
   );
+});
+
+test("inactivity prompt snooze persists across reads", () => {
+  const storage = new Map();
+  const mockStorage = {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+  };
+  const now = 1_700_000_000_000;
+
+  assert.equal(isInactivityPromptSnoozed(now, mockStorage), false);
+
+  snoozeInactivityPrompt(5 * 60 * 1000, now, mockStorage);
+
+  assert.equal(readInactivityPromptSnoozeUntil(mockStorage), now + 5 * 60 * 1000);
+  assert.equal(isInactivityPromptSnoozed(now + 60 * 1000, mockStorage), true);
+  assert.equal(isInactivityPromptSnoozed(now + 6 * 60 * 1000, mockStorage), false);
+
+  writeInactivityPromptSnoozeUntil(now + 15 * 60 * 1000, mockStorage);
+  assert.equal(isInactivityPromptSnoozed(now + 10 * 60 * 1000, mockStorage), true);
 });

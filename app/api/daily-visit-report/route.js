@@ -6,9 +6,6 @@ import {
   isFarFromCustomer,
 } from "../../lib/customerLocation.js";
 import {
-  applyReverseGeocoding,
-  buildReverseGeocodeCache,
-  coordinateCacheKey,
   enrichVisitsWithDistances,
   extractAreaFromActivityNote,
   extractStreetFromActivityNote,
@@ -22,6 +19,8 @@ import { filterLogsByKsaEventDate, getKsaDateString, ksaDayBounds } from "../../
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+export const maxDuration = 60;
 
 const ACTIVITY_ENTRY_TYPES = [
   "VISIT_REPORT",
@@ -395,17 +394,6 @@ export async function GET(request) {
       };
     }).sort((left, right) => left.userName.localeCompare(right.userName));
 
-    const geocodeKeys = users
-      .flatMap((entryUser) => entryUser.entries || [])
-      .filter((entry) => entry.hasEntryGps && (!entry.area || !entry.street))
-      .map((entry) => coordinateCacheKey(entry.entryLatitude, entry.entryLongitude))
-      .filter(Boolean);
-    const geocodeCache = await buildReverseGeocodeCache(geocodeKeys);
-    const usersWithGeocoding = users.map((entryUser) => ({
-      ...entryUser,
-      entries: (entryUser.entries || []).map((entry) => applyReverseGeocoding(entry, geocodeCache)),
-    }));
-
     const allDayUserIds = [...new Set([
       ...allCollectionEntries.map((entry) => entry.user_id),
       ...allActivityResult.entries.map((entry) => entry.user_id),
@@ -419,18 +407,18 @@ export async function GET(request) {
       userName: formatCollectorDisplayName(row),
     })).sort((left, right) => left.userName.localeCompare(right.userName));
 
-    const flatEntries = usersWithGeocoding.flatMap((entryUser) => entryUser.entries || []);
+    const flatEntries = users.flatMap((entryUser) => entryUser.entries || []);
 
     return Response.json({
       success: true,
       date,
       thresholdKm: CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM,
       visitCount: flatEntries.length,
-      userCount: usersWithGeocoding.length,
+      userCount: users.length,
       farFromCustomerCount: flatEntries.filter((entry) => entry.isFarFromCustomer).length,
-      totalRouteDistanceKm: usersWithGeocoding.reduce((sum, entryUser) => sum + Number(entryUser.totalRouteDistanceKm || 0), 0),
+      totalRouteDistanceKm: users.reduce((sum, entryUser) => sum + Number(entryUser.totalRouteDistanceKm || 0), 0),
       availableUsers,
-      users: usersWithGeocoding,
+      users,
     });
   } catch (error) {
     console.error("Error building daily visit report:", error);

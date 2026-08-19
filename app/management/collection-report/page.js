@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
+import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { buildGoogleMapsPointUrl } from "../../lib/geo";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -186,8 +187,12 @@ export default function CollectionReportPage() {
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
               <MostVisitedPages />
-              <Link href="/management/daily-visit-report" className="moduleBackLink">Daily Visit Report</Link>
-              <Link href="/management/payment-collections" className="moduleBackLink">{t("collections")}</Link>
+              <AccessibleHeaderLink moduleKey="dailyVisitReport" href="/management/daily-visit-report" className="moduleBackLink">
+                Daily Visit Report
+              </AccessibleHeaderLink>
+              <AccessibleHeaderLink moduleKey="paymentCollections" href="/management/payment-collections" className="moduleBackLink">
+                {t("collections")}
+              </AccessibleHeaderLink>
               <Link href="/management" className="moduleBackLink">{t("back")}</Link>
             </div>
           </div>

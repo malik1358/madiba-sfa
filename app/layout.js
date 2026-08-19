@@ -1,6 +1,8 @@
 import "./globals.css";
+import BuildUpdateWatcher from "./components/BuildUpdateWatcher";
 import GlobalAppStatus from "./components/GlobalAppStatus";
 import GlobalLogoutButton from "./components/GlobalLogoutButton";
+import { resolveBuildId } from "./lib/buildInfo";
 
 export const metadata = {
   title: "MADIBA SFA",
@@ -10,7 +12,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   const isStaging = process.env.NEXT_PUBLIC_APP_ENV === "staging";
   const environment = isStaging ? "STAGING" : "PRODUCTION";
-  const buildId = String(process.env.VERCEL_GIT_COMMIT_SHA || process.env.NEXT_PUBLIC_BUILD_ID || "local").slice(0, 7);
+  const buildId = resolveBuildId();
 
   return (
     <html lang="en">
@@ -20,6 +22,7 @@ export default function RootLayout({ children }) {
             STAGING / UAT - TEST DATA ONLY
           </div>
         )}
+        <BuildUpdateWatcher />
         <GlobalAppStatus environment={environment} buildId={buildId} />
         <GlobalLogoutButton />
         {children}

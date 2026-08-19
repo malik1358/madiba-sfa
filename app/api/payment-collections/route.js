@@ -7,6 +7,7 @@ import {
   resolveInvoiceAgingDays,
   toNumber,
 } from "../../lib/outstanding.js";
+import { needsEnglishTranslation, translateText } from "../../lib/translateText.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -662,7 +663,10 @@ export async function POST(request) {
     const receiptMode = String(formData.get("receiptMode") || "").trim();
     const nextVisitAt = String(formData.get("nextVisitAt") || "").trim();
     const remarkArabic = String(formData.get("remarkArabic") || "").trim();
-    const remarkEnglish = String(formData.get("remarkEnglish") || "").trim();
+    let remarkEnglish = String(formData.get("remarkEnglish") || "").trim();
+    if (needsEnglishTranslation(remarkArabic, remarkEnglish)) {
+      remarkEnglish = await translateText(remarkArabic, { from: "ar", to: "en" }) || remarkArabic;
+    }
     const nonPaymentReason = String(formData.get("nonPaymentReason") || "").trim();
     const legalNote = String(formData.get("legalNote") || "").trim();
     const latitudeRaw = formData.get("latitude");

@@ -8,6 +8,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveInvoiceAgingDays, resolveOverdueDaysFromDueDate } from "../../lib/outstanding";
 import { captureGpsLocation, GPS_REQUIRED_ERROR } from "../../lib/geo";
@@ -99,6 +100,8 @@ const TEXT = {
   lastThreeVisits: { en: "Last 3 Visits", ar: "آخر 3 زيارات" },
   noLatestVisit: { en: "No collection update saved yet.", ar: "لا يوجد تحديث تحصيل محفوظ بعد." },
   customerDetails: { en: "Customer Details", ar: "تفاصيل العميل" },
+  viewVisitReport: { en: "View Report", ar: "عرض التقرير" },
+  visitReportTitle: { en: "Collection Visit Report", ar: "تقرير زيارة التحصيل" },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
   translating: { en: "Translating...", ar: "جاري الترجمة..." },
   msgLoginAgain: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
@@ -225,6 +228,42 @@ function buildVisitSummary(row, form, translatedRemark, t) {
   lines.push(`${t("bucket91to120")}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${t("bucket120plus")}: ${formatMoney(row.outstanding_above_120)}`);
   return lines.join("\n");
+}
+
+function buildStoredVisitReport(row, englishRemark, t) {
+  const visit = row?.latest_collection;
+  if (!visit) return "";
+
+  return buildVisitSummary(row, {
+    visitOutcome: visit.visit_outcome || visit.payment_status || "",
+    amountReceived: visit.amount_received ? String(visit.amount_received) : "",
+    receiptMode: visit.receipt_mode || "",
+    nextVisitAt: toDateInputValue(visit.next_visit_at),
+    remarkArabic: visit.remark_arabic || "",
+    remarkEnglish: englishRemark || visit.remark_english || "",
+  }, englishRemark || visit.remark_english || "", t);
+}
+
+async function resolveEnglishRemark(arabicRemark, englishRemark) {
+  const arabic = String(arabicRemark || "").trim();
+  const english = String(englishRemark || "").trim();
+  if (!arabic || (english && english !== arabic)) return english;
+
+  try {
+    const response = await fetch("/api/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: arabic, from: "ar", to: "en" }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload.success && payload.translatedText) {
+      return String(payload.translatedText).trim();
+    }
+  } catch {
+    // Fall back to stored remark below.
+  }
+
+  return english || arabic;
 }
 
 function formatLastUpdateText(row, t) {
@@ -372,7 +411,9 @@ function buildInitialForm(row) {
 
 export default function PaymentCollectionsView({ view = "due" }) {
   const { language, dir, setLanguage } = useAppLanguage();
+  const { access } = useModuleAccess();
   const t = translate(language, TEXT);
+  const canViewVisitReports = access.role === "admin" || access.role === "manager";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dueCustomers, setDueCustomers] = useState([]);
@@ -388,6 +429,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [copyStatus, setCopyStatus] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
   const [isDictating, setIsDictating] = useState(false);
+  const [visitReportRow, setVisitReportRow] = useState(null);
+  const [visitReportText, setVisitReportText] = useState("");
+  const [visitReportLoading, setVisitReportLoading] = useState(false);
   const recognitionRef = useRef(null);
   const loadSeqRef = useRef(0);
 
@@ -567,6 +611,26 @@ export default function PaymentCollectionsView({ view = "due" }) {
       ));
   }, [customerFilter, dueCustomers, notDueCustomers, selectedSalesmen, view]);
 
+  const scheduledRevisitGroups = useMemo(() => {
+    const groups = new Map();
+
+    scheduledRevisitRows.forEach((row) => {
+      const dateKey = toDateInputValue(row?.latest_collection?.next_visit_at);
+      if (!dateKey) return;
+
+      if (!groups.has(dateKey)) {
+        groups.set(dateKey, []);
+      }
+      groups.get(dateKey).push(row);
+    });
+
+    return [...groups.entries()].map(([dateKey, rows]) => ({
+      dateKey,
+      dateLabel: formatDateOnly(dateKey),
+      rows,
+    }));
+  }, [scheduledRevisitRows]);
+
   const tableRows = useMemo(() => {
     if (view !== "due") {
       return visibleRows.map((row) => ({ type: "customer", row }));
@@ -596,7 +660,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
         });
         const payload = await response.json().catch(() => ({}));
         if (response.ok && payload.success && payload.translatedText) {
-          setForm((current) => ({ ...current, remarkEnglish: String(payload.translatedText) }));
+          setForm((current) => {
+            const currentEnglish = String(current.remarkEnglish || "").trim();
+            const currentArabic = String(current.remarkArabic || "").trim();
+            if (currentEnglish && currentEnglish !== currentArabic) return current;
+            return { ...current, remarkEnglish: String(payload.translatedText) };
+          });
         }
       } catch {
       } finally {
@@ -614,6 +683,22 @@ export default function PaymentCollectionsView({ view = "due" }) {
         message="The payment collections screen needs Supabase credentials to load customer queues."
       />
     );
+  }
+
+  async function openVisitReport(row) {
+    if (!row?.latest_collection?.saved_at) return;
+
+    setVisitReportRow(row);
+    setVisitReportLoading(true);
+    setVisitReportText("");
+
+    try {
+      const visit = row.latest_collection;
+      const englishRemark = await resolveEnglishRemark(visit.remark_arabic, visit.remark_english);
+      setVisitReportText(buildStoredVisitReport(row, englishRemark, t));
+    } finally {
+      setVisitReportLoading(false);
+    }
   }
 
   async function saveVisit(row, options = {}) {
@@ -658,7 +743,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
       const outcomeReason = ["RESPONSIBLE_NOT_AVAILABLE", "WRONG_CREDIT_DAYS", "NO_DUE_AS_PER_CUSTOMER", "TRANSFER_TO_LEGAL"].includes(selectedOutcome)
         ? formatOutcomeLabel(selectedOutcome, t)
         : "";
-      const effectiveEnglishRemark = form.remarkEnglish || (form.remarkArabic ? form.remarkArabic : "");
+      const effectiveEnglishRemark = await resolveEnglishRemark(form.remarkArabic, form.remarkEnglish);
+      if (effectiveEnglishRemark !== form.remarkEnglish) {
+        setForm((current) => ({ ...current, remarkEnglish: effectiveEnglishRemark }));
+      }
       const summaryText = buildVisitSummary(row, { ...form, visitOutcome: selectedOutcome }, effectiveEnglishRemark, t);
 
       const formData = new FormData();
@@ -905,7 +993,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
                   <table className="moduleTable moduleCollectorInvoiceTable">
                     <thead>
                       <tr>
-                        <th>{t("scheduledRevisitDate")}</th>
                         <th>{t("customerCode")}</th>
                         <th>{t("customer")}</th>
                         <th>{t("salesman")}</th>
@@ -914,27 +1001,49 @@ export default function PaymentCollectionsView({ view = "due" }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {scheduledRevisitRows.map((row) => {
-                        const key = rowKey(row);
-                        return (
-                          <tr key={`revisit-${key}`}>
-                            <td data-label={t("scheduledRevisitDate")}>{formatDateOnly(row?.latest_collection?.next_visit_at)}</td>
-                            <td data-label={t("customerCode")}>{row.customer_code}</td>
-                            <td data-label={t("customer")}>{row.customer_name}</td>
-                            <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>
-                            <td data-label={t("amount")}>{formatMoney(row.total_due_amount || row.total_not_due_amount)}</td>
-                            <td data-label={t("actions")}>
-                              <button
-                                type="button"
-                                className="moduleInlineButton moduleActionButton"
-                                onClick={() => setActiveRowKey(key)}
-                              >
-                                {activeRowKey === key ? t("close") : t("open")}
-                              </button>
+                      {scheduledRevisitGroups.map((group) => (
+                        <Fragment key={`revisit-group-${group.dateKey}`}>
+                          <tr className="moduleCollectorSectionRow">
+                            <td colSpan={5}>
+                              <strong>{group.dateLabel}</strong>
+                              <span className="moduleHint" style={{ marginInlineStart: "8px" }}>
+                                {group.rows.length}
+                              </span>
                             </td>
                           </tr>
-                        );
-                      })}
+                          {group.rows.map((row) => {
+                            const key = rowKey(row);
+                            return (
+                              <tr key={`revisit-${key}`}>
+                                <td data-label={t("customerCode")}>{row.customer_code}</td>
+                                <td data-label={t("customer")}>{row.customer_name}</td>
+                                <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>
+                                <td data-label={t("amount")}>{formatMoney(row.total_due_amount || row.total_not_due_amount)}</td>
+                                <td data-label={t("actions")}>
+                                  <div className="moduleInlineStack moduleActionStack">
+                                    <button
+                                      type="button"
+                                      className="moduleInlineButton moduleActionButton"
+                                      onClick={() => setActiveRowKey(key)}
+                                    >
+                                      {activeRowKey === key ? t("close") : t("open")}
+                                    </button>
+                                    {canViewVisitReports && row?.latest_collection?.saved_at ? (
+                                      <button
+                                        type="button"
+                                        className="moduleInlineButton moduleActionButton"
+                                        onClick={() => openVisitReport(row)}
+                                      >
+                                        {t("viewVisitReport")}
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </Fragment>
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -1072,6 +1181,15 @@ export default function PaymentCollectionsView({ view = "due" }) {
                               >
                                 {isOpen ? t("close") : t("open")}
                               </button>
+                              {canViewVisitReports && row?.latest_collection?.saved_at ? (
+                                <button
+                                  type="button"
+                                  className="moduleInlineButton moduleActionButton"
+                                  onClick={() => openVisitReport(row)}
+                                >
+                                  {t("viewVisitReport")}
+                                </button>
+                              ) : null}
                               <Link href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`} className="moduleInlineButton moduleActionButton">
                                 {t("customerDetails")}
                               </Link>
@@ -1327,6 +1445,51 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
           {loading && <div className="moduleLoading">{t("loading")}</div>}
         </div>
+
+        {visitReportRow ? (
+          <div className="moduleModalOverlay" dir={dir}>
+            <div className="moduleModal" role="dialog" aria-modal="true">
+              <h2>{t("visitReportTitle")}</h2>
+              <p className="moduleHint">
+                {visitReportRow.customer_name || visitReportRow.customer_code}
+                {" · "}
+                {visitReportRow.customer_code}
+              </p>
+              {visitReportLoading ? (
+                <div className="moduleHint">{t("translating")}</div>
+              ) : (
+                <textarea className="moduleTextArea" rows={16} value={visitReportText} readOnly />
+              )}
+              <div className="moduleOrderActions">
+                <button
+                  type="button"
+                  className="modulePrimaryButton"
+                  onClick={async () => {
+                    const copied = await copyTextToClipboard(visitReportText);
+                    if (copied) {
+                      setCopyStatus(t("copied"));
+                      setTimeout(() => setCopyStatus(""), 1200);
+                    }
+                  }}
+                  disabled={!visitReportText}
+                >
+                  {t("copySummary")}
+                </button>
+                <button
+                  type="button"
+                  className="moduleSecondaryButton"
+                  onClick={() => {
+                    setVisitReportRow(null);
+                    setVisitReportText("");
+                  }}
+                >
+                  {t("close")}
+                </button>
+              </div>
+              {copyStatus ? <div className="moduleHint">{copyStatus}</div> : null}
+            </div>
+          </div>
+        ) : null}
       </main>
     </MorningAttendanceGate>
   );

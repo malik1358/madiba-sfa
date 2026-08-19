@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildCollectionPriority,
   buildCollectionQueues,
+  hasCollectionVisit,
   normalizeWhatsappNumber,
 } from "../app/lib/paymentCollections.js";
 
@@ -125,5 +126,37 @@ test("buildCollectionQueues prioritizes scheduled future revisits at top", () =>
   assert.deepEqual(
     queues.dueCustomers.map((row) => row.customer_code),
     ["NEXT", "SOON", "LATE"],
+  );
+});
+
+test("buildCollectionQueues prioritizes unvisited customers over visited ones", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "VISITED",
+      customer_name: "Visited Customer",
+      outstanding_cash: 0,
+      invoices: [{ pending_amount: 900, due_date: "2026-08-01", overdue_days: 17 }],
+      latest_collection: {
+        payment_status: "NOT_PAID",
+        visit_outcome: "COME_LATER",
+        saved_at: "2026-08-18T10:00:00Z",
+      },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "UNVISITED",
+      customer_name: "Unvisited Customer",
+      outstanding_cash: 0,
+      invoices: [{ pending_amount: 300, due_date: "2026-08-05", overdue_days: 13 }],
+      latest_collection: null,
+      legal_transfer: null,
+    },
+  ], "2026-08-19T10:00:00Z");
+
+  assert.equal(hasCollectionVisit(queues.dueCustomers[0]), false);
+  assert.equal(hasCollectionVisit(queues.dueCustomers[1]), true);
+  assert.deepEqual(
+    queues.dueCustomers.map((row) => row.customer_code),
+    ["UNVISITED", "VISITED"],
   );
 });

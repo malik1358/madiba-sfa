@@ -27,6 +27,10 @@ export function scheduledRevisitDate(record) {
   return dateOnly(record?.latest_collection?.next_visit_at);
 }
 
+export function hasCollectionVisit(record) {
+  return Boolean(dateOnly(record?.latest_collection?.saved_at));
+}
+
 function scheduledRevisitTier(record, today) {
   const revisitAt = scheduledRevisitDate(record);
   if (!revisitAt) return 2;
@@ -133,6 +137,10 @@ export function buildCollectionPriority(record) {
 
   if (nextVisitAt && today && nextVisitAt <= today) {
     score += 8;
+  }
+
+  if (lastVisitAt) {
+    score -= 15;
   }
 
   const normalizedScore = Math.max(0, Math.min(100, score));
@@ -251,12 +259,16 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
   });
 
   dueCustomers.sort((left, right) => {
+    const byVisitStatus = Number(hasCollectionVisit(left)) - Number(hasCollectionVisit(right));
+    if (byVisitStatus !== 0) return byVisitStatus;
+
     const byScheduled = compareScheduledRevisitPriority(left, right, today);
     if (byScheduled !== 0) return byScheduled;
 
     const leftHasDue = Number(left.due_invoice_count > 0);
     const rightHasDue = Number(right.due_invoice_count > 0);
-    const byDueStatus = rightHasDue - leftHasDue;    if (byDueStatus !== 0) return byDueStatus;
+    const byDueStatus = rightHasDue - leftHasDue;
+    if (byDueStatus !== 0) return byDueStatus;
 
     // Priority 2: Cash presence
     const leftCash = toNumber(left?.outstanding_cash);

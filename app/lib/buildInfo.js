@@ -1,3 +1,7 @@
+export function resolveBuildId(env = process.env) {
+  return String(env.VERCEL_GIT_COMMIT_SHA || env.NEXT_PUBLIC_BUILD_ID || "local").slice(0, 7);
+}
+
 export function getClientBuildId() {
   if (typeof document === "undefined") return "local";
   return String(document.body?.dataset?.buildId || "local").trim() || "local";

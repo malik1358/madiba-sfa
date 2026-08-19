@@ -10,7 +10,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 
 const TEXT = {
   title: { en: "Upload Sales Data", ar: "رفع بيانات المبيعات" },
-  subtitle: { en: "Replace the current sales snapshot with the latest complete Excel export.", ar: "استبدال لقطة المبيعات الحالية بآخر ملف إكسل كامل." },
+  subtitle: { en: "Upload a sales Excel file to refresh only the transaction dates found in that file. All other dates stay unchanged.", ar: "ارفع ملف مبيعات إكسل لتحديث تواريخ المعاملات الموجودة في الملف فقط. باقي التواريخ تبقى كما هي." },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   lastSalesUpload: { en: "Last sales upload", ar: "آخر رفع للمبيعات" },
   lastOutstandingUpload: { en: "Last outstanding upload", ar: "آخر رفع للمتأخرات" },
@@ -241,11 +241,12 @@ export default function UploadSalesPage() {
         </div>
 
         <div className="uploadWarning">
-          <strong>Full Snapshot Upload</strong>
+          <strong>Incremental Date Upload</strong>
           <p>
-            Upload the complete sales history Excel file.
-            The existing live dataset will only be replaced
-            after the new file has been successfully processed.
+            Upload a sales Excel export for the dates you want to refresh.
+            Only those transaction dates are replaced. The rest of the live
+            sales history stays intact, so you do not need to upload the full
+            history every time.
           </p>
         </div>
 
@@ -303,7 +304,7 @@ export default function UploadSalesPage() {
           >
             {uploading
               ? "Processing Sales Data..."
-              : "Validate & Replace Sales Data"}
+              : "Validate & Update Sales Data"}
           </button>
 
           {uploading && (
@@ -315,8 +316,8 @@ export default function UploadSalesPage() {
                   Please keep this page open
                 </strong>
                 <p>
-                  Reading Excel, validating transactions and
-                  preparing the new sales snapshot.
+                  Reading Excel, validating transactions, updating only the
+                  dates found in the file, and refreshing customer assignments.
                 </p>
               </div>
             </div>
@@ -327,8 +328,8 @@ export default function UploadSalesPage() {
               <strong>Upload Failed</strong>
               <p>{error}</p>
               <p>
-                The previous live dataset has not been
-                replaced.
+                The live sales dataset was not changed unless the upload had
+                already finished merging.
               </p>
             </div>
           )}
@@ -343,14 +344,14 @@ export default function UploadSalesPage() {
                   <strong>
                     Sales Data Updated Successfully
                   </strong>
-                  <p>{result.fileName}</p>
+                  <p>{result.message || result.fileName}</p>
                 </div>
               </div>
 
               <div className="resultGrid">
 
                 <div>
-                  <span>Rows Loaded</span>
+                  <span>Rows In File</span>
                   <strong>
                     {Number(
                       result.rows
@@ -359,7 +360,16 @@ export default function UploadSalesPage() {
                 </div>
 
                 <div>
-                  <span>Customers</span>
+                  <span>Dates Updated</span>
+                  <strong>
+                    {Number(
+                      result.datesUpdated || (Array.isArray(result.uploadDates) ? result.uploadDates.length : 0)
+                    ).toLocaleString()}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Customers In File</span>
                   <strong>
                     {Number(
                       result.customers
@@ -368,41 +378,38 @@ export default function UploadSalesPage() {
                 </div>
 
                 <div>
-                  <span>Items</span>
+                  <span>Live Rows</span>
                   <strong>
                     {Number(
-                      result.items
+                      result.liveRows ?? result.rows
                     ).toLocaleString()}
                   </strong>
                 </div>
 
                 <div>
-                  <span>Salesmen</span>
+                  <span>Live Customers</span>
                   <strong>
                     {Number(
-                      result.salesmen
+                      result.liveCustomers ?? result.customers
                     ).toLocaleString()}
                   </strong>
                 </div>
 
                 <div>
-                  <span>First Transaction</span>
+                  <span>Live Date Range</span>
                   <strong>
-                    {result.minDate || "-"}
-                  </strong>
-                </div>
-
-                <div>
-                  <span>Latest Transaction</span>
-                  <strong>
-                    {result.maxDate || "-"}
+                    {(result.liveMinDate || result.minDate || "-")}
+                    {" -> "}
+                    {(result.liveMaxDate || result.maxDate || "-")}
                   </strong>
                 </div>
 
               </div>
 
               <div className="snapshotActivated">
-                ✓ New dataset is now LIVE
+                {result.mergedIntoExisting
+                  ? `✓ Updated ${Number(result.datesUpdated || 0).toLocaleString()} date(s) in the live dataset`
+                  : "✓ New sales dataset is now LIVE"}
               </div>
 
             </div>

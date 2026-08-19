@@ -115,6 +115,141 @@ function findValue(row, possibilities) {
   return null;
 }
 
+function pickLatestCustomerRow(existing, candidate) {
+  if (!existing) return candidate;
+
+  if (
+    candidate.transaction_date &&
+    (
+      !existing.transaction_date ||
+      candidate.transaction_date > existing.transaction_date
+    )
+  ) {
+    return candidate;
+  }
+
+  if (
+    candidate.transaction_date &&
+    existing.transaction_date &&
+    candidate.transaction_date === existing.transaction_date &&
+    Number(candidate.source_row_number || 0) >
+      Number(existing.source_row_number || 0)
+  ) {
+    return candidate;
+  }
+
+  return existing;
+}
+
+async function loadLatestCustomersFromBatch(admin, batchId, customerCodes) {
+  const latestCustomer = new Map();
+  const codes = [...new Set((customerCodes || []).filter(Boolean))];
+  if (!batchId || codes.length === 0) return latestCustomer;
+
+  const CUSTOMER_LOOKUP_CHUNK = 200;
+
+  for (
+    let index = 0;
+    index < codes.length;
+    index += CUSTOMER_LOOKUP_CHUNK
+  ) {
+    const chunk = codes.slice(
+      index,
+      index + CUSTOMER_LOOKUP_CHUNK
+    );
+
+    const {
+      data,
+      error,
+    } = await admin
+      .from("sales_raw")
+      .select(
+        "customer_code,customer_name,salesman_code,salesman_name,transaction_date,source_row_number"
+      )
+      .eq("import_batch_id", batchId)
+      .in("customer_code", chunk);
+
+    if (error) {
+      throw error;
+    }
+
+    for (const row of data || []) {
+      if (!row.customer_code) continue;
+
+      latestCustomer.set(
+        row.customer_code,
+        pickLatestCustomerRow(
+          latestCustomer.get(row.customer_code),
+          row
+        )
+      );
+    }
+  }
+
+  return latestCustomer;
+}
+
+async function upsertCustomersFromLatestMap(admin, latestCustomer) {
+  const customerUpserts = [];
+
+  for (
+    const [
+      customerCode,
+      row,
+    ] of latestCustomer
+  ) {
+    customerUpserts.push({
+      customer_code:
+        customerCode,
+
+      customer_name:
+        row.customer_name ||
+        customerCode,
+
+      current_salesman_code:
+        row.salesman_code,
+
+      latest_transaction_date:
+        row.transaction_date,
+
+      is_active: true,
+    });
+  }
+
+  const CUSTOMER_CHUNK = 500;
+
+  for (
+    let i = 0;
+    i <
+    customerUpserts.length;
+    i += CUSTOMER_CHUNK
+  ) {
+    const chunk =
+      customerUpserts.slice(
+        i,
+        i + CUSTOMER_CHUNK
+      );
+
+    const {
+      error: customerError,
+    } = await admin
+      .from("customers")
+      .upsert(
+        chunk,
+        {
+          onConflict:
+            "customer_code",
+        }
+      );
+
+    if (customerError) {
+      throw new Error(
+        `Customer update failed: ${customerError.message}`
+      );
+    }
+  }
+}
+
 
 /* ============================================================
    MAIN IMPORT API
@@ -725,8 +860,22 @@ export async function POST(request) {
       }
     }
 
+    const uploadDates = [
+      ...new Set(
+        mappedRows
+          .map((row) => row.transaction_date)
+          .filter(Boolean)
+      ),
+    ].sort();
+
+    if (!uploadDates.length) {
+      throw new Error(
+        "No transaction dates were detected in the Excel file."
+      );
+    }
+
     /* ========================================================
-       10. IMPORT STATISTICS
+       10. IMPORT STATISTICS (UPLOAD FILE ONLY)
        ======================================================== */
 
     const customers =
@@ -781,132 +930,97 @@ export async function POST(request) {
         : null;
 
     /* ========================================================
-       11. DETERMINE CURRENT SALESMAN FOR EACH CUSTOMER
-
-       BUSINESS RULE:
-
-       The customer belongs to the salesman from the
-       customer's LAST TRANSACTION.
-
-       If multiple transactions exist on the same latest date,
-       the later Excel row wins.
+       11. MERGE UPLOAD DATES INTO ACTIVE DATASET
        ======================================================== */
 
-    const latestCustomer =
-      new Map();
-
-    for (const row of mappedRows) {
-      if (!row.customer_code) {
-        continue;
+    const {
+      data: activeBatchId,
+      error: mergeError,
+    } = await admin.rpc(
+      "merge_sales_batch_by_dates",
+      {
+        p_new_batch_id: batchId,
+        p_dates: uploadDates,
       }
+    );
 
-      const existing =
-        latestCustomer.get(
-          row.customer_code
-        );
-
-      if (!existing) {
-        latestCustomer.set(
-          row.customer_code,
-          row
-        );
-
-        continue;
-      }
-
+    if (mergeError) {
       if (
-        row.transaction_date &&
-        (
-          !existing.transaction_date ||
-          row.transaction_date >
-            existing.transaction_date
+        String(mergeError.message || "").includes(
+          "merge_sales_batch_by_dates"
         )
       ) {
-        latestCustomer.set(
-          row.customer_code,
-          row
+        throw new Error(
+          "Incremental sales merge is not enabled in Supabase yet. Run sql/merge_sales_batch_by_dates.sql in SQL Editor."
         );
-
-        continue;
       }
 
+      throw mergeError;
+    }
+
+    const liveBatchId = Number(activeBatchId) || batchId;
+    const mergedIntoExisting = liveBatchId !== batchId;
+
+    const {
+      error: refreshStatsError,
+    } = await admin.rpc(
+      "refresh_import_batch_stats",
+      {
+        p_batch_id: liveBatchId,
+      }
+    );
+
+    if (refreshStatsError) {
       if (
-        row.transaction_date &&
-        existing.transaction_date &&
-        row.transaction_date ===
-          existing.transaction_date &&
-        row.source_row_number >
-          existing.source_row_number
+        String(refreshStatsError.message || "").includes(
+          "refresh_import_batch_stats"
+        )
       ) {
-        latestCustomer.set(
-          row.customer_code,
-          row
+        throw new Error(
+          "Sales stats refresh is not enabled in Supabase yet. Run sql/merge_sales_batch_by_dates.sql in SQL Editor."
         );
       }
+
+      throw refreshStatsError;
+    }
+
+    const {
+      data: liveBatch,
+      error: liveBatchError,
+    } = await admin
+      .from("import_batches")
+      .select(
+        "total_rows,customer_count,item_count,salesman_count,min_transaction_date,max_transaction_date"
+      )
+      .eq("id", liveBatchId)
+      .single();
+
+    if (liveBatchError) {
+      throw liveBatchError;
     }
 
     /* ========================================================
-       12. UPDATE CUSTOMER MASTER
+       12. UPDATE CUSTOMER MASTER FOR UPLOADED CUSTOMERS
        ======================================================== */
 
-    const customerUpserts = [];
+    const affectedCustomerCodes = [
+      ...new Set(
+        mappedRows
+          .map((row) => row.customer_code)
+          .filter(Boolean)
+      ),
+    ];
 
-    for (
-      const [
-        customerCode,
-        row,
-      ] of latestCustomer
-    ) {
-      customerUpserts.push({
-        customer_code:
-          customerCode,
+    const latestCustomer = await loadLatestCustomersFromBatch(
+      admin,
+      liveBatchId,
+      affectedCustomerCodes
+    );
 
-        customer_name:
-          row.customer_name ||
-          customerCode,
-
-        current_salesman_code:
-          row.salesman_code,
-
-        latest_transaction_date:
-          row.transaction_date,
-
-        is_active: true,
-      });
-    }
-
-    const CUSTOMER_CHUNK = 500;
-
-    for (
-      let i = 0;
-      i <
-      customerUpserts.length;
-      i += CUSTOMER_CHUNK
-    ) {
-      const chunk =
-        customerUpserts.slice(
-          i,
-          i + CUSTOMER_CHUNK
-        );
-
-      const {
-        error: customerError,
-      } = await admin
-        .from("customers")
-        .upsert(
-          chunk,
-          {
-            onConflict:
-              "customer_code",
-          }
-        );
-
-      if (customerError) {
-        throw new Error(
-          `Customer update failed: ${customerError.message}`
-        );
-      }
-    }
+    await upsertCustomersFromLatestMap(
+      admin,
+      latestCustomer
+    );
 
     /* ========================================================
        13. UPSERT ITEM MASTER FROM IMPORTED SALES
@@ -962,17 +1076,14 @@ export async function POST(request) {
     }
 
     /* ========================================================
-       14. UPDATE BATCH STATISTICS
+       14. UPDATE UPLOAD BATCH METADATA
        ======================================================== */
 
     const {
-      error: statsError,
+      error: uploadBatchError,
     } = await admin
       .from("import_batches")
       .update({
-        total_rows:
-          mappedRows.length,
-
         customer_count:
           customers.size,
 
@@ -993,36 +1104,20 @@ export async function POST(request) {
         batchId
       );
 
-    if (statsError) {
-      throw statsError;
+    if (uploadBatchError) {
+      throw uploadBatchError;
     }
 
     /* ========================================================
-       15. ACTIVATE NEW SNAPSHOT
-       ======================================================== */
-
-    const {
-      error: activateError,
-    } = await admin.rpc(
-      "activate_sales_batch",
-      {
-        p_batch_id:
-          batchId,
-      }
-    );
-
-    if (activateError) {
-      throw activateError;
-    }
-
-    /* ========================================================
-       16. SUCCESS RESPONSE
+       15. SUCCESS RESPONSE
        ======================================================== */
 
     return NextResponse.json({
       success: true,
 
-      batchId,
+      batchId: liveBatchId,
+
+      uploadBatchId: batchId,
 
       fileName,
 
@@ -1042,8 +1137,33 @@ export async function POST(request) {
 
       maxDate,
 
-      message:
-        "Sales data replaced successfully.",
+      uploadDates,
+
+      datesUpdated: uploadDates.length,
+
+      mergedIntoExisting,
+
+      liveRows:
+        liveBatch?.total_rows || mappedRows.length,
+
+      liveCustomers:
+        liveBatch?.customer_count || customers.size,
+
+      liveItems:
+        liveBatch?.item_count || items.size,
+
+      liveSalesmen:
+        liveBatch?.salesman_count || salesmen.size,
+
+      liveMinDate:
+        liveBatch?.min_transaction_date || minDate,
+
+      liveMaxDate:
+        liveBatch?.max_transaction_date || maxDate,
+
+      message: mergedIntoExisting
+        ? `Sales data updated for ${uploadDates.length} date(s). Other dates were kept unchanged.`
+        : "Sales data loaded successfully.",
     });
 
   } catch (error) {

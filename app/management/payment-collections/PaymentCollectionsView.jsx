@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
@@ -18,6 +17,7 @@ import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { readCollectionQueuesForUser } from "../../lib/mobileDataCache";
 import { getSupabaseClient } from "../../lib/supabase";
+import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
 
 const TEXT = {
   title: { en: "Payment Collections", ar: "التحصيلات" },
@@ -156,6 +156,7 @@ const TEXT = {
   summaryAmountReceived: { en: "Amount received", ar: "المبلغ المستلم" },
   summaryReceiptMode: { en: "Receipt mode", ar: "طريقة الاستلام" },
   summaryNextVisit: { en: "Next visit", ar: "الزيارة القادمة" },
+  summaryVisitNumber: { en: "Visit number today", ar: "رقم الزيارة لليوم" },
   summaryOutstanding: { en: "Outstanding", ar: "المديونية" },
   summaryNotSpecified: { en: "not specified", ar: "غير محدد" },
   viewPaymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
@@ -208,9 +209,10 @@ function formatProbabilityLabel(label, t) {
   return String(label || t("probNA"));
 }
 
-function buildVisitSummary(row, form, translatedRemark, t) {
+function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   const amount = Number(form.amountReceived || 0);
   const nextVisit = formatDateOnly(form.nextVisitAt);
+  const visitNumberForDay = Number(options.visitNumberForDay || 0);
   const outcomeText = formatOutcomeLabel(form.visitOutcome, t);
   const arabicRemark = String(form.remarkArabic || "").trim();
   const englishRemark = String(translatedRemark || form.remarkEnglish || "").trim();
@@ -225,7 +227,10 @@ function buildVisitSummary(row, form, translatedRemark, t) {
   if (form.receiptMode) lines.push(`${t("summaryReceiptMode")}: ${formatReceiptModeLabel(form.receiptMode, t)}.`);
   if (arabicRemark) lines.push(`${t("remarkArabic")}: ${arabicRemark}.`);
   if (englishRemark) lines.push(`${t("remarkEnglish")}: ${englishRemark}.`);
-  if (nextVisit) lines.push(`${t("summaryNextVisit")}: ${nextVisit}.`);
+  lines.push(`${t("summaryNextVisit")}: ${nextVisit || t("summaryNotSpecified")}.`);
+  if (visitNumberForDay > 0) {
+    lines.push(`${t("summaryVisitNumber")}: ${visitNumberForDay}.`);
+  }
   lines.push(`${t("summaryOutstanding")}:`);
   lines.push(`${t("bucket30")}: ${formatMoney(row.outstanding_0_30)}`);
   lines.push(`${t("bucket31to60")}: ${formatMoney(row.outstanding_30_60)}`);
@@ -269,6 +274,20 @@ async function resolveEnglishRemark(arabicRemark, englishRemark) {
   }
 
   return english || arabic;
+}
+
+async function fetchTodayCollectionVisitCount(supabase, userId) {
+  const reportDate = getKsaDateString();
+  const { startIso, endIso } = ksaDayBounds(reportDate);
+  const { count, error } = await supabase
+    .from("collection_visits")
+    .select("id", { count: "exact", head: true })
+    .eq("created_by", userId)
+    .gte("saved_at", startIso)
+    .lte("saved_at", endIso);
+
+  if (error) throw error;
+  return Number(count || 0);
 }
 
 function formatLastUpdateText(row, t) {
@@ -486,12 +505,27 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [visitReportRow, setVisitReportRow] = useState(null);
   const [visitReportText, setVisitReportText] = useState("");
   const [visitReportLoading, setVisitReportLoading] = useState(false);
+  const [todayVisitCount, setTodayVisitCount] = useState(0);
   const recognitionRef = useRef(null);
   const loadSeqRef = useRef(0);
 
   const showPopup = (message) => {
     if (typeof window !== "undefined" && message) window.alert(message);
   };
+
+  const refreshTodayVisitCount = useCallback(async () => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.user?.id) return;
+      const count = await fetchTodayCollectionVisitCount(supabase, session.user.id);
+      setTodayVisitCount(count);
+    } catch {
+      // Ignore count lookup failures for WhatsApp preview.
+    }
+  }, []);
 
   const localizeApiMessage = (message) => {
     const text = String(message || "").trim();
@@ -650,6 +684,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   useEffect(() => {
     loadQueue();
+    refreshTodayVisitCount();
     const onSnapshotHydrated = () => {
       loadQueue();
     };
@@ -825,7 +860,21 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (effectiveEnglishRemark !== form.remarkEnglish) {
         setForm((current) => ({ ...current, remarkEnglish: effectiveEnglishRemark }));
       }
-      const summaryText = buildVisitSummary(row, { ...form, visitOutcome: selectedOutcome }, effectiveEnglishRemark, t);
+
+      let visitNumberForDay = todayVisitCount + 1;
+      try {
+        visitNumberForDay = (await fetchTodayCollectionVisitCount(supabase, session.user.id)) + 1;
+      } catch {
+        // Fall back to the latest cached count when lookup fails.
+      }
+
+      const summaryText = buildVisitSummary(
+        row,
+        { ...form, visitOutcome: selectedOutcome },
+        effectiveEnglishRemark,
+        t,
+        { visitNumberForDay },
+      );
 
       const formData = new FormData();
       formData.append("customerCode", row.customer_code);
@@ -883,6 +932,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           : t("msgVisitSaved");
       showPopup(popupMessage);
       setSummaryForWhatsApp(summaryText);
+      setTodayVisitCount(visitNumberForDay);
       if (!saveResult.queued) {
         const copied = await copyTextToClipboard(summaryText);
         if (copied) {
@@ -946,7 +996,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }
 
   async function copySummaryText() {
-    const summaryText = String(summaryForWhatsApp || (activeRow ? buildVisitSummary(activeRow, form, form.remarkEnglish, t) : "") || "").trim();
+    const summaryOptions = { visitNumberForDay: todayVisitCount + 1 };
+    const summaryText = String(
+      summaryForWhatsApp
+      || (activeRow ? buildVisitSummary(activeRow, form, form.remarkEnglish, t, summaryOptions) : "")
+      || "",
+    ).trim();
     if (!summaryText) return;
     try {
       const copied = await copyTextToClipboard(summaryText);
@@ -1484,7 +1539,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
                                 <label className="moduleFieldFull" style={{ marginTop: "12px", display: "block" }}>
                                   {t("summary")}
-                                  <textarea className="moduleTextArea" rows={7} value={summaryForWhatsApp || buildVisitSummary(row, form, form.remarkEnglish, t)} readOnly />
+                                  <textarea className="moduleTextArea" rows={8} value={summaryForWhatsApp || buildVisitSummary(row, form, form.remarkEnglish, t, { visitNumberForDay: todayVisitCount + 1 })} readOnly />
                                 </label>
                                 <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
                                   <button type="button" className="moduleInlineButton moduleActionButton" onClick={copySummaryText}>{t("copySummary")}</button>

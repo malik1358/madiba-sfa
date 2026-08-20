@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
 import {
   captureGpsLocationWithFallbackConfirm,
-  GPS_CANCELLED_ERROR,
-  maybePromptCustomerLocationUpdate,
 } from '../../../lib/customerLocation';
 import { postJsonResilient } from '../../../lib/offlineApi';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
@@ -226,18 +224,12 @@ export function useOrder({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please login again.');
 
-      const location = await captureGpsLocationWithFallbackConfirm(language);
+      const location = await captureGpsLocationWithFallbackConfirm(language, {
+        customerCode: selectedCustomer.customer_code,
+        customerName: selectedCustomer.customer_name,
+        accessToken: session.access_token,
+      });
       const capturedAt = new Date().toISOString();
-
-      if (session.access_token) {
-        await maybePromptCustomerLocationUpdate({
-          customerCode: selectedCustomer.customer_code,
-          customerName: selectedCustomer.customer_name,
-          entryLocation: location,
-          accessToken: session.access_token,
-          language,
-        });
-      }
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -281,9 +273,6 @@ export function useOrder({
       setMessage('Draft order saved successfully.');
       return payload.orderId;
     } catch (err) {
-      if (String(err.message || '') === GPS_CANCELLED_ERROR) {
-        return null;
-      }
       setError(err.message || 'Unable to save draft order.');
       return null;
     } finally {
@@ -314,18 +303,12 @@ export function useOrder({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please login again.');
 
-      const location = await captureGpsLocationWithFallbackConfirm(language);
+      const location = await captureGpsLocationWithFallbackConfirm(language, {
+        customerCode: selectedCustomer?.customer_code,
+        customerName: selectedCustomer?.customer_name,
+        accessToken: session.access_token,
+      });
       const capturedAt = new Date().toISOString();
-
-      if (session.access_token) {
-        await maybePromptCustomerLocationUpdate({
-          customerCode: selectedCustomer?.customer_code,
-          customerName: selectedCustomer?.customer_name,
-          entryLocation: location,
-          accessToken: session.access_token,
-          language,
-        });
-      }
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -372,9 +355,6 @@ export function useOrder({
       setShowOrderReview(false);
       return payload.orderId;
     } catch (err) {
-      if (String(err.message || '') === GPS_CANCELLED_ERROR) {
-        return null;
-      }
       setError(err.message || 'Unable to submit order.');
       return null;
     } finally {

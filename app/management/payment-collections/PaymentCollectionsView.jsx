@@ -13,8 +13,6 @@ import { resolveInvoiceAgingDays, resolveOverdueDaysFromDueDate } from "../../li
 import { GPS_REQUIRED_ERROR } from "../../lib/geo";
 import {
   captureGpsLocationWithFallbackConfirm,
-  GPS_CANCELLED_ERROR,
-  maybePromptCustomerLocationUpdate,
 } from "../../lib/customerLocation";
 import { postFormDataResilient } from "../../lib/offlineApi";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
@@ -959,13 +957,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("whatsappMessage", summaryText);
       formData.append("legalNote", form.legalNote || t("defaultLegalNote"));
 
-      const gps = await captureGpsLocationWithFallbackConfirm(language);
-      await maybePromptCustomerLocationUpdate({
+      const gps = await captureGpsLocationWithFallbackConfirm(language, {
         customerCode: row.customer_code,
         customerName: row.customer_name,
-        entryLocation: gps,
         accessToken: session.access_token,
-        language,
       });
 
       if (gps) {
@@ -1018,11 +1013,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         setForm(buildInitialForm(row));
       }
     } catch (err) {
-      const message = String(err.message || "");
-      if (message === GPS_CANCELLED_ERROR) {
-        return;
-      }
-      showPopup(localizeApiMessage(message || t("msgSaveFailed")));
+      showPopup(localizeApiMessage(err.message || t("msgSaveFailed")));
     } finally {
       setSavingCustomerCode("");
     }
@@ -1108,13 +1099,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (!session?.access_token) throw new Error(t("msgLoginAgain"));
 
-      const gps = await captureGpsLocationWithFallbackConfirm(language);
-      await maybePromptCustomerLocationUpdate({
+      const gps = await captureGpsLocationWithFallbackConfirm(language, {
         customerCode: row.customer_code,
         customerName: row.customer_name,
-        entryLocation: gps,
         accessToken: session.access_token,
-        language,
       });
 
       const response = await fetch("/api/payment-collections", {
@@ -1148,11 +1136,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         setActiveRowKey("");
       }
     } catch (err) {
-      const message = String(err.message || "");
-      if (message === GPS_CANCELLED_ERROR) {
-        return;
-      }
-      showPopup(localizeApiMessage(message || t("msgLegalUpdateFailed")));
+      showPopup(localizeApiMessage(err.message || t("msgLegalUpdateFailed")));
     } finally {
       setLegalBusyCode("");
     }

@@ -3894,6 +3894,20 @@ table.auditMatrix td.auditTrendSame {
   font-size: 0.9em;
 }
 
+.moduleCollectorSectionRowContent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.moduleCollectorSectionRowToggleIcon {
+  margin-inline-start: auto;
+  color: #0b5364;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .moduleCollectorTableWrap {
   overflow-x: auto;
 }
@@ -4689,6 +4703,19 @@ table.auditMatrix td.auditTrendSame {
 
   .moduleReviewMeta {
     grid-template-columns: 1fr;
+  }
+
+  .moduleCollectorSectionRow--mobileToggle td {
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .moduleCollectorSectionRow--mobileToggle .moduleHint {
+    margin-top: 0;
+  }
+
+  .moduleCollectorRevisitDetailRow.is-collapsed {
+    display: none !important;
   }
 }
 

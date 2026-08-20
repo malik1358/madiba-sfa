@@ -59,6 +59,10 @@ const TEXT = {
     en: "Customers with a future collection revisit date saved from the last visit. Nearest dates appear first.",
     ar: "عملاء لديهم موعد زيارة تحصيل قادم من آخر زيارة. أقرب المواعيد تظهر أولاً.",
   },
+  scheduledRevisitsMobileHint: {
+    en: "Tap a date to show or hide customers for that day.",
+    ar: "اضغط على التاريخ لإظهار أو إخفاء عملاء ذلك اليوم.",
+  },
   scheduledRevisitDate: { en: "Revisit Date", ar: "موعد الزيارة" },
   lastVisitDate: { en: "Last Visit", ar: "آخر زيارة" },
   visitRemark: { en: "Visit Remark", ar: "ملاحظة الزيارة" },
@@ -339,6 +343,22 @@ function rowMatchesSalesmanSelection(row, selectedKeys) {
   return selectedKeys.has(normalizeSalesmanKey(getSalesmanLabel(row)));
 }
 
+function useMobileLayout(breakpointPx = 700) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const media = window.matchMedia(`(max-width: ${breakpointPx}px)`);
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [breakpointPx]);
+
+  return isMobile;
+}
+
 function filterQueueRows(rows, customerFilter, selectedSalesmen) {
   const customerQuery = String(customerFilter || "").trim().toLowerCase();
   const selectedSalesmanSet = new Set(selectedSalesmen);
@@ -506,6 +526,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [visitReportText, setVisitReportText] = useState("");
   const [visitReportLoading, setVisitReportLoading] = useState(false);
   const [todayVisitCount, setTodayVisitCount] = useState(0);
+  const [expandedRevisitDates, setExpandedRevisitDates] = useState(() => new Set());
+  const isMobileLayout = useMobileLayout();
   const recognitionRef = useRef(null);
   const loadSeqRef = useRef(0);
 
@@ -743,6 +765,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
       rows,
     }));
   }, [scheduledRevisitRows]);
+
+  function toggleRevisitDateGroup(dateKey) {
+    setExpandedRevisitDates((current) => {
+      const next = new Set(current);
+      if (next.has(dateKey)) {
+        next.delete(dateKey);
+      } else {
+        next.add(dateKey);
+      }
+      return next;
+    });
+  }
 
   const tableRows = useMemo(() => {
     if (view !== "due") {
@@ -1123,6 +1157,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                 <span>{scheduledRevisitRows.length}</span>
               </div>
               <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("scheduledRevisitsHint")}</div>
+              {isMobileLayout ? (
+                <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("scheduledRevisitsMobileHint")}</div>
+              ) : null}
               {scheduledRevisitRows.length === 0 ? (
                 <div className="moduleHint">{t("noScheduledRevisits")}</div>
               ) : (
@@ -1140,20 +1177,45 @@ export default function PaymentCollectionsView({ view = "due" }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {scheduledRevisitGroups.map((group) => (
+                      {scheduledRevisitGroups.map((group) => {
+                        const isExpanded = !isMobileLayout || expandedRevisitDates.has(group.dateKey);
+                        return (
                         <Fragment key={`revisit-group-${group.dateKey}`}>
-                          <tr className="moduleCollectorSectionRow">
+                          <tr
+                            className={`moduleCollectorSectionRow${isMobileLayout ? " moduleCollectorSectionRow--mobileToggle" : ""}`}
+                            onClick={isMobileLayout ? () => toggleRevisitDateGroup(group.dateKey) : undefined}
+                            onKeyDown={isMobileLayout ? (event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                toggleRevisitDateGroup(group.dateKey);
+                              }
+                            } : undefined}
+                            tabIndex={isMobileLayout ? 0 : undefined}
+                            role={isMobileLayout ? "button" : undefined}
+                            aria-expanded={isMobileLayout ? isExpanded : undefined}
+                          >
                             <td colSpan={7}>
-                              <strong>{group.dateLabel}</strong>
-                              <span className="moduleHint" style={{ marginInlineStart: "8px" }}>
-                                {group.rows.length}
-                              </span>
+                              <div className="moduleCollectorSectionRowContent">
+                                <strong>{group.dateLabel}</strong>
+                                <span className="moduleHint" style={{ marginInlineStart: "8px" }}>
+                                  {group.rows.length}
+                                </span>
+                                {isMobileLayout ? (
+                                  <span className="moduleCollectorSectionRowToggleIcon" aria-hidden="true">
+                                    {isExpanded ? "▾" : "▸"}
+                                  </span>
+                                ) : null}
+                              </div>
                             </td>
                           </tr>
                           {group.rows.map((row) => {
                             const key = rowKey(row);
+                            if (isMobileLayout && !isExpanded) return null;
                             return (
-                              <tr key={`revisit-${key}`}>
+                              <tr
+                                key={`revisit-${key}`}
+                                className={`moduleCollectorRevisitDetailRow${isMobileLayout && !isExpanded ? " is-collapsed" : ""}`}
+                              >
                                 <td data-label={t("customerCode")}>{row.customer_code}</td>
                                 <td data-label={t("customer")}>{row.customer_name}</td>
                                 <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>
@@ -1186,7 +1248,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
                             );
                           })}
                         </Fragment>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

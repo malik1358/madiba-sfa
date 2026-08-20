@@ -155,6 +155,7 @@ const TEXT = {
   probNA: { en: "N/A", ar: "غير متاح" },
   summaryCustomer: { en: "Customer", ar: "العميل" },
   summaryCode: { en: "Code", ar: "الكود" },
+  summaryQueuePriority: { en: "Queue priority", ar: "أولوية الزيارة" },
   summarySalesman: { en: "Salesman", ar: "المندوب" },
   summaryOutcome: { en: "Outcome", ar: "النتيجة" },
   summaryAmountReceived: { en: "Amount received", ar: "المبلغ المستلم" },
@@ -213,10 +214,17 @@ function formatProbabilityLabel(label, t) {
   return String(label || t("probNA"));
 }
 
+function formatCustomerCodeWithPriority(customerCode, priority) {
+  const code = String(customerCode || "-").trim() || "-";
+  if (!priority || priority <= 0) return code;
+  return `${priority} · ${code}`;
+}
+
 function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   const amount = Number(form.amountReceived || 0);
   const nextVisit = formatDateOnly(form.nextVisitAt);
   const visitNumberForDay = Number(options.visitNumberForDay || 0);
+  const queuePriority = Number(options.queuePriority || 0);
   const outcomeText = formatOutcomeLabel(form.visitOutcome, t);
   const arabicRemark = String(form.remarkArabic || "").trim();
   const englishRemark = String(translatedRemark || form.remarkEnglish || "").trim();
@@ -226,6 +234,10 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
     `${t("summarySalesman")}: ${row.salesman_name || row.salesman_code || "-"}`,
     `${t("summaryOutcome")}: ${outcomeText || t("summaryNotSpecified")}`,
   ];
+
+  if (queuePriority > 0) {
+    lines.splice(1, 0, `${t("summaryQueuePriority")}: ${queuePriority}.`);
+  }
 
   if (amount > 0) lines.push(`${t("summaryAmountReceived")}: ${formatMoney(amount)}.`);
   if (form.receiptMode) lines.push(`${t("summaryReceiptMode")}: ${formatReceiptModeLabel(form.receiptMode, t)}.`);
@@ -791,6 +803,20 @@ export default function PaymentCollectionsView({ view = "due" }) {
     return items;
   }, [visibleRows, visibleNotDueRows, view]);
 
+  const queuePriorityByKey = useMemo(() => {
+    const priorities = new Map();
+    let priority = 0;
+
+    tableRows.forEach((item) => {
+      if (item.type !== "customer") return;
+      if (view === "due" && item.row.queue_kind === "not_due") return;
+      priority += 1;
+      priorities.set(rowKey(item.row), priority);
+    });
+
+    return priorities;
+  }, [tableRows, view]);
+
   const allSalesmenSelected = salesmanOptions.length > 0 && selectedSalesmen.length === salesmanOptions.length;
 
   useEffect(() => {
@@ -907,7 +933,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
         { ...form, visitOutcome: selectedOutcome },
         effectiveEnglishRemark,
         t,
-        { visitNumberForDay },
+        {
+          visitNumberForDay,
+          queuePriority: queuePriorityByKey.get(rowKey(row)) || 0,
+        },
       );
 
       const formData = new FormData();
@@ -1030,7 +1059,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }
 
   async function copySummaryText() {
-    const summaryOptions = { visitNumberForDay: todayVisitCount + 1 };
+    const summaryOptions = {
+      visitNumberForDay: todayVisitCount + 1,
+      queuePriority: activeRow ? (queuePriorityByKey.get(rowKey(activeRow)) || 0) : 0,
+    };
     const summaryText = String(
       summaryForWhatsApp
       || (activeRow ? buildVisitSummary(activeRow, form, form.remarkEnglish, t, summaryOptions) : "")
@@ -1349,12 +1381,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
                     const row = item.row;
                     const key = rowKey(row);
+                    const queuePriority = queuePriorityByKey.get(key) || 0;
                     const isOpen = activeRowKey === key;
                     const isNotDue = row.queue_kind === "not_due";
                     return (
                       <Fragment key={`${key}-${tableIndex}`}>
                         <tr key={key}>
-                          <td data-label={t("customerCode")}>{row.customer_code || "-"}</td>
+                          <td data-label={t("customerCode")}>{formatCustomerCodeWithPriority(row.customer_code, queuePriority)}</td>
                           <td data-label={t("customer")} className="moduleCollectorCellPrimary">{row.customer_name || row.customer_code}</td>
                           <td data-label={t("salesman")}>{row.salesman_name || row.salesman_code || "-"}</td>
                           <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
@@ -1602,7 +1635,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
                                 <label className="moduleFieldFull" style={{ marginTop: "12px", display: "block" }}>
                                   {t("summary")}
-                                  <textarea className="moduleTextArea" rows={8} value={summaryForWhatsApp || buildVisitSummary(row, form, form.remarkEnglish, t, { visitNumberForDay: todayVisitCount + 1 })} readOnly />
+                                  <textarea className="moduleTextArea" rows={8} value={summaryForWhatsApp || buildVisitSummary(row, form, form.remarkEnglish, t, { visitNumberForDay: todayVisitCount + 1, queuePriority })} readOnly />
                                 </label>
                                 <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
                                   <button type="button" className="moduleInlineButton moduleActionButton" onClick={copySummaryText}>{t("copySummary")}</button>

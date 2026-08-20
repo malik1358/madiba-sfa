@@ -13,6 +13,7 @@ const TEXT = {
 };
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -266,7 +267,7 @@ function CustomerAuditPageContent() {
   }
 
   if (loading) {
-    return <LoadingScreen title="Customer Details" subtitle="Loading customer data..." />;
+    return <LoadingScreen title={t("title")} subtitle="Loading customer data..." />;
   }
 
   if (!selectedCustomer) {
@@ -283,6 +284,11 @@ function CustomerAuditPageContent() {
           </div>
 
           {error && <div className="auditError">{error}</div>}
+          {error && error.toLowerCase().includes("login") ? (
+            <div style={{ marginTop: "8px" }}>
+              <Link href="/" className="moduleInlineButton">Go to login</Link>
+            </div>
+          ) : null}
           {refreshing && <div className="moduleHint">{t("cacheRefreshing")}</div>}
 
           <CustomerList

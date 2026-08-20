@@ -55,6 +55,7 @@ const TEXT = {
   sequence: { en: "#", ar: "#" },
   customer: { en: "Customer", ar: "العميل" },
   outcome: { en: "Outcome", ar: "النتيجة" },
+  nextVisitDate: { en: "Next Visit", ar: "الزيارة القادمة" },
   amount: { en: "Amount", ar: "المبلغ" },
   gps: { en: "GPS", ar: "GPS" },
   distance: { en: "Distance from previous", ar: "المسافة من السابق" },
@@ -74,6 +75,18 @@ function formatNumber(value, digits = 2) {
 function formatTime(value) {
   if (!value) return "-";
   return new Date(value).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDateOnly(value) {
+  const input = String(value || "").trim();
+  if (!input) return "-";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    const [y, m, d] = input.split("-");
+    return `${d}/${m}/${y}`;
+  }
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("en-GB");
 }
 
 function formatAmount(value) {
@@ -312,6 +325,7 @@ export default function CollectionReportPage() {
                           <th>{t("userName")}</th>
                           <th>{t("customer")}</th>
                           <th>{t("outcome")}</th>
+                          <th>{t("nextVisitDate")}</th>
                           <th>{t("amount")}</th>
                           <th>{t("gps")}</th>
                           <th>{t("distance")}</th>
@@ -329,6 +343,7 @@ export default function CollectionReportPage() {
                               <div className="moduleCode">{visit.customerCode}</div>
                             </td>
                             <td>{visit.visitOutcomeLabel || visit.visitOutcome}</td>
+                            <td>{formatDateOnly(visit.nextVisitAt)}</td>
                             <td>{formatAmount(visit.amountReceived)}</td>
                             <td>
                               {visit.hasGps
@@ -356,7 +371,7 @@ export default function CollectionReportPage() {
                         ))}
                         {(collector.visits || []).length === 0 && (
                           <tr>
-                            <td colSpan={9}>{t("noVisits")}</td>
+                            <td colSpan={10}>{t("noVisits")}</td>
                           </tr>
                         )}
                       </tbody>

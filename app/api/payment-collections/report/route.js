@@ -155,8 +155,8 @@ function applyNearestActivityGpsFallback(visit, activityGpsByUser) {
   };
 }
 
-const VISIT_SELECT_WITH_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,saved_at,latitude,longitude,gps_accuracy_meters,created_by";
-const VISIT_SELECT_WITHOUT_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,saved_at,created_by";
+const VISIT_SELECT_WITH_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,next_visit_at,saved_at,latitude,longitude,gps_accuracy_meters,created_by";
+const VISIT_SELECT_WITHOUT_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,next_visit_at,saved_at,created_by";
 
 async function queryCollectionVisits(admin, {
   startIso,
@@ -320,6 +320,7 @@ export async function GET(request) {
         visitOutcomeLabel: formatOutcome(visit.visit_outcome),
         paymentStatus: visit.payment_status,
         amountReceived: Number(visit.amount_received || 0),
+        nextVisitAt: visit.next_visit_at || null,
         savedAt: visit.saved_at,
         latitude: visit.latitude,
         longitude: visit.longitude,

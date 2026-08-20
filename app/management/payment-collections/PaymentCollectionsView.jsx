@@ -89,6 +89,10 @@ const TEXT = {
   remarkEnglish: { en: "Remark (English)", ar: "الملاحظة بالانجليزية" },
   dictation: { en: "Dictate", ar: "إملاء" },
   summary: { en: "Visit Summary for WhatsApp", ar: "ملخص الزيارة للواتساب" },
+  summaryAfterSave: {
+    en: "Save the visit first. The WhatsApp summary appears here only after a successful save.",
+    ar: "احفظ الزيارة أولاً. يظهر ملخص الواتساب هنا فقط بعد الحفظ بنجاح.",
+  },
   copySummary: { en: "Copy Summary", ar: "نسخ الملخص" },
   copied: { en: "Copied", ar: "تم النسخ" },
   paymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
@@ -139,6 +143,10 @@ const TEXT = {
     ar: "سجل العميل غير موجود في القائمة الرئيسية. اطلب من المسؤول إضافة العميل في Customer Master.",
   },
   msgVisitSaved: { en: "Visit saved successfully.", ar: "تم حفظ الزيارة بنجاح." },
+  msgSavedOfflineNoWhatsapp: {
+    en: "Saved on device. It will sync when you are back online. WhatsApp summary will be available after sync completes.",
+    ar: "تم الحفظ على الجهاز. سيتم المزامنة عند عودة الاتصال. سيظهر ملخص الواتساب بعد اكتمال المزامنة.",
+  },
   msgGpsRequired: { en: "GPS is required. Allow location access in the browser before saving.", ar: "GPS مطلوب. اسمح بالموقع في المتصفح قبل الحفظ." },
   msgWhatsappNotSent: { en: "WhatsApp not sent", ar: "لم يتم إرسال واتساب" },
   msgSpeechUnsupported: { en: "Speech dictation is not supported in this browser.", ar: "الإملاء الصوتي غير مدعوم في هذا المتصفح." },
@@ -992,14 +1000,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       const payload = saveResult.payload || {};
       const popupMessage = saveResult.queued
-        ? saveResult.message
+        ? t("msgSavedOfflineNoWhatsapp")
         : payload?.whatsapp?.error
           ? `${t("msgVisitSaved")} ${t("msgWhatsappNotSent")}: ${payload.whatsapp.error}`
           : t("msgVisitSaved");
       showPopup(popupMessage);
-      setSummaryForWhatsApp(summaryText);
       setTodayVisitCount(visitNumberForDay);
       if (!saveResult.queued) {
+        setSummaryForWhatsApp(summaryText);
         const copied = await copyTextToClipboard(summaryText);
         if (copied) {
           setCopyStatus(t("copied"));
@@ -1009,6 +1017,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         }
         await loadQueue(rowKey(row));
       } else {
+        setSummaryForWhatsApp("");
         setActiveRowKey("");
         setForm(buildInitialForm(row));
       }
@@ -1062,15 +1071,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }
 
   async function copySummaryText() {
-    const summaryOptions = {
-      visitNumberForDay: todayVisitCount + 1,
-      queuePriority: activeRow ? (queuePriorityByKey.get(rowKey(activeRow)) || 0) : 0,
-    };
-    const summaryText = String(
-      summaryForWhatsApp
-      || (activeRow ? buildVisitSummary(activeRow, form, form.remarkEnglish, t, summaryOptions) : "")
-      || "",
-    ).trim();
+    const summaryText = String(summaryForWhatsApp || "").trim();
     if (!summaryText) return;
     try {
       const copied = await copyTextToClipboard(summaryText);
@@ -1636,12 +1637,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
                                 <label className="moduleFieldFull" style={{ marginTop: "12px", display: "block" }}>
                                   {t("summary")}
-                                  <textarea className="moduleTextArea" rows={8} value={summaryForWhatsApp || buildVisitSummary(row, form, form.remarkEnglish, t, { visitNumberForDay: todayVisitCount + 1, queuePriority })} readOnly />
+                                  {summaryForWhatsApp ? (
+                                    <textarea className="moduleTextArea" rows={8} value={summaryForWhatsApp} readOnly />
+                                  ) : (
+                                    <div className="moduleHint" style={{ marginTop: "6px" }}>{t("summaryAfterSave")}</div>
+                                  )}
                                 </label>
-                                <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
-                                  <button type="button" className="moduleInlineButton moduleActionButton" onClick={copySummaryText}>{t("copySummary")}</button>
-                                  {copyStatus ? <span className="moduleHint">{copyStatus}</span> : null}
-                                </div>
+                                {summaryForWhatsApp ? (
+                                  <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
+                                    <button type="button" className="moduleInlineButton moduleActionButton" onClick={copySummaryText}>{t("copySummary")}</button>
+                                    {copyStatus ? <span className="moduleHint">{copyStatus}</span> : null}
+                                  </div>
+                                ) : null}
 
                                 <div className="moduleSectionHeader" style={{ marginTop: "14px" }}>
                                   <h2>{t("latestVisit")}</h2>

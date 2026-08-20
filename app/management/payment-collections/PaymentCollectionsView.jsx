@@ -10,8 +10,12 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveInvoiceAgingDays, resolveOverdueDaysFromDueDate } from "../../lib/outstanding";
-import { captureGpsLocation, GPS_REQUIRED_ERROR } from "../../lib/geo";
-import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
+import { GPS_REQUIRED_ERROR } from "../../lib/geo";
+import {
+  captureGpsLocationWithFallbackConfirm,
+  GPS_CANCELLED_ERROR,
+  maybePromptCustomerLocationUpdate,
+} from "../../lib/customerLocation";
 import { postFormDataResilient } from "../../lib/offlineApi";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
@@ -955,7 +959,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("whatsappMessage", summaryText);
       formData.append("legalNote", form.legalNote || t("defaultLegalNote"));
 
-      const gps = await captureGpsLocation();
+      const gps = await captureGpsLocationWithFallbackConfirm(language);
       await maybePromptCustomerLocationUpdate({
         customerCode: row.customer_code,
         customerName: row.customer_name,
@@ -964,9 +968,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
         language,
       });
 
-      formData.append("latitude", String(gps.latitude));
-      formData.append("longitude", String(gps.longitude));
-      formData.append("gpsAccuracyMeters", String(gps.accuracy));
+      if (gps) {
+        formData.append("latitude", String(gps.latitude));
+        formData.append("longitude", String(gps.longitude));
+        formData.append("gpsAccuracyMeters", String(gps.accuracy));
+      } else {
+        formData.append("allowMissingGps", "1");
+      }
 
       if (form.paymentCopy) {
         formData.append("paymentCopy", await prepareUploadFile(form.paymentCopy));
@@ -1010,7 +1018,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
         setForm(buildInitialForm(row));
       }
     } catch (err) {
-      showPopup(localizeApiMessage(err.message || t("msgSaveFailed")));
+      const message = String(err.message || "");
+      if (message === GPS_CANCELLED_ERROR) {
+        return;
+      }
+      showPopup(localizeApiMessage(message || t("msgSaveFailed")));
     } finally {
       setSavingCustomerCode("");
     }
@@ -1096,7 +1108,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (!session?.access_token) throw new Error(t("msgLoginAgain"));
 
-      const gps = await captureGpsLocation();
+      const gps = await captureGpsLocationWithFallbackConfirm(language);
       await maybePromptCustomerLocationUpdate({
         customerCode: row.customer_code,
         customerName: row.customer_name,
@@ -1116,9 +1128,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerName: row.customer_name,
           note: form.legalNote,
           action,
-          latitude: gps.latitude,
-          longitude: gps.longitude,
-          gpsAccuracyMeters: gps.accuracy,
+          latitude: gps?.latitude ?? null,
+          longitude: gps?.longitude ?? null,
+          gpsAccuracyMeters: gps?.accuracy ?? null,
+          allowMissingGps: !gps,
         }),
       });
 
@@ -1135,7 +1148,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
         setActiveRowKey("");
       }
     } catch (err) {
-      showPopup(localizeApiMessage(err.message || t("msgLegalUpdateFailed")));
+      const message = String(err.message || "");
+      if (message === GPS_CANCELLED_ERROR) {
+        return;
+      }
+      showPopup(localizeApiMessage(message || t("msgLegalUpdateFailed")));
     } finally {
       setLegalBusyCode("");
     }

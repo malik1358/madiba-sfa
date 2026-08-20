@@ -1,14 +1,34 @@
 import { isProspectCustomerCode } from "./customerCode.js";
 import {
-  GPS_REQUIRED_ERROR,
+  captureGpsLocation,
   haversineDistanceKm,
   hasGpsCoordinates,
+  reverseGeocodeCoordinates,
 } from "./geo.js";
 
 export const CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM = 0.5;
+export const GPS_CANCELLED_ERROR = "Location update cancelled.";
 
 export function customerHasSavedLocation(customer) {
   return hasGpsCoordinates(customer);
+}
+
+export function customerHasArea(customer) {
+  return Boolean(String(customer?.area || "").trim());
+}
+
+export async function captureGpsLocationWithFallbackConfirm(language = "en") {
+  try {
+    return await captureGpsLocation();
+  } catch (error) {
+    const message = language === "ar"
+      ? "GPS غير متاح. هل تريد المتابعة بدون GPS؟"
+      : "GPS is not available. Continue without GPS?";
+    if (window.confirm(message)) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export function distanceFromCustomerKm(entryLocation, customer) {
@@ -50,25 +70,71 @@ export async function fetchCustomerLocation(accessToken, customerCode) {
 }
 
 export async function updateCustomerLocation(accessToken, customerCode, location) {
+  const payload = {
+    customerCode,
+    latitude: location.latitude,
+    longitude: location.longitude,
+  };
+
+  if (location.area !== undefined) {
+    payload.area = location.area;
+  }
+  if (location.city !== undefined) {
+    payload.city = location.city;
+  }
+
   const response = await fetch("/api/customers/location", {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({
-      customerCode,
-      latitude: location.latitude,
-      longitude: location.longitude,
-    }),
+    body: JSON.stringify(payload),
   });
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.success) {
-    throw new Error(payload.error || "Unable to update customer location.");
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to update customer location.");
   }
 
-  return payload.customer;
+  return result.customer;
+}
+
+function buildLocationUpdatePayload(entryLocation, customer, geocoded = {}) {
+  const detectedArea = String(geocoded.area || "").trim();
+  const detectedCity = String(geocoded.city || "").trim();
+
+  return {
+    latitude: entryLocation.latitude,
+    longitude: entryLocation.longitude,
+    area: detectedArea || String(customer?.area || "").trim(),
+    city: detectedCity || String(customer?.city || "").trim(),
+  };
+}
+
+function confirmContinueWithoutArea(displayName, language) {
+  const message = language === "ar"
+    ? `لا توجد منطقة محفوظة للعميل ${displayName}. المتابعة بدون تحديث المنطقة؟`
+    : `No saved area for ${displayName}. Continue without updating the area?`;
+  if (!window.confirm(message)) {
+    throw new Error(GPS_CANCELLED_ERROR);
+  }
+}
+
+function confirmDetectedArea(displayName, detectedArea, language) {
+  const message = language === "ar"
+    ? `تم تحديد المنطقة: ${detectedArea}. هل تريد حفظها للعميل ${displayName}؟`
+    : `Detected area: ${detectedArea}. Save this area for ${displayName}?`;
+  return window.confirm(message);
+}
+
+function confirmUndetectedArea(displayName, language) {
+  const message = language === "ar"
+    ? `تعذر تحديد المنطقة من GPS للعميل ${displayName}. المتابعة بدون حفظ المنطقة؟`
+    : `Could not detect an area from GPS for ${displayName}. Continue without saving the area?`;
+  if (!window.confirm(message)) {
+    throw new Error(GPS_CANCELLED_ERROR);
+  }
 }
 
 export async function maybePromptCustomerLocationUpdate({
@@ -82,21 +148,51 @@ export async function maybePromptCustomerLocationUpdate({
     return;
   }
 
-  if (!hasGpsCoordinates(entryLocation)) {
-    throw new Error(GPS_REQUIRED_ERROR);
-  }
-
   const customer = await fetchCustomerLocation(accessToken, customerCode);
   const displayName = customerName || customer?.customer_name || customerCode;
 
-  if (!customerHasSavedLocation(customer)) {
-    const message = language === "ar"
-      ? `لا يوجد موقع محفوظ للعميل ${displayName}. هل تريد تحديث موقع العميل إلى GPS الحالي؟`
-      : `No saved location for ${displayName}. Update customer location to your current GPS?`;
-    if (window.confirm(message)) {
-      await updateCustomerLocation(accessToken, customerCode, entryLocation);
+  if (!hasGpsCoordinates(entryLocation)) {
+    if (!customerHasArea(customer)) {
+      confirmContinueWithoutArea(displayName, language);
     }
     return;
+  }
+
+  const geocoded = await reverseGeocodeCoordinates(entryLocation.latitude, entryLocation.longitude);
+  const detectedArea = String(geocoded.area || "").trim();
+  const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
+
+  if (!customerHasSavedLocation(customer)) {
+    let message = language === "ar"
+      ? `لا يوجد موقع محفوظ للعميل ${displayName}. هل تريد تحديث موقع العميل إلى GPS الحالي؟`
+      : `No saved location for ${displayName}. Update customer location to your current GPS?`;
+    if (detectedArea && !customerHasArea(customer)) {
+      message += language === "ar"
+        ? `\nالمنطقة المقترحة: ${detectedArea}`
+        : `\nSuggested area: ${detectedArea}`;
+    }
+    if (window.confirm(message)) {
+      await updateCustomerLocation(accessToken, customerCode, updatePayload);
+    } else if (detectedArea && !customerHasArea(customer)) {
+      if (confirmDetectedArea(displayName, detectedArea, language)) {
+        await updateCustomerLocation(accessToken, customerCode, updatePayload);
+      } else {
+        confirmUndetectedArea(displayName, language);
+      }
+    } else if (!customerHasArea(customer)) {
+      confirmUndetectedArea(displayName, language);
+    }
+    return;
+  }
+
+  if (detectedArea && !customerHasArea(customer)) {
+    if (confirmDetectedArea(displayName, detectedArea, language)) {
+      await updateCustomerLocation(accessToken, customerCode, updatePayload);
+    } else {
+      confirmUndetectedArea(displayName, language);
+    }
+  } else if (!customerHasArea(customer)) {
+    confirmUndetectedArea(displayName, language);
   }
 
   const distanceKm = distanceFromCustomerKm(entryLocation, customer);
@@ -107,6 +203,6 @@ export async function maybePromptCustomerLocationUpdate({
     : `You are ${distanceKm.toFixed(2)} km from ${displayName}'s saved location. Update customer location to your current GPS?`;
 
   if (window.confirm(message)) {
-    await updateCustomerLocation(accessToken, customerCode, entryLocation);
+    await updateCustomerLocation(accessToken, customerCode, updatePayload);
   }
 }

@@ -28,3 +28,10 @@ test("customerHasSavedLocation requires both coordinates", () => {
   assert.equal(customerHasSavedLocation({ latitude: 1 }), false);
   assert.equal(CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM, 0.5);
 });
+
+test("customerHasArea requires a non-empty area value", async () => {
+  const { customerHasArea } = await import("../app/lib/customerLocation.js");
+  assert.equal(customerHasArea({ area: "Al Olaya" }), true);
+  assert.equal(customerHasArea({ area: "  " }), false);
+  assert.equal(customerHasArea({}), false);
+});

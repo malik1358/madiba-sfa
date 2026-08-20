@@ -785,6 +785,7 @@ export default function NewOrderPage() {
     setMessage,
     accessScope,
     editOrderId,
+    language,
   });
 
   const buildOrderSnapshot = useCallback(

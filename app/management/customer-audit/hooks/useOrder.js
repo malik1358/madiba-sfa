@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
-import { requireGpsLocation } from '../../../lib/geo';
-import { maybePromptCustomerLocationUpdate } from '../../../lib/customerLocation';
+import {
+  captureGpsLocationWithFallbackConfirm,
+  GPS_CANCELLED_ERROR,
+  maybePromptCustomerLocationUpdate,
+} from '../../../lib/customerLocation';
 import { postJsonResilient } from '../../../lib/offlineApi';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
@@ -54,6 +57,7 @@ export function useOrder({
   setMessage,
   accessScope = null,
   editOrderId = '',
+  language = 'en',
 }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
   const [orderQuantities, setOrderQuantities] = useState({});
@@ -222,7 +226,7 @@ export function useOrder({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please login again.');
 
-      const location = await requireGpsLocation();
+      const location = await captureGpsLocationWithFallbackConfirm(language);
       const capturedAt = new Date().toISOString();
 
       if (session.access_token) {
@@ -231,6 +235,7 @@ export function useOrder({
           customerName: selectedCustomer.customer_name,
           entryLocation: location,
           accessToken: session.access_token,
+          language,
         });
       }
 
@@ -276,12 +281,15 @@ export function useOrder({
       setMessage('Draft order saved successfully.');
       return payload.orderId;
     } catch (err) {
+      if (String(err.message || '') === GPS_CANCELLED_ERROR) {
+        return null;
+      }
       setError(err.message || 'Unable to save draft order.');
       return null;
     } finally {
       setSavingOrder(false);
     }
-  }, [draftOrderId, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage]);
+  }, [draftOrderId, language, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage]);
 
   const submitOrder = useCallback(async () => {
     if (orderItems.length === 0) {
@@ -306,7 +314,7 @@ export function useOrder({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please login again.');
 
-      const location = await requireGpsLocation();
+      const location = await captureGpsLocationWithFallbackConfirm(language);
       const capturedAt = new Date().toISOString();
 
       if (session.access_token) {
@@ -315,6 +323,7 @@ export function useOrder({
           customerName: selectedCustomer?.customer_name,
           entryLocation: location,
           accessToken: session.access_token,
+          language,
         });
       }
 
@@ -363,12 +372,15 @@ export function useOrder({
       setShowOrderReview(false);
       return payload.orderId;
     } catch (err) {
+      if (String(err.message || '') === GPS_CANCELLED_ERROR) {
+        return null;
+      }
       setError(err.message || 'Unable to submit order.');
       return null;
     } finally {
       setSubmittingOrder(false);
     }
-  }, [draftOrderId, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage]);
+  }, [draftOrderId, language, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage]);
 
   return {
     draftOrderId,

@@ -687,8 +687,11 @@ export async function POST(request) {
 
     if (!customerCode) throw new Error("Customer code is required");
     if (!visitOutcome) throw new Error("Please select visit outcome");
+    const allowMissingGps = String(formData.get("allowMissingGps") || "") === "1";
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-      throw new Error("GPS is required. Allow location access in the browser and try again.");
+      if (!allowMissingGps) {
+        throw new Error("GPS is required. Allow location access in the browser and try again.");
+      }
     }
 
     if (visitOutcome === "FUNDS_RECEIVED" && amountReceived <= 0) {
@@ -875,8 +878,11 @@ export async function PATCH(request) {
       : Number(body.longitude);
 
     if (!customerCode) throw new Error("Customer code is required");
+    const allowMissingGps = Boolean(body.allowMissingGps);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-      throw new Error("GPS is required. Allow location access in the browser and try again.");
+      if (!allowMissingGps) {
+        throw new Error("GPS is required. Allow location access in the browser and try again.");
+      }
     }
 
     const admin = createClient(supabaseUrl, serviceKey, {
@@ -935,14 +941,16 @@ export async function PATCH(request) {
       },
     });
 
-    const { error: gpsLogError } = await admin.from("daily_activity_logs").insert({
-      user_id: user.id,
-      entry_type: "GPS_PING",
-      note: gpsNote,
-    });
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      const { error: gpsLogError } = await admin.from("daily_activity_logs").insert({
+        user_id: user.id,
+        entry_type: "GPS_PING",
+        note: gpsNote,
+      });
 
-    if (gpsLogError && !isMissingTableError(gpsLogError)) {
-      throw gpsLogError;
+      if (gpsLogError && !isMissingTableError(gpsLogError)) {
+        throw gpsLogError;
+      }
     }
 
     return Response.json({ success: true });

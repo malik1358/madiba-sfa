@@ -39,7 +39,7 @@ async function getProfile(admin, userId) {
 async function ensureCustomerAccess(admin, profile, customerCode) {
   const { data: customer, error } = await admin
     .from("customers")
-    .select("customer_code,customer_name,current_salesman_code,latitude,longitude")
+    .select("customer_code,customer_name,current_salesman_code,latitude,longitude,city,area")
     .eq("customer_code", customerCode)
     .maybeSingle();
 
@@ -85,6 +85,8 @@ export async function GET(request) {
         customer_name: customer.customer_name,
         latitude: customer.latitude,
         longitude: customer.longitude,
+        city: customer.city,
+        area: customer.area,
       },
     });
   } catch (error) {
@@ -104,8 +106,16 @@ export async function PATCH(request) {
     const user = await getAuthUser(request);
     const body = await request.json();
     const customerCode = normalizeCode(body.customerCode || "");
-    const latitude = Number(body.latitude);
-    const longitude = Number(body.longitude);
+    const latitudeRaw = body.latitude;
+    const longitudeRaw = body.longitude;
+    const latitude = latitudeRaw === null || latitudeRaw === undefined || latitudeRaw === ""
+      ? null
+      : Number(latitudeRaw);
+    const longitude = longitudeRaw === null || longitudeRaw === undefined || longitudeRaw === ""
+      ? null
+      : Number(longitudeRaw);
+    const area = body.area === undefined ? undefined : String(body.area || "").trim();
+    const city = body.city === undefined ? undefined : String(body.city || "").trim();
 
     if (!customerCode) throw new Error("Customer code is required");
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
@@ -119,14 +129,18 @@ export async function PATCH(request) {
     const profile = await getProfile(admin, user.id);
     await ensureCustomerAccess(admin, profile, customerCode);
 
+    const updatePayload = {
+      latitude,
+      longitude,
+    };
+    if (area !== undefined) updatePayload.area = area;
+    if (city !== undefined) updatePayload.city = city;
+
     const { data, error } = await admin
       .from("customers")
-      .update({
-        latitude,
-        longitude,
-      })
+      .update(updatePayload)
       .eq("customer_code", customerCode)
-      .select("customer_code,customer_name,latitude,longitude")
+      .select("customer_code,customer_name,latitude,longitude,city,area")
       .maybeSingle();
 
     if (error) throw error;

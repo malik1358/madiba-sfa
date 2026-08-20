@@ -247,15 +247,22 @@ export function parseReverseGeocodeAddress(payload) {
     || address.quarter
     || "",
   ).trim();
+  const city = String(
+    address.city
+    || address.town
+    || address.village
+    || address.state
+    || "",
+  ).trim();
 
-  return { area, street };
+  return { area, street, city };
 }
 
 export async function reverseGeocodeCoordinates(latitude, longitude) {
   const lat = Number(latitude);
   const lng = Number(longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return { area: "", street: "" };
+    return { area: "", street: "", city: "" };
   }
 
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=en&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`;
@@ -267,12 +274,12 @@ export async function reverseGeocodeCoordinates(latitude, longitude) {
         "User-Agent": "MadibaSFA/1.0 (daily-visit-report)",
       },
     });
-    if (!response.ok) return { area: "", street: "" };
+    if (!response.ok) return { area: "", street: "", city: "" };
 
     const payload = await response.json().catch(() => ({}));
     return parseReverseGeocodeAddress(payload);
   } catch {
-    return { area: "", street: "" };
+    return { area: "", street: "", city: "" };
   }
 }
 

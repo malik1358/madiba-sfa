@@ -42,6 +42,7 @@ import { useCustomerData } from "./hooks/useCustomerData";
 import { useAnalytics } from "./hooks/useAnalytics";
 import { useQuickOrder } from "./hooks/useQuickOrder";
 import { useOrder } from "./hooks/useOrder";
+import { buildOrderCatalog } from "./lib/orderHelpers";
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString("en-US", {
@@ -100,6 +101,10 @@ function CustomerAuditPageContent() {
 
   const analytics = useAnalytics(transactions);
   const quickOrderSuggestions = useQuickOrder({ analytics, transactions, peerTransactions, itemMaster });
+  const orderCatalog = useMemo(
+    () => buildOrderCatalog(itemMaster, priceSheetItems, priceList),
+    [itemMaster, priceList, priceSheetItems],
+  );
   const {
     orderItems,
     orderSummary,
@@ -122,12 +127,13 @@ function CustomerAuditPageContent() {
       ...quickOrderSuggestions.notBoughtRecently,
       ...quickOrderSuggestions.buyingLess,
     ],
-    catalogItems: itemMaster,
+    catalogItems: orderCatalog,
     selectedCustomer,
     priceList,
     setError,
     setMessage,
     accessScope,
+    language,
   });
 
   useEffect(() => {

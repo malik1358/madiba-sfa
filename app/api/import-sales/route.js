@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import { normalizeImportedItemName } from "../../lib/itemName.js";
+import { scheduleMobileFieldSnapshotRebuild } from "../../lib/server/mobileFieldSnapshot.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -1111,6 +1113,18 @@ export async function POST(request) {
     /* ========================================================
        15. SUCCESS RESPONSE
        ======================================================== */
+
+    after(async () => {
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const rebuildAdmin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        await scheduleMobileFieldSnapshotRebuild(rebuildAdmin, { trigger: "sales-upload" });
+      } catch (rebuildError) {
+        console.error("Mobile snapshot rebuild after sales upload failed:", rebuildError);
+      }
+    });
 
     return NextResponse.json({
       success: true,

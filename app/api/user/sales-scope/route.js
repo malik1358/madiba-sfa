@@ -98,6 +98,121 @@ function isSoyebProfile(profile) {
   return normalizedName === "SOYEB";
 }
 
+export async function resolveSalesScopeForUserId(admin, userId) {
+  const { data: authData, error: authError } = await admin.auth.admin.getUserById(userId);
+  if (authError || !authData?.user) {
+    throw new Error("User not found.");
+  }
+
+  const user = authData.user;
+
+  const { data: currentProfile, error: profileError } = await admin
+    .from("profiles")
+    .select("id,role,salesman_code,salesman_name")
+    .eq("id", userId)
+    .single();
+
+  if (profileError || !currentProfile) {
+    throw new Error("Profile not found.");
+  }
+
+  const role = normalizeRole(currentProfile.role);
+  const currentSalesmanCode = normalizeCode(currentProfile.salesman_code);
+
+  const [profilesRes, usersRes] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("id,role,salesman_code,salesman_name")
+      .order("salesman_name"),
+    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+  ]);
+
+  if (profilesRes.error) throw profilesRes.error;
+  if (usersRes.error) throw usersRes.error;
+
+  const allProfiles = profilesRes.data || [];
+  const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
+  const authUsers = usersRes.data?.users || [];
+  const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
+  const currentAuthUser = authMap.get(currentProfile.id) || user;
+  const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
+  const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
+
+  let members = [];
+  if (["admin", "manager"].includes(role)) {
+    members = scopedProfiles;
+  } else if (isProductPromoterRole(role) && inheritedHeadCode) {
+    const subordinateIds = new Set();
+
+    authUsers.forEach((authUser) => {
+      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+      const headCode = normalizeCode(metadata.head_salesman_code);
+      if (headCode && headCode === inheritedHeadCode) {
+        subordinateIds.add(authUser.id);
+      }
+    });
+
+    members = scopedProfiles.filter((profile) => {
+      const profileCode = normalizeCode(profile.salesman_code);
+      return profileCode === inheritedHeadCode || subordinateIds.has(profile.id);
+    });
+  } else {
+    const subordinateIds = new Set();
+
+    authUsers.forEach((authUser) => {
+      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+      const headCode = normalizeCode(metadata.head_salesman_code);
+      if (headCode && headCode === currentSalesmanCode) {
+        subordinateIds.add(authUser.id);
+      }
+    });
+
+    members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
+
+    if (!members.some((profile) => profile.id === currentProfile.id)) {
+      members = [currentProfile, ...members];
+    }
+  }
+
+  const visibleMembers = members.map((profile) => {
+    const authUser = authMap.get(profile.id);
+    return {
+      id: profile.id,
+      role: profile.role || "",
+      salesman_code: profile.salesman_code || "",
+      salesman_name: profile.salesman_name || "",
+      email: authUser?.email || "",
+    };
+  });
+
+  const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
+
+  const visibleSalesmanCodes = [...new Set([
+    ...members.flatMap((member) => profileCodeCandidates(member)),
+    ...authCodeCandidates(currentAuthUser),
+    ...fuzzyMatchedProfileCodes(scopedProfiles, currentAuthUser),
+    ...mutualGroupCodes,
+  ])];
+  const visibleUserIds = isProductPromoterRole(role)
+    ? [...new Set([currentProfile.id].filter(Boolean))]
+    : [...new Set(visibleMembers.map((member) => member.id).filter(Boolean))];
+
+  const hasAllAccess = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role) || isSoyebProfile(currentProfile);
+
+  return {
+    success: true,
+    role,
+    currentUserId: currentProfile.id,
+    currentSalesmanCode,
+    hasAllAccess,
+    mutualSalesmanCodes: mutualGroupCodes,
+    visibleSalesmanCodes,
+    visibleUserIds,
+    visibleMembers,
+    hasSubordinates: visibleMembers.some((member) => member.id !== currentProfile.id),
+  };
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -123,112 +238,8 @@ export async function GET(request) {
       return NextResponse.json({ success: false, error: "Invalid login session" }, { status: 401 });
     }
 
-    const { data: currentProfile, error: profileError } = await admin
-      .from("profiles")
-      .select("id,role,salesman_code,salesman_name")
-      .eq("id", user.id)
-      .single();
-
-    if (profileError || !currentProfile) {
-      return NextResponse.json({ success: false, error: "Profile not found." }, { status: 404 });
-    }
-
-    const role = normalizeRole(currentProfile.role);
-    const currentSalesmanCode = normalizeCode(currentProfile.salesman_code);
-
-    const [profilesRes, usersRes] = await Promise.all([
-      admin
-        .from("profiles")
-        .select("id,role,salesman_code,salesman_name")
-        .order("salesman_name"),
-      admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-    ]);
-
-    if (profilesRes.error) throw profilesRes.error;
-    if (usersRes.error) throw usersRes.error;
-
-    const allProfiles = profilesRes.data || [];
-    const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
-    const authUsers = usersRes.data?.users || [];
-    const authMap = new Map(authUsers.map((entry) => [entry.id, entry]));
-    const currentAuthUser = authMap.get(currentProfile.id) || user;
-    const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
-    const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
-
-    let members = [];
-    if (["admin", "manager"].includes(role)) {
-      members = scopedProfiles;
-    } else if (isProductPromoterRole(role) && inheritedHeadCode) {
-      const subordinateIds = new Set();
-
-      authUsers.forEach((authUser) => {
-        const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-        const headCode = normalizeCode(metadata.head_salesman_code);
-        if (headCode && headCode === inheritedHeadCode) {
-          subordinateIds.add(authUser.id);
-        }
-      });
-
-      members = scopedProfiles.filter((profile) => {
-        const profileCode = normalizeCode(profile.salesman_code);
-        return profileCode === inheritedHeadCode || subordinateIds.has(profile.id);
-      });
-    } else {
-      const subordinateIds = new Set();
-
-      authUsers.forEach((authUser) => {
-        const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-        const headCode = normalizeCode(metadata.head_salesman_code);
-        if (headCode && headCode === currentSalesmanCode) {
-          subordinateIds.add(authUser.id);
-        }
-      });
-
-      members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
-
-      // Keep self-scope even when profile role text is dirty (case/spacing mismatch).
-      if (!members.some((profile) => profile.id === currentProfile.id)) {
-        members = [currentProfile, ...members];
-      }
-    }
-
-    const visibleMembers = members.map((profile) => {
-      const authUser = authMap.get(profile.id);
-      return {
-        id: profile.id,
-        role: profile.role || "",
-        salesman_code: profile.salesman_code || "",
-        salesman_name: profile.salesman_name || "",
-        email: authUser?.email || "",
-      };
-    });
-
-    const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
-
-    const visibleSalesmanCodes = [...new Set([
-      ...members.flatMap((member) => profileCodeCandidates(member)),
-      ...authCodeCandidates(currentAuthUser),
-      ...fuzzyMatchedProfileCodes(scopedProfiles, currentAuthUser),
-      ...mutualGroupCodes,
-    ])];
-    const visibleUserIds = isProductPromoterRole(role)
-      ? [...new Set([currentProfile.id].filter(Boolean))]
-      : [...new Set(visibleMembers.map((member) => member.id).filter(Boolean))];
-
-    const hasAllAccess = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role) || isSoyebProfile(currentProfile);
-
-    return NextResponse.json({
-      success: true,
-      role,
-      currentUserId: currentProfile.id,
-      currentSalesmanCode,
-      hasAllAccess,
-      mutualSalesmanCodes: mutualGroupCodes,
-      visibleSalesmanCodes,
-      visibleUserIds,
-      visibleMembers,
-      hasSubordinates: visibleMembers.some((member) => member.id !== currentProfile.id),
-    });
+    const payload = await resolveSalesScopeForUserId(admin, user.id);
+    return NextResponse.json(payload);
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message || "Unable to resolve sales scope." }, { status: 500 });
   }

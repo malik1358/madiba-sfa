@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import {
@@ -21,6 +22,7 @@ import {
   sanitizeStoredOverdueDays,
   toNumber,
 } from "../../lib/outstanding";
+import { scheduleMobileFieldSnapshotRebuild } from "../../lib/server/mobileFieldSnapshot.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -462,6 +464,18 @@ export async function POST(request) {
       }, { onConflict: "setting_key" });
 
     if (upsertError) throw upsertError;
+
+    after(async () => {
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const rebuildAdmin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        await scheduleMobileFieldSnapshotRebuild(rebuildAdmin, { trigger: "outstanding-upload" });
+      } catch (rebuildError) {
+        console.error("Mobile snapshot rebuild after outstanding upload failed:", rebuildError);
+      }
+    });
 
     return NextResponse.json({
       success: true,

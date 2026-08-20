@@ -12,7 +12,7 @@ body {
 
 @media print {
   body::after {
-    content: "Build: " attr(data-build-id);
+    content: "Build: " attr(data-build-id) " · " attr(data-build-time);
     position: fixed;
     right: 12mm;
     bottom: 6mm;
@@ -4920,6 +4920,24 @@ table.auditMatrix td.auditTrendSame {
     width: 100%;
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+
+  .pwaInstallModal {
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+  }
+
+  .pwaInstallSteps {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .pwaInstallSteps li {
+    color: #073f4c;
+    font-size: 13px;
+    line-height: 1.45;
   }
 
   .languageDashboard button,

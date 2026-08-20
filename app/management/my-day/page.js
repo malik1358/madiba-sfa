@@ -19,6 +19,7 @@ import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
+import { postJsonResilient } from "../../lib/offlineApi";
 
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 
@@ -963,6 +964,7 @@ export default function MyDayPage() {
         language,
       });
       const capturedAt = new Date().toISOString();
+      let saveResult = null;
 
       if (logsEnabled) {
         const payload = {
@@ -984,13 +986,9 @@ export default function MyDayPage() {
         const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
         if (insertError) throw insertError;
       } else {
-        const response = await fetch("/api/visit-reports", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
+        saveResult = await postJsonResilient({
+          url: "/api/visit-reports",
+          jsonBody: {
             customerCode: customer.customer_code,
             customerName: customer.customer_name,
             outcome: visitForm.outcome,
@@ -999,16 +997,28 @@ export default function MyDayPage() {
             stockChecks: visitForm.stockChecks,
             capturedAt,
             location,
-          }),
+          },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          metadata: {
+            type: "visit_report",
+            customerCode: customer.customer_code,
+          },
         });
 
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok || !result?.success) {
-          throw new Error(result?.error || "Unable to save visit report.");
+        if (!saveResult.success) {
+          throw new Error("Unable to save visit report.");
         }
       }
 
-      setMessage(`${customer.customer_name} ${language === "ar" ? "تم حفظ تقرير الزيارة" : "visit report saved"}.`);
+      setMessage(
+        saveResult?.queued
+          ? (language === "ar"
+            ? `${customer.customer_name} تم حفظ تقرير الزيارة على الجهاز وسيتم المزامنة تلقائياً`
+            : `${customer.customer_name} visit report saved on device and will sync automatically`)
+          : `${customer.customer_name} ${language === "ar" ? "تم حفظ تقرير الزيارة" : "visit report saved"}.`,
+      );
       setVisitStatusRows((current) =>
         current.map((row) => {
           if (row.customer_code !== customer.customer_code) return row;

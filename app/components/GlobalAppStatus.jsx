@@ -1,10 +1,51 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { countPendingOfflineQueue } from "../lib/offlineSyncQueue";
 import { getSupabaseClient } from "../lib/supabase";
 
-export default function GlobalAppStatus({ environment, buildId }) {
+export default function GlobalAppStatus({ environment, buildId, buildTime = "" }) {
   const [identity, setIdentity] = useState("Not signed in");
+  const [online, setOnline] = useState(true);
+  const [pendingSync, setPendingSync] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    function refreshOnline() {
+      setOnline(window.navigator.onLine);
+    }
+
+    refreshOnline();
+    window.addEventListener("online", refreshOnline);
+    window.addEventListener("offline", refreshOnline);
+    return () => {
+      window.removeEventListener("online", refreshOnline);
+      window.removeEventListener("offline", refreshOnline);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshPending() {
+      try {
+        const count = await countPendingOfflineQueue();
+        if (!cancelled) setPendingSync(count);
+      } catch {
+        if (!cancelled) setPendingSync(0);
+      }
+    }
+
+    refreshPending();
+    window.addEventListener("madiba-offline-queue-changed", refreshPending);
+    window.addEventListener("online", refreshPending);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("madiba-offline-queue-changed", refreshPending);
+      window.removeEventListener("online", refreshPending);
+    };
+  }, []);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -54,7 +95,14 @@ export default function GlobalAppStatus({ environment, buildId }) {
     <div className={`globalAppStatus globalAppStatus${environment}`} role="status">
       <span><strong>User:</strong> {identity}</span>
       <span><strong>Server:</strong> {environment}</span>
-      <span><strong>Build:</strong> {buildId}</span>
+      <span>
+        <strong>Build:</strong> {buildId}
+        {buildTime ? ` · ${buildTime}` : ""}
+      </span>
+      <span><strong>Network:</strong> {online ? "Online" : "Offline"}</span>
+      {pendingSync > 0 ? (
+        <span><strong>Sync:</strong> {pendingSync} pending</span>
+      ) : null}
     </div>
   );
 }

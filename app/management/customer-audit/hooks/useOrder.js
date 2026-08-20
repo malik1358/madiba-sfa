@@ -1,96 +1,47 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
-import { insertGpsActivityLog, requireGpsLocation } from '../../../lib/geo';
+import { requireGpsLocation } from '../../../lib/geo';
 import { maybePromptCustomerLocationUpdate } from '../../../lib/customerLocation';
+import { postJsonResilient } from '../../../lib/offlineApi';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
 
-function normalizeCode(value) {
-  return String(value || '').trim().toUpperCase();
+function isPendingOrderId(orderId) {
+  return String(orderId || '').startsWith('pending:');
 }
 
-function toNumber(value) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) ? parsed : 0;
+function buildPendingOrderId(queueId) {
+  return `pending:${String(queueId || '').slice(0, 12)}`;
 }
 
-function buildChangeSet(beforeLines = [], afterLines = []) {
-  const beforeMap = new Map();
-  const afterMap = new Map();
-
-  beforeLines.forEach((line) => {
-    const code = normalizeCode(line.item_code);
-    if (!code) return;
-    beforeMap.set(code, {
-      item_code: code,
-      item_name: String(line.item_name || code),
-      quantity: toNumber(line.quantity),
-      rate: toNumber(line.rate),
-    });
-  });
-
-  afterLines.forEach((line) => {
-    const code = normalizeCode(line.item_code);
-    if (!code) return;
-    afterMap.set(code, {
-      item_code: code,
-      item_name: String(line.item_name || code),
-      quantity: toNumber(line.quantity),
-      rate: toNumber(line.rate),
-    });
-  });
-
-  const allCodes = new Set([...beforeMap.keys(), ...afterMap.keys()]);
-  const changes = [];
-
-  allCodes.forEach((code) => {
-    const before = beforeMap.get(code) || null;
-    const after = afterMap.get(code) || null;
-
-    if (!before && after) {
-      changes.push({
-        type: 'ADDED',
-        item_code: code,
-        item_name: after.item_name,
-        before_quantity: 0,
-        after_quantity: after.quantity,
-        before_rate: 0,
-        after_rate: after.rate,
-      });
-      return;
-    }
-
-    if (before && !after) {
-      changes.push({
-        type: 'REMOVED',
-        item_code: code,
-        item_name: before.item_name,
-        before_quantity: before.quantity,
-        after_quantity: 0,
-        before_rate: before.rate,
-        after_rate: 0,
-      });
-      return;
-    }
-
-    if (!before || !after) return;
-
-    const qtyChanged = before.quantity !== after.quantity;
-    const rateChanged = before.rate !== after.rate;
-    if (!qtyChanged && !rateChanged) return;
-
-    changes.push({
-      type: 'UPDATED',
-      item_code: code,
-      item_name: after.item_name || before.item_name,
-      before_quantity: before.quantity,
-      after_quantity: after.quantity,
-      before_rate: before.rate,
-      after_rate: after.rate,
-    });
-  });
-
-  return changes.sort((a, b) => String(a.item_code).localeCompare(String(b.item_code)));
+function buildOrderPayload({
+  action,
+  selectedCustomer,
+  orderItems,
+  priceList,
+  draftOrderId,
+  loadedOrderStatus,
+  location,
+  capturedAt,
+}) {
+  return {
+    action,
+    orderId: draftOrderId && !isPendingOrderId(draftOrderId) ? Number(draftOrderId) : null,
+    customerCode: selectedCustomer.customer_code,
+    customerName: selectedCustomer.customer_name,
+    salesmanCode: selectedCustomer.current_salesman_code,
+    loadedOrderStatus: loadedOrderStatus || 'DRAFT',
+    capturedAt,
+    location,
+    lines: orderItems.map((item) => ({
+      item_code: item.item_code,
+      item_name: item.item_name,
+      category: item.category,
+      quantity: Number(item.order_quantity),
+      rate: Number(getPrice(priceList, item.item_code) || 0),
+      line_value: Number(getPrice(priceList, item.item_code) || 0) * Number(item.order_quantity),
+    })),
+  };
 }
 
 export function useOrder({
@@ -272,7 +223,7 @@ export function useOrder({
       if (!session) throw new Error('Please login again.');
 
       const location = await requireGpsLocation();
-      const nowIso = new Date().toISOString();
+      const capturedAt = new Date().toISOString();
 
       if (session.access_token) {
         await maybePromptCustomerLocationUpdate({
@@ -283,117 +234,54 @@ export function useOrder({
         });
       }
 
-      let existingLines = [];
-      if (draftOrderId) {
-        const { data: beforeLines, error: beforeLinesError } = await supabase
-          .from('sales_order_items')
-          .select('item_code,item_name,quantity,rate')
-          .eq('order_id', draftOrderId);
-
-        if (beforeLinesError) throw beforeLinesError;
-        existingLines = beforeLines || [];
-      }
-
-      let orderId = draftOrderId;
-      if (!orderId) {
-        const { data: newOrder, error: orderError } = await supabase
-          .from('sales_orders')
-          .insert({
-            customer_code: selectedCustomer.customer_code,
-            customer_name: selectedCustomer.customer_name,
-            salesman_code: selectedCustomer.current_salesman_code,
-            status: 'DRAFT',
-            created_by: session.user.id,
-            updated_at: nowIso,
-          })
-          .select('id')
-          .single();
-
-        if (orderError) throw orderError;
-        orderId = newOrder.id;
-        setDraftOrderId(orderId);
-      } else {
-        const { error: updateError } = await supabase
-          .from('sales_orders')
-          .update({
-            customer_name: selectedCustomer.customer_name,
-            salesman_code: selectedCustomer.current_salesman_code,
-            updated_at: nowIso,
-          })
-          .eq('id', orderId);
-
-        if (updateError) throw updateError;
-      }
-
-      const { error: deleteError } = await supabase.from('sales_order_items').delete().eq('order_id', orderId);
-      if (deleteError) throw deleteError;
-
-      const lines = orderItems.map((item) => ({
-        order_id: orderId,
-        item_code: item.item_code,
-        item_name: item.item_name,
-        category: item.category,
-        quantity: Number(item.order_quantity),
-        rate: Number(getPrice(priceList, item.item_code) || 0),
-        line_value: Number(getPrice(priceList, item.item_code) || 0) * Number(item.order_quantity),
-      }));
-
-      const { error: lineError } = await supabase.from('sales_order_items').insert(lines);
-      if (lineError) throw lineError;
-
-      const changeSet = buildChangeSet(
-        existingLines,
-        lines.map((line) => ({
-          item_code: line.item_code,
-          item_name: line.item_name,
-          quantity: line.quantity,
-          rate: line.rate,
-        }))
-      );
-
-      const action = draftOrderId ? 'EDITED_ORDER' : 'CREATED_ORDER';
-      const historyResponse = await fetch('/api/order-history', {
-        method: 'POST',
+      const saveResult = await postJsonResilient({
+        url: '/api/sales-orders',
+        jsonBody: buildOrderPayload({
+          action: 'save_draft',
+          selectedCustomer,
+          orderItems,
+          priceList,
+          draftOrderId,
+          loadedOrderStatus,
+          location,
+          capturedAt,
+        }),
         headers: {
-          'Content-Type': 'application/json',
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({
-          orderId,
-          changedAt: nowIso,
-          action,
-          previousStatus: loadedOrderStatus || 'DRAFT',
-          nextStatus: loadedOrderStatus || 'DRAFT',
-          changes: changeSet,
-        }),
+        metadata: {
+          type: 'sales_order',
+          action: 'save_draft',
+          customerCode: selectedCustomer.customer_code,
+        },
       });
 
-      const historyPayload = await historyResponse.json().catch(() => ({}));
-      if (historyResponse.ok && historyPayload.success) {
-        setOrderHistory(Array.isArray(historyPayload.history) ? historyPayload.history : []);
+      if (saveResult.queued) {
+        const pendingOrderId = buildPendingOrderId(saveResult.queueId);
+        if (!draftOrderId) {
+          setDraftOrderId(pendingOrderId);
+        }
+        setMessage(saveResult.message || 'Draft saved on device. It will sync automatically when you are back online.');
+        return pendingOrderId;
       }
 
-      await insertGpsActivityLog(
-        supabase,
-        session.user.id,
-        draftOrderId ? 'ORDER_EDITED' : 'ORDER_DRAFT',
-        location,
-        {
-          order_id: orderId,
-          customer_code: selectedCustomer.customer_code,
-          customer_name: selectedCustomer.customer_name,
-        },
-      );
+      const payload = saveResult.payload || {};
+      if (!payload.orderId) {
+        throw new Error('Unable to save draft order.');
+      }
 
+      setDraftOrderId(payload.orderId);
+      setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
+      setLoadedOrderStatus(String(payload.status || 'DRAFT').toUpperCase());
       setMessage('Draft order saved successfully.');
-      return orderId;
+      return payload.orderId;
     } catch (err) {
       setError(err.message || 'Unable to save draft order.');
       return null;
     } finally {
       setSavingOrder(false);
     }
-  }, [draftOrderId, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage]);
+  }, [draftOrderId, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage]);
 
   const submitOrder = useCallback(async () => {
     if (orderItems.length === 0) {
@@ -415,65 +303,72 @@ export function useOrder({
     setMessage('');
 
     try {
-      const orderId = await saveDraft();
-      if (!orderId) return null;
-
-      const nowIso = new Date().toISOString();
-
-      const { error: submitError } = await supabase
-        .from('sales_orders')
-        .update({
-          status: 'SUBMITTED',
-          submitted_at: nowIso,
-          updated_at: nowIso,
-        })
-        .eq('id', orderId);
-
-      if (submitError) throw submitError;
-
       const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Please login again.');
+
       const location = await requireGpsLocation();
-      if (session?.user?.id) {
-        await insertGpsActivityLog(supabase, session.user.id, 'ORDER_SUBMITTED', location, {
-          order_id: orderId,
-          customer_code: selectedCustomer?.customer_code || '',
+      const capturedAt = new Date().toISOString();
+
+      if (session.access_token) {
+        await maybePromptCustomerLocationUpdate({
+          customerCode: selectedCustomer?.customer_code,
+          customerName: selectedCustomer?.customer_name,
+          entryLocation: location,
+          accessToken: session.access_token,
         });
       }
 
-      if (session?.access_token) {
-        const historyResponse = await fetch('/api/order-history', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            orderId,
-            changedAt: nowIso,
-            action: 'SUBMITTED_ORDER',
-            previousStatus: loadedOrderStatus || 'DRAFT',
-            nextStatus: 'SUBMITTED',
-            changes: [],
-          }),
-        });
+      const saveResult = await postJsonResilient({
+        url: '/api/sales-orders',
+        jsonBody: buildOrderPayload({
+          action: 'submit',
+          selectedCustomer,
+          orderItems,
+          priceList,
+          draftOrderId,
+          loadedOrderStatus,
+          location,
+          capturedAt,
+        }),
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        metadata: {
+          type: 'sales_order',
+          action: 'submit',
+          customerCode: selectedCustomer?.customer_code || '',
+        },
+      });
 
-        const historyPayload = await historyResponse.json().catch(() => ({}));
-        if (historyResponse.ok && historyPayload.success) {
-          setOrderHistory(Array.isArray(historyPayload.history) ? historyPayload.history : []);
+      if (saveResult.queued) {
+        const pendingOrderId = buildPendingOrderId(saveResult.queueId);
+        if (!draftOrderId) {
+          setDraftOrderId(pendingOrderId);
         }
+        setMessage(saveResult.message || 'Order saved on device. It will submit automatically when you are back online.');
+        setShowOrderReview(false);
+        setLoadedOrderStatus('SUBMITTED');
+        return pendingOrderId;
       }
 
-      setMessage(`Order #${orderId} submitted successfully.`);
+      const payload = saveResult.payload || {};
+      if (!payload.orderId) {
+        throw new Error('Unable to submit order.');
+      }
+
+      setDraftOrderId(payload.orderId);
+      setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
+      setLoadedOrderStatus(String(payload.status || 'SUBMITTED').toUpperCase());
+      setMessage(`Order #${payload.orderId} submitted successfully.`);
       setShowOrderReview(false);
-      setLoadedOrderStatus('SUBMITTED');
-      return orderId;
+      return payload.orderId;
     } catch (err) {
       setError(err.message || 'Unable to submit order.');
       return null;
     } finally {
       setSubmittingOrder(false);
     }
-  }, [loadedOrderStatus, orderItems.length, saveDraft, selectedCustomer, selectedQuantityCount, setError, setMessage]);
+  }, [draftOrderId, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage]);
 
   return {
     draftOrderId,

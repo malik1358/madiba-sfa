@@ -1,4 +1,4 @@
-import { resolveBuildId } from "../../lib/buildInfo.js";
+import { resolveBuildId, resolveBuildTime, formatBuildDateTime } from "../../lib/buildInfo.js";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +9,7 @@ export async function GET() {
     {
       success: true,
       buildId: resolveBuildId(),
+      buildTime: formatBuildDateTime(resolveBuildTime()),
       environment: isStaging ? "STAGING" : "PRODUCTION",
     },
     {

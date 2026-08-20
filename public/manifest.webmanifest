@@ -1,0 +1,27 @@
+{
+  "name": "MADIBA SFA",
+  "short_name": "MADIBA",
+  "description": "Madiba Sales Force Automation for field sales and collections",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#073f4c",
+  "theme_color": "#073f4c",
+  "lang": "en",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

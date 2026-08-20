@@ -293,7 +293,7 @@ async function getAuthUser(request) {
   return user;
 }
 
-async function getSalesScope(admin, userId) {
+export async function getSalesScope(admin, userId) {
   const { data: profile, error } = await admin
     .from("profiles")
     .select("id,salesman_code,salesman_name,role")
@@ -423,7 +423,7 @@ async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
   return rows;
 }
 
-async function fetchOutstandingAndCollectionRecords(admin, scope) {
+export async function fetchOutstandingAndCollectionRecords(admin, scope) {
   if (!supabaseUrl || !serviceKey) {
     throw new Error("Server configuration is incomplete");
   }

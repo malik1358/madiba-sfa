@@ -128,20 +128,16 @@ function parseInactiveMarkedAt(rawSettingValue) {
   }
 }
 
-async function resolveScope(admin, token) {
-  const {
-    data: { user },
-    error: userError,
-  } = await admin.auth.getUser(token);
-
-  if (userError || !user) {
+async function resolveScopeForUser(admin, user) {
+  const userId = user?.id;
+  if (!userId) {
     throw new Error("Invalid login session");
   }
 
   const { data: currentProfile, error: profileError } = await admin
     .from("profiles")
     .select("id,role,salesman_code,salesman_name")
-    .eq("id", user.id)
+    .eq("id", userId)
     .single();
 
   if (profileError || !currentProfile) {
@@ -201,22 +197,10 @@ async function resolveScope(admin, token) {
 
     members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
 
-    // Keep self-scope even when profile role text is dirty (case/spacing mismatch).
     if (!members.some((profile) => profile.id === currentProfile.id)) {
       members = [currentProfile, ...members];
     }
   }
-
-  const visibleMembers = members.map((profile) => {
-    const authUser = authMap.get(profile.id);
-    return {
-      id: profile.id,
-      role: profile.role || "",
-      salesman_code: profile.salesman_code || "",
-      salesman_name: profile.salesman_name || "",
-      email: authUser?.email || "",
-    };
-  });
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
 
@@ -235,6 +219,27 @@ async function resolveScope(admin, token) {
     visibleSalesmanCodes,
     identitySearchPatterns,
   };
+}
+
+async function resolveScope(admin, token) {
+  const {
+    data: { user },
+    error: userError,
+  } = await admin.auth.getUser(token);
+
+  if (userError || !user) {
+    throw new Error("Invalid login session");
+  }
+
+  return resolveScopeForUser(admin, user);
+}
+
+export async function resolveScopeForUserId(admin, userId) {
+  const { data: authData, error } = await admin.auth.admin.getUserById(userId);
+  if (error || !authData?.user) {
+    throw new Error("User not found.");
+  }
+  return resolveScopeForUser(admin, authData.user);
 }
 
 async function fetchVisibleCustomers(admin, scope) {
@@ -585,6 +590,68 @@ async function attachOutstandingValues(admin, customers) {
   });
 }
 
+export async function buildVisibleCustomersForScope(admin, scope, options = {}) {
+  const includeRecentSales = Boolean(options.includeRecentSales);
+  const includeOutstanding = Boolean(options.includeOutstanding);
+  const warnings = [];
+
+  try {
+    await autoReactivateCustomers(admin, scope);
+  } catch {
+    warnings.push("auto-reactivate-unavailable");
+  }
+
+  let customers = [];
+  try {
+    customers = await fetchVisibleCustomers(admin, scope);
+  } catch {
+    warnings.push("basic-visible-fallback");
+    customers = await fetchBasicVisibleCustomers(admin, scope);
+  }
+
+  let inactiveCustomers = [];
+  try {
+    inactiveCustomers = await fetchInactiveCustomers(admin, scope);
+  } catch {
+    warnings.push("inactive-customers-unavailable");
+    inactiveCustomers = [];
+  }
+
+  let responseCustomers = customers;
+
+  if (includeRecentSales) {
+    try {
+      responseCustomers = await attachRecentSalesValues(admin, responseCustomers);
+    } catch {
+      warnings.push("recent-sales-unavailable");
+      responseCustomers = responseCustomers.map((customer) => ({
+        ...customer,
+        recent_sales_value: Number(customer?.recent_sales_value || 0),
+      }));
+    }
+  }
+
+  if (includeOutstanding) {
+    try {
+      responseCustomers = await attachOutstandingValues(admin, responseCustomers);
+    } catch {
+      warnings.push("outstanding-unavailable");
+      responseCustomers = responseCustomers.map((customer) => ({
+        ...customer,
+        outstanding_0_30: Number(customer?.outstanding_0_30 || 0),
+        outstanding_30_60: Number(customer?.outstanding_30_60 || 0),
+        outstanding_above_60: Number(customer?.outstanding_above_60 || 0),
+      }));
+    }
+  }
+
+  return {
+    customers: responseCustomers,
+    inactiveCustomers,
+    warnings,
+  };
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -602,60 +669,18 @@ export async function GET(request) {
 
     const token = authHeader.replace("Bearer ", "");
     const scope = await resolveScope(admin, token);
-    const warnings = [];
-
-    try {
-      await autoReactivateCustomers(admin, scope);
-    } catch (error) {
-      warnings.push("auto-reactivate-unavailable");
-    }
-
-    let customers = [];
-    try {
-      customers = await fetchVisibleCustomers(admin, scope);
-    } catch (error) {
-      warnings.push("basic-visible-fallback");
-      customers = await fetchBasicVisibleCustomers(admin, scope);
-    }
-
-    let inactiveCustomers = [];
-    try {
-      inactiveCustomers = await fetchInactiveCustomers(admin, scope);
-    } catch (error) {
-      warnings.push("inactive-customers-unavailable");
-      inactiveCustomers = [];
-    }
-
     const searchParams = new URL(request.url).searchParams;
     const includeRecentSales = searchParams.get("includeRecentSales") === "1";
     const includeOutstanding = searchParams.get("includeOutstanding") === "1";
-    let responseCustomers = customers;
 
-    if (includeRecentSales) {
-      try {
-        responseCustomers = await attachRecentSalesValues(admin, responseCustomers);
-      } catch (error) {
-        warnings.push("recent-sales-unavailable");
-        responseCustomers = responseCustomers.map((customer) => ({
-          ...customer,
-          recent_sales_value: Number(customer?.recent_sales_value || 0),
-        }));
-      }
-    }
-
-    if (includeOutstanding) {
-      try {
-        responseCustomers = await attachOutstandingValues(admin, responseCustomers);
-      } catch (error) {
-        warnings.push("outstanding-unavailable");
-        responseCustomers = responseCustomers.map((customer) => ({
-          ...customer,
-          outstanding_0_30: Number(customer?.outstanding_0_30 || 0),
-          outstanding_30_60: Number(customer?.outstanding_30_60 || 0),
-          outstanding_above_60: Number(customer?.outstanding_above_60 || 0),
-        }));
-      }
-    }
+    const {
+      customers: responseCustomers,
+      inactiveCustomers,
+      warnings,
+    } = await buildVisibleCustomersForScope(admin, scope, {
+      includeRecentSales,
+      includeOutstanding,
+    });
 
     return NextResponse.json({
       success: true,

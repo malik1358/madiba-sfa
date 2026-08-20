@@ -149,6 +149,20 @@ export async function fetchWithLocalCache(key, ttlMs, fetcher, options = {}) {
   const cached = await readCacheEntry(key);
   const onUpdate = typeof options.onUpdate === "function" ? options.onUpdate : null;
   const allowStale = options.allowStale !== false;
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+
+  if (offline) {
+    if (cached?.value !== undefined) {
+      return {
+        data: cached.value,
+        fromCache: true,
+        stale: true,
+        offline: true,
+      };
+    }
+
+    throw new Error("You are offline and this data is not available on the device yet.");
+  }
 
   if (cached && isCacheEntryFresh(cached, ttlMs)) {
     if (onUpdate) {

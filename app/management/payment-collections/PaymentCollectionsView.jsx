@@ -13,8 +13,10 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveInvoiceAgingDays, resolveOverdueDaysFromDueDate } from "../../lib/outstanding";
 import { captureGpsLocation, GPS_REQUIRED_ERROR } from "../../lib/geo";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
+import { postFormDataResilient } from "../../lib/offlineApi";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
+import { readCollectionQueuesForUser } from "../../lib/mobileDataCache";
 import { getSupabaseClient } from "../../lib/supabase";
 
 const TEXT = {
@@ -549,6 +551,23 @@ export default function PaymentCollectionsView({ view = "due" }) {
     setCopyStatus("");
   }, [language]);
 
+  async function applyQueuePayload(payload, preferredKey = "") {
+    const due = Array.isArray(payload.dueCustomers) ? payload.dueCustomers : [];
+    const notDue = Array.isArray(payload.notDueCustomers) ? payload.notDueCustomers : [];
+    const legal = Array.isArray(payload.legalCustomers) ? payload.legalCustomers : [];
+    setDueCustomers(due);
+    setNotDueCustomers(notDue);
+    setLegalCustomers(legal);
+
+    const allRows = [...due, ...notDue, ...legal];
+    if (preferredKey) {
+      const preferred = allRows.find((row) => rowKey(row) === preferredKey);
+      setActiveRowKey(preferred ? preferredKey : rowKey(allRows[0] || {}));
+    }
+
+    return { dueCustomers: due, notDueCustomers: notDue, legalCustomers: legal };
+  }
+
   async function loadQueue(preferredKey = "") {
     const supabase = getSupabaseClient();
     const seq = ++loadSeqRef.current;
@@ -568,11 +587,20 @@ export default function PaymentCollectionsView({ view = "due" }) {
       setError((current) => current || "Queue load timed out. Please login and refresh the page.");
     }, 15000);
 
+    let cachedResult = null;
+
     try {
       const session = await resolveAuthSession(supabase, 8000);
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
 
       if (!session?.access_token) throw new Error("Please login again.");
+
+      const cachedQueues = await readCollectionQueuesForUser(session.user?.id);
+      if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
+      if (cachedQueues) {
+        cachedResult = await applyQueuePayload(cachedQueues, preferredKey);
+        setLoading(false);
+      }
 
       const { response, payload } = await fetchJsonWithTimeout(
         "/api/payment-collections",
@@ -587,25 +615,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
 
       if (!response.ok || !payload.success) {
+        if (cachedResult) return cachedResult;
         throw new Error(localizeApiMessage(payload.error || "Unable to load payment collection queue."));
       }
 
-      const due = Array.isArray(payload.dueCustomers) ? payload.dueCustomers : [];
-      const notDue = Array.isArray(payload.notDueCustomers) ? payload.notDueCustomers : [];
-      const legal = Array.isArray(payload.legalCustomers) ? payload.legalCustomers : [];
-      setDueCustomers(due);
-      setNotDueCustomers(notDue);
-      setLegalCustomers(legal);
-
-      const allRows = [...due, ...notDue, ...legal];
-      if (preferredKey) {
-        const preferred = allRows.find((row) => rowKey(row) === preferredKey);
-        setActiveRowKey(preferred ? preferredKey : rowKey(allRows[0] || {}));
-      }
-
-      return { dueCustomers: due, notDueCustomers: notDue, legalCustomers: legal };
+      return applyQueuePayload(payload, preferredKey);
     } catch (err) {
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
+
+      if (cachedResult) {
+        setError("");
+        return cachedResult;
+      }
 
       const message = String(err.message || "");
       if (message === "SESSION_TIMEOUT") {
@@ -629,8 +650,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   useEffect(() => {
     loadQueue();
+    const onSnapshotHydrated = () => {
+      loadQueue();
+    };
+    window.addEventListener("madiba-mobile-snapshot-hydrated", onSnapshotHydrated);
     return () => {
       loadSeqRef.current += 1;
+      window.removeEventListener("madiba-mobile-snapshot-hydrated", onSnapshotHydrated);
     };
   }, []);
 
@@ -837,35 +863,39 @@ export default function PaymentCollectionsView({ view = "due" }) {
         formData.append("receiptCopy", await prepareUploadFile(form.receiptCopy));
       }
 
-      const response = await fetch("/api/payment-collections", {
-        method: "POST",
+      const saveResult = await postFormDataResilient({
+        url: "/api/payment-collections",
+        formData,
         headers: {
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: formData,
+        metadata: {
+          type: "collection_visit",
+          customerCode: row.customer_code,
+        },
       });
 
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        const fallback = response.status === 413
-          ? t("msgUploadTooLarge")
-          : t("msgSaveFailed");
-        throw new Error(payload.error || fallback);
-      }
-
-      const popupMessage = payload?.whatsapp?.error
-        ? `${t("msgVisitSaved")} ${t("msgWhatsappNotSent")}: ${payload.whatsapp.error}`
-        : t("msgVisitSaved");
-      const copied = await copyTextToClipboard(summaryText);
+      const payload = saveResult.payload || {};
+      const popupMessage = saveResult.queued
+        ? saveResult.message
+        : payload?.whatsapp?.error
+          ? `${t("msgVisitSaved")} ${t("msgWhatsappNotSent")}: ${payload.whatsapp.error}`
+          : t("msgVisitSaved");
       showPopup(popupMessage);
       setSummaryForWhatsApp(summaryText);
-      if (copied) {
-        setCopyStatus(t("copied"));
-        setTimeout(() => setCopyStatus(""), 1200);
+      if (!saveResult.queued) {
+        const copied = await copyTextToClipboard(summaryText);
+        if (copied) {
+          setCopyStatus(t("copied"));
+          setTimeout(() => setCopyStatus(""), 1200);
+        } else {
+          showPopup(t("msgCopyFailed"));
+        }
+        await loadQueue(rowKey(row));
       } else {
-        showPopup(t("msgCopyFailed"));
+        setActiveRowKey("");
+        setForm(buildInitialForm(row));
       }
-      await loadQueue(rowKey(row));
     } catch (err) {
       showPopup(localizeApiMessage(err.message || t("msgSaveFailed")));
     } finally {

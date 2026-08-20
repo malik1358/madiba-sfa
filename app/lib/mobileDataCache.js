@@ -1,5 +1,8 @@
 import { fetchWithLocalCache, readCacheEntry, writeCacheEntry } from "./localDataStore.js";
 import { getSupabaseClient } from "./supabase.js";
+import { buildScopeHash } from "./scopeHash.js";
+
+export { buildScopeHash } from "./scopeHash.js";
 
 export const CACHE_TTL = {
   scopeMs: 15 * 60 * 1000,
@@ -9,16 +12,9 @@ export const CACHE_TTL = {
   itemsMasterMs: 24 * 60 * 60 * 1000,
   outstandingMs: 24 * 60 * 60 * 1000,
   myDaySnapshotMs: 24 * 60 * 60 * 1000,
+  collectionQueuesMs: 24 * 60 * 60 * 1000,
+  mobileSnapshotMs: 7 * 24 * 60 * 60 * 1000,
 };
-
-export function buildScopeHash(scope) {
-  if (scope?.hasAllAccess) return "all";
-  const codes = [...(scope?.visibleSalesmanCodes || [])]
-    .map((code) => String(code || "").trim().toUpperCase())
-    .filter(Boolean)
-    .sort();
-  return codes.join("|") || "none";
-}
 
 function scopeCacheKey(userId) {
   return `scope:v1:${String(userId || "").trim()}`;
@@ -41,8 +37,30 @@ function outstandingCacheKey(customerCode, customerName) {
   return `outstanding:v1:${String(customerCode || "").trim().toUpperCase()}:${String(customerName || "").trim().toUpperCase()}`;
 }
 
+function collectionQueuesCacheKey(scope) {
+  return `collectionQueues:v1:${buildScopeHash(scope)}`;
+}
+
+function collectionScopeCacheKey(userId) {
+  return `collectionScope:v1:${String(userId || "").trim()}`;
+}
+
 function myDaySnapshotCacheKey(userId, dateKey) {
   return `myday:v1:${String(userId || "").trim()}:${String(dateKey || "").trim()}`;
+}
+
+async function fetchMobileSnapshotNetwork(accessToken) {
+  const response = await fetch("/api/mobile-snapshot", {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.success) {
+    throw new Error(payload.error || "Unable to load mobile snapshot.");
+  }
+  return payload.snapshot;
 }
 
 async function fetchSalesScopeNetwork(accessToken) {
@@ -239,4 +257,77 @@ export async function invalidateVisibleCustomersCache(scope) {
     removeCacheEntry(customersCacheKey(scope, false)),
     removeCacheEntry(customersCacheKey(scope, true)),
   ]);
+}
+
+export async function readCollectionQueuesForUser(userId) {
+  const scopeEntry = await readCacheEntry(collectionScopeCacheKey(userId));
+  if (!scopeEntry?.value) return null;
+  const entry = await readCacheEntry(collectionQueuesCacheKey(scopeEntry.value));
+  return entry?.value || null;
+}
+
+export async function hydrateFromMobileSnapshot(snapshot, userId) {
+  if (!snapshot || !userId) return false;
+
+  const writes = [];
+
+  if (snapshot.salesScope) {
+    writes.push(writeCacheEntry(scopeCacheKey(userId), snapshot.salesScope, { ttlMs: CACHE_TTL.scopeMs }));
+  }
+
+  const customerScope = snapshot.customerScope || snapshot.salesScope;
+  if (customerScope) {
+    if (Array.isArray(snapshot.customersBasic)) {
+      writes.push(writeCacheEntry(
+        customersCacheKey(customerScope, false),
+        snapshot.customersBasic,
+        { ttlMs: CACHE_TTL.customersBasicMs },
+      ));
+    }
+    if (snapshot.customersEnriched) {
+      writes.push(writeCacheEntry(
+        customersCacheKey(customerScope, true),
+        snapshot.customersEnriched,
+        { ttlMs: CACHE_TTL.customersEnrichedMs },
+      ));
+    }
+  }
+
+  const collectionScope = snapshot.collectionScope || snapshot.salesScope;
+  if (collectionScope) {
+    writes.push(writeCacheEntry(collectionScopeCacheKey(userId), collectionScope, { ttlMs: CACHE_TTL.scopeMs }));
+    if (snapshot.collectionQueues) {
+      writes.push(writeCacheEntry(
+        collectionQueuesCacheKey(collectionScope),
+        snapshot.collectionQueues,
+        { ttlMs: CACHE_TTL.collectionQueuesMs },
+      ));
+    }
+  }
+
+  if (snapshot.itemsMaster) {
+    writes.push(writeCacheEntry(itemsMasterCacheKey(), snapshot.itemsMaster, { ttlMs: CACHE_TTL.itemsMasterMs }));
+  }
+
+  await Promise.all(writes);
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("madiba-mobile-snapshot-hydrated"));
+  }
+
+  return true;
+}
+
+export async function fetchAndHydrateMobileSnapshot() {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error("Supabase is not configured.");
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token || !session?.user?.id) {
+    throw new Error("Please login again.");
+  }
+
+  const snapshot = await fetchMobileSnapshotNetwork(session.access_token);
+  await hydrateFromMobileSnapshot(snapshot, session.user.id);
+  return { snapshot, userId: session.user.id };
 }

@@ -66,6 +66,13 @@ const TEXT = {
     ar: "اضغط على التاريخ لإظهار أو إخفاء عملاء ذلك اليوم.",
   },
   scheduledRevisitDate: { en: "Revisit Date", ar: "موعد الزيارة" },
+  scheduledBy: { en: "Scheduled By", ar: "مجدول بواسطة" },
+  scheduledByFilter: { en: "Filter scheduled by", ar: "تصفية من قام بالجدولة" },
+  scheduledByFilterHint: { en: "Tap to select one or more people who saved the revisit date", ar: "اضغط لاختيار شخص واحد أو أكثر ممن حفظ موعد الزيارة" },
+  allSchedulers: { en: "No scheduler names loaded yet", ar: "لا توجد أسماء مسجلة بعد" },
+  clearScheduledByFilter: { en: "Clear scheduler filter", ar: "مسح تصفية الجدولة" },
+  selectAllSchedulers: { en: "Select all", ar: "تحديد الكل" },
+  noScheduledRevisitsForFilter: { en: "No scheduled revisits match the selected scheduler filter.", ar: "لا توجد زيارات مجدولة مطابقة لتصفية الجدولة." },
   lastVisitDate: { en: "Last Visit", ar: "آخر زيارة" },
   visitRemark: { en: "Visit Remark", ar: "ملاحظة الزيارة" },
   noVisitRemark: { en: "No remark saved", ar: "لا توجد ملاحظة محفوظة" },
@@ -421,6 +428,17 @@ function formatLastVisitDate(row) {
   return formatDateOnly(savedAt) || new Date(savedAt).toLocaleDateString("en-GB");
 }
 
+function getScheduledByLabel(row) {
+  const name = String(row?.latest_collection?.scheduled_by_name || "").trim();
+  if (name) return name;
+  const id = String(row?.latest_collection?.scheduled_by_id || row?.latest_collection?.created_by || "").trim();
+  return id || "-";
+}
+
+function getScheduledByKey(row) {
+  return String(row?.latest_collection?.scheduled_by_id || row?.latest_collection?.created_by || "").trim();
+}
+
 function VisitRemarkCell({ row, t }) {
   const visit = row?.latest_collection;
   const arabic = String(visit?.remark_arabic || "").trim();
@@ -539,6 +557,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [legalBusyCode, setLegalBusyCode] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
   const [selectedSalesmen, setSelectedSalesmen] = useState([]);
+  const [selectedSchedulers, setSelectedSchedulers] = useState([]);
   const [activeRowKey, setActiveRowKey] = useState("");
   const [summaryForWhatsApp, setSummaryForWhatsApp] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -609,6 +628,22 @@ export default function PaymentCollectionsView({ view = "due" }) {
       current.length === salesmanOptions.length
         ? []
         : salesmanOptions.map((option) => option.key)
+    ));
+  }
+
+  function toggleScheduler(optionKey) {
+    setSelectedSchedulers((current) => (
+      current.includes(optionKey)
+        ? current.filter((value) => value !== optionKey)
+        : [...current, optionKey]
+    ));
+  }
+
+  function toggleAllSchedulers() {
+    setSelectedSchedulers((current) => (
+      current.length === scheduledRevisitSchedulerOptions.length
+        ? []
+        : scheduledRevisitSchedulerOptions.map((option) => option.key)
     ));
   }
 
@@ -754,7 +789,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     [notDueCustomers, customerFilter, selectedSalesmen, view],
   );
 
-  const scheduledRevisitRows = useMemo(() => {
+  const scheduledRevisitSourceRows = useMemo(() => {
     if (view !== "due") return [];
     const today = new Date().toISOString().slice(0, 10);
     return filterQueueRows([...dueCustomers, ...notDueCustomers], customerFilter, selectedSalesmen)
@@ -767,6 +802,25 @@ export default function PaymentCollectionsView({ view = "due" }) {
           .localeCompare(toDateInputValue(right?.latest_collection?.next_visit_at))
       ));
   }, [customerFilter, dueCustomers, notDueCustomers, selectedSalesmen, view]);
+
+  const scheduledRevisitSchedulerOptions = useMemo(() => {
+    const options = new Map();
+    scheduledRevisitSourceRows.forEach((row) => {
+      const key = getScheduledByKey(row);
+      const label = getScheduledByLabel(row);
+      if (!key || label === "-") return;
+      if (!options.has(key)) {
+        options.set(key, { key, label });
+      }
+    });
+    return [...options.values()].sort((left, right) => left.label.localeCompare(right.label));
+  }, [scheduledRevisitSourceRows]);
+
+  const scheduledRevisitRows = useMemo(() => {
+    if (selectedSchedulers.length === 0) return scheduledRevisitSourceRows;
+    const selected = new Set(selectedSchedulers);
+    return scheduledRevisitSourceRows.filter((row) => selected.has(getScheduledByKey(row)));
+  }, [scheduledRevisitSourceRows, selectedSchedulers]);
 
   const scheduledRevisitGroups = useMemo(() => {
     const groups = new Map();
@@ -828,6 +882,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }, [tableRows, view]);
 
   const allSalesmenSelected = salesmanOptions.length > 0 && selectedSalesmen.length === salesmanOptions.length;
+  const allSchedulersSelected = scheduledRevisitSchedulerOptions.length > 0
+    && selectedSchedulers.length === scheduledRevisitSchedulerOptions.length;
 
   useEffect(() => {
     const text = String(form.remarkArabic || "").trim();
@@ -1194,8 +1250,53 @@ export default function PaymentCollectionsView({ view = "due" }) {
               {isMobileLayout ? (
                 <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("scheduledRevisitsMobileHint")}</div>
               ) : null}
+              {scheduledRevisitSourceRows.length > 0 ? (
+                <div style={{ marginBottom: "10px" }}>
+                  <div className="moduleCollectorCheckboxList" role="group" aria-label={t("scheduledByFilter")}>
+                    {scheduledRevisitSchedulerOptions.length === 0 ? (
+                      <div className="moduleHint">{t("allSchedulers")}</div>
+                    ) : (
+                      <>
+                        <label className="moduleCollectorCheckbox moduleCollectorCheckboxSelectAll">
+                          <input
+                            type="checkbox"
+                            checked={allSchedulersSelected}
+                            onChange={toggleAllSchedulers}
+                          />
+                          <span>{t("selectAllSchedulers")}</span>
+                        </label>
+                        {scheduledRevisitSchedulerOptions.map((option) => (
+                          <label key={option.key} className="moduleCollectorCheckbox">
+                            <input
+                              type="checkbox"
+                              checked={selectedSchedulers.includes(option.key)}
+                              onChange={() => toggleScheduler(option.key)}
+                            />
+                            <span>{option.label}</span>
+                          </label>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                  <div className="moduleHint" style={{ marginTop: "4px" }}>{t("scheduledByFilterHint")}</div>
+                  {selectedSchedulers.length > 0 ? (
+                    <button
+                      type="button"
+                      className="moduleInlineButton moduleActionButton"
+                      style={{ marginTop: "6px" }}
+                      onClick={() => setSelectedSchedulers([])}
+                    >
+                      {t("clearScheduledByFilter")}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {scheduledRevisitRows.length === 0 ? (
-                <div className="moduleHint">{t("noScheduledRevisits")}</div>
+                <div className="moduleHint">
+                  {scheduledRevisitSourceRows.length > 0 && selectedSchedulers.length > 0
+                    ? t("noScheduledRevisitsForFilter")
+                    : t("noScheduledRevisits")}
+                </div>
               ) : (
                 <div className="moduleTableWrap">
                   <table className="moduleTable moduleCollectorInvoiceTable">
@@ -1204,6 +1305,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                         <th>{t("customerCode")}</th>
                         <th>{t("customer")}</th>
                         <th>{t("salesman")}</th>
+                        <th>{t("scheduledBy")}</th>
                         <th>{t("lastVisitDate")}</th>
                         <th>{t("visitRemark")}</th>
                         <th>{t("amount")}</th>
@@ -1228,7 +1330,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                             role={isMobileLayout ? "button" : undefined}
                             aria-expanded={isMobileLayout ? isExpanded : undefined}
                           >
-                            <td colSpan={7}>
+                            <td colSpan={8}>
                               <div className="moduleCollectorSectionRowContent">
                                 <strong>{group.dateLabel}</strong>
                                 <span className="moduleHint" style={{ marginInlineStart: "8px" }}>
@@ -1253,6 +1355,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                 <td data-label={t("customerCode")}>{row.customer_code}</td>
                                 <td data-label={t("customer")}>{row.customer_name}</td>
                                 <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>
+                                <td data-label={t("scheduledBy")}>{getScheduledByLabel(row)}</td>
                                 <td data-label={t("lastVisitDate")}>{formatLastVisitDate(row)}</td>
                                 <td data-label={t("visitRemark")}>
                                   <VisitRemarkCell row={row} t={t} />

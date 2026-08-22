@@ -8,9 +8,19 @@
     "dev:stop": "node scripts/stop-dev-server.mjs",
     "build": "next build",
     "start": "next start",
-    "import:customer-locations": "node scripts/import-customer-locations.mjs"
+    "import:customer-locations": "node scripts/import-customer-locations.mjs",
+    "cap:sync": "npx cap sync android",
+    "cap:open:android": "npx cap open android",
+    "cap:run:android": "npx cap run android",
+    "cap:build:apk": "powershell -ExecutionPolicy Bypass -File scripts/build-android-apk.ps1"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/camera": "^8.2.3",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/geolocation": "^8.2.2",
+    "@capacitor/splash-screen": "^8.0.2",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.1",
     "jspdf": "^4.2.1",

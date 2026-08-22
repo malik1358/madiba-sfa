@@ -31,6 +31,24 @@ Never configure the staging Vercel project with production Supabase credentials.
 
 The staging deployment displays a yellow `STAGING / UAT - TEST DATA ONLY` banner on every page.
 
+## Internal Android APK
+
+See [ANDROID_APK.md](ANDROID_APK.md) for building and distributing the internal APK (no Play Store).
+
+Quick start after installing Android Studio:
+
+```bash
+npm run cap:open:android
+```
+
+Then in Android Studio: **Build → Build APK(s)**.
+
+Or from PowerShell:
+
+```bash
+npm run cap:build:apk
+```
+
 ## Price Cache Sync (Every 8 Hours)
 
 The app now reads price data from Supabase cache instead of calling the live sheet API from the browser.

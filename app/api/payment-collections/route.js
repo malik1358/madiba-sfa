@@ -8,6 +8,7 @@ import {
   toNumber,
 } from "../../lib/outstanding.js";
 import { needsEnglishTranslation, translateText } from "../../lib/translateText.js";
+import { formatCollectionUserDisplayName } from "../../lib/geo.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -436,7 +437,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
   const visitsQuery = admin
     .from("collection_visits")
-    .select("customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at")
+    .select("customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,created_by")
     .order("saved_at", { ascending: false })
     .limit(3000);
 
@@ -464,6 +465,19 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
   const visits = Array.isArray(visitsData) ? visitsData : [];
   const legalTransfers = Array.isArray(legalData) ? legalData : [];
+
+  const creatorIds = [...new Set(visits.map((visit) => visit.created_by).filter(Boolean))];
+  const creatorProfileMap = new Map();
+  if (creatorIds.length > 0) {
+    const { data: creatorProfiles, error: creatorProfilesError } = await admin
+      .from("profiles")
+      .select("id,role,salesman_code,salesman_name,email")
+      .in("id", creatorIds);
+    if (creatorProfilesError) throw creatorProfilesError;
+    (creatorProfiles || []).forEach((profile) => {
+      creatorProfileMap.set(profile.id, profile);
+    });
+  }
 
   const salesmanMap = new Map();
   const visibleSalesmanNames = new Set();
@@ -603,7 +617,18 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       city: customer.city,
       area: customer.area,
       invoices: customerInvoices,
-      latest_collection: visits[0] || null,
+      latest_collection: (() => {
+        const visit = visits[0] || null;
+        if (!visit) return null;
+        const schedulerProfile = visit.created_by ? creatorProfileMap.get(visit.created_by) : null;
+        return {
+          ...visit,
+          scheduled_by_id: visit.created_by || "",
+          scheduled_by_name: schedulerProfile
+            ? formatCollectionUserDisplayName(schedulerProfile)
+            : "",
+        };
+      })(),
       legal_transfer: legalTransfer || null,
       ...outstanding,
     });

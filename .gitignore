@@ -3,3 +3,12 @@ node_modules
 .vercel
 .env*
 !.env.example
+
+# Android / Capacitor local build artifacts
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/keystore.properties
+*.keystore
+*.jks

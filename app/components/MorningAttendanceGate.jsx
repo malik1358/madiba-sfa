@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useModuleAccess } from "../hooks/useModuleAccess";
 import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { detectTable } from "../lib/schemaGuards";
@@ -108,7 +109,9 @@ export default function MorningAttendanceGate({
   enableBackgroundGps = true,
 }) {
   const { language, dir } = useAppLanguage();
+  const { access, loading: accessLoading } = useModuleAccess();
   const t = translate(language, TEXT);
+  const attendanceRequired = requireMorningAttendance && access.role !== "admin";
   const [checking, setChecking] = useState(requireMorningAttendance);
   const [capturing, setCapturing] = useState(false);
   const [ready, setReady] = useState(!requireMorningAttendance);
@@ -247,7 +250,7 @@ export default function MorningAttendanceGate({
   }
 
   async function checkAttendance(triggerAutoCapture = false) {
-    if (!requireMorningAttendance) {
+    if (!attendanceRequired) {
       setReady(true);
       setChecking(false);
       return;
@@ -353,7 +356,11 @@ export default function MorningAttendanceGate({
   }
 
   useEffect(() => {
-    if (!requireMorningAttendance) {
+    if (accessLoading) {
+      return undefined;
+    }
+
+    if (!attendanceRequired) {
       let cancelled = false;
 
       async function runAutoClose() {
@@ -391,12 +398,12 @@ export default function MorningAttendanceGate({
     }, 12000);
 
     return () => window.clearTimeout(safetyTimer);
-  }, [requireMorningAttendance]);
+  }, [attendanceRequired, accessLoading]);
 
   useEffect(() => {
     if (!enableBackgroundGps) return undefined;
 
-    const backgroundGpsReady = requireMorningAttendance ? ready : true;
+    const backgroundGpsReady = attendanceRequired ? ready : true;
     if (!backgroundGpsReady) return undefined;
 
     let cancelled = false;
@@ -453,12 +460,26 @@ export default function MorningAttendanceGate({
         window.removeEventListener("online", handleVisibleOrFocused);
       }
     };
-  }, [enableBackgroundGps, requireMorningAttendance, ready]);
+  }, [enableBackgroundGps, attendanceRequired, ready]);
+
+  if (accessLoading && requireMorningAttendance) {
+    return (
+      <main className="modulePage" dir={dir}>
+        <div className="moduleShell">
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>{t("checking")}</h2>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   if (ready) {
     return (
       <>
-        {requireMorningAttendance ? <WorkdayInactivityPrompt /> : null}
+        {attendanceRequired ? <WorkdayInactivityPrompt /> : null}
         {children}
       </>
     );

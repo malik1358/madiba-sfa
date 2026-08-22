@@ -802,18 +802,23 @@ export default function PaymentCollectionsView({ view = "due" }) {
     return true;
   }
 
+  const filteredDueRows = useMemo(
+    () => filterQueueRows(dueCustomers, customerFilter, selectedSalesmen),
+    [customerFilter, dueCustomers, selectedSalesmen],
+  );
+
   const cashQueueSourceRows = useMemo(() => {
     if (view !== "due") return [];
     return sortCashQueueCustomers(
-      filterQueueRows(dueCustomers, customerFilter, selectedSalesmen)
-        .filter((row) => isCashQueueCustomer(row, queueToday)),
+      filteredDueRows.filter((row) => isCashQueueCustomer(row, queueToday)),
     );
-  }, [customerFilter, dueCustomers, queueToday, selectedSalesmen, view]);
+  }, [filteredDueRows, queueToday, view]);
 
   const visibleRows = useMemo(
-    () => filterQueueRows(view === "legal" ? legalCustomers : dueCustomers, customerFilter, selectedSalesmen)
-      .filter((row) => view !== "due" || keepRowInActiveDueQueue(row)),
-    [activeRowKey, customerFilter, dueCustomers, legalCustomers, queueToday, selectedSalesmen, view],
+    () => (view === "legal"
+      ? filterQueueRows(legalCustomers, customerFilter, selectedSalesmen)
+      : filteredDueRows.filter((row) => keepRowInActiveDueQueue(row))),
+    [activeRowKey, customerFilter, filteredDueRows, legalCustomers, queueToday, selectedSalesmen, view],
   );
 
   const visibleNotDueRows = useMemo(
@@ -1435,74 +1440,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
             </section>
           ) : null}
 
-          {view === "due" ? (
-            <section className="moduleSection" style={{ marginBottom: "12px" }}>
-              <div className="moduleSectionHeader">
-                <h2>{t("cashQueueTitle")}</h2>
-                <span>{cashQueueSourceRows.length}</span>
-              </div>
-              <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("cashQueueHint")}</div>
-              {cashQueueSourceRows.length === 0 ? (
-                <div className="moduleHint">{t("noCashQueue")}</div>
-              ) : (
-                <div className="moduleTableWrap">
-                  <table className="moduleTable moduleCollectorTable">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>{t("customerCode")}</th>
-                        <th>{t("customer")}</th>
-                        <th>{t("salesman")}</th>
-                        <th>{t("cashDueAmount")}</th>
-                        <th>{t("amount")}</th>
-                        <th>{t("overdue")}</th>
-                        <th>{t("lastVisitDate")}</th>
-                        <th>{t("actions")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cashQueueSourceRows.map((row, index) => {
-                        const key = rowKey(row);
-                        return (
-                          <tr key={`cash-${key}`}>
-                            <td data-label="#">{index + 1}</td>
-                            <td data-label={t("customerCode")}>{row.customer_code}</td>
-                            <td data-label={t("customer")}>{row.customer_name}</td>
-                            <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>
-                            <td data-label={t("cashDueAmount")}>{formatMoney(row.outstanding_cash)}</td>
-                            <td data-label={t("amount")}>{formatMoney(row.total_due_amount)}</td>
-                            <td data-label={t("overdue")}>{row.max_overdue_days || 0}</td>
-                            <td data-label={t("lastVisitDate")}>{formatLastVisitDate(row)}</td>
-                            <td data-label={t("actions")}>
-                              <div className="moduleInlineStack moduleActionStack">
-                                <button
-                                  type="button"
-                                  className="moduleInlineButton moduleActionButton"
-                                  onClick={() => setActiveRowKey(activeRowKey === key ? "" : key)}
-                                >
-                                  {activeRowKey === key ? t("close") : t("open")}
-                                </button>
-                                {canViewVisitReports && row?.latest_collection?.saved_at ? (
-                                  <button
-                                    type="button"
-                                    className="moduleInlineButton moduleActionButton"
-                                    onClick={() => openVisitReport(row)}
-                                  >
-                                    {t("viewVisitReport")}
-                                  </button>
-                                ) : null}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          ) : null}
-
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>{view === "legal" ? t("legalQueue") : t("dueQueue")}</h2>
@@ -1556,6 +1493,74 @@ export default function PaymentCollectionsView({ view = "due" }) {
                 ) : null}
               </div>
             </div>
+
+            {view === "due" ? (
+              <div style={{ marginBottom: "14px" }}>
+                <div className="moduleSectionHeader">
+                  <h3 style={{ margin: 0, fontSize: "1rem" }}>{t("cashQueueTitle")}</h3>
+                  <span>{cashQueueSourceRows.length}</span>
+                </div>
+                <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("cashQueueHint")}</div>
+                {cashQueueSourceRows.length === 0 ? (
+                  <div className="moduleHint">{t("noCashQueue")}</div>
+                ) : (
+                  <div className="moduleTableWrap">
+                    <table className="moduleTable moduleCollectorTable">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>{t("customerCode")}</th>
+                          <th>{t("customer")}</th>
+                          <th>{t("salesman")}</th>
+                          <th>{t("cashDueAmount")}</th>
+                          <th>{t("amount")}</th>
+                          <th>{t("overdue")}</th>
+                          <th>{t("lastVisitDate")}</th>
+                          <th>{t("actions")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cashQueueSourceRows.map((row, index) => {
+                          const key = rowKey(row);
+                          return (
+                            <tr key={`cash-${key}`}>
+                              <td data-label="#">{index + 1}</td>
+                              <td data-label={t("customerCode")}>{row.customer_code}</td>
+                              <td data-label={t("customer")}>{row.customer_name}</td>
+                              <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>
+                              <td data-label={t("cashDueAmount")}>{formatMoney(row.outstanding_cash)}</td>
+                              <td data-label={t("amount")}>{formatMoney(row.total_due_amount)}</td>
+                              <td data-label={t("overdue")}>{row.max_overdue_days || 0}</td>
+                              <td data-label={t("lastVisitDate")}>{formatLastVisitDate(row)}</td>
+                              <td data-label={t("actions")}>
+                                <div className="moduleInlineStack moduleActionStack">
+                                  <button
+                                    type="button"
+                                    className="moduleInlineButton moduleActionButton"
+                                    onClick={() => setActiveRowKey(activeRowKey === key ? "" : key)}
+                                  >
+                                    {activeRowKey === key ? t("close") : t("open")}
+                                  </button>
+                                  {canViewVisitReports && row?.latest_collection?.saved_at ? (
+                                    <button
+                                      type="button"
+                                      className="moduleInlineButton moduleActionButton"
+                                      onClick={() => openVisitReport(row)}
+                                    >
+                                      {t("viewVisitReport")}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             <div className="moduleTableWrap moduleCollectorTableWrap">
               <table className="moduleTable moduleCollectorTable">

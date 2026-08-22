@@ -30,7 +30,7 @@ While logged in during an active work session, the app will:
 - Send **GPS pings every 15 minutes** after 15 minutes of inactivity
 - Show a **lock-screen alert** if no visit/order/collection is recorded for 45 minutes (repeats every 15 minutes while still idle)
 
-Active sessions follow attendance logs: **login → lunch break out**, then **lunch break in → logout**. Nothing runs during lunch or after end-of-day.
+Active sessions follow attendance logs: **login → lunch break out**, then **lunch break in → logout**. Nothing runs during lunch or after end-of-day. If lunch lasts more than **3 hours**, a one-time reminder push is sent (English or Arabic).
 
 ---
 

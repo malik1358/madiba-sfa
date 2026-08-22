@@ -13,6 +13,8 @@ import {
   isOnLunchBreak,
   isWithinActiveWorkSession,
   ksaDayBounds,
+  shouldSendLunchBreakReminder,
+  getOpenLunchBreakOutTimestamp,
   isInactivityPromptSnoozed,
   ksaMidnightEndIso,
   readInactivityPromptSnoozeUntil,
@@ -155,6 +157,39 @@ test("isWithinActiveWorkSession follows login-lunch-logout windows", () => {
       now: new Date("2026-08-18T12:00:00.000Z"),
     }),
     false,
+  );
+});
+
+test("shouldSendLunchBreakReminder is true after 3 hours on lunch", () => {
+  const lunchOutAt = "2026-08-18T09:00:00.000Z";
+  const logs = [
+    {
+      entry_type: "LUNCH_BREAK_OUT",
+      note: JSON.stringify({ captured_at: lunchOutAt }),
+      created_at: lunchOutAt,
+    },
+  ];
+
+  assert.equal(
+    shouldSendLunchBreakReminder(logs, new Date("2026-08-18T11:30:00.000Z")),
+    false,
+  );
+
+  assert.equal(
+    shouldSendLunchBreakReminder(logs, new Date("2026-08-18T12:00:00.000Z")),
+    true,
+  );
+
+  assert.equal(
+    getOpenLunchBreakOutTimestamp([
+      ...logs,
+      {
+        entry_type: "LUNCH_BREAK_IN",
+        note: JSON.stringify({ captured_at: "2026-08-18T12:30:00.000Z" }),
+        created_at: "2026-08-18T12:30:00.000Z",
+      },
+    ], Date.parse("2026-08-18T13:00:00.000Z")),
+    0,
   );
 });
 

@@ -3,14 +3,17 @@ import { isFcmConfigured, sendPushToUser } from "./fcm.js";
 import {
   getKsaDateString,
   getInactivityAlertMessage,
-  isWithinActiveWorkSession,
+  getLunchBreakReminderMessage,
   ksaDayBounds,
   logEventTimestamp,
+  shouldSendLunchBreakReminder,
   shouldWarnInactivity,
+  getOpenLunchBreakOutTimestamp,
   INACTIVITY_ALERT_REPEAT_MS,
 } from "./workdayActivity.js";
 
 export const INACTIVITY_PUSH_TYPE = "inactivity";
+export const LUNCH_BREAK_REMINDER_PUSH_TYPE = "lunch_break_reminder";
 
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
@@ -39,6 +42,7 @@ async function logPushAttempt(admin, {
   body,
   successCount,
   failureCount,
+  referenceKey = null,
 }) {
   const { error } = await admin.from("push_notification_log").insert({
     user_id: userId,
@@ -47,9 +51,22 @@ async function logPushAttempt(admin, {
     body,
     success_count: successCount,
     failure_count: failureCount,
+    reference_key: referenceKey,
   });
 
   if (error) throw error;
+}
+
+async function hasSentPushReference(admin, referenceKey) {
+  if (!referenceKey) return false;
+
+  const { count, error } = await admin
+    .from("push_notification_log")
+    .select("id", { count: "exact", head: true })
+    .eq("reference_key", referenceKey);
+
+  if (error) throw error;
+  return Number(count || 0) > 0;
 }
 
 async function loadActiveFieldUsers(admin, reportDate) {
@@ -157,6 +174,7 @@ export async function runInactivityPushCycle(admin, now = new Date()) {
 
   let checked = 0;
   let sent = 0;
+  let lunchRemindersSent = 0;
   const details = [];
 
   for (const { userId, loginLog, preferredLanguage } of activeUsers) {
@@ -171,6 +189,37 @@ export async function runInactivityPushCycle(admin, now = new Date()) {
     const logoutAt = logoutLog
       ? new Date(logEventTimestamp(logoutLog) || logoutLog.created_at).toISOString()
       : null;
+
+    if (shouldSendLunchBreakReminder(logs, now)) {
+      const lunchOutTs = getOpenLunchBreakOutTimestamp(logs, now.getTime());
+      const lunchReferenceKey = `lunch_reminder:${userId}:${lunchOutTs}`;
+
+      if (!await hasSentPushReference(admin, lunchReferenceKey)) {
+        const { title, body } = getLunchBreakReminderMessage(preferredLanguage);
+        const lunchResult = await sendPushToUser(admin, userId, {
+          title,
+          body,
+          data: {
+            type: LUNCH_BREAK_REMINDER_PUSH_TYPE,
+            reportDate,
+          },
+        });
+
+        await logPushAttempt(admin, {
+          userId,
+          notificationType: LUNCH_BREAK_REMINDER_PUSH_TYPE,
+          title,
+          body,
+          successCount: lunchResult.successCount,
+          failureCount: lunchResult.failureCount,
+          referenceKey: lunchReferenceKey,
+        });
+
+        if (lunchResult.successCount > 0) {
+          lunchRemindersSent += 1;
+        }
+      }
+    }
 
     if (!shouldWarnInactivity({
       loginAt,
@@ -223,6 +272,7 @@ export async function runInactivityPushCycle(admin, now = new Date()) {
     ok: true,
     checked,
     sent,
+    lunchRemindersSent,
     reportDate,
     details,
   };

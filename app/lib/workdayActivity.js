@@ -1,6 +1,7 @@
 export const KSA_TIMEZONE = "Asia/Riyadh";
 export const INACTIVITY_MS = 45 * 60 * 1000;
 export const INACTIVITY_ALERT_REPEAT_MS = 15 * 60 * 1000;
+export const LUNCH_BREAK_REMINDER_MS = 3 * 60 * 60 * 1000;
 
 export function getInactivityAlertMessage(language = "en") {
   if (String(language || "").trim().toLowerCase() === "ar") {
@@ -13,6 +14,20 @@ export function getInactivityAlertMessage(language = "en") {
   return {
     title: "No activity recorded",
     body: "You have not logged a visit, order, or collection in the last 45 minutes.",
+  };
+}
+
+export function getLunchBreakReminderMessage(language = "en") {
+  if (String(language || "").trim().toLowerCase() === "ar") {
+    return {
+      title: "تذكير استراحة الغداء",
+      body: "استراحة الغداء تجاوزت 3 ساعات. يرجى تسجيل العودة من الغداء عند عودتك.",
+    };
+  }
+
+  return {
+    title: "Lunch break reminder",
+    body: "Your lunch break has been over 3 hours. Please tap Lunch break in when you return.",
   };
 }
 export const INACTIVITY_PROMPT_SHOWN_SNOOZE_MS = 5 * 60 * 1000;
@@ -276,6 +291,28 @@ export function isOnLunchBreak(userLogs, now = Date.now()) {
   }
 
   return lunchOutTs > 0 && (lunchInTs === 0 || lunchInTs < lunchOutTs) && now >= lunchOutTs;
+}
+
+export function getOpenLunchBreakOutTimestamp(userLogs, now = Date.now()) {
+  let lunchOutTs = 0;
+  let lunchInTs = 0;
+
+  for (const row of userLogs || []) {
+    const ts = logEventTimestamp(row);
+    if (!ts) continue;
+    if (row.entry_type === "LUNCH_BREAK_OUT") lunchOutTs = Math.max(lunchOutTs, ts);
+    if (row.entry_type === "LUNCH_BREAK_IN" && ts >= lunchOutTs) lunchInTs = Math.max(lunchInTs, ts);
+  }
+
+  if (!lunchOutTs || (lunchInTs > 0 && lunchInTs >= lunchOutTs)) return 0;
+  if (now < lunchOutTs) return 0;
+  return lunchOutTs;
+}
+
+export function shouldSendLunchBreakReminder(userLogs, now = new Date()) {
+  const lunchOutTs = getOpenLunchBreakOutTimestamp(userLogs, now.getTime());
+  if (!lunchOutTs) return false;
+  return now.getTime() - lunchOutTs >= LUNCH_BREAK_REMINDER_MS;
 }
 
 export function lastTransactionTimestamp(userLogs, collections = [], orders = []) {

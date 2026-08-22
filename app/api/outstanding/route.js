@@ -149,7 +149,7 @@ function detectColumnIndexes(headerRow) {
   };
 
   const codeAliases = ["customer code", "customer_code", "cust code", "customer no", "account code", "code"];
-  const nameAliases = ["customer name", "customer", "party name", "name", "account name"];
+  const nameAliases = ["customer name", "customer", "party name", "party's name", "partys name", "name", "account name"];
 
   headerRow.forEach((cell, idx) => {
     const text = String(cell || "").trim();
@@ -179,7 +179,7 @@ function detectColumnIndexes(headerRow) {
       indexes.overdueDays = idx;
     }
 
-    if (indexes.salesman < 0 && normalized.includes("salesman")) {
+    if (indexes.salesman < 0 && (normalized.includes("salesman") || normalized.includes("sales person") || normalized.includes("salesperson"))) {
       indexes.salesman = idx;
     }
 

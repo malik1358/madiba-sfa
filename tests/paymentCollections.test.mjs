@@ -43,6 +43,60 @@ test("buildCollectionQueues does not treat customer code ending in C as cash wit
   assert.equal(isCashQueueCustomer(queues.dueCustomers[0], "2026-08-22"), false);
 });
 
+test("buildCollectionQueues keeps 1119C high-exposure credit customer in due queue", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "1119C",
+      customer_name: "Fahd Ali Sulaiman Al Subaie Trading Est",
+      invoices: [{ pending_amount: 2805538, due_date: "2026-06-01", overdue_days: 82, ref_no: "SI/9901" }],
+      latest_collection: null,
+      legal_transfer: null,
+    },
+  ], "2026-08-22T10:00:00Z");
+
+  assert.equal(queues.dueCustomers.length, 1);
+  assert.equal(queues.dueCustomers[0].customer_code, "1119C");
+  assert.ok(queues.dueCustomers[0].exposure_score > 1_000_000);
+  assert.equal(isCashQueueCustomer(queues.dueCustomers[0], "2026-08-22"), false);
+});
+
+test("buildCollectionQueues keeps scheduled revisit credit customers in due queue data", () => {
+  const today = "2026-08-22T10:00:00Z";
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "1119C",
+      customer_name: "Fahd Ali Sulaiman Al Subaie Trading Est",
+      invoices: [{ pending_amount: 2805538, due_date: "2026-06-01", overdue_days: 82, ref_no: "SI/9901" }],
+      latest_collection: {
+        saved_at: "2026-08-20T10:00:00Z",
+        payment_status: "PARTIAL",
+        next_visit_at: "2026-08-25",
+      },
+      legal_transfer: null,
+    },
+  ], today);
+
+  assert.equal(queues.dueCustomers.length, 1);
+  assert.equal(isScheduledRevisitQueueCustomer(queues.dueCustomers[0], today), true);
+  assert.equal(isCashQueueCustomer(queues.dueCustomers[0], today), false);
+});
+
+test("buildCollectionQueues keeps 1119C with future due date in not-yet-due queue", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "1119C",
+      customer_name: "Fahd Ali Sulaiman Al Subaie Trading Est",
+      invoices: [{ pending_amount: 2805538, due_date: "2026-09-01", overdue_days: 0, ref_no: "SI/9901" }],
+      latest_collection: null,
+      legal_transfer: null,
+    },
+  ], "2026-08-22T10:00:00Z");
+
+  assert.equal(queues.dueCustomers.length, 0);
+  assert.equal(queues.notDueCustomers.length, 1);
+  assert.equal(queues.notDueCustomers[0].total_not_due_amount, 2805538);
+});
+
 test("buildExposureScoreFromInvoices sums amount x days per invoice", () => {
   const exposure = buildExposureScoreFromInvoices([
     { pending_amount: 4132.68, overdue_days: 29 },

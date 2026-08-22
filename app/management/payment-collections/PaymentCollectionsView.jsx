@@ -797,7 +797,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   function keepRowInActiveDueQueue(row) {
     const key = rowKey(row);
     if (activeRowKey && key === activeRowKey) return true;
-    if (isScheduledRevisitQueueCustomer(row, queueToday)) return false;
+    // Cash customers live in the cash subsection; scheduled revisits stay in the main exposure-ranked table too.
     if (isCashQueueCustomer(row, queueToday)) return false;
     return true;
   }
@@ -809,10 +809,15 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   const cashQueueSourceRows = useMemo(() => {
     if (view !== "due") return [];
-    return sortCashQueueCustomers(
-      filteredDueRows.filter((row) => isCashQueueCustomer(row, queueToday)),
+    const sourceRows = filterQueueRows(
+      [...dueCustomers, ...notDueCustomers],
+      customerFilter,
+      selectedSalesmen,
     );
-  }, [filteredDueRows, queueToday, view]);
+    return sortCashQueueCustomers(
+      sourceRows.filter((row) => isCashQueueCustomer(row, queueToday)),
+    );
+  }, [customerFilter, dueCustomers, notDueCustomers, queueToday, selectedSalesmen, view]);
 
   const visibleRows = useMemo(
     () => (view === "legal"

@@ -132,6 +132,8 @@ const TEXT = {
   customerDetails: { en: "Customer Details", ar: "تفاصيل العميل" },
   viewVisitReport: { en: "View Report", ar: "عرض التقرير" },
   visitReportTitle: { en: "Collection Visit Report", ar: "تقرير زيارة التحصيل" },
+  visitReportNumber: { en: "Visit", ar: "زيارة" },
+  visitReportSeparator: { en: "---", ar: "---" },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
   translating: { en: "Translating...", ar: "جاري الترجمة..." },
   msgLoginAgain: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
@@ -285,18 +287,53 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   return lines.join("\n");
 }
 
-function buildStoredVisitReport(row, englishRemark, t) {
-  const visit = row?.latest_collection;
-  if (!visit) return "";
+function buildStoredVisitReport(row, englishRemark, t, visit = null) {
+  const selectedVisit = visit || row?.latest_collection;
+  if (!selectedVisit) return "";
 
-  return buildVisitSummary(row, {
-    visitOutcome: visit.visit_outcome || visit.payment_status || "",
-    amountReceived: visit.amount_received ? String(visit.amount_received) : "",
-    receiptMode: visit.receipt_mode || "",
-    nextVisitAt: toDateInputValue(visit.next_visit_at),
-    remarkArabic: visit.remark_arabic || "",
-    remarkEnglish: englishRemark || visit.remark_english || "",
-  }, englishRemark || visit.remark_english || "", t);
+  const reportRow = {
+    ...row,
+    salesman_name: selectedVisit.scheduled_by_name || row.salesman_name,
+    salesman_code: row.salesman_code,
+  };
+
+  return buildVisitSummary(reportRow, {
+    visitOutcome: selectedVisit.visit_outcome || selectedVisit.payment_status || "",
+    amountReceived: selectedVisit.amount_received ? String(selectedVisit.amount_received) : "",
+    receiptMode: selectedVisit.receipt_mode || "",
+    nextVisitAt: toDateInputValue(selectedVisit.next_visit_at),
+    remarkArabic: selectedVisit.remark_arabic || "",
+    remarkEnglish: englishRemark || selectedVisit.remark_english || "",
+  }, englishRemark || selectedVisit.remark_english || "", t);
+}
+
+async function buildVisitReportText(row, t) {
+  const visits = Array.isArray(row?.collection_history) && row.collection_history.length > 0
+    ? row.collection_history.slice(0, 3)
+    : (row?.latest_collection ? [row.latest_collection] : []);
+
+  if (visits.length === 0) return "";
+
+  const reportParts = [];
+
+  for (let index = 0; index < visits.length; index += 1) {
+    const visit = visits[index];
+    const englishRemark = await resolveEnglishRemark(visit.remark_arabic, visit.remark_english);
+    const report = buildStoredVisitReport(row, englishRemark, t, visit);
+    if (!report) continue;
+
+    if (index > 0) {
+      reportParts.push("", t("visitReportSeparator"), "");
+    }
+
+    if (visits.length > 1) {
+      reportParts.push(`${t("visitReportNumber")} ${index + 1}`, report);
+    } else {
+      reportParts.push(report);
+    }
+  }
+
+  return reportParts.join("\n");
 }
 
 async function resolveEnglishRemark(arabicRemark, englishRemark) {
@@ -981,9 +1018,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     setVisitReportText("");
 
     try {
-      const visit = row.latest_collection;
-      const englishRemark = await resolveEnglishRemark(visit.remark_arabic, visit.remark_english);
-      setVisitReportText(buildStoredVisitReport(row, englishRemark, t));
+      setVisitReportText(await buildVisitReportText(row, t));
     } finally {
       setVisitReportLoading(false);
     }
@@ -1926,7 +1961,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
               {visitReportLoading ? (
                 <div className="moduleHint">{t("translating")}</div>
               ) : (
-                <textarea className="moduleTextArea" rows={16} value={visitReportText} readOnly />
+                <>
+                  {Array.isArray(visitReportRow.collection_history) && visitReportRow.collection_history.length > 1 ? (
+                    <p className="moduleHint">{t("lastThreeVisits")}</p>
+                  ) : null}
+                  <textarea className="moduleTextArea" rows={22} value={visitReportText} readOnly />
+                </>
               )}
               <div className="moduleOrderActions">
                 <button

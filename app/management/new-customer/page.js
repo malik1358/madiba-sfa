@@ -14,6 +14,7 @@ import { fetchSalesScope } from "../../lib/salesScope";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { detectTable } from "../../lib/schemaGuards";
 import { insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
+import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 
 const TEXT = {
   title: { en: "New Customer", ar: "عميل جديد" },
@@ -473,6 +474,13 @@ export default function NewCustomerPage() {
         setSchemaWarning(`Prospect was saved, but these missing columns were skipped: ${removed}`);
       }
 
+      queueTransactionAlert(session.access_token, {
+        transactionType: "PROSPECT_REGISTERED",
+        referenceKey: `prospect:${data.id}:registered`,
+        companyName: form.customer_name_en || form.shop_name,
+        customerCode: data.id,
+      });
+
       const { data: latest, error: latestError } = await supabase
         .from("prospects")
         .select("*")
@@ -536,6 +544,13 @@ export default function NewCustomerPage() {
           follow_up_date: followUpDate,
         });
       }
+
+      queueTransactionAlert(session.access_token, {
+        transactionType: "PROSPECT_FOLLOW_UP",
+        referenceKey: `prospect:${savedProspect.id}:follow-up:${followUpDate}`,
+        referenceId: savedProspect.id,
+        companyName: form.customer_name_en || form.shop_name,
+      });
 
       setRecent((current) => current.map((row) => (
         row.id === savedProspect.id

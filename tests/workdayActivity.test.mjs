@@ -11,6 +11,7 @@ import {
   formatWorkingHours,
   getKsaDateString,
   isOnLunchBreak,
+  isWithinActiveWorkSession,
   ksaDayBounds,
   isInactivityPromptSnoozed,
   ksaMidnightEndIso,
@@ -94,6 +95,67 @@ test("isOnLunchBreak is true after lunch out and false after lunch in", () => {
 
   assert.equal(isOnLunchBreak(logs.slice(0, 1), Date.parse("2026-08-18T09:30:00.000Z")), true);
   assert.equal(isOnLunchBreak(logs, Date.parse("2026-08-18T10:00:00.000Z")), false);
+});
+
+test("isWithinActiveWorkSession follows login-lunch-logout windows", () => {
+  const loginAt = "2026-08-18T03:00:00.000Z";
+  const logs = [
+    {
+      entry_type: "MORNING_ATTENDANCE",
+      note: JSON.stringify({ captured_at: loginAt }),
+      created_at: loginAt,
+    },
+    {
+      entry_type: "LUNCH_BREAK_OUT",
+      note: JSON.stringify({ captured_at: "2026-08-18T09:00:00.000Z" }),
+      created_at: "2026-08-18T09:00:00.000Z",
+    },
+    {
+      entry_type: "LUNCH_BREAK_IN",
+      note: JSON.stringify({ captured_at: "2026-08-18T09:45:00.000Z" }),
+      created_at: "2026-08-18T09:45:00.000Z",
+    },
+  ];
+
+  assert.equal(
+    isWithinActiveWorkSession({
+      loginAt,
+      logoutAt: null,
+      userLogs: logs,
+      now: new Date("2026-08-18T08:00:00.000Z"),
+    }),
+    true,
+  );
+
+  assert.equal(
+    isWithinActiveWorkSession({
+      loginAt,
+      logoutAt: null,
+      userLogs: logs,
+      now: new Date("2026-08-18T09:30:00.000Z"),
+    }),
+    false,
+  );
+
+  assert.equal(
+    isWithinActiveWorkSession({
+      loginAt,
+      logoutAt: null,
+      userLogs: logs,
+      now: new Date("2026-08-18T11:00:00.000Z"),
+    }),
+    true,
+  );
+
+  assert.equal(
+    isWithinActiveWorkSession({
+      loginAt,
+      logoutAt: "2026-08-18T13:00:00.000Z",
+      userLogs: logs,
+      now: new Date("2026-08-18T12:00:00.000Z"),
+    }),
+    false,
+  );
 });
 
 test("deriveActivityStatus marks idle users without recent transactions", () => {

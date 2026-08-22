@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { GPS_REQUIRED_ERROR, hasGpsCoordinates } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
+import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -421,6 +422,21 @@ export async function POST(request) {
 
       status = "SUBMITTED";
     }
+
+    queueTransactionBossAlerts(admin, {
+      actorUserId: user.id,
+      transactionType: action === "submit"
+        ? "ORDER_SUBMITTED"
+        : (isNewOrder ? "ORDER_DRAFT" : "ORDER_EDITED"),
+      referenceKey: action === "submit"
+        ? `order:${orderId}:submit`
+        : (isNewOrder ? `order:${orderId}:draft` : `order:${orderId}:edit:${nowIso}`),
+      details: {
+        customerCode,
+        customerName,
+        referenceId: orderId,
+      },
+    });
 
     return NextResponse.json({
       success: true,

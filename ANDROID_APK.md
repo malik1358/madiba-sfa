@@ -24,11 +24,13 @@ The workflow also runs automatically when `android/` or Capacitor config changes
 3. **Battery → Unrestricted** for MADIBA SFA
 4. Complete **morning attendance** — this starts the native field-tracking notification
 
-While logged in during work hours (6:00–22:00 KSA), the app will:
+While logged in during an active work session, the app will:
 
 - Show a persistent **“MADIBA field tracking active”** notification (Android foreground service)
 - Send **GPS pings every 15 minutes** after 15 minutes of inactivity
-- Show a **lock-screen alert** if no visit/order/collection is recorded for 45 minutes
+- Show a **lock-screen alert** if no visit/order/collection is recorded for 45 minutes (repeats every 15 minutes while still idle)
+
+Active sessions follow attendance logs: **login → lunch break out**, then **lunch break in → logout**. Nothing runs during lunch or after end-of-day.
 
 ---
 
@@ -38,11 +40,30 @@ Push alerts to salesmen (even when the app is not open) require Firebase Cloud M
 
 1. Create a Firebase project → add Android app `com.madiba.sfa`
 2. Download **`google-services.json`** → place in `android/app/google-services.json`
-3. Run the SQL migration `supabase/migrations/20260822120000_device_push_tokens.sql` in Supabase
-4. Rebuild the APK (Actions → **Android APK** → **Run workflow**)
-5. Reinstall on phones — login registers the device token automatically
+3. Run these SQL migrations in Supabase:
+   - `supabase/migrations/20260822120000_device_push_tokens.sql`
+   - `supabase/migrations/20260822153000_push_notification_log.sql`
+   - `supabase/migrations/20260822160000_push_notification_reference_key.sql`
+4. In Firebase → **Project settings → Service accounts** → **Generate new private key**
+5. In Vercel → **Environment variables** → add `FIREBASE_SERVICE_ACCOUNT_JSON` (paste the full JSON on one line)
+6. Ensure `CRON_SECRET` is set in Vercel (same value as GitHub Actions secret)
+7. Rebuild the APK (Actions → **Android APK** → **Run workflow**)
+8. Reinstall on phones — login registers the device token automatically
 
-Without `google-services.json`, background GPS and local inactivity alerts still work; **remote push from the server does not**.
+After deploy, MADIBA automatically sends **45-minute inactivity push alerts**, repeating every **15 minutes** while still idle, during each user's active work session (login → lunch out, lunch in → logout) via `/api/cron/inactivity-push` (GitHub Actions workflow **Inactivity Push**). Alerts use each user's selected language (English or Arabic).
+
+Every field transaction (visit, order, collection, prospect, attendance, etc.) also sends **push alerts up the reporting chain** — each boss in **Salesman Hierarchy** receives the alert, and if that boss also has a head, the alert continues to the top.
+
+Admins can also send a manual push:
+
+```bash
+curl -X POST "https://madiba-sfa.vercel.app/api/admin/push-notifications" \
+  -H "Authorization: Bearer YOUR_ADMIN_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"USER_UUID","title":"MADIBA SFA","body":"Please check in with your next customer."}'
+```
+
+Without `google-services.json` and `FIREBASE_SERVICE_ACCOUNT_JSON`, background GPS and local inactivity alerts still work; **remote push from the server does not**.
 
 ---
 
@@ -209,7 +230,5 @@ Android APK (Capacitor)
 
 ## Next phase (optional)
 
-- Server-triggered push campaigns (boss alerts) via Firebase Admin SDK
 - Boot-time restart of field tracking after phone reboot
-
-These require Firebase credentials on Vercel plus optional cron/worker setup.
+- Admin UI button to send push from User Activity screen

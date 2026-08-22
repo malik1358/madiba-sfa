@@ -2,18 +2,21 @@ import {
   BACKGROUND_GPS_IDLE_MS,
   IDLE_GPS_ACTIVITY_ENTRY_TYPES,
   INACTIVITY_MS,
+  INACTIVITY_ALERT_REPEAT_MS,
+  getInactivityAlertMessage,
   shouldCaptureIdleGpsPing,
   shouldWarnInactivity,
   ksaDayBounds,
   getKsaDateString,
   logEventTimestamp,
-  isWithinKsaWorkingHours,
+  isWithinActiveWorkSession,
 } from "./workdayActivity.js";
 import { getSupabaseClient } from "./supabase.js";
 import { fetchJsonWithTimeout, resolveAuthSession } from "./authSession.js";
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const FOREGROUND_CHANNEL_ID = "madiba-field-tracking";
+const PUSH_ALERTS_CHANNEL_ID = "madiba-push-alerts";
 const INACTIVITY_NOTIFICATION_ID = 9045;
 const TRACKING_PREFS_PREFIX = "madiba.nativeTracking.";
 
@@ -163,6 +166,13 @@ async function ensureNativePermissions() {
 
   const { LocalNotifications } = await import("@capacitor/local-notifications");
   await LocalNotifications.requestPermissions().catch(() => {});
+  await LocalNotifications.createChannel({
+    id: PUSH_ALERTS_CHANNEL_ID,
+    name: "MADIBA alerts",
+    description: "Remote push alerts from MADIBA during the workday.",
+    importance: 4,
+    visibility: 1,
+  }).catch(() => {});
 
   const { PushNotifications } = await import("@capacitor/push-notifications");
   await PushNotifications.requestPermissions().catch(() => {});
@@ -220,7 +230,7 @@ async function maybeShowInactivityNotification(userId, lastActivityTs, loginAt) 
   const lastInactivityAlertTs = await readPrefNumber(userId, "lastInactivityAlert");
   const now = Date.now();
 
-  if (lastInactivityAlertTs && now - lastInactivityAlertTs < INACTIVITY_MS) {
+  if (lastInactivityAlertTs && now - lastInactivityAlertTs < INACTIVITY_ALERT_REPEAT_MS) {
     return;
   }
 
@@ -228,12 +238,18 @@ async function maybeShowInactivityNotification(userId, lastActivityTs, loginAt) 
     return;
   }
 
+  const language = typeof window !== "undefined"
+    && window.localStorage.getItem("madiba-language") === "ar"
+    ? "ar"
+    : "en";
+  const { title, body } = getInactivityAlertMessage(language);
+
   const { LocalNotifications } = await import("@capacitor/local-notifications");
   await LocalNotifications.schedule({
     notifications: [{
       id: INACTIVITY_NOTIFICATION_ID,
-      title: "No activity recorded",
-      body: "You have not logged a visit, order, or collection in the last 45 minutes.",
+      title,
+      body,
       channelId: FOREGROUND_CHANNEL_ID,
       smallIcon: "ic_launcher",
       schedule: { at: new Date(now + 1000) },
@@ -248,8 +264,6 @@ async function runTrackingCycle(userId) {
   cycleInFlight = true;
 
   try {
-    if (!isWithinKsaWorkingHours()) return;
-
     const supabase = getSupabaseClient();
     if (!supabase) return;
 
@@ -259,6 +273,33 @@ async function runTrackingCycle(userId) {
     const { lastActivityTs, lastGpsPingTs, workdayEnded } = await hydrateActivityTimestamps(userId);
     if (workdayEnded) {
       await stopNativeFieldTracking();
+      return;
+    }
+
+    const reportDate = getKsaDateString();
+    const { startIso, endIso } = ksaDayBounds(reportDate);
+    const { data: logs } = await supabase
+      .from("daily_activity_logs")
+      .select("entry_type,note,created_at")
+      .eq("user_id", userId)
+      .gte("created_at", startIso)
+      .lte("created_at", endIso)
+      .order("created_at", { ascending: true });
+
+    const loginLog = (logs || []).find((row) => row.entry_type === "MORNING_ATTENDANCE");
+    const logoutLog = [...(logs || [])].reverse().find((row) => row.entry_type === "END_OF_DAY");
+    const loginAt = loginLog
+      ? new Date(logEventTimestamp(loginLog) || loginLog.created_at).toISOString()
+      : null;
+    const logoutAt = logoutLog
+      ? new Date(logEventTimestamp(logoutLog) || logoutLog.created_at).toISOString()
+      : null;
+
+    if (!isWithinActiveWorkSession({
+      loginAt,
+      logoutAt,
+      userLogs: logs || [],
+    })) {
       return;
     }
 
@@ -276,16 +317,6 @@ async function runTrackingCycle(userId) {
       }
     }
 
-    const reportDate = getKsaDateString();
-    const { startIso, endIso } = ksaDayBounds(reportDate);
-    const { data: logs } = await supabase
-      .from("daily_activity_logs")
-      .select("entry_type,note,created_at")
-      .eq("user_id", userId)
-      .gte("created_at", startIso)
-      .lte("created_at", endIso)
-      .order("created_at", { ascending: true });
-
     const [{ data: collections }, { data: orders }] = await Promise.all([
       supabase
         .from("collection_visits")
@@ -301,15 +332,9 @@ async function runTrackingCycle(userId) {
         .lte("updated_at", endIso),
     ]);
 
-    const loginLog = (logs || []).find((row) => row.entry_type === "MORNING_ATTENDANCE");
-    const logoutLog = [...(logs || [])].reverse().find((row) => row.entry_type === "END_OF_DAY");
-    const loginAt = loginLog
-      ? new Date(logEventTimestamp(loginLog) || loginLog.created_at).toISOString()
-      : null;
-
     if (shouldWarnInactivity({
       loginAt,
-      logoutAt: logoutLog ? new Date(logEventTimestamp(logoutLog) || logoutLog.created_at).toISOString() : null,
+      logoutAt,
       userLogs: logs || [],
       collections: collections || [],
       orders: orders || [],

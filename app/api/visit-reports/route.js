@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
+import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -342,6 +343,17 @@ export async function POST(request) {
       // Keep success path resilient even if history insert fails.
       console.error("visit report history insert failed", insertHistoryError);
     }
+
+    queueTransactionBossAlerts(admin, {
+      actorUserId: scope.userId,
+      transactionType: "VISIT_REPORT",
+      referenceKey: `visit:${customerCode}:${value.captured_at}`,
+      details: {
+        customerCode,
+        customerName: value.customer_name,
+        outcome: value.outcome,
+      },
+    });
 
     return NextResponse.json({ success: true, customerCode, value });
   } catch (error) {

@@ -9,6 +9,7 @@ import { detectTable } from "../lib/schemaGuards";
 import { autoCloseForgottenWorkdays, BACKGROUND_GPS_IDLE_MS, IDLE_GPS_ACTIVITY_ENTRY_TYPES, shouldCaptureIdleGpsPing } from "../lib/workdayActivity";
 import { NATIVE_WORKDAY_READY_EVENT } from "../lib/nativeFieldTracking";
 import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
+import { queueTransactionAlert } from "../lib/transactionAlertClient";
 
 const TEXT = {
   checking: { en: "Checking morning attendance...", ar: "جاري التحقق من حضور الصباح..." },
@@ -127,26 +128,32 @@ export default function MorningAttendanceGate({
   const lastGpsPingAtRef = useRef(0);
   const lastActivityAtRef = useRef(0);
 
-  async function insertAttendance(sessionUserId) {
+  async function insertAttendance(sessionUserId, accessToken = "") {
     const supabase = getSupabaseClient();
     if (!supabase) {
       throw new Error("Supabase is not configured.");
     }
 
     const location = await captureLocation();
+    const capturedAt = new Date().toISOString();
     const payload = {
       user_id: sessionUserId,
       entry_type: "MORNING_ATTENDANCE",
       note: JSON.stringify({
         action: "MORNING_ATTENDANCE",
         autoCaptured: true,
-        captured_at: new Date().toISOString(),
+        captured_at: capturedAt,
         location,
       }),
     };
 
     const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
     if (insertError) throw insertError;
+
+    queueTransactionAlert(accessToken, {
+      transactionType: "MORNING_ATTENDANCE",
+      referenceKey: `activity:${sessionUserId}:MORNING_ATTENDANCE:${capturedAt}`,
+    });
   }
 
   async function captureBackgroundPing(sessionUserId) {
@@ -327,7 +334,7 @@ export default function MorningAttendanceGate({
       if (triggerAutoCapture) {
         setCapturing(true);
         try {
-          await insertAttendance(session.user.id);
+          await insertAttendance(session.user.id, session.access_token || "");
           const loginTs = Date.now();
           lastActivityAtRef.current = loginTs;
           lastGpsPingAtRef.current = loginTs;

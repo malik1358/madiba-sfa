@@ -1,5 +1,20 @@
 export const KSA_TIMEZONE = "Asia/Riyadh";
 export const INACTIVITY_MS = 45 * 60 * 1000;
+export const INACTIVITY_ALERT_REPEAT_MS = 15 * 60 * 1000;
+
+export function getInactivityAlertMessage(language = "en") {
+  if (String(language || "").trim().toLowerCase() === "ar") {
+    return {
+      title: "لا يوجد نشاط مسجل",
+      body: "لم تسجل زيارة أو طلب أو تحصيل خلال آخر 45 دقيقة.",
+    };
+  }
+
+  return {
+    title: "No activity recorded",
+    body: "You have not logged a visit, order, or collection in the last 45 minutes.",
+  };
+}
 export const INACTIVITY_PROMPT_SHOWN_SNOOZE_MS = 5 * 60 * 1000;
 export const INACTIVITY_PROMPT_DISMISS_SNOOZE_MS = 15 * 60 * 1000;
 export const INACTIVITY_PROMPT_SNOOZE_STORAGE_KEY = "madiba_inactivity_prompt_snooze_until";
@@ -75,6 +90,37 @@ export function getKsaDateTimeParts(date = new Date()) {
 export function isWithinKsaWorkingHours(date = new Date()) {
   const { hour } = getKsaDateTimeParts(date);
   return hour >= WORKDAY_START_HOUR && hour < WORKDAY_END_HOUR;
+}
+
+export function isWithinActiveWorkSession({
+  loginAt,
+  logoutAt,
+  userLogs = [],
+  now = new Date(),
+} = {}) {
+  if (!loginAt || logoutAt) return false;
+
+  const nowTs = now.getTime();
+  const loginTs = parseEventTimestamp(loginAt);
+  if (!loginTs || nowTs < loginTs) return false;
+
+  if (isOnLunchBreak(userLogs, nowTs)) return false;
+
+  const { lunchOutAt, lunchInAt } = extractLunchTimes(userLogs);
+  const lunchOutTs = parseEventTimestamp(lunchOutAt);
+  const lunchInTs = parseEventTimestamp(lunchInAt);
+
+  // Morning session: login until lunch break out (or all day if lunch not taken yet).
+  if (!lunchOutTs || nowTs <= lunchOutTs) {
+    return true;
+  }
+
+  // Afternoon session: lunch break in until logout.
+  if (lunchInTs && nowTs >= lunchInTs) {
+    return true;
+  }
+
+  return false;
 }
 
 export function ksaDayBounds(dateString) {
@@ -275,12 +321,17 @@ export function deriveActivityStatus({
     return "logged_in";
   }
 
-  if (!isWithinKsaWorkingHours(now)) {
-    return "logged_in";
-  }
-
   if (isOnLunchBreak(userLogs, now.getTime())) {
     return "on_lunch";
+  }
+
+  if (!isWithinActiveWorkSession({
+    loginAt,
+    logoutAt,
+    userLogs,
+    now,
+  })) {
+    return "logged_in";
   }
 
   const lastTransactionTs = lastTransactionTimestamp(userLogs, collections, orders);
@@ -365,8 +416,13 @@ export function shouldWarnInactivity({
   now = new Date(),
 }) {
   if (!loginAt || logoutAt) return false;
-  if (!isWithinKsaWorkingHours(now)) return false;
   if (isOnLunchBreak(userLogs, now.getTime())) return false;
+  if (!isWithinActiveWorkSession({
+    loginAt,
+    logoutAt,
+    userLogs,
+    now,
+  })) return false;
 
   const lastTransactionTs = lastTransactionTimestamp(userLogs, collections, orders);
   const loginTs = Date.parse(String(loginAt || ""));

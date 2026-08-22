@@ -62,6 +62,7 @@ Run [sql/setup_price_catalog_cache.sql](sql/setup_price_catalog_cache.sql) in Su
 - NEXT_PUBLIC_SUPABASE_URL
 - SUPABASE_SERVICE_ROLE_KEY
 - CRON_SECRET
+- FIREBASE_SERVICE_ACCOUNT_JSON (Firebase service account JSON for server push)
 
 ### 3) Automatic schedule
 

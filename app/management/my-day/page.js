@@ -22,6 +22,7 @@ import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
 import { postJsonResilient } from "../../lib/offlineApi";
+import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 
@@ -785,6 +786,11 @@ export default function MyDayPage() {
       const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
       if (insertError) throw insertError;
 
+      queueTransactionAlert(session.access_token, {
+        transactionType: entryType,
+        referenceKey: `activity:${session.user.id}:${entryType}:${payload.note}`,
+      });
+
       setMessage(entryType === "NOTE"
         ? (location ? "Note saved with GPS." : "Note saved.")
         : (location ? `${entryType} logged with GPS.` : `${entryType} logged.`));
@@ -996,6 +1002,14 @@ export default function MyDayPage() {
 
         const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
         if (insertError) throw insertError;
+
+        queueTransactionAlert(session.access_token, {
+          transactionType: "VISIT_REPORT",
+          referenceKey: `visit:${customer.customer_code}:${capturedAt}`,
+          customerCode: customer.customer_code,
+          customerName: customer.customer_name,
+          outcome: visitForm.outcome,
+        });
       } else {
         saveResult = await postJsonResilient({
           url: "/api/visit-reports",

@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { buildCollectionQueues, filterCollectionQueueInvoices, invoiceHasCashRef } from "../../lib/paymentCollections.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
+import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { resolveMutualGroupCodes } from "../../lib/mutualSalesmanGroups.js";
 import {
   OUTSTANDING_DATASET_KEY,
@@ -511,9 +512,33 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
   (visits || []).forEach((visit) => {
     const key = canonicalCustomerCode(visit.customer_code);
-    if (!key || visitsByCustomer.has(key)) return;
-    visitsByCustomer.set(key, [visit]);
+    if (!key) return;
+    if (!visitsByCustomer.has(key)) {
+      visitsByCustomer.set(key, []);
+    }
+    visitsByCustomer.get(key).push(visit);
   });
+
+  function enrichCollectionVisit(visit) {
+    if (!visit) return null;
+    const schedulerProfile = visit.created_by ? creatorProfileMap.get(visit.created_by) : null;
+    return {
+      ...visit,
+      scheduled_by_id: visit.created_by || "",
+      scheduled_by_name: schedulerProfile
+        ? formatCollectionUserDisplayName(schedulerProfile)
+        : "",
+    };
+  }
+
+  function latestCustomerVisits(customerCode, limit = 3) {
+    const customerVisits = visitsByCustomer.get(customerCode) || [];
+    return customerVisits
+      .slice()
+      .sort((left, right) => new Date(right.saved_at || 0).getTime() - new Date(left.saved_at || 0).getTime())
+      .slice(0, limit)
+      .map((visit) => enrichCollectionVisit(visit));
+  }
 
   (legalTransfers || []).forEach((transfer) => {
     const key = canonicalCustomerCode(transfer.customer_code);
@@ -581,7 +606,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     const customerInvoices = filterCollectionQueueInvoices(allCustomerInvoices);
     if (customerInvoices.length === 0) return;
 
-    const visits = visitsByCustomer.get(customer.customer_code) || [];
+    const visits = latestCustomerVisits(customer.customer_code);
     const legalTransfer = legalTransfersByCustomer.get(customer.customer_code);
 
     // The uploaded file decides who collects, since customer assignments drift out of date.
@@ -637,18 +662,8 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       city: customer.city,
       area: customer.area,
       invoices: customerInvoices,
-      latest_collection: (() => {
-        const visit = visits[0] || null;
-        if (!visit) return null;
-        const schedulerProfile = visit.created_by ? creatorProfileMap.get(visit.created_by) : null;
-        return {
-          ...visit,
-          scheduled_by_id: visit.created_by || "",
-          scheduled_by_name: schedulerProfile
-            ? formatCollectionUserDisplayName(schedulerProfile)
-            : "",
-        };
-      })(),
+      latest_collection: visits[0] || null,
+      collection_history: visits,
       legal_transfer: legalTransfer || null,
       ...outstanding,
     });
@@ -869,6 +884,18 @@ export async function POST(request) {
       }
     }
 
+    queueTransactionBossAlerts(admin, {
+      actorUserId: user.id,
+      transactionType: "COLLECTION_VISIT",
+      referenceKey: `collection:${insertData?.id || customerCode}`,
+      details: {
+        customerCode,
+        customerName,
+        visitOutcome,
+        referenceId: insertData?.id,
+      },
+    });
+
     return Response.json({
       success: true,
       message: "Collection visit saved successfully",
@@ -980,6 +1007,15 @@ export async function PATCH(request) {
         throw gpsLogError;
       }
     }
+
+    queueTransactionBossAlerts(admin, {
+      actorUserId: user.id,
+      transactionType: action === "remove" ? "LEGAL_TRANSFER_REMOVE" : "LEGAL_TRANSFER",
+      referenceKey: `legal:${customerCode}:${action}:${Date.now()}`,
+      details: {
+        customerCode,
+      },
+    });
 
     return Response.json({ success: true });
   } catch (error) {

@@ -2,9 +2,10 @@ import { createClient } from "@supabase/supabase-js";
 import { buildGpsActivityNote } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import {
-  isWithinKsaWorkingHours,
+  isWithinActiveWorkSession,
   ksaDayBounds,
   getKsaDateString,
+  logEventTimestamp,
 } from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -65,6 +66,35 @@ async function hasEndedWorkday(admin, userId) {
   return Boolean(data?.id);
 }
 
+async function loadActiveWorkSession(admin, userId) {
+  const reportDate = getKsaDateString();
+  const { startIso, endIso } = ksaDayBounds(reportDate);
+
+  const { data: logs, error } = await admin
+    .from("daily_activity_logs")
+    .select("entry_type,note,created_at")
+    .eq("user_id", userId)
+    .gte("created_at", startIso)
+    .lte("created_at", endIso)
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+
+  const rows = logs || [];
+  const loginLog = rows.find((row) => row.entry_type === "MORNING_ATTENDANCE");
+  const logoutLog = [...rows].reverse().find((row) => row.entry_type === "END_OF_DAY");
+
+  return {
+    loginAt: loginLog
+      ? new Date(logEventTimestamp(loginLog) || loginLog.created_at).toISOString()
+      : null,
+    logoutAt: logoutLog
+      ? new Date(logEventTimestamp(logoutLog) || logoutLog.created_at).toISOString()
+      : null,
+    userLogs: rows,
+  };
+}
+
 export async function POST(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -90,8 +120,9 @@ export async function POST(request) {
       return Response.json({ success: true, skipped: true, reason: "role_exempt" });
     }
 
-    if (!isWithinKsaWorkingHours()) {
-      return Response.json({ success: true, skipped: true, reason: "outside_working_hours" });
+    const workSession = await loadActiveWorkSession(admin, user.id);
+    if (!isWithinActiveWorkSession(workSession)) {
+      return Response.json({ success: true, skipped: true, reason: "outside_active_work_session" });
     }
 
     if (await hasEndedWorkday(admin, user.id)) {

@@ -15,6 +15,7 @@ import {
   captureGpsLocationWithFallbackConfirm,
 } from "../../lib/customerLocation";
 import { postFormDataResilient } from "../../lib/offlineApi";
+import { isScheduledRevisitQueueCustomer } from "../../lib/paymentCollections";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { readCollectionQueuesForUser } from "../../lib/mobileDataCache";
@@ -779,29 +780,31 @@ export default function PaymentCollectionsView({ view = "due" }) {
     [dueCustomers, legalCustomers, notDueCustomers],
   );
 
+  const queueToday = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
   const visibleRows = useMemo(
-    () => filterQueueRows(view === "legal" ? legalCustomers : dueCustomers, customerFilter, selectedSalesmen),
-    [dueCustomers, legalCustomers, customerFilter, selectedSalesmen, view],
+    () => filterQueueRows(view === "legal" ? legalCustomers : dueCustomers, customerFilter, selectedSalesmen)
+      .filter((row) => view !== "due" || !isScheduledRevisitQueueCustomer(row, queueToday)),
+    [customerFilter, dueCustomers, legalCustomers, queueToday, selectedSalesmen, view],
   );
 
   const visibleNotDueRows = useMemo(
-    () => (view === "due" ? filterQueueRows(notDueCustomers, customerFilter, selectedSalesmen) : []),
-    [notDueCustomers, customerFilter, selectedSalesmen, view],
+    () => (view === "due"
+      ? filterQueueRows(notDueCustomers, customerFilter, selectedSalesmen)
+        .filter((row) => !isScheduledRevisitQueueCustomer(row, queueToday))
+      : []),
+    [customerFilter, notDueCustomers, queueToday, selectedSalesmen, view],
   );
 
   const scheduledRevisitSourceRows = useMemo(() => {
     if (view !== "due") return [];
-    const today = new Date().toISOString().slice(0, 10);
     return filterQueueRows([...dueCustomers, ...notDueCustomers], customerFilter, selectedSalesmen)
-      .filter((row) => {
-        const revisitAt = toDateInputValue(row?.latest_collection?.next_visit_at);
-        return revisitAt && revisitAt >= today;
-      })
+      .filter((row) => isScheduledRevisitQueueCustomer(row, queueToday))
       .sort((left, right) => (
         toDateInputValue(left?.latest_collection?.next_visit_at)
           .localeCompare(toDateInputValue(right?.latest_collection?.next_visit_at))
       ));
-  }, [customerFilter, dueCustomers, notDueCustomers, selectedSalesmen, view]);
+  }, [customerFilter, dueCustomers, notDueCustomers, queueToday, selectedSalesmen, view]);
 
   const scheduledRevisitSchedulerOptions = useMemo(() => {
     const options = new Map();

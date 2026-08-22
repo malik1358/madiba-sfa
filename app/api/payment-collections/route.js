@@ -729,6 +729,9 @@ export async function POST(request) {
     if (visitOutcome === "FUNDS_RECEIVED" && !receiptMode) {
       throw new Error("Mode of receipt is required for funds received outcome");
     }
+    if (paymentStatus !== "PAID" && visitOutcome !== "TRANSFER_TO_LEGAL" && !nextVisitAt) {
+      throw new Error("Next visit date is required when full payment was not received.");
+    }
 
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },

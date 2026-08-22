@@ -9,6 +9,7 @@ import {
   filterCollectionQueueInvoices,
   hasCollectionVisit,
   isExcludedCollectionQueueSalesman,
+  isScheduledRevisitQueueCustomer,
   normalizeWhatsappNumber,
 } from "../app/lib/paymentCollections.js";
 
@@ -239,13 +240,24 @@ test("buildCollectionQueues prioritizes scheduled future revisits at top", () =>
   );
 });
 
-test("buildCollectionQueues prioritizes unvisited customers over visited ones", () => {
+test("buildCollectionQueues prioritizes higher exposure over visit status", () => {
   const queues = buildCollectionQueues([
     {
-      customer_code: "VISITED",
-      customer_name: "Visited Customer",
+      customer_code: "UNVISITED_LOW",
+      customer_name: "Unvisited Customer",
       outstanding_cash: 0,
-      invoices: [{ pending_amount: 900, due_date: "2026-08-01", overdue_days: 17 }],
+      invoices: [{ pending_amount: 300, due_date: "2026-08-05", overdue_days: 13 }],
+      latest_collection: null,
+      legal_transfer: null,
+    },
+    {
+      customer_code: "1423",
+      customer_name: "Al-Haram Plaza Company Limited",
+      outstanding_cash: 0,
+      invoices: [
+        { pending_amount: 45581.07, overdue_days: 91 },
+        { pending_amount: 1695.5, overdue_days: 120 },
+      ],
       latest_collection: {
         payment_status: "NOT_PAID",
         visit_outcome: "COME_LATER",
@@ -253,22 +265,46 @@ test("buildCollectionQueues prioritizes unvisited customers over visited ones", 
       },
       legal_transfer: null,
     },
-    {
-      customer_code: "UNVISITED",
-      customer_name: "Unvisited Customer",
-      outstanding_cash: 0,
-      invoices: [{ pending_amount: 300, due_date: "2026-08-05", overdue_days: 13 }],
-      latest_collection: null,
-      legal_transfer: null,
-    },
   ], "2026-08-19T10:00:00Z");
 
-  assert.equal(hasCollectionVisit(queues.dueCustomers[0]), false);
-  assert.equal(hasCollectionVisit(queues.dueCustomers[1]), true);
+  assert.equal(hasCollectionVisit(queues.dueCustomers[0]), true);
+  assert.equal(hasCollectionVisit(queues.dueCustomers[1]), false);
   assert.deepEqual(
     queues.dueCustomers.map((row) => row.customer_code),
-    ["UNVISITED", "VISITED"],
+    ["1423", "UNVISITED_LOW"],
   );
+});
+
+test("isScheduledRevisitQueueCustomer moves visited partial visits with future revisit out of due queue", () => {
+  const today = "2026-08-22";
+  const scheduled = {
+    customer_code: "1423",
+    latest_collection: {
+      payment_status: "PARTIAL",
+      saved_at: "2026-08-20T10:00:00Z",
+      next_visit_at: "2026-08-25",
+    },
+  };
+  const missingRevisit = {
+    customer_code: "1423",
+    latest_collection: {
+      payment_status: "NOT_PAID",
+      saved_at: "2026-08-20T10:00:00Z",
+      next_visit_at: null,
+    },
+  };
+  const paid = {
+    customer_code: "9999",
+    latest_collection: {
+      payment_status: "PAID",
+      saved_at: "2026-08-20T10:00:00Z",
+      next_visit_at: "2026-08-25",
+    },
+  };
+
+  assert.equal(isScheduledRevisitQueueCustomer(scheduled, today), true);
+  assert.equal(isScheduledRevisitQueueCustomer(missingRevisit, today), false);
+  assert.equal(isScheduledRevisitQueueCustomer(paid, today), false);
 });
 
 test("isExcludedCollectionQueueSalesman matches Zia and Asrar Ahmed with loose spelling", () => {

@@ -80,7 +80,7 @@ export function hasCollectionVisit(record) {
 function scheduledRevisitTier(record, today) {
   const revisitAt = scheduledRevisitDate(record);
   if (!revisitAt) return 2;
-  if (revisitAt > today) return 0;
+  if (revisitAt >= today) return 0;
   return 1;
 }
 
@@ -138,6 +138,20 @@ export function isInvoiceCashDue(invoice) {
 export function hasFutureScheduledRevisit(record, today) {
   const revisitAt = scheduledRevisitDate(record);
   return Boolean(revisitAt && revisitAt > today);
+}
+
+export function hasUpcomingScheduledRevisit(record, todayIso = new Date().toISOString()) {
+  const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
+  const revisitAt = scheduledRevisitDate(record);
+  return Boolean(revisitAt && revisitAt >= today);
+}
+
+export function isScheduledRevisitQueueCustomer(record, todayIso = new Date().toISOString()) {
+  if (!hasUpcomingScheduledRevisit(record, todayIso)) return false;
+  if (!hasCollectionVisit(record)) return false;
+
+  const status = String(record?.latest_collection?.payment_status || "").trim().toUpperCase();
+  return status !== "PAID";
 }
 
 export function hasCashDueInvoices(record) {
@@ -376,6 +390,10 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       - Number(shouldPrioritizeCashVisit(left, today));
     if (byCash !== 0) return byCash;
 
+    // Primary rank: invoice-level exposure (amount x overdue days per invoice).
+    const byExposure = Number(right.exposure_score || 0) - Number(left.exposure_score || 0);
+    if (byExposure !== 0) return byExposure;
+
     const byVisitStatus = Number(hasCollectionVisit(left)) - Number(hasCollectionVisit(right));
     if (byVisitStatus !== 0) return byVisitStatus;
 
@@ -389,19 +407,15 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
     const byCashAmount = rightCash - leftCash;
     if (byCashAmount !== 0) return byCashAmount;
 
-    // Priority: Amount x days overdue (exposure / risk)
-    const byExposure = Number(right.exposure_score || 0) - Number(left.exposure_score || 0);
-    if (byExposure !== 0) return byExposure;
-
-    // Priority 5: Probability score
+    // Probability score
     const byScore = Number(right.probability_score || 0) - Number(left.probability_score || 0);
     if (byScore !== 0) return byScore;
 
-    // Priority 6: Days overdue
+    // Days overdue
     const byOverdue = Number(right.max_overdue_days || 0) - Number(left.max_overdue_days || 0);
     if (byOverdue !== 0) return byOverdue;
 
-    // Priority 7: Earliest due date
+    // Earliest due date
     const byOldestDue = compareDateText(left?.earliest_due_date, right?.earliest_due_date);
     if (byOldestDue !== 0) return byOldestDue;
     const byAmount = Number(right.total_due_amount || 0) - Number(left.total_due_amount || 0);

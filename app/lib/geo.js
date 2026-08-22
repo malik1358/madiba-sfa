@@ -23,6 +23,8 @@ export function hasGpsCoordinates(record) {
   return Number.isFinite(latitude) && Number.isFinite(longitude);
 }
 
+import { shouldRequireTransactionGps } from "./moduleAccess.js";
+
 export const GPS_REQUIRED_ERROR = "GPS is required. Allow location access in the browser and try again.";
 
 export function captureGpsLocation() {
@@ -45,7 +47,10 @@ export function captureGpsLocation() {
   });
 }
 
-export function requireGpsLocation() {
+export function requireGpsLocation(options = {}) {
+  if (!shouldRequireTransactionGps(options.role)) {
+    return Promise.resolve(null);
+  }
   return captureGpsLocation();
 }
 

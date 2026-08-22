@@ -5,6 +5,7 @@ import {
   buildModuleAccess,
   isCollectionOnlyAccess,
   listAccessibleModules,
+  shouldRequireTransactionGps,
 } from "../app/lib/moduleAccess.js";
 
 test("collector-only users only see collection modules", () => {
@@ -59,4 +60,10 @@ test("isCollectionOnlyAccess detects collector metadata and codes", () => {
   assert.equal(isCollectionOnlyAccess({ role: "salesman", collectionOnlyMetadata: true }), true);
   assert.equal(isCollectionOnlyAccess({ role: "salesman", salesmanCode: "CL12" }), true);
   assert.equal(isCollectionOnlyAccess({ role: "salesman", salesmanCode: "PARVEZ" }), false);
+});
+
+test("invoice-makers are exempt from transaction GPS requirements", () => {
+  assert.equal(shouldRequireTransactionGps("salesman"), true);
+  assert.equal(shouldRequireTransactionGps("invoice-maker"), false);
+  assert.equal(shouldRequireTransactionGps("invoice_maker"), false);
 });

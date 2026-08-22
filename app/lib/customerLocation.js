@@ -1,4 +1,5 @@
 import { isProspectCustomerCode } from "./customerCode.js";
+import { shouldRequireTransactionGps } from "./moduleAccess.js";
 import {
   captureGpsLocation,
   GPS_REQUIRED_ERROR,
@@ -40,6 +41,7 @@ export async function captureGpsLocationWithFallbackConfirm(language = "en", opt
     customerName: options.customerName || "",
     accessToken: options.accessToken || "",
     skipCustomerLocationUpdate: Boolean(options.skipCustomerLocationUpdate),
+    role: options.role || "",
   });
 }
 
@@ -64,7 +66,12 @@ export async function resolveVisitGpsAndUpdateCustomer({
   customerName = "",
   accessToken = "",
   skipCustomerLocationUpdate = false,
+  role = "",
 }) {
+  if (!shouldRequireTransactionGps(role)) {
+    return null;
+  }
+
   const displayName = customerName || customerCode || "this customer";
   let location = null;
   let saveCustomerGps = false;

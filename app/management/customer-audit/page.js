@@ -42,6 +42,7 @@ import { useCustomerData } from "./hooks/useCustomerData";
 import { useAnalytics } from "./hooks/useAnalytics";
 import { useQuickOrder } from "./hooks/useQuickOrder";
 import { useOrder } from "./hooks/useOrder";
+import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { buildOrderCatalog } from "./lib/orderHelpers";
 
 function formatAmount(value) {
@@ -99,6 +100,7 @@ function CustomerAuditPageContent() {
     accessScope,
   } = useCustomerData({ setError, setMessage });
 
+  const { access } = useModuleAccess();
   const analytics = useAnalytics(transactions);
   const quickOrderSuggestions = useQuickOrder({ analytics, transactions, peerTransactions, itemMaster });
   const orderCatalog = useMemo(
@@ -134,6 +136,7 @@ function CustomerAuditPageContent() {
     setMessage,
     accessScope,
     language,
+    userRole: access.role,
   });
 
   useEffect(() => {

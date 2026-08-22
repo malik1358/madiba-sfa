@@ -15,6 +15,8 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import { useModuleAccess } from "../../hooks/useModuleAccess";
+import { shouldRequireTransactionGps } from "../../lib/moduleAccess";
 import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
@@ -189,6 +191,7 @@ async function loadVisibleCustomers(accessToken, scope, options = {}) {
 
 export default function MyDayPage() {
   const { language, dir, setLanguage } = useAppLanguage();
+  const { access } = useModuleAccess();
   const t = translate(language, PAGE_TEXT);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -722,6 +725,10 @@ export default function MyDayPage() {
   }, [today]);
 
   async function captureLocation() {
+    if (!shouldRequireTransactionGps(access.role)) {
+      return null;
+    }
+
     if (!navigator.geolocation) {
       throw new Error("Geolocation is not supported on this device.");
     }
@@ -778,7 +785,9 @@ export default function MyDayPage() {
       const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
       if (insertError) throw insertError;
 
-      setMessage(entryType === "NOTE" ? "Note saved with GPS." : `${entryType} logged with GPS.`);
+      setMessage(entryType === "NOTE"
+        ? (location ? "Note saved with GPS." : "Note saved.")
+        : (location ? `${entryType} logged with GPS.` : `${entryType} logged.`));
       if (entryType === "NOTE") setNote("");
 
       const { data: logs, error: logsError } = await supabase
@@ -956,13 +965,15 @@ export default function MyDayPage() {
       }
 
       const location = await captureLocation();
-      await maybePromptCustomerLocationUpdate({
-        customerCode: customer.customer_code,
-        customerName: customer.customer_name,
-        entryLocation: location,
-        accessToken: session.access_token,
-        language,
-      });
+      if (location) {
+        await maybePromptCustomerLocationUpdate({
+          customerCode: customer.customer_code,
+          customerName: customer.customer_name,
+          entryLocation: location,
+          accessToken: session.access_token,
+          language,
+        });
+      }
       const capturedAt = new Date().toISOString();
       let saveResult = null;
 

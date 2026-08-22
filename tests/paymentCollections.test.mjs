@@ -15,6 +15,7 @@ import {
   normalizeWhatsappNumber,
   sortCashQueueCustomers,
 } from "../app/lib/paymentCollections.js";
+import { hydrateOutstandingInvoices } from "../app/lib/outstanding.js";
 
 test("invoiceHasCashRef matches C in Ref. No. only", () => {
   assert.equal(invoiceHasCashRef({ ref_no: "RC/056" }), true);
@@ -58,6 +59,29 @@ test("buildCollectionQueues keeps 1119C high-exposure credit customer in due que
   assert.equal(queues.dueCustomers[0].customer_code, "1119C");
   assert.ok(queues.dueCustomers[0].exposure_score > 1_000_000);
   assert.equal(isCashQueueCustomer(queues.dueCustomers[0], "2026-08-22"), false);
+});
+
+test("hydrated aggregate-only outstanding rows place 1119C in due queue", () => {
+  const invoices = hydrateOutstandingInvoices({
+    invoices: [],
+    rows: [{
+      customer_code: "1119C  Fahd Ali Sulaiman Al Subaie Trading Est",
+      customer_name: "1119C  Fahd Ali Sulaiman Al Subaie Trading Est",
+      buckets: { ">120": 2805538 },
+      total_outstanding: 2805538,
+    }],
+  });
+
+  const queues = buildCollectionQueues([{
+    customer_code: "1119C",
+    customer_name: "Fahd Ali Sulaiman Al Subaie Trading Est",
+    invoices,
+    latest_collection: null,
+    legal_transfer: null,
+  }], "2026-08-22T10:00:00Z");
+
+  assert.equal(queues.dueCustomers.length, 1);
+  assert.equal(queues.dueCustomers[0].customer_code, "1119C");
 });
 
 test("buildCollectionQueues keeps scheduled revisit credit customers in due queue data", () => {

@@ -56,6 +56,7 @@ export function useOrder({
   accessScope = null,
   editOrderId = '',
   language = 'en',
+  userRole = '',
 }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
   const [orderQuantities, setOrderQuantities] = useState({});
@@ -229,6 +230,7 @@ export function useOrder({
         customerName: selectedCustomer.customer_name,
         accessToken: session.access_token,
         skipCustomerLocationUpdate: true,
+        role: userRole,
       });
       const capturedAt = new Date().toISOString();
 
@@ -280,7 +282,7 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [draftOrderId, language, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage]);
+  }, [draftOrderId, language, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole]);
 
   const submitOrder = useCallback(async () => {
     if (orderItems.length === 0) {
@@ -311,6 +313,7 @@ export function useOrder({
         customerName: selectedCustomer?.customer_name,
         accessToken: session.access_token,
         skipCustomerLocationUpdate: true,
+        role: userRole,
       });
       const capturedAt = new Date().toISOString();
 
@@ -365,7 +368,7 @@ export function useOrder({
     } finally {
       setSubmittingOrder(false);
     }
-  }, [draftOrderId, language, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage]);
+  }, [draftOrderId, language, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole]);
 
   return {
     draftOrderId,

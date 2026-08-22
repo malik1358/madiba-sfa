@@ -24,6 +24,90 @@ function outstandingInvoiceCustomerCode(invoice) {
     || normalizeCode(extractLeadingCustomerCodeAndName(invoice?.customer_name).customer_code);
 }
 
+export function resolveOutstandingInvoiceCustomerCode(invoice) {
+  return outstandingInvoiceCustomerCode(invoice);
+}
+
+export function repairOutstandingInvoice(invoice) {
+  const code = resolveOutstandingInvoiceCustomerCode(invoice);
+  const combined = String(invoice?.customer_name || invoice?.customer_code || "").trim();
+  const extracted = extractLeadingCustomerCodeAndName(combined);
+
+  return {
+    ...invoice,
+    customer_code: code || extracted.customer_code || normalizeCode(invoice?.customer_code),
+    customer_name: String(extracted.customer_name || invoice?.customer_name || combined || code || "").trim(),
+  };
+}
+
+export function synthesizeInvoicesFromOutstandingRows(rows, invoices = []) {
+  const existingCodes = new Set(
+    (invoices || []).map((invoice) => resolveOutstandingInvoiceCustomerCode(invoice)).filter(Boolean),
+  );
+  const synthetic = [];
+
+  (rows || []).forEach((rawRow) => {
+    const row = buildOutstandingRow(rawRow);
+    const code = resolveOutstandingInvoiceCustomerCode({
+      customer_code: row.customer_code,
+      customer_name: row.customer_name,
+    });
+    if (!code || existingCodes.has(code)) return;
+
+    const bucketEntries = Object.entries(row.buckets || {}).filter(([, value]) => toNumber(value) > 0);
+    const bucketTotal = bucketEntries.reduce((sum, [, value]) => sum + toNumber(value), 0);
+    const pendingAmount = toNumber(row.total_outstanding) || bucketTotal;
+    if (pendingAmount <= 0) return;
+
+    let overdueDays = 0;
+    bucketEntries.forEach(([label, value]) => {
+      if (toNumber(value) <= 0) return;
+      const startDay = bucketSortValue(label);
+      if (startDay > overdueDays && startDay < Number.MAX_SAFE_INTEGER - 10) {
+        overdueDays = startDay;
+      }
+    });
+
+    existingCodes.add(code);
+    synthetic.push({
+      customer_code: code,
+      customer_name: row.customer_name || code,
+      pending_amount: pendingAmount,
+      ref_no: "",
+      due_date: "",
+      overdue_days: overdueDays || 30,
+      invoice_day: overdueDays || 30,
+      salesman: String(rawRow?.salesman || "").trim(),
+    });
+  });
+
+  return synthetic;
+}
+
+export function hydrateOutstandingInvoices(dataset) {
+  const repaired = (Array.isArray(dataset?.invoices) ? dataset.invoices : [])
+    .map(repairOutstandingInvoice)
+    .filter((invoice) => resolveOutstandingInvoiceCustomerCode(invoice));
+  const synthesized = synthesizeInvoicesFromOutstandingRows(dataset?.rows, repaired);
+  return [...repaired, ...synthesized];
+}
+
+export function mergeOutstandingInvoiceSources(primary, supplemental) {
+  const primaryCodes = new Set(
+    (primary || []).map((invoice) => resolveOutstandingInvoiceCustomerCode(invoice)).filter(Boolean),
+  );
+  const merged = [...(primary || [])];
+
+  (supplemental || []).forEach((invoice) => {
+    const code = resolveOutstandingInvoiceCustomerCode(invoice);
+    if (!code || primaryCodes.has(code)) return;
+    primaryCodes.add(code);
+    merged.push(repairOutstandingInvoice(invoice));
+  });
+
+  return merged;
+}
+
 export function resolveOutstandingCustomerOwnership(dataset, salesmanIdentities) {
   const identityNames = new Set(
     (salesmanIdentities || []).map(normalizeComparableName).filter(Boolean)
@@ -174,6 +258,7 @@ export function normalizeOutstandingHeader(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
+    .replace(/[''\u2018\u2019\u201a\u2032`´]/g, "")
     .replace(/[_\-]+/g, " ")
     .replace(/\s+/g, " ");
 }

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import { useModuleAccess } from "../../hooks/useModuleAccess";
+import { shouldRequireTransactionGps } from "../../lib/moduleAccess";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -151,6 +153,8 @@ async function insertProspectWithColumnFallback(supabase, payload) {
 export default function NewCustomerPage() {
   const router = useRouter();
   const { language, dir, setLanguage } = useAppLanguage();
+  const { access } = useModuleAccess();
+  const requireGps = shouldRequireTransactionGps(access.role);
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -202,11 +206,12 @@ export default function NewCustomerPage() {
   }, [form.customer_name_en, arabicNameEdited]);
 
   useEffect(() => {
+    if (!requireGps) return;
     if (loading) return;
     if (form.gps_location) return;
 
     captureLocation();
-  }, [loading, form.gps_location]);
+  }, [loading, form.gps_location, requireGps]);
 
   useEffect(() => {
     if (!savedProspect) return undefined;
@@ -395,7 +400,7 @@ export default function NewCustomerPage() {
       return;
     }
 
-    if (!form.gps_location) {
+    if (requireGps && !form.gps_location) {
       setError("GPS location is required for new customer saving.");
       return;
     }
@@ -406,14 +411,14 @@ export default function NewCustomerPage() {
       return;
     }
 
-    const parsedGps = parseGpsCoordinates(form.gps_location);
-    if (!parsedGps) {
+    const parsedGps = form.gps_location ? parseGpsCoordinates(form.gps_location) : null;
+    if (requireGps && !parsedGps) {
       setError("GPS location must be in the format: latitude, longitude");
       return;
     }
 
     if (!String(form.city || "").trim() || !String(form.area || "").trim()) {
-      setError("City and Area are auto-filled from GPS. Please capture location again.");
+      setError("City and Area are required. Enter them manually or capture GPS again.");
       return;
     }
 
@@ -455,8 +460,8 @@ export default function NewCustomerPage() {
         mobile: normalizedMobile,
         city: form.city,
         area: form.area,
-        latitude: Number(parsedGps.lat.toFixed(7)),
-        longitude: Number(parsedGps.lng.toFixed(7)),
+        latitude: parsedGps ? Number(parsedGps.lat.toFixed(7)) : null,
+        longitude: parsedGps ? Number(parsedGps.lng.toFixed(7)) : null,
         salesman_code: form.salesman_code,
         remarks,
       };
@@ -516,7 +521,7 @@ export default function NewCustomerPage() {
       } = await supabase.auth.getSession();
       if (!session?.user) throw new Error("Please login again.");
 
-      const location = await requireGpsLocation();
+      const location = await requireGpsLocation({ role: access.role });
 
       const { error: updateError } = await supabase
         .from("prospects")
@@ -525,10 +530,12 @@ export default function NewCustomerPage() {
 
       if (updateError) throw updateError;
 
-      await insertGpsActivityLog(supabase, session.user.id, "PROSPECT_FOLLOW_UP", location, {
-        prospect_id: savedProspect.id,
-        follow_up_date: followUpDate,
-      });
+      if (location) {
+        await insertGpsActivityLog(supabase, session.user.id, "PROSPECT_FOLLOW_UP", location, {
+          prospect_id: savedProspect.id,
+          follow_up_date: followUpDate,
+        });
+      }
 
       setRecent((current) => current.map((row) => (
         row.id === savedProspect.id
@@ -691,11 +698,23 @@ export default function NewCustomerPage() {
             </label>
             <label>
               City
-              <input className="moduleInput" value={form.city} readOnly placeholder="Auto-filled from GPS" />
+              <input
+                className="moduleInput"
+                required
+                value={form.city}
+                onChange={(e) => setForm({ ...form, city: e.target.value })}
+                placeholder={requireGps ? "Auto-filled from GPS when available" : "Enter city"}
+              />
             </label>
             <label>
               Area
-              <input className="moduleInput" value={form.area} readOnly placeholder="Auto-filled from GPS" />
+              <input
+                className="moduleInput"
+                required
+                value={form.area}
+                onChange={(e) => setForm({ ...form, area: e.target.value })}
+                placeholder={requireGps ? "Auto-filled from GPS when available" : "Enter area"}
+              />
             </label>
             <label className="moduleFieldFull">
               National Address
@@ -724,6 +743,11 @@ export default function NewCustomerPage() {
             <label className="moduleGpsRow">
               GPS Status
               <small className="moduleHint">{gpsStatus}</small>
+              {requireGps && (
+                <button type="button" className="moduleSecondaryButton" onClick={captureLocation}>
+                  Retry GPS
+                </button>
+              )}
             </label>
             <div className="moduleFieldFull">
               <div className="moduleSectionHeader">

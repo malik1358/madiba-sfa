@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { GPS_REQUIRED_ERROR } from "../../lib/geo.js";
+import { GPS_REQUIRED_ERROR, hasGpsCoordinates } from "../../lib/geo.js";
+import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -328,15 +329,25 @@ export async function POST(request) {
 
     const latitude = Number(location?.latitude);
     const longitude = Number(location?.longitude);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-      return NextResponse.json({ success: false, error: GPS_REQUIRED_ERROR }, { status: 400 });
-    }
 
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
     const user = await getAuthUser(admin, authHeader.replace("Bearer ", ""));
+
+    const { data: profile, error: profileError } = await admin
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileError) throw profileError;
+
+    const requireGps = shouldRequireTransactionGps(profile?.role);
+    if (requireGps && (!Number.isFinite(latitude) || !Number.isFinite(longitude))) {
+      return NextResponse.json({ success: false, error: GPS_REQUIRED_ERROR }, { status: 400 });
+    }
 
     const { orderId, changeSet, nowIso } = await persistDraftOrder(admin, {
       userId: user.id,
@@ -362,17 +373,19 @@ export async function POST(request) {
       changedAt: nowIso,
     });
 
-    await insertGpsActivityLog(
-      admin,
-      user.id,
-      isNewOrder ? "ORDER_DRAFT" : "ORDER_EDITED",
-      location,
-      {
-        order_id: orderId,
-        customer_code: customerCode,
-        customer_name: customerName,
-      },
-    );
+    if (requireGps && hasGpsCoordinates(location)) {
+      await insertGpsActivityLog(
+        admin,
+        user.id,
+        isNewOrder ? "ORDER_DRAFT" : "ORDER_EDITED",
+        location,
+        {
+          order_id: orderId,
+          customer_code: customerCode,
+          customer_name: customerName,
+        },
+      );
+    }
 
     let status = "DRAFT";
 
@@ -399,10 +412,12 @@ export async function POST(request) {
         changedAt: nowIso,
       });
 
-      await insertGpsActivityLog(admin, user.id, "ORDER_SUBMITTED", location, {
-        order_id: orderId,
-        customer_code: customerCode,
-      });
+      if (requireGps && hasGpsCoordinates(location)) {
+        await insertGpsActivityLog(admin, user.id, "ORDER_SUBMITTED", location, {
+          order_id: orderId,
+          customer_code: customerCode,
+        });
+      }
 
       status = "SUBMITTED";
     }

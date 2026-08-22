@@ -8,10 +8,14 @@ import {
   findOutstandingHeaderRow,
   findOutstandingCustomerCodesForSalesmen,
   findOutstandingInvoiceDayColumn,
+  hydrateOutstandingInvoices,
   isOutstandingInvoiceDayHeader,
+  normalizeOutstandingHeader,
   prioritizeOutstandingSheets,
+  repairOutstandingInvoice,
   resolveOutstandingCustomerOwnership,
   resolveInvoiceAgingDays,
+  resolveOutstandingInvoiceCustomerCode,
   resolveOverdueDaysFromDueDate,
   sanitizeStoredOverdueDays,
   summarizeOutstandingBuckets,
@@ -206,4 +210,36 @@ test("resolveInvoiceAgingDays prefers invoice day over excel serial overdue valu
 test("sanitizeStoredOverdueDays drops excel serial values from uploads", () => {
   assert.equal(sanitizeStoredOverdueDays(46241, 41), 0);
   assert.equal(sanitizeStoredOverdueDays(15, 41), 15);
+});
+
+test("normalizeOutstandingHeader strips curly apostrophes from Party Name headers", () => {
+  assert.equal(normalizeOutstandingHeader("Party\u2019s Name"), "partys name");
+});
+
+test("repairOutstandingInvoice extracts 1119C from party name text", () => {
+  const repaired = repairOutstandingInvoice({
+    customer_code: "",
+    customer_name: "1119C  Fahd Ali Sulaiman Al Subaie Trading Est",
+    pending_amount: 2805538,
+    ref_no: "SI/9901",
+  });
+
+  assert.equal(resolveOutstandingInvoiceCustomerCode(repaired), "1119C");
+  assert.equal(repaired.customer_code, "1119C");
+});
+
+test("hydrateOutstandingInvoices synthesizes missing invoice rows from aggregate rows", () => {
+  const invoices = hydrateOutstandingInvoices({
+    invoices: [],
+    rows: [{
+      customer_code: "1119C  Fahd Ali Sulaiman Al Subaie Trading Est",
+      customer_name: "1119C  Fahd Ali Sulaiman Al Subaie Trading Est",
+      buckets: { ">120": 2805538 },
+      total_outstanding: 2805538,
+    }],
+  });
+
+  assert.equal(invoices.length, 1);
+  assert.equal(resolveOutstandingInvoiceCustomerCode(invoices[0]), "1119C");
+  assert.equal(invoices[0].pending_amount, 2805538);
 });

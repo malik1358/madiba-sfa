@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useModuleAccess } from "../hooks/useModuleAccess";
+import { shouldRequireTransactionGps } from "../lib/moduleAccess";
 import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { detectTable } from "../lib/schemaGuards";
@@ -111,7 +112,10 @@ export default function MorningAttendanceGate({
   const { language, dir } = useAppLanguage();
   const { access, loading: accessLoading } = useModuleAccess();
   const t = translate(language, TEXT);
-  const attendanceRequired = requireMorningAttendance && access.role !== "admin";
+  const attendanceRequired = requireMorningAttendance
+    && access.role !== "admin"
+    && shouldRequireTransactionGps(access.role);
+  const backgroundGpsEnabled = enableBackgroundGps && shouldRequireTransactionGps(access.role);
   const [checking, setChecking] = useState(requireMorningAttendance);
   const [capturing, setCapturing] = useState(false);
   const [ready, setReady] = useState(!requireMorningAttendance);
@@ -401,7 +405,7 @@ export default function MorningAttendanceGate({
   }, [attendanceRequired, accessLoading]);
 
   useEffect(() => {
-    if (!enableBackgroundGps) return undefined;
+    if (!backgroundGpsEnabled) return undefined;
 
     const backgroundGpsReady = attendanceRequired ? ready : true;
     if (!backgroundGpsReady) return undefined;
@@ -460,7 +464,7 @@ export default function MorningAttendanceGate({
         window.removeEventListener("online", handleVisibleOrFocused);
       }
     };
-  }, [enableBackgroundGps, attendanceRequired, ready]);
+  }, [backgroundGpsEnabled, attendanceRequired, ready]);
 
   if (accessLoading && requireMorningAttendance) {
     return (

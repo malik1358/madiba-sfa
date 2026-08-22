@@ -27,6 +27,10 @@ export function isInvoiceMakerRole(role) {
   return normalized === "invoice-maker";
 }
 
+export function shouldRequireTransactionGps(role) {
+  return !isInvoiceMakerRole(role);
+}
+
 export function isProductPromoterRole(role) {
   const normalized = normalizeAccessRole(role);
   return normalized === "product-promoter";

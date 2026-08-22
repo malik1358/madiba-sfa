@@ -1,10 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
 import { buildCollectionQueues, filterCollectionQueueInvoices, invoiceHasCashRef } from "../../lib/paymentCollections.js";
+import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { resolveMutualGroupCodes } from "../../lib/mutualSalesmanGroups.js";
 import {
   OUTSTANDING_DATASET_KEY,
   extractLeadingCustomerCodeAndName,
+  hydrateOutstandingInvoices,
+  mergeOutstandingInvoiceSources,
   resolveInvoiceAgingDays,
+  resolveOutstandingInvoiceCustomerCode,
   toNumber,
 } from "../../lib/outstanding.js";
 import { needsEnglishTranslation, translateText } from "../../lib/translateText.js";
@@ -141,8 +145,18 @@ async function readOutstandingInvoices(admin) {
     return [];
   }
 
-  const uploaded = Array.isArray(parsed?.invoices) ? parsed.invoices : [];
-  if (uploaded.length > 0) return uploaded;
+  const hasUploadedDataset = Boolean(
+    (Array.isArray(parsed?.invoices) && parsed.invoices.length > 0)
+    || (Array.isArray(parsed?.rows) && parsed.rows.length > 0),
+  );
+
+  if (hasUploadedDataset) {
+    const hydrated = hydrateOutstandingInvoices(parsed);
+    if (hydrated.length > 0) {
+      const tableInvoices = await readOutstandingInvoicesFromTable(admin);
+      return mergeOutstandingInvoiceSources(hydrated, tableInvoices);
+    }
+  }
 
   // Staging/dev fallback when no outstanding workbook has been uploaded yet.
   return readOutstandingInvoicesFromTable(admin);
@@ -397,7 +411,8 @@ export async function getSalesScope(admin, userId) {
 async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
   const lookupCodes = new Set();
   (outstandingInvoices || []).forEach((invoice) => {
-    const key = canonicalCustomerCode(invoice.customer_code)
+    const key = resolveOutstandingInvoiceCustomerCode(invoice)
+      || canonicalCustomerCode(invoice.customer_code)
       || canonicalCustomerCode(invoice.customer_name);
     if (key) lookupCodes.add(key);
     const rawCode = String(invoice.customer_code || "").trim();
@@ -510,7 +525,8 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
   const invoicesByCustomer = new Map();
   const nameByCustomer = new Map();
   outstandingInvoices.forEach((invoice) => {
-    const key = canonicalCustomerCode(invoice.customer_code)
+    const key = resolveOutstandingInvoiceCustomerCode(invoice)
+      || canonicalCustomerCode(invoice.customer_code)
       || canonicalCustomerCode(invoice.customer_name);
     if (!key) return;
 
@@ -716,7 +732,15 @@ export async function POST(request) {
 
     if (!customerCode) throw new Error("Customer code is required");
     if (!visitOutcome) throw new Error("Please select visit outcome");
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const scope = await getSalesScope(admin, user.id);
+    const requireGps = shouldRequireTransactionGps(scope.userRole);
+
+    if (requireGps && (!Number.isFinite(latitude) || !Number.isFinite(longitude))) {
       throw new Error("GPS is required. Allow location access in the browser and try again.");
     }
 
@@ -730,13 +754,7 @@ export async function POST(request) {
       throw new Error("Next visit date is required when full payment was not received.");
     }
 
-    const admin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-
     await ensureCollectionCustomerRecord(admin, customerCode, customerName);
-
-    const scope = await getSalesScope(admin, user.id);
 
     // Verify user has access to this customer
     if (!scope.hasAllAccess) {
@@ -807,8 +825,8 @@ export async function POST(request) {
 
     const visitInsertWithGps = {
       ...visitInsertBase,
-      latitude,
-      longitude,
+      latitude: Number.isFinite(latitude) ? latitude : null,
+      longitude: Number.isFinite(longitude) ? longitude : null,
       gps_accuracy_meters: Number.isFinite(gpsAccuracyMeters) ? gpsAccuracyMeters : null,
     };
 
@@ -855,7 +873,7 @@ export async function POST(request) {
       success: true,
       message: "Collection visit saved successfully",
       visitId: insertData?.id,
-      gpsCaptured: true,
+      gpsCaptured: Number.isFinite(latitude) && Number.isFinite(longitude),
     });
   } catch (error) {
     console.error("Error saving collection visit:", error);
@@ -888,15 +906,18 @@ export async function PATCH(request) {
       : Number(body.longitude);
 
     if (!customerCode) throw new Error("Customer code is required");
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-      throw new Error("GPS is required. Allow location access in the browser and try again.");
-    }
 
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
     const scope = await getSalesScope(admin, user.id);
+    const requireGps = shouldRequireTransactionGps(scope.userRole);
+
+    if (requireGps && (!Number.isFinite(latitude) || !Number.isFinite(longitude))) {
+      throw new Error("GPS is required. Allow location access in the browser and try again.");
+    }
+
     if (!scope.hasAllAccess) {
       const records = await fetchOutstandingAndCollectionRecords(admin, scope);
       if (!records.some((record) => record.customer_code === customerCode)) {
@@ -937,25 +958,27 @@ export async function PATCH(request) {
       throw new Error("Unsupported legal transfer action");
     }
 
-    const gpsNote = JSON.stringify({
-      action: action === "remove" ? "LEGAL_TRANSFER_REMOVE" : "LEGAL_TRANSFER",
-      customer_code: customerCode,
-      captured_at: new Date().toISOString(),
-      location: {
-        latitude,
-        longitude,
-        accuracy: Number(body.gpsAccuracyMeters) || null,
-      },
-    });
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      const gpsNote = JSON.stringify({
+        action: action === "remove" ? "LEGAL_TRANSFER_REMOVE" : "LEGAL_TRANSFER",
+        customer_code: customerCode,
+        captured_at: new Date().toISOString(),
+        location: {
+          latitude,
+          longitude,
+          accuracy: Number(body.gpsAccuracyMeters) || null,
+        },
+      });
 
-    const { error: gpsLogError } = await admin.from("daily_activity_logs").insert({
-      user_id: user.id,
-      entry_type: "GPS_PING",
-      note: gpsNote,
-    });
+      const { error: gpsLogError } = await admin.from("daily_activity_logs").insert({
+        user_id: user.id,
+        entry_type: "GPS_PING",
+        note: gpsNote,
+      });
 
-    if (gpsLogError && !isMissingTableError(gpsLogError)) {
-      throw gpsLogError;
+      if (gpsLogError && !isMissingTableError(gpsLogError)) {
+        throw gpsLogError;
+      }
     }
 
     return Response.json({ success: true });

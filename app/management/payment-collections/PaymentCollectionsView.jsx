@@ -1076,11 +1076,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
         customerCode: row.customer_code,
         customerName: row.customer_name,
         accessToken: session.access_token,
+        role: access.role,
       });
 
-      formData.append("latitude", String(gps.latitude));
-      formData.append("longitude", String(gps.longitude));
-      formData.append("gpsAccuracyMeters", String(gps.accuracy));
+      if (gps) {
+        formData.append("latitude", String(gps.latitude));
+        formData.append("longitude", String(gps.longitude));
+        formData.append("gpsAccuracyMeters", String(gps.accuracy));
+      }
 
       if (form.paymentCopy) {
         formData.append("paymentCopy", await prepareUploadFile(form.paymentCopy));
@@ -1207,6 +1210,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         customerCode: row.customer_code,
         customerName: row.customer_name,
         accessToken: session.access_token,
+        role: access.role,
       });
 
       const response = await fetch("/api/payment-collections", {
@@ -1220,9 +1224,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerName: row.customer_name,
           note: form.legalNote,
           action,
-          latitude: gps.latitude,
-          longitude: gps.longitude,
-          gpsAccuracyMeters: gps.accuracy,
+          latitude: gps?.latitude ?? null,
+          longitude: gps?.longitude ?? null,
+          gpsAccuracyMeters: gps?.accuracy ?? null,
         }),
       });
 

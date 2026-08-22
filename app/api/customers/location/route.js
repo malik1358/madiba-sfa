@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -118,15 +119,18 @@ export async function PATCH(request) {
     const city = body.city === undefined ? undefined : String(body.city || "").trim();
 
     if (!customerCode) throw new Error("Customer code is required");
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-      throw new Error("GPS is required. Allow location access in the browser and try again.");
-    }
 
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
     const profile = await getProfile(admin, user.id);
+    const requireGps = shouldRequireTransactionGps(profile.role);
+
+    if (requireGps && (!Number.isFinite(latitude) || !Number.isFinite(longitude))) {
+      throw new Error("GPS is required. Allow location access in the browser and try again.");
+    }
+
     await ensureCustomerAccess(admin, profile, customerCode);
 
     const updatePayload = {

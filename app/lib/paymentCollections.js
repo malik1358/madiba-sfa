@@ -127,8 +127,27 @@ export function invoiceHasCashRef(invoice) {
     || invoice?.reference_no
     || invoice?.reference
     || "",
-  );
+  ).trim();
   return /C/i.test(refText);
+}
+
+export function isInvoiceCashDue(invoice) {
+  return invoiceHasCashRef(invoice) && toNumber(invoice?.pending_amount) > 0;
+}
+
+export function hasFutureScheduledRevisit(record, today) {
+  const revisitAt = scheduledRevisitDate(record);
+  return Boolean(revisitAt && revisitAt > today);
+}
+
+export function hasCashDueInvoices(record) {
+  if (toNumber(record?.outstanding_cash) > 0) return true;
+  return Array.isArray(record?.invoices)
+    && record.invoices.some((invoice) => isInvoiceCashDue(invoice));
+}
+
+export function shouldPrioritizeCashVisit(record, today) {
+  return hasCashDueInvoices(record) && !hasFutureScheduledRevisit(record, today);
 }
 
 function queueKeyFor(record) {
@@ -146,10 +165,17 @@ export function normalizeWhatsappNumber(value, defaultCountryCode = "966") {
   return digits;
 }
 
+export function buildExposureScore(totalDueAmount, maxOverdueDays) {
+  const amount = Math.max(0, Number(totalDueAmount || 0));
+  const days = Math.max(0, Number(maxOverdueDays || 0));
+  return amount * days;
+}
+
 export function buildCollectionPriority(record) {
   const maxOverdueDays = Math.max(0, Number(record?.max_overdue_days || 0));
   const totalDueAmount = Math.max(0, Number(record?.total_due_amount || 0));
   const dueInvoiceCount = Math.max(0, Number(record?.due_invoice_count || 0));
+  const exposureScore = buildExposureScore(totalDueAmount, maxOverdueDays);
   const latestStatus = String(record?.latest_collection?.payment_status || "").trim().toUpperCase();
   const lastVisitAt = dateOnly(record?.latest_collection?.saved_at);
   const nextVisitAt = dateOnly(record?.latest_collection?.next_visit_at);
@@ -169,6 +195,14 @@ export function buildCollectionPriority(record) {
   else if (totalDueAmount >= 20000) score += 16;
   else if (totalDueAmount >= 5000) score += 12;
   else score += 7;
+
+  if (exposureScore >= 2500000) score += 28;
+  else if (exposureScore >= 1500000) score += 24;
+  else if (exposureScore >= 1000000) score += 20;
+  else if (exposureScore >= 500000) score += 14;
+  else   if (exposureScore > 0) score += 8;
+
+  if (toNumber(record?.outstanding_cash) > 0) score += 30;
 
   if (dueInvoiceCount >= 5) score += 14;
   else if (dueInvoiceCount >= 3) score += 11;
@@ -196,11 +230,6 @@ export function buildCollectionPriority(record) {
   };
 }
 
-function hasCreditRef(record) {
-  return Array.isArray(record?.invoices)
-    && record.invoices.some((invoice) => invoiceHasCashRef(invoice));
-}
-
 function only0to30Outstanding(record) {
   const b0to30 = toNumber(record?.outstanding_0_30);
   const b31to60 = toNumber(record?.outstanding_30_60);
@@ -217,8 +246,13 @@ export function isInvoicePastDue(invoice, today) {
   return resolveInvoiceAgingDays(invoice, `${today}T00:00:00`) > 0;
 }
 
+export function isInvoiceDueForCollection(invoice, today) {
+  return isInvoicePastDue(invoice, today) || isInvoiceCashDue(invoice);
+}
+
 export function isInvoiceNotYetDue(invoice, today) {
   if (toNumber(invoice?.pending_amount) <= 0) return false;
+  if (isInvoiceCashDue(invoice)) return false;
   return !isInvoicePastDue(invoice, today);
 }
 
@@ -238,7 +272,7 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
     };
 
     const dueInvoices = Array.isArray(queueRecord?.invoices)
-      ? queueRecord.invoices.filter((invoice) => isInvoicePastDue(invoice, today))
+      ? queueRecord.invoices.filter((invoice) => isInvoiceDueForCollection(invoice, today))
       : [];
 
     const notDueInvoices = Array.isArray(queueRecord?.invoices)
@@ -246,6 +280,10 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       : [];
 
     const totalDueAmount = dueInvoices.reduce((sum, invoice) => sum + toNumber(invoice?.pending_amount), 0);
+    const cashDueAmount = dueInvoices.reduce(
+      (sum, invoice) => sum + (isInvoiceCashDue(invoice) ? toNumber(invoice?.pending_amount) : 0),
+      0,
+    );
     const maxOverdueDays = dueInvoices.reduce(
       (max, invoice) => Math.max(max, resolveInvoiceAgingDays(invoice, `${today}T00:00:00`)),
       0,
@@ -271,6 +309,9 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       max_overdue_days: maxOverdueDays,
       earliest_due_date: earliestDueDate,
       scheduled_revisit_at: scheduledRevisitDate(queueRecord),
+      exposure_score: buildExposureScore(totalDueAmount, maxOverdueDays),
+      outstanding_cash: cashDueAmount,
+      has_cash_due: cashDueAmount > 0,
       invoices: Array.isArray(queueRecord?.invoices) ? queueRecord.invoices : [],
       probability_score: priority.score,
       probability_label: priority.label,
@@ -313,36 +354,39 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
   });
 
   dueCustomers.sort((left, right) => {
-    const byVisitStatus = Number(hasCollectionVisit(left)) - Number(hasCollectionVisit(right));
-    if (byVisitStatus !== 0) return byVisitStatus;
-
     const byScheduled = compareScheduledRevisitPriority(left, right, today);
     if (byScheduled !== 0) return byScheduled;
+
+    const byCash = Number(shouldPrioritizeCashVisit(right, today))
+      - Number(shouldPrioritizeCashVisit(left, today));
+    if (byCash !== 0) return byCash;
+
+    const byVisitStatus = Number(hasCollectionVisit(left)) - Number(hasCollectionVisit(right));
+    if (byVisitStatus !== 0) return byVisitStatus;
 
     const leftHasDue = Number(left.due_invoice_count > 0);
     const rightHasDue = Number(right.due_invoice_count > 0);
     const byDueStatus = rightHasDue - leftHasDue;
     if (byDueStatus !== 0) return byDueStatus;
 
-    // Priority 2: Cash presence
     const leftCash = toNumber(left?.outstanding_cash);
     const rightCash = toNumber(right?.outstanding_cash);
-    const byCashPresence = Number(rightCash > 0) - Number(leftCash > 0);
-    if (byCashPresence !== 0) return byCashPresence;
-
-    // Priority 3: Cash amount
     const byCashAmount = rightCash - leftCash;
     if (byCashAmount !== 0) return byCashAmount;
 
-    // Priority 4: Probability score
+    // Priority: Amount x days overdue (exposure / risk)
+    const byExposure = Number(right.exposure_score || 0) - Number(left.exposure_score || 0);
+    if (byExposure !== 0) return byExposure;
+
+    // Priority 5: Probability score
     const byScore = Number(right.probability_score || 0) - Number(left.probability_score || 0);
     if (byScore !== 0) return byScore;
 
-    // Priority 5: Days overdue
+    // Priority 6: Days overdue
     const byOverdue = Number(right.max_overdue_days || 0) - Number(left.max_overdue_days || 0);
     if (byOverdue !== 0) return byOverdue;
 
-    // Priority 6: Earliest due date
+    // Priority 7: Earliest due date
     const byOldestDue = compareDateText(left?.earliest_due_date, right?.earliest_due_date);
     if (byOldestDue !== 0) return byOldestDue;
     const byAmount = Number(right.total_due_amount || 0) - Number(left.total_due_amount || 0);

@@ -4,11 +4,18 @@ import assert from "node:assert/strict";
 import {
   buildCollectionPriority,
   buildCollectionQueues,
+  buildExposureScore,
   filterCollectionQueueInvoices,
   hasCollectionVisit,
   isExcludedCollectionQueueSalesman,
   normalizeWhatsappNumber,
 } from "../app/lib/paymentCollections.js";
+
+test("buildExposureScore multiplies amount by overdue days", () => {
+  assert.equal(buildExposureScore(13566.32, 195), 13566.32 * 195);
+  assert.equal(buildExposureScore(5311, 241), 5311 * 241);
+  assert.ok(buildExposureScore(13566.32, 195) > buildExposureScore(5311, 241));
+});
 
 test("normalizeWhatsappNumber converts local KSA mobile to country format", () => {
   assert.equal(normalizeWhatsappNumber("0551234567"), "966551234567");
@@ -64,7 +71,7 @@ test("buildCollectionQueues places not-yet-due customers in notDueCustomers queu
       outstanding_61_90: 0,
       outstanding_91_120: 0,
       outstanding_above_120: 0,
-      invoices: [{ pending_amount: 1000, due_date: "2026-08-20", overdue_days: 0, ref_no: "INV-9283-C" }],
+      invoices: [{ pending_amount: 1000, due_date: "2026-08-20", overdue_days: 0, ref_no: "INV-9283" }],
       latest_collection: { payment_status: "NOT_PAID" },
       legal_transfer: null,
     },
@@ -98,6 +105,66 @@ test("buildCollectionQueues prioritizes cash-bucket customers at top", () => {
   ], "2026-08-14T10:00:00Z");
 
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["CASH", "NONCASH"]);
+});
+
+test("buildCollectionQueues treats cash ref invoices as immediately due even with zero overdue days", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "1011C",
+      customer_name: "Cash Customer",
+      invoices: [{ pending_amount: 13185, due_date: "2026-08-24", overdue_days: 0, ref_no: "RC/056" }],
+      latest_collection: null,
+      legal_transfer: null,
+    },
+  ], "2026-08-22T10:00:00Z");
+
+  assert.equal(queues.dueCustomers.length, 1);
+  assert.equal(queues.notDueCustomers.length, 0);
+  assert.equal(queues.dueCustomers[0].outstanding_cash, 13185);
+});
+
+test("buildCollectionQueues keeps future scheduled revisit ahead of cash", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "CASHNOW",
+      customer_name: "Cash Now",
+      invoices: [{ pending_amount: 5000, due_date: "2026-08-24", overdue_days: 0, ref_no: "RC/001" }],
+      latest_collection: { payment_status: "NOT_PAID" },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "SCHEDULED",
+      customer_name: "Scheduled Revisit",
+      invoices: [{ pending_amount: 300, due_date: "2026-08-01", overdue_days: 17, ref_no: "INV-200" }],
+      latest_collection: { payment_status: "PROMISED", next_visit_at: "2026-08-25" },
+      legal_transfer: null,
+    },
+  ], "2026-08-22T10:00:00Z");
+
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["SCHEDULED", "CASHNOW"]);
+});
+
+test("buildCollectionQueues ranks higher exposure (amount x overdue days) first", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "1164C",
+      customer_name: "Khaled Waleed",
+      outstanding_cash: 0,
+      invoices: [{ pending_amount: 5311, due_date: "2025-12-25", overdue_days: 241 }],
+      latest_collection: { payment_status: "NOT_PAID", saved_at: "2026-08-20T10:00:00Z" },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "1209C",
+      customer_name: "NOON SAVING",
+      outstanding_cash: 0,
+      invoices: [{ pending_amount: 13566.32, due_date: "2026-02-08", overdue_days: 195 }],
+      latest_collection: { payment_status: "NOT_PAID", saved_at: "2026-08-20T10:00:00Z" },
+      legal_transfer: null,
+    },
+  ], "2026-08-22T10:00:00Z");
+
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["1209C", "1164C"]);
 });
 
 test("buildCollectionQueues prioritizes scheduled future revisits at top", () => {

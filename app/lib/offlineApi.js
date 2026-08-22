@@ -99,6 +99,7 @@ export async function postJsonResilient({
   headers = {},
   metadata = {},
   onQueued,
+  timeoutMs = ONLINE_PROBE_TIMEOUT_MS,
 }) {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     const queued = await enqueueOfflineRequest({
@@ -127,7 +128,7 @@ export async function postJsonResilient({
         "Content-Type": "application/json",
       },
       body: JSON.stringify(jsonBody || {}),
-    });
+    }, timeoutMs);
     const body = await response.json().catch(() => ({}));
 
     if (!response.ok || body.success === false) {

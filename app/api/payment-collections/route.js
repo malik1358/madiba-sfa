@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildCollectionQueues, filterCollectionQueueInvoices } from "../../lib/paymentCollections.js";
+import { buildCollectionQueues, filterCollectionQueueInvoices, invoiceHasCashRef } from "../../lib/paymentCollections.js";
 import { resolveMutualGroupCodes } from "../../lib/mutualSalesmanGroups.js";
 import {
   OUTSTANDING_DATASET_KEY,
@@ -591,6 +591,10 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     customerInvoices.forEach((invoice) => {
       const pendingAmount = Number(invoice.pending_amount || 0);
       if (pendingAmount <= 0) return;
+
+      if (invoiceHasCashRef(invoice)) {
+        outstanding.outstanding_cash += pendingAmount;
+      }
 
       const daysOverdue = resolveInvoiceAgingDays(invoice, todayIso);
 

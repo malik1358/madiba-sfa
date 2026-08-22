@@ -228,11 +228,13 @@ export function useOrder({
         customerCode: selectedCustomer.customer_code,
         customerName: selectedCustomer.customer_name,
         accessToken: session.access_token,
+        skipCustomerLocationUpdate: true,
       });
       const capturedAt = new Date().toISOString();
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
+        timeoutMs: 15000,
         jsonBody: buildOrderPayload({
           action: 'save_draft',
           selectedCustomer,
@@ -297,6 +299,7 @@ export function useOrder({
     }
 
     setSubmittingOrder(true);
+    setError('');
     setMessage('');
 
     try {
@@ -307,11 +310,13 @@ export function useOrder({
         customerCode: selectedCustomer?.customer_code,
         customerName: selectedCustomer?.customer_name,
         accessToken: session.access_token,
+        skipCustomerLocationUpdate: true,
       });
       const capturedAt = new Date().toISOString();
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
+        timeoutMs: 15000,
         jsonBody: buildOrderPayload({
           action: 'submit',
           selectedCustomer,

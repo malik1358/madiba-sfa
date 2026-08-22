@@ -266,6 +266,8 @@ export async function reverseGeocodeCoordinates(latitude, longitude) {
   }
 
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=en&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
 
   try {
     const response = await fetch(url, {
@@ -273,6 +275,7 @@ export async function reverseGeocodeCoordinates(latitude, longitude) {
         Accept: "application/json",
         "User-Agent": "MadibaSFA/1.0 (daily-visit-report)",
       },
+      signal: controller.signal,
     });
     if (!response.ok) return { area: "", street: "", city: "" };
 
@@ -280,6 +283,8 @@ export async function reverseGeocodeCoordinates(latitude, longitude) {
     return parseReverseGeocodeAddress(payload);
   } catch {
     return { area: "", street: "", city: "" };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

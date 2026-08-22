@@ -8,6 +8,21 @@ import {
 
 export const CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM = 0.5;
 export const GPS_CANCELLED_ERROR = "Location update cancelled.";
+const CUSTOMER_LOCATION_FETCH_TIMEOUT_MS = 8000;
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = CUSTOMER_LOCATION_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function customerHasSavedLocation(customer) {
   return hasGpsCoordinates(customer);
@@ -23,6 +38,7 @@ export async function captureGpsLocationWithFallbackConfirm(language = "en", opt
     customerCode: options.customerCode || "",
     customerName: options.customerName || "",
     accessToken: options.accessToken || "",
+    skipCustomerLocationUpdate: Boolean(options.skipCustomerLocationUpdate),
   });
 }
 
@@ -46,6 +62,7 @@ export async function resolveVisitGpsAndUpdateCustomer({
   customerCode = "",
   customerName = "",
   accessToken = "",
+  skipCustomerLocationUpdate = false,
 }) {
   const displayName = customerName || customerCode || "this customer";
   let location = null;
@@ -61,11 +78,21 @@ export async function resolveVisitGpsAndUpdateCustomer({
       return null;
     }
 
-    location = await captureGpsLocation();
-    saveCustomerGps = true;
+    try {
+      location = await captureGpsLocation();
+      saveCustomerGps = true;
+    } catch {
+      return null;
+    }
   }
 
-  if (location && accessToken && customerCode && !isProspectCustomerCode(customerCode)) {
+  if (
+    !skipCustomerLocationUpdate
+    && location
+    && accessToken
+    && customerCode
+    && !isProspectCustomerCode(customerCode)
+  ) {
     if (saveCustomerGps) {
       await saveCustomerGpsFromVisitLocation({
         customerCode,
@@ -113,7 +140,7 @@ export async function fetchCustomerLocation(accessToken, customerCode) {
   const code = String(customerCode || "").trim();
   if (!code || !accessToken) return null;
 
-  const response = await fetch(`/api/customers/location?customerCode=${encodeURIComponent(code)}`, {
+  const response = await fetchWithTimeout(`/api/customers/location?customerCode=${encodeURIComponent(code)}`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
@@ -138,7 +165,7 @@ export async function updateCustomerLocation(accessToken, customerCode, location
     payload.city = location.city;
   }
 
-  const response = await fetch("/api/customers/location", {
+  const response = await fetchWithTimeout("/api/customers/location", {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",

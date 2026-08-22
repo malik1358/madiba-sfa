@@ -8,10 +8,20 @@ import {
   buildExposureScoreFromInvoices,
   filterCollectionQueueInvoices,
   hasCollectionVisit,
+  invoiceHasCashRef,
   isExcludedCollectionQueueSalesman,
   isScheduledRevisitQueueCustomer,
   normalizeWhatsappNumber,
 } from "../app/lib/paymentCollections.js";
+
+test("invoiceHasCashRef matches cash document prefixes only", () => {
+  assert.equal(invoiceHasCashRef({ ref_no: "RC/056" }), true);
+  assert.equal(invoiceHasCashRef({ ref_no: "DC/008" }), true);
+  assert.equal(invoiceHasCashRef({ ref_no: "CNFD/001" }), true);
+  assert.equal(invoiceHasCashRef({ ref_no: "INV-9283" }), false);
+  assert.equal(invoiceHasCashRef({ ref_no: "SI/12345" }), false);
+  assert.equal(invoiceHasCashRef({ ref_no: "CREDIT-123" }), false);
+});
 
 test("buildExposureScoreFromInvoices sums amount x days per invoice", () => {
   const exposure = buildExposureScoreFromInvoices([
@@ -97,7 +107,7 @@ test("buildCollectionQueues places not-yet-due customers in notDueCustomers queu
   assert.equal(queues.notDueCustomers[0].invoices.length, 1);
 });
 
-test("buildCollectionQueues prioritizes cash-bucket customers at top", () => {
+test("buildCollectionQueues ranks exposure before cash bucket tie-breaker", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "NONCASH",
@@ -117,7 +127,7 @@ test("buildCollectionQueues prioritizes cash-bucket customers at top", () => {
     },
   ], "2026-08-14T10:00:00Z");
 
-  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["CASH", "NONCASH"]);
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["NONCASH", "CASH"]);
 });
 
 test("buildCollectionQueues treats cash ref invoices as immediately due even with zero overdue days", () => {
@@ -134,6 +144,58 @@ test("buildCollectionQueues treats cash ref invoices as immediately due even wit
   assert.equal(queues.dueCustomers.length, 1);
   assert.equal(queues.notDueCustomers.length, 0);
   assert.equal(queues.dueCustomers[0].outstanding_cash, 13185);
+});
+
+test("buildCollectionQueues ranks cash by exposure when cash exposure is higher", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "NONCASH",
+      customer_name: "Non Cash Customer",
+      outstanding_cash: 0,
+      invoices: [{ pending_amount: 500, due_date: "2026-08-10", overdue_days: 2, ref_no: "INV-100" }],
+      latest_collection: { payment_status: "NOT_PAID" },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "CASH",
+      customer_name: "Cash Customer",
+      outstanding_cash: 5000,
+      invoices: [{ pending_amount: 5000, due_date: "2026-08-12", overdue_days: 20, ref_no: "RC/001" }],
+      latest_collection: { payment_status: "NOT_PAID" },
+      legal_transfer: null,
+    },
+  ], "2026-08-14T10:00:00Z");
+
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["CASH", "NONCASH"]);
+});
+
+test("buildCollectionQueues ranks 1115C above 1416 when exposure is higher", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "1416",
+      customer_name: "Zuhour Al Madina Trading Company",
+      invoices: [{ pending_amount: 6375, overdue_days: 12, ref_no: "SI/1416" }],
+      latest_collection: {
+        payment_status: "NOT_PAID",
+        saved_at: "2026-08-20T10:00:00Z",
+        next_visit_at: "2026-08-15",
+      },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "1115C",
+      customer_name: "Ealam Almanzil Trading Establishment",
+      invoices: [
+        { pending_amount: 5416.5, overdue_days: 45, ref_no: "SI/2001" },
+        { pending_amount: 5580, overdue_days: 154, ref_no: "SI/2002" },
+      ],
+      latest_collection: { payment_status: "NOT_PAID" },
+      legal_transfer: null,
+    },
+  ], "2026-08-22T10:00:00Z");
+
+  assert.ok(queues.dueCustomers[0].exposure_score > queues.dueCustomers[1].exposure_score);
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["1115C", "1416"]);
 });
 
 test("buildCollectionQueues keeps future scheduled revisit ahead of cash", () => {
@@ -209,7 +271,7 @@ test("buildCollectionQueues ranks 1162C above 1042 when invoice-level exposure i
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["1162C", "1042"]);
 });
 
-test("buildCollectionQueues prioritizes scheduled future revisits at top", () => {
+test("buildCollectionQueues orders future scheduled revisits by exposure in backend list", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "LATE",
@@ -236,7 +298,7 @@ test("buildCollectionQueues prioritizes scheduled future revisits at top", () =>
 
   assert.deepEqual(
     queues.dueCustomers.map((row) => row.customer_code),
-    ["NEXT", "SOON", "LATE"],
+    ["LATE", "SOON", "NEXT"],
   );
 });
 

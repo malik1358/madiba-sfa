@@ -127,8 +127,11 @@ export function invoiceHasCashRef(invoice) {
     || invoice?.reference_no
     || invoice?.reference
     || "",
-  ).trim();
-  return /C/i.test(refText);
+  ).trim().toUpperCase();
+
+  return refText.startsWith("RC/")
+    || refText.startsWith("DC/")
+    || refText.includes("CNFD/");
 }
 
 export function isInvoiceCashDue(invoice) {
@@ -383,16 +386,12 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
   });
 
   dueCustomers.sort((left, right) => {
-    const byScheduled = compareScheduledRevisitPriority(left, right, today);
-    if (byScheduled !== 0) return byScheduled;
+    const byExposure = Number(right.exposure_score || 0) - Number(left.exposure_score || 0);
+    if (byExposure !== 0) return byExposure;
 
     const byCash = Number(shouldPrioritizeCashVisit(right, today))
       - Number(shouldPrioritizeCashVisit(left, today));
     if (byCash !== 0) return byCash;
-
-    // Primary rank: invoice-level exposure (amount x overdue days per invoice).
-    const byExposure = Number(right.exposure_score || 0) - Number(left.exposure_score || 0);
-    if (byExposure !== 0) return byExposure;
 
     const byVisitStatus = Number(hasCollectionVisit(left)) - Number(hasCollectionVisit(right));
     if (byVisitStatus !== 0) return byVisitStatus;

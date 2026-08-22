@@ -116,7 +116,7 @@ export async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 30000)
     const payload = await response.json().catch(() => ({}));
     return { response, payload };
   } catch (error) {
-    if (error?.name === "AbortError") {
+    if (error?.name === "AbortError" || String(error?.message || "").toLowerCase().includes("abort")) {
       throw new Error("Request timed out. Please refresh and try again.");
     }
     if (error instanceof TypeError || String(error?.message || "").includes("NetworkError")) {

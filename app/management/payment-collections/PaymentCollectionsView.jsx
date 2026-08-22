@@ -134,6 +134,10 @@ const TEXT = {
   msgReceiptRequired: { en: "Receipt copy is compulsory when funds are received.", ar: "صورة الإيصال إلزامية عند استلام مبلغ." },
   msgNextVisitRequired: { en: "Next visit date is required when full overdue is not received.", ar: "تاريخ الزيارة القادمة مطلوب عند عدم استلام كامل المبلغ المستحق." },
   msgSaveFailed: { en: "Unable to save collection visit.", ar: "تعذر حفظ زيارة التحصيل." },
+  msgRequestTimeout: {
+    en: "Request timed out. Please check your connection and try again.",
+    ar: "انتهت مهلة الطلب. يرجى التحقق من الاتصال والمحاولة مرة أخرى.",
+  },
   msgStorageUnavailable: {
     en: "File storage is not configured for payment collection uploads. Please contact your administrator.",
     ar: "تخزين الملفات غير مُعد لرفع مستندات التحصيل. يرجى التواصل مع المسؤول.",
@@ -602,6 +606,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (text.includes("Next visit date is required") || text.includes("Next visit is required")) return t("msgNextVisitRequired");
     if (text.includes("GPS is required") || text === GPS_REQUIRED_ERROR) return t("msgGpsRequired");
     if (text.includes("Unable to save collection visit")) return t("msgSaveFailed");
+    if (text.includes("timed out") || text.toLowerCase().includes("abort")) return t("msgRequestTimeout");
     if (text.toLowerCase().includes("bucket not found") || text.includes("File storage is not configured")) {
       return t("msgStorageUnavailable");
     }

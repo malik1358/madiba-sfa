@@ -5,13 +5,25 @@ import {
   buildCollectionPriority,
   buildCollectionQueues,
   buildExposureScore,
+  buildExposureScoreFromInvoices,
   filterCollectionQueueInvoices,
   hasCollectionVisit,
   isExcludedCollectionQueueSalesman,
   normalizeWhatsappNumber,
 } from "../app/lib/paymentCollections.js";
 
-test("buildExposureScore multiplies amount by overdue days", () => {
+test("buildExposureScoreFromInvoices sums amount x days per invoice", () => {
+  const exposure = buildExposureScoreFromInvoices([
+    { pending_amount: 4132.68, overdue_days: 29 },
+    { pending_amount: 3185.5, overdue_days: 75 },
+    { pending_amount: 3811.45, overdue_days: 93 },
+  ], "2026-08-22T00:00:00Z");
+
+  assert.ok(exposure > 0);
+  assert.notEqual(exposure, buildExposureScore(11129.63, 93));
+});
+
+test("buildExposureScore multiplies amount by overdue days for single-invoice shorthand", () => {
   assert.equal(buildExposureScore(13566.32, 195), 13566.32 * 195);
   assert.equal(buildExposureScore(5311, 241), 5311 * 241);
   assert.ok(buildExposureScore(13566.32, 195) > buildExposureScore(5311, 241));
@@ -165,6 +177,35 @@ test("buildCollectionQueues ranks higher exposure (amount x overdue days) first"
   ], "2026-08-22T10:00:00Z");
 
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["1209C", "1164C"]);
+});
+
+test("buildCollectionQueues ranks 1162C above 1042 when invoice-level exposure is higher", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "1042",
+      customer_name: "Al-Khamsa Al-Mumayaza Trading Company",
+      invoices: [
+        { pending_amount: 4132.68, overdue_days: 29 },
+        { pending_amount: 3185.5, overdue_days: 75 },
+        { pending_amount: 3811.45, overdue_days: 93 },
+      ],
+      latest_collection: { payment_status: "NOT_PAID", saved_at: "2026-08-20T10:00:00Z" },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "1162C",
+      customer_name: "Kanooz Al-Rayan Trading Establishment",
+      invoices: [
+        { pending_amount: 3134.74, overdue_days: 160 },
+        { pending_amount: 3134.74, overdue_days: 112 },
+      ],
+      latest_collection: { payment_status: "NOT_PAID", saved_at: "2026-08-20T10:00:00Z" },
+      legal_transfer: null,
+    },
+  ], "2026-08-22T10:00:00Z");
+
+  assert.ok(queues.dueCustomers[0].exposure_score > queues.dueCustomers[1].exposure_score);
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["1162C", "1042"]);
 });
 
 test("buildCollectionQueues prioritizes scheduled future revisits at top", () => {

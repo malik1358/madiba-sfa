@@ -171,11 +171,24 @@ export function buildExposureScore(totalDueAmount, maxOverdueDays) {
   return amount * days;
 }
 
+export function buildExposureScoreFromInvoices(invoices, todayIso = new Date().toISOString()) {
+  const today = `${dateOnly(todayIso) || new Date().toISOString().slice(0, 10)}T00:00:00`;
+
+  return (invoices || []).reduce((sum, invoice) => {
+    const amount = toNumber(invoice?.pending_amount);
+    if (amount <= 0) return sum;
+    const days = Math.max(0, resolveInvoiceAgingDays(invoice, today));
+    return sum + (amount * days);
+  }, 0);
+}
+
 export function buildCollectionPriority(record) {
   const maxOverdueDays = Math.max(0, Number(record?.max_overdue_days || 0));
   const totalDueAmount = Math.max(0, Number(record?.total_due_amount || 0));
   const dueInvoiceCount = Math.max(0, Number(record?.due_invoice_count || 0));
-  const exposureScore = buildExposureScore(totalDueAmount, maxOverdueDays);
+  const exposureScore = Number(record?.exposure_score) > 0
+    ? Number(record.exposure_score)
+    : buildExposureScore(totalDueAmount, maxOverdueDays);
   const latestStatus = String(record?.latest_collection?.payment_status || "").trim().toUpperCase();
   const lastVisitAt = dateOnly(record?.latest_collection?.saved_at);
   const nextVisitAt = dateOnly(record?.latest_collection?.next_visit_at);
@@ -293,11 +306,13 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       .filter(Boolean)
       .sort()[0] || "";
     const latestStatus = String(queueRecord?.latest_collection?.payment_status || "").trim().toUpperCase();
+    const exposureScore = buildExposureScoreFromInvoices(dueInvoices, todayIso);
     const priority = buildCollectionPriority({
       ...queueRecord,
       total_due_amount: totalDueAmount,
       max_overdue_days: maxOverdueDays,
       due_invoice_count: dueInvoices.length,
+      exposure_score: exposureScore,
       today,
     });
 
@@ -309,7 +324,7 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       max_overdue_days: maxOverdueDays,
       earliest_due_date: earliestDueDate,
       scheduled_revisit_at: scheduledRevisitDate(queueRecord),
-      exposure_score: buildExposureScore(totalDueAmount, maxOverdueDays),
+      exposure_score: exposureScore,
       outstanding_cash: cashDueAmount,
       has_cash_due: cashDueAmount > 0,
       invoices: Array.isArray(queueRecord?.invoices) ? queueRecord.invoices : [],

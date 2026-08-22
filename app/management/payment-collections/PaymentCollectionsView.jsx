@@ -15,7 +15,7 @@ import {
   captureGpsLocationWithFallbackConfirm,
 } from "../../lib/customerLocation";
 import { postFormDataResilient } from "../../lib/offlineApi";
-import { isCashQueueCustomer, isScheduledRevisitQueueCustomer, sortCashQueueCustomers } from "../../lib/paymentCollections";
+import { isCashOnlyQueueCustomer, isCashQueueCustomer, isScheduledRevisitQueueCustomer, sortCashQueueCustomers } from "../../lib/paymentCollections";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { readCollectionQueuesForUser } from "../../lib/mobileDataCache";
@@ -797,8 +797,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
   function keepRowInActiveDueQueue(row) {
     const key = rowKey(row);
     if (activeRowKey && key === activeRowKey) return true;
-    // Cash customers live in the cash subsection; scheduled revisits stay in the main exposure-ranked table too.
-    if (isCashQueueCustomer(row, queueToday)) return false;
+    // Cash-only customers live in the cash subsection; mixed cash+credit customers stay in both.
+    if (isCashOnlyQueueCustomer(row, queueToday)) return false;
     return true;
   }
 

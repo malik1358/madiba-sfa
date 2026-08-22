@@ -158,10 +158,26 @@ export function shouldPrioritizeCashVisit(record, today) {
   return hasCashDueInvoices(record) && !hasFutureScheduledRevisit(record, today);
 }
 
+export function isInvoiceCreditDue(invoice, today) {
+  if (toNumber(invoice?.pending_amount) <= 0) return false;
+  if (isInvoiceCashDue(invoice)) return false;
+  return isInvoicePastDue(invoice, today);
+}
+
+export function hasCreditDueInvoices(record, todayIso = new Date().toISOString()) {
+  const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
+  return Array.isArray(record?.invoices)
+    && record.invoices.some((invoice) => isInvoiceCreditDue(invoice, today));
+}
+
 export function isCashQueueCustomer(record, todayIso = new Date().toISOString()) {
   if (!hasCashDueInvoices(record)) return false;
   if (isScheduledRevisitQueueCustomer(record, todayIso)) return false;
   return true;
+}
+
+export function isCashOnlyQueueCustomer(record, todayIso = new Date().toISOString()) {
+  return isCashQueueCustomer(record, todayIso) && !hasCreditDueInvoices(record, todayIso);
 }
 
 export function sortCashQueueCustomers(rows) {

@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -9,6 +9,7 @@ import {
   filterCollectionQueueInvoices,
   hasCollectionVisit,
   invoiceHasCashRef,
+  isCashOnlyQueueCustomer,
   isCashQueueCustomer,
   isExcludedCollectionQueueSalesman,
   isScheduledRevisitQueueCustomer,
@@ -460,6 +461,30 @@ test("isCashQueueCustomer separates cash due customers from the normal due queue
   assert.equal(isCashQueueCustomer(cashDue, today), true);
   assert.equal(isCashQueueCustomer(scheduledCash, today), false);
   assert.equal(isCashQueueCustomer(creditOnly, today), false);
+});
+
+test("isCashOnlyQueueCustomer keeps mixed cash and overdue credit customers in both queues", () => {
+  const today = "2026-08-22";
+  const mixed = {
+    customer_code: "1041",
+    customer_name: "AL KHAMIS ARABIYA TRADING Co.",
+    outstanding_cash: 4186,
+    invoices: [
+      { pending_amount: 4186, ref_no: "RC/058", due_date: "2026-09-05", overdue_days: 0 },
+      { pending_amount: 2347, ref_no: "NFD/593", due_date: "2026-05-30", overdue_days: 82 },
+      { pending_amount: 653, ref_no: "NFD/800", due_date: "2026-06-16", overdue_days: 65 },
+    ],
+    latest_collection: null,
+  };
+  const cashOnly = {
+    customer_code: "1011C",
+    invoices: [{ pending_amount: 5000, ref_no: "RC/001", due_date: "2026-08-24", overdue_days: 0 }],
+    latest_collection: null,
+  };
+
+  assert.equal(isCashQueueCustomer(mixed, today), true);
+  assert.equal(isCashOnlyQueueCustomer(mixed, today), false);
+  assert.equal(isCashOnlyQueueCustomer(cashOnly, today), true);
 });
 
 test("sortCashQueueCustomers ranks higher cash due amount first", () => {

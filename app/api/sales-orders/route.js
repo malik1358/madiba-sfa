@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { GPS_REQUIRED_ERROR } from "../../lib/geo.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -323,6 +324,12 @@ export async function POST(request) {
     }
     if (lines.length === 0) {
       return NextResponse.json({ success: false, error: "Add at least one item before saving the order." }, { status: 400 });
+    }
+
+    const latitude = Number(location?.latitude);
+    const longitude = Number(location?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return NextResponse.json({ success: false, error: GPS_REQUIRED_ERROR }, { status: 400 });
     }
 
     const admin = createClient(supabaseUrl, serviceKey, {

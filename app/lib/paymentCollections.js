@@ -121,17 +121,8 @@ function probabilityLabel(score) {
 }
 
 export function invoiceHasCashRef(invoice) {
-  const refText = String(
-    invoice?.ref_no
-    || invoice?.ref
-    || invoice?.reference_no
-    || invoice?.reference
-    || "",
-  ).trim().toUpperCase();
-
-  return refText.startsWith("RC/")
-    || refText.startsWith("DC/")
-    || refText.includes("CNFD/");
+  const refText = String(invoice?.ref_no || "").trim();
+  return /C/i.test(refText);
 }
 
 export function isInvoiceCashDue(invoice) {

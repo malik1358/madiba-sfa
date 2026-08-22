@@ -18,8 +18,8 @@ import {
 const TEXT = {
   title: { en: "No activity recorded", ar: "لا يوجد نشاط مسجل" },
   message: {
-    en: "You have not logged a visit, order, or collection in the last 30 minutes. Please record your current activity.",
-    ar: "لم تسجل زيارة أو طلب أو تحصيل خلال آخر 30 دقيقة. يرجى تسجيل نشاطك الحالي.",
+    en: "You have not logged a visit, order, or collection in the last 45 minutes. Please record your current activity.",
+    ar: "لم تسجل زيارة أو طلب أو تحصيل خلال آخر 45 دقيقة. يرجى تسجيل نشاطك الحالي.",
   },
   dismiss: { en: "Remind me in 15 minutes", ar: "ذكرني بعد 15 دقيقة" },
   myDay: { en: "Open My Day", ar: "فتح يومي" },

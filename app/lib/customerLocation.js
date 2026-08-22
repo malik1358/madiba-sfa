@@ -1,6 +1,7 @@
 import { isProspectCustomerCode } from "./customerCode.js";
 import {
   captureGpsLocation,
+  GPS_REQUIRED_ERROR,
   haversineDistanceKm,
   hasGpsCoordinates,
   reverseGeocodeCoordinates,
@@ -75,15 +76,19 @@ export async function resolveVisitGpsAndUpdateCustomer({
       ? `GPS غير متاح. هل تريد حفظ موقعك الحالي كموقع GPS للعميل ${displayName}؟`
       : `GPS is not available. Save your current location as the GPS location for ${displayName}?`;
     if (!window.confirm(message)) {
-      return null;
+      throw new Error(GPS_REQUIRED_ERROR);
     }
 
     try {
       location = await captureGpsLocation();
       saveCustomerGps = true;
     } catch {
-      return null;
+      throw new Error(GPS_REQUIRED_ERROR);
     }
+  }
+
+  if (!hasGpsCoordinates(location)) {
+    throw new Error(GPS_REQUIRED_ERROR);
   }
 
   if (

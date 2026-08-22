@@ -16,13 +16,31 @@ import {
   sortCashQueueCustomers,
 } from "../app/lib/paymentCollections.js";
 
-test("invoiceHasCashRef matches cash document prefixes only", () => {
+test("invoiceHasCashRef matches C in Ref. No. only", () => {
   assert.equal(invoiceHasCashRef({ ref_no: "RC/056" }), true);
   assert.equal(invoiceHasCashRef({ ref_no: "DC/008" }), true);
   assert.equal(invoiceHasCashRef({ ref_no: "CNFD/001" }), true);
+  assert.equal(invoiceHasCashRef({ ref_no: "CREDIT-123" }), true);
   assert.equal(invoiceHasCashRef({ ref_no: "INV-9283" }), false);
   assert.equal(invoiceHasCashRef({ ref_no: "SI/12345" }), false);
-  assert.equal(invoiceHasCashRef({ ref_no: "CREDIT-123" }), false);
+  assert.equal(invoiceHasCashRef({ ref_no: "1098", customer_code: "1119C" }), false);
+  assert.equal(invoiceHasCashRef({ ref_no: "1098", reference: "RC/001" }), false);
+});
+
+test("buildCollectionQueues does not treat customer code ending in C as cash without C in ref_no", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "1119C",
+      customer_name: "Fahd Ali Sulaiman Al Subaie Trading Est",
+      invoices: [{ pending_amount: 25000, due_date: "2026-08-10", overdue_days: 12, ref_no: "SI/4501" }],
+      latest_collection: null,
+      legal_transfer: null,
+    },
+  ], "2026-08-22T10:00:00Z");
+
+  assert.equal(queues.dueCustomers.length, 1);
+  assert.equal(queues.dueCustomers[0].outstanding_cash, 0);
+  assert.equal(isCashQueueCustomer(queues.dueCustomers[0], "2026-08-22"), false);
 });
 
 test("buildExposureScoreFromInvoices sums amount x days per invoice", () => {

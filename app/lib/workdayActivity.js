@@ -1,5 +1,5 @@
 export const KSA_TIMEZONE = "Asia/Riyadh";
-export const INACTIVITY_MS = 30 * 60 * 1000;
+export const INACTIVITY_MS = 45 * 60 * 1000;
 export const INACTIVITY_PROMPT_SHOWN_SNOOZE_MS = 5 * 60 * 1000;
 export const INACTIVITY_PROMPT_DISMISS_SNOOZE_MS = 15 * 60 * 1000;
 export const INACTIVITY_PROMPT_SNOOZE_STORAGE_KEY = "madiba_inactivity_prompt_snooze_until";

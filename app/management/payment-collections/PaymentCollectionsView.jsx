@@ -80,8 +80,8 @@ const TEXT = {
   noScheduledRevisits: { en: "No upcoming collection revisits scheduled.", ar: "لا توجد زيارات تحصيل مجدولة قادمة." },
   cashQueueTitle: { en: "Cash Due Queue", ar: "قائمة التحصيل النقدي" },
   cashQueueHint: {
-    en: "Customers with cash invoices (RC/, DC/, CNFD/) due immediately. Collect these before credit follow-ups.",
-    ar: "عملاء لديهم فواتير نقدية (RC/, DC/, CNFD/) مستحقة فوراً. حصل هذه قبل متابعة الائتمان.",
+    en: "Customers with cash invoices where Ref. No. contains C (for example RC/, DC/, CNFD/). Collect these before credit follow-ups.",
+    ar: "عملاء لديهم فواتير نقدية حيث رقم المرجع يحتوي على C (مثل RC/ أو DC/ أو CNFD/). حصل هذه قبل متابعة الائتمان.",
   },
   noCashQueue: { en: "No cash-due customers in the outstanding file.", ar: "لا يوجد عملاء بفواتير نقدية مستحقة في ملف المديونية." },
   cashDueAmount: { en: "Cash Due", ar: "المبلغ النقدي المستحق" },
@@ -1073,13 +1073,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
         accessToken: session.access_token,
       });
 
-      if (gps) {
-        formData.append("latitude", String(gps.latitude));
-        formData.append("longitude", String(gps.longitude));
-        formData.append("gpsAccuracyMeters", String(gps.accuracy));
-      } else {
-        formData.append("allowMissingGps", "1");
-      }
+      formData.append("latitude", String(gps.latitude));
+      formData.append("longitude", String(gps.longitude));
+      formData.append("gpsAccuracyMeters", String(gps.accuracy));
 
       if (form.paymentCopy) {
         formData.append("paymentCopy", await prepareUploadFile(form.paymentCopy));
@@ -1219,10 +1215,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerName: row.customer_name,
           note: form.legalNote,
           action,
-          latitude: gps?.latitude ?? null,
-          longitude: gps?.longitude ?? null,
-          gpsAccuracyMeters: gps?.accuracy ?? null,
-          allowMissingGps: !gps,
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          gpsAccuracyMeters: gps.accuracy,
         }),
       });
 

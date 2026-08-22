@@ -7,6 +7,7 @@ import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { detectTable } from "../lib/schemaGuards";
 import { autoCloseForgottenWorkdays, BACKGROUND_GPS_IDLE_MS, IDLE_GPS_ACTIVITY_ENTRY_TYPES, shouldCaptureIdleGpsPing } from "../lib/workdayActivity";
+import { NATIVE_WORKDAY_READY_EVENT } from "../lib/nativeFieldTracking";
 import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
 
 const TEXT = {
@@ -465,6 +466,27 @@ export default function MorningAttendanceGate({
       }
     };
   }, [backgroundGpsEnabled, attendanceRequired, ready]);
+
+  useEffect(() => {
+    if (!ready || !backgroundGpsEnabled || typeof window === "undefined") return undefined;
+
+    let cancelled = false;
+    const supabase = getSupabaseClient();
+    if (!supabase) return undefined;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      const userId = data?.session?.user?.id;
+      if (!userId) return;
+      window.dispatchEvent(new CustomEvent(NATIVE_WORKDAY_READY_EVENT, {
+        detail: { userId, trackingEnabled: true },
+      }));
+    }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [backgroundGpsEnabled, ready]);
 
   if (accessLoading && requireMorningAttendance) {
     return (

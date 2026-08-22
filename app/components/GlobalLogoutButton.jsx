@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { getSupabaseClient } from "../lib/supabase";
+import { NATIVE_WORKDAY_STOP_EVENT } from "../lib/nativeFieldTracking";
 
 function hasPersistedSession() {
   if (typeof window === "undefined") return false;
@@ -65,6 +66,9 @@ export default function GlobalLogoutButton() {
 
     setBusy(true);
     try {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(NATIVE_WORKDAY_STOP_EVENT));
+      }
       await supabase.auth.signOut();
       router.replace("/");
     } finally {

@@ -8,6 +8,8 @@ on:
       - staging
     paths:
       - "android/**"
+      - "app/lib/nativeFieldTracking.js"
+      - "app/components/NativeFieldTracking.jsx"
       - "capacitor.config.js"
       - "public/**"
       - "package.json"

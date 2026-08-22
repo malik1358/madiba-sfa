@@ -2,6 +2,7 @@ import "./globals.css";
 import BuildUpdateWatcher from "./components/BuildUpdateWatcher";
 import GlobalAppStatus from "./components/GlobalAppStatus";
 import GlobalLogoutButton from "./components/GlobalLogoutButton";
+import NativeFieldTracking from "./components/NativeFieldTracking";
 import PwaShell from "./components/PwaShell";
 import { resolveBuildId, resolveBuildTime, formatBuildDateTime } from "./lib/buildInfo";
 
@@ -46,6 +47,7 @@ export default function RootLayout({ children }) {
         )}
         <BuildUpdateWatcher />
         <PwaShell />
+        <NativeFieldTracking />
         <GlobalAppStatus environment={environment} buildId={buildId} buildTime={buildTime} />
         <GlobalLogoutButton />
         {children}

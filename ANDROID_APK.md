@@ -17,6 +17,33 @@ Use GitHub Actions — builds in the cloud on Google’s servers. No Android Stu
 
 The workflow also runs automatically when `android/` or Capacitor config changes on `main`.
 
+### After installing the APK (required once per phone)
+
+1. **Allow location → All the time** for MADIBA SFA
+2. **Allow notifications** when prompted
+3. **Battery → Unrestricted** for MADIBA SFA
+4. Complete **morning attendance** — this starts the native field-tracking notification
+
+While logged in during work hours (6:00–22:00 KSA), the app will:
+
+- Show a persistent **“MADIBA field tracking active”** notification (Android foreground service)
+- Send **GPS pings every 15 minutes** after 15 minutes of inactivity
+- Show a **lock-screen alert** if no visit/order/collection is recorded for 45 minutes
+
+---
+
+## Firebase push notifications (lock screen when app is closed)
+
+Push alerts to salesmen (even when the app is not open) require Firebase Cloud Messaging.
+
+1. Create a Firebase project → add Android app `com.madiba.sfa`
+2. Download **`google-services.json`** → place in `android/app/google-services.json`
+3. Run the SQL migration `supabase/migrations/20260822120000_device_push_tokens.sql` in Supabase
+4. Rebuild the APK (Actions → **Android APK** → **Run workflow**)
+5. Reinstall on phones — login registers the device token automatically
+
+Without `google-services.json`, background GPS and local inactivity alerts still work; **remote push from the server does not**.
+
 ---
 
 ## What you need on your PC (only if building locally)
@@ -162,8 +189,9 @@ Rebuild the APK after changing the URL.
 Android APK (Capacitor)
   └── WebView → https://madiba-sfa.vercel.app
         ├── Same login, My Day, Collections, offline queue
-        ├── GPS + camera through WebView (same as PWA today)
-        └── Future: native background GPS + push notifications
+        ├── Native foreground service → GPS pings while logged in
+        ├── Local notifications → inactivity alerts on lock screen
+        └── Firebase push → remote alerts (after google-services.json)
 ```
 
 ---
@@ -179,9 +207,9 @@ Android APK (Capacitor)
 
 ---
 
-## Next phase (not in this APK yet)
+## Next phase (optional)
 
-- Native **background GPS** foreground service (reliable pings when app minimized)
-- **Firebase push notifications** for boss alerts and inactivity
+- Server-triggered push campaigns (boss alerts) via Firebase Admin SDK
+- Boot-time restart of field tracking after phone reboot
 
-These require additional native plugins and backend work; the current APK is the installable shell for internal distribution.
+These require Firebase credentials on Vercel plus optional cron/worker setup.

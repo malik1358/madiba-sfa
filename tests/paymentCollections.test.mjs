@@ -9,9 +9,11 @@ import {
   filterCollectionQueueInvoices,
   hasCollectionVisit,
   invoiceHasCashRef,
+  isCashQueueCustomer,
   isExcludedCollectionQueueSalesman,
   isScheduledRevisitQueueCustomer,
   normalizeWhatsappNumber,
+  sortCashQueueCustomers,
 } from "../app/lib/paymentCollections.js";
 
 test("invoiceHasCashRef matches cash document prefixes only", () => {
@@ -335,6 +337,42 @@ test("buildCollectionQueues prioritizes higher exposure over visit status", () =
     queues.dueCustomers.map((row) => row.customer_code),
     ["1423", "UNVISITED_LOW"],
   );
+});
+
+test("isCashQueueCustomer separates cash due customers from the normal due queue", () => {
+  const today = "2026-08-22";
+  const cashDue = {
+    customer_code: "1011C",
+    invoices: [{ pending_amount: 5000, ref_no: "RC/001" }],
+    latest_collection: null,
+  };
+  const scheduledCash = {
+    customer_code: "1011C",
+    invoices: [{ pending_amount: 5000, ref_no: "RC/001" }],
+    latest_collection: {
+      payment_status: "PROMISED",
+      saved_at: "2026-08-20T10:00:00Z",
+      next_visit_at: "2026-08-25",
+    },
+  };
+  const creditOnly = {
+    customer_code: "1416",
+    invoices: [{ pending_amount: 6375, ref_no: "SI/1416" }],
+    latest_collection: null,
+  };
+
+  assert.equal(isCashQueueCustomer(cashDue, today), true);
+  assert.equal(isCashQueueCustomer(scheduledCash, today), false);
+  assert.equal(isCashQueueCustomer(creditOnly, today), false);
+});
+
+test("sortCashQueueCustomers ranks higher cash due amount first", () => {
+  const sorted = sortCashQueueCustomers([
+    { customer_code: "LOW", outstanding_cash: 500, exposure_score: 1000 },
+    { customer_code: "HIGH", outstanding_cash: 5000, exposure_score: 100 },
+  ]);
+
+  assert.deepEqual(sorted.map((row) => row.customer_code), ["HIGH", "LOW"]);
 });
 
 test("isScheduledRevisitQueueCustomer moves visited partial visits with future revisit out of due queue", () => {

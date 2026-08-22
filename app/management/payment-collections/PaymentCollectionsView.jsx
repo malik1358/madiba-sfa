@@ -15,7 +15,7 @@ import {
   captureGpsLocationWithFallbackConfirm,
 } from "../../lib/customerLocation";
 import { postFormDataResilient } from "../../lib/offlineApi";
-import { isScheduledRevisitQueueCustomer } from "../../lib/paymentCollections";
+import { isCashQueueCustomer, isScheduledRevisitQueueCustomer, sortCashQueueCustomers } from "../../lib/paymentCollections";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { readCollectionQueuesForUser } from "../../lib/mobileDataCache";
@@ -78,6 +78,13 @@ const TEXT = {
   visitRemark: { en: "Visit Remark", ar: "ملاحظة الزيارة" },
   noVisitRemark: { en: "No remark saved", ar: "لا توجد ملاحظة محفوظة" },
   noScheduledRevisits: { en: "No upcoming collection revisits scheduled.", ar: "لا توجد زيارات تحصيل مجدولة قادمة." },
+  cashQueueTitle: { en: "Cash Due Queue", ar: "قائمة التحصيل النقدي" },
+  cashQueueHint: {
+    en: "Customers with cash invoices (RC/, DC/, CNFD/) due immediately. Collect these before credit follow-ups.",
+    ar: "عملاء لديهم فواتير نقدية (RC/, DC/, CNFD/) مستحقة فوراً. حصل هذه قبل متابعة الائتمان.",
+  },
+  noCashQueue: { en: "No cash-due customers in the outstanding file.", ar: "لا يوجد عملاء بفواتير نقدية مستحقة في ملف المديونية." },
+  cashDueAmount: { en: "Cash Due", ar: "المبلغ النقدي المستحق" },
   notDueAmount: { en: "Pending Amount", ar: "المبلغ المعلق" },
   notDueInvoices: { en: "Pending Invoices", ar: "الفواتير المعلقة" },
   noNotDue: { en: "No not-yet-due invoices in the outstanding file.", ar: "لا توجد فواتير غير مستحقة في ملف المديونية." },
@@ -787,18 +794,34 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   const queueToday = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
+  function keepRowInActiveDueQueue(row) {
+    const key = rowKey(row);
+    if (activeRowKey && key === activeRowKey) return true;
+    if (isScheduledRevisitQueueCustomer(row, queueToday)) return false;
+    if (isCashQueueCustomer(row, queueToday)) return false;
+    return true;
+  }
+
+  const cashQueueSourceRows = useMemo(() => {
+    if (view !== "due") return [];
+    return sortCashQueueCustomers(
+      filterQueueRows(dueCustomers, customerFilter, selectedSalesmen)
+        .filter((row) => isCashQueueCustomer(row, queueToday)),
+    );
+  }, [customerFilter, dueCustomers, queueToday, selectedSalesmen, view]);
+
   const visibleRows = useMemo(
     () => filterQueueRows(view === "legal" ? legalCustomers : dueCustomers, customerFilter, selectedSalesmen)
-      .filter((row) => view !== "due" || !isScheduledRevisitQueueCustomer(row, queueToday)),
-    [customerFilter, dueCustomers, legalCustomers, queueToday, selectedSalesmen, view],
+      .filter((row) => view !== "due" || keepRowInActiveDueQueue(row)),
+    [activeRowKey, customerFilter, dueCustomers, legalCustomers, queueToday, selectedSalesmen, view],
   );
 
   const visibleNotDueRows = useMemo(
     () => (view === "due"
       ? filterQueueRows(notDueCustomers, customerFilter, selectedSalesmen)
-        .filter((row) => !isScheduledRevisitQueueCustomer(row, queueToday))
+        .filter((row) => keepRowInActiveDueQueue(row))
       : []),
-    [customerFilter, notDueCustomers, queueToday, selectedSalesmen, view],
+    [activeRowKey, customerFilter, notDueCustomers, queueToday, selectedSalesmen, view],
   );
 
   const scheduledRevisitSourceRows = useMemo(() => {
@@ -874,6 +897,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
     }
     return items;
   }, [visibleRows, visibleNotDueRows, view]);
+
+  const cashQueuePriorityByKey = useMemo(() => {
+    const priorities = new Map();
+    cashQueueSourceRows.forEach((row, index) => {
+      priorities.set(rowKey(row), index + 1);
+    });
+    return priorities;
+  }, [cashQueueSourceRows]);
 
   const queuePriorityByKey = useMemo(() => {
     const priorities = new Map();
@@ -1009,7 +1040,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
         t,
         {
           visitNumberForDay,
-          queuePriority: queuePriorityByKey.get(rowKey(row)) || 0,
+          queuePriority: queuePriorityByKey.get(rowKey(row))
+            || cashQueuePriorityByKey.get(rowKey(row))
+            || 0,
         },
       );
 
@@ -1393,6 +1426,74 @@ export default function PaymentCollectionsView({ view = "due" }) {
                             );
                           })}
                         </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {view === "due" ? (
+            <section className="moduleSection" style={{ marginBottom: "12px" }}>
+              <div className="moduleSectionHeader">
+                <h2>{t("cashQueueTitle")}</h2>
+                <span>{cashQueueSourceRows.length}</span>
+              </div>
+              <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("cashQueueHint")}</div>
+              {cashQueueSourceRows.length === 0 ? (
+                <div className="moduleHint">{t("noCashQueue")}</div>
+              ) : (
+                <div className="moduleTableWrap">
+                  <table className="moduleTable moduleCollectorTable">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>{t("customerCode")}</th>
+                        <th>{t("customer")}</th>
+                        <th>{t("salesman")}</th>
+                        <th>{t("cashDueAmount")}</th>
+                        <th>{t("amount")}</th>
+                        <th>{t("overdue")}</th>
+                        <th>{t("lastVisitDate")}</th>
+                        <th>{t("actions")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cashQueueSourceRows.map((row, index) => {
+                        const key = rowKey(row);
+                        return (
+                          <tr key={`cash-${key}`}>
+                            <td data-label="#">{index + 1}</td>
+                            <td data-label={t("customerCode")}>{row.customer_code}</td>
+                            <td data-label={t("customer")}>{row.customer_name}</td>
+                            <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>
+                            <td data-label={t("cashDueAmount")}>{formatMoney(row.outstanding_cash)}</td>
+                            <td data-label={t("amount")}>{formatMoney(row.total_due_amount)}</td>
+                            <td data-label={t("overdue")}>{row.max_overdue_days || 0}</td>
+                            <td data-label={t("lastVisitDate")}>{formatLastVisitDate(row)}</td>
+                            <td data-label={t("actions")}>
+                              <div className="moduleInlineStack moduleActionStack">
+                                <button
+                                  type="button"
+                                  className="moduleInlineButton moduleActionButton"
+                                  onClick={() => setActiveRowKey(activeRowKey === key ? "" : key)}
+                                >
+                                  {activeRowKey === key ? t("close") : t("open")}
+                                </button>
+                                {canViewVisitReports && row?.latest_collection?.saved_at ? (
+                                  <button
+                                    type="button"
+                                    className="moduleInlineButton moduleActionButton"
+                                    onClick={() => openVisitReport(row)}
+                                  >
+                                    {t("viewVisitReport")}
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
                         );
                       })}
                     </tbody>

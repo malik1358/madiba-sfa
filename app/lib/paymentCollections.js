@@ -167,6 +167,25 @@ export function shouldPrioritizeCashVisit(record, today) {
   return hasCashDueInvoices(record) && !hasFutureScheduledRevisit(record, today);
 }
 
+export function isCashQueueCustomer(record, todayIso = new Date().toISOString()) {
+  if (!hasCashDueInvoices(record)) return false;
+  if (isScheduledRevisitQueueCustomer(record, todayIso)) return false;
+  return true;
+}
+
+export function sortCashQueueCustomers(rows) {
+  return [...(rows || [])].sort((left, right) => {
+    const byCashAmount = toNumber(right?.outstanding_cash) - toNumber(left?.outstanding_cash);
+    if (byCashAmount !== 0) return byCashAmount;
+
+    const byExposure = Number(right?.exposure_score || 0) - Number(left.exposure_score || 0);
+    if (byExposure !== 0) return byExposure;
+
+    return String(left.customer_name || left.customer_code || "")
+      .localeCompare(String(right.customer_name || right.customer_code || ""));
+  });
+}
+
 function queueKeyFor(record) {
   const normalizedCode = normalizeCode(record?.customer_code);
   if (normalizedCode) return normalizedCode;
@@ -389,10 +408,6 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
     const byExposure = Number(right.exposure_score || 0) - Number(left.exposure_score || 0);
     if (byExposure !== 0) return byExposure;
 
-    const byCash = Number(shouldPrioritizeCashVisit(right, today))
-      - Number(shouldPrioritizeCashVisit(left, today));
-    if (byCash !== 0) return byCash;
-
     const byVisitStatus = Number(hasCollectionVisit(left)) - Number(hasCollectionVisit(right));
     if (byVisitStatus !== 0) return byVisitStatus;
 
@@ -400,11 +415,6 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
     const rightHasDue = Number(right.due_invoice_count > 0);
     const byDueStatus = rightHasDue - leftHasDue;
     if (byDueStatus !== 0) return byDueStatus;
-
-    const leftCash = toNumber(left?.outstanding_cash);
-    const rightCash = toNumber(right?.outstanding_cash);
-    const byCashAmount = rightCash - leftCash;
-    if (byCashAmount !== 0) return byCashAmount;
 
     // Probability score
     const byScore = Number(right.probability_score || 0) - Number(left.probability_score || 0);

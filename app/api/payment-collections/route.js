@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { buildCollectionQueues, filterCollectionQueueInvoices, invoiceHasCashRef } from "../../lib/paymentCollections.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
-import { resolveMutualGroupCodes } from "../../lib/mutualSalesmanGroups.js";
+import { resolveMutualGroupProfiles, buildSalesmanScopeMatchers, salesmanValueMatchesScope, normalizeSalesmanCode } from "../../lib/mutualSalesmanGroups.js";
 import {
   OUTSTANDING_DATASET_KEY,
   extractLeadingCustomerCodeAndName,
@@ -44,24 +44,6 @@ function canonicalCustomerCode(value) {
   const extracted = normalizeCode(extractLeadingCustomerCodeAndName(raw).customer_code);
   return extracted || raw.split(/\s+/)[0] || raw;
 }
-
-function comparableName(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Uploads spell names inconsistently (e.g. ABDALLA vs ABADALLA), so compare consonant skeletons.
-function loosePersonName(value) {
-  return comparableName(value)
-    .replace(/[^A-Z]/g, "")
-    .replace(/[AEIOU]/g, "")
-    .replace(/(.)\1+/g, "$1");
-}
-
 
 async function readOutstandingInvoicesFromTable(admin) {
   const { data: invoiceRows, error } = await admin
@@ -320,6 +302,7 @@ export async function getSalesScope(admin, userId) {
   if (!profile) throw new Error("No profile found for this user");
 
   let visibleSalesmanCodes = [profile.salesman_code];
+  let scopeProfiles = [profile];
   let hasAllAccess = false;
 
   const userRole = String(profile?.role || "").toLowerCase();
@@ -392,10 +375,28 @@ export async function getSalesScope(admin, userId) {
     try {
       const { data: teamProfiles } = await admin
         .from("profiles")
-        .select("salesman_code,salesman_name");
+        .select("id,salesman_code,salesman_name");
 
-      const mutualCodes = resolveMutualGroupCodes(teamProfiles || [], profile);
+      const mutualProfiles = resolveMutualGroupProfiles(teamProfiles || [], profile);
+      const mutualCodes = mutualProfiles
+        .map((entry) => normalizeSalesmanCode(entry.salesman_code))
+        .filter(Boolean);
       visibleSalesmanCodes = [...new Set([...visibleSalesmanCodes, ...mutualCodes])];
+
+      const scopeCodeSet = new Set(visibleSalesmanCodes.map((code) => normalizeSalesmanCode(code)).filter(Boolean));
+      const scopeProfilesByKey = new Map();
+      [profile, ...(teamProfiles || []), ...mutualProfiles].forEach((entry) => {
+        if (!entry) return;
+        const key = String(entry.id || entry.salesman_code || entry.salesman_name || "").trim();
+        if (key) scopeProfilesByKey.set(key, entry);
+      });
+      (teamProfiles || []).forEach((entry) => {
+        if (scopeCodeSet.has(normalizeSalesmanCode(entry.salesman_code))) {
+          const key = String(entry.id || entry.salesman_code || entry.salesman_name || "").trim();
+          if (key) scopeProfilesByKey.set(key, entry);
+        }
+      });
+      scopeProfiles = [...scopeProfilesByKey.values()];
     } catch {
       // Keep the existing scope if team profile lookup fails.
     }
@@ -403,6 +404,7 @@ export async function getSalesScope(admin, userId) {
 
   return {
     visibleSalesmanCodes: [...new Set(visibleSalesmanCodes.filter(Boolean))],
+    scopeProfiles,
     identitySearchPatterns: [profile.salesman_code],
     hasAllAccess,
     userRole,
@@ -446,6 +448,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
   }
 
   const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+  const scopeMatchers = buildSalesmanScopeMatchers(scope.scopeProfiles || []);
 
   const salesmenQuery = admin
     .from("profiles")
@@ -496,14 +499,9 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
   }
 
   const salesmanMap = new Map();
-  const visibleSalesmanNames = new Set();
   (salesmen || []).forEach((salesman) => {
     const normalizedCode = normalizeCode(salesman.salesman_code);
     salesmanMap.set(normalizedCode, salesman.salesman_name);
-    if (scope.hasAllAccess || normalizedScopeCodes.has(normalizedCode)) {
-      const name = loosePersonName(salesman.salesman_name);
-      if (name) visibleSalesmanNames.add(name);
-    }
   });
 
   // Build customer records with outstanding and collection data
@@ -612,10 +610,10 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     // The uploaded file decides who collects, since customer assignments drift out of date.
     const invoiceSalesmen = customerInvoices.map((invoice) => invoice.salesman).filter(Boolean);
     if (!scope.hasAllAccess) {
-      const owned = invoiceSalesmen.length > 0
-        ? invoiceSalesmen.some((name) => visibleSalesmanNames.has(loosePersonName(name)))
-        : normalizedScopeCodes.has(normalizeCode(customer.current_salesman_code));
-      if (!owned) return;
+      const invoiceOwned = invoiceSalesmen.some((name) => salesmanValueMatchesScope(name, scopeMatchers));
+      const customerOwned = salesmanValueMatchesScope(customer.current_salesman_code, scopeMatchers)
+        || normalizedScopeCodes.has(normalizeCode(customer.current_salesman_code));
+      if (!invoiceOwned && !customerOwned) return;
     }
 
     // Calculate outstanding amounts

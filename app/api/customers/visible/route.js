@@ -8,6 +8,11 @@ import {
   summarizeOutstandingBuckets,
 } from "../../../lib/outstanding";
 import { mergeSalesSnapshots } from "../../../lib/salesHistory";
+import {
+  buildSalesmanScopeMatchers,
+  resolveMutualGroupCodes,
+  resolveMutualGroupProfiles,
+} from "../../../lib/mutualSalesmanGroups.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -53,19 +58,6 @@ function identitySearchPattern(value) {
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
   return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
-}
-
-const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
-
-function resolveMutualGroupCodes(allProfiles, currentProfile) {
-  const currentName = normalizeName(currentProfile?.salesman_name);
-  const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => group.includes(currentName));
-  if (!matchedGroup) return [];
-
-  return allProfiles
-    .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
-    .map((profile) => normalizeCode(profile.salesman_code))
-    .filter(Boolean);
 }
 
 function profileCodeCandidates(profile) {
@@ -202,7 +194,15 @@ async function resolveScopeForUser(admin, user) {
     }
   }
 
+  const mutualProfiles = resolveMutualGroupProfiles(allProfiles, currentProfile);
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
+  const scopeProfiles = [...members, ...mutualProfiles.filter((profile) => !members.some((member) => member.id === profile.id))];
+  const scopeMatchers = buildSalesmanScopeMatchers(scopeProfiles);
+  const outstandingSalesmanIdentities = [
+    ...scopeMatchers.codes,
+    ...scopeMatchers.comparableNames,
+    ...scopeMatchers.tokens,
+  ];
 
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),
@@ -218,6 +218,7 @@ async function resolveScopeForUser(admin, user) {
     hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
     visibleSalesmanCodes,
     identitySearchPatterns,
+    outstandingSalesmanIdentities,
   };
 }
 
@@ -315,7 +316,7 @@ async function fetchVisibleCustomers(admin, scope) {
 
     try {
       const dataset = JSON.parse(setting?.setting_value || "null");
-      const ownership = resolveOutstandingCustomerOwnership(dataset, scope.visibleSalesmanCodes);
+      const ownership = resolveOutstandingCustomerOwnership(dataset, scope.outstandingSalesmanIdentities || scope.visibleSalesmanCodes);
       ownership.assignedCustomerCodes.forEach((code) => outstandingAssignedCustomerCodes.add(normalizeCode(code)));
       ownership.ownedCustomerCodes.forEach((code) => outstandingOwnedCustomerCodes.add(normalizeCode(code)));
     } catch {

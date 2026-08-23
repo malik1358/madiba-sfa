@@ -11,6 +11,17 @@ export default function PwaShell() {
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return undefined;
 
+    navigator.serviceWorker.getRegistrations()
+      .then((registrations) => Promise.all(
+        registrations
+          .filter((registration) => {
+            const scriptUrl = registration.active?.scriptURL || registration.installing?.scriptURL || "";
+            return scriptUrl.includes("/sw.js");
+          })
+          .map((registration) => registration.update()),
+      ))
+      .catch(() => undefined);
+
     navigator.serviceWorker.register("/sw.js").catch(() => undefined);
   }, []);
 

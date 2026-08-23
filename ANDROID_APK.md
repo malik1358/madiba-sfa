@@ -1,6 +1,6 @@
 # MADIBA SFA — Internal Android APK
 
-This repo includes a **Capacitor Android shell** that loads the live MADIBA web app from Vercel. Field UI updates deploy instantly through the website; rebuild the APK only when native settings or permissions change.
+This repo includes a **Capacitor Android shell** that loads the live MADIBA web app from Vercel. Field UI updates deploy instantly through the website; rebuild and publish to Play Store (or sideload APK) only when native settings or permissions change.
 
 **Production URL (default):** https://madiba-sfa.vercel.app
 
@@ -232,3 +232,125 @@ Android APK (Capacitor)
 
 - Boot-time restart of field tracking after phone reboot
 - Admin UI button to send push from User Activity screen
+
+---
+
+## Google Play — internal testing (recommended for field rollout)
+
+Use **Google Play internal testing** so salesmen install and update MADIBA from the Play Store instead of sideloading APK files. The app still loads the live Vercel site; Play Store updates only the native Android shell (GPS, push, permissions).
+
+### What updates where
+
+| Change | How salesmen get it |
+| --- | --- |
+| UI, orders, collections, APIs | Vercel deploy — force-close and reopen the app |
+| Native Android (GPS service, push, permissions) | New Play Store internal release |
+
+### One-time setup (about 30–60 minutes)
+
+#### 1. Google Play Developer account
+
+1. Open [Google Play Console](https://play.google.com/console)
+2. Pay the **one-time $25** registration fee (company account recommended)
+3. Create a new app → name **MADIBA SFA** → default language **English**
+
+#### 2. Create the app listing (minimum for internal testing)
+
+In Play Console, complete these sections (required even for internal track):
+
+| Section | What to enter |
+| --- | --- |
+| **App access** | All functionality available without special access |
+| **Ads** | No, app does not contain ads |
+| **Content rating** | Complete the questionnaire (business/productivity app) |
+| **Target audience** | 18+ (field staff) |
+| **Data safety** | Declare location collection (field tracking), data encrypted in transit |
+| **Privacy policy** | Public URL (required because the app uses location) |
+| **Store listing** | App name, short description, 512×512 icon, 2+ phone screenshots |
+
+Package name must be **`com.madiba.sfa`** (matches this repo).
+
+#### 3. Create an upload keystore (one-time — keep safe)
+
+From any machine with Java installed:
+
+```bash
+keytool -genkeypair -v \
+  -keystore madiba-sfa-upload.keystore \
+  -alias madiba-upload \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+
+Store the `.keystore` file and passwords securely. If lost, you cannot publish updates to the same Play listing.
+
+For local release builds, copy `android/keystore.properties.example` → `android/keystore.properties` and point `storeFile` at your keystore.
+
+#### 4. Link a Google Cloud service account (for GitHub uploads)
+
+1. Play Console → **Setup → API access** → link or create a Google Cloud project
+2. **Create new service account** → open Google Cloud Console
+3. Grant the service account **Service Account User** (if prompted)
+4. Back in Play Console → **Grant access** to the service account → role **Release manager** (or Admin for first setup)
+5. In Google Cloud → **IAM → Service account → Keys** → **Add key → JSON** → download the JSON file
+
+#### 5. Add GitHub repository secrets
+
+In GitHub → **Settings → Secrets and variables → Actions**, add:
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | Base64 of `madiba-sfa-upload.keystore` (see below) |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
+| `ANDROID_KEY_ALIAS` | `madiba-upload` |
+| `ANDROID_KEY_PASSWORD` | Key password |
+| `PLAY_STORE_SERVICE_ACCOUNT_JSON` | Full contents of the service account JSON file |
+
+Encode the keystore for GitHub (PowerShell):
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("madiba-sfa-upload.keystore")) | Set-Clipboard
+```
+
+Paste the clipboard into the `ANDROID_KEYSTORE_BASE64` secret.
+
+#### 6. First release to internal testing
+
+1. GitHub → **Actions** → **Play Store Internal** → **Run workflow** (branch `main`, deploy = true)
+2. Wait for the job to finish (builds signed AAB + uploads to internal track)
+3. In Play Console → **Testing → Internal testing** → confirm the release is active
+
+If the upload fails on the very first release, open Play Console once and accept **Google Play App Signing** when prompted, then re-run the workflow.
+
+### Add salesmen as internal testers
+
+1. Play Console → **Testing → Internal testing → Testers**
+2. Create an email list (Google accounts used on their phones)
+3. Copy the **opt-in link** and send it to each salesman (WhatsApp / email)
+4. Each tester opens the link → **Become a tester** → installs **MADIBA SFA** from the Play Store
+
+They only need the opt-in link **once**. After that, updates arrive through the Play Store like any other app.
+
+### Publishing updates
+
+| Trigger | What happens |
+| --- | --- |
+| Push to `main` (android / native files change) | Workflow builds AAB and uploads to **internal** automatically |
+| Manual | Actions → **Play Store Internal** → **Run workflow** |
+
+Each build gets `versionCode = GitHub run number` and `versionName = 1.0.<run number>`. Play Store requires a higher `versionCode` on every upload — the workflow handles this.
+
+Edit release notes before a rollout in:
+
+```
+android/play-whatsnew/en-US/whatsnew
+```
+
+### Troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| Upload failed: version code already used | Re-run workflow (run number increments) |
+| Upload failed: package not found | Create the app in Play Console with package `com.madiba.sfa` first |
+| Upload failed: API access | Re-check service account has Release manager in Play Console |
+| Tester cannot see the app | They must open the opt-in link with the same Google account on their phone |
+| App not updating | Play Store → MADIBA SFA → check for update; or wait a few hours for rollout |

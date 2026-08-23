@@ -430,8 +430,18 @@ function useMobileLayout(breakpointPx = 700) {
     const media = window.matchMedia(`(max-width: ${breakpointPx}px)`);
     const update = () => setIsMobile(media.matches);
     update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
+
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", update);
+      return () => media.removeEventListener("change", update);
+    }
+
+    if (typeof media.addListener === "function") {
+      media.addListener(update);
+      return () => media.removeListener(update);
+    }
+
+    return undefined;
   }, [breakpointPx]);
 
   return isMobile;

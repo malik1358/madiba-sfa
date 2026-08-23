@@ -31,17 +31,20 @@ Never configure the staging Vercel project with production Supabase credentials.
 
 The staging deployment displays a yellow `STAGING / UAT - TEST DATA ONLY` banner on every page.
 
-## Internal Android APK
+## Internal Android app
 
-See [ANDROID_APK.md](ANDROID_APK.md) for building and distributing the internal APK (no Play Store).
+See [ANDROID_APK.md](ANDROID_APK.md) for the Capacitor Android shell (GPS tracking, push, field notifications).
+
+| Method | Best for |
+| --- | --- |
+| **Google Play internal testing** (recommended) | Field rollout — install and update from Play Store |
+| **Debug APK** (GitHub Actions → Android APK) | Quick testing before Play is set up |
 
 Quick start after installing Android Studio:
 
 ```bash
 npm run cap:open:android
 ```
-
-Then in Android Studio: **Build → Build APK(s)**.
 
 Or from PowerShell:
 

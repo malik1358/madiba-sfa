@@ -1,6 +1,5 @@
-const CACHE_NAME = "madiba-sfa-shell-v1";
+const CACHE_NAME = "madiba-sfa-shell-v2";
 const PRECACHE_URLS = [
-  "/",
   "/manifest.webmanifest",
   "/icons/icon.svg",
   "/icons/icon-maskable.svg",
@@ -23,8 +22,12 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-function isApiRequest(url) {
-  return url.pathname.startsWith("/api/");
+function shouldUseNetworkOnly(url) {
+  return url.pathname.startsWith("/api/")
+    || url.pathname.startsWith("/_next/")
+    || url.pathname.endsWith(".js")
+    || url.pathname.endsWith(".css")
+    || url.pathname.endsWith(".json");
 }
 
 self.addEventListener("fetch", (event) => {
@@ -32,22 +35,19 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
-  if (isApiRequest(url)) return;
+
+  if (shouldUseNetworkOnly(url)) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
 
   event.respondWith(
     fetch(event.request)
-      .then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => undefined);
-        }
-        return response;
-      })
+      .then((response) => response)
       .catch(async () => {
-        const cached = await caches.match(event.request);
-        if (cached) return cached;
         if (event.request.mode === "navigate") {
-          return caches.match("/");
+          const cached = await caches.match("/");
+          if (cached) return cached;
         }
         return Response.error();
       }),

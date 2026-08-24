@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  attachComparisonToMeta,
+  compareInvoiceBufferWithOrder,
+  compareStoredInvoiceWithOrder,
+  INVOICE_BUCKET,
+} from "../../lib/orderInvoiceComparison.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const INVOICE_BUCKET = "order-invoices";
 
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 const STATUS_PENDING_CREDIT = "Pending for credit approval";
@@ -203,6 +208,20 @@ async function readMetaMap(admin, orderIds) {
   return map;
 }
 
+async function hydrateMetaWithComparison(admin, meta, { forceCompare = false } = {}) {
+  if (!meta?.invoiceFilePath) return meta;
+  if (!forceCompare && meta.comparisonCheckedAt) return meta;
+
+  try {
+    const comparison = await compareStoredInvoiceWithOrder(admin, meta.orderId, meta.invoiceFilePath);
+    const enriched = attachComparisonToMeta(meta, comparison);
+    await upsertMeta(admin, enriched);
+    return enriched;
+  } catch {
+    return meta;
+  }
+}
+
 async function withSignedUrl(admin, meta) {
   if (!meta?.invoiceFilePath) return meta;
 
@@ -243,10 +262,13 @@ export async function GET(request) {
     const singleOrderId = String(url.searchParams.get("orderId") || "").trim();
     const orderIdsCsv = String(url.searchParams.get("orderIds") || "").trim();
 
+    const compare = String(url.searchParams.get("compare") || "").trim() === "1";
+
     if (singleOrderId) {
       await ensureOrderVisible(admin, singleOrderId, scope);
       const metaMap = await readMetaMap(admin, [singleOrderId]);
-      const meta = metaMap.get(singleOrderId) || { orderId: singleOrderId };
+      let meta = metaMap.get(singleOrderId) || { orderId: singleOrderId };
+      meta = await hydrateMetaWithComparison(admin, meta, { forceCompare: compare });
       const hydrated = await withSignedUrl(admin, meta);
       return NextResponse.json({ success: true, item: hydrated });
     }
@@ -365,14 +387,54 @@ export async function POST(request) {
         updated.invoiceBuildSeconds = diffSeconds;
       }
 
-      await upsertMeta(admin, updated);
-      const hydrated = await withSignedUrl(admin, updated);
+      let enriched = updated;
+      try {
+        const comparison = await compareInvoiceBufferWithOrder(admin, orderId, arrayBuffer);
+        enriched = attachComparisonToMeta(updated, comparison);
+      } catch {
+        // Keep upload successful even if PDF text extraction fails.
+      }
+
+      await upsertMeta(admin, enriched);
+      const hydrated = await withSignedUrl(admin, enriched);
 
       return NextResponse.json({ success: true, item: hydrated });
     }
 
     const body = await request.json();
     const mode = String(body?.mode || "").trim();
+
+    if (mode === "backfill-comparisons") {
+      const orderIds = (Array.isArray(body?.orderIds) ? body.orderIds : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .slice(0, 15);
+
+      const items = {};
+      for (const orderId of orderIds) {
+        await ensureOrderVisible(admin, orderId, scope);
+        const metaMap = await readMetaMap(admin, [orderId]);
+        const meta = metaMap.get(orderId) || { orderId };
+        const compared = await hydrateMetaWithComparison(admin, meta, { forceCompare: true });
+        items[orderId] = await withSignedUrl(admin, compared);
+      }
+
+      return NextResponse.json({ success: true, items });
+    }
+
+    if (mode === "compare") {
+      const orderId = String(body?.orderId || "").trim();
+      if (!orderId) {
+        return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
+      }
+
+      await ensureOrderVisible(admin, orderId, scope);
+      const metaMap = await readMetaMap(admin, [orderId]);
+      const meta = metaMap.get(orderId) || { orderId };
+      const compared = await hydrateMetaWithComparison(admin, meta, { forceCompare: true });
+      const hydrated = await withSignedUrl(admin, compared);
+      return NextResponse.json({ success: true, item: hydrated });
+    }
 
     if (mode !== "set-status") {
       return NextResponse.json({ success: false, error: "Unsupported action." }, { status: 400 });

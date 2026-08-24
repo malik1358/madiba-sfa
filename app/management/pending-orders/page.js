@@ -11,6 +11,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { addPdfBuildFooter } from "../../lib/buildInfo";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
+import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -25,6 +26,24 @@ const INVOICE_STATUS_PENDING_CREDIT = "Pending for credit approval";
 const INVOICE_STATUS_REJECTED = "Rejected by management";
 const INVOICE_STATUS_MADE = "Invoice made";
 const OUTSTANDING_API = "/api/outstanding";
+const EMPTY_FILTERS = {
+  orderId: "",
+  customer: "",
+  salesman: "",
+  status: "",
+  invoiceStatus: "",
+  uploadedAt: "",
+  timeToMake: "",
+  created: "",
+  lastUpdated: "",
+  age: "",
+};
+
+function includesFilter(value, filter) {
+  const query = String(filter || "").trim().toLowerCase();
+  if (!query) return true;
+  return String(value ?? "").toLowerCase().includes(query);
+}
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -71,6 +90,40 @@ function invoiceStatusText(meta) {
   return "-";
 }
 
+function InvoiceComparisonPanel({ meta, backfillingComparisons }) {
+  if (!meta?.invoiceFilePath) return null;
+
+  if (backfillingComparisons && !meta?.comparisonCheckedAt) {
+    return <div className="moduleHint" style={{ marginTop: "10px" }}>Checking uploaded invoice against order...</div>;
+  }
+
+  if (!meta?.comparisonCheckedAt) {
+    return <div className="moduleHint" style={{ marginTop: "10px" }}>Invoice comparison pending.</div>;
+  }
+
+  const diffs = Array.isArray(meta.comparisonDiffs) ? meta.comparisonDiffs : [];
+  if (diffs.length === 0) {
+    return (
+      <div className="moduleHint" style={{ marginTop: "10px", color: "#166534" }}>
+        Invoice matches the order for item, quantity, and price.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: "10px" }}>
+      <strong>Invoice vs order differences</strong>
+      <ul style={{ margin: "8px 0 0", paddingInlineStart: "18px" }}>
+        {diffs.map((diff, index) => (
+          <li key={`${diff.item_code || "item"}-${diff.type || "diff"}-${index}`}>
+            {formatComparisonDiff(diff)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function PendingOrdersPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -90,6 +143,8 @@ export default function PendingOrdersPage() {
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
   const [savingInvoiceStatus, setSavingInvoiceStatus] = useState(false);
   const [outstandingInfoByOrder, setOutstandingInfoByOrder] = useState({});
+  const [columnFilters, setColumnFilters] = useState(EMPTY_FILTERS);
+  const [backfillingComparisons, setBackfillingComparisons] = useState(false);
 
   const startOfTodayIso = useMemo(() => {
     const start = new Date();
@@ -142,8 +197,74 @@ export default function PendingOrdersPage() {
         });
         return next;
       });
+
+      await backfillInvoiceComparisons(items);
     } catch (err) {
       setError(err.message || "Unable to load invoice status.");
+    }
+  }
+
+  async function backfillInvoiceComparisons(items) {
+    const pendingIds = Object.entries(items || {})
+      .filter(([, meta]) => meta?.invoiceFilePath && !meta?.comparisonCheckedAt)
+      .map(([orderId]) => orderId);
+
+    if (pendingIds.length === 0) return;
+
+    setBackfillingComparisons(true);
+    try {
+      const token = await getAuthToken();
+      for (let index = 0; index < pendingIds.length; index += 15) {
+        const chunk = pendingIds.slice(index, index + 15);
+        const response = await fetch("/api/order-invoice", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            mode: "backfill-comparisons",
+            orderIds: chunk,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) continue;
+
+        setInvoiceMetaByOrder((current) => ({
+          ...current,
+          ...(payload.items || {}),
+        }));
+      }
+    } catch {
+      // Keep queue usable even if historical comparison backfill fails.
+    } finally {
+      setBackfillingComparisons(false);
+    }
+  }
+
+  async function refreshInvoiceComparison(orderId) {
+    if (!orderId) return null;
+
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(`/api/order-invoice?orderId=${encodeURIComponent(orderId)}&compare=1`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) return null;
+
+      const item = payload.item || null;
+      if (item) {
+        setInvoiceMetaByOrder((current) => ({
+          ...current,
+          [orderId]: item,
+        }));
+      }
+      return item;
+    } catch {
+      return null;
     }
   }
 
@@ -218,6 +339,10 @@ export default function PendingOrdersPage() {
           [orderId]: String(invoiceMetaByOrder?.[orderId]?.status || ""),
         };
       });
+
+      if (invoiceMetaByOrder?.[orderId]?.invoiceFilePath) {
+        await refreshInvoiceComparison(orderId);
+      }
 
       if (isInvoiceMakerRole(userRole)) {
         setOpenStartedAtByOrder((current) => {
@@ -312,6 +437,24 @@ export default function PendingOrdersPage() {
     () => orders.find((order) => order.id === activeOrderId) || null,
     [orders, activeOrderId]
   );
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const meta = invoiceMetaByOrder?.[order.id] || null;
+      const age = daysOld(order.updated_at || order.created_at);
+
+      return includesFilter(order.id, columnFilters.orderId)
+        && includesFilter(order.customer_name || order.customer_code, columnFilters.customer)
+        && includesFilter(order.salesman_code, columnFilters.salesman)
+        && includesFilter(order.status, columnFilters.status)
+        && includesFilter(invoiceStatusText(meta), columnFilters.invoiceStatus)
+        && includesFilter(formatDateTime(meta?.invoiceUploadedAt), columnFilters.uploadedAt)
+        && includesFilter(formatDuration(meta?.invoiceBuildSeconds), columnFilters.timeToMake)
+        && includesFilter(formatDateTime(order.created_at), columnFilters.created)
+        && includesFilter(formatDateTime(order.updated_at), columnFilters.lastUpdated)
+        && includesFilter(age, columnFilters.age);
+    });
+  }, [columnFilters, invoiceMetaByOrder, orders]);
 
   async function regenerateOrderPdf() {
     if (!activeOrder) {
@@ -698,8 +841,14 @@ export default function PendingOrdersPage() {
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>Pending Order Queue</h2>
-              <span>{summary.total} order(s)</span>
+              <span>{filteredOrders.length} shown / {summary.total} order(s)</span>
             </div>
+
+            {backfillingComparisons ? (
+              <div className="moduleHint" style={{ marginBottom: "10px" }}>
+                Comparing past uploaded invoices with orders...
+              </div>
+            ) : null}
 
             <div className="moduleTableWrap">
               <table className="moduleTable">
@@ -717,9 +866,45 @@ export default function PendingOrdersPage() {
                     <th>Age (days)</th>
                     <th>Action</th>
                   </tr>
+                  <tr>
+                    {[
+                      ["orderId", "Filter ID"],
+                      ["customer", "Filter customer"],
+                      ["salesman", "Filter salesman"],
+                      ["status", "Filter status"],
+                      ["invoiceStatus", "Filter invoice status"],
+                      ["uploadedAt", "Filter uploaded"],
+                      ["timeToMake", "Filter time"],
+                      ["created", "Filter created"],
+                      ["lastUpdated", "Filter updated"],
+                      ["age", "Filter age"],
+                    ].map(([key, placeholder]) => (
+                      <th key={key}>
+                        <input
+                          className="moduleInput"
+                          type="text"
+                          value={columnFilters[key]}
+                          placeholder={placeholder}
+                          onChange={(event) => setColumnFilters((current) => ({
+                            ...current,
+                            [key]: event.target.value,
+                          }))}
+                        />
+                      </th>
+                    ))}
+                    <th>
+                      <button
+                        type="button"
+                        className="moduleInlineButton"
+                        onClick={() => setColumnFilters(EMPTY_FILTERS)}
+                      >
+                        Clear
+                      </button>
+                    </th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {orders.map((order) => {
+                  {filteredOrders.map((order) => {
                     const age = daysOld(order.updated_at || order.created_at);
                     const meta = invoiceMetaByOrder?.[order.id] || null;
 
@@ -797,6 +982,8 @@ export default function PendingOrdersPage() {
                                   <span> | <strong>Uploaded at:</strong> {formatDateTime(meta?.invoiceUploadedAt)}</span>
                                   <span> | <strong>Time to make:</strong> {formatDuration(meta?.invoiceBuildSeconds)}</span>
                                 </div>
+
+                                <InvoiceComparisonPanel meta={meta} backfillingComparisons={backfillingComparisons} />
 
                                 {isInvoiceMaker && (
                                   <div style={{ marginTop: "12px" }}>
@@ -914,9 +1101,9 @@ export default function PendingOrdersPage() {
                     );
                   })}
 
-                  {orders.length === 0 && (
+                  {filteredOrders.length === 0 && (
                     <tr>
-                      <td colSpan={11}>No pending orders found.</td>
+                      <td colSpan={11}>{orders.length === 0 ? "No pending orders found." : "No orders match the current filters."}</td>
                     </tr>
                   )}
                 </tbody>

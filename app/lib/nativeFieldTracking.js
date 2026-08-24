@@ -23,6 +23,8 @@ const TRACKING_PREFS_PREFIX = "madiba.nativeTracking.";
 let trackingTimer = null;
 let activeUserId = null;
 let cycleInFlight = false;
+let appStateListener = null;
+let visibilityListener = null;
 
 export const NATIVE_WORKDAY_READY_EVENT = "madiba-workday-ready";
 export const NATIVE_WORKDAY_STOP_EVENT = "madiba-workday-stop";
@@ -348,6 +350,38 @@ async function runTrackingCycle(userId) {
   }
 }
 
+async function installResumeListeners(userId) {
+  if (!(await isNativeAndroidPlatform())) return;
+
+  if (appStateListener) {
+    await appStateListener.remove().catch(() => {});
+    appStateListener = null;
+  }
+
+  try {
+    const { App } = await import("@capacitor/app");
+    appStateListener = await App.addListener("appStateChange", ({ isActive }) => {
+      if (isActive && activeUserId === userId) {
+        runTrackingCycle(userId);
+      }
+    });
+  } catch {
+    // Resume catch-up is best-effort when App plugin is unavailable.
+  }
+
+  if (typeof document !== "undefined") {
+    if (visibilityListener) {
+      document.removeEventListener("visibilitychange", visibilityListener);
+    }
+    visibilityListener = () => {
+      if (document.visibilityState === "visible" && activeUserId === userId) {
+        runTrackingCycle(userId);
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityListener);
+  }
+}
+
 export async function startNativeFieldTracking(userId) {
   if (!userId || !(await isNativeAndroidPlatform())) return;
   if (activeUserId === userId && trackingTimer) return;
@@ -358,6 +392,7 @@ export async function startNativeFieldTracking(userId) {
   await ensureNativePermissions();
   await startForegroundServiceNotification();
   await registerPushNotifications(userId);
+  await installResumeListeners(userId);
 
   await runTrackingCycle(userId);
   trackingTimer = window.setInterval(() => {
@@ -369,6 +404,16 @@ export async function stopNativeFieldTracking() {
   if (trackingTimer) {
     window.clearInterval(trackingTimer);
     trackingTimer = null;
+  }
+
+  if (appStateListener) {
+    await appStateListener.remove().catch(() => {});
+    appStateListener = null;
+  }
+
+  if (visibilityListener && typeof document !== "undefined") {
+    document.removeEventListener("visibilitychange", visibilityListener);
+    visibilityListener = null;
   }
 
   activeUserId = null;

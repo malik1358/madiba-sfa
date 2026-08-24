@@ -27,8 +27,11 @@ The workflow also runs automatically when `android/` or Capacitor config changes
 While logged in during an active work session, the app will:
 
 - Show a persistent **“MADIBA field tracking active”** notification (Android foreground service)
-- Send **GPS pings every 15 minutes** after 15 minutes of inactivity
+- Check location every **5 minutes** while the app process is running, and save an **idle GPS ping** once **15 minutes pass with no visit/order/collection activity** (not a fixed ping every 15 minutes on the clock)
+- When Soyeb reopens the app after it was minimized, a **catch-up ping** runs immediately if the 15-minute idle threshold was already reached
 - Show a **lock-screen alert** if no visit/order/collection is recorded for 45 minutes (repeats every 15 minutes while still idle)
+
+**Important:** Android may pause JavaScript timers when the screen is off or another app is in front. For reliable tracking, keep MADIBA open or return to it periodically, set **Battery → Unrestricted**, and grant **Location → Allow all the time**. Pings are also paused during **lunch break** (between Lunch out and Lunch in).
 
 Active sessions follow attendance logs: **login → lunch break out**, then **lunch break in → logout**. Nothing runs during lunch or after end-of-day. If lunch lasts more than **3 hours**, a one-time reminder push is sent (English or Arabic).
 

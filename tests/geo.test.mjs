@@ -11,6 +11,8 @@ import {
   formatCollectorDisplayName,
   formatCollectionUserDisplayName,
   formatCollectionUserRoleLabel,
+  formatGpsCapturePlatformLabel,
+  inferGpsCapturePlatformFromNote,
   isCollectionReportCollector,
   isCollectionReportSalesman,
   GPS_REQUIRED_ERROR,
@@ -18,6 +20,7 @@ import {
   nearestActivityGps,
   parseGpsFromActivityNote,
   parseReverseGeocodeAddress,
+  normalizeGpsCapturePlatform,
   summarizeRouteDistanceKm,
 } from "../app/lib/geo.js";
 
@@ -80,6 +83,23 @@ test("parseGpsFromActivityNote reads nested location payload", () => {
   assert.equal(gps.latitude, 24.7136);
   assert.equal(gps.longitude, 46.6753);
   assert.equal(gps.accuracy, 12);
+  assert.equal(gps.platform, "web");
+});
+
+test("normalizeGpsCapturePlatform infers android from native source", () => {
+  assert.equal(normalizeGpsCapturePlatform("", "native_foreground_service"), "android");
+  assert.equal(normalizeGpsCapturePlatform("android"), "android");
+  assert.equal(formatGpsCapturePlatformLabel("android"), "Android App");
+});
+
+test("inferGpsCapturePlatformFromNote reads stored platform", () => {
+  const platform = inferGpsCapturePlatformFromNote(JSON.stringify({
+    platform: "android",
+    source: "native_idle",
+    location: { latitude: 1, longitude: 2 },
+  }));
+
+  assert.equal(platform, "android");
 });
 
 test("nearestActivityGps picks the closest point within the window", () => {

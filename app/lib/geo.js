@@ -54,20 +54,68 @@ export function requireGpsLocation(options = {}) {
   return captureGpsLocation();
 }
 
+export function normalizeGpsCapturePlatform(value, source = "") {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "android" || text === "ios" || text === "web") return text;
+
+  const sourceText = String(source || "").trim().toLowerCase();
+  if (
+    sourceText.includes("native")
+    || sourceText.includes("foreground")
+    || sourceText.includes("android")
+  ) {
+    return "android";
+  }
+
+  return "web";
+}
+
+export function inferGpsCapturePlatformFromNote(note) {
+  const parsed = parseActivityNoteObject(note);
+  if (!parsed) return null;
+  return normalizeGpsCapturePlatform(parsed.platform, parsed.source);
+}
+
+export function formatGpsCapturePlatformLabel(platform) {
+  const normalized = normalizeGpsCapturePlatform(platform);
+  if (normalized === "android") return "Android App";
+  if (normalized === "ios") return "iOS App";
+  return "Web";
+}
+
+export async function resolveGpsCapturePlatform() {
+  if (typeof window === "undefined") return "web";
+
+  try {
+    const { Capacitor } = await import("@capacitor/core");
+    const platform = Capacitor.getPlatform();
+    if (platform === "android" || platform === "ios") return platform;
+  } catch {
+    // Capacitor is unavailable in plain browser builds.
+  }
+
+  return "web";
+}
+
 export function buildGpsActivityNote(action, location, extra = {}) {
+  const platform = normalizeGpsCapturePlatform(extra.platform, extra.source);
+  const { platform: _platform, ...rest } = extra;
+
   return JSON.stringify({
     action,
     captured_at: new Date().toISOString(),
     location,
-    ...extra,
+    platform,
+    ...rest,
   });
 }
 
 export async function insertGpsActivityLog(supabase, userId, entryType, location, extra = {}) {
+  const platform = extra.platform || await resolveGpsCapturePlatform();
   const { error } = await supabase.from("daily_activity_logs").insert({
     user_id: userId,
     entry_type: entryType,
-    note: buildGpsActivityNote(entryType, location, extra),
+    note: buildGpsActivityNote(entryType, location, { ...extra, platform }),
   });
   if (error) throw error;
 }
@@ -152,6 +200,7 @@ export function parseGpsFromActivityNote(note) {
     accuracy: Number(location.accuracy ?? parsed.accuracy) || null,
     capturedAt: Number.isFinite(capturedTs) ? capturedAt : null,
     capturedTs: Number.isFinite(capturedTs) ? capturedTs : 0,
+    platform: normalizeGpsCapturePlatform(parsed.platform, parsed.source),
   };
 }
 

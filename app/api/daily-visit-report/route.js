@@ -10,8 +10,10 @@ import {
   extractAreaFromActivityNote,
   extractStreetFromActivityNote,
   formatCollectorDisplayName,
+  formatGpsCapturePlatformLabel,
   computeSpeedKmh,
   hasGpsCoordinates,
+  inferGpsCapturePlatformFromNote,
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
 } from "../../lib/geo.js";
@@ -271,6 +273,9 @@ function enrichEntries(entries, customerMap, profileMap) {
       : null;
     const area = String(customer.area || extractAreaFromActivityNote(entry.meta?.activityNote) || "").trim();
     const street = extractStreetFromActivityNote(entry.meta?.activityNote);
+    const capturePlatform = entry.meta?.activityNote
+      ? inferGpsCapturePlatformFromNote(entry.meta.activityNote)
+      : null;
 
     return {
       id: entry.id,
@@ -297,6 +302,8 @@ function enrichEntries(entries, customerMap, profileMap) {
       speedKmh,
       area,
       street,
+      capturePlatform,
+      capturePlatformLabel: capturePlatform ? formatGpsCapturePlatformLabel(capturePlatform) : null,
       isFarFromCustomer: farFromCustomer,
       farThresholdKm: CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM,
     };

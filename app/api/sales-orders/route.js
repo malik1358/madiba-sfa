@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { GPS_REQUIRED_ERROR, hasGpsCoordinates } from "../../lib/geo.js";
+import { GPS_REQUIRED_ERROR, buildGpsActivityNote, hasGpsCoordinates, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 
@@ -167,16 +167,6 @@ async function appendOrderHistory(admin, {
   return readHistory(admin, orderId);
 }
 
-function buildGpsActivityNote(entryType, location, extra = {}) {
-  return JSON.stringify({
-    action: entryType,
-    latitude: location?.latitude ?? null,
-    longitude: location?.longitude ?? null,
-    accuracy: location?.accuracy ?? null,
-    ...extra,
-  });
-}
-
 async function insertGpsActivityLog(admin, userId, entryType, location, extra = {}) {
   const { error } = await admin.from("daily_activity_logs").insert({
     user_id: userId,
@@ -318,6 +308,7 @@ export async function POST(request) {
     const lines = Array.isArray(body?.lines) ? body.lines : [];
     const location = body?.location || null;
     const capturedAt = String(body?.capturedAt || new Date().toISOString());
+    const capturePlatform = normalizeGpsCapturePlatform(body?.platform);
     const loadedOrderStatus = String(body?.loadedOrderStatus || "DRAFT").trim().toUpperCase();
     const requestedOrderId = body?.orderId ? Number(body.orderId) : null;
 
@@ -384,6 +375,7 @@ export async function POST(request) {
           order_id: orderId,
           customer_code: customerCode,
           customer_name: customerName,
+          platform: capturePlatform,
         },
       );
     }
@@ -417,6 +409,7 @@ export async function POST(request) {
         await insertGpsActivityLog(admin, user.id, "ORDER_SUBMITTED", location, {
           order_id: orderId,
           customer_code: customerCode,
+          platform: capturePlatform,
         });
       }
 

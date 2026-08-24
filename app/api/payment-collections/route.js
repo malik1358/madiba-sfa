@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { buildCollectionQueues, filterCollectionQueueInvoices, invoiceHasCashRef } from "../../lib/paymentCollections.js";
+import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { resolveMutualGroupProfiles, buildSalesmanScopeMatchers, salesmanValueMatchesScope, normalizeSalesmanCode } from "../../lib/mutualSalesmanGroups.js";
@@ -10,6 +11,8 @@ import {
   isPlaceholderSalesmanValue,
   mergeOutstandingInvoiceSources,
   pickOutstandingSalesmanName,
+  customerAccountCodesMatch,
+  resolveCustomerAccountCode,
   resolveInvoiceAgingDays,
   resolveOutstandingInvoiceCustomerCode,
   toNumber,
@@ -37,14 +40,36 @@ function normalizeCode(value) {
 
 // Customer codes in uploads appear as "1114C SOME NAME" or "1442-MADAR SOME NAME".
 function canonicalCustomerCode(value) {
-  const raw = normalizeCode(value);
-  if (!raw) return "";
+  return resolveCustomerAccountCode(value);
+}
 
-  const numericPrefix = raw.match(/^(\d{3,6}[A-Z]?)[-\s]/);
-  if (numericPrefix) return numericPrefix[1];
+function preferMatchingCustomerKey(candidates, targetCode) {
+  const normalizedTarget = canonicalCustomerCode(targetCode);
+  if (!normalizedTarget) return "";
 
-  const extracted = normalizeCode(extractLeadingCustomerCodeAndName(raw).customer_code);
-  return extracted || raw.split(/\s+/)[0] || raw;
+  let bestMatch = "";
+  (candidates || []).forEach((candidate) => {
+    const normalizedCandidate = canonicalCustomerCode(candidate);
+    if (!normalizedCandidate) return;
+    if (!customerAccountCodesMatch(normalizedCandidate, normalizedTarget)) return;
+
+    if (
+      !bestMatch
+      || normalizedCandidate.length > bestMatch.length
+      || (normalizedCandidate.length === bestMatch.length && normalizedCandidate.localeCompare(bestMatch) < 0)
+    ) {
+      bestMatch = normalizedCandidate;
+    }
+  });
+
+  return bestMatch || normalizedTarget;
+}
+
+function findScopedCollectionRecord(records, customerCode) {
+  const target = canonicalCustomerCode(customerCode);
+  if (!target) return null;
+
+  return (records || []).find((record) => customerAccountCodesMatch(record?.customer_code, target)) || null;
 }
 
 async function readOutstandingInvoicesFromTable(admin) {
@@ -593,11 +618,19 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
   // Outstanding files often contain codes that are missing or inactive in the customers table.
   invoicesByCustomer.forEach((customerInvoices, key) => {
-    if (uniqueCustomers.has(key)) return;
+    const matchedKey = preferMatchingCustomerKey([...uniqueCustomers.keys(), key], key);
+    if (uniqueCustomers.has(matchedKey)) {
+      if (matchedKey !== key) {
+        const existingInvoices = invoicesByCustomer.get(matchedKey) || [];
+        invoicesByCustomer.set(matchedKey, [...existingInvoices, ...customerInvoices]);
+        invoicesByCustomer.delete(key);
+      }
+      return;
+    }
 
-    uniqueCustomers.set(key, {
-      customer_code: key,
-      customer_name: nameByCustomer.get(key) || key,
+    uniqueCustomers.set(matchedKey, {
+      customer_code: matchedKey,
+      customer_name: nameByCustomer.get(key) || matchedKey,
       current_salesman_code: "",
       city: "",
       area: "",
@@ -730,7 +763,7 @@ export async function POST(request) {
 
     const customerCodeRaw = String(formData.get("customerCode") || "");
     const customerName = String(formData.get("customerName") || "").trim();
-    const customerCode = canonicalCustomerCode(customerCodeRaw);
+    let customerCode = canonicalCustomerCode(customerCodeRaw);
     const visitOutcome = String(formData.get("visitOutcome") || "").trim();
     const paymentStatus = String(formData.get("paymentStatus") || "").trim();
     const amountReceived = Number(formData.get("amountReceived") || 0);
@@ -785,16 +818,17 @@ export async function POST(request) {
       throw new Error("Next visit date is required when full payment was not received.");
     }
 
-    await ensureCollectionCustomerRecord(admin, customerCode, customerName);
-
     // Verify user has access to this customer
     if (!scope.hasAllAccess) {
       const records = await fetchOutstandingAndCollectionRecords(admin, scope);
-      const target = canonicalCustomerCode(customerCode);
-      if (!records.some((record) => record.customer_code === target)) {
+      const matchedRecord = findScopedCollectionRecord(records, customerCode);
+      if (!matchedRecord) {
         throw new Error("You do not have access to this customer");
       }
+      customerCode = matchedRecord.customer_code;
     }
+
+    await ensureCollectionCustomerRecord(admin, customerCode, customerName);
 
     // Handle file uploads for payment and receipt copies
     let paymentCopyUrl = null;
@@ -968,7 +1002,7 @@ export async function PATCH(request) {
 
     const user = await getAuthUser(request);
     const body = await request.json();
-    const customerCode = canonicalCustomerCode(body.customerCode || "");
+    let customerCode = canonicalCustomerCode(body.customerCode || "");
     const action = String(body.action || "transfer").trim().toLowerCase();
     const note = String(body.note || "").trim();
     const latitude = body.latitude === null || body.latitude === undefined || body.latitude === ""
@@ -993,9 +1027,11 @@ export async function PATCH(request) {
 
     if (!scope.hasAllAccess) {
       const records = await fetchOutstandingAndCollectionRecords(admin, scope);
-      if (!records.some((record) => record.customer_code === customerCode)) {
+      const matchedRecord = findScopedCollectionRecord(records, customerCode);
+      if (!matchedRecord) {
         throw new Error("You do not have access to this customer");
       }
+      customerCode = matchedRecord.customer_code;
     }
 
     if (action === "remove") {
@@ -1032,16 +1068,18 @@ export async function PATCH(request) {
     }
 
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-      const gpsNote = JSON.stringify({
-        action: action === "remove" ? "LEGAL_TRANSFER_REMOVE" : "LEGAL_TRANSFER",
-        customer_code: customerCode,
-        captured_at: new Date().toISOString(),
-        location: {
+      const gpsNote = buildGpsActivityNote(
+        action === "remove" ? "LEGAL_TRANSFER_REMOVE" : "LEGAL_TRANSFER",
+        {
           latitude,
           longitude,
           accuracy: Number(body.gpsAccuracyMeters) || null,
         },
-      });
+        {
+          customer_code: customerCode,
+          platform: normalizeGpsCapturePlatform(body?.platform),
+        },
+      );
 
       const { error: gpsLogError } = await admin.from("daily_activity_logs").insert({
         user_id: user.id,

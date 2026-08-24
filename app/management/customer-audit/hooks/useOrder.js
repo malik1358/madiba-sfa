@@ -4,6 +4,7 @@ import {
   captureGpsLocationWithFallbackConfirm,
 } from '../../../lib/customerLocation';
 import { postJsonResilient } from '../../../lib/offlineApi';
+import { resolveGpsCapturePlatform } from '../../../lib/geo';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
 
@@ -24,6 +25,7 @@ function buildOrderPayload({
   loadedOrderStatus,
   location,
   capturedAt,
+  platform,
 }) {
   return {
     action,
@@ -34,6 +36,7 @@ function buildOrderPayload({
     loadedOrderStatus: loadedOrderStatus || 'DRAFT',
     capturedAt,
     location,
+    platform,
     lines: orderItems.map((item) => ({
       item_code: item.item_code,
       item_name: item.item_name,
@@ -233,6 +236,7 @@ export function useOrder({
         role: userRole,
       });
       const capturedAt = new Date().toISOString();
+      const platform = await resolveGpsCapturePlatform();
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -246,6 +250,7 @@ export function useOrder({
           loadedOrderStatus,
           location,
           capturedAt,
+          platform,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -316,6 +321,7 @@ export function useOrder({
         role: userRole,
       });
       const capturedAt = new Date().toISOString();
+      const platform = await resolveGpsCapturePlatform();
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -329,6 +335,7 @@ export function useOrder({
           loadedOrderStatus,
           location,
           capturedAt,
+          platform,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,

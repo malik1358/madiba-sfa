@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildGpsActivityNote } from "../../lib/geo.js";
+import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import {
   isWithinActiveWorkSession,
@@ -130,10 +130,11 @@ export async function POST(request) {
     }
 
     const source = String(body?.source || "native_idle").trim() || "native_idle";
+    const platform = normalizeGpsCapturePlatform(body?.platform, source);
     const { error: insertError } = await admin.from("daily_activity_logs").insert({
       user_id: user.id,
       entry_type: "GPS_PING",
-      note: buildGpsActivityNote("GPS_PING", location, { source }),
+      note: buildGpsActivityNote("GPS_PING", location, { source, platform }),
     });
 
     if (insertError) throw insertError;

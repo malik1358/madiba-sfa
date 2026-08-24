@@ -17,6 +17,7 @@ import { evaluateNativeAndroidApkVersion } from "../lib/androidAppVersion";
 import { isNativeAndroidPlatform } from "../lib/nativeFieldTracking";
 import AndroidApkUpdateRequired from "./AndroidApkUpdateRequired";
 import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
+import { buildGpsActivityNote, resolveGpsCapturePlatform } from "../lib/geo";
 import { queueTransactionAlert } from "../lib/transactionAlertClient";
 
 const TEXT = {
@@ -204,14 +205,14 @@ export default function MorningAttendanceGate({
 
     const location = await captureLocation();
     const capturedAt = new Date().toISOString();
+    const platform = await resolveGpsCapturePlatform();
     const payload = {
       user_id: sessionUserId,
       entry_type: "MORNING_ATTENDANCE",
-      note: JSON.stringify({
-        action: "MORNING_ATTENDANCE",
+      note: buildGpsActivityNote("MORNING_ATTENDANCE", location, {
         autoCaptured: true,
         captured_at: capturedAt,
-        location,
+        platform,
       }),
     };
 
@@ -230,14 +231,15 @@ export default function MorningAttendanceGate({
 
     const location = await captureLocation();
     const nowIso = new Date().toISOString();
+    const platform = await resolveGpsCapturePlatform();
 
     const payload = {
       user_id: sessionUserId,
       entry_type: "GPS_PING",
-      note: JSON.stringify({
-        action: "GPS_PING",
+      note: buildGpsActivityNote("GPS_PING", location, {
         captured_at: nowIso,
-        location,
+        source: "web_idle",
+        platform,
       }),
     };
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
+import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 
 export const runtime = "nodejs";
@@ -229,18 +230,20 @@ export async function PATCH(request) {
       if (clearMetaError) throw clearMetaError;
     }
 
-    const activityNote = JSON.stringify({
-      action: updatedCustomer.is_active === false ? "CUSTOMER_INACTIVE" : "CUSTOMER_ACTIVE",
-      customer_code: customerCode,
-      captured_at: new Date().toISOString(),
-      location: Number.isFinite(latitude) && Number.isFinite(longitude)
+    const activityNote = buildGpsActivityNote(
+      updatedCustomer.is_active === false ? "CUSTOMER_INACTIVE" : "CUSTOMER_ACTIVE",
+      Number.isFinite(latitude) && Number.isFinite(longitude)
         ? {
           latitude,
           longitude,
           accuracy: Number(location.accuracy) || null,
         }
         : null,
-    });
+      {
+        customer_code: customerCode,
+        platform: normalizeGpsCapturePlatform(body?.platform),
+      },
+    );
 
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
       const { error: gpsLogError } = await admin.from("daily_activity_logs").insert({

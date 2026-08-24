@@ -140,6 +140,52 @@ export function customerCodeCandidates(value) {
   return [...new Set([storedCode, extractedCode].filter(Boolean))];
 }
 
+export function resolveCustomerAccountCode(value) {
+  const raw = normalizeCode(value);
+  if (!raw) return "";
+
+  const numericPrefix = raw.match(/^(\d{3,6}[A-Z]?)[-\s]/);
+  if (numericPrefix) return numericPrefix[1];
+
+  const extracted = normalizeCode(extractLeadingCustomerCodeAndName(raw).customer_code);
+  return extracted || raw.split(/\s+/)[0] || raw;
+}
+
+export function customerAccountCodesMatch(left, right) {
+  const leftCode = resolveCustomerAccountCode(left);
+  const rightCode = resolveCustomerAccountCode(right);
+  if (!leftCode || !rightCode) return false;
+  if (leftCode === rightCode) return true;
+
+  const leftCandidates = new Set(
+    customerCodeCandidates(left).map((candidate) => resolveCustomerAccountCode(candidate)).filter(Boolean),
+  );
+  const leftVariants = new Set([leftCode, ...leftCandidates]);
+  const rightCandidates = new Set(
+    customerCodeCandidates(right).map((candidate) => resolveCustomerAccountCode(candidate)).filter(Boolean),
+  );
+  const rightVariants = new Set([rightCode, ...rightCandidates]);
+
+  for (const leftVariant of leftVariants) {
+    if (rightVariants.has(leftVariant)) return true;
+  }
+
+  for (const leftVariant of leftVariants) {
+    for (const rightVariant of rightVariants) {
+      if (leftVariant === rightVariant) return true;
+
+      const shorter = leftVariant.length <= rightVariant.length ? leftVariant : rightVariant;
+      const longer = leftVariant.length > rightVariant.length ? leftVariant : rightVariant;
+      if (!longer.startsWith(shorter)) continue;
+
+      const suffix = longer.slice(shorter.length);
+      if (/^\d{3,6}$/.test(shorter) && /^[A-Z]$/.test(suffix)) return true;
+    }
+  }
+
+  return false;
+}
+
 export function extractLeadingCustomerCodeAndName(value) {
   const text = String(value || "").trim();
   if (!text) {

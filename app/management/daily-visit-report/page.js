@@ -7,7 +7,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
-import { applyReverseGeocoding, buildGoogleMapsPointUrl } from "../../lib/geo";
+import { applyReverseGeocoding, buildGoogleMapsPointUrl, buildGpsActivityNote, resolveGpsCapturePlatform } from "../../lib/geo";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
 import { useReverseGeocodeCache } from "../../hooks/useReverseGeocodeCache";
@@ -52,6 +52,7 @@ const TEXT = {
   entries: { en: "entries", ar: "إدخالات" },
   routeTotal: { en: "Route total", ar: "إجمالي المسار" },
   autoClosed: { en: "Auto-closed", ar: "إغلاق تلقائي" },
+  platform: { en: "Platform", ar: "المنصة" },
 };
 
 function formatNumber(value, digits = 2) {
@@ -295,6 +296,7 @@ export default function DailyVisitReportPage() {
                           <th>{t("area")}</th>
                           <th>{t("street")}</th>
                           <th>{t("speed")}</th>
+                          <th>{t("platform")}</th>
                           <th>{t("map")}</th>
                         </tr>
                       </thead>
@@ -342,6 +344,7 @@ export default function DailyVisitReportPage() {
                                 ? "-"
                                 : `${formatNumber(entry.speedKmh, 1)} km/h`}
                             </td>
+                            <td>{entry.capturePlatformLabel || "-"}</td>
                             <td>
                               {entry.hasEntryGps ? (
                                 <a
@@ -358,7 +361,7 @@ export default function DailyVisitReportPage() {
                         ))}
                         {(entryUser.entries || []).length === 0 && (
                           <tr>
-                            <td colSpan={11}>{t("noEntries")}</td>
+                            <td colSpan={12}>{t("noEntries")}</td>
                           </tr>
                         )}
                       </tbody>

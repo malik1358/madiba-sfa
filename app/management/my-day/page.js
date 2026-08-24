@@ -21,6 +21,7 @@ import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
+import { buildGpsActivityNote, resolveGpsCapturePlatform } from "../../lib/geo";
 import { postJsonResilient } from "../../lib/offlineApi";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 
@@ -771,15 +772,14 @@ export default function MyDayPage() {
       }
 
       const location = await captureLocation();
+      const platform = await resolveGpsCapturePlatform();
 
       const payload = {
         user_id: session.user.id,
         entry_type: entryType,
-        note: JSON.stringify({
-          action: entryType,
+        note: buildGpsActivityNote(entryType, location, {
           note: entryType === "NOTE" ? note || null : null,
-          captured_at: new Date().toISOString(),
-          location,
+          platform,
         }),
       };
 
@@ -981,14 +981,14 @@ export default function MyDayPage() {
         });
       }
       const capturedAt = new Date().toISOString();
+      const platform = await resolveGpsCapturePlatform();
       let saveResult = null;
 
       if (logsEnabled) {
         const payload = {
           user_id: session.user.id,
           entry_type: "VISIT_REPORT",
-          note: JSON.stringify({
-            action: "VISIT_REPORT",
+          note: buildGpsActivityNote("VISIT_REPORT", location, {
             customer_code: customer.customer_code,
             customer_name: customer.customer_name,
             outcome: visitForm.outcome,
@@ -996,7 +996,7 @@ export default function MyDayPage() {
             note: visitForm.note || null,
             stock_checks: visitForm.stockChecks,
             captured_at: capturedAt,
-            location,
+            platform,
           }),
         };
 
@@ -1022,6 +1022,7 @@ export default function MyDayPage() {
             stockChecks: visitForm.stockChecks,
             capturedAt,
             location,
+            platform,
           },
           headers: {
             Authorization: `Bearer ${session.access_token}`,
@@ -1094,6 +1095,7 @@ export default function MyDayPage() {
       }
 
       const location = await captureLocation();
+      const platform = await resolveGpsCapturePlatform();
 
       const response = await fetch("/api/visit-reports", {
         method: "PATCH",
@@ -1101,7 +1103,7 @@ export default function MyDayPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ customerCode: code, isActive: false, location }),
+        body: JSON.stringify({ customerCode: code, isActive: false, location, platform }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) {
@@ -1160,6 +1162,7 @@ export default function MyDayPage() {
       }
 
       const location = await captureLocation();
+      const platform = await resolveGpsCapturePlatform();
 
       const response = await fetch("/api/visit-reports", {
         method: "PATCH",
@@ -1167,7 +1170,7 @@ export default function MyDayPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ customerCode: code, isActive: true, location }),
+        body: JSON.stringify({ customerCode: code, isActive: true, location, platform }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) {

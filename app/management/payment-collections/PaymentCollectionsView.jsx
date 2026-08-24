@@ -10,7 +10,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveInvoiceAgingDays, resolveOverdueDaysFromDueDate } from "../../lib/outstanding";
-import { GPS_REQUIRED_ERROR } from "../../lib/geo";
+import { GPS_REQUIRED_ERROR, resolveGpsCapturePlatform } from "../../lib/geo";
 import {
   captureGpsLocationWithFallbackConfirm,
 } from "../../lib/customerLocation";
@@ -1275,6 +1275,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         accessToken: session.access_token,
         role: access.role,
       });
+      const platform = await resolveGpsCapturePlatform();
 
       const response = await fetch("/api/payment-collections", {
         method: "PATCH",
@@ -1290,6 +1291,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           latitude: gps?.latitude ?? null,
           longitude: gps?.longitude ?? null,
           gpsAccuracyMeters: gps?.accuracy ?? null,
+          platform,
         }),
       });
 

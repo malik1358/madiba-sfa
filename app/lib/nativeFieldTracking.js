@@ -139,6 +139,7 @@ async function postGpsPing(accessToken, location) {
       body: JSON.stringify({
         ...location,
         source: "native_foreground_service",
+        platform: "android",
       }),
     },
     20000,

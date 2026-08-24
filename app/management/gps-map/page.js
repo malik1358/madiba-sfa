@@ -7,6 +7,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
+import { formatGpsCapturePlatformLabel, inferGpsCapturePlatformFromNote } from "../../lib/geo";
 import { getSupabaseClient } from "../../lib/supabase";
 
 const TEXT = {
@@ -77,6 +78,8 @@ function parseGps(note) {
     customer_code: String(parsed.customer_code || parsed.customerCode || "").trim(),
     customer_name: String(parsed.customer_name || parsed.customerName || "").trim(),
     captured_at: parsed.captured_at || parsed.capturedAt || null,
+    platform: inferGpsCapturePlatformFromNote(note),
+    platform_label: formatGpsCapturePlatformLabel(inferGpsCapturePlatformFromNote(note)),
   };
 }
 
@@ -272,6 +275,8 @@ export default function GpsMapPage() {
               longitude: gps.longitude,
               accuracy: gps.accuracy,
               street_name: String(gps.street_name || "").trim(),
+              platform: gps.platform,
+              platform_label: gps.platform_label,
               captured_at: capturedAt,
               created_at: log.created_at,
             };
@@ -947,6 +952,7 @@ export default function GpsMapPage() {
                     <th>Role</th>
                     <th>Action</th>
                     <th>GPS</th>
+                    <th>Platform</th>
                     <th>Captured At</th>
                     <th>Map</th>
                   </tr>
@@ -959,6 +965,7 @@ export default function GpsMapPage() {
                       <td>{getUserRoleLabel(point.role)}</td>
                       <td>{point.action || point.entry_type}</td>
                       <td>{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</td>
+                      <td>{point.platform_label || "-"}</td>
                       <td>{point.captured_at ? new Date(point.captured_at).toLocaleString("en-GB") : "-"}</td>
                       <td>
                         <div className="moduleInlineStack">
@@ -970,7 +977,7 @@ export default function GpsMapPage() {
                   ))}
                   {customerVisitPoints.length === 0 && (
                     <tr>
-                      <td colSpan={7}>No customer-wise visit points found.</td>
+                      <td colSpan={8}>No customer-wise visit points found.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1031,6 +1038,7 @@ export default function GpsMapPage() {
                     <th>Role</th>
                     <th>Customer</th>
                     <th>Action</th>
+                    <th>Platform</th>
                     <th>Capture Type</th>
                     <th>GPS</th>
                     <th>Distance From Previous</th>
@@ -1047,6 +1055,7 @@ export default function GpsMapPage() {
                       <td>{getUserRoleLabel(point.role)}</td>
                       <td>{point.customer_name || point.customer_code || "-"}</td>
                       <td>{point.action || point.entry_type}</td>
+                      <td>{point.platform_label || "-"}</td>
                       <td>{point.capture_type}</td>
                       <td>{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</td>
                       <td>{Number.isFinite(point.distance_from_previous_km) ? `${point.distance_from_previous_km.toFixed(2)} km` : "-"}</td>
@@ -1065,7 +1074,7 @@ export default function GpsMapPage() {
                   ))}
                   {enrichedFilteredRecords.length === 0 && (
                     <tr>
-                      <td colSpan={11}>No GPS captures found for selected filters.</td>
+                      <td colSpan={12}>No GPS captures found for selected filters.</td>
                     </tr>
                   )}
                 </tbody>

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   combineOutstandingHeaderRows,
+  customerAccountCodesMatch,
   customerCodeCandidates,
   detectOutstandingPendingAmountColumn,
   detectOutstandingSalesmanColumn,
@@ -121,6 +122,12 @@ test("customerCodeCandidates extracts code from a combined customer master value
     customerCodeCandidates("1173C LOULOAT AL NILE TRADING CO."),
     ["1173C LOULOAT AL NILE TRADING CO.", "1173C"]
   );
+});
+
+test("customerAccountCodesMatch treats numeric suffix variants as the same account", () => {
+  assert.equal(customerAccountCodesMatch("1199", "1199C"), true);
+  assert.equal(customerAccountCodesMatch("1199C", "1199 NASSER HAMAD AL-MALEK TRADING EST"), true);
+  assert.equal(customerAccountCodesMatch("1173C", "1174C"), false);
 });
 
 test("findOutstandingHeaderRow accepts Open Balance and Aging invoice detail headers", () => {

@@ -7,7 +7,9 @@ import {
   OUTSTANDING_DATASET_KEY,
   extractLeadingCustomerCodeAndName,
   hydrateOutstandingInvoices,
+  isPlaceholderSalesmanValue,
   mergeOutstandingInvoiceSources,
+  pickOutstandingSalesmanName,
   resolveInvoiceAgingDays,
   resolveOutstandingInvoiceCustomerCode,
   toNumber,
@@ -608,11 +610,15 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     const legalTransfer = legalTransfersByCustomer.get(customer.customer_code);
 
     // The uploaded file decides who collects, since customer assignments drift out of date.
-    const invoiceSalesmen = customerInvoices.map((invoice) => invoice.salesman).filter(Boolean);
+    const invoiceSalesmen = customerInvoices
+      .map((invoice) => invoice.salesman)
+      .filter((name) => name && !isPlaceholderSalesmanValue(name));
     if (!scope.hasAllAccess) {
       const invoiceOwned = invoiceSalesmen.some((name) => salesmanValueMatchesScope(name, scopeMatchers));
-      const customerOwned = salesmanValueMatchesScope(customer.current_salesman_code, scopeMatchers)
-        || normalizedScopeCodes.has(normalizeCode(customer.current_salesman_code));
+      const customerCode = customer.current_salesman_code;
+      const customerOwned = !isPlaceholderSalesmanValue(customerCode)
+        && (salesmanValueMatchesScope(customerCode, scopeMatchers)
+          || normalizedScopeCodes.has(normalizeCode(customerCode)));
       if (!invoiceOwned && !customerOwned) return;
     }
 
@@ -654,9 +660,10 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       customer_code: customer.customer_code,
       customer_name: customer.customer_name,
       current_salesman_code: customer.current_salesman_code,
-      salesman_name: invoiceSalesmen[0]
-        || salesmanMap.get(normalizeCode(customer.current_salesman_code))
-        || customer.current_salesman_code,
+      salesman_name: pickOutstandingSalesmanName(customerInvoices)
+        || (!isPlaceholderSalesmanValue(customer.current_salesman_code)
+          ? (salesmanMap.get(normalizeCode(customer.current_salesman_code)) || customer.current_salesman_code)
+          : ""),
       city: customer.city,
       area: customer.area,
       invoices: customerInvoices,

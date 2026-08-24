@@ -7,6 +7,7 @@ import {
   buildOutstandingRow,
   combineOutstandingHeaderRows,
   detectOutstandingPendingAmountColumn,
+  detectOutstandingSalesmanColumn,
   extractLeadingCustomerCodeAndName,
   findOutstandingForCustomer,
   findOutstandingHeaderRow,
@@ -179,10 +180,6 @@ function detectColumnIndexes(headerRow) {
       indexes.overdueDays = idx;
     }
 
-    if (indexes.salesman < 0 && (normalized.includes("salesman") || normalized.includes("sales person") || normalized.includes("salesperson"))) {
-      indexes.salesman = idx;
-    }
-
     const bucketLabel = parseBucketLabelFromHeader(text);
     if (!bucketLabel) return;
 
@@ -193,6 +190,8 @@ function detectColumnIndexes(headerRow) {
 
     indexes.buckets.push({ idx, label: bucketLabel });
   });
+
+  indexes.salesman = detectOutstandingSalesmanColumn(headerRow);
 
   indexes.invoiceDay = findOutstandingInvoiceDayColumn(
     headerRow,

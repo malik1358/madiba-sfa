@@ -5,6 +5,9 @@ import {
   combineOutstandingHeaderRows,
   customerCodeCandidates,
   detectOutstandingPendingAmountColumn,
+  detectOutstandingSalesmanColumn,
+  isPlaceholderSalesmanValue,
+  pickOutstandingSalesmanName,
   findOutstandingHeaderRow,
   findOutstandingCustomerCodesForSalesmen,
   findOutstandingInvoiceDayColumn,
@@ -21,6 +24,32 @@ import {
   summarizeOutstandingBuckets,
   visibleOutstandingBucketLabels,
 } from "../app/lib/outstanding.js";
+
+test("detectOutstandingSalesmanColumn prefers Salesman over Sales Person", () => {
+  const header = ["Date", "Ref. No.", "Party's Name", "Sales Person", "City Name", "State Name", "Pending", "Due on", "Overdue", "Invoice Days", "Salesman"];
+
+  assert.equal(detectOutstandingSalesmanColumn(header), 10);
+});
+
+test("isPlaceholderSalesmanValue detects voucher placeholders", () => {
+  assert.equal(isPlaceholderSalesmanValue("NOT ADDED IN VOUCHER"), true);
+  assert.equal(isPlaceholderSalesmanValue(""), true);
+  assert.equal(isPlaceholderSalesmanValue("N/A"), true);
+  assert.equal(isPlaceholderSalesmanValue("UNASSIGNED"), true);
+  assert.equal(isPlaceholderSalesmanValue("Osama"), false);
+});
+
+test("pickOutstandingSalesmanName prefers real salesman over empty and placeholders", () => {
+  const invoices = [
+    { salesman: "" },
+    { salesman: "NOT ADDED IN VOUCHER" },
+    { salesman: "Osama" },
+    { salesman: "Osama" },
+    { salesman: "" },
+  ];
+
+  assert.equal(pickOutstandingSalesmanName(invoices), "Osama");
+});
 
 test("findOutstandingCustomerCodesForSalesmen matches normalized salesman identity", () => {
   const dataset = {

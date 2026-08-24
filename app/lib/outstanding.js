@@ -283,6 +283,69 @@ export function isOutstandingAmountHeader(value) {
     || header.includes("amount due");
 }
 
+const PLACEHOLDER_SALESMAN_VALUES = new Set([
+  "NOT ADDED IN VOUCHER",
+  "N/A",
+  "NA",
+  "UNASSIGNED",
+  "NONE",
+  "-",
+  "--",
+]);
+
+export function isPlaceholderSalesmanValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  return PLACEHOLDER_SALESMAN_VALUES.has(text.toUpperCase());
+}
+
+function outstandingSalesmanColumnPriority(headerValue) {
+  const header = normalizeOutstandingHeader(headerValue);
+  if (!header) return 0;
+  if (header === "salesman") return 4;
+  if (header.includes("salesman")) return 3;
+  if (header.includes("salesperson")) return 2;
+  if (header.includes("sales person")) return 1;
+  return 0;
+}
+
+export function detectOutstandingSalesmanColumn(headerRow) {
+  let bestIndex = -1;
+  let bestPriority = 0;
+
+  (headerRow || []).forEach((cell, idx) => {
+    const priority = outstandingSalesmanColumnPriority(cell);
+    if (priority > bestPriority || (priority === bestPriority && priority > 0 && idx > bestIndex)) {
+      bestPriority = priority;
+      bestIndex = idx;
+    }
+  });
+
+  return bestIndex;
+}
+
+export function pickOutstandingSalesmanName(invoices) {
+  const counts = new Map();
+
+  (invoices || []).forEach((invoice) => {
+    const name = String(invoice?.salesman || "").trim();
+    if (isPlaceholderSalesmanValue(name)) return;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  });
+
+  let bestName = "";
+  let bestCount = 0;
+
+  counts.forEach((count, name) => {
+    if (count > bestCount) {
+      bestCount = count;
+      bestName = name;
+    }
+  });
+
+  return bestName;
+}
+
 export function detectOutstandingPendingAmountColumn(headerRow) {
   const exactIdx = (headerRow || []).findIndex((cell) => {
     const normalized = normalizeOutstandingHeader(cell);

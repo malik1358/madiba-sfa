@@ -7,7 +7,8 @@ import { useAppLanguage } from "./lib/appLanguage";
 import MorningAttendanceGate from "./components/MorningAttendanceGate";
 import MostVisitedPages from "./components/MostVisitedPages";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
-import { buildModuleAccess, listAccessibleModules } from "./lib/moduleAccess";
+import { buildModuleAccess, listAccessibleModules, shouldRequireTransactionGps } from "./lib/moduleAccess";
+import { isAndroidBatteryRestricted, openAndroidBatterySettings, requestAndroidBatteryUnrestricted } from "./lib/androidBatteryOptimization";
 
 export default function Home() {
   const { language, ar, dir, setLanguage } = useAppLanguage();
@@ -141,7 +142,7 @@ export default function Home() {
 
     if (error) {
       setProfile(null);
-      return;
+      return null;
     }
 
     setProfile(data);
@@ -149,6 +150,8 @@ export default function Home() {
     if (data?.preferred_language) {
       setLanguage(data.preferred_language);
     }
+
+    return data;
   }
 
   async function handleLogin(e) {
@@ -182,8 +185,24 @@ export default function Home() {
     }
 
     if (data?.user) {
+      const profileData = await loadProfile(data.user.id);
+      if (
+        profileData
+        && shouldRequireTransactionGps(profileData.role)
+        && await isAndroidBatteryRestricted()
+      ) {
+        await supabase.auth.signOut();
+        setUser(null);
+        setProfile(null);
+        setError(
+          ar
+            ? "يجب ضبط بطارية MADIBA على غير مقيد قبل تسجيل الدخول. افتح الإعدادات واضبط Battery إلى Unrestricted."
+            : "Set MADIBA battery to Unrestricted before signing in. Open settings and choose Battery → Unrestricted."
+        );
+        setLoginLoading(false);
+        return;
+      }
       setUser(data.user);
-      await loadProfile(data.user.id);
     }
 
     setLoginLoading(false);

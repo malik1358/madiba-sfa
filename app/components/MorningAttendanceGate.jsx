@@ -8,6 +8,11 @@ import { translate, useAppLanguage } from "../lib/appLanguage";
 import { detectTable } from "../lib/schemaGuards";
 import { autoCloseForgottenWorkdays, BACKGROUND_GPS_IDLE_MS, IDLE_GPS_ACTIVITY_ENTRY_TYPES, shouldCaptureIdleGpsPing } from "../lib/workdayActivity";
 import { NATIVE_WORKDAY_READY_EVENT } from "../lib/nativeFieldTracking";
+import {
+  isAndroidBatteryRestricted,
+  openAndroidBatterySettings,
+  requestAndroidBatteryUnrestricted,
+} from "../lib/androidBatteryOptimization";
 import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
 import { queueTransactionAlert } from "../lib/transactionAlertClient";
 
@@ -28,6 +33,15 @@ const TEXT = {
     en: "Unable to verify attendance status right now. You can continue, but attendance may not be recorded.",
     ar: "تعذر التحقق من حضور الصباح الآن. يمكنك المتابعة، لكن قد لا يتم تسجيل الحضور.",
   },
+  batteryTitle: { en: "Battery must be Unrestricted", ar: "يجب ضبط البطارية على غير مقيد" },
+  batteryDescription: {
+    en: "MADIBA needs unrestricted battery access on this phone so idle GPS tracking works while you are in the field. Open settings, choose MADIBA SFA, and set Battery to Unrestricted, then tap Check again.",
+    ar: "يحتاج MADIBA إلى وصول غير مقيد للبطارية على هذا الهاتف حتى يعمل تتبع GPS أثناء العمل. افتح الإعدادات، اختر MADIBA SFA، واضبط البطارية على غير مقيد، ثم اضغط تحقق مرة أخرى.",
+  },
+  openBatterySettings: { en: "Open battery settings", ar: "فتح إعدادات البطارية" },
+  allowUnrestrictedBattery: { en: "Allow unrestricted battery", ar: "السماح ببطارية غير مقيدة" },
+  checkBatteryAgain: { en: "Check again", ar: "تحقق مرة أخرى" },
+  checkingBattery: { en: "Checking battery settings...", ar: "جاري التحقق من إعدادات البطارية..." },
 };
 
 function captureLocation() {
@@ -118,15 +132,37 @@ export default function MorningAttendanceGate({
     && access.role !== "admin"
     && shouldRequireTransactionGps(access.role);
   const backgroundGpsEnabled = enableBackgroundGps && shouldRequireTransactionGps(access.role);
+  const batteryCheckRequired = shouldRequireTransactionGps(access.role);
   const [checking, setChecking] = useState(requireMorningAttendance);
   const [capturing, setCapturing] = useState(false);
   const [ready, setReady] = useState(!requireMorningAttendance);
+  const [batteryReady, setBatteryReady] = useState(false);
+  const [checkingBattery, setCheckingBattery] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const attemptedAutoRef = useRef(false);
   const autoPingInFlightRef = useRef(false);
   const lastGpsPingAtRef = useRef(0);
   const lastActivityAtRef = useRef(0);
+
+  async function verifyBatteryAccess() {
+    if (!batteryCheckRequired) {
+      setBatteryReady(true);
+      return true;
+    }
+
+    setCheckingBattery(true);
+    try {
+      const restricted = await isAndroidBatteryRestricted();
+      setBatteryReady(!restricted);
+      return !restricted;
+    } catch {
+      setBatteryReady(true);
+      return true;
+    } finally {
+      setCheckingBattery(false);
+    }
+  }
 
   async function insertAttendance(sessionUserId, accessToken = "") {
     const supabase = getSupabaseClient();
@@ -268,6 +304,13 @@ export default function MorningAttendanceGate({
       return;
     }
 
+    const batteryOk = await verifyBatteryAccess();
+    if (!batteryOk) {
+      setReady(false);
+      setChecking(false);
+      return;
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) {
       setReady(true);
@@ -368,6 +411,18 @@ export default function MorningAttendanceGate({
   }
 
   useEffect(() => {
+    if (accessLoading) return undefined;
+
+    if (!batteryCheckRequired) {
+      setBatteryReady(true);
+      return undefined;
+    }
+
+    verifyBatteryAccess();
+    return undefined;
+  }, [accessLoading, batteryCheckRequired]);
+
+  useEffect(() => {
     if (accessLoading) {
       return undefined;
     }
@@ -389,9 +444,22 @@ export default function MorningAttendanceGate({
         }
       }
 
-      runAutoClose();
-      setReady(true);
-      setChecking(false);
+      async function runBatteryAndAutoClose() {
+        const batteryOk = await verifyBatteryAccess();
+        if (cancelled) return;
+        if (!batteryOk) {
+          setReady(false);
+          setChecking(false);
+          return;
+        }
+        await runAutoClose();
+        if (!cancelled) {
+          setReady(true);
+          setChecking(false);
+        }
+      }
+
+      runBatteryAndAutoClose();
 
       return () => {
         cancelled = true;
@@ -410,12 +478,45 @@ export default function MorningAttendanceGate({
     }, 12000);
 
     return () => window.clearTimeout(safetyTimer);
-  }, [attendanceRequired, accessLoading]);
+  }, [attendanceRequired, accessLoading, batteryCheckRequired]);
+
+  useEffect(() => {
+    if (!batteryCheckRequired || batteryReady || accessLoading) return undefined;
+
+    let cancelled = false;
+
+    async function recheckOnResume() {
+      if (cancelled) return;
+      await verifyBatteryAccess();
+    }
+
+    const handleResume = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      recheckOnResume();
+    };
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleResume);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", handleResume);
+    }
+
+    return () => {
+      cancelled = true;
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleResume);
+      }
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", handleResume);
+      }
+    };
+  }, [batteryCheckRequired, batteryReady, accessLoading]);
 
   useEffect(() => {
     if (!backgroundGpsEnabled) return undefined;
 
-    const backgroundGpsReady = attendanceRequired ? ready : true;
+    const backgroundGpsReady = (attendanceRequired ? ready : batteryReady && ready) && batteryReady;
     if (!backgroundGpsReady) return undefined;
 
     let cancelled = false;
@@ -472,10 +573,10 @@ export default function MorningAttendanceGate({
         window.removeEventListener("online", handleVisibleOrFocused);
       }
     };
-  }, [backgroundGpsEnabled, attendanceRequired, ready]);
+  }, [backgroundGpsEnabled, attendanceRequired, ready, batteryReady]);
 
   useEffect(() => {
-    if (!ready || !backgroundGpsEnabled || typeof window === "undefined") return undefined;
+    if (!ready || !batteryReady || !backgroundGpsEnabled || typeof window === "undefined") return undefined;
 
     let cancelled = false;
     const supabase = getSupabaseClient();
@@ -493,7 +594,7 @@ export default function MorningAttendanceGate({
     return () => {
       cancelled = true;
     };
-  }, [backgroundGpsEnabled, ready]);
+  }, [backgroundGpsEnabled, ready, batteryReady]);
 
   if (accessLoading && requireMorningAttendance) {
     return (
@@ -509,12 +610,54 @@ export default function MorningAttendanceGate({
     );
   }
 
-  if (ready) {
+  if (ready && batteryReady) {
     return (
       <>
         {attendanceRequired ? <WorkdayInactivityPrompt /> : null}
         {children}
       </>
+    );
+  }
+
+  if (batteryCheckRequired && !batteryReady) {
+    return (
+      <main className="modulePage" dir={dir}>
+        <div className="moduleShell">
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>{checkingBattery ? t("checkingBattery") : t("batteryTitle")}</h2>
+            </div>
+            {!checkingBattery && (
+              <>
+                <div className="moduleHint">{t("batteryDescription")}</div>
+                <div className="moduleActionRow">
+                  <button
+                    type="button"
+                    className="modulePrimaryButton"
+                    onClick={() => requestAndroidBatteryUnrestricted().catch(() => openAndroidBatterySettings())}
+                  >
+                    {t("allowUnrestrictedBattery")}
+                  </button>
+                  <button
+                    type="button"
+                    className="moduleInlineButton moduleActionButton"
+                    onClick={() => openAndroidBatterySettings()}
+                  >
+                    {t("openBatterySettings")}
+                  </button>
+                  <button
+                    type="button"
+                    className="moduleInlineButton moduleActionButton"
+                    onClick={() => verifyBatteryAccess()}
+                  >
+                    {t("checkBatteryAgain")}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      </main>
     );
   }
 

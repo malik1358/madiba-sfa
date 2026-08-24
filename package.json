@@ -28,6 +28,7 @@
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/push-notifications": "^8.1.2",
     "@capacitor/splash-screen": "^8.0.2",
+    "@capawesome-team/capacitor-android-battery-optimization": "^8.0.1",
     "@capawesome-team/capacitor-android-foreground-service": "^8.1.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.1",

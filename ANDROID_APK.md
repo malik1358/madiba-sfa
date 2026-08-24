@@ -21,7 +21,7 @@ The workflow also runs automatically when `android/` or Capacitor config changes
 
 1. **Allow location → All the time** for MADIBA SFA
 2. **Allow notifications** when prompted
-3. **Battery → Unrestricted** for MADIBA SFA
+3. **Battery → Unrestricted** for MADIBA SFA — **required before login**; the app blocks sign-in and morning attendance until this is set
 4. Complete **morning attendance** — this starts the native field-tracking notification
 
 While logged in during an active work session, the app will:

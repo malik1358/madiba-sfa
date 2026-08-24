@@ -6,6 +6,8 @@ import {
   customerCodeCandidates,
   detectOutstandingPendingAmountColumn,
   detectOutstandingSalesmanColumn,
+  applyOutstandingRowSalesman,
+  buildOutstandingRowSalesmanByCode,
   isPlaceholderSalesmanValue,
   pickOutstandingSalesmanName,
   findOutstandingHeaderRow,
@@ -49,6 +51,25 @@ test("pickOutstandingSalesmanName prefers real salesman over empty and placehold
   ];
 
   assert.equal(pickOutstandingSalesmanName(invoices), "Osama");
+});
+
+test("applyOutstandingRowSalesman backfills invoice salesman from aggregate rows", () => {
+  const rows = [{
+    customer_code: "1134C",
+    customer_name: "Golden Top Company",
+    salesman: "Osama",
+    buckets: { ">120": 11850.52 },
+    total_outstanding: 11850.52,
+  }];
+  const invoices = [{
+    customer_code: "1134C",
+    customer_name: "Golden Top Company",
+    pending_amount: 11850.52,
+    salesman: "",
+  }];
+
+  assert.deepEqual(buildOutstandingRowSalesmanByCode(rows), new Map([["1134C", "Osama"]]));
+  assert.equal(applyOutstandingRowSalesman(invoices, rows)[0].salesman, "Osama");
 });
 
 test("findOutstandingCustomerCodesForSalesmen matches normalized salesman identity", () => {

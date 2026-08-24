@@ -85,11 +85,14 @@ export function synthesizeInvoicesFromOutstandingRows(rows, invoices = []) {
 }
 
 export function hydrateOutstandingInvoices(dataset) {
-  const repaired = (Array.isArray(dataset?.invoices) ? dataset.invoices : [])
-    .map(repairOutstandingInvoice)
-    .filter((invoice) => resolveOutstandingInvoiceCustomerCode(invoice));
+  const repaired = applyOutstandingRowSalesman(
+    (Array.isArray(dataset?.invoices) ? dataset.invoices : [])
+      .map(repairOutstandingInvoice)
+      .filter((invoice) => resolveOutstandingInvoiceCustomerCode(invoice)),
+    dataset?.rows,
+  );
   const synthesized = synthesizeInvoicesFromOutstandingRows(dataset?.rows, repaired);
-  return [...repaired, ...synthesized];
+  return applyOutstandingRowSalesman([...repaired, ...synthesized], dataset?.rows);
 }
 
 export function mergeOutstandingInvoiceSources(primary, supplemental) {
@@ -346,6 +349,39 @@ export function pickOutstandingSalesmanName(invoices) {
   return bestName;
 }
 
+export function buildOutstandingRowSalesmanByCode(rows) {
+  const grouped = new Map();
+
+  (rows || []).forEach((row) => {
+    const code = resolveOutstandingInvoiceCustomerCode(row);
+    if (!code) return;
+    if (!grouped.has(code)) grouped.set(code, []);
+    grouped.get(code).push({ salesman: row?.salesman });
+  });
+
+  const result = new Map();
+  grouped.forEach((invoices, code) => {
+    const name = pickOutstandingSalesmanName(invoices);
+    if (name) result.set(code, name);
+  });
+
+  return result;
+}
+
+export function applyOutstandingRowSalesman(invoices, rows) {
+  const rowSalesmanByCode = buildOutstandingRowSalesmanByCode(rows);
+
+  return (invoices || []).map((invoice) => {
+    if (!isPlaceholderSalesmanValue(invoice?.salesman)) return invoice;
+
+    const code = resolveOutstandingInvoiceCustomerCode(invoice);
+    const fallback = code ? rowSalesmanByCode.get(code) : "";
+    if (!fallback) return invoice;
+
+    return { ...invoice, salesman: fallback };
+  });
+}
+
 export function detectOutstandingPendingAmountColumn(headerRow) {
   const exactIdx = (headerRow || []).findIndex((cell) => {
     const normalized = normalizeOutstandingHeader(cell);
@@ -504,12 +540,15 @@ export function buildOutstandingRow(raw) {
 
   const totalOutstanding = Object.values(normalizedBuckets).reduce((sum, value) => sum + toNumber(value), 0);
 
+  const salesman = String(row.salesman || "").trim();
+
   return {
     customer_code: String(row.customer_code || "").trim(),
     customer_name: String(row.customer_name || "").trim(),
     open_invoices: toNumber(row.open_invoices),
     buckets: normalizedBuckets,
     total_outstanding: toNumber(row.total_outstanding) || totalOutstanding,
+    ...(salesman ? { salesman } : {}),
   };
 }
 

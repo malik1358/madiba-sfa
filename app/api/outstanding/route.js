@@ -14,10 +14,12 @@ import {
   findOutstandingInvoiceDayColumn,
   isSameOutstandingCustomer,
   isOutstandingAmountHeader,
+  isPlaceholderSalesmanValue,
   normalizeCode,
   normalizeOutstandingHeader,
   normalizeName,
   parseBucketLabelFromHeader,
+  pickOutstandingSalesmanName,
   prioritizeOutstandingSheets,
   sortBucketLabels,
   sanitizeStoredOverdueDays,
@@ -284,6 +286,16 @@ function parseOutstandingRows(rows, headerRowIndex) {
     bucketLabels.forEach((label) => {
       current.buckets[label] = toNumber(current.buckets[label]) + toNumber(rowBuckets[label]);
     });
+
+    if (columns.salesman >= 0) {
+      const rowSalesman = String(row[columns.salesman] || "").trim();
+      if (rowSalesman && !isPlaceholderSalesmanValue(rowSalesman)) {
+        current.salesman = pickOutstandingSalesmanName([
+          ...(current.salesman ? [{ salesman: current.salesman }] : []),
+          { salesman: rowSalesman },
+        ]);
+      }
+    }
 
     aggregate.set(key, current);
 

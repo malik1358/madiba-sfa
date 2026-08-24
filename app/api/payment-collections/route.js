@@ -432,10 +432,14 @@ async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
 
   for (let index = 0; index < codes.length; index += batchSize) {
     const batch = codes.slice(index, index + batchSize);
+    const filters = batch.flatMap((code) => [
+      `customer_code.eq.${code}`,
+      `customer_code.ilike.${code}%`,
+    ]).join(",");
     const { data, error } = await admin
       .from("customers")
       .select("customer_code,customer_name,current_salesman_code,city,area")
-      .in("customer_code", batch);
+      .or(filters);
 
     if (error) throw error;
     if (Array.isArray(data)) rows.push(...data);
@@ -610,11 +614,13 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     const legalTransfer = legalTransfersByCustomer.get(customer.customer_code);
 
     // The uploaded file decides who collects, since customer assignments drift out of date.
+    const uploadSalesman = pickOutstandingSalesmanName(customerInvoices);
     const invoiceSalesmen = customerInvoices
       .map((invoice) => invoice.salesman)
       .filter((name) => name && !isPlaceholderSalesmanValue(name));
     if (!scope.hasAllAccess) {
-      const invoiceOwned = invoiceSalesmen.some((name) => salesmanValueMatchesScope(name, scopeMatchers));
+      const invoiceOwned = (uploadSalesman && salesmanValueMatchesScope(uploadSalesman, scopeMatchers))
+        || invoiceSalesmen.some((name) => salesmanValueMatchesScope(name, scopeMatchers));
       const customerCode = customer.current_salesman_code;
       const customerOwned = !isPlaceholderSalesmanValue(customerCode)
         && (salesmanValueMatchesScope(customerCode, scopeMatchers)

@@ -140,8 +140,18 @@ export function hasUpcomingScheduledRevisit(record, todayIso = new Date().toISOS
   return Boolean(revisitAt && revisitAt >= today);
 }
 
+export function hasPendingScheduledRevisit(record) {
+  return Boolean(scheduledRevisitDate(record));
+}
+
+export function isOverdueScheduledRevisit(record, todayIso = new Date().toISOString()) {
+  const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
+  const revisitAt = scheduledRevisitDate(record);
+  return Boolean(revisitAt && revisitAt < today);
+}
+
 export function isScheduledRevisitQueueCustomer(record, todayIso = new Date().toISOString()) {
-  if (!hasUpcomingScheduledRevisit(record, todayIso)) return false;
+  if (!hasPendingScheduledRevisit(record)) return false;
   if (!hasCollectionVisit(record)) return false;
 
   const status = String(record?.latest_collection?.payment_status || "").trim().toUpperCase();

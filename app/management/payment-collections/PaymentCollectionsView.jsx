@@ -15,7 +15,12 @@ import {
   captureGpsLocationWithFallbackConfirm,
 } from "../../lib/customerLocation";
 import { postFormDataResilient } from "../../lib/offlineApi";
-import { isCashOnlyQueueCustomer, isCashQueueCustomer, isScheduledRevisitQueueCustomer, sortCashQueueCustomers } from "../../lib/paymentCollections";
+import {
+  isCashOnlyQueueCustomer,
+  isCashQueueCustomer,
+  isScheduledRevisitQueueCustomer,
+  sortCashQueueCustomers,
+} from "../../lib/paymentCollections";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { readCollectionQueuesForUser } from "../../lib/mobileDataCache";
@@ -59,8 +64,8 @@ const TEXT = {
   },
   scheduledRevisitsTitle: { en: "Scheduled Revisits", ar: "زيارات التحصيل المجدولة" },
   scheduledRevisitsHint: {
-    en: "Customers with a future collection revisit date saved from the last visit. Nearest dates appear first.",
-    ar: "عملاء لديهم موعد زيارة تحصيل قادم من آخر زيارة. أقرب المواعيد تظهر أولاً.",
+    en: "Customers with a collection revisit date saved from the last visit, including overdue dates not yet visited. Nearest dates appear first.",
+    ar: "عملاء لديهم موعد زيارة تحصيل من آخر زيارة، بما في ذلك المواعيد المتأخرة التي لم تُزار بعد. أقرب المواعيد تظهر أولاً.",
   },
   scheduledRevisitsMobileHint: {
     en: "Tap a date to show or hide customers for that day.",
@@ -77,7 +82,8 @@ const TEXT = {
   lastVisitDate: { en: "Last Visit", ar: "آخر زيارة" },
   visitRemark: { en: "Visit Remark", ar: "ملاحظة الزيارة" },
   noVisitRemark: { en: "No remark saved", ar: "لا توجد ملاحظة محفوظة" },
-  noScheduledRevisits: { en: "No upcoming collection revisits scheduled.", ar: "لا توجد زيارات تحصيل مجدولة قادمة." },
+  noScheduledRevisits: { en: "No collection revisits scheduled.", ar: "لا توجد زيارات تحصيل مجدولة." },
+  overdueRevisit: { en: "Overdue", ar: "متأخر" },
   cashQueueTitle: { en: "Cash Due Queue", ar: "قائمة التحصيل النقدي" },
   cashQueueHint: {
     en: "Customers with cash invoices where Ref. No. contains C (for example RC/, DC/, CNFD/). Collect these before credit follow-ups.",
@@ -1115,6 +1121,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("summaryText", summaryText);
       formData.append("sendWhatsapp", "1");
       formData.append("whatsappMessage", summaryText);
+      formData.append("queuePriority", String(queuePriorityByKey.get(rowKey(row))
+        || cashQueuePriorityByKey.get(rowKey(row))
+        || 0));
+      formData.append("probabilityScore", String(row.probability_score || 0));
+      formData.append("probabilityLabel", String(row.probability_label || ""));
+      formData.append("visitNumberForDay", String(visitNumberForDay));
       formData.append("legalNote", form.legalNote || t("defaultLegalNote"));
 
       const gps = await captureGpsLocationWithFallbackConfirm(language, {
@@ -1410,6 +1422,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                     <tbody>
                       {scheduledRevisitGroups.map((group) => {
                         const isExpanded = !isMobileLayout || expandedRevisitDates.has(group.dateKey);
+                        const isOverdueGroup = group.dateKey < queueToday;
                         return (
                         <Fragment key={`revisit-group-${group.dateKey}`}>
                           <tr
@@ -1428,6 +1441,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
                             <td colSpan={8}>
                               <div className="moduleCollectorSectionRowContent">
                                 <strong>{group.dateLabel}</strong>
+                                {isOverdueGroup ? (
+                                  <span className="moduleCollectorProbability moduleCollectorProbabilityLOW" style={{ marginInlineStart: "8px" }}>
+                                    {t("overdueRevisit")}
+                                  </span>
+                                ) : null}
                                 <span className="moduleHint" style={{ marginInlineStart: "8px" }}>
                                   {group.rows.length}
                                 </span>

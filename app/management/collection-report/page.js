@@ -43,6 +43,7 @@ const TEXT = {
     ar: "أعمدة GPS غير مُطبقة في Supabase بعد. نفّذ sql/add_collection_visit_gps.sql في SQL Editor لتفعيل مسافات GPS.",
   },
   totalVisits: { en: "Total visits", ar: "إجمالي الزيارات" },
+  uniqueCustomers: { en: "Unique customers visited", ar: "عملاء مختلفون تمت زيارتهم" },
   totalDistance: { en: "Total route distance", ar: "إجمالي مسافة المسار" },
   collectorsActive: { en: "Users active", ar: "المستخدمون النشطون" },
   userName: { en: "User name", ar: "اسم المستخدم" },
@@ -61,10 +62,27 @@ const TEXT = {
   distance: { en: "Distance from previous", ar: "المسافة من السابق" },
   map: { en: "Map", ar: "الخريطة" },
   visits: { en: "visits", ar: "زيارات" },
+  uniqueCustomersShort: { en: "unique customers", ar: "عملاء مختلفون" },
   gpsCaptured: { en: "GPS captured", ar: "تم التقاط GPS" },
   routeTotal: { en: "Route total", ar: "إجمالي المسار" },
   noGps: { en: "No GPS", ar: "لا GPS" },
   openMap: { en: "Open", ar: "فتح" },
+  viewReport: { en: "View Report", ar: "عرض التقرير" },
+  visitReportTitle: { en: "Collection Visit Report", ar: "تقرير زيارة التحصيل" },
+  whatsappSummary: { en: "WhatsApp summary", ar: "ملخص الواتساب" },
+  priorityCustomer: { en: "Priority customer visit", ar: "زيارة عميل ذو أولوية" },
+  priorityYes: { en: "Yes — higher collection probability", ar: "نعم — احتمالية تحصيل أعلى" },
+  priorityNo: { en: "No — lower priority / not recorded", ar: "لا — أولوية أقل / غير مسجل" },
+  queuePriority: { en: "Queue priority", ar: "أولوية الزيارة" },
+  probability: { en: "Payment probability", ar: "احتمالية التحصيل" },
+  copySummary: { en: "Copy summary", ar: "نسخ الملخص" },
+  copied: { en: "Copied", ar: "تم النسخ" },
+  close: { en: "Close", ar: "إغلاق" },
+  summaryReconstructed: {
+    en: "Rebuilt from saved visit data. Priority details are only exact for visits saved after the latest update.",
+    ar: "أُعيد بناؤه من بيانات الزيارة المحفوظة. تفاصيل الأولوية دقيقة فقط للزيارات المحفوظة بعد آخر تحديث.",
+  },
+  notRecorded: { en: "Not recorded", ar: "غير مسجل" },
 };
 
 function formatNumber(value, digits = 2) {
@@ -96,6 +114,44 @@ function formatAmount(value) {
   });
 }
 
+async function copyTextToClipboard(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Fall back below.
+  }
+
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return copied;
+  } catch {
+    return false;
+  }
+}
+
+function formatProbabilityLabel(label, t) {
+  const normalized = String(label || "").trim().toLowerCase();
+  if (normalized === "high") return "High";
+  if (normalized === "medium") return "Medium";
+  if (normalized === "low") return "Low";
+  if (!normalized || normalized === "n/a") return t("notRecorded");
+  return String(label);
+}
+
 export default function CollectionReportPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -106,6 +162,8 @@ export default function CollectionReportPage() {
   const [collectorId, setCollectorId] = useState("");
   const [userRole, setUserRole] = useState("");
   const [report, setReport] = useState(null);
+  const [selectedVisit, setSelectedVisit] = useState(null);
+  const [copyStatus, setCopyStatus] = useState("");
 
   const collectorOptions = useMemo(
     () => (Array.isArray(report?.availableCollectors) ? report.availableCollectors : []),
@@ -291,6 +349,10 @@ export default function CollectionReportPage() {
                   <strong>{report.visitCount || 0}</strong>
                 </section>
                 <section className="moduleMetricCard">
+                  <span>{t("uniqueCustomers")}</span>
+                  <strong>{report.uniqueCustomerVisitCount || 0}</strong>
+                </section>
+                <section className="moduleMetricCard">
                   <span>{t("totalDistance")}</span>
                   <strong>{formatNumber(report.totalDistanceKm)} km</strong>
                 </section>
@@ -310,6 +372,8 @@ export default function CollectionReportPage() {
                     <span>
                       {collector.visitCount} {t("visits")}
                       {" · "}
+                      {collector.uniqueCustomerVisitCount ?? collector.visitCount} {t("uniqueCustomersShort")}
+                      {" · "}
                       {collector.gpsVisitCount} {t("gpsCaptured")}
                       {" · "}
                       {t("routeTotal")}: {formatNumber(collector.totalDistanceKm)} km
@@ -323,6 +387,7 @@ export default function CollectionReportPage() {
                           <th>{t("sequence")}</th>
                           <th>{t("time")}</th>
                           <th>{t("userName")}</th>
+                          <th>{t("viewReport")}</th>
                           <th>{t("customer")}</th>
                           <th>{t("outcome")}</th>
                           <th>{t("nextVisitDate")}</th>
@@ -339,8 +404,26 @@ export default function CollectionReportPage() {
                             <td>{formatTime(visit.savedAt)}</td>
                             <td>{visit.userName || collector.collectorName}</td>
                             <td>
+                              <button
+                                type="button"
+                                className="moduleInlineButton"
+                                onClick={() => setSelectedVisit({ visit, collector })}
+                              >
+                                {t("viewReport")}
+                              </button>
+                            </td>
+                            <td>
                               {visit.customerName}
                               <div className="moduleCode">{visit.customerCode}</div>
+                              {visit.isPriorityCustomer ? (
+                                <div className="moduleCollectorProbability moduleCollectorProbabilityHIGH">
+                                  {t("priorityYes")}
+                                </div>
+                              ) : visit.probabilityLabel || visit.queuePriority ? (
+                                <div className="moduleCollectorProbability moduleCollectorProbabilityLOW">
+                                  {t("priorityNo")}
+                                </div>
+                              ) : null}
                             </td>
                             <td>{visit.visitOutcomeLabel || visit.visitOutcome}</td>
                             <td>{formatDateOnly(visit.nextVisitAt)}</td>
@@ -371,7 +454,7 @@ export default function CollectionReportPage() {
                         ))}
                         {(collector.visits || []).length === 0 && (
                           <tr>
-                            <td colSpan={10}>{t("noVisits")}</td>
+                            <td colSpan={11}>{t("noVisits")}</td>
                           </tr>
                         )}
                       </tbody>
@@ -388,6 +471,78 @@ export default function CollectionReportPage() {
             </>
           )}
         </div>
+
+        {selectedVisit ? (
+          <div className="moduleModalOverlay" dir={dir}>
+            <div className="moduleModal" role="dialog" aria-modal="true">
+              <h2>{t("visitReportTitle")}</h2>
+              <p className="moduleHint">
+                {selectedVisit.visit.customerName}
+                {" · "}
+                {selectedVisit.visit.customerCode}
+                {" · "}
+                {formatTime(selectedVisit.visit.savedAt)}
+              </p>
+
+              <section className="moduleMetricGrid">
+                <section className="moduleMetricCard">
+                  <span>{t("priorityCustomer")}</span>
+                  <strong>{selectedVisit.visit.isPriorityCustomer ? t("priorityYes") : t("priorityNo")}</strong>
+                </section>
+                <section className="moduleMetricCard">
+                  <span>{t("probability")}</span>
+                  <strong>{formatProbabilityLabel(selectedVisit.visit.probabilityLabel, t)}</strong>
+                </section>
+                <section className="moduleMetricCard">
+                  <span>{t("queuePriority")}</span>
+                  <strong>{selectedVisit.visit.queuePriority || t("notRecorded")}</strong>
+                </section>
+              </section>
+
+              {!selectedVisit.visit.hasStoredSummary ? (
+                <div className="moduleHint">{t("summaryReconstructed")}</div>
+              ) : null}
+
+              <label className="moduleField">
+                {t("whatsappSummary")}
+                <textarea
+                  className="moduleTextArea"
+                  rows={16}
+                  value={selectedVisit.visit.whatsappSummary || ""}
+                  readOnly
+                />
+              </label>
+
+              <div className="moduleOrderActions">
+                <button
+                  type="button"
+                  className="modulePrimaryButton"
+                  onClick={async () => {
+                    const copied = await copyTextToClipboard(selectedVisit.visit.whatsappSummary);
+                    if (copied) {
+                      setCopyStatus(t("copied"));
+                      setTimeout(() => setCopyStatus(""), 1200);
+                    }
+                  }}
+                  disabled={!selectedVisit.visit.whatsappSummary}
+                >
+                  {t("copySummary")}
+                </button>
+                <button
+                  type="button"
+                  className="moduleSecondaryButton"
+                  onClick={() => {
+                    setSelectedVisit(null);
+                    setCopyStatus("");
+                  }}
+                >
+                  {t("close")}
+                </button>
+              </div>
+              {copyStatus ? <div className="moduleHint">{copyStatus}</div> : null}
+            </div>
+          </div>
+        ) : null}
       </main>
     </MorningAttendanceGate>
   );

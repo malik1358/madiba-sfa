@@ -496,6 +496,20 @@ test("sortCashQueueCustomers ranks higher cash due amount first", () => {
   assert.deepEqual(sorted.map((row) => row.customer_code), ["HIGH", "LOW"]);
 });
 
+test("isScheduledRevisitQueueCustomer includes overdue revisit dates not yet visited", () => {
+  const today = "2026-08-24";
+  const overdue = {
+    customer_code: "1005",
+    latest_collection: {
+      payment_status: "NOT_PAID",
+      saved_at: "2026-08-20T10:00:00Z",
+      next_visit_at: "2026-08-22",
+    },
+  };
+
+  assert.equal(isScheduledRevisitQueueCustomer(overdue, today), true);
+});
+
 test("isScheduledRevisitQueueCustomer moves visited partial visits with future revisit out of due queue", () => {
   const today = "2026-08-22";
   const scheduled = {

@@ -1,5 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import {
+  buildStoredCollectionVisitSummary,
+  isPriorityCollectionVisit,
+} from "../../../lib/collectionVisitSummary.js";
+import {
   enrichVisitsWithDistances,
   formatCollectionUserDisplayName,
   formatCollectionUserRoleLabel,
@@ -11,6 +15,8 @@ import {
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
 } from "../../../lib/geo.js";
+import { filterCollectionQueueInvoices, invoiceHasCashRef } from "../../../lib/paymentCollections.js";
+import { resolveInvoiceAgingDays, toNumber } from "../../../lib/outstanding.js";
 import { getKsaDateString, ksaDayBounds } from "../../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -88,6 +94,141 @@ function formatOutcome(value) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function countUniqueCustomerVisits(visits) {
+  return new Set(
+    (visits || [])
+      .map((visit) => normalizeCode(visit.customer_code || visit.customerCode))
+      .filter(Boolean),
+  ).size;
+}
+
+async function loadOutstandingContextByCustomer(admin, customerCodes, reportDate) {
+  const targets = new Set((customerCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
+  if (!targets.size) return new Map();
+
+  const { data: invoiceRows, error } = await admin
+    .from("invoices")
+    .select("customer_code,due_date,pending_amount,ref_no,salesman_code")
+    .gt("pending_amount", 0);
+
+  if (error) {
+    if (isMissingTableError(error)) return new Map();
+    throw error;
+  }
+
+  const { data: customers, error: customersError } = await admin
+    .from("customers")
+    .select("customer_code,customer_name,current_salesman_code")
+    .in("customer_code", [...targets]);
+
+  if (customersError && !isMissingTableError(customersError)) throw customersError;
+
+  const { data: salesmen, error: salesmenError } = await admin
+    .from("profiles")
+    .select("salesman_code,salesman_name");
+
+  if (salesmenError) throw salesmenError;
+
+  const customerByCode = new Map(
+    (customers || []).map((customer) => [normalizeCode(customer.customer_code), customer]),
+  );
+  const salesmanNameByCode = new Map(
+    (salesmen || []).map((salesman) => [normalizeCode(salesman.salesman_code), String(salesman.salesman_name || "").trim()]),
+  );
+
+  const groupedInvoices = new Map();
+  (invoiceRows || []).forEach((row) => {
+    const customerCode = normalizeCode(row.customer_code);
+    if (!targets.has(customerCode)) return;
+    if (!groupedInvoices.has(customerCode)) groupedInvoices.set(customerCode, []);
+    groupedInvoices.get(customerCode).push({
+      pending_amount: row.pending_amount,
+      due_date: row.due_date,
+      ref_no: row.ref_no,
+      salesman_code: row.salesman_code,
+    });
+  });
+
+  const todayIso = `${reportDate}T00:00:00`;
+  const contextByCustomer = new Map();
+
+  targets.forEach((customerCode) => {
+    const customer = customerByCode.get(customerCode) || { customer_code: customerCode, customer_name: customerCode };
+    const invoices = filterCollectionQueueInvoices(groupedInvoices.get(customerCode) || []);
+    const outstanding = {
+      outstanding_cash: 0,
+      outstanding_0_30: 0,
+      outstanding_30_60: 0,
+      outstanding_61_90: 0,
+      outstanding_91_120: 0,
+      outstanding_above_120: 0,
+    };
+
+    invoices.forEach((invoice) => {
+      const pendingAmount = toNumber(invoice.pending_amount);
+      if (pendingAmount <= 0) return;
+      if (invoiceHasCashRef(invoice)) outstanding.outstanding_cash += pendingAmount;
+
+      const daysOverdue = resolveInvoiceAgingDays(invoice, todayIso);
+      if (daysOverdue <= 30) outstanding.outstanding_0_30 += pendingAmount;
+      else if (daysOverdue <= 60) outstanding.outstanding_30_60 += pendingAmount;
+      else if (daysOverdue <= 90) outstanding.outstanding_61_90 += pendingAmount;
+      else if (daysOverdue <= 120) outstanding.outstanding_91_120 += pendingAmount;
+      else outstanding.outstanding_above_120 += pendingAmount;
+    });
+
+    const salesmanCode = normalizeCode(invoices[0]?.salesman_code || customer.current_salesman_code || "");
+    contextByCustomer.set(customerCode, {
+      customer_code: customerCode,
+      customer_name: customer.customer_name || customerCode,
+      salesman_code: salesmanCode,
+      salesman_name: salesmanNameByCode.get(salesmanCode) || salesmanCode,
+      ...outstanding,
+    });
+  });
+
+  return contextByCustomer;
+}
+
+function buildVisitReportFields(visit, customerContext, visitNumberForDay) {
+  const queuePriority = Number(visit.queue_priority || 0);
+  const probabilityLabel = String(visit.probability_label || "").trim();
+  const probabilityScore = Number(visit.probability_score || 0);
+  const storedSummary = String(visit.summary_text || "").trim();
+  const priority = isPriorityCollectionVisit({ queuePriority, probabilityLabel });
+  const customerRow = customerContext || {
+    customer_code: visit.customer_code,
+    customer_name: visit.customer_code,
+    salesman_code: "",
+    salesman_name: "",
+    outstanding_0_30: 0,
+    outstanding_30_60: 0,
+    outstanding_61_90: 0,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+  };
+
+  const whatsappSummary = storedSummary || buildStoredCollectionVisitSummary(customerRow, {
+    ...visit,
+    visit_number_for_day: visit.visit_number_for_day || visitNumberForDay,
+    queue_priority: queuePriority,
+  }, {
+    visitNumberForDay: visit.visit_number_for_day || visitNumberForDay,
+    queuePriority,
+  });
+
+  return {
+    whatsappSummary,
+    queuePriority: queuePriority || null,
+    probabilityLabel: probabilityLabel || null,
+    probabilityScore: probabilityScore || null,
+    isPriorityCustomer: priority.isPriority,
+    priorityReason: priority.reason,
+    visitNumberForDay: visit.visit_number_for_day || visitNumberForDay || null,
+    hasStoredSummary: Boolean(storedSummary),
+  };
+}
+
 function profileMatchesUserRoleFilter(profile, userRoleFilter) {
   if (!userRoleFilter) return true;
   if (userRoleFilter === "salesman") return isCollectionReportSalesman(profile);
@@ -155,8 +296,10 @@ function applyNearestActivityGpsFallback(visit, activityGpsByUser) {
   };
 }
 
-const VISIT_SELECT_WITH_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,next_visit_at,saved_at,latitude,longitude,gps_accuracy_meters,created_by";
-const VISIT_SELECT_WITHOUT_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,next_visit_at,saved_at,created_by";
+const VISIT_SELECT_WITH_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,latitude,longitude,gps_accuracy_meters,created_by,summary_text,queue_priority,probability_score,probability_label,visit_number_for_day";
+const VISIT_SELECT_WITHOUT_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,created_by,summary_text,queue_priority,probability_score,probability_label,visit_number_for_day";
+const VISIT_SELECT_WITH_GPS_LEGACY = "id,customer_code,visit_outcome,payment_status,amount_received,next_visit_at,saved_at,latitude,longitude,gps_accuracy_meters,created_by";
+const VISIT_SELECT_WITHOUT_GPS_LEGACY = "id,customer_code,visit_outcome,payment_status,amount_received,next_visit_at,saved_at,created_by";
 
 async function queryCollectionVisits(admin, {
   startIso,
@@ -165,8 +308,11 @@ async function queryCollectionVisits(admin, {
   userId,
   restrictToUser,
   includeGps,
+  includeReportMeta,
 }) {
-  const selectFields = includeGps ? VISIT_SELECT_WITH_GPS : VISIT_SELECT_WITHOUT_GPS;
+  const selectFields = includeGps
+    ? (includeReportMeta ? VISIT_SELECT_WITH_GPS : VISIT_SELECT_WITH_GPS_LEGACY)
+    : (includeReportMeta ? VISIT_SELECT_WITHOUT_GPS : VISIT_SELECT_WITHOUT_GPS_LEGACY);
   let visitQuery = admin
     .from("collection_visits")
     .select(selectFields)
@@ -213,6 +359,7 @@ export async function GET(request) {
     const { startIso, endIso } = ksaDayBounds(date);
 
     let gpsColumnsAvailable = true;
+    let reportMetaAvailable = true;
 
     let visitQueryResult = await queryCollectionVisits(admin, {
       startIso,
@@ -221,7 +368,21 @@ export async function GET(request) {
       userId: user.id,
       restrictToUser: String(profile.role || "").toLowerCase() === "collector" && !collectorId,
       includeGps: true,
+      includeReportMeta: true,
     });
+
+    if (visitQueryResult.error && isMissingColumnError(visitQueryResult.error)) {
+      reportMetaAvailable = false;
+      visitQueryResult = await queryCollectionVisits(admin, {
+        startIso,
+        endIso,
+        collectorId,
+        userId: user.id,
+        restrictToUser: String(profile.role || "").toLowerCase() === "collector" && !collectorId,
+        includeGps: true,
+        includeReportMeta: false,
+      });
+    }
 
     if (visitQueryResult.error && isMissingColumnError(visitQueryResult.error)) {
       gpsColumnsAvailable = false;
@@ -232,6 +393,20 @@ export async function GET(request) {
         userId: user.id,
         restrictToUser: String(profile.role || "").toLowerCase() === "collector" && !collectorId,
         includeGps: false,
+        includeReportMeta: reportMetaAvailable,
+      });
+    }
+
+    if (visitQueryResult.error && isMissingColumnError(visitQueryResult.error)) {
+      reportMetaAvailable = false;
+      visitQueryResult = await queryCollectionVisits(admin, {
+        startIso,
+        endIso,
+        collectorId,
+        userId: user.id,
+        restrictToUser: String(profile.role || "").toLowerCase() === "collector" && !collectorId,
+        includeGps: false,
+        includeReportMeta: false,
       });
     }
 
@@ -289,6 +464,8 @@ export async function GET(request) {
       (customers || []).map((row) => [normalizeCode(row.customer_code), row.customer_name || ""]),
     );
 
+    const outstandingByCustomer = await loadOutstandingContextByCustomer(admin, customerCodes, date);
+
     const activityGpsByUser = await loadActivityGpsByUser(admin, allCollectorIds, startIso, endIso);
     const visitRowsWithGpsFallback = visitRows
       .filter((visit) => {
@@ -310,7 +487,14 @@ export async function GET(request) {
       const userName = formatCollectorDisplayName(collectorProfile);
       const userRole = String(collectorProfile.role || "").trim().toLowerCase().replace(/_/g, "-");
       const userRoleLabel = formatCollectionUserRoleLabel(collectorProfile.role);
-      const enrichedVisits = enrichVisitsWithDistances(rows).map((visit) => ({
+      const enrichedVisits = enrichVisitsWithDistances(rows).map((visit, index) => {
+        const reportFields = buildVisitReportFields(
+          visit,
+          outstandingByCustomer.get(normalizeCode(visit.customer_code)),
+          index + 1,
+        );
+
+        return {
         id: visit.id,
         visitSequence: visit.visitSequence,
         userName,
@@ -328,7 +512,16 @@ export async function GET(request) {
         hasGps: visit.hasGps,
         gpsSource: visit.gpsSource || (visit.hasGps ? "collection_visit" : null),
         distanceFromPreviousKm: visit.distanceFromPreviousKm,
-      }));
+        whatsappSummary: reportFields.whatsappSummary,
+        queuePriority: reportFields.queuePriority,
+        probabilityLabel: reportFields.probabilityLabel,
+        probabilityScore: reportFields.probabilityScore,
+        isPriorityCustomer: reportFields.isPriorityCustomer,
+        priorityReason: reportFields.priorityReason,
+        visitNumberForDay: reportFields.visitNumberForDay,
+        hasStoredSummary: reportFields.hasStoredSummary,
+      };
+      });
 
       return {
         collectorId: createdBy,
@@ -337,6 +530,7 @@ export async function GET(request) {
         userRoleLabel,
         salesmanCode: collectorProfile.salesman_code || "",
         visitCount: enrichedVisits.length,
+        uniqueCustomerVisitCount: countUniqueCustomerVisits(rows),
         gpsVisitCount: enrichedVisits.filter((visit) => visit.hasGps).length,
         totalDistanceKm: summarizeRouteDistanceKm(rows),
         visits: enrichedVisits,
@@ -372,6 +566,7 @@ export async function GET(request) {
         userRoleLabel: formatCollectionUserRoleLabel(selectedProfile.role),
         salesmanCode: selectedProfile.salesman_code || "",
         visitCount: 0,
+        uniqueCustomerVisitCount: 0,
         gpsVisitCount: 0,
         totalDistanceKm: 0,
         visits: [],
@@ -383,10 +578,14 @@ export async function GET(request) {
       success: true,
       date,
       gpsColumnsAvailable,
+      reportMetaAvailable,
       migrationHint: gpsColumnsAvailable
-        ? null
+        ? (reportMetaAvailable
+          ? null
+          : "Apply supabase/migrations/20260824120000_collection_visit_report_meta.sql in Supabase SQL Editor to store WhatsApp summaries and priority at visit time.")
         : "Apply sql/add_collection_visit_gps.sql in Supabase SQL Editor to enable GPS distance reporting.",
       visitCount: visitRowsWithGpsFallback.length,
+      uniqueCustomerVisitCount: countUniqueCustomerVisits(visitRowsWithGpsFallback),
       collectorCount: visibleCollectors.length,
       gpsVisitCount: visibleCollectors.reduce((sum, collector) => sum + Number(collector.gpsVisitCount || 0), 0),
       totalDistanceKm: visibleCollectors.reduce((sum, collector) => sum + Number(collector.totalDistanceKm || 0), 0),

@@ -742,6 +742,11 @@ export async function POST(request) {
     const gpsAccuracyMeters = gpsAccuracyRaw === null || gpsAccuracyRaw === undefined || gpsAccuracyRaw === ""
       ? null
       : Number(gpsAccuracyRaw);
+    const summaryText = String(formData.get("summaryText") || formData.get("whatsappMessage") || "").trim();
+    const queuePriority = Number(formData.get("queuePriority") || 0);
+    const probabilityScore = Number(formData.get("probabilityScore") || 0);
+    const probabilityLabel = String(formData.get("probabilityLabel") || "").trim();
+    const visitNumberForDay = Number(formData.get("visitNumberForDay") || 0);
 
     if (!customerCode) throw new Error("Customer code is required");
     if (!visitOutcome) throw new Error("Please select visit outcome");
@@ -832,6 +837,11 @@ export async function POST(request) {
       non_payment_reason: nonPaymentReason,
       payment_copy_url: paymentCopyUrl,
       receipt_copy_url: receiptCopyUrl,
+      summary_text: summaryText || null,
+      queue_priority: queuePriority > 0 ? queuePriority : null,
+      probability_score: probabilityScore > 0 ? probabilityScore : null,
+      probability_label: probabilityLabel || null,
+      visit_number_for_day: visitNumberForDay > 0 ? visitNumberForDay : null,
       created_by: user.id,
       saved_at: new Date().toISOString(),
     };
@@ -843,14 +853,39 @@ export async function POST(request) {
       gps_accuracy_meters: Number.isFinite(gpsAccuracyMeters) ? gpsAccuracyMeters : null,
     };
 
-    const {
+    let insertData = null;
+    let insertError = null;
+
+    ({
       data: insertData,
       error: insertError,
     } = await admin
       .from("collection_visits")
       .insert(visitInsertWithGps)
       .select("id")
-      .maybeSingle();
+      .maybeSingle());
+
+    if (insertError) {
+      if (isMissingColumnError(insertError)) {
+        const {
+          summary_text: _summaryText,
+          queue_priority: _queuePriority,
+          probability_score: _probabilityScore,
+          probability_label: _probabilityLabel,
+          visit_number_for_day: _visitNumberForDay,
+          ...visitInsertWithoutMeta
+        } = visitInsertWithGps;
+
+        ({
+          data: insertData,
+          error: insertError,
+        } = await admin
+          .from("collection_visits")
+          .insert(visitInsertWithoutMeta)
+          .select("id")
+          .maybeSingle());
+      }
+    }
 
     if (insertError) {
       if (isMissingColumnError(insertError)) {

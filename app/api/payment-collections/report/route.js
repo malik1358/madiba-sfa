@@ -1,5 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import {
+  buildAggregateCollectionDaySummary,
+  buildCollectionDaySummary,
+  COLLECTION_DAY_SUMMARY_LABELS,
+  COLLECTION_DAY_SUMMARY_LABELS_AR,
+} from "../../../lib/collectionDaySummary.js";
+import {
   buildStoredCollectionVisitSummary,
   isPriorityCollectionVisit,
 } from "../../../lib/collectionVisitSummary.js";
@@ -8,7 +14,10 @@ import {
   resolveVisitPriorityMeta,
 } from "../../../lib/collectionVisitPriority.js";
 import {
+  computeSpeedKmh,
   enrichVisitsWithDistances,
+  extractAreaFromActivityNote,
+  extractStreetFromActivityNote,
   formatCollectionUserDisplayName,
   formatCollectionUserRoleLabel,
   formatCollectorDisplayName,
@@ -21,7 +30,7 @@ import {
 } from "../../../lib/geo.js";
 import { filterCollectionQueueInvoices, invoiceHasCashRef, isScheduledRevisitQueueCustomer } from "../../../lib/paymentCollections.js";
 import { resolveInvoiceAgingDays, toNumber } from "../../../lib/outstanding.js";
-import { getKsaDateString, ksaDayBounds } from "../../../lib/workdayActivity.js";
+import { filterLogsByKsaEventDate, getKsaDateString, ksaDayBounds } from "../../../lib/workdayActivity.js";
 import { fetchOutstandingAndCollectionRecords } from "../route.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -259,6 +268,64 @@ async function loadCollectionFieldUsers(admin) {
   return Array.isArray(data) ? data : [];
 }
 
+function extractLunchTimesFromTimelineRows(lunchRows) {
+  let lunchOutAt = null;
+  let lunchInAt = null;
+
+  (lunchRows || []).forEach((row) => {
+    if (row.entryType === "LUNCH_BREAK_OUT" && !lunchOutAt) {
+      lunchOutAt = row.saved_at;
+    }
+    if (row.entryType === "LUNCH_BREAK_IN" && lunchOutAt && !lunchInAt) {
+      lunchInAt = row.saved_at;
+    }
+  });
+
+  return { lunchOutAt, lunchInAt };
+}
+
+function buildCustomerLocationMap(customerDetailsMap) {
+  const locationMap = new Map();
+  (customerDetailsMap || new Map()).forEach((row, code) => {
+    locationMap.set(code, {
+      city: row.city || "",
+      area: row.area || "",
+      street: row.street || "",
+    });
+  });
+  return locationMap;
+}
+
+async function loadReportCustomers(admin, customerCodes) {
+  const targets = [...new Set((customerCodes || []).map((code) => normalizeCode(code)).filter(Boolean))];
+  if (!targets.length) return [];
+
+  let selectFields = "customer_code,customer_name,city,area,street";
+  let { data, error } = await admin
+    .from("customers")
+    .select(selectFields)
+    .in("customer_code", targets);
+
+  if (error && isMissingColumnError(error)) {
+    selectFields = "customer_code,customer_name,city,area";
+    ({ data, error } = await admin
+      .from("customers")
+      .select(selectFields)
+      .in("customer_code", targets));
+  }
+
+  if (error && isMissingColumnError(error)) {
+    selectFields = "customer_code,customer_name,area";
+    ({ data, error } = await admin
+      .from("customers")
+      .select(selectFields)
+      .in("customer_code", targets));
+  }
+
+  if (error && !isMissingTableError(error)) throw error;
+  return Array.isArray(data) ? data : [];
+}
+
 async function loadActivityGpsByUser(admin, userIds, startIso, endIso) {
   if (!userIds.length) return new Map();
 
@@ -293,6 +360,160 @@ async function loadActivityGpsByUser(admin, userIds, startIso, endIso) {
   return grouped;
 }
 
+function parseActivityNote(note) {
+  if (!note) return null;
+  try {
+    return typeof note === "string" ? JSON.parse(note) : note;
+  } catch {
+    return null;
+  }
+}
+
+async function loadLunchBreakEventsByUser(admin, userIds, startIso, endIso, reportDate) {
+  if (!userIds.length) return new Map();
+
+  const widenedStart = new Date(startIso);
+  widenedStart.setUTCDate(widenedStart.getUTCDate() - 1);
+  const widenedEnd = new Date(endIso);
+  widenedEnd.setUTCDate(widenedEnd.getUTCDate() + 1);
+
+  const { data, error } = await admin
+    .from("daily_activity_logs")
+    .select("id,user_id,entry_type,note,created_at")
+    .in("entry_type", LUNCH_ENTRY_TYPES)
+    .in("user_id", userIds)
+    .gte("created_at", widenedStart.toISOString())
+    .lte("created_at", widenedEnd.toISOString())
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    if (isMissingTableError(error)) return new Map();
+    throw error;
+  }
+
+  const grouped = new Map();
+  filterLogsByKsaEventDate(data || [], reportDate).forEach((row) => {
+    const parsed = parseActivityNote(row.note) || {};
+    const gps = parseGpsFromActivityNote(row.note) || {};
+    const savedAt = parsed.captured_at || parsed.capturedAt || row.created_at;
+
+    const event = {
+      id: `lunch-${row.id}`,
+      rowType: "lunch",
+      entryType: row.entry_type,
+      saved_at: savedAt,
+      created_by: row.user_id,
+      latitude: gps.latitude,
+      longitude: gps.longitude,
+      gps_accuracy_meters: gps.accuracy,
+      area: extractAreaFromActivityNote(row.note),
+      street: extractStreetFromActivityNote(row.note),
+    };
+
+    if (!grouped.has(row.user_id)) grouped.set(row.user_id, []);
+    grouped.get(row.user_id).push(event);
+  });
+
+  return grouped;
+}
+
+function buildCollectorTimelineRows({
+  visitRows,
+  lunchRows,
+  userName,
+  customerDetailsMap,
+  outstandingByCustomer,
+  priorityMaps,
+  date,
+}) {
+  const timelineRows = [
+    ...visitRows.map((visit) => ({ ...visit, rowType: "visit" })),
+    ...(lunchRows || []),
+  ].sort(
+    (left, right) => new Date(left.saved_at).getTime() - new Date(right.saved_at).getTime(),
+  );
+
+  let visitCounter = 0;
+
+  return enrichVisitsWithDistances(timelineRows).map((row) => {
+    if (row.rowType === "lunch") {
+      return {
+        id: row.id,
+        rowType: "lunch",
+        visitSequence: row.visitSequence,
+        userName,
+        entryType: row.entryType,
+        eventLabel: LUNCH_EVENT_LABELS[row.entryType] || formatOutcome(row.entryType),
+        savedAt: row.saved_at,
+        area: row.area || "",
+        street: row.street || "",
+        latitude: row.latitude,
+        longitude: row.longitude,
+        gpsAccuracyMeters: row.gps_accuracy_meters,
+        hasGps: row.hasGps,
+        gpsSource: row.hasGps ? "activity_log" : null,
+        distanceFromPreviousKm: row.distanceFromPreviousKm,
+      };
+    }
+
+    visitCounter += 1;
+    const customerCode = normalizeCode(row.customer_code);
+    const customer = customerDetailsMap.get(customerCode) || {};
+    const record = priorityMaps.recordByCode.get(customerCode);
+    const priorityMeta = resolveVisitPriorityMeta(row, priorityMaps, {
+      reportDate: date,
+      visitNumberForDay: row.visit_number_for_day || visitCounter,
+    });
+    priorityMeta.isScheduledRevisit = record
+      ? isScheduledRevisitQueueCustomer(record, `${date}T12:00:00`)
+      : false;
+
+    const reportFields = buildVisitReportFields(
+      row,
+      outstandingByCustomer.get(customerCode),
+      visitCounter,
+      priorityMeta,
+    );
+
+    return {
+      id: row.id,
+      rowType: "visit",
+      visitSequence: row.visitSequence,
+      userName,
+      customerCode: row.customer_code,
+      customerName: customer.customer_name || row.customer_code,
+      area: String(customer.area || "").trim(),
+      street: "",
+      visitOutcome: row.visit_outcome,
+      visitOutcomeLabel: formatOutcome(row.visit_outcome),
+      paymentStatus: row.payment_status,
+      amountReceived: Number(row.amount_received || 0),
+      nextVisitAt: row.next_visit_at || null,
+      savedAt: row.saved_at,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      gpsAccuracyMeters: row.gps_accuracy_meters,
+      hasGps: row.hasGps,
+      gpsSource: row.gpsSource || (row.hasGps ? "collection_visit" : null),
+      distanceFromPreviousKm: row.distanceFromPreviousKm,
+      speedFromPreviousKmH,
+      whatsappSummary: reportFields.whatsappSummary,
+      queuePriority: reportFields.queuePriority,
+      probabilityLabel: reportFields.probabilityLabel,
+      probabilityScore: reportFields.probabilityScore,
+      isPriorityCustomer: reportFields.isPriorityCustomer,
+      priorityReason: reportFields.priorityReason,
+      visitNumberForDay: reportFields.visitNumberForDay,
+      hasStoredSummary: reportFields.hasStoredSummary,
+      prioritySource: reportFields.prioritySource,
+      queueRankGap: reportFields.queueRankGap,
+      queueCompliance: reportFields.queueCompliance,
+      dueQueueSize: reportFields.dueQueueSize,
+      isScheduledRevisit: reportFields.isScheduledRevisit,
+    };
+  });
+}
+
 function applyNearestActivityGpsFallback(visit, activityGpsByUser) {
   if (hasGpsCoordinates(visit)) return visit;
 
@@ -308,6 +529,13 @@ function applyNearestActivityGpsFallback(visit, activityGpsByUser) {
     gpsSource: "activity_log_fallback",
   };
 }
+
+const LUNCH_ENTRY_TYPES = ["LUNCH_BREAK_OUT", "LUNCH_BREAK_IN"];
+
+const LUNCH_EVENT_LABELS = {
+  LUNCH_BREAK_OUT: "Lunch out",
+  LUNCH_BREAK_IN: "Lunch in",
+};
 
 const VISIT_SELECT_WITH_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,latitude,longitude,gps_accuracy_meters,created_by,summary_text,queue_priority,probability_score,probability_label,visit_number_for_day";
 const VISIT_SELECT_WITHOUT_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,created_by,summary_text,queue_priority,probability_score,probability_label,visit_number_for_day";
@@ -462,7 +690,7 @@ export async function GET(request) {
         ? admin.from("profiles").select("id,salesman_code,salesman_name,role,email").in("id", allCollectorIds)
         : Promise.resolve({ data: [], error: null }),
       customerCodes.length
-        ? admin.from("customers").select("customer_code,customer_name").in("customer_code", customerCodes)
+        ? admin.from("customers").select("customer_code,customer_name,area").in("customer_code", customerCodes)
         : Promise.resolve({ data: [], error: null }),
     ]);
 
@@ -473,9 +701,10 @@ export async function GET(request) {
     [...fieldUsers, ...(visitDayProfiles || [])].forEach((row) => {
       if (row?.id) profileMap.set(row.id, row);
     });
-    const customerMap = new Map(
-      (customers || []).map((row) => [normalizeCode(row.customer_code), row.customer_name || ""]),
+    const customerDetailsMap = new Map(
+      (customers || []).map((row) => [normalizeCode(row.customer_code), row]),
     );
+    const customerLocationByCode = buildCustomerLocationMap(customerDetailsMap);
 
     const outstandingByCustomer = await loadOutstandingContextByCustomer(admin, customerCodes, date);
 
@@ -502,61 +731,32 @@ export async function GET(request) {
       grouped.get(key).push(visit);
     });
 
+    const timelineUserIds = [...grouped.keys()].filter((id) => id && id !== "unknown");
+    const lunchEventsByUser = await loadLunchBreakEventsByUser(admin, timelineUserIds, startIso, endIso, date);
+
     const collectors = [...grouped.entries()].map(([createdBy, rows]) => {
       const collectorProfile = profileMap.get(createdBy) || {};
       const userName = formatCollectorDisplayName(collectorProfile);
       const userRole = String(collectorProfile.role || "").trim().toLowerCase().replace(/_/g, "-");
       const userRoleLabel = formatCollectionUserRoleLabel(collectorProfile.role);
-      const enrichedVisits = enrichVisitsWithDistances(rows).map((visit, index) => {
-        const customerCode = normalizeCode(visit.customer_code);
-        const record = priorityMaps.recordByCode.get(customerCode);
-        const priorityMeta = resolveVisitPriorityMeta(visit, priorityMaps, {
-          reportDate: date,
-          visitNumberForDay: visit.visit_number_for_day || index + 1,
-        });
-        priorityMeta.isScheduledRevisit = record
-          ? isScheduledRevisitQueueCustomer(record, `${date}T12:00:00`)
-          : false;
-
-        const reportFields = buildVisitReportFields(
-          visit,
-          outstandingByCustomer.get(customerCode),
-          index + 1,
-          priorityMeta,
-        );
-
-        return {
-        id: visit.id,
-        visitSequence: visit.visitSequence,
-        userName,
-        customerCode: visit.customer_code,
-        customerName: customerMap.get(normalizeCode(visit.customer_code)) || visit.customer_code,
-        visitOutcome: visit.visit_outcome,
-        visitOutcomeLabel: formatOutcome(visit.visit_outcome),
-        paymentStatus: visit.payment_status,
-        amountReceived: Number(visit.amount_received || 0),
-        nextVisitAt: visit.next_visit_at || null,
-        savedAt: visit.saved_at,
-        latitude: visit.latitude,
-        longitude: visit.longitude,
-        gpsAccuracyMeters: visit.gps_accuracy_meters,
-        hasGps: visit.hasGps,
-        gpsSource: visit.gpsSource || (visit.hasGps ? "collection_visit" : null),
-        distanceFromPreviousKm: visit.distanceFromPreviousKm,
-        whatsappSummary: reportFields.whatsappSummary,
-        queuePriority: reportFields.queuePriority,
-        probabilityLabel: reportFields.probabilityLabel,
-        probabilityScore: reportFields.probabilityScore,
-        isPriorityCustomer: reportFields.isPriorityCustomer,
-        priorityReason: reportFields.priorityReason,
-        visitNumberForDay: reportFields.visitNumberForDay,
-        hasStoredSummary: reportFields.hasStoredSummary,
-        prioritySource: reportFields.prioritySource,
-        queueRankGap: reportFields.queueRankGap,
-        queueCompliance: reportFields.queueCompliance,
-        dueQueueSize: reportFields.dueQueueSize,
-        isScheduledRevisit: reportFields.isScheduledRevisit,
+      const lunchRows = lunchEventsByUser.get(createdBy) || [];
+      const lunchEvents = extractLunchTimesFromTimelineRows(lunchRows);
+      const daySummaryEn = buildCollectionDaySummary(rows, customerLocationByCode, lunchEvents, COLLECTION_DAY_SUMMARY_LABELS);
+      const daySummaryAr = buildCollectionDaySummary(rows, customerLocationByCode, lunchEvents, COLLECTION_DAY_SUMMARY_LABELS_AR);
+      const daySummary = {
+        lines: daySummaryEn.lines,
+        linesAr: daySummaryAr.lines,
+        stats: daySummaryEn.stats,
       };
+
+      const enrichedVisits = buildCollectorTimelineRows({
+        visitRows: rows,
+        lunchRows,
+        userName,
+        customerDetailsMap,
+        outstandingByCustomer,
+        priorityMaps,
+        date,
       });
 
       return {
@@ -565,10 +765,11 @@ export async function GET(request) {
         userRole,
         userRoleLabel,
         salesmanCode: collectorProfile.salesman_code || "",
-        visitCount: enrichedVisits.length,
+        visitCount: rows.length,
         uniqueCustomerVisitCount: countUniqueCustomerVisits(rows),
-        gpsVisitCount: enrichedVisits.filter((visit) => visit.hasGps).length,
+        gpsVisitCount: rows.filter((visit) => hasGpsCoordinates(visit)).length,
         totalDistanceKm: summarizeRouteDistanceKm(rows),
+        daySummary,
         visits: enrichedVisits,
       };
     }).sort((left, right) => left.collectorName.localeCompare(right.collectorName));
@@ -605,10 +806,22 @@ export async function GET(request) {
         uniqueCustomerVisitCount: 0,
         gpsVisitCount: 0,
         totalDistanceKm: 0,
+        daySummary: buildCollectionDaySummary([], customerLocationByCode),
         visits: [],
       };
       visibleCollectors = [selectedSection];
     }
+
+    const daySummary = visibleCollectors.length === 1
+      ? visibleCollectors[0].daySummary
+      : (() => {
+        const aggregate = buildAggregateCollectionDaySummary(visibleCollectors);
+        const aggregateAr = buildAggregateCollectionDaySummary(visibleCollectors, COLLECTION_DAY_SUMMARY_LABELS_AR);
+        return {
+          ...aggregate,
+          linesAr: aggregateAr.lines,
+        };
+      })();
 
     return Response.json({
       success: true,
@@ -627,6 +840,7 @@ export async function GET(request) {
       totalDistanceKm: visibleCollectors.reduce((sum, collector) => sum + Number(collector.totalDistanceKm || 0), 0),
       userRoleFilter: userRoleFilter || null,
       availableCollectors,
+      daySummary,
       collectors: visibleCollectors,
     });
   } catch (error) {

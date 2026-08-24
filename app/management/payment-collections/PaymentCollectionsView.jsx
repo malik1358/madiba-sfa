@@ -35,6 +35,7 @@ const TEXT = {
   dueQueue: { en: "Due Collection Queue", ar: "قائمة التحصيل المستحق" },
   legalQueue: { en: "Legal Queue", ar: "قائمة القسم القانوني" },
   customerCode: { en: "Code", ar: "الكود" },
+  priorityNumber: { en: "Priority #", ar: "رقم الأولوية" },
   customer: { en: "Customer", ar: "العميل" },
   customerFilter: { en: "Filter customer", ar: "تصفية العميل" },
   salesmanFilter: { en: "Filter salesman", ar: "تصفية المندوب" },
@@ -1414,6 +1415,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                   <table className="moduleTable moduleCollectorInvoiceTable">
                     <thead>
                       <tr>
+                        <th>{t("priorityNumber")}</th>
                         <th>{t("customerCode")}</th>
                         <th>{t("customer")}</th>
                         <th>{t("salesman")}</th>
@@ -1443,7 +1445,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                             role={isMobileLayout ? "button" : undefined}
                             aria-expanded={isMobileLayout ? isExpanded : undefined}
                           >
-                            <td colSpan={8}>
+                            <td colSpan={9}>
                               <div className="moduleCollectorSectionRowContent">
                                 <strong>{group.dateLabel}</strong>
                                 {isOverdueGroup ? (
@@ -1464,12 +1466,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
                           </tr>
                           {group.rows.map((row) => {
                             const key = rowKey(row);
+                            const queuePriority = queuePriorityByKey.get(key) || cashQueuePriorityByKey.get(key) || 0;
                             if (isMobileLayout && !isExpanded) return null;
                             return (
                               <tr
                                 key={`revisit-${key}`}
                                 className={`moduleCollectorRevisitDetailRow${isMobileLayout && !isExpanded ? " is-collapsed" : ""}`}
                               >
+                                <td data-label={t("priorityNumber")}>{queuePriority > 0 ? queuePriority : "-"}</td>
                                 <td data-label={t("customerCode")}>{row.customer_code}</td>
                                 <td data-label={t("customer")}>{row.customer_name}</td>
                                 <td data-label={t("salesman")}>{getSalesmanLabel(row)}</td>

@@ -3362,6 +3362,32 @@ table.auditMatrix td.auditTrendSame {
   border: 1px solid #dde8eb;
 }
 
+.moduleDaySummary {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: #eef6fa;
+  border: 1px solid #b8d4e0;
+  border-radius: 12px;
+  color: #073f4c;
+}
+
+.moduleDaySummary h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.moduleDaySummaryList {
+  margin: 0;
+  padding-inline-start: 18px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.moduleDaySummaryList li + li {
+  margin-top: 4px;
+}
+
 .moduleMetricGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

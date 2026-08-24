@@ -60,6 +60,7 @@ const TEXT = {
   amount: { en: "Amount", ar: "المبلغ" },
   gps: { en: "GPS", ar: "GPS" },
   distance: { en: "Distance from previous", ar: "المسافة من السابق" },
+  speed: { en: "Speed from previous", ar: "السرعة من السابق" },
   map: { en: "Map", ar: "الخريطة" },
   visits: { en: "visits", ar: "زيارات" },
   uniqueCustomersShort: { en: "unique customers", ar: "عملاء مختلفون" },
@@ -92,6 +93,12 @@ const TEXT = {
   complianceUnknown: { en: "Queue rank unavailable for this visit", ar: "ترتيب القائمة غير متاح لهذه الزيارة" },
   visitOrderVsQueue: { en: "Visit # vs queue rank", ar: "رقم الزيارة مقابل ترتيب القائمة" },
   scheduledRevisitOnly: { en: "Scheduled revisit (not in due queue rank)", ar: "زيارة مجدولة (ليست ضمن ترتيب القائمة المستحقة)" },
+  area: { en: "Area", ar: "المنطقة" },
+  street: { en: "Street", ar: "الشارع" },
+  lunchOut: { en: "Lunch out", ar: "خروج استراحة الغداء" },
+  lunchIn: { en: "Lunch in", ar: "العودة من استراحة الغداء" },
+  daySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
+  collectorDaySummaryTitle: { en: "Route summary", ar: "ملخص المسار" },
 };
 
 function formatNumber(value, digits = 2) {
@@ -172,6 +179,32 @@ function formatQueueCompliance(visit, t) {
 function formatVisitOrderVsQueue(visit) {
   if (!visit.visitNumberForDay || !visit.queuePriority) return "-";
   return `#${visit.visitNumberForDay} visit · queue #${visit.queuePriority}`;
+}
+
+function isLunchTimelineRow(row) {
+  return row?.rowType === "lunch";
+}
+
+function formatTimelineEventLabel(row, t) {
+  if (row.entryType === "LUNCH_BREAK_OUT") return t("lunchOut");
+  if (row.entryType === "LUNCH_BREAK_IN") return t("lunchIn");
+  return row.eventLabel || "-";
+}
+
+function DaySummaryBox({ summary, language, title }) {
+  if (!summary?.lines?.length) return null;
+  const lines = language === "ar" ? (summary.linesAr || summary.lines) : summary.lines;
+
+  return (
+    <section className="moduleDaySummary" aria-label={title}>
+      <h3>{title}</h3>
+      <ul className="moduleDaySummaryList">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 export default function CollectionReportPage() {
@@ -365,6 +398,12 @@ export default function CollectionReportPage() {
 
           {!loading && report && (
             <>
+              <DaySummaryBox
+                summary={report.daySummary}
+                language={language}
+                title={t("daySummaryTitle")}
+              />
+
               <div className="moduleMetricGrid">
                 <section className="moduleMetricCard">
                   <span>{t("totalVisits")}</span>
@@ -402,6 +441,14 @@ export default function CollectionReportPage() {
                     </span>
                   </div>
 
+                  {(report.collectors || []).length > 1 && collector.daySummary ? (
+                    <DaySummaryBox
+                      summary={collector.daySummary}
+                      language={language}
+                      title={t("collectorDaySummaryTitle")}
+                    />
+                  ) : null}
+
                   <div className="moduleTableWrap">
                     <table className="moduleTable">
                       <thead>
@@ -412,11 +459,14 @@ export default function CollectionReportPage() {
                           <th>{t("viewReport")}</th>
                           <th>{t("queuePriority")}</th>
                           <th>{t("customer")}</th>
+                          <th>{t("area")}</th>
+                          <th>{t("street")}</th>
                           <th>{t("outcome")}</th>
                           <th>{t("nextVisitDate")}</th>
                           <th>{t("amount")}</th>
                           <th>{t("gps")}</th>
                           <th>{t("distance")}</th>
+                          <th>{t("speed")}</th>
                           <th>{t("map")}</th>
                         </tr>
                       </thead>
@@ -427,43 +477,65 @@ export default function CollectionReportPage() {
                             <td>{formatTime(visit.savedAt)}</td>
                             <td>{visit.userName || collector.collectorName}</td>
                             <td>
-                              <button
-                                type="button"
-                                className="moduleInlineButton"
-                                onClick={() => setSelectedVisit({ visit, collector })}
-                              >
-                                {t("viewReport")}
-                              </button>
+                              {isLunchTimelineRow(visit) ? (
+                                "-"
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="moduleInlineButton"
+                                  onClick={() => setSelectedVisit({ visit, collector })}
+                                >
+                                  {t("viewReport")}
+                                </button>
+                              )}
                             </td>
                             <td>
-                              {visit.queuePriority ? `#${visit.queuePriority}` : t("notRecorded")}
-                              <div className="moduleCode">{formatVisitOrderVsQueue(visit)}</div>
-                              {visit.queueCompliance === "off_priority" ? (
-                                <div className="moduleCollectorProbability moduleCollectorProbabilityLOW">
-                                  {t("complianceOffPriority")}
-                                </div>
-                              ) : visit.queueCompliance === "on_priority" ? (
-                                <div className="moduleCollectorProbability moduleCollectorProbabilityHIGH">
-                                  {t("complianceOnPriority")}
-                                </div>
-                              ) : null}
+                              {isLunchTimelineRow(visit) ? (
+                                "-"
+                              ) : (
+                                <>
+                                  {visit.queuePriority ? `#${visit.queuePriority}` : t("notRecorded")}
+                                  <div className="moduleCode">{formatVisitOrderVsQueue(visit)}</div>
+                                  {visit.queueCompliance === "off_priority" ? (
+                                    <div className="moduleCollectorProbability moduleCollectorProbabilityLOW">
+                                      {t("complianceOffPriority")}
+                                    </div>
+                                  ) : visit.queueCompliance === "on_priority" ? (
+                                    <div className="moduleCollectorProbability moduleCollectorProbabilityHIGH">
+                                      {t("complianceOnPriority")}
+                                    </div>
+                                  ) : null}
+                                </>
+                              )}
                             </td>
                             <td>
-                              {visit.customerName}
-                              <div className="moduleCode">{visit.customerCode}</div>
-                              {visit.isPriorityCustomer ? (
-                                <div className="moduleCollectorProbability moduleCollectorProbabilityHIGH">
-                                  {t("priorityYes")}
-                                </div>
-                              ) : visit.probabilityLabel || visit.queuePriority ? (
-                                <div className="moduleCollectorProbability moduleCollectorProbabilityLOW">
-                                  {t("priorityNo")}
-                                </div>
-                              ) : null}
+                              {isLunchTimelineRow(visit) ? (
+                                "-"
+                              ) : (
+                                <>
+                                  {visit.customerName}
+                                  <div className="moduleCode">{visit.customerCode}</div>
+                                  {visit.isPriorityCustomer ? (
+                                    <div className="moduleCollectorProbability moduleCollectorProbabilityHIGH">
+                                      {t("priorityYes")}
+                                    </div>
+                                  ) : visit.probabilityLabel || visit.queuePriority ? (
+                                    <div className="moduleCollectorProbability moduleCollectorProbabilityLOW">
+                                      {t("priorityNo")}
+                                    </div>
+                                  ) : null}
+                                </>
+                              )}
                             </td>
-                            <td>{visit.visitOutcomeLabel || visit.visitOutcome}</td>
-                            <td>{formatDateOnly(visit.nextVisitAt)}</td>
-                            <td>{formatAmount(visit.amountReceived)}</td>
+                            <td>{visit.area || "-"}</td>
+                            <td>{visit.street || "-"}</td>
+                            <td>
+                              {isLunchTimelineRow(visit)
+                                ? formatTimelineEventLabel(visit, t)
+                                : (visit.visitOutcomeLabel || visit.visitOutcome)}
+                            </td>
+                            <td>{isLunchTimelineRow(visit) ? "-" : formatDateOnly(visit.nextVisitAt)}</td>
+                            <td>{isLunchTimelineRow(visit) ? "-" : formatAmount(visit.amountReceived)}</td>
                             <td>
                               {visit.hasGps
                                 ? `${Number(visit.latitude).toFixed(5)}, ${Number(visit.longitude).toFixed(5)}${visit.gpsSource === "activity_log_fallback" ? ` (${t("gpsEstimated")})` : ""}`
@@ -473,6 +545,11 @@ export default function CollectionReportPage() {
                               {visit.distanceFromPreviousKm === null
                                 ? "-"
                                 : `${formatNumber(visit.distanceFromPreviousKm)} km`}
+                            </td>
+                            <td>
+                              {visit.speedFromPreviousKmH === null || visit.speedFromPreviousKmH === undefined
+                                ? "-"
+                                : `${formatNumber(visit.speedFromPreviousKmH, 1)} km/h`}
                             </td>
                             <td>
                               {visit.hasGps ? (
@@ -490,7 +567,7 @@ export default function CollectionReportPage() {
                         ))}
                         {(collector.visits || []).length === 0 && (
                           <tr>
-                            <td colSpan={12}>{t("noVisits")}</td>
+                            <td colSpan={15}>{t("noVisits")}</td>
                           </tr>
                         )}
                       </tbody>

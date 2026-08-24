@@ -342,6 +342,32 @@ They only need the opt-in link **once**. After that, updates arrive through the 
 
 Each build gets `versionCode = GitHub run number` and `versionName = 1.0.<run number>`. Play Store requires a higher `versionCode` on every upload — the workflow handles this.
 
+### Require the latest APK before login
+
+The web app can block outdated Android APK builds at login. Set the minimum required build in **either** place:
+
+1. **Supabase** `system_settings` key `android_apk_min_version_v1`:
+
+```json
+{
+  "minVersionCode": 200,
+  "minVersionName": "1.0.200",
+  "downloadUrl": "https://your-apk-link.example/app-debug.apk",
+  "messageEn": "Install the latest MADIBA APK from admin, then sign in again.",
+  "messageAr": "ثبّت أحدث APK من المسؤول ثم سجّل الدخول مرة أخرى."
+}
+```
+
+2. **Vercel env vars** (optional fallback / override):
+
+- `MIN_ANDROID_APK_VERSION_CODE`
+- `MIN_ANDROID_APK_VERSION_NAME`
+- `ANDROID_APK_DOWNLOAD_URL`
+
+The server uses the **higher** of the Supabase and env build numbers. Set `minVersionCode` to `0` (or leave unset) to disable the check.
+
+After you publish a new APK, update `minVersionCode` to that build's GitHub run number so older APKs cannot sign in.
+
 Edit release notes before a rollout in:
 
 ```

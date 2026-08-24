@@ -8,7 +8,9 @@ import MorningAttendanceGate from "./components/MorningAttendanceGate";
 import MostVisitedPages from "./components/MostVisitedPages";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
 import { buildModuleAccess, listAccessibleModules, shouldRequireTransactionGps } from "./lib/moduleAccess";
-import { isAndroidBatteryRestricted, openAndroidBatterySettings, requestAndroidBatteryUnrestricted } from "./lib/androidBatteryOptimization";
+import { isAndroidBatteryRestricted } from "./lib/androidBatteryOptimization";
+import { evaluateNativeAndroidApkVersion } from "./lib/androidAppVersion";
+import AndroidApkUpdateRequired from "./components/AndroidApkUpdateRequired";
 
 export default function Home() {
   const { language, ar, dir, setLanguage } = useAppLanguage();
@@ -21,6 +23,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
   const [error, setError] = useState("");
+  const [checkingApkVersion, setCheckingApkVersion] = useState(true);
+  const [apkVersionState, setApkVersionState] = useState(null);
 
   const router = useRouter();
   const moduleAccess = buildModuleAccess({
@@ -99,6 +103,26 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function verifyApkVersionForLogin() {
+      setCheckingApkVersion(true);
+      try {
+        const result = await evaluateNativeAndroidApkVersion();
+        if (!cancelled) setApkVersionState(result);
+      } finally {
+        if (!cancelled) setCheckingApkVersion(false);
+      }
+    }
+
+    verifyApkVersionForLogin();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function checkSession(supabaseClient = getSupabaseClient()) {
     if (!supabaseClient) {
       setLoading(false);
@@ -166,6 +190,13 @@ export default function Home() {
 
     setError("");
     setLoginLoading(true);
+
+    const apkStatus = await evaluateNativeAndroidApkVersion();
+    setApkVersionState(apkStatus);
+    if (apkStatus.outdated) {
+      setLoginLoading(false);
+      return;
+    }
 
     const { data, error } =
       await supabase.auth.signInWithPassword({
@@ -384,6 +415,22 @@ export default function Home() {
   // =========================================================
   // LOGIN
   // =========================================================
+
+  if (apkVersionState?.outdated) {
+    return (
+      <AndroidApkUpdateRequired
+        currentVersion={apkVersionState.current}
+        minimum={apkVersionState.minimum}
+        checking={checkingApkVersion}
+        onRecheck={async () => {
+          setCheckingApkVersion(true);
+          const result = await evaluateNativeAndroidApkVersion();
+          setApkVersionState(result);
+          setCheckingApkVersion(false);
+        }}
+      />
+    );
+  }
 
   return (
     <main

@@ -13,6 +13,9 @@ import {
   openAndroidBatterySettings,
   requestAndroidBatteryUnrestricted,
 } from "../lib/androidBatteryOptimization";
+import { evaluateNativeAndroidApkVersion } from "../lib/androidAppVersion";
+import { isNativeAndroidPlatform } from "../lib/nativeFieldTracking";
+import AndroidApkUpdateRequired from "./AndroidApkUpdateRequired";
 import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
 import { queueTransactionAlert } from "../lib/transactionAlertClient";
 
@@ -138,12 +141,41 @@ export default function MorningAttendanceGate({
   const [ready, setReady] = useState(!requireMorningAttendance);
   const [batteryReady, setBatteryReady] = useState(false);
   const [checkingBattery, setCheckingBattery] = useState(false);
+  const [apkVersionReady, setApkVersionReady] = useState(true);
+  const [checkingApkVersion, setCheckingApkVersion] = useState(false);
+  const [apkVersionState, setApkVersionState] = useState(null);
+  const [nativeAndroidApp, setNativeAndroidApp] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const attemptedAutoRef = useRef(false);
   const autoPingInFlightRef = useRef(false);
   const lastGpsPingAtRef = useRef(0);
   const lastActivityAtRef = useRef(0);
+
+  async function verifyApkVersion() {
+    const isNative = await isNativeAndroidPlatform();
+    setNativeAndroidApp(isNative);
+    if (!isNative) {
+      setApkVersionReady(true);
+      setApkVersionState(null);
+      return true;
+    }
+
+    setCheckingApkVersion(true);
+    try {
+      const result = await evaluateNativeAndroidApkVersion();
+      setApkVersionState(result);
+      const allowed = !result.outdated;
+      setApkVersionReady(allowed);
+      return allowed;
+    } catch {
+      setApkVersionReady(true);
+      setApkVersionState(null);
+      return true;
+    } finally {
+      setCheckingApkVersion(false);
+    }
+  }
 
   async function verifyBatteryAccess() {
     if (!batteryCheckRequired) {
@@ -311,6 +343,13 @@ export default function MorningAttendanceGate({
       return;
     }
 
+    const apkOk = await verifyApkVersion();
+    if (!apkOk) {
+      setReady(false);
+      setChecking(false);
+      return;
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) {
       setReady(true);
@@ -411,6 +450,20 @@ export default function MorningAttendanceGate({
   }
 
   useEffect(() => {
+    let cancelled = false;
+
+    isNativeAndroidPlatform().then((isNative) => {
+      if (!cancelled) setNativeAndroidApp(isNative);
+    });
+
+    verifyApkVersion();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (accessLoading) return undefined;
 
     if (!batteryCheckRequired) {
@@ -445,6 +498,14 @@ export default function MorningAttendanceGate({
       }
 
       async function runBatteryAndAutoClose() {
+        const apkOk = await verifyApkVersion();
+        if (cancelled) return;
+        if (!apkOk) {
+          setReady(false);
+          setChecking(false);
+          return;
+        }
+
         const batteryOk = await verifyBatteryAccess();
         if (cancelled) return;
         if (!batteryOk) {
@@ -479,6 +540,39 @@ export default function MorningAttendanceGate({
 
     return () => window.clearTimeout(safetyTimer);
   }, [attendanceRequired, accessLoading, batteryCheckRequired]);
+
+  useEffect(() => {
+    if (!nativeAndroidApp || apkVersionReady) return undefined;
+
+    let cancelled = false;
+
+    async function recheckOnResume() {
+      if (cancelled) return;
+      await verifyApkVersion();
+    }
+
+    const handleResume = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      recheckOnResume();
+    };
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleResume);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", handleResume);
+    }
+
+    return () => {
+      cancelled = true;
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleResume);
+      }
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", handleResume);
+      }
+    };
+  }, [nativeAndroidApp, apkVersionReady]);
 
   useEffect(() => {
     if (!batteryCheckRequired || batteryReady || accessLoading) return undefined;
@@ -516,7 +610,9 @@ export default function MorningAttendanceGate({
   useEffect(() => {
     if (!backgroundGpsEnabled) return undefined;
 
-    const backgroundGpsReady = (attendanceRequired ? ready : batteryReady && ready) && batteryReady;
+    const backgroundGpsReady = (attendanceRequired ? ready : batteryReady && ready)
+      && batteryReady
+      && apkVersionReady;
     if (!backgroundGpsReady) return undefined;
 
     let cancelled = false;
@@ -573,10 +669,10 @@ export default function MorningAttendanceGate({
         window.removeEventListener("online", handleVisibleOrFocused);
       }
     };
-  }, [backgroundGpsEnabled, attendanceRequired, ready, batteryReady]);
+  }, [backgroundGpsEnabled, attendanceRequired, ready, batteryReady, apkVersionReady]);
 
   useEffect(() => {
-    if (!ready || !batteryReady || !backgroundGpsEnabled || typeof window === "undefined") return undefined;
+    if (!ready || !batteryReady || !apkVersionReady || !backgroundGpsEnabled || typeof window === "undefined") return undefined;
 
     let cancelled = false;
     const supabase = getSupabaseClient();
@@ -594,7 +690,7 @@ export default function MorningAttendanceGate({
     return () => {
       cancelled = true;
     };
-  }, [backgroundGpsEnabled, ready, batteryReady]);
+  }, [backgroundGpsEnabled, ready, batteryReady, apkVersionReady]);
 
   if (accessLoading && requireMorningAttendance) {
     return (
@@ -610,12 +706,23 @@ export default function MorningAttendanceGate({
     );
   }
 
-  if (ready && batteryReady) {
+  if (ready && batteryReady && apkVersionReady) {
     return (
       <>
         {attendanceRequired ? <WorkdayInactivityPrompt /> : null}
         {children}
       </>
+    );
+  }
+
+  if (nativeAndroidApp && !apkVersionReady) {
+    return (
+      <AndroidApkUpdateRequired
+        currentVersion={apkVersionState?.current}
+        minimum={apkVersionState?.minimum}
+        checking={checkingApkVersion}
+        onRecheck={() => verifyApkVersion()}
+      />
     );
   }
 

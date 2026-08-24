@@ -68,9 +68,12 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: 1.0.${{ github.run_number }}
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

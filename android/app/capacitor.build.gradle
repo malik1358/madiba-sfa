@@ -16,6 +16,7 @@ dependencies {
     implementation project(':capacitor-preferences')
     implementation project(':capacitor-push-notifications')
     implementation project(':capacitor-splash-screen')
+    implementation project(':capawesome-team-capacitor-android-battery-optimization')
     implementation project(':capawesome-team-capacitor-android-foreground-service')
 
 }

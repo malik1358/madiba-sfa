@@ -83,6 +83,15 @@ const TEXT = {
     ar: "أُعيد بناؤه من بيانات الزيارة المحفوظة. تفاصيل الأولوية دقيقة فقط للزيارات المحفوظة بعد آخر تحديث.",
   },
   notRecorded: { en: "Not recorded", ar: "غير مسجل" },
+  priorityEstimated: { en: "Estimated from outstanding queue", ar: "تقدير من قائمة التحصيل" },
+  priorityRecorded: { en: "Recorded at visit save", ar: "مسجل عند حفظ الزيارة" },
+  queueCompliance: { en: "Route compliance", ar: "الالتزام بالمسار" },
+  complianceOnPriority: { en: "On priority — visited a top-ranked customer for this visit order", ar: "ضمن الأولوية — زار عميلاً ذا ترتيب مناسب لهذه الزيارة" },
+  complianceSlightlyDelayed: { en: "Slightly off — customer was a few places lower in queue", ar: "انحراف بسيط — العميل كان أدنى قليلاً في القائمة" },
+  complianceOffPriority: { en: "Off priority — collector skipped many higher-ranked customers", ar: "خارج الأولوية — تم تجاوز عملاء أعلى في القائمة" },
+  complianceUnknown: { en: "Queue rank unavailable for this visit", ar: "ترتيب القائمة غير متاح لهذه الزيارة" },
+  visitOrderVsQueue: { en: "Visit # vs queue rank", ar: "رقم الزيارة مقابل ترتيب القائمة" },
+  scheduledRevisitOnly: { en: "Scheduled revisit (not in due queue rank)", ar: "زيارة مجدولة (ليست ضمن ترتيب القائمة المستحقة)" },
 };
 
 function formatNumber(value, digits = 2) {
@@ -150,6 +159,19 @@ function formatProbabilityLabel(label, t) {
   if (normalized === "low") return "Low";
   if (!normalized || normalized === "n/a") return t("notRecorded");
   return String(label);
+}
+
+function formatQueueCompliance(visit, t) {
+  if (visit.isScheduledRevisit && !visit.queuePriority) return t("scheduledRevisitOnly");
+  if (visit.queueCompliance === "on_priority") return t("complianceOnPriority");
+  if (visit.queueCompliance === "slightly_delayed") return t("complianceSlightlyDelayed");
+  if (visit.queueCompliance === "off_priority") return t("complianceOffPriority");
+  return t("complianceUnknown");
+}
+
+function formatVisitOrderVsQueue(visit) {
+  if (!visit.visitNumberForDay || !visit.queuePriority) return "-";
+  return `#${visit.visitNumberForDay} visit · queue #${visit.queuePriority}`;
 }
 
 export default function CollectionReportPage() {
@@ -388,6 +410,7 @@ export default function CollectionReportPage() {
                           <th>{t("time")}</th>
                           <th>{t("userName")}</th>
                           <th>{t("viewReport")}</th>
+                          <th>{t("queuePriority")}</th>
                           <th>{t("customer")}</th>
                           <th>{t("outcome")}</th>
                           <th>{t("nextVisitDate")}</th>
@@ -411,6 +434,19 @@ export default function CollectionReportPage() {
                               >
                                 {t("viewReport")}
                               </button>
+                            </td>
+                            <td>
+                              {visit.queuePriority ? `#${visit.queuePriority}` : t("notRecorded")}
+                              <div className="moduleCode">{formatVisitOrderVsQueue(visit)}</div>
+                              {visit.queueCompliance === "off_priority" ? (
+                                <div className="moduleCollectorProbability moduleCollectorProbabilityLOW">
+                                  {t("complianceOffPriority")}
+                                </div>
+                              ) : visit.queueCompliance === "on_priority" ? (
+                                <div className="moduleCollectorProbability moduleCollectorProbabilityHIGH">
+                                  {t("complianceOnPriority")}
+                                </div>
+                              ) : null}
                             </td>
                             <td>
                               {visit.customerName}
@@ -454,7 +490,7 @@ export default function CollectionReportPage() {
                         ))}
                         {(collector.visits || []).length === 0 && (
                           <tr>
-                            <td colSpan={11}>{t("noVisits")}</td>
+                            <td colSpan={12}>{t("noVisits")}</td>
                           </tr>
                         )}
                       </tbody>
@@ -495,9 +531,21 @@ export default function CollectionReportPage() {
                 </section>
                 <section className="moduleMetricCard">
                   <span>{t("queuePriority")}</span>
-                  <strong>{selectedVisit.visit.queuePriority || t("notRecorded")}</strong>
+                  <strong>{selectedVisit.visit.queuePriority ? `#${selectedVisit.visit.queuePriority}` : t("notRecorded")}</strong>
+                </section>
+                <section className="moduleMetricCard">
+                  <span>{t("visitOrderVsQueue")}</span>
+                  <strong>{formatVisitOrderVsQueue(selectedVisit.visit)}</strong>
                 </section>
               </section>
+
+              <div className="moduleHint">{formatQueueCompliance(selectedVisit.visit, t)}</div>
+
+              {selectedVisit.visit.prioritySource === "reconstructed" ? (
+                <div className="moduleHint">{t("priorityEstimated")}</div>
+              ) : selectedVisit.visit.prioritySource === "stored" || selectedVisit.visit.prioritySource === "summary_text" ? (
+                <div className="moduleHint">{t("priorityRecorded")}</div>
+              ) : null}
 
               {!selectedVisit.visit.hasStoredSummary ? (
                 <div className="moduleHint">{t("summaryReconstructed")}</div>

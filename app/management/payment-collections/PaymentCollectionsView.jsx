@@ -193,6 +193,7 @@ const TEXT = {
   summaryCustomer: { en: "Customer", ar: "العميل" },
   summaryCode: { en: "Code", ar: "الكود" },
   summaryQueuePriority: { en: "Queue priority", ar: "أولوية الزيارة" },
+  summaryProbability: { en: "Payment probability", ar: "احتمالية التحصيل" },
   summarySalesman: { en: "Salesman", ar: "المندوب" },
   summaryOutcome: { en: "Outcome", ar: "النتيجة" },
   summaryAmountReceived: { en: "Amount received", ar: "المبلغ المستلم" },
@@ -262,6 +263,7 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   const nextVisit = formatDateOnly(form.nextVisitAt);
   const visitNumberForDay = Number(options.visitNumberForDay || 0);
   const queuePriority = Number(options.queuePriority || 0);
+  const probabilityLabel = formatProbabilityLabel(row.probability_label, t);
   const outcomeText = formatOutcomeLabel(form.visitOutcome, t);
   const arabicRemark = String(form.remarkArabic || "").trim();
   const englishRemark = String(translatedRemark || form.remarkEnglish || "").trim();
@@ -274,6 +276,9 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
 
   if (queuePriority > 0) {
     lines.splice(1, 0, `${t("summaryQueuePriority")}: ${queuePriority}.`);
+  }
+  if (probabilityLabel && probabilityLabel !== t("probNA")) {
+    lines.splice(queuePriority > 0 ? 2 : 1, 0, `${t("summaryProbability")}: ${probabilityLabel}.`);
   }
 
   if (amount > 0) lines.push(`${t("summaryAmountReceived")}: ${formatMoney(amount)}.`);
@@ -1094,6 +1099,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
         // Fall back to the latest cached count when lookup fails.
       }
 
+      const resolvedQueuePriority = queuePriorityByKey.get(rowKey(row))
+        || cashQueuePriorityByKey.get(rowKey(row))
+        || 0;
+
       const summaryText = buildVisitSummary(
         row,
         { ...form, visitOutcome: selectedOutcome },
@@ -1101,9 +1110,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         t,
         {
           visitNumberForDay,
-          queuePriority: queuePriorityByKey.get(rowKey(row))
-            || cashQueuePriorityByKey.get(rowKey(row))
-            || 0,
+          queuePriority: resolvedQueuePriority,
         },
       );
 
@@ -1121,9 +1128,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("summaryText", summaryText);
       formData.append("sendWhatsapp", "1");
       formData.append("whatsappMessage", summaryText);
-      formData.append("queuePriority", String(queuePriorityByKey.get(rowKey(row))
-        || cashQueuePriorityByKey.get(rowKey(row))
-        || 0));
+      formData.append("queuePriority", String(resolvedQueuePriority));
       formData.append("probabilityScore", String(row.probability_score || 0));
       formData.append("probabilityLabel", String(row.probability_label || ""));
       formData.append("visitNumberForDay", String(visitNumberForDay));

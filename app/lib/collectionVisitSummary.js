@@ -38,6 +38,7 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   summaryCustomer: "Customer",
   summaryCode: "Code",
   summaryQueuePriority: "Queue priority",
+  summaryProbability: "Payment probability",
   summarySalesman: "Salesman",
   summaryOutcome: "Outcome",
   summaryAmountReceived: "Amount received",
@@ -92,6 +93,7 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   const nextVisit = formatDateOnly(form.nextVisitAt);
   const visitNumberForDay = Number(options.visitNumberForDay || 0);
   const queuePriority = Number(options.queuePriority || 0);
+  const probabilityLabel = String(options.probabilityLabel || row.probability_label || "").trim();
   const outcomeText = formatCollectionOutcomeLabel(form.visitOutcome, OUTCOME_LABELS);
   const arabicRemark = String(form.remarkArabic || "").trim();
   const englishRemark = String(options.translatedRemark || form.remarkEnglish || "").trim();
@@ -104,6 +106,9 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
 
   if (queuePriority > 0) {
     lines.splice(1, 0, `${labels.summaryQueuePriority}: ${queuePriority}.`);
+  }
+  if (probabilityLabel && probabilityLabel !== "N/A") {
+    lines.splice(queuePriority > 0 ? 2 : 1, 0, `${labels.summaryProbability}: ${probabilityLabel}.`);
   }
 
   if (amount > 0) lines.push(`${labels.summaryAmountReceived}: ${formatMoney(amount)}.`);
@@ -145,6 +150,7 @@ export function buildStoredCollectionVisitSummary(row, visit, options = {}, labe
     ...options,
     translatedRemark: visit.remark_english || "",
     queuePriority: visit.queue_priority ?? options.queuePriority ?? 0,
+    probabilityLabel: visit.probability_label ?? options.probabilityLabel ?? "",
     visitNumberForDay: visit.visit_number_for_day ?? options.visitNumberForDay ?? 0,
   }, labels);
 }

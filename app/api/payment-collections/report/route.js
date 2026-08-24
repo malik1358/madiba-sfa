@@ -4,6 +4,10 @@ import {
   isPriorityCollectionVisit,
 } from "../../../lib/collectionVisitSummary.js";
 import {
+  buildCollectionQueuePriorityMaps,
+  resolveVisitPriorityMeta,
+} from "../../../lib/collectionVisitPriority.js";
+import {
   enrichVisitsWithDistances,
   formatCollectionUserDisplayName,
   formatCollectionUserRoleLabel,
@@ -15,9 +19,10 @@ import {
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
 } from "../../../lib/geo.js";
-import { filterCollectionQueueInvoices, invoiceHasCashRef } from "../../../lib/paymentCollections.js";
+import { filterCollectionQueueInvoices, invoiceHasCashRef, isScheduledRevisitQueueCustomer } from "../../../lib/paymentCollections.js";
 import { resolveInvoiceAgingDays, toNumber } from "../../../lib/outstanding.js";
 import { getKsaDateString, ksaDayBounds } from "../../../lib/workdayActivity.js";
+import { fetchOutstandingAndCollectionRecords } from "../route.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -190,10 +195,10 @@ async function loadOutstandingContextByCustomer(admin, customerCodes, reportDate
   return contextByCustomer;
 }
 
-function buildVisitReportFields(visit, customerContext, visitNumberForDay) {
-  const queuePriority = Number(visit.queue_priority || 0);
-  const probabilityLabel = String(visit.probability_label || "").trim();
-  const probabilityScore = Number(visit.probability_score || 0);
+function buildVisitReportFields(visit, customerContext, visitNumberForDay, priorityMeta = {}) {
+  const queuePriority = Number(priorityMeta.queuePriority || visit.queue_priority || 0);
+  const probabilityLabel = String(priorityMeta.probabilityLabel || visit.probability_label || "").trim();
+  const probabilityScore = Number(priorityMeta.probabilityScore || visit.probability_score || 0);
   const storedSummary = String(visit.summary_text || "").trim();
   const priority = isPriorityCollectionVisit({ queuePriority, probabilityLabel });
   const customerRow = customerContext || {
@@ -206,15 +211,18 @@ function buildVisitReportFields(visit, customerContext, visitNumberForDay) {
     outstanding_61_90: 0,
     outstanding_91_120: 0,
     outstanding_above_120: 0,
+    probability_label: probabilityLabel,
   };
 
   const whatsappSummary = storedSummary || buildStoredCollectionVisitSummary(customerRow, {
     ...visit,
     visit_number_for_day: visit.visit_number_for_day || visitNumberForDay,
     queue_priority: queuePriority,
+    probability_label: probabilityLabel,
   }, {
     visitNumberForDay: visit.visit_number_for_day || visitNumberForDay,
     queuePriority,
+    probabilityLabel,
   });
 
   return {
@@ -226,6 +234,11 @@ function buildVisitReportFields(visit, customerContext, visitNumberForDay) {
     priorityReason: priority.reason,
     visitNumberForDay: visit.visit_number_for_day || visitNumberForDay || null,
     hasStoredSummary: Boolean(storedSummary),
+    prioritySource: priorityMeta.prioritySource || (queuePriority || probabilityLabel ? "stored" : "unknown"),
+    queueRankGap: priorityMeta.queueRankGap ?? null,
+    queueCompliance: priorityMeta.queueCompliance || "unknown",
+    dueQueueSize: priorityMeta.dueQueueSize ?? null,
+    isScheduledRevisit: Boolean(priorityMeta.isScheduledRevisit),
   };
 }
 
@@ -466,6 +479,13 @@ export async function GET(request) {
 
     const outstandingByCustomer = await loadOutstandingContextByCustomer(admin, customerCodes, date);
 
+    const collectionRecords = await fetchOutstandingAndCollectionRecords(admin, {
+      hasAllAccess: true,
+      visibleSalesmanCodes: [],
+      scopeProfiles: [],
+    });
+    const priorityMaps = buildCollectionQueuePriorityMaps(collectionRecords, `${date}T12:00:00`);
+
     const activityGpsByUser = await loadActivityGpsByUser(admin, allCollectorIds, startIso, endIso);
     const visitRowsWithGpsFallback = visitRows
       .filter((visit) => {
@@ -488,10 +508,21 @@ export async function GET(request) {
       const userRole = String(collectorProfile.role || "").trim().toLowerCase().replace(/_/g, "-");
       const userRoleLabel = formatCollectionUserRoleLabel(collectorProfile.role);
       const enrichedVisits = enrichVisitsWithDistances(rows).map((visit, index) => {
+        const customerCode = normalizeCode(visit.customer_code);
+        const record = priorityMaps.recordByCode.get(customerCode);
+        const priorityMeta = resolveVisitPriorityMeta(visit, priorityMaps, {
+          reportDate: date,
+          visitNumberForDay: visit.visit_number_for_day || index + 1,
+        });
+        priorityMeta.isScheduledRevisit = record
+          ? isScheduledRevisitQueueCustomer(record, `${date}T12:00:00`)
+          : false;
+
         const reportFields = buildVisitReportFields(
           visit,
-          outstandingByCustomer.get(normalizeCode(visit.customer_code)),
+          outstandingByCustomer.get(customerCode),
           index + 1,
+          priorityMeta,
         );
 
         return {
@@ -520,6 +551,11 @@ export async function GET(request) {
         priorityReason: reportFields.priorityReason,
         visitNumberForDay: reportFields.visitNumberForDay,
         hasStoredSummary: reportFields.hasStoredSummary,
+        prioritySource: reportFields.prioritySource,
+        queueRankGap: reportFields.queueRankGap,
+        queueCompliance: reportFields.queueCompliance,
+        dueQueueSize: reportFields.dueQueueSize,
+        isScheduledRevisit: reportFields.isScheduledRevisit,
       };
       });
 

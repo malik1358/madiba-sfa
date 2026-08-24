@@ -12,8 +12,8 @@ Use GitHub Actions — builds in the cloud on Google’s servers. No Android Stu
 
 1. Push this repo to GitHub (or merge the `android/` folder to `main`)
 2. Open GitHub → **Actions** → **Android APK** → **Run workflow**
-3. When the job finishes, download artifact **madiba-sfa-debug-apk**
-4. Unzip → share `app-debug.apk` with salesmen
+3. When the job finishes, download artifact **madiba-sfa-release-apk**
+4. Unzip → share `app-release.apk` with salesmen (same release signing key as Google Play internal testing)
 
 The workflow also runs automatically when `android/` or Capacitor config changes on `main`.
 
@@ -167,11 +167,22 @@ android/app/build/outputs/apk/release/app-release.apk
 
 ## Install on salesman phones
 
-1. Send the APK file (Drive / WhatsApp / email)
+1. Send the APK file (Google Drive link is more reliable than WhatsApp for large APKs)
 2. On the phone: download the APK
 3. Android may ask to allow **Install unknown apps** for Chrome / Files / Drive — allow once
 4. Tap the APK → **Install**
 5. Open **MADIBA SFA** from the app drawer (not Chrome)
+
+### If install fails ("Installation failed — Please try again")
+
+| Cause | Fix |
+| --- | --- |
+| **Different signing key** (old debug APK on phone, new release APK shared) | Uninstall **MADIBA SFA** completely, then install the new APK |
+| **Older APK version** (phone already has 1.0.30, shared file is 1.0.28) | Share the **latest** APK from GitHub Actions (higher version number) |
+| **Corrupted WhatsApp transfer** | Re-download from Google Drive or GitHub artifact; avoid forwarding APK in chat |
+| **Play Store copy already installed** | Use Play Store internal testing update, or uninstall Play copy first then sideload |
+
+Android only shows a generic error for all of these. When in doubt: **uninstall MADIBA SFA → install the newest release APK**.
 
 ### Recommended phone settings
 
@@ -228,6 +239,7 @@ Android APK (Capacitor)
 | Gradle sync failed | Open SDK Manager in Android Studio; install latest SDK Platform + Build Tools |
 | Location/camera blocked | App info → Permissions → allow Location + Camera |
 | Old UI after deploy | Force-close app and reopen; web updates come from Vercel automatically |
+| APK install failed | Uninstall old MADIBA SFA first; use latest **madiba-sfa-release-apk** (not an old debug build) |
 
 ---
 

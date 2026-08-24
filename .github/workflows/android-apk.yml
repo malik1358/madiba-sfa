@@ -28,6 +28,9 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 1.0.${{ github.run_number }}
 
     steps:
       - name: Checkout
@@ -66,19 +69,33 @@ jobs:
       - name: Sync Capacitor Android
         run: npm exec -- cap sync android
 
-      - name: Build debug APK
+      - name: Decode upload keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 secret is not set."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/madiba-upload.keystore"
+
+      - name: Build signed release APK
         working-directory: android
         env:
-          VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: 1.0.${{ github.run_number }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/madiba-upload.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon -PmadibaVersionCode="$VERSION_CODE" -PmadibaVersionName="$VERSION_NAME"
+          ./gradlew assembleRelease --no-daemon \
+            -PmadibaVersionCode="$VERSION_CODE" \
+            -PmadibaVersionName="$VERSION_NAME"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: madiba-sfa-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: madiba-sfa-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30

@@ -73,7 +73,7 @@ jobs:
           VERSION_NAME: 1.0.${{ github.run_number }}
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
+          ./gradlew assembleDebug --no-daemon -PmadibaVersionCode="$VERSION_CODE" -PmadibaVersionName="$VERSION_NAME"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

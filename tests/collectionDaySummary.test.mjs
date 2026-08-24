@@ -54,8 +54,9 @@ test("buildCollectionDaySummary matches SM001-style day narrative", () => {
 
   const joined = summary.lines.join("\n");
   assert.match(joined, /Visited 10 customer/);
-  assert.match(joined, /Started at 12 pm and till 7:30 pm visited 6 customer/);
+  assert.match(joined, /Started at 12 pm and till 1:45 pm visited 4 customer/);
   assert.match(joined, /collection only from 1 customer of 3,625 SAR/);
+  assert.match(joined, /Between 2:30 pm to 7:30 pm visited 2 customer/);
   assert.match(joined, /went to Kharj/);
   assert.match(joined, /In Kharj visited 3 customer/);
   assert.match(joined, /without any collection/);

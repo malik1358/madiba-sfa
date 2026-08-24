@@ -434,8 +434,14 @@ function buildCollectorTimelineRows({
   );
 
   let visitCounter = 0;
+  const enrichedTimeline = enrichVisitsWithDistances(timelineRows);
 
-  return enrichVisitsWithDistances(timelineRows).map((row) => {
+  return enrichedTimeline.map((row, index) => {
+    const previous = index > 0 ? enrichedTimeline[index - 1] : null;
+    const speedFromPreviousKmH = previous
+      ? computeSpeedKmh(row.distanceFromPreviousKm, previous.saved_at, row.saved_at)
+      : null;
+
     if (row.rowType === "lunch") {
       return {
         id: row.id,
@@ -453,6 +459,7 @@ function buildCollectorTimelineRows({
         hasGps: row.hasGps,
         gpsSource: row.hasGps ? "activity_log" : null,
         distanceFromPreviousKm: row.distanceFromPreviousKm,
+        speedFromPreviousKmH,
       };
     }
 

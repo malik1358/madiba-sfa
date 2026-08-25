@@ -32,6 +32,25 @@ test("planCustomerLocationUpdates skips zero coordinates and matches by code", (
   assert.equal(plan.skipped.length, 1);
 });
 
+test("planCustomerLocationUpdates onlyMissing skips customers that already have GPS", () => {
+  const plan = planCustomerLocationUpdates(
+    [
+      { party_name: "1415 sharikat khutwh alearud", customer_code: "1415", latitude: 24.5, longitude: 46.6 },
+      { party_name: "1301 Zero One", customer_code: "1301", latitude: 24.6, longitude: 46.7 },
+    ],
+    [
+      { customer_code: "1415", customer_name: "SHARIKAT KHUTWH ALEARUD", latitude: null, longitude: null },
+      { customer_code: "1301", customer_name: "ZERO ONE", latitude: 24.1, longitude: 46.2 },
+    ],
+    { onlyMissing: true },
+  );
+
+  assert.equal(plan.updates.length, 1);
+  assert.equal(plan.updates[0].customer_code, "1415");
+  assert.equal(plan.alreadySet.length, 1);
+  assert.equal(plan.alreadySet[0].customer_code, "1301");
+});
+
 test("dedupeLocationRows keeps the latest valid coordinates", () => {
   const rows = dedupeLocationRows([
     { customer_code: "1010", latitude: 0, longitude: 0, party_name: "1010 first" },

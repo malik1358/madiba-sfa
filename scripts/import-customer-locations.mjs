@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
- * One-time customer GPS import from Excel.
+ * One-time customer GPS import from Excel or CSV.
  *
  * Usage:
  *   npm.cmd run import:customer-locations -- "C:\path\customer master gps location.xlsx"
+ *   npm.cmd run import:customer-locations -- data/customer-locations-missing-20260825.csv --missing-only
  *
  * Requires .env.local with NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import XLSX from "xlsx";
 import {
@@ -17,6 +18,35 @@ import {
   parseLocationSpreadsheetRow,
   planCustomerLocationUpdates,
 } from "../app/lib/customerLocationImport.js";
+
+function parseCsvRows(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) return [];
+
+  const headers = lines[0].split(",").map((value) => value.trim());
+  return lines.slice(1).map((line) => {
+    const values = line.split(",");
+    return headers.reduce((row, header, index) => {
+      row[header] = String(values[index] || "").trim();
+      return row;
+    }, {});
+  });
+}
+
+function loadLocationRows(inputPath) {
+  const extension = extname(inputPath).toLowerCase();
+  if (extension === ".csv") {
+    return parseCsvRows(readFileSync(inputPath, "utf8"));
+  }
+
+  const workbook = XLSX.readFile(inputPath);
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { defval: "" });
+}
 
 function loadEnvLocal() {
   const envPath = join(process.cwd(), ".env.local");
@@ -69,14 +99,18 @@ async function main() {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
   }
 
-  const inputPath = resolve(process.argv[2] || join(process.env.USERPROFILE || "", "OneDrive", "Documents", "customer master gps location.xlsx"));
+  const inputPath = resolve(
+    process.argv.find((arg) => !arg.startsWith("--") && arg.endsWith(".xlsx"))
+    || process.argv.find((arg) => !arg.startsWith("--") && arg.endsWith(".csv"))
+    || process.argv[2]
+    || join(process.env.USERPROFILE || "", "OneDrive", "Documents", "customer master gps location.xlsx"),
+  );
   if (!existsSync(inputPath)) {
-    throw new Error(`Excel file not found: ${inputPath}`);
+    throw new Error(`Location file not found: ${inputPath}`);
   }
 
-  const workbook = XLSX.readFile(inputPath);
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  const missingOnly = process.argv.includes("--missing-only");
+  const rawRows = loadLocationRows(inputPath);
   const parsedRows = rawRows.map(parseLocationSpreadsheetRow);
 
   const admin = createClient(supabaseUrl, serviceKey, {
@@ -84,11 +118,12 @@ async function main() {
   });
 
   const customers = await fetchAllCustomers(admin);
-  const plan = planCustomerLocationUpdates(parsedRows, customers);
+  const plan = planCustomerLocationUpdates(parsedRows, customers, { onlyMissing: missingOnly });
 
   console.log(`Source rows: ${rawRows.length}`);
   console.log(`Matched updates: ${plan.updates.length}`);
   console.log(`Skipped (invalid/zero GPS): ${plan.skipped.length}`);
+  console.log(`Already had GPS: ${plan.alreadySet.length}`);
   console.log(`Not found in customers table: ${plan.notFound.length}`);
 
   if (plan.updates.length === 0) {

@@ -113,13 +113,19 @@ export function resolveCustomerForLocationRow(row, lookup) {
   return null;
 }
 
-export function planCustomerLocationUpdates(rows, customers) {
+export function customerHasStoredLocation(customer) {
+  return isValidLatitude(customer?.latitude) && isValidLongitude(customer?.longitude);
+}
+
+export function planCustomerLocationUpdates(rows, customers, options = {}) {
+  const onlyMissing = Boolean(options.onlyMissing);
   const lookup = buildCustomerLookup(customers);
   const dedupedRows = dedupeLocationRows(rows);
 
   const updates = [];
   const skipped = [];
   const notFound = [];
+  const alreadySet = [];
 
   dedupedRows.forEach((row) => {
     if (!isValidLatitude(row.latitude) || !isValidLongitude(row.longitude)) {
@@ -133,6 +139,15 @@ export function planCustomerLocationUpdates(rows, customers) {
       return;
     }
 
+    if (onlyMissing && customerHasStoredLocation(customer)) {
+      alreadySet.push({
+        customer_code: customer.customer_code,
+        customer_name: customer.customer_name,
+        source_party_name: row.party_name || "",
+      });
+      return;
+    }
+
     updates.push({
       customer_code: customer.customer_code,
       customer_name: customer.customer_name,
@@ -142,7 +157,7 @@ export function planCustomerLocationUpdates(rows, customers) {
     });
   });
 
-  return { updates, skipped, notFound };
+  return { updates, skipped, notFound, alreadySet };
 }
 
 export async function applyCustomerLocationUpdates(admin, updates, chunkSize = 100) {

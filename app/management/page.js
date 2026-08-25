@@ -8,8 +8,9 @@ import { translate, useAppLanguage } from "../lib/appLanguage";
 import SupabaseUnavailable from "../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../components/AppLanguageSwitch";
 import MostVisitedPages from "../components/MostVisitedPages";
-import { usePopupMessages } from "../../hooks/usePopupMessages";
-import { useAppPopup } from "../../components/AppPopupProvider";
+import { usePopupMessages } from "../hooks/usePopupMessages";
+import { useAppPopup } from "../components/AppPopupProvider";
+import { buildModuleAccess, listAccessibleModules } from "../lib/moduleAccess";
 
 const TEXT = {
   title: { en: "Management", ar: "الإدارة" },

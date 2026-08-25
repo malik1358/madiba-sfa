@@ -16,8 +16,10 @@ import {
 } from "../../../lib/collectionVisitPriority.js";
 import {
   computeSpeedKmh,
-  computeWaitingMinutes,
+  resolveWaitingMinutesFromPreviousVisit,
   computeEstimatedTransitHours,
+  haversineDistanceKm,
+  findPreviousWaitingAnchorRow,
   enrichVisitsWithDistances,
   extractAreaFromActivityNote,
   extractStreetFromActivityNote,
@@ -443,18 +445,32 @@ function buildCollectorTimelineRows({
 
   let visitCounter = 0;
   const enrichedTimeline = enrichVisitsWithDistances(timelineRows);
+  const timelineForWaiting = enrichedTimeline.map((row) => ({
+    savedAt: row.saved_at,
+    saved_at: row.saved_at,
+    rowType: row.rowType,
+    latitude: row.latitude,
+    longitude: row.longitude,
+  }));
 
   return enrichedTimeline.map((row, index) => {
     const previous = index > 0 ? enrichedTimeline[index - 1] : null;
     const speedFromPreviousKmH = previous
       ? computeSpeedKmh(row.distanceFromPreviousKm, previous.saved_at, row.saved_at)
       : null;
-    const estimatedTransitMinutesFromPrevious = previous
-      ? Math.round((computeEstimatedTransitHours(row.distanceFromPreviousKm) || 0) * 60)
+    const previousAnchor = findPreviousWaitingAnchorRow(timelineForWaiting, index);
+    const anchorDistanceKm = previousAnchor && hasGpsCoordinates(previousAnchor) && hasGpsCoordinates(row)
+      ? haversineDistanceKm(
+        Number(previousAnchor.latitude),
+        Number(previousAnchor.longitude),
+        Number(row.latitude),
+        Number(row.longitude),
+      )
       : null;
-    const waitingMinutesFromPrevious = previous
-      ? computeWaitingMinutes(row.distanceFromPreviousKm, previous.saved_at, row.saved_at)
-      : null;
+    const estimatedTransitMinutesFromPrevious = anchorDistanceKm === null
+      ? null
+      : Math.round((computeEstimatedTransitHours(anchorDistanceKm) || 0) * 60);
+    const waitingMinutesFromPrevious = resolveWaitingMinutesFromPreviousVisit(timelineForWaiting, index);
 
     if (row.rowType === "lunch") {
       return {

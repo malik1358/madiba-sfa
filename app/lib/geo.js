@@ -326,6 +326,61 @@ export function resolveWaitingMinutesFromPrevious(
   return computeWaitingMinutes(row.distanceFromPreviousKm, fromSavedAt, toSavedAt, assumedSpeedKmh);
 }
 
+export function isIdleGpsPingTimelineRow(row) {
+  const transactionType = String(row?.transactionType || row?.transaction_type || "").trim().toUpperCase();
+  if (transactionType === "GPS_PING") return true;
+  if (row?.rowType === "lunch") return true;
+  return false;
+}
+
+function resolveTimelineRowGps(row) {
+  if (!row) return null;
+
+  const latitude = row.entryLatitude ?? row.latitude;
+  const longitude = row.entryLongitude ?? row.longitude;
+  if (!hasGpsCoordinates({ latitude, longitude })) return null;
+
+  return {
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+  };
+}
+
+export function findPreviousWaitingAnchorRow(rows, index) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = rows[cursor];
+    if (!isIdleGpsPingTimelineRow(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function resolveWaitingMinutesFromPreviousVisit(
+  rows,
+  index,
+  assumedSpeedKmh = DEFAULT_TRANSIT_SPEED_KMH,
+) {
+  const row = rows?.[index];
+  if (!row || isIdleGpsPingTimelineRow(row)) return null;
+
+  const previous = findPreviousWaitingAnchorRow(rows, index);
+  if (!previous) return null;
+
+  const fromSavedAt = previous.savedAt ?? previous.saved_at;
+  const toSavedAt = row.savedAt ?? row.saved_at;
+  const fromGps = resolveTimelineRowGps(previous);
+  const toGps = resolveTimelineRowGps(row);
+  if (!fromGps || !toGps) return null;
+
+  const distanceKm = haversineDistanceKm(
+    fromGps.latitude,
+    fromGps.longitude,
+    toGps.latitude,
+    toGps.longitude,
+  );
+
+  return computeWaitingMinutes(distanceKm, fromSavedAt, toSavedAt, assumedSpeedKmh);
+}
+
 export function sumWaitingMinutesFromTimeline(
   rows,
   assumedSpeedKmh = DEFAULT_TRANSIT_SPEED_KMH,
@@ -333,9 +388,7 @@ export function sumWaitingMinutesFromTimeline(
   let total = 0;
 
   for (let index = 0; index < (rows || []).length; index += 1) {
-    const row = rows[index];
-    const previous = index > 0 ? rows[index - 1] : null;
-    const waiting = resolveWaitingMinutesFromPrevious(row, previous, assumedSpeedKmh);
+    const waiting = resolveWaitingMinutesFromPreviousVisit(rows, index, assumedSpeedKmh);
     if (waiting !== null) total += waiting;
   }
 

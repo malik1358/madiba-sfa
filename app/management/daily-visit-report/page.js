@@ -14,7 +14,7 @@ import {
   buildGoogleMapsPointUrl,
   buildGpsActivityNote,
   formatDurationMinutes,
-  resolveWaitingMinutesFromPrevious,
+  resolveWaitingMinutesFromPreviousVisit,
   resolveGpsCapturePlatform,
   sumWaitingMinutesFromTimeline,
 } from "../../lib/geo";
@@ -57,8 +57,8 @@ const TEXT = {
   speed: { en: "Speed (km/h)", ar: "السرعة (كم/س)" },
   waitingTime: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
   waitingTimeHint: {
-    en: "Elapsed time minus estimated driving time at the assumed speed below.",
-    ar: "الوقت المنقضي ناقص وقت القيادة التقديري بالسرعة المفترضة أدناه.",
+    en: "Elapsed time between visits minus estimated driving time. Idle GPS pings are ignored.",
+    ar: "الوقت المنقضي بين الزيارات ناقص وقت القيادة التقديري. يتم تجاهل نبضات GPS الخاملة.",
   },
   transitSpeed: { en: "Assumed driving speed", ar: "سرعة القيادة المفترضة" },
   totalWaiting: { en: "Est. total waiting", ar: "إجمالي وقت الانتظار التقديري" },
@@ -407,9 +407,9 @@ export default function DailyVisitReportPage() {
                             </td>
                             <td>
                               {(() => {
-                                const waiting = resolveWaitingMinutesFromPrevious(
-                                  entry,
-                                  entryIndex > 0 ? entries[entryIndex - 1] : null,
+                                const waiting = resolveWaitingMinutesFromPreviousVisit(
+                                  entryUser.entries,
+                                  entryIndex,
                                   transitSpeedKmh,
                                 );
                                 return waiting === null ? "-" : formatDurationMinutes(waiting);

@@ -12,8 +12,10 @@ import {
   formatCollectorDisplayName,
   formatGpsCapturePlatformLabel,
   computeSpeedKmh,
-  computeWaitingMinutes,
+  resolveWaitingMinutesFromPreviousVisit,
   computeEstimatedTransitHours,
+  haversineDistanceKm,
+  findPreviousWaitingAnchorRow,
   hasGpsCoordinates,
   inferGpsCapturePlatformFromNote,
   parseGpsFromActivityNote,
@@ -262,6 +264,13 @@ function enrichEntries(entries, customerMap, profileMap) {
   );
 
   const withRoute = enrichVisitsWithDistances(sorted);
+  const timelineForWaiting = withRoute.map((entry) => ({
+    savedAt: entry.saved_at,
+    saved_at: entry.saved_at,
+    transactionType: entry.transaction_type,
+    latitude: entry.latitude,
+    longitude: entry.longitude,
+  }));
 
   return withRoute.map((entry, index) => {
     const customer = customerMap.get(normalizeCode(entry.customer_code)) || {};
@@ -273,12 +282,19 @@ function enrichEntries(entries, customerMap, profileMap) {
     const speedKmh = previous
       ? computeSpeedKmh(entry.distanceFromPreviousKm, previous.saved_at, entry.saved_at)
       : null;
-    const waitingMinutesFromPrevious = previous
-      ? computeWaitingMinutes(entry.distanceFromPreviousKm, previous.saved_at, entry.saved_at)
+    const waitingMinutesFromPrevious = resolveWaitingMinutesFromPreviousVisit(timelineForWaiting, index);
+    const previousAnchor = findPreviousWaitingAnchorRow(timelineForWaiting, index);
+    const anchorDistanceKm = previousAnchor && hasGpsCoordinates(previousAnchor) && hasGpsCoordinates(entry)
+      ? haversineDistanceKm(
+        Number(previousAnchor.latitude),
+        Number(previousAnchor.longitude),
+        Number(entry.latitude),
+        Number(entry.longitude),
+      )
       : null;
-    const estimatedTransitMinutesFromPrevious = previous
-      ? Math.round((computeEstimatedTransitHours(entry.distanceFromPreviousKm) || 0) * 60)
-      : null;
+    const estimatedTransitMinutesFromPrevious = anchorDistanceKm === null
+      ? null
+      : Math.round((computeEstimatedTransitHours(anchorDistanceKm) || 0) * 60);
     const area = String(customer.area || extractAreaFromActivityNote(entry.meta?.activityNote) || "").trim();
     const street = extractStreetFromActivityNote(entry.meta?.activityNote);
     const capturePlatform = entry.meta?.activityNote

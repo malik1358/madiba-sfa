@@ -13,6 +13,7 @@ import { useAppPopup } from "./components/AppPopupProvider";
 import { isAndroidBatteryRestricted } from "./lib/androidBatteryOptimization";
 import { evaluateNativeAndroidApkVersion } from "./lib/androidAppVersion";
 import AndroidApkUpdateRequired from "./components/AndroidApkUpdateRequired";
+import { useLogoutWithDaySummary } from "./hooks/useLogoutWithDaySummary";
 
 export default function Home() {
   const { language, ar, dir, setLanguage } = useAppLanguage();
@@ -29,6 +30,7 @@ export default function Home() {
 
   const router = useRouter();
   const { showPopup } = useAppPopup();
+  const { requestLogout, dialog: logoutDialog, busy: logoutBusy } = useLogoutWithDaySummary();
   const moduleAccess = buildModuleAccess({
     role: profile?.role,
     salesmanCode: profile?.salesman_code,
@@ -249,15 +251,7 @@ export default function Home() {
   }
 
   async function handleLogout() {
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
-
-    setUser(null);
-    setProfile(null);
-    setEmail("");
-    setPassword("");
+    await requestLogout();
   }
 
   function handleNavigate(path) {
@@ -356,6 +350,7 @@ export default function Home() {
             <button
               className="logoutButton"
               onClick={handleLogout}
+              disabled={logoutBusy}
             >
               {ar ? "تسجيل الخروج" : "Logout"}
             </button>
@@ -441,6 +436,7 @@ export default function Home() {
         </section>
 
       </main>
+      {logoutDialog}
       </MorningAttendanceGate>
     );
   }

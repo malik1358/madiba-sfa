@@ -8,7 +8,8 @@ import {
   computeEstimatedTransitHours,
   DEFAULT_TRANSIT_SPEED_KMH,
   formatDurationMinutes,
-  resolveWaitingMinutesFromPrevious,
+  resolveWaitingMinutesFromPreviousVisit,
+  isIdleGpsPingTimelineRow,
   sumWaitingMinutesFromTimeline,
   TRANSIT_SPEED_OPTIONS_KMH,
   coordinateCacheKey,
@@ -198,15 +199,52 @@ test("sumWaitingMinutesFromTimeline totals waiting across consecutive visits", (
     {
       savedAt: "2026-08-17T10:12:00.000Z",
       distanceFromPreviousKm: null,
+      latitude: 24.8705,
+      longitude: 46.62321,
+      transactionType: "COLLECTION_VISIT",
     },
     {
       savedAt: "2026-08-17T12:43:00.000Z",
-      distanceFromPreviousKm: 35.82,
+      latitude: 24.56683,
+      longitude: 46.74144,
+      transactionType: "COLLECTION_VISIT",
     },
   ];
 
   assert.equal(sumWaitingMinutesFromTimeline(rows, DEFAULT_TRANSIT_SPEED_KMH), 97);
   assert.equal(sumWaitingMinutesFromTimeline(rows, 30), 79);
+});
+
+test("resolveWaitingMinutesFromPreviousVisit skips idle GPS pings between visits", () => {
+  const rows = [
+    {
+      savedAt: "2026-08-17T19:57:00.000Z",
+      latitude: 24.70,
+      longitude: 46.70,
+      transactionType: "COLLECTION_VISIT",
+    },
+    {
+      savedAt: "2026-08-17T20:39:00.000Z",
+      latitude: 24.71,
+      longitude: 46.71,
+      transactionType: "GPS_PING",
+    },
+    {
+      savedAt: "2026-08-17T21:20:00.000Z",
+      latitude: 24.715,
+      longitude: 46.715,
+      transactionType: "GPS_PING",
+    },
+    {
+      savedAt: "2026-08-17T21:21:00.000Z",
+      latitude: 24.716,
+      longitude: 46.716,
+      transactionType: "COLLECTION_VISIT",
+    },
+  ];
+
+  assert.equal(resolveWaitingMinutesFromPreviousVisit(rows, 1), null);
+  assert.equal(resolveWaitingMinutesFromPreviousVisit(rows, 3, DEFAULT_TRANSIT_SPEED_KMH), 80);
 });
 
 test("parseReverseGeocodeAddress maps OpenStreetMap fields", () => {

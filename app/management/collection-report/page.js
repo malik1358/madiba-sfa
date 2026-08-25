@@ -12,7 +12,7 @@ import {
   TRANSIT_SPEED_OPTIONS_KMH,
   buildGoogleMapsPointUrl,
   formatDurationMinutes,
-  resolveWaitingMinutesFromPrevious,
+  resolveWaitingMinutesFromPreviousVisit,
   sumWaitingMinutesFromTimeline,
 } from "../../lib/geo";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -71,8 +71,8 @@ const TEXT = {
   speed: { en: "Speed from previous", ar: "السرعة من السابق" },
   waitingTime: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
   waitingTimeHint: {
-    en: "Elapsed time minus estimated driving time at the assumed speed below.",
-    ar: "الوقت المنقضي ناقص وقت القيادة التقديري بالسرعة المفترضة أدناه.",
+    en: "Elapsed time between visits minus estimated driving time. Idle GPS pings and lunch breaks are ignored.",
+    ar: "الوقت المنقضي بين الزيارات ناقص وقت القيادة التقديري. يتم تجاهل نبضات GPS الخاملة واستراحات الغداء.",
   },
   transitSpeed: { en: "Assumed driving speed", ar: "سرعة القيادة المفترضة" },
   totalWaiting: { en: "Est. total waiting", ar: "إجمالي وقت الانتظار التقديري" },
@@ -602,9 +602,9 @@ export default function CollectionReportPage() {
                             </td>
                             <td>
                               {(() => {
-                                const waiting = resolveWaitingMinutesFromPrevious(
-                                  visit,
-                                  visitIndex > 0 ? visits[visitIndex - 1] : null,
+                                const waiting = resolveWaitingMinutesFromPreviousVisit(
+                                  collector.visits,
+                                  visitIndex,
                                   transitSpeedKmh,
                                 );
                                 return waiting === null ? "-" : formatDurationMinutes(waiting);

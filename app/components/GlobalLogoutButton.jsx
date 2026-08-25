@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { useLogoutWithDaySummary } from "../hooks/useLogoutWithDaySummary";
 import { getSupabaseClient } from "../lib/supabase";
-import { NATIVE_WORKDAY_STOP_EVENT } from "../lib/nativeFieldTracking";
 
 function hasPersistedSession() {
   if (typeof window === "undefined") return false;
@@ -15,10 +15,9 @@ function hasPersistedSession() {
 }
 
 export default function GlobalLogoutButton() {
-  const router = useRouter();
   const pathname = usePathname();
   const [visible, setVisible] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const { requestLogout, dialog, busy } = useLogoutWithDaySummary();
 
   useEffect(() => {
     setVisible(hasPersistedSession());
@@ -60,34 +59,20 @@ export default function GlobalLogoutButton() {
     };
   }, [pathname]);
 
-  async function handleLogout() {
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-
-    setBusy(true);
-    try {
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent(NATIVE_WORKDAY_STOP_EVENT));
-      }
-      await supabase.auth.signOut();
-      router.replace("/");
-    } finally {
-      setBusy(false);
-      setVisible(false);
-    }
-  }
-
   if (!visible) return null;
 
   return (
-    <button
-      type="button"
-      className="globalLogoutButton"
-      onClick={handleLogout}
-      disabled={busy}
-      aria-label="Logout"
-    >
-      {busy ? "Logging out..." : "Logout"}
-    </button>
+    <>
+      <button
+        type="button"
+        className="globalLogoutButton"
+        onClick={requestLogout}
+        disabled={busy}
+        aria-label="Logout"
+      >
+        {busy ? "Logging out..." : "Logout"}
+      </button>
+      {dialog}
+    </>
   );
 }

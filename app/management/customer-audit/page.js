@@ -17,6 +17,7 @@ import Link from "next/link";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";

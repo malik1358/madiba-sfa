@@ -11,7 +11,9 @@ import {
   buildOutstandingRowSalesmanByCode,
   isPlaceholderSalesmanValue,
   pickOutstandingSalesmanName,
+  findOutstandingForCustomer,
   findOutstandingHeaderRow,
+  isSameOutstandingCustomer,
   findOutstandingCustomerCodesForSalesmen,
   findOutstandingInvoiceDayColumn,
   hydrateOutstandingInvoices,
@@ -299,4 +301,41 @@ test("hydrateOutstandingInvoices synthesizes missing invoice rows from aggregate
   assert.equal(invoices.length, 1);
   assert.equal(resolveOutstandingInvoiceCustomerCode(invoices[0]), "1119C");
   assert.equal(invoices[0].pending_amount, 2805538);
+});
+
+test("prospect customers do not inherit outstanding from similar customer names", () => {
+  const dataset = {
+    rows: [{
+      customer_code: "1098",
+      customer_name: "Al Tawfeer Trading Company",
+      open_invoices: 1,
+      buckets: { ">120": 2224 },
+      total_outstanding: 2224,
+    }],
+    invoices: [{
+      customer_code: "1098",
+      customer_name: "Al Tawfeer Trading Company",
+      ref_no: "1098",
+      pending_amount: 2224,
+      overdue_days: 328,
+      salesman: "Abdul Rehman",
+    }],
+  };
+
+  const customer = findOutstandingForCustomer(
+    dataset,
+    "PROSPECT-126",
+    "Raed Al Tawfeer Trading Company, Al Shifa Branch",
+  );
+
+  assert.equal(customer, null);
+  assert.equal(
+    isSameOutstandingCustomer(
+      "1098",
+      "Al Tawfeer Trading Company",
+      "PROSPECT-126",
+      "Raed Al Tawfeer Trading Company, Al Shifa Branch",
+    ),
+    false,
+  );
 });

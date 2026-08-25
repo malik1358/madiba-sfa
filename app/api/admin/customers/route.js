@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   fetchAllFilteredCustomers,
+  normalizeCustomerMasterActiveFilter,
   normalizeCustomerMasterGpsFilter,
+  normalizeCustomerMasterOutstandingFilter,
   normalizeCustomerMasterSearch,
 } from "../../../lib/customerMasterQuery.js";
 
@@ -57,11 +59,18 @@ export async function GET(request) {
       url.searchParams.get("gpsFilter"),
       url.searchParams.get("missingGps") === "1",
     );
+    const activeFilter = normalizeCustomerMasterActiveFilter(url.searchParams.get("activeFilter"));
+    const outstandingFilter = normalizeCustomerMasterOutstandingFilter(url.searchParams.get("outstandingFilter"));
     const page = Math.max(1, Number(url.searchParams.get("page") || 1));
     const limit = Math.min(200, Math.max(10, Number(url.searchParams.get("limit") || 50)));
     const from = (page - 1) * limit;
 
-    const customers = await fetchAllFilteredCustomers(admin, { search, gpsFilter });
+    const customers = await fetchAllFilteredCustomers(admin, {
+      search,
+      gpsFilter,
+      activeFilter,
+      outstandingFilter,
+    });
     const pageRows = customers.slice(from, from + limit);
 
     return NextResponse.json({
@@ -70,6 +79,8 @@ export async function GET(request) {
       filters: {
         search,
         gpsFilter,
+        activeFilter,
+        outstandingFilter,
       },
       pagination: {
         page,

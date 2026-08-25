@@ -6,6 +6,7 @@ import {
   insertProspectWithColumnFallback,
   normalizeProspectSalesmanCode,
 } from "../../lib/prospects.js";
+import { linkProspectToCustomer } from "../../lib/prospectCustomerLink.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -123,6 +124,27 @@ export async function PATCH(request) {
 
     if (!canAccessProspectSalesmanCode(scope, existing.salesman_code)) {
       return NextResponse.json({ success: false, error: "You do not have access to this prospect." }, { status: 403 });
+    }
+
+    const action = String(body.action || "schedule_follow_up").trim().toLowerCase();
+    if (action === "link_customer") {
+      const customerCode = String(body.customer_code || "").trim();
+      const result = await linkProspectToCustomer(admin, {
+        prospectId,
+        customerCode,
+        copyGps: body.copy_gps !== false,
+        overwriteCustomerGps: Boolean(body.overwrite_customer_gps),
+      });
+
+      return NextResponse.json({
+        success: true,
+        data: result.prospect,
+        linkedCustomer: {
+          customer_code: result.customerCode,
+          customer_name: result.customer.customer_name,
+          gpsCopied: result.gpsCopied,
+        },
+      });
     }
 
     const followUpDate = String(body.follow_up_date || "").trim();

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { findCustomerByCode, formatCustomerLookupPreview } from "../../../lib/prospectCustomerLink.js";
 import { shouldRequireTransactionGps } from "../../../lib/moduleAccess.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -38,13 +39,7 @@ async function getProfile(admin, userId) {
 }
 
 async function ensureCustomerAccess(admin, profile, customerCode) {
-  const { data: customer, error } = await admin
-    .from("customers")
-    .select("customer_code,customer_name,current_salesman_code,latitude,longitude,city,area")
-    .eq("customer_code", customerCode)
-    .maybeSingle();
-
-  if (error) throw error;
+  const customer = await findCustomerByCode(admin, customerCode);
   if (!customer) throw new Error("Customer not found.");
 
   const role = String(profile.role || "").toLowerCase();
@@ -78,12 +73,12 @@ export async function GET(request) {
 
     const profile = await getProfile(admin, user.id);
     const customer = await ensureCustomerAccess(admin, profile, customerCode);
+    const preview = formatCustomerLookupPreview(customer);
 
     return Response.json({
       success: true,
       customer: {
-        customer_code: customer.customer_code,
-        customer_name: customer.customer_name,
+        ...preview,
         latitude: customer.latitude,
         longitude: customer.longitude,
         city: customer.city,

@@ -1,0 +1,46 @@
+name: Mobile Snapshot Sync
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Rebuild mobile field snapshots
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          MOBILE_SNAPSHOT_URL: ${{ secrets.MOBILE_SNAPSHOT_URL }}
+        run: |
+          DEFAULT_MOBILE_SNAPSHOT_URL='https://madiba-sfa.vercel.app/api/cron/mobile-snapshot'
+          MOBILE_SNAPSHOT_URL_TRIMMED="$(printf '%s' "$MOBILE_SNAPSHOT_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          MOBILE_SNAPSHOT_URL_EFFECTIVE="$MOBILE_SNAPSHOT_URL_TRIMMED"
+
+          if [[ -z "$MOBILE_SNAPSHOT_URL_EFFECTIVE" ]]; then
+            echo "MOBILE_SNAPSHOT_URL secret is missing; falling back to default endpoint."
+            MOBILE_SNAPSHOT_URL_EFFECTIVE="$DEFAULT_MOBILE_SNAPSHOT_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          status_code="$(curl -sS -L --post301 --post302 --post303 -o response.json -w "%{http_code}" -X POST "$MOBILE_SNAPSHOT_URL_EFFECTIVE" \
+            -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+            -H "Content-Type: application/json" \
+            --data '{}')"
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Mobile snapshot sync failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Mobile snapshot sync succeeded with HTTP $status_code"
+          cat response.json

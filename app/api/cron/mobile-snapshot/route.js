@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
-import { runInactivityPushCycle } from "../../../lib/inactivityPushServer.js";
+import { rebuildAllMobileFieldSnapshots } from "../../../lib/server/mobileFieldSnapshot.js";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+export async function POST(request) {
+  return handleRequest(request);
+}
+
+export async function GET(request) {
+  return handleRequest(request);
+}
 
 async function handleRequest(request) {
   try {
@@ -23,30 +31,16 @@ async function handleRequest(request) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const result = await runInactivityPushCycle(admin);
-    return NextResponse.json({ success: true, ...result });
-  } catch (error) {
-    const message = error.message || "Inactivity push cycle failed.";
-    if (String(message).includes("FIREBASE_SERVICE_ACCOUNT_JSON")) {
-      return NextResponse.json({
-        success: true,
-        skipped: true,
-        reason: "fcm_misconfigured",
-        error: message,
-      });
-    }
+    const meta = await rebuildAllMobileFieldSnapshots(admin, { trigger: "cron" });
 
+    return NextResponse.json({
+      success: true,
+      ...meta,
+    });
+  } catch (error) {
     return NextResponse.json(
-      { success: false, error: message },
+      { success: false, error: error.message || "Mobile snapshot rebuild failed." },
       { status: 500 },
     );
   }
-}
-
-export async function POST(request) {
-  return handleRequest(request);
-}
-
-export async function GET(request) {
-  return handleRequest(request);
 }

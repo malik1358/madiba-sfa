@@ -17,6 +17,10 @@ function normalizeComparableName(value) {
     .trim();
 }
 
+function isProspectCustomerCode(value) {
+  return /^PROSPECT-\d+$/i.test(String(value || "").trim());
+}
+
 function outstandingInvoiceCustomerCode(invoice) {
   const storedCode = normalizeCode(invoice?.customer_code);
   return normalizeCode(extractLeadingCustomerCodeAndName(storedCode).customer_code)
@@ -599,6 +603,10 @@ export function buildOutstandingRow(raw) {
 }
 
 export function findOutstandingForCustomer(dataset, customerCode, customerName) {
+  if (isProspectCustomerCode(customerCode)) {
+    return null;
+  }
+
   const rows = Array.isArray(dataset?.rows) ? dataset.rows : [];
   const code = normalizeCode(customerCode);
   const name = normalizeName(customerName);
@@ -631,6 +639,10 @@ export function findOutstandingForCustomer(dataset, customerCode, customerName) 
 }
 
 export function isSameOutstandingCustomer(rowCustomerCode, rowCustomerName, customerCode, customerName) {
+  if (isProspectCustomerCode(customerCode)) {
+    return false;
+  }
+
   const targetCode = normalizeCode(customerCode);
   const targetName = normalizeName(customerName);
   const targetCodeNoZeros = targetCode.replace(/^0+/, "");

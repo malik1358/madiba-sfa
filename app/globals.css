@@ -7,7 +7,7 @@ body {
   background: #f3f7f8;
   color: #062f3a;
   font-family: Arial, Helvetica, sans-serif;
-  --sticky-table-top: 68px;
+  --sticky-table-top: 102px;
 }
 
 @media print {
@@ -97,6 +97,93 @@ body {
 
   .globalAppStatus span:first-child {
     flex-basis: 100%;
+  }
+}
+
+.appMainNav {
+  position: sticky;
+  top: 34px;
+  z-index: 9998;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #edf4f5;
+  border-bottom: 1px solid #c8d8db;
+}
+
+.environmentBanner + .globalAppStatus + .appMainNav {
+  top: 68px;
+}
+
+.appMainNavGroup {
+  position: relative;
+}
+
+.appMainNavGroupButton {
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid #b9ccd0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.appMainNavGroup--active .appMainNavGroupButton,
+.appMainNavGroupButton:hover,
+.appMainNavGroupButton:focus-visible {
+  background: #073f4c;
+  border-color: #073f4c;
+  color: #ffffff;
+}
+
+.appMainNavDropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 210px;
+  padding: 6px;
+  border: 1px solid #c8d8db;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(7, 63, 76, 0.12);
+}
+
+.appMainNavDropdown--open {
+  display: grid;
+  gap: 2px;
+}
+
+.appMainNavLink {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.appMainNavLink:hover,
+.appMainNavLink:focus-visible,
+.appMainNavLink--active {
+  background: #edf4f5;
+  color: #0b6173;
+}
+
+@media (max-width: 640px) {
+  .appMainNav {
+    top: 56px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .environmentBanner + .globalAppStatus + .appMainNav {
+    top: 90px;
   }
 }
 
@@ -4077,12 +4164,20 @@ table.auditMatrix td.auditTrendSame {
 }
 
 .moduleCustomerMasterTable {
-  min-width: 1080px;
+  min-width: 1180px;
+}
+
+/* Sticky page headers covered the first customer row when scrolling. */
+.moduleCustomerMasterTable th {
+  position: static;
+  top: auto;
+  box-shadow: none;
 }
 
 .moduleCustomerMasterTable th.moduleCustomerMasterSticky,
 .moduleCustomerMasterTable td.moduleCustomerMasterSticky {
   position: sticky;
+  top: auto;
   left: 0;
   z-index: 2;
   background: #ffffff;
@@ -4103,6 +4198,14 @@ table.auditMatrix td.auditTrendSame {
 .moduleCustomerMasterTable th.moduleCustomerMasterSticky {
   z-index: 7;
   background: #edf4f5;
+}
+
+.moduleCustomerMasterTable tbody tr:nth-child(even) td.moduleCustomerMasterSticky {
+  background: #f8fbfc;
+}
+
+.moduleCustomerMasterTable tbody tr:hover td.moduleCustomerMasterSticky {
+  background: #f3f8f9;
 }
 
 .moduleCustomerMasterTable td.moduleCustomerMasterName {

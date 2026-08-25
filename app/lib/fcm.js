@@ -5,17 +5,67 @@ const ANDROID_CHANNEL_ID = "madiba-push-alerts";
 
 let messagingClient = null;
 
-function parseServiceAccount() {
-  const raw = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim();
-  if (!raw) {
-    throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not configured.");
+function unwrapParsedServiceAccount(parsed) {
+  if (typeof parsed === "string") {
+    const nested = String(parsed || "").trim();
+    if (nested.startsWith("{")) {
+      return JSON.parse(nested);
+    }
+  }
+  return parsed;
+}
+
+function tryParseServiceAccountRaw(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return null;
+
+  const candidates = [trimmed];
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+    || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    candidates.push(trimmed.slice(1, -1));
   }
 
-  try {
-    return JSON.parse(raw);
-  } catch {
+  for (const candidate of candidates) {
+    try {
+      return unwrapParsedServiceAccount(JSON.parse(candidate));
+    } catch {
+      // try next candidate
+    }
+  }
+
+  return null;
+}
+
+function parseServiceAccount() {
+  const parsed = tryParseServiceAccountRaw(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+  if (!parsed) {
+    const raw = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim();
+    if (!raw) {
+      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not configured.");
+    }
     throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON must be valid JSON.");
   }
+  return parsed;
+}
+
+export function getFcmConfigurationStatus() {
+  const raw = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim();
+  if (!raw) {
+    return { configured: false, reason: "fcm_not_configured" };
+  }
+
+  const parsed = tryParseServiceAccountRaw(raw);
+  if (!parsed || typeof parsed !== "object") {
+    return { configured: false, reason: "fcm_invalid_json" };
+  }
+
+  if (!parsed.type || !parsed.project_id || !parsed.private_key) {
+    return { configured: false, reason: "fcm_incomplete_credentials" };
+  }
+
+  return { configured: true };
 }
 
 function getMessagingClient() {
@@ -32,7 +82,7 @@ function getMessagingClient() {
 }
 
 export function isFcmConfigured() {
-  return Boolean(String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim());
+  return getFcmConfigurationStatus().configured;
 }
 
 function isInvalidTokenError(error) {

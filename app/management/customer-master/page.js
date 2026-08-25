@@ -7,6 +7,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
+import { resolveCustomerMasterExportFields } from "../../lib/customerCode.js";
 import { resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -62,6 +63,19 @@ const TEXT = {
   filterWithGps: { en: "with GPS", ar: "مع GPS" },
   filterWithoutGps: { en: "without GPS", ar: "بدون GPS" },
   filterAll: { en: "all customers", ar: "كل العملاء" },
+  activeFilter: { en: "Status filter", ar: "تصفية الحالة" },
+  activeAll: { en: "All statuses", ar: "كل الحالات" },
+  activeOnly: { en: "Active only", ar: "نشط فقط" },
+  inactiveOnly: { en: "Inactive only", ar: "غير نشط فقط" },
+  outstandingFilter: { en: "Outstanding filter", ar: "تصفية المستحقات" },
+  outstandingAll: { en: "All balances", ar: "كل الأرصدة" },
+  outstandingWith: { en: "With outstanding", ar: "مع مستحقات" },
+  outstandingWithout: { en: "No outstanding", ar: "بدون مستحقات" },
+  outstanding: { en: "Outstanding", ar: "المستحقات" },
+  filterActive: { en: "active", ar: "نشط" },
+  filterInactive: { en: "inactive", ar: "غير نشط" },
+  filterWithOutstanding: { en: "with outstanding", ar: "مع مستحقات" },
+  filterWithoutOutstanding: { en: "no outstanding", ar: "بدون مستحقات" },
   exportExcel: { en: "Export Excel", ar: "تصدير Excel" },
   exporting: { en: "Exporting...", ar: "جاري التصدير..." },
 };
@@ -75,6 +89,12 @@ function hasSavedGps(row) {
 function formatCoordinate(value) {
   const number = Number(value);
   return Number.isFinite(number) ? String(number) : "";
+}
+
+function formatOutstanding(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "0";
+  return number.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
 export default function CustomerMasterPage() {
@@ -95,6 +115,8 @@ export default function CustomerMasterPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [gpsFilter, setGpsFilter] = useState("all");
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [outstandingFilter, setOutstandingFilter] = useState("all");
   const [drafts, setDrafts] = useState({});
 
   usePopupMessages({ error, message: importSummary });
@@ -125,6 +147,8 @@ export default function CustomerMasterPage() {
       });
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (gpsFilter !== "all") params.set("gpsFilter", gpsFilter);
+      if (activeFilter !== "all") params.set("activeFilter", activeFilter);
+      if (outstandingFilter !== "all") params.set("outstandingFilter", outstandingFilter);
 
       const response = await fetch(`/api/admin/customers?${params.toString()}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -150,7 +174,7 @@ export default function CustomerMasterPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, gpsFilter]);
+  }, [debouncedSearch, gpsFilter, activeFilter, outstandingFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -164,10 +188,19 @@ export default function CustomerMasterPage() {
   }, [loadCustomers]);
 
   const filterLabel = useMemo(() => {
-    if (gpsFilter === "with") return t("filterWithGps");
-    if (gpsFilter === "without") return t("filterWithoutGps");
-    return t("filterAll");
-  }, [gpsFilter, t]);
+    const parts = [];
+    if (gpsFilter === "with") parts.push(t("filterWithGps"));
+    else if (gpsFilter === "without") parts.push(t("filterWithoutGps"));
+    else parts.push(t("filterAll"));
+
+    if (activeFilter === "active") parts.push(t("filterActive"));
+    else if (activeFilter === "inactive") parts.push(t("filterInactive"));
+
+    if (outstandingFilter === "with") parts.push(t("filterWithOutstanding"));
+    else if (outstandingFilter === "without") parts.push(t("filterWithoutOutstanding"));
+
+    return parts.join(" · ");
+  }, [activeFilter, gpsFilter, outstandingFilter, t]);
 
   const rows = useMemo(() => customers, [customers]);
 
@@ -233,6 +266,8 @@ export default function CustomerMasterPage() {
       const params = new URLSearchParams();
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (gpsFilter !== "all") params.set("gpsFilter", gpsFilter);
+      if (activeFilter !== "all") params.set("activeFilter", activeFilter);
+      if (outstandingFilter !== "all") params.set("outstandingFilter", outstandingFilter);
 
       const response = await fetch(`/api/admin/customers/export?${params.toString()}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -360,6 +395,30 @@ export default function CustomerMasterPage() {
                   <option value="without">{t("gpsWithout")}</option>
                 </select>
               </label>
+              <label>
+                {t("activeFilter")}
+                <select
+                  className="moduleInput"
+                  value={activeFilter}
+                  onChange={(event) => setActiveFilter(event.target.value)}
+                >
+                  <option value="all">{t("activeAll")}</option>
+                  <option value="active">{t("activeOnly")}</option>
+                  <option value="inactive">{t("inactiveOnly")}</option>
+                </select>
+              </label>
+              <label>
+                {t("outstandingFilter")}
+                <select
+                  className="moduleInput"
+                  value={outstandingFilter}
+                  onChange={(event) => setOutstandingFilter(event.target.value)}
+                >
+                  <option value="all">{t("outstandingAll")}</option>
+                  <option value="with">{t("outstandingWith")}</option>
+                  <option value="without">{t("outstandingWithout")}</option>
+                </select>
+              </label>
               <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => loadCustomers(pagination.page || 1)}>
                 {t("refresh")}
               </button>
@@ -438,6 +497,7 @@ export default function CustomerMasterPage() {
                     <th className="moduleCustomerMasterSticky moduleCustomerMasterName">{t("customer")}</th>
                     <th>{t("salesman")}</th>
                     <th>{t("cityArea")}</th>
+                    <th>{t("outstanding")}</th>
                     <th>{t("latitude")}</th>
                     <th>{t("longitude")}</th>
                     <th>{t("status")}</th>
@@ -447,12 +507,16 @@ export default function CustomerMasterPage() {
                 <tbody>
                   {rows.map((row) => {
                     const draft = drafts[row.customer_code] || {};
+                    const display = resolveCustomerMasterExportFields(row);
+                    const customerCode = display.customer_code || row.customer_code || "-";
+                    const customerName = display.customer_name || row.customer_name || "-";
                     return (
-                      <tr key={row.customer_code} className="moduleCustomerMasterRow">
-                        <td data-label={t("code")} className="moduleCustomerMasterSticky moduleCustomerMasterCode">{row.customer_code}</td>
-                        <td data-label={t("customer")} className="moduleCustomerMasterSticky moduleCustomerMasterName">{row.customer_name}</td>
+                      <tr key={row.customer_code || customerName} className="moduleCustomerMasterRow">
+                        <td data-label={t("code")} className="moduleCustomerMasterSticky moduleCustomerMasterCode">{customerCode}</td>
+                        <td data-label={t("customer")} className="moduleCustomerMasterSticky moduleCustomerMasterName">{customerName}</td>
                         <td data-label={t("salesman")}>{row.current_salesman_code || "-"}</td>
                         <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
+                        <td data-label={t("outstanding")}>{formatOutstanding(row.total_outstanding)}</td>
                         <td data-label={t("latitude")}>
                           <input
                             className="moduleInput"

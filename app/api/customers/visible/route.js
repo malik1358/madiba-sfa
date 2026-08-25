@@ -13,6 +13,7 @@ import {
   resolveMutualGroupCodes,
   resolveMutualGroupProfiles,
 } from "../../../lib/mutualSalesmanGroups.js";
+import { dedupeCustomerMasterRows } from "../../../lib/customerMasterQuery.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -604,15 +605,15 @@ export async function buildVisibleCustomersForScope(admin, scope, options = {}) 
 
   let customers = [];
   try {
-    customers = await fetchVisibleCustomers(admin, scope);
+    customers = dedupeCustomerMasterRows(await fetchVisibleCustomers(admin, scope));
   } catch {
     warnings.push("basic-visible-fallback");
-    customers = await fetchBasicVisibleCustomers(admin, scope);
+    customers = dedupeCustomerMasterRows(await fetchBasicVisibleCustomers(admin, scope));
   }
 
   let inactiveCustomers = [];
   try {
-    inactiveCustomers = await fetchInactiveCustomers(admin, scope);
+    inactiveCustomers = dedupeCustomerMasterRows(await fetchInactiveCustomers(admin, scope));
   } catch {
     warnings.push("inactive-customers-unavailable");
     inactiveCustomers = [];

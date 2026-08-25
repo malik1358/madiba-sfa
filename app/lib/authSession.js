@@ -82,6 +82,11 @@ export async function resolveAuthSession(supabase, timeoutMs = 8000) {
       return session;
     } catch (error) {
       if (String(error?.message || "") === "SESSION_TIMEOUT") {
+        const { data, error: sessionError } = await supabase.auth.getSession();
+        if (!sessionError && data?.session) {
+          sharedSessionCache = { session: data.session, at: Date.now() };
+          return data.session;
+        }
         sharedSessionCache = { session: null, at: Date.now() };
         return null;
       }

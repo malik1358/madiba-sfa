@@ -1,3 +1,4 @@
+import { findOutstandingForCustomer, OUTSTANDING_DATASET_KEY } from "./outstanding.js";
 import { normalizeCustomerNameKey, resolveCustomerMasterExportFields } from "./customerCode.js";
 
 export function normalizeCustomerMasterSearch(value) {
@@ -8,11 +9,29 @@ export function normalizeCustomerMasterGpsFilter(rawValue, legacyMissingGps = fa
   return String(rawValue || (legacyMissingGps ? "without" : "all")).toLowerCase();
 }
 
-export function applyCustomerMasterFilters(query, { search = "", gpsFilter = "all" } = {}) {
+export function normalizeCustomerMasterActiveFilter(rawValue) {
+  const value = String(rawValue || "all").toLowerCase();
+  if (value === "active" || value === "inactive") return value;
+  return "all";
+}
+
+export function normalizeCustomerMasterOutstandingFilter(rawValue) {
+  const value = String(rawValue || "all").toLowerCase();
+  if (value === "with" || value === "without") return value;
+  return "all";
+}
+
+export function applyCustomerMasterFilters(query, { search = "", gpsFilter = "all", activeFilter = "all" } = {}) {
   let nextQuery = query;
 
   if (search) {
     nextQuery = nextQuery.or(`customer_code.ilike.%${search}%,customer_name.ilike.%${search}%`);
+  }
+
+  if (activeFilter === "active") {
+    nextQuery = nextQuery.eq("is_active", true);
+  } else if (activeFilter === "inactive") {
+    nextQuery = nextQuery.eq("is_active", false);
   }
 
   if (gpsFilter === "without" || gpsFilter === "missing") {
@@ -74,6 +93,51 @@ export function dedupeCustomerMasterRows(rows) {
   );
 }
 
+function parseOutstandingDataset(rawValue) {
+  try {
+    const parsed = JSON.parse(rawValue || "null");
+    if (!parsed || typeof parsed !== "object") {
+      return { rows: [] };
+    }
+    return {
+      rows: Array.isArray(parsed.rows) ? parsed.rows : [],
+    };
+  } catch {
+    return { rows: [] };
+  }
+}
+
+export async function readOutstandingDataset(admin) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", OUTSTANDING_DATASET_KEY)
+    .maybeSingle();
+
+  if (error) throw error;
+  return parseOutstandingDataset(data?.setting_value);
+}
+
+export function enrichCustomerMasterOutstanding(rows, outstandingDataset) {
+  return (rows || []).map((row) => {
+    const outstanding = findOutstandingForCustomer(outstandingDataset, row.customer_code, row.customer_name);
+    return {
+      ...row,
+      total_outstanding: Number(outstanding?.total_outstanding || 0),
+    };
+  });
+}
+
+export function applyCustomerMasterOutstandingFilter(rows, outstandingFilter = "all") {
+  if (outstandingFilter === "with") {
+    return (rows || []).filter((row) => Number(row.total_outstanding || 0) > 0);
+  }
+  if (outstandingFilter === "without") {
+    return (rows || []).filter((row) => Number(row.total_outstanding || 0) <= 0);
+  }
+  return rows || [];
+}
+
 export async function fetchAllFilteredCustomers(admin, filters) {
   const pageSize = 1000;
   let from = 0;
@@ -96,7 +160,10 @@ export async function fetchAllFilteredCustomers(admin, filters) {
     from += pageSize;
   }
 
-  return dedupeCustomerMasterRows(rows);
+  const deduped = dedupeCustomerMasterRows(rows);
+  const outstandingDataset = await readOutstandingDataset(admin);
+  const enriched = enrichCustomerMasterOutstanding(deduped, outstandingDataset);
+  return applyCustomerMasterOutstandingFilter(enriched, filters.outstandingFilter);
 }
 
 export function customerMasterExportRows(customers) {
@@ -113,6 +180,7 @@ export function customerMasterExportRows(customers) {
       Longitutde: row.longitude ?? "",
       "GPS Status": customerHasSavedGps(row) ? "With GPS" : "Missing GPS",
       Active: row.is_active ? "Yes" : "No",
+      "Total Outstanding": Number(row.total_outstanding || 0),
       "Latest Transaction Date": row.latest_transaction_date || "",
     };
   });

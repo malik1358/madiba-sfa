@@ -206,3 +206,21 @@ export async function fetchWithLocalCache(key, ttlMs, fetcher, options = {}) {
     stale: false,
   };
 }
+
+export async function fetchWithLocalCacheResilient(key, ttlMs, fetcher, options = {}) {
+  try {
+    return await fetchWithLocalCache(key, ttlMs, fetcher, options);
+  } catch (error) {
+    const cached = await readCacheEntry(key);
+    if (cached?.value !== undefined && options.allowStale !== false) {
+      return {
+        data: cached.value,
+        fromCache: true,
+        stale: true,
+        offline: typeof navigator !== "undefined" && navigator.onLine === false,
+        error: String(error?.message || error || ""),
+      };
+    }
+    throw error;
+  }
+}

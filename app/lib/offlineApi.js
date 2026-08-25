@@ -45,10 +45,11 @@ export async function postFormDataResilient({
   metadata = {},
   onQueued,
   timeoutMs = FORM_UPLOAD_TIMEOUT_MS,
+  queueOnTimeout = true,
 }) {
   const payload = await formDataToOfflinePayload(formData);
 
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
+  async function queueForSync() {
     const queued = await enqueueOfflineRequest({
       url,
       method: "POST",
@@ -64,8 +65,12 @@ export async function postFormDataResilient({
       queued: true,
       offline: true,
       queueId: queued.id,
-      message: "Saved on device. It will sync automatically when you are back online.",
+      message: "Saved on device. It will sync automatically when internet returns.",
     };
+  }
+
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    return queueForSync();
   }
 
   try {
@@ -87,27 +92,15 @@ export async function postFormDataResilient({
       payload: body,
     };
   } catch (error) {
+    if (queueOnTimeout && isFetchAbortError(error)) {
+      return queueForSync();
+    }
+
     if (!isOfflineLikeError(error)) {
       throw error;
     }
 
-    const queued = await enqueueOfflineRequest({
-      url,
-      method: "POST",
-      headers,
-      bodyType: "form",
-      fields: payload.fields,
-      files: payload.files,
-      metadata,
-    });
-    onQueued?.(queued);
-    return {
-      success: true,
-      queued: true,
-      offline: true,
-      queueId: queued.id,
-      message: "Saved on device. It will sync automatically when you are back online.",
-    };
+    return queueForSync();
   }
 }
 

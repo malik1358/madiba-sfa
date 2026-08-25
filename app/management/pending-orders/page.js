@@ -9,11 +9,18 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { addPdfBuildFooter } from "../../lib/buildInfo";
-import { fetchSalesScope } from "../../lib/salesScope";
+import {
+  fetchPendingOrdersCached,
+  fetchSalesScopeCached,
+  readPendingOrdersInvoiceMeta,
+  waitForPendingOrdersHydration,
+  writePendingOrdersInvoiceMeta,
+} from "../../lib/mobileDataCache";
 import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
+import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -21,9 +28,11 @@ const TEXT = {
   subtitleMine: { en: "Orders queue in your account", ar: "قائمة الطلبات في حسابك" },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading old pending orders...", ar: "جاري تحميل الطلبات المعلقة القديمة..." },
+  cacheRefreshing: { en: "Showing saved data. Refreshing in background...", ar: "عرض البيانات المحفوظة. جاري التحديث في الخلفية..." },
+  cacheOffline: { en: "Offline — showing last saved pending orders.", ar: "غير متصل — عرض آخر الطلبات المحفوظة." },
 };
 
-const PENDING_STATUSES = ["DRAFT", "PENDING", "SUBMITTED"];
+const PENDING_STATUSES = PENDING_ORDER_STATUSES;
 const INVOICE_STATUS_PENDING_CREDIT = "Pending for credit approval";
 const INVOICE_STATUS_REJECTED = "Rejected by management";
 const INVOICE_STATUS_MADE = "Invoice made";
@@ -92,12 +101,8 @@ function invoiceStatusText(meta) {
   return "-";
 }
 
-function InvoiceComparisonPanel({ meta, backfillingComparisons }) {
+function InvoiceComparisonPanel({ meta }) {
   if (!meta?.invoiceFilePath) return null;
-
-  if (backfillingComparisons && !meta?.comparisonCheckedAt) {
-    return <div className="moduleHint" style={{ marginTop: "10px" }}>Checking uploaded invoice against order...</div>;
-  }
 
   if (!meta?.comparisonCheckedAt) {
     return <div className="moduleHint" style={{ marginTop: "10px" }}>Invoice comparison pending.</div>;
@@ -130,6 +135,8 @@ export default function PendingOrdersPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [offlineHint, setOfflineHint] = useState(false);
   const [error, setError] = useState("");
   const [orders, setOrders] = useState([]);
   const [userRole, setUserRole] = useState("");
@@ -148,7 +155,6 @@ export default function PendingOrdersPage() {
   const [savingInvoiceStatus, setSavingInvoiceStatus] = useState(false);
   const [outstandingInfoByOrder, setOutstandingInfoByOrder] = useState({});
   const [columnFilters, setColumnFilters] = useState(EMPTY_FILTERS);
-  const [backfillingComparisons, setBackfillingComparisons] = useState(false);
 
   const startOfTodayIso = useMemo(() => {
     const start = new Date();
@@ -171,9 +177,8 @@ export default function PendingOrdersPage() {
     return session.access_token;
   }
 
-  async function loadInvoiceMeta(orderIds) {
+  async function loadInvoiceMeta(orderIds, userId = "") {
     if (!Array.isArray(orderIds) || orderIds.length === 0) {
-      setInvoiceMetaByOrder({});
       return;
     }
 
@@ -191,7 +196,13 @@ export default function PendingOrdersPage() {
       }
 
       const items = payload.items && typeof payload.items === "object" ? payload.items : {};
-      setInvoiceMetaByOrder(items);
+      setInvoiceMetaByOrder((current) => {
+        const next = { ...current, ...items };
+        if (userId) {
+          void writePendingOrdersInvoiceMeta(userId, next);
+        }
+        return next;
+      });
       setStatusDraftByOrder((current) => {
         const next = { ...current };
         Object.entries(items).forEach(([orderId, meta]) => {
@@ -201,48 +212,8 @@ export default function PendingOrdersPage() {
         });
         return next;
       });
-
-      await backfillInvoiceComparisons(items);
     } catch (err) {
       setError(err.message || "Unable to load invoice status.");
-    }
-  }
-
-  async function backfillInvoiceComparisons(items) {
-    const pendingIds = Object.entries(items || {})
-      .filter(([, meta]) => meta?.invoiceFilePath && !meta?.comparisonCheckedAt)
-      .map(([orderId]) => orderId);
-
-    if (pendingIds.length === 0) return;
-
-    setBackfillingComparisons(true);
-    try {
-      const token = await getAuthToken();
-      for (let index = 0; index < pendingIds.length; index += 15) {
-        const chunk = pendingIds.slice(index, index + 15);
-        const response = await fetch("/api/order-invoice", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            mode: "backfill-comparisons",
-            orderIds: chunk,
-          }),
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success) continue;
-
-        setInvoiceMetaByOrder((current) => ({
-          ...current,
-          ...(payload.items || {}),
-        }));
-      }
-    } catch {
-      // Keep queue usable even if historical comparison backfill fails.
-    } finally {
-      setBackfillingComparisons(false);
     }
   }
 
@@ -365,6 +336,8 @@ export default function PendingOrdersPage() {
   }
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       const supabase = getSupabaseClient();
       if (!supabase) {
@@ -374,6 +347,7 @@ export default function PendingOrdersPage() {
 
       setLoading(true);
       setError("");
+      setOfflineHint(false);
 
       try {
         const {
@@ -384,39 +358,58 @@ export default function PendingOrdersPage() {
           throw new Error("Please login again.");
         }
 
-        const scope = await fetchSalesScope();
+        const cachedInvoiceMeta = await readPendingOrdersInvoiceMeta(session.user.id);
+        if (Object.keys(cachedInvoiceMeta).length > 0) {
+          setInvoiceMetaByOrder(cachedInvoiceMeta);
+        }
+
+        const scopeResult = await fetchSalesScopeCached();
+        if (cancelled) return;
+
+        const scope = scopeResult.scope;
         const role = String(scope?.role || "").toLowerCase();
         setUserRole(role);
 
-        const query = supabase
-          .from("sales_orders")
-          .select("id,customer_code,customer_name,salesman_code,created_by,created_at,updated_at,status")
-          .in("status", PENDING_STATUSES)
-          .order("updated_at", { ascending: false })
-          .limit(500);
+        await waitForPendingOrdersHydration(session.user.id, scope);
 
-        const { data, error: ordersError } = await query;
-        if (ordersError) throw ordersError;
-
-        const visibleOrders = (data || []).filter((order) => {
-          if (scope?.hasAllAccess) return true;
-
-          const createdByVisible = (scope?.visibleUserIds || []).includes(order.created_by);
-          const salesmanVisible = (scope?.visibleSalesmanCodes || []).includes(String(order.salesman_code || "").trim().toUpperCase());
-
-          return createdByVisible || salesmanVisible;
+        const ordersResult = await fetchPendingOrdersCached(session.user.id, scope, {
+          onUpdate: (freshOrders) => {
+            if (cancelled) return;
+            setOrders(Array.isArray(freshOrders) ? freshOrders : []);
+            setRefreshing(false);
+            setOfflineHint(false);
+            void loadInvoiceMeta(
+              (Array.isArray(freshOrders) ? freshOrders : []).map((order) => order.id),
+              session.user.id,
+            );
+          },
         });
 
+        if (cancelled) return;
+
+        const visibleOrders = Array.isArray(ordersResult.data) ? ordersResult.data : [];
         setOrders(visibleOrders);
-        await loadInvoiceMeta(visibleOrders.map((order) => order.id));
-      } catch (err) {
-        setError(err.message || "Unable to load pending orders.");
-      } finally {
         setLoading(false);
+
+        if (ordersResult.fromCache) {
+          setRefreshing(!ordersResult.stale);
+          setOfflineHint(Boolean(ordersResult.offline));
+        }
+
+        void loadInvoiceMeta(visibleOrders.map((order) => order.id), session.user.id);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message || "Unable to load pending orders.");
+          setLoading(false);
+        }
       }
     }
 
     load();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const summary = useMemo(() => {
@@ -870,17 +863,14 @@ export default function PendingOrdersPage() {
             <section className="moduleMetricCard"><span>Older than 30 days</span><strong>{summary.olderThan30}</strong></section>
           </div>
 
+          {offlineHint ? <div className="moduleHint">{t("cacheOffline")}</div> : null}
+          {refreshing ? <div className="moduleHint">{t("cacheRefreshing")}</div> : null}
+
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>Pending Order Queue</h2>
               <span>{filteredOrders.length} shown / {summary.total} order(s)</span>
             </div>
-
-            {backfillingComparisons ? (
-              <div className="moduleHint" style={{ marginBottom: "10px" }}>
-                Comparing past uploaded invoices with orders...
-              </div>
-            ) : null}
 
             <div className="moduleTableWrap">
               <table className="moduleTable">
@@ -1015,7 +1005,7 @@ export default function PendingOrdersPage() {
                                   <span> | <strong>Time to make:</strong> {formatDuration(meta?.invoiceBuildSeconds)}</span>
                                 </div>
 
-                                <InvoiceComparisonPanel meta={meta} backfillingComparisons={backfillingComparisons} />
+                                <InvoiceComparisonPanel meta={meta} />
 
                                 {isInvoiceMaker && (
                                   <div style={{ marginTop: "12px" }}>

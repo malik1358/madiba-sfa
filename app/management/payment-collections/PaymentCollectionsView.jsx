@@ -18,14 +18,27 @@ import {
 } from "../../lib/customerLocation";
 import { postFormDataResilient } from "../../lib/offlineApi";
 import {
+  buildOptimisticLatestCollection,
+  incrementLocalCollectionVisitCount,
+  patchCollectionQueuesWithOptimisticVisit,
+  resolveCollectionVisitNumberForDay,
+} from "../../lib/collectionOffline";
+import { listOfflineQueue, processOfflineQueue } from "../../lib/offlineSyncQueue";
+import {
+  fetchCollectionQueuesCached,
+  fetchSalesScopeCached,
+  readCollectionQueuesForUser,
+  writeCollectionQueuesForUser,
+} from "../../lib/mobileDataCache";
+import { resolveAuthSession } from "../../lib/authSession";
+import {
   isCashOnlyQueueCustomer,
   isCashQueueCustomer,
   isScheduledRevisitQueueCustomer,
   sortCashQueueCustomers,
 } from "../../lib/paymentCollections";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
-import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
-import { readCollectionQueuesForUser } from "../../lib/mobileDataCache";
+import { shareTextOnWhatsapp } from "../../lib/whatsappShare";
 import { getSupabaseClient } from "../../lib/supabase";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
@@ -119,6 +132,11 @@ const TEXT = {
     ar: "احفظ الزيارة أولاً. يظهر ملخص الواتساب هنا فقط بعد الحفظ بنجاح.",
   },
   copySummary: { en: "Copy Summary", ar: "نسخ الملخص" },
+  shareWhatsapp: { en: "Share on WhatsApp", ar: "مشاركة على واتساب" },
+  whatsappShareHint: {
+    en: "Visit saved. Share this summary on WhatsApp now — works offline too.",
+    ar: "تم حفظ الزيارة. شارك هذا الملخص على واتساب الآن — يعمل بدون اتصال أيضاً.",
+  },
   copied: { en: "Copied", ar: "تم النسخ" },
   paymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
   receiptCopy: { en: "Receipt Copy", ar: "صورة الإيصال" },
@@ -174,9 +192,26 @@ const TEXT = {
     ar: "سجل العميل غير موجود في القائمة الرئيسية. اطلب من المسؤول إضافة العميل في Customer Master.",
   },
   msgVisitSaved: { en: "Visit saved successfully.", ar: "تم حفظ الزيارة بنجاح." },
-  msgSavedOfflineNoWhatsapp: {
-    en: "Saved on device. It will sync when you are back online. WhatsApp summary will be available after sync completes.",
-    ar: "تم الحفظ على الجهاز. سيتم المزامنة عند عودة الاتصال. سيظهر ملخص الواتساب بعد اكتمال المزامنة.",
+  msgSavedOffline: {
+    en: "Saved on this device. Share the WhatsApp summary below — sync will finish when connection improves.",
+    ar: "تم الحفظ على الجهاز. شارك ملخص الواتساب أدناه — ستكتمل المزامنة عند تحسن الاتصال.",
+  },
+  offlineQueueBanner: {
+    en: "Working offline from saved queue. Visits save on this device and sync automatically when connection improves.",
+    ar: "العمل دون اتصال من القائمة المحفوظة. تُحفظ الزيارات على الجهاز وتُزامَن تلقائياً عند تحسن الاتصال.",
+  },
+  staleQueueBanner: {
+    en: "Showing saved collection queue while the server reconnects.",
+    ar: "عرض قائمة التحصيل المحفوظة أثناء إعادة الاتصال بالخادم.",
+  },
+  pendingSyncBanner: {
+    en: "visits waiting to sync",
+    ar: "زيارات بانتظار المزامنة",
+  },
+  pendingSyncBadge: { en: "Pending sync", ar: "بانتظار المزامنة" },
+  cacheRefreshing: {
+    en: "Showing saved queue. Refreshing in background...",
+    ar: "عرض القائمة المحفوظة. جاري التحديث في الخلفية...",
   },
   msgGpsRequired: { en: "GPS is required. Allow location access in the browser before saving.", ar: "GPS مطلوب. اسمح بالموقع في المتصفح قبل الحفظ." },
   msgWhatsappNotSent: { en: "WhatsApp not sent", ar: "لم يتم إرسال واتساب" },
@@ -186,6 +221,7 @@ const TEXT = {
   msgLegalTransferred: { en: "transferred to legal queue.", ar: "تم تحويله إلى قائمة القانوني." },
   msgLegalUpdateFailed: { en: "Unable to update legal transfer status.", ar: "تعذر تحديث حالة التحويل للقانوني." },
   msgCopyFailed: { en: "Could not copy WhatsApp message automatically.", ar: "تعذر نسخ رسالة واتساب تلقائياً." },
+  msgWhatsappShareFailed: { en: "Could not open WhatsApp. Use Copy Summary and paste manually.", ar: "تعذر فتح واتساب. استخدم نسخ الملخص واللصق يدوياً." },
   salesmanFilterHint: { en: "Tap to select one or more salesmen", ar: "اضغط لاختيار مندوب واحد أو أكثر" },
   allSalesmen: { en: "All salesmen", ar: "كل المندوبين" },
   clearSalesmanFilter: { en: "Clear selection", ar: "مسح التحديد" },
@@ -349,6 +385,21 @@ async function buildVisitReportText(row, t) {
   }
 
   return reportParts.join("\n");
+}
+
+async function countCollectionPendingSync() {
+  const pending = await listOfflineQueue("pending");
+  return pending.filter((item) => item.metadata?.type === "collection_visit").length;
+}
+
+async function resolveEnglishRemarkForSave(arabicRemark, englishRemark) {
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const english = String(englishRemark || "").trim();
+    const arabic = String(arabicRemark || "").trim();
+    if (english && english !== arabic) return english;
+    return arabic;
+  }
+  return resolveEnglishRemark(arabicRemark, englishRemark);
 }
 
 async function resolveEnglishRemark(arabicRemark, englishRemark) {
@@ -585,8 +636,14 @@ async function copyTextToClipboard(text) {
     textarea.value = value;
     textarea.setAttribute("readonly", "");
     textarea.style.position = "fixed";
+    textarea.style.top = "0";
+    textarea.style.left = "0";
+    textarea.style.width = "1px";
+    textarea.style.height = "1px";
     textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
     document.body.appendChild(textarea);
+    textarea.focus({ preventScroll: true });
     textarea.select();
     textarea.setSelectionRange(0, textarea.value.length);
     const copied = document.execCommand("copy");
@@ -626,6 +683,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const t = translate(language, TEXT);
   const canViewVisitReports = access.role === "admin" || access.role === "manager";
   const [loading, setLoading] = useState(true);
+  const [refreshingQueue, setRefreshingQueue] = useState(false);
+  const [queueFromCache, setQueueFromCache] = useState(false);
+  const [queueOffline, setQueueOffline] = useState(false);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [error, setError] = useState("");
   const [dueCustomers, setDueCustomers] = useState([]);
   const [notDueCustomers, setNotDueCustomers] = useState([]);
@@ -649,9 +710,24 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const isMobileLayout = useMobileLayout();
   const recognitionRef = useRef(null);
   const loadSeqRef = useRef(0);
+  const queuesRef = useRef({ dueCustomers: [], notDueCustomers: [], legalCustomers: [] });
+  const pendingSyncCountRef = useRef(0);
+  const activeRowKeyRef = useRef("");
   const { showPopup } = useAppPopup();
 
   usePopupMessages({ error });
+
+  useEffect(() => {
+    queuesRef.current = { dueCustomers, notDueCustomers, legalCustomers };
+  }, [dueCustomers, legalCustomers, notDueCustomers]);
+
+  useEffect(() => {
+    pendingSyncCountRef.current = pendingSyncCount;
+  }, [pendingSyncCount]);
+
+  useEffect(() => {
+    activeRowKeyRef.current = activeRowKey;
+  }, [activeRowKey]);
 
   const refreshTodayVisitCount = useCallback(async () => {
     const supabase = getSupabaseClient();
@@ -733,9 +809,24 @@ export default function PaymentCollectionsView({ view = "due" }) {
   useEffect(() => {
     if (activeRow) {
       setForm(buildInitialForm(activeRow));
-      setSummaryForWhatsApp("");
     }
   }, [activeRow]);
+
+  useEffect(() => {
+    setSummaryForWhatsApp("");
+    setCopyStatus("");
+  }, [activeRowKey]);
+
+  useEffect(() => {
+    if (!activeRowKey || typeof window === "undefined") return undefined;
+
+    const timer = window.setTimeout(() => {
+      const detail = document.getElementById(`collector-detail-${activeRowKey}`);
+      detail?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [activeRowKey]);
 
   useEffect(() => {
     setSummaryForWhatsApp("");
@@ -769,13 +860,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
       return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
     }
 
-    setLoading(true);
     setError("");
 
     const safetyTimer = window.setTimeout(() => {
       if (loadSeqRef.current !== seq) return;
       setLoading(false);
-      setError((current) => current || "Queue load timed out. Please login and refresh the page.");
+      setRefreshingQueue(false);
+      setError((current) => current || "Queue load timed out. Showing saved data if available.");
     }, 15000);
 
     let cachedResult = null;
@@ -784,37 +875,43 @@ export default function PaymentCollectionsView({ view = "due" }) {
       const session = await resolveAuthSession(supabase, 8000);
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
 
-      if (!session?.access_token) throw new Error("Please login again.");
+      if (!session?.access_token || !session?.user?.id) throw new Error("Please login again.");
 
-      const cachedQueues = await readCollectionQueuesForUser(session.user?.id);
+      const cachedQueues = await readCollectionQueuesForUser(session.user.id);
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
       if (cachedQueues) {
         cachedResult = await applyQueuePayload(cachedQueues, preferredKey);
+        setQueueFromCache(true);
         setLoading(false);
+        setRefreshingQueue(true);
+      } else {
+        setLoading(true);
       }
 
-      const { response, payload } = await fetchJsonWithTimeout(
-        "/api/payment-collections",
-        {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
+      const queueResult = await fetchCollectionQueuesCached(session.access_token, session.user.id, {
+        onUpdate: (freshQueues) => {
+          if (loadSeqRef.current !== seq) return;
+          applyQueuePayload(freshQueues, preferredKey);
+          setQueueFromCache(false);
+          setQueueOffline(false);
+          setRefreshingQueue(false);
         },
-        30000,
-      );
+      });
 
-      if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
+      if (loadSeqRef.current !== seq) return cachedResult || queueResult.queues;
 
-      if (!response.ok || !payload.success) {
-        if (cachedResult) return cachedResult;
-        throw new Error(localizeApiMessage(payload.error || "Unable to load payment collection queue."));
-      }
-
-      return applyQueuePayload(payload, preferredKey);
+      const result = await applyQueuePayload(queueResult.queues, preferredKey);
+      setQueueFromCache(Boolean(queueResult.fromCache));
+      setQueueOffline(Boolean(queueResult.offline));
+      setRefreshingQueue(Boolean(queueResult.fromCache && !queueResult.offline));
+      setError("");
+      return result;
     } catch (err) {
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
 
       if (cachedResult) {
+        setQueueFromCache(true);
+        setQueueOffline(typeof navigator !== "undefined" && !navigator.onLine);
         setError("");
         return cachedResult;
       }
@@ -835,20 +932,62 @@ export default function PaymentCollectionsView({ view = "due" }) {
       window.clearTimeout(safetyTimer);
       if (loadSeqRef.current === seq) {
         setLoading(false);
+        setRefreshingQueue(false);
       }
+    }
+  }
+
+  async function persistOptimisticVisitSave(row, visitDetails, userId, scope) {
+    const latestCollection = buildOptimisticLatestCollection(row, visitDetails);
+    const patchedQueues = patchCollectionQueuesWithOptimisticVisit(
+      queuesRef.current,
+      row.customer_code,
+      latestCollection,
+    );
+
+    queuesRef.current = patchedQueues;
+    await applyQueuePayload(patchedQueues, rowKey(row));
+    await writeCollectionQueuesForUser(userId, scope, patchedQueues);
+    await incrementLocalCollectionVisitCount(userId);
+    return latestCollection;
+  }
+
+  async function refreshPendingSyncCount() {
+    try {
+      const count = await countCollectionPendingSync();
+      setPendingSyncCount(count);
+      return count;
+    } catch {
+      setPendingSyncCount(0);
+      return 0;
     }
   }
 
   useEffect(() => {
     loadQueue();
     refreshTodayVisitCount();
+    refreshPendingSyncCount();
+
     const onSnapshotHydrated = () => {
       loadQueue();
     };
+    const onQueueChanged = async () => {
+      const previousCount = pendingSyncCountRef.current;
+      const nextCount = await refreshPendingSyncCount();
+      if (previousCount > 0 && nextCount < previousCount) {
+        void loadQueue(activeRowKeyRef.current);
+        refreshTodayVisitCount();
+      }
+    };
+
     window.addEventListener("madiba-mobile-snapshot-hydrated", onSnapshotHydrated);
+    window.addEventListener("madiba-offline-queue-changed", onQueueChanged);
+    window.addEventListener("online", onQueueChanged);
     return () => {
       loadSeqRef.current += 1;
       window.removeEventListener("madiba-mobile-snapshot-hydrated", onSnapshotHydrated);
+      window.removeEventListener("madiba-offline-queue-changed", onQueueChanged);
+      window.removeEventListener("online", onQueueChanged);
     };
   }, []);
 
@@ -1086,11 +1225,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
         ? formatOutcomeLabel(selectedOutcome, t)
         : "";
 
+      const pendingQueuedCount = await countCollectionPendingSync();
       const [effectiveEnglishRemark, visitNumberForDay, gps] = await Promise.all([
-        resolveEnglishRemark(form.remarkArabic, form.remarkEnglish),
-        fetchTodayCollectionVisitCount(supabase, session.user.id)
-          .then((count) => count + 1)
-          .catch(() => todayVisitCount + 1),
+        resolveEnglishRemarkForSave(form.remarkArabic, form.remarkEnglish),
+        resolveCollectionVisitNumberForDay(session.user.id, {
+          cachedServerCount: todayVisitCount,
+          pendingQueuedCount,
+        }),
         captureGpsLocationWithFallbackConfirm(language, {
           customerCode: row.customer_code,
           customerName: row.customer_name,
@@ -1163,16 +1304,20 @@ export default function PaymentCollectionsView({ view = "due" }) {
           type: "collection_visit",
           customerCode: row.customer_code,
         },
+        timeoutMs: 25000,
+        queueOnTimeout: true,
       });
 
       const payload = saveResult.payload || {};
       const popupMessage = saveResult.queued
-        ? t("msgSavedOfflineNoWhatsapp")
+        ? t("msgSavedOffline")
         : payload?.whatsapp?.error
           ? `${t("msgVisitSaved")} ${t("msgWhatsappNotSent")}: ${payload.whatsapp.error}`
           : t("msgVisitSaved");
       showPopup({ message: popupMessage, variant: "success" });
       setTodayVisitCount(visitNumberForDay);
+      await refreshPendingSyncCount();
+
       if (!saveResult.queued) {
         if (gps) {
           void promptCustomerLocationUpdateAfterVisit({
@@ -1183,20 +1328,24 @@ export default function PaymentCollectionsView({ view = "due" }) {
             accessToken: session.access_token,
           });
         }
-        setSummaryForWhatsApp(summaryText);
-        const copied = await copyTextToClipboard(summaryText);
-        if (copied) {
-          setCopyStatus(t("copied"));
-          setTimeout(() => setCopyStatus(""), 1200);
-        } else {
-          showPopup({ message: t("msgCopyFailed"), variant: "error" });
-        }
         await loadQueue(rowKey(row));
       } else {
-        setSummaryForWhatsApp("");
-        setActiveRowKey("");
-        setForm(buildInitialForm(row));
+        const { scope } = await fetchSalesScopeCached();
+        await persistOptimisticVisitSave(row, {
+          visitOutcome: selectedOutcome,
+          paymentStatus,
+          amountReceived: form.amountReceived,
+          nextVisitAt: form.nextVisitAt,
+          remarkArabic: form.remarkArabic,
+          remarkEnglish: effectiveEnglishRemark,
+          summaryText,
+        }, session.user.id, scope);
+        void processOfflineQueue(async () => session.access_token);
       }
+
+      await presentWhatsappSummaryAfterSave(summaryText, {
+        autoOpenWhatsapp: Boolean(saveResult.queued),
+      });
     } catch (err) {
       showPopup({ message: localizeApiMessage(err.message || t("msgSaveFailed")), variant: "error" });
     } finally {
@@ -1257,6 +1406,48 @@ export default function PaymentCollectionsView({ view = "due" }) {
     } catch {
       setCopyStatus("");
       showPopup({ message: t("msgCopyFailed"), variant: "error" });
+    }
+  }
+
+  function scrollToWhatsappSummary() {
+    if (typeof window === "undefined") return;
+    window.setTimeout(() => {
+      document.getElementById("collector-whatsapp-summary")?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }, 120);
+  }
+
+  async function shareSummaryOnWhatsapp(summaryText = summaryForWhatsApp) {
+    const text = String(summaryText || "").trim();
+    if (!text) return;
+
+    const result = await shareTextOnWhatsapp(text, {
+      title: t("summary"),
+      dialogTitle: t("shareWhatsapp"),
+    });
+
+    if (result.success) return;
+    if (result.reason === "cancelled") return;
+
+    showPopup({ message: t("msgWhatsappShareFailed"), variant: "warning" });
+  }
+
+  async function presentWhatsappSummaryAfterSave(summaryText, options = {}) {
+    setSummaryForWhatsApp(summaryText);
+    scrollToWhatsappSummary();
+
+    const copied = await copyTextToClipboard(summaryText);
+    if (copied) {
+      setCopyStatus(t("copied"));
+      setTimeout(() => setCopyStatus(""), 1200);
+    }
+
+    if (options.autoOpenWhatsapp) {
+      window.setTimeout(() => {
+        void shareSummaryOnWhatsapp(summaryText);
+      }, 450);
     }
   }
 
@@ -1346,6 +1537,21 @@ export default function PaymentCollectionsView({ view = "due" }) {
                   Retry
                 </button>
               )}
+            </div>
+          ) : null}
+
+          {queueOffline ? (
+            <div className="moduleHint" style={{ marginBottom: "12px" }}>{t("offlineQueueBanner")}</div>
+          ) : null}
+          {queueFromCache && !queueOffline ? (
+            <div className="moduleHint" style={{ marginBottom: "12px" }}>{t("staleQueueBanner")}</div>
+          ) : null}
+          {refreshingQueue ? (
+            <div className="moduleHint" style={{ marginBottom: "12px" }}>{t("cacheRefreshing")}</div>
+          ) : null}
+          {pendingSyncCount > 0 ? (
+            <div className="moduleHint" style={{ marginBottom: "12px" }}>
+              {pendingSyncCount} {t("pendingSyncBanner")}
             </div>
           ) : null}
 
@@ -1477,6 +1683,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                             const queuePriority = dueQueuePriorityByCode.get(customerCodeKey)
                               || cashQueuePriorityByKey.get(key)
                               || 0;
+                            const isOpen = activeRowKey === key;
                             if (isMobileLayout && !isExpanded) return null;
                             return (
                               <tr
@@ -1498,9 +1705,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     <button
                                       type="button"
                                       className="moduleInlineButton moduleActionButton"
-                                      onClick={() => setActiveRowKey(key)}
+                                      onClick={() => setActiveRowKey(isOpen ? "" : key)}
                                     >
-                                      {activeRowKey === key ? t("close") : t("open")}
+                                      {isOpen ? t("close") : t("open")}
                                     </button>
                                     {canViewVisitReports && row?.latest_collection?.saved_at ? (
                                       <button
@@ -1742,7 +1949,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                           </td>
                         </tr>
                         {isOpen ? (
-                          <tr className="moduleCollectorDetailRow">
+                          <tr id={`collector-detail-${key}`} className="moduleCollectorDetailRow">
                             <td colSpan={17}>
                               <div className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "10px" }}>
                                 <table className="moduleTable">
@@ -1939,16 +2146,28 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   <textarea className="moduleTextArea" rows={2} value={form.legalNote} onChange={(event) => setForm((current) => ({ ...current, legalNote: event.target.value }))} />
                                 </label>
 
-                                <label className="moduleFieldFull" style={{ marginTop: "12px", display: "block" }}>
+                                <label id="collector-whatsapp-summary" className="moduleFieldFull" style={{ marginTop: "12px", display: "block" }}>
                                   {t("summary")}
                                   {summaryForWhatsApp ? (
-                                    <textarea className="moduleTextArea" rows={8} value={summaryForWhatsApp} readOnly />
+                                    <>
+                                      <div className="moduleHint" style={{ marginTop: "6px", color: "#166534" }}>
+                                        {t("whatsappShareHint")}
+                                      </div>
+                                      <textarea className="moduleTextArea" rows={8} value={summaryForWhatsApp} readOnly />
+                                    </>
                                   ) : (
                                     <div className="moduleHint" style={{ marginTop: "6px" }}>{t("summaryAfterSave")}</div>
                                   )}
                                 </label>
                                 {summaryForWhatsApp ? (
                                   <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
+                                    <button
+                                      type="button"
+                                      className="modulePrimaryButton"
+                                      onClick={() => shareSummaryOnWhatsapp()}
+                                    >
+                                      {t("shareWhatsapp")}
+                                    </button>
                                     <button type="button" className="moduleInlineButton moduleActionButton" onClick={copySummaryText}>{t("copySummary")}</button>
                                     {copyStatus ? <span className="moduleHint">{copyStatus}</span> : null}
                                   </div>

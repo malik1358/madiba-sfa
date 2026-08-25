@@ -5,6 +5,11 @@ import { countPendingOfflineQueue, processOfflineQueue } from "../lib/offlineSyn
 import { fetchAndHydrateMobileSnapshot } from "../lib/mobileDataCache";
 import { getSupabaseClient } from "../lib/supabase";
 
+function hydrateMobileSnapshotIfOnline() {
+  if (typeof navigator !== "undefined" && !navigator.onLine) return;
+  fetchAndHydrateMobileSnapshot().catch(() => undefined);
+}
+
 export default function PwaShell() {
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -26,16 +31,30 @@ export default function PwaShell() {
   }, []);
 
   useEffect(() => {
-    if (typeof navigator !== "undefined" && !navigator.onLine) return undefined;
+    hydrateMobileSnapshotIfOnline();
 
-    fetchAndHydrateMobileSnapshot().catch(() => undefined);
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      const onOnline = () => hydrateMobileSnapshotIfOnline();
+      window.addEventListener("online", onOnline);
+      return () => window.removeEventListener("online", onOnline);
+    }
 
-    const onOnline = () => {
-      fetchAndHydrateMobileSnapshot().catch(() => undefined);
-    };
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.access_token && (event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED")) {
+        hydrateMobileSnapshotIfOnline();
+      }
+    });
 
+    const onOnline = () => hydrateMobileSnapshotIfOnline();
     window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener("online", onOnline);
+    };
   }, []);
 
   useEffect(() => {

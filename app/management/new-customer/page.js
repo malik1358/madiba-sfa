@@ -11,11 +11,12 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
-import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { translateText } from "../../lib/translateText";
 import { detectTable } from "../../lib/schemaGuards";
 import { insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { resolveAuthSession } from "../../lib/authSession";
 import { extractMissingProspectsColumn, normalizeProspectSalesmanCode } from "../../lib/prospects";
 
 const TEXT = {
@@ -30,6 +31,28 @@ const TEXT = {
   nextVisitDate: { en: "Next Visit Date", ar: "تاريخ الزيارة القادمة" },
   saveFollowUp: { en: "Save Follow-up", ar: "حفظ المتابعة" },
   savingFollowUp: { en: "Saving...", ar: "جاري الحفظ..." },
+  linkCustomer: { en: "Link Customer", ar: "ربط عميل" },
+  linkCustomerTitle: { en: "Link prospect to customer", ar: "ربط العميل المحتمل بعميل" },
+  linkCustomerHint: {
+    en: "Enter the ERP customer code (e.g. 1301). The app validates the code and shows the ERP customer name. Prospect and ERP names may differ — linking is by code only.",
+    ar: "أدخل كود العميل في النظام (مثل 1301). يتحقق التطبيق من الكود ويعرض اسم العميل في النظام. قد يختلف اسم العميل المحتمل عن اسم ERP — الربط يتم بالكود فقط.",
+  },
+  prospectNameLabel: { en: "Prospect name", ar: "اسم العميل المحتمل" },
+  erpCustomerNameLabel: { en: "ERP customer name", ar: "اسم العميل في النظام" },
+  namesMayDifferNote: {
+    en: "Names do not need to match. Confirm the customer code is correct.",
+    ar: "لا يشترط تطابق الأسماء. تأكد من صحة كود العميل.",
+  },
+  customerCode: { en: "Customer code", ar: "كود العميل" },
+  copyProspectGps: { en: "Copy prospect GPS to customer", ar: "نسخ GPS من العميل المحتمل إلى العميل" },
+  overwriteCustomerGps: { en: "Replace existing customer GPS", ar: "استبدال GPS الحالي للعميل" },
+  linkSave: { en: "Link", ar: "ربط" },
+  linking: { en: "Linking...", ar: "جاري الربط..." },
+  cancel: { en: "Cancel", ar: "إلغاء" },
+  linkedCustomer: { en: "Linked", ar: "مرتبط" },
+  viewCustomer: { en: "View", ar: "عرض" },
+  prospectGpsAvailable: { en: "Prospect GPS available", ar: "GPS متوفر للعميل المحتمل" },
+  customerLookupFailed: { en: "Customer not found for this code.", ar: "لم يتم العثور على عميل بهذا الكود." },
 };
 
 const INITIAL_FORM = {
@@ -76,6 +99,12 @@ function buildProspectOrderParams({ id, customerName, salesmanCode }) {
   return params.toString();
 }
 
+function prospectRowHasGps(row) {
+  const lat = Number(row?.latitude);
+  const lng = Number(row?.longitude);
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+}
+
 async function reverseGeocode(lat, lng) {
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&addressdetails=1&accept-language=en`;
   const response = await fetch(url);
@@ -96,21 +125,11 @@ async function reverseGeocode(lat, lng) {
 }
 
 async function translateToArabic(text) {
-  const source = String(text || "").trim();
-  if (!source) return "";
-
-  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q=${encodeURIComponent(source)}`;
-  const response = await fetch(url);
-  if (!response.ok) {
+  const translated = await translateText(text, { from: "en", to: "ar" });
+  if (!translated) {
     throw new Error("Translation request failed.");
   }
-
-  const payload = await response.json().catch(() => []);
-  const translated = Array.isArray(payload?.[0])
-    ? payload[0].map((part) => String(part?.[0] || "")).join("")
-    : "";
-
-  return translated.trim();
+  return translated;
 }
 
 export default function NewCustomerPage() {
@@ -145,6 +164,13 @@ export default function NewCustomerPage() {
   const [showFollowUpDate, setShowFollowUpDate] = useState(false);
   const [followUpDate, setFollowUpDate] = useState("");
   const [savingFollowUp, setSavingFollowUp] = useState(false);
+  const [linkProspect, setLinkProspect] = useState(null);
+  const [linkCustomerCode, setLinkCustomerCode] = useState("");
+  const [linkCustomerPreview, setLinkCustomerPreview] = useState(null);
+  const [linkCopyGps, setLinkCopyGps] = useState(true);
+  const [linkOverwriteGps, setLinkOverwriteGps] = useState(false);
+  const [linkSaving, setLinkSaving] = useState(false);
+  const [linkLookupError, setLinkLookupError] = useState("");
 
   useEffect(() => {
     const englishName = String(form.customer_name_en || "").trim();
@@ -576,6 +602,122 @@ export default function NewCustomerPage() {
     }
   }
 
+  function openLinkProspect(row) {
+    setLinkProspect(row);
+    setLinkCustomerCode("");
+    setLinkCustomerPreview(null);
+    setLinkCopyGps(prospectRowHasGps(row));
+    setLinkOverwriteGps(false);
+    setLinkLookupError("");
+    setError("");
+  }
+
+  function closeLinkProspect() {
+    setLinkProspect(null);
+    setLinkCustomerCode("");
+    setLinkCustomerPreview(null);
+    setLinkLookupError("");
+  }
+
+  async function lookupLinkCustomer() {
+    const code = String(linkCustomerCode || "").trim().toUpperCase();
+    if (!code) {
+      setLinkCustomerPreview(null);
+      setLinkLookupError("");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const response = await fetch(`/api/customers/location?customerCode=${encodeURIComponent(code)}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success || !payload.customer) {
+        setLinkCustomerPreview(null);
+        setLinkLookupError(t("customerLookupFailed"));
+        return;
+      }
+
+      setLinkCustomerPreview({
+        customer_code: String(payload.customer.customer_code || code).trim(),
+        customer_name: String(payload.customer.customer_name || "").trim(),
+      });
+      setLinkLookupError("");
+    } catch {
+      setLinkCustomerPreview(null);
+      setLinkLookupError(t("customerLookupFailed"));
+    }
+  }
+
+  async function saveProspectLink() {
+    if (!linkProspect?.id) return;
+
+    const customerCode = String(linkCustomerCode || "").trim().toUpperCase();
+    if (!customerCode) {
+      setError(t("customerCode") + " is required.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setLinkSaving(true);
+    setError("");
+
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const response = await fetch("/api/prospects", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: "link_customer",
+          id: linkProspect.id,
+          customer_code: customerCode,
+          copy_gps: linkCopyGps,
+          overwrite_customer_gps: linkOverwriteGps,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to link prospect to customer.");
+      }
+
+      setRecent((current) => current.map((row) => (
+        row.id === linkProspect.id
+          ? {
+            ...row,
+            status: "CONVERTED",
+            converted_customer_code: result.linkedCustomer?.customer_code || customerCode,
+          }
+          : row
+      )));
+
+      const gpsNote = result.linkedCustomer?.gpsCopied ? " GPS copied to customer." : "";
+      setMessage(`Prospect ${linkProspect.id} linked to ${customerCode}.${gpsNote}`);
+      closeLinkProspect();
+    } catch (err) {
+      setError(err.message || "Unable to link prospect to customer.");
+    } finally {
+      setLinkSaving(false);
+    }
+  }
+
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
     return (
@@ -814,12 +956,17 @@ export default function NewCustomerPage() {
                   <th>Mobile</th>
                   <th>Area</th>
                   <th>Status</th>
+                  <th>Linked Customer</th>
                   <th>Created</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {recent.map((row) => (
+                {recent.map((row) => {
+                  const isConverted = String(row.status || "").toUpperCase() === "CONVERTED"
+                    || Boolean(row.converted_customer_code);
+                  const linkedCode = String(row.converted_customer_code || "").trim().toUpperCase();
+                  return (
                   <tr key={row.id}>
                     <td>{row.id}</td>
                     <td>{row.company_name || row.shop_name || row.customer_name || "-"}</td>
@@ -827,34 +974,141 @@ export default function NewCustomerPage() {
                     <td>{row.mobile || "-"}</td>
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.status || "-"}</td>
+                    <td>
+                      {linkedCode ? (
+                        <Link href={`/management/customer-audit?customer_code=${encodeURIComponent(linkedCode)}`}>
+                          {linkedCode}
+                        </Link>
+                      ) : "-"}
+                    </td>
                     <td>{row.created_at ? new Date(row.created_at).toLocaleString("en-GB") : "-"}</td>
                     <td>
-                      <button
-                        type="button"
-                        className="moduleInlineButton"
-                        onClick={() => {
-                          const query = buildProspectOrderParams({
-                            id: row.id,
-                            customerName: row.company_name || row.customer_name || row.shop_name,
-                            salesmanCode: row.salesman_code || form.salesman_code,
-                          });
-                          router.push(`/management/new-order?${query}`);
-                        }}
-                      >
-                        Create Order
-                      </button>
+                      <div className="moduleInlineStack moduleActionStack">
+                        {!isConverted ? (
+                          <>
+                            <button
+                              type="button"
+                              className="moduleInlineButton"
+                              onClick={() => openLinkProspect(row)}
+                            >
+                              {t("linkCustomer")}
+                            </button>
+                            <button
+                              type="button"
+                              className="moduleInlineButton"
+                              onClick={() => {
+                                const query = buildProspectOrderParams({
+                                  id: row.id,
+                                  customerName: row.company_name || row.customer_name || row.shop_name,
+                                  salesmanCode: row.salesman_code || form.salesman_code,
+                                });
+                                router.push(`/management/new-order?${query}`);
+                              }}
+                            >
+                              Create Order
+                            </button>
+                          </>
+                        ) : linkedCode ? (
+                          <Link
+                            href={`/management/customer-audit?customer_code=${encodeURIComponent(linkedCode)}`}
+                            className="moduleInlineButton"
+                          >
+                            {t("viewCustomer")}
+                          </Link>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {recent.length === 0 && (
                   <tr>
-                    <td colSpan={8}>No prospects created yet.</td>
+                    <td colSpan={9}>No prospects created yet.</td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
         </section>
+
+        {linkProspect ? (
+          <div className="appPopupOverlay" dir={dir} role="presentation" onClick={closeLinkProspect}>
+            <div
+              className="appPopupDialog appPopupDialogInfo"
+              role="dialog"
+              aria-modal="true"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h2>{t("linkCustomerTitle")}</h2>
+              <p className="moduleHint">{t("linkCustomerHint")}</p>
+              <p><strong>{t("prospectNameLabel")}:</strong> {linkProspect.company_name || linkProspect.shop_name || `Prospect ${linkProspect.id}`}</p>
+              {prospectRowHasGps(linkProspect) ? (
+                <p className="moduleHint">{t("prospectGpsAvailable")}: {Number(linkProspect.latitude).toFixed(6)}, {Number(linkProspect.longitude).toFixed(6)}</p>
+              ) : null}
+              <label className="moduleFieldFull">
+                {t("customerCode")}
+                <input
+                  className="moduleInput"
+                  value={linkCustomerCode}
+                  onChange={(event) => {
+                    setLinkCustomerCode(event.target.value.toUpperCase());
+                    setLinkCustomerPreview(null);
+                    setLinkLookupError("");
+                  }}
+                  onBlur={() => {
+                    void lookupLinkCustomer();
+                  }}
+                  placeholder="1301"
+                />
+              </label>
+              {linkCustomerPreview ? (
+                <div className="moduleHint">
+                  <p><strong>{t("erpCustomerNameLabel")}:</strong> {linkCustomerPreview.customer_name || "-"}</p>
+                  <p>{t("namesMayDifferNote")}</p>
+                </div>
+              ) : null}
+              {linkLookupError ? (
+                <p className="moduleHint" style={{ color: "var(--module-danger, #b42318)" }}>{linkLookupError}</p>
+              ) : null}
+              {prospectRowHasGps(linkProspect) ? (
+                <>
+                  <label className="moduleCollectorCheckbox">
+                    <input
+                      type="checkbox"
+                      checked={linkCopyGps}
+                      onChange={(event) => setLinkCopyGps(event.target.checked)}
+                    />
+                    <span>{t("copyProspectGps")}</span>
+                  </label>
+                  <label className="moduleCollectorCheckbox">
+                    <input
+                      type="checkbox"
+                      checked={linkOverwriteGps}
+                      disabled={!linkCopyGps}
+                      onChange={(event) => setLinkOverwriteGps(event.target.checked)}
+                    />
+                    <span>{t("overwriteCustomerGps")}</span>
+                  </label>
+                </>
+              ) : null}
+              <div className="moduleInlineStack" style={{ marginTop: "12px" }}>
+                <button
+                  type="button"
+                  className="modulePrimaryButton"
+                  onClick={() => {
+                    void saveProspectLink();
+                  }}
+                  disabled={linkSaving}
+                >
+                  {linkSaving ? t("linking") : t("linkSave")}
+                </button>
+                <button type="button" className="moduleInlineButton" onClick={closeLinkProspect}>
+                  {t("cancel")}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </main>
     </MorningAttendanceGate>

@@ -1,6 +1,11 @@
-import { fetchWithLocalCache, readCacheEntry, writeCacheEntry } from "./localDataStore.js";
+import { fetchWithLocalCache, fetchWithLocalCacheResilient, readCacheEntry, writeCacheEntry } from "./localDataStore.js";
 import { getSupabaseClient } from "./supabase.js";
 import { buildScopeHash } from "./scopeHash.js";
+import {
+  filterPendingOrdersForScope,
+  PENDING_ORDER_STATUSES,
+  PENDING_ORDERS_SELECT,
+} from "./pendingOrdersQuery.js";
 
 export { buildScopeHash } from "./scopeHash.js";
 
@@ -13,6 +18,7 @@ export const CACHE_TTL = {
   outstandingMs: 24 * 60 * 60 * 1000,
   myDaySnapshotMs: 24 * 60 * 60 * 1000,
   collectionQueuesMs: 24 * 60 * 60 * 1000,
+  pendingOrdersMs: 24 * 60 * 60 * 1000,
   mobileSnapshotMs: 7 * 24 * 60 * 60 * 1000,
 };
 
@@ -47,6 +53,14 @@ function collectionScopeCacheKey(userId) {
 
 function myDaySnapshotCacheKey(userId, dateKey) {
   return `myday:v1:${String(userId || "").trim()}:${String(dateKey || "").trim()}`;
+}
+
+function pendingOrdersCacheKey(userId, scope) {
+  return `pendingOrders:v1:${String(userId || "").trim()}:${buildScopeHash(scope)}`;
+}
+
+function pendingOrdersInvoiceMetaCacheKey(userId) {
+  return `pendingOrdersInvoiceMeta:v1:${String(userId || "").trim()}`;
 }
 
 async function fetchMobileSnapshotNetwork(accessToken) {
@@ -266,6 +280,84 @@ export async function readCollectionQueuesForUser(userId) {
   return entry?.value || null;
 }
 
+async function fetchCollectionQueuesNetwork(accessToken) {
+  const response = await fetch("/api/payment-collections", {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.success) {
+    throw new Error(payload.error || "Unable to load payment collection queue.");
+  }
+  return {
+    dueCustomers: payload.dueCustomers || [],
+    notDueCustomers: payload.notDueCustomers || [],
+    legalCustomers: payload.legalCustomers || [],
+  };
+}
+
+export async function writeCollectionQueuesForUser(userId, scope, queues) {
+  if (!userId || !scope || !queues) return false;
+
+  const collectionScope = {
+    hasAllAccess: Boolean(scope?.hasAllAccess),
+    visibleSalesmanCodes: Array.isArray(scope?.visibleSalesmanCodes) ? scope.visibleSalesmanCodes : [],
+  };
+
+  await Promise.all([
+    writeCacheEntry(collectionScopeCacheKey(userId), collectionScope, { ttlMs: CACHE_TTL.scopeMs }),
+    writeCacheEntry(collectionQueuesCacheKey(collectionScope), queues, { ttlMs: CACHE_TTL.collectionQueuesMs }),
+  ]);
+
+  return true;
+}
+
+async function resolveCollectionScopeForUser(accessToken, userId, preferredScope = null) {
+  if (preferredScope) {
+    return {
+      hasAllAccess: Boolean(preferredScope?.hasAllAccess),
+      visibleSalesmanCodes: Array.isArray(preferredScope?.visibleSalesmanCodes) ? preferredScope.visibleSalesmanCodes : [],
+    };
+  }
+
+  const cachedScope = await readCacheEntry(collectionScopeCacheKey(userId));
+  if (cachedScope?.value) return cachedScope.value;
+
+  const salesScope = await fetchSalesScopeNetwork(accessToken);
+  return {
+    hasAllAccess: Boolean(salesScope?.hasAllAccess),
+    visibleSalesmanCodes: Array.isArray(salesScope?.visibleSalesmanCodes) ? salesScope.visibleSalesmanCodes : [],
+  };
+}
+
+export async function fetchCollectionQueuesCached(accessToken, userId, options = {}) {
+  if (!accessToken || !userId) {
+    throw new Error("Please login again.");
+  }
+
+  const scope = await resolveCollectionScopeForUser(accessToken, userId, options.scope);
+
+  const result = await fetchWithLocalCacheResilient(
+    collectionQueuesCacheKey(scope),
+    CACHE_TTL.collectionQueuesMs,
+    async () => {
+      const queues = await fetchCollectionQueuesNetwork(accessToken);
+      await writeCollectionQueuesForUser(userId, scope, queues);
+      return queues;
+    },
+    { onUpdate: options.onUpdate },
+  );
+
+  return {
+    queues: result.data,
+    fromCache: result.fromCache,
+    stale: result.stale,
+    offline: Boolean(result.offline),
+  };
+}
+
 export async function hydrateFromMobileSnapshot(snapshot, userId) {
   if (!snapshot || !userId) return false;
 
@@ -309,6 +401,14 @@ export async function hydrateFromMobileSnapshot(snapshot, userId) {
     writes.push(writeCacheEntry(itemsMasterCacheKey(), snapshot.itemsMaster, { ttlMs: CACHE_TTL.itemsMasterMs }));
   }
 
+  if (Array.isArray(snapshot.pendingOrders) && snapshot.salesScope) {
+    writes.push(writeCacheEntry(
+      pendingOrdersCacheKey(userId, snapshot.salesScope),
+      snapshot.pendingOrders,
+      { ttlMs: CACHE_TTL.pendingOrdersMs },
+    ));
+  }
+
   await Promise.all(writes);
 
   if (typeof window !== "undefined") {
@@ -330,4 +430,80 @@ export async function fetchAndHydrateMobileSnapshot() {
   const snapshot = await fetchMobileSnapshotNetwork(session.access_token);
   await hydrateFromMobileSnapshot(snapshot, session.user.id);
   return { snapshot, userId: session.user.id };
+}
+
+async function fetchPendingOrdersNetwork(scope) {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error("Supabase is not configured.");
+
+  const { data, error } = await supabase
+    .from("sales_orders")
+    .select(PENDING_ORDERS_SELECT)
+    .in("status", PENDING_ORDER_STATUSES)
+    .order("updated_at", { ascending: false })
+    .limit(500);
+
+  if (error) throw error;
+
+  return filterPendingOrdersForScope(data, scope);
+}
+
+export async function fetchPendingOrdersCached(userId, scope, options = {}) {
+  if (!userId) throw new Error("Please login again.");
+
+  return fetchWithLocalCacheResilient(
+    pendingOrdersCacheKey(userId, scope),
+    CACHE_TTL.pendingOrdersMs,
+    () => fetchPendingOrdersNetwork(scope),
+    { onUpdate: options.onUpdate },
+  );
+}
+
+export async function readPendingOrdersCache(userId, scope) {
+  const entry = await readCacheEntry(pendingOrdersCacheKey(userId, scope));
+  return Array.isArray(entry?.value) ? entry.value : null;
+}
+
+export async function waitForPendingOrdersHydration(userId, scope, maxMs = 2500) {
+  const cached = await readPendingOrdersCache(userId, scope);
+  if (cached && cached.length > 0) return true;
+
+  if (typeof window === "undefined") return false;
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const finish = async () => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("madiba-mobile-snapshot-hydrated", onHydrated);
+      clearTimeout(timer);
+      const next = await readPendingOrdersCache(userId, scope);
+      resolve(Boolean(next && next.length > 0));
+    };
+
+    const onHydrated = () => {
+      finish();
+    };
+
+    const timer = window.setTimeout(() => {
+      finish();
+    }, maxMs);
+
+    window.addEventListener("madiba-mobile-snapshot-hydrated", onHydrated);
+  });
+}
+
+export async function readPendingOrdersInvoiceMeta(userId) {
+  const entry = await readCacheEntry(pendingOrdersInvoiceMetaCacheKey(userId));
+  return entry?.value && typeof entry.value === "object" ? entry.value : {};
+}
+
+export async function writePendingOrdersInvoiceMeta(userId, items) {
+  if (!userId || !items || typeof items !== "object") return false;
+  return writeCacheEntry(
+    pendingOrdersInvoiceMetaCacheKey(userId),
+    items,
+    { ttlMs: CACHE_TTL.pendingOrdersMs },
+  );
 }

@@ -6,6 +6,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import {
   fetchVisibleCustomersCached,
+  hydrateFoundationFromCache,
   invalidateVisibleCustomersCache,
   readMyDaySnapshot,
   writeMyDaySnapshot,
@@ -313,6 +314,38 @@ export default function MyDayPage() {
     return uniqueItems;
   }
 
+  async function waitForMobileSnapshotHydration(userId, maxMs = 3000) {
+    const foundation = await hydrateFoundationFromCache(userId);
+    if (Array.isArray(foundation?.customers) && foundation.customers.length > 0) {
+      return true;
+    }
+
+    if (typeof window === "undefined") return false;
+
+    return new Promise((resolve) => {
+      let settled = false;
+
+      const finish = async () => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener("madiba-mobile-snapshot-hydrated", onHydrated);
+        clearTimeout(timer);
+        const hydrated = await hydrateFoundationFromCache(userId);
+        resolve(Array.isArray(hydrated?.customers) && hydrated.customers.length > 0);
+      };
+
+      const onHydrated = () => {
+        finish();
+      };
+
+      const timer = window.setTimeout(() => {
+        finish();
+      }, maxMs);
+
+      window.addEventListener("madiba-mobile-snapshot-hydrated", onHydrated);
+    });
+  }
+
   useEffect(() => {
     async function load() {
       const supabase = getSupabaseClient();
@@ -343,6 +376,8 @@ export default function MyDayPage() {
           setProspectScheduleRows(cachedSnapshot.prospectScheduleRows || []);
           setLoading(false);
           setRefreshing(true);
+        } else {
+          await waitForMobileSnapshotHydration(session.user.id);
         }
 
         const scope = await fetchSalesScope();

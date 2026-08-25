@@ -4,7 +4,9 @@ import * as XLSX from "xlsx";
 import {
   customerMasterExportRows,
   fetchAllFilteredCustomers,
+  normalizeCustomerMasterActiveFilter,
   normalizeCustomerMasterGpsFilter,
+  normalizeCustomerMasterOutstandingFilter,
   normalizeCustomerMasterSearch,
 } from "../../../../lib/customerMasterQuery.js";
 
@@ -60,6 +62,8 @@ export async function GET(request) {
         url.searchParams.get("gpsFilter"),
         url.searchParams.get("missingGps") === "1",
       ),
+      activeFilter: normalizeCustomerMasterActiveFilter(url.searchParams.get("activeFilter")),
+      outstandingFilter: normalizeCustomerMasterOutstandingFilter(url.searchParams.get("outstandingFilter")),
     };
 
     const customers = await fetchAllFilteredCustomers(admin, filters);

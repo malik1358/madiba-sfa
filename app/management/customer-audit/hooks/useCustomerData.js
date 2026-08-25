@@ -8,6 +8,7 @@ import {
   fetchVisibleCustomersCached,
   hydrateFoundationFromCache,
 } from '../../../lib/mobileDataCache';
+import { dedupeCustomerMasterRows } from '../../../lib/customerMasterQuery';
 
 export function useCustomerData({ setError, setMessage }) {
   const [customers, setCustomers] = useState([]);
@@ -51,7 +52,7 @@ export function useCustomerData({ setError, setMessage }) {
         const hydrated = await hydrateFoundationFromCache(session.user.id);
         if (hydrated) {
           setAccessScope(hydrated.scope);
-          setCustomers(hydrated.customers);
+          setCustomers(dedupeCustomerMasterRows(hydrated.customers));
           setItemMaster(hydrated.itemsMaster);
           setItemMasterStatus(hydrated.itemMasterStatus);
           setSalesmen([
@@ -75,11 +76,11 @@ export function useCustomerData({ setError, setMessage }) {
 
         const customersResult = await fetchVisibleCustomersCached(session.access_token, scope, {
           onUpdate: (freshCustomers) => {
-            setCustomers(Array.isArray(freshCustomers) ? freshCustomers : []);
+            setCustomers(dedupeCustomerMasterRows(Array.isArray(freshCustomers) ? freshCustomers : []));
             setRefreshing(false);
           },
         });
-        setCustomers(Array.isArray(customersResult.data) ? customersResult.data : []);
+        setCustomers(dedupeCustomerMasterRows(Array.isArray(customersResult.data) ? customersResult.data : []));
 
         const itemsResult = await fetchItemsMasterCached({
           onUpdate: (freshItems) => {

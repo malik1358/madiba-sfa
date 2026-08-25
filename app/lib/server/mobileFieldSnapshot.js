@@ -1,5 +1,6 @@
 import { buildCollectionQueues } from "../paymentCollections.js";
 import { buildScopeHash, buildSnapshotKey } from "../scopeHash.js";
+import { filterPendingOrdersForScope, PENDING_ORDER_STATUSES, PENDING_ORDERS_SELECT } from "../pendingOrdersQuery.js";
 import { buildVisibleCustomersForScope, resolveScopeForUserId } from "../../api/customers/visible/route.js";
 import {
   fetchOutstandingAndCollectionRecords,
@@ -32,6 +33,19 @@ function isFieldUserRole(role) {
   ].includes(normalized);
 }
 
+async function fetchPendingOrdersForScope(admin, salesScope) {
+  const { data, error } = await admin
+    .from("sales_orders")
+    .select(PENDING_ORDERS_SELECT)
+    .in("status", PENDING_ORDER_STATUSES)
+    .order("updated_at", { ascending: false })
+    .limit(500);
+
+  if (error) throw error;
+
+  return filterPendingOrdersForScope(data, salesScope);
+}
+
 export async function buildMobileFieldSnapshot(admin, userId) {
   const [salesScope, collectionScope, customerScope] = await Promise.all([
     resolveSalesScopeForUserId(admin, userId),
@@ -41,7 +55,7 @@ export async function buildMobileFieldSnapshot(admin, userId) {
 
   const snapshotKey = buildSnapshotKey(collectionScope, customerScope);
 
-  const [records, enrichedCustomers, basicCustomers, itemsRes] = await Promise.all([
+  const [records, enrichedCustomers, basicCustomers, itemsRes, pendingOrders] = await Promise.all([
     fetchOutstandingAndCollectionRecords(admin, collectionScope),
     buildVisibleCustomersForScope(admin, customerScope, {
       includeRecentSales: true,
@@ -52,6 +66,7 @@ export async function buildMobileFieldSnapshot(admin, userId) {
       includeOutstanding: false,
     }),
     admin.from("items_master").select("*"),
+    fetchPendingOrdersForScope(admin, salesScope),
   ]);
 
   if (itemsRes.error) throw itemsRes.error;
@@ -89,6 +104,7 @@ export async function buildMobileFieldSnapshot(admin, userId) {
       rows: items,
       status: `SUCCESS: ${items.length} rows`,
     },
+    pendingOrders,
   };
 }
 

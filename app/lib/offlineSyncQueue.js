@@ -58,7 +58,10 @@ export function isOfflineLikeError(error) {
   return message.includes("failed to fetch")
     || message.includes("network")
     || message.includes("load failed")
-    || message.includes("networkerror");
+    || message.includes("networkerror")
+    || message.includes("timed out")
+    || message.includes("timeout")
+    || message.includes("abort");
 }
 
 async function storeBlobParts(files = []) {
@@ -200,6 +203,22 @@ async function rebuildFormData(item) {
   return formData;
 }
 
+import { SYNC_UPLOAD_TIMEOUT_MS } from "./offlineSyncQueueConstants.js";
+
+async function fetchWithSyncTimeout(url, options = {}, timeoutMs = SYNC_UPLOAD_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function processOfflineQueue(getAccessToken, options = {}) {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     return { processed: 0, failed: 0, pending: await countPendingOfflineQueue() };
@@ -223,7 +242,7 @@ export async function processOfflineQueue(getAccessToken, options = {}) {
 
       let response;
       if (item.bodyType === "json") {
-        response = await fetch(item.url, {
+        response = await fetchWithSyncTimeout(item.url, {
           method: item.method || "POST",
           headers: {
             ...headers,
@@ -233,7 +252,7 @@ export async function processOfflineQueue(getAccessToken, options = {}) {
         });
       } else {
         const body = await rebuildFormData(item);
-        response = await fetch(item.url, {
+        response = await fetchWithSyncTimeout(item.url, {
           method: item.method || "POST",
           headers,
           body,

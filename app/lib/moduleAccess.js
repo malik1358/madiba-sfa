@@ -18,6 +18,25 @@ export const MODULES = {
   upload: { href: "/management/upload", label: "Imports" },
 };
 
+export const NAV_GROUPS = [
+  { key: "home", label: "Home", modules: ["dashboard", "management"] },
+  {
+    key: "field",
+    label: "Field Sales",
+    modules: ["myDay", "customerAudit", "newOrder", "pendingOrders", "newCustomer", "myPerformance", "myCollections"],
+  },
+  {
+    key: "collections",
+    label: "Collections",
+    modules: ["paymentCollections", "collectionReport", "dailyVisitReport"],
+  },
+  {
+    key: "admin",
+    label: "Admin",
+    modules: ["customerMaster", "userActivity", "salesmanHierarchy", "gpsMap", "upload"],
+  },
+];
+
 export function normalizeAccessRole(role) {
   return String(role || "").trim().toLowerCase().replace(/_/g, "-");
 }
@@ -96,6 +115,15 @@ export function listAccessibleModules(access, moduleKeys) {
       moduleKey,
       ...MODULES[moduleKey],
     }));
+}
+
+export function listAccessibleNavGroups(access) {
+  return NAV_GROUPS
+    .map((group) => ({
+      ...group,
+      items: listAccessibleModules(access, group.modules),
+    }))
+    .filter((group) => group.items.length > 0);
 }
 
 export function moduleLabelForPath(href) {

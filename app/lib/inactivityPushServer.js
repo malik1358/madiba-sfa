@@ -1,5 +1,5 @@
 import { shouldRequireTransactionGps } from "./moduleAccess.js";
-import { isFcmConfigured, sendPushToUser } from "./fcm.js";
+import { getFcmConfigurationStatus, sendPushToUser } from "./fcm.js";
 import {
   getKsaDateString,
   getInactivityAlertMessage,
@@ -158,11 +158,12 @@ async function loadUserActivity(admin, userId, startIso, endIso) {
 }
 
 export async function runInactivityPushCycle(admin, now = new Date()) {
-  if (!isFcmConfigured()) {
+  const fcmStatus = getFcmConfigurationStatus();
+  if (!fcmStatus.configured) {
     return {
       ok: false,
       skipped: true,
-      reason: "fcm_not_configured",
+      reason: fcmStatus.reason || "fcm_not_configured",
       checked: 0,
       sent: 0,
     };

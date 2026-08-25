@@ -1,0 +1,1 @@
+export const SYNC_UPLOAD_TIMEOUT_MS = 120000;

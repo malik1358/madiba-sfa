@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildCollectionQueues, filterCollectionQueueInvoices, invoiceHasCashRef } from "../../lib/paymentCollections.js";
+import { buildCollectionQueues, filterCollectionQueueInvoices } from "../../lib/paymentCollections.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
@@ -7,13 +7,14 @@ import { resolveMutualGroupProfiles, buildSalesmanScopeMatchers, salesmanValueMa
 import {
   OUTSTANDING_DATASET_KEY,
   extractLeadingCustomerCodeAndName,
+  findOutstandingForCustomer,
   hydrateOutstandingInvoices,
   isPlaceholderSalesmanValue,
   mergeOutstandingInvoiceSources,
   pickOutstandingSalesmanName,
   customerAccountCodesMatch,
   resolveCustomerAccountCode,
-  resolveInvoiceAgingDays,
+  resolveCollectionOutstandingBuckets,
   resolveOutstandingInvoiceCustomerCode,
   toNumber,
 } from "../../lib/outstanding.js";
@@ -139,20 +140,20 @@ async function readOutstandingInvoicesFromTable(admin) {
   });
 }
 
-async function readOutstandingInvoices(admin) {
+async function readOutstandingDataset(admin) {
   const { data, error } = await admin
     .from("system_settings")
     .select("setting_value")
     .eq("setting_key", OUTSTANDING_DATASET_KEY)
     .maybeSingle();
 
-  if (error) return [];
+  if (error) return { invoices: [], rows: [] };
 
   let parsed = null;
   try {
     parsed = typeof data?.setting_value === "string" ? JSON.parse(data.setting_value) : data?.setting_value;
   } catch {
-    return [];
+    return { invoices: [], rows: [] };
   }
 
   const hasUploadedDataset = Boolean(
@@ -162,14 +163,26 @@ async function readOutstandingInvoices(admin) {
 
   if (hasUploadedDataset) {
     const hydrated = hydrateOutstandingInvoices(parsed);
+    const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
     if (hydrated.length > 0) {
       const tableInvoices = await readOutstandingInvoicesFromTable(admin);
-      return mergeOutstandingInvoiceSources(hydrated, tableInvoices);
+      return {
+        invoices: mergeOutstandingInvoiceSources(hydrated, tableInvoices),
+        rows,
+      };
     }
   }
 
   // Staging/dev fallback when no outstanding workbook has been uploaded yet.
-  return readOutstandingInvoicesFromTable(admin);
+  return {
+    invoices: await readOutstandingInvoicesFromTable(admin),
+    rows: [],
+  };
+}
+
+async function readOutstandingInvoices(admin) {
+  const { invoices } = await readOutstandingDataset(admin);
+  return invoices;
 }
 
 function isMissingTableError(error) {
@@ -496,12 +509,12 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     .select("customer_code,is_transferred,transferred_at,note");
 
   const [
-    outstandingInvoices,
+    { invoices: outstandingInvoices, rows: outstandingRows },
     { data: salesmen, error: salesmenError },
     { data: visitsData, error: visitsError },
     { data: legalData, error: legalError },
   ] = await Promise.all([
-    readOutstandingInvoices(admin),
+    readOutstandingDataset(admin),
     salesmenQuery,
     visitsQuery,
     legalQuery,
@@ -593,6 +606,9 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       invoice_date: invoice.invoice_date || "",
       due_date: invoice.due_date || "",
       pending_amount: toNumber(invoice.pending_amount),
+      invoice_day: invoice.invoice_day === undefined || invoice.invoice_day === null || invoice.invoice_day === ""
+        ? null
+        : toNumber(invoice.invoice_day),
       overdue_days: invoice.overdue_days === undefined || invoice.overdue_days === null || invoice.overdue_days === ""
         ? null
         : toNumber(invoice.overdue_days),
@@ -661,38 +677,16 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       if (!invoiceOwned && !customerOwned) return;
     }
 
-    // Calculate outstanding amounts
-    const outstanding = {
-      outstanding_cash: 0,
-      outstanding_0_30: 0,
-      outstanding_30_60: 0,
-      outstanding_61_90: 0,
-      outstanding_91_120: 0,
-      outstanding_above_120: 0,
-    };
-
+    const uploadedOutstanding = findOutstandingForCustomer(
+      { rows: outstandingRows },
+      customer.customer_code,
+      customer.customer_name,
+    );
     const todayIso = new Date().toISOString();
-    customerInvoices.forEach((invoice) => {
-      const pendingAmount = Number(invoice.pending_amount || 0);
-      if (pendingAmount <= 0) return;
-
-      if (invoiceHasCashRef(invoice)) {
-        outstanding.outstanding_cash += pendingAmount;
-      }
-
-      const daysOverdue = resolveInvoiceAgingDays(invoice, todayIso);
-
-      if (daysOverdue <= 30) {
-        outstanding.outstanding_0_30 += pendingAmount;
-      } else if (daysOverdue <= 60) {
-        outstanding.outstanding_30_60 += pendingAmount;
-      } else if (daysOverdue <= 90) {
-        outstanding.outstanding_61_90 += pendingAmount;
-      } else if (daysOverdue <= 120) {
-        outstanding.outstanding_91_120 += pendingAmount;
-      } else {
-        outstanding.outstanding_above_120 += pendingAmount;
-      }
+    const outstanding = resolveCollectionOutstandingBuckets({
+      rowBuckets: uploadedOutstanding?.buckets,
+      invoices: customerInvoices,
+      todayIso,
     });
 
     records.push({

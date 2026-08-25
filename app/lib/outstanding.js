@@ -258,6 +258,81 @@ export function resolveInvoiceAgingDays(invoice, todayIso = new Date().toISOStri
   return 0;
 }
 
+export function bucketLabelForAgingDays(dayValue) {
+  const day = toNumber(dayValue);
+  if (!Number.isFinite(day) || day <= 0) return "0-30";
+  if (day <= 30) return "0-30";
+  if (day <= 60) return "31-60";
+  if (day <= 90) return "61-90";
+  if (day <= 120) return "91-120";
+  return ">120";
+}
+
+export function mapOutstandingBucketsToCollectionFields(buckets) {
+  const outstanding = {
+    outstanding_0_30: 0,
+    outstanding_30_60: 0,
+    outstanding_61_90: 0,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+  };
+
+  Object.entries(buckets || {}).forEach(([label, value]) => {
+    const amount = toNumber(value);
+    if (amount <= 0 || isOpenInvoicesLabel(label)) return;
+
+    const startDay = bucketSortValue(label);
+    if (startDay <= 30) outstanding.outstanding_0_30 += amount;
+    else if (startDay <= 60) outstanding.outstanding_30_60 += amount;
+    else if (startDay <= 90) outstanding.outstanding_61_90 += amount;
+    else if (startDay <= 120) outstanding.outstanding_91_120 += amount;
+    else outstanding.outstanding_above_120 += amount;
+  });
+
+  return outstanding;
+}
+
+export function buildCollectionOutstandingBucketsFromInvoices(invoices, todayIso = new Date().toISOString()) {
+  const outstanding = {
+    outstanding_cash: 0,
+    outstanding_0_30: 0,
+    outstanding_30_60: 0,
+    outstanding_61_90: 0,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+  };
+
+  (invoices || []).forEach((invoice) => {
+    const pendingAmount = toNumber(invoice?.pending_amount);
+    if (pendingAmount <= 0) return;
+
+    const bucketLabel = bucketLabelForAgingDays(resolveInvoiceAgingDays(invoice, todayIso));
+    if (bucketLabel === "0-30") outstanding.outstanding_0_30 += pendingAmount;
+    else if (bucketLabel === "31-60") outstanding.outstanding_30_60 += pendingAmount;
+    else if (bucketLabel === "61-90") outstanding.outstanding_61_90 += pendingAmount;
+    else if (bucketLabel === "91-120") outstanding.outstanding_91_120 += pendingAmount;
+    else outstanding.outstanding_above_120 += pendingAmount;
+  });
+
+  return outstanding;
+}
+
+export function resolveCollectionOutstandingBuckets({
+  rowBuckets,
+  invoices,
+  todayIso = new Date().toISOString(),
+}) {
+  const hasRowBuckets = Object.values(rowBuckets || {}).some((value) => toNumber(value) > 0);
+  if (hasRowBuckets) {
+    return {
+      outstanding_cash: 0,
+      ...mapOutstandingBucketsToCollectionFields(rowBuckets),
+    };
+  }
+
+  return buildCollectionOutstandingBucketsFromInvoices(invoices, todayIso);
+}
+
 export function resolveOverdueDaysFromDueDate(invoice, todayIso = new Date().toISOString()) {
   const dueDate = dateOnlyFromIso(invoice?.due_date);
   if (dueDate) {

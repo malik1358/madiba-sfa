@@ -28,6 +28,9 @@ import {
   sanitizeStoredOverdueDays,
   summarizeOutstandingBuckets,
   visibleOutstandingBucketLabels,
+  mapOutstandingBucketsToCollectionFields,
+  buildCollectionOutstandingBucketsFromInvoices,
+  resolveCollectionOutstandingBuckets,
 } from "../app/lib/outstanding.js";
 
 test("detectOutstandingSalesmanColumn prefers Salesman over Sales Person", () => {
@@ -338,4 +341,75 @@ test("prospect customers do not inherit outstanding from similar customer names"
     ),
     false,
   );
+});
+
+test("mapOutstandingBucketsToCollectionFields mirrors customer audit bucket layout", () => {
+  assert.deepEqual(
+    mapOutstandingBucketsToCollectionFields({
+      "0-30": 0,
+      "31-60": 1160,
+      "61-90": 2244,
+      "91-120": 2906,
+    }),
+    {
+      outstanding_0_30: 0,
+      outstanding_30_60: 1160,
+      outstanding_61_90: 2244,
+      outstanding_91_120: 2906,
+      outstanding_above_120: 0,
+    },
+  );
+});
+
+test("buildCollectionOutstandingBucketsFromInvoices prefers invoice day over overdue days", () => {
+  const withInvoiceDay = buildCollectionOutstandingBucketsFromInvoices([
+    { pending_amount: 1159.89, invoice_day: 35, overdue_days: 5 },
+    { pending_amount: 2243.94, invoice_day: 65, overdue_days: 35 },
+    { pending_amount: 2906, invoice_day: 117, overdue_days: 89 },
+  ]);
+
+  assert.deepEqual(withInvoiceDay, {
+    outstanding_cash: 0,
+    outstanding_0_30: 0,
+    outstanding_30_60: 1159.89,
+    outstanding_61_90: 2243.94,
+    outstanding_91_120: 2906,
+    outstanding_above_120: 0,
+  });
+
+  const overdueOnly = buildCollectionOutstandingBucketsFromInvoices([
+    { pending_amount: 1159.89, overdue_days: 5 },
+    { pending_amount: 2243.94, overdue_days: 35 },
+    { pending_amount: 2906, overdue_days: 89 },
+  ]);
+
+  assert.deepEqual(overdueOnly, {
+    outstanding_cash: 0,
+    outstanding_0_30: 1159.89,
+    outstanding_30_60: 2243.94,
+    outstanding_61_90: 2906,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+  });
+});
+
+test("resolveCollectionOutstandingBuckets prefers uploaded row buckets", () => {
+  const fromRows = resolveCollectionOutstandingBuckets({
+    rowBuckets: {
+      "0-30": 0,
+      "31-60": 1160,
+      "61-90": 2244,
+      "91-120": 2906,
+    },
+    invoices: [
+      { pending_amount: 1159.89, invoice_day: 35, overdue_days: 5 },
+      { pending_amount: 2243.94, invoice_day: 65, overdue_days: 35 },
+      { pending_amount: 2906, invoice_day: 117, overdue_days: 89 },
+    ],
+  });
+
+  assert.equal(fromRows.outstanding_30_60, 1160);
+  assert.equal(fromRows.outstanding_61_90, 2244);
+  assert.equal(fromRows.outstanding_91_120, 2906);
+  assert.equal(fromRows.outstanding_0_30, 0);
 });

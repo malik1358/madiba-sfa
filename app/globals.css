@@ -613,7 +613,8 @@ select {
    ---------------------------------------------------------- */
 
 .auditCategoryHeader {
-  min-width: 145px;
+  min-width: 150px;
+  width: 150px;
 
   text-align: left !important;
 
@@ -647,7 +648,7 @@ select {
    ---------------------------------------------------------- */
 
 .auditMergedCategory {
-  min-width: 145px;
+  min-width: 150px;
   max-width: 170px;
 
   white-space: normal !important;
@@ -806,10 +807,9 @@ select {
 
 /*
    CATEGORY stays on the far left when scrolling.
+   Header cells are excluded — rowSpan + sticky breaks thead alignment.
 */
 
-.auditCategoryMatrixV3
-.auditCategoryHeader,
 .auditCategoryMatrixV3
 .auditMergedCategory {
   position: sticky;
@@ -825,26 +825,21 @@ select {
 */
 
 .auditCategoryMatrixV3
-.auditCategoryMetricHeader,
-.auditCategoryMatrixV3
 .auditCategoryMetric {
   position: sticky;
 
-  left: 145px;
+  left: 150px;
 
   z-index: 4;
 }
 
 
-/*
-   Headers need higher z-index.
-*/
-
-.auditCategoryMatrixV3
+.auditCategoryMatrixV3 thead
 .auditCategoryHeader,
-.auditCategoryMatrixV3
+.auditCategoryMatrixV3 thead
 .auditCategoryMetricHeader {
-  z-index: 8;
+  position: static !important;
+  left: auto !important;
 }
 
 
@@ -910,8 +905,6 @@ select {
     mobile category width.
   */
 
-  .auditCategoryMatrixV3
-  .auditCategoryMetricHeader,
   .auditCategoryMatrixV3
   .auditCategoryMetric {
     left: 110px;
@@ -2153,16 +2146,14 @@ table.auditMatrix td.auditTrendSame {
   color: #536b72 !important;
 }
 
-/* ================= STICKY CATEGORY + METRIC ================= */
+/* ================= STICKY CATEGORY + METRIC (body rows only) ================= */
 
-.auditCategoryMatrixV3 .auditCategoryHeader,
 .auditCategoryMatrixV3 .auditMergedCategory {
   position: sticky !important;
   left: 0 !important;
   z-index: 4 !important;
 }
 
-.auditCategoryMatrixV3 .auditCategoryMetricHeader,
 .auditCategoryMatrixV3 .auditCategoryMetric {
   position: sticky !important;
   left: 150px !important;
@@ -2170,9 +2161,11 @@ table.auditMatrix td.auditTrendSame {
   border-right: 2px solid #91aab1 !important;
 }
 
-.auditCategoryMatrixV3 .auditCategoryHeader,
-.auditCategoryMatrixV3 .auditCategoryMetricHeader {
-  z-index: 8 !important;
+.auditCategoryMatrixV3 thead .auditCategoryHeader,
+.auditCategoryMatrixV3 thead .auditCategoryMetricHeader {
+  position: static !important;
+  left: auto !important;
+  z-index: auto !important;
 }
 
 /* ================= MOBILE ================= */
@@ -2192,14 +2185,12 @@ table.auditMatrix td.auditTrendSame {
     padding: 8px 8px !important;
   }
 
-  .auditCategoryMatrixV3 .auditCategoryHeader,
   .auditCategoryMatrixV3 .auditMergedCategory {
     min-width: 110px !important;
     width: 110px !important;
     max-width: 110px !important;
   }
 
-  .auditCategoryMatrixV3 .auditCategoryMetricHeader,
   .auditCategoryMatrixV3 .auditCategoryMetric {
     min-width: 70px !important;
     width: 70px !important;
@@ -3241,6 +3232,12 @@ table.auditMatrix td.auditTrendSame {
 .auditQuickOrderTable th,
 .auditTransactionTable thead th {
   position: static !important;
+}
+
+.auditCategoryMatrixV3 thead .auditCategoryHeader,
+.auditCategoryMatrixV3 thead .auditCategoryMetricHeader {
+  position: static !important;
+  left: auto !important;
 }
 
 

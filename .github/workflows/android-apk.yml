@@ -70,16 +70,20 @@ jobs:
         run: npm exec -- cap sync android
 
       - name: Decode upload keystore
+        id: keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "ANDROID_KEYSTORE_BASE64 secret is not set."
-            exit 1
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+            echo "ANDROID_KEYSTORE_BASE64 secret is not set. Building debug APK instead."
+          else
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/madiba-upload.keystore"
           fi
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/madiba-upload.keystore"
 
       - name: Build signed release APK
+        if: steps.keystore.outputs.has_keystore == 'true'
         working-directory: android
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/madiba-upload.keystore
@@ -92,10 +96,29 @@ jobs:
             -PmadibaVersionCode="$VERSION_CODE" \
             -PmadibaVersionName="$VERSION_NAME"
 
-      - name: Upload APK artifact
+      - name: Build debug APK
+        if: steps.keystore.outputs.has_keystore != 'true'
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon \
+            -PmadibaVersionCode="$VERSION_CODE" \
+            -PmadibaVersionName="$VERSION_NAME"
+
+      - name: Upload release APK artifact
+        if: steps.keystore.outputs.has_keystore == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: madiba-sfa-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload debug APK artifact
+        if: steps.keystore.outputs.has_keystore != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: madiba-sfa-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30

@@ -26,6 +26,7 @@ import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
 import { sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -1171,12 +1172,23 @@ export default function NewOrderPage() {
         doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 28);
         addPdfBuildFooter(doc);
 
-        const safeCustomer = String(snapshot.customerCode || "customer").replace(/[^a-zA-Z0-9_-]/g, "_");
-        const safeDate = snapshot.savedAtIso.slice(0, 19).replace(/[:T]/g, "-");
-        const fileName = `order-${snapshot.orderId}-${safeCustomer}-${safeDate}.pdf`;
-        doc.save(fileName);
-      } catch {
-        setError("Order saved, but PDF generation failed. Please try again.");
+        const fileName = buildOrderPdfFileName({
+          orderId: snapshot.orderId,
+          customerCode: snapshot.customerCode,
+          savedAtIso: snapshot.savedAtIso,
+        });
+        const shareResult = await saveOrShareOrderPdf(doc, fileName, {
+          title: `Order #${snapshot.orderId}`,
+          text: `${snapshot.statusLabel} order for ${snapshot.customerName || snapshot.customerCode}`,
+          dialogTitle: "Save or share order PDF",
+        });
+        return shareResult;
+      } catch (error) {
+        if (error?.name === "AbortError" || String(error?.message || "").toLowerCase().includes("cancel")) {
+          return { method: "cancelled" };
+        }
+        setError("Order saved, but PDF could not be prepared. Please try Save / Share PDF again.");
+        return { method: "error" };
       } finally {
         setDownloadingPdf(false);
       }
@@ -1207,7 +1219,7 @@ export default function NewOrderPage() {
     });
 
     await downloadOrderPdf(snapshot);
-    setMessage(`Draft order #${orderId} saved. PDF downloaded automatically.`);
+    setMessage(`Draft order #${orderId} saved. Choose an app to save or share the PDF.`);
   }, [buildOrderSnapshot, downloadOrderPdf, saveDraft]);
 
   const handleSubmitOrder = useCallback(async () => {
@@ -1223,8 +1235,12 @@ export default function NewOrderPage() {
     };
 
     setLastSavedOrder(snapshot);
-    await downloadOrderPdf(snapshot);
-    setMessage(`Order #${orderId} submitted. PDF downloaded automatically.`);
+    const shareResult = await downloadOrderPdf(snapshot);
+    if (shareResult?.method === "cancelled") {
+      setMessage(`Order #${orderId} submitted. Tap Save / Share PDF to send it later.`);
+      return;
+    }
+    setMessage(`Order #${orderId} submitted. Choose WhatsApp, Drive, Files, or another app to save or share the PDF.`);
   }, [buildOrderSnapshot, downloadOrderPdf, draftOrderId, submitOrder]);
 
   const shareText = useMemo(() => {
@@ -1340,15 +1356,10 @@ export default function NewOrderPage() {
     }
   }, [fetchOutstandingForCustomer, outstandingUploadFile, selectedCustomer, setError, setMessage]);
 
-  const whatsappShareUrl = useMemo(
-    () => (shareText ? `https://wa.me/?text=${encodeURIComponent(shareText)}` : "#"),
-    [shareText]
-  );
-
   const emailShareUrl = useMemo(() => {
     if (!lastSavedOrder) return "#";
     const subject = `Order #${lastSavedOrder.orderId} - ${lastSavedOrder.customerName}`;
-    const body = `${shareText}\n\nPlease attach the downloaded PDF from your device before sending.`;
+    const body = `${shareText}\n\nUse Save / Share PDF in the app to attach the order PDF.`;
     return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }, [lastSavedOrder, shareText]);
 
@@ -1957,20 +1968,17 @@ export default function NewOrderPage() {
                 <div className="moduleReviewActions">
                   <button
                     type="button"
-                    className="moduleInlineButton"
-                    disabled={downloadingPdf}
+                    className="modulePrimaryButton"
+                    disabled={downloadingPdf || !lastSavedOrder}
                     onClick={() => downloadOrderPdf(lastSavedOrder)}
                   >
-                    {downloadingPdf ? "Preparing PDF..." : "Download PDF Again"}
+                    {downloadingPdf ? "Preparing PDF..." : "Save / Share PDF"}
                   </button>
-                  <a className="moduleShareLink" href={emailShareUrl}>Share via Email</a>
-                  <a className="moduleShareLink" href={whatsappShareUrl} target="_blank" rel="noreferrer">
-                    Share via WhatsApp
-                  </a>
+                  <a className="moduleShareLink" href={emailShareUrl}>Share order details via Email</a>
                 </div>
 
                 <p className="moduleReviewNote">
-                  PDF downloads automatically after save/submit. Attach the downloaded file in Email or WhatsApp before sending.
+                  After save or submit, Android opens a share menu so you can send the PDF to WhatsApp, save to Files/Drive, or another app.
                 </p>
               </section>
             )}

@@ -13,6 +13,7 @@ import { fetchSalesScope } from "../../lib/salesScope";
 import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -670,13 +671,21 @@ export default function PendingOrdersPage() {
 
       addPdfBuildFooter(doc);
 
-      const safeCustomer = String(activeOrder.customer_code || "customer").replace(/[^a-zA-Z0-9_-]/g, "_");
-      const safeDate = String(activeOrder.updated_at || activeOrder.created_at || new Date().toISOString())
-        .slice(0, 19)
-        .replace(/[:T]/g, "-");
-      doc.save(`order-${activeOrder.id}-${safeCustomer}-${safeDate}.pdf`);
-    } catch {
-      setError("Unable to regenerate PDF for this order.");
+      const fileName = buildOrderPdfFileName({
+        orderId: activeOrder.id,
+        customerCode: activeOrder.customer_code,
+        savedAtIso: activeOrder.updated_at || activeOrder.created_at,
+      });
+      await saveOrShareOrderPdf(doc, fileName, {
+        title: `Order #${activeOrder.id}`,
+        text: `Sales order for ${activeOrder.customer_name || activeOrder.customer_code || "customer"}`,
+        dialogTitle: "Save or share order PDF",
+      });
+    } catch (error) {
+      if (error?.name === "AbortError" || String(error?.message || "").toLowerCase().includes("cancel")) {
+        return;
+      }
+      setError("Unable to prepare PDF for this order.");
     } finally {
       setDownloadingPdf(false);
     }
@@ -1065,7 +1074,7 @@ export default function PendingOrdersPage() {
                                     onClick={regenerateOrderPdf}
                                     disabled={downloadingPdf || loadingLines || orderLines.length === 0}
                                   >
-                                    {downloadingPdf ? "Generating PDF..." : "Regenerate PDF"}
+                                    {downloadingPdf ? "Preparing PDF..." : "Save / Share PDF"}
                                   </button>
                                   <button type="button" className="moduleInlineButton" onClick={exportQueueToExcel} disabled={orders.length === 0}>
                                     Export Excel

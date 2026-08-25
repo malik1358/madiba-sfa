@@ -69,14 +69,15 @@ const PAGE_TEXT = {
   noRoutes: { en: "No routes", ar: "لا توجد مسارات" },
   customersCount: { en: "customers", ar: "عميل" },
   visitStatus: { en: "Visit Status", ar: "حالة الزيارات" },
-  outstandingUnder60: { en: "Outstanding Under 60 Days", ar: "المبالغ المستحقة لأقل من 60 يوماً" },
-  outstandingAbove60: { en: "Outstanding Above 60 Days", ar: "المبالغ المستحقة لأكثر من 60 يوماً" },
+  outstandingUnder90: { en: "Outstanding Under 90 Days", ar: "المبالغ المستحقة لأقل من 90 يوماً" },
+  outstandingAbove90: { en: "Outstanding Above 90 Days", ar: "المبالغ المستحقة لأكثر من 90 يوماً" },
   visitedWithoutInvoice: { en: "Visited Without Invoice", ar: "تمت الزيارة بدون فاتورة" },
   noOutstanding: { en: "No Outstanding", ar: "لا يوجد رصيد مستحق" },
   inactiveCustomers: { en: "Inactive Customers", ar: "عملاء غير نشطين" },
   outstanding0To30: { en: "0-30 Days", ar: "0-30 يوماً" },
-  outstanding30To60: { en: "30-60 Days", ar: "30-60 يوماً" },
-  outstandingAbove60Column: { en: ">60 Days", ar: ">60 يوماً" },
+  outstanding30To60: { en: "31-60 Days", ar: "31-60 يوماً" },
+  outstanding61To90: { en: "61-90 Days", ar: "61-90 يوماً" },
+  outstandingAbove90Column: { en: ">90 Days", ar: ">90 يوماً" },
   totalOutstanding: { en: "Total Outstanding", ar: "إجمالي المستحقات" },
   searchCustomer: { en: "Search customer by name or code", ar: "ابحث عن العميل بالاسم أو الرمز" },
   searchSalesman: { en: "Salesman Filter", ar: "فلتر رجل البيع" },
@@ -715,7 +716,8 @@ export default function MyDayPage() {
               recent_sales_value: Number(row.recent_sales_value || 0),
               outstanding_0_30: Number(row.outstanding_0_30 || 0),
               outstanding_30_60: Number(row.outstanding_30_60 || 0),
-              outstanding_above_60: Number(row.outstanding_above_60 || 0),
+              outstanding_61_90: Number(row.outstanding_61_90 || 0),
+              outstanding_above_90: Number(row.outstanding_above_90 || 0),
               status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
                 : daysBetween(row.latest_transaction_date) > 21
@@ -765,7 +767,8 @@ export default function MyDayPage() {
               recent_sales_value: Number(row.recent_sales_value || 0),
               outstanding_0_30: Number(row.outstanding_0_30 || 0),
               outstanding_30_60: Number(row.outstanding_30_60 || 0),
-              outstanding_above_60: Number(row.outstanding_above_60 || 0),
+              outstanding_61_90: Number(row.outstanding_61_90 || 0),
+              outstanding_above_90: Number(row.outstanding_above_90 || 0),
               status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
                 : daysBetween(row.latest_transaction_date) > 21
@@ -1276,7 +1279,8 @@ export default function MyDayPage() {
           recent_sales_value: Number(activatedRow.recent_sales_value || 0),
           outstanding_0_30: Number(activatedRow.outstanding_0_30 || 0),
           outstanding_30_60: Number(activatedRow.outstanding_30_60 || 0),
-          outstanding_above_60: Number(activatedRow.outstanding_above_60 || 0),
+          outstanding_61_90: Number(activatedRow.outstanding_61_90 || 0),
+          outstanding_above_90: Number(activatedRow.outstanding_above_90 || 0),
           status: daysBetween(activatedRow.latest_transaction_date) > 21 ? "Overdue" : "Planned",
         };
 
@@ -1759,8 +1763,8 @@ export default function MyDayPage() {
           </details>
           {[
             { key: "without-invoice", title: t("visitedWithoutInvoice"), rows: groupedVisitStatusRows.withoutInvoice },
-            { key: "under-60", title: t("outstandingUnder60"), rows: groupedVisitStatusRows.under60 },
-            { key: "above-60", title: t("outstandingAbove60"), rows: groupedVisitStatusRows.above60 },
+            { key: "under-90", title: t("outstandingUnder90"), rows: groupedVisitStatusRows.under90 },
+            { key: "above-90", title: t("outstandingAbove90"), rows: groupedVisitStatusRows.above90 },
             { key: "no-outstanding", title: t("noOutstanding"), rows: groupedVisitStatusRows.noOutstanding },
           ].map((group) => (
           <div key={group.key} style={{ marginTop: "14px" }}>
@@ -1779,7 +1783,8 @@ export default function MyDayPage() {
                   <th>{t("recentValue")}</th>
                   <th>{t("outstanding0To30")}</th>
                   <th>{t("outstanding30To60")}</th>
-                  <th>{t("outstandingAbove60Column")}</th>
+                  <th>{t("outstanding61To90")}</th>
+                  <th>{t("outstandingAbove90Column")}</th>
                   <th>{t("totalOutstanding")}</th>
                   <th>{t("status")}</th>
                   <th>{t("actions")}</th>
@@ -1803,8 +1808,9 @@ export default function MyDayPage() {
                     <td>{Number(row.recent_sales_value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     <td>{Number(row.outstanding_0_30 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     <td>{Number(row.outstanding_30_60 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
-                    <td>{Number(row.outstanding_above_60 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
-                    <td>{Number((Number(row.outstanding_0_30 || 0) + Number(row.outstanding_30_60 || 0) + Number(row.outstanding_above_60 || 0))).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number(row.outstanding_61_90 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number(row.outstanding_above_90 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number((Number(row.outstanding_0_30 || 0) + Number(row.outstanding_30_60 || 0) + Number(row.outstanding_61_90 || 0) + Number(row.outstanding_above_90 || 0))).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     <td>{row.status === "Visited" ? t("visited") : row.status === "Overdue" ? t("overdue") : t("planned")}</td>
                     <td>
                       <div className="moduleInlineStack moduleActionStack">

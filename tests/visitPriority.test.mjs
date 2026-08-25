@@ -57,15 +57,16 @@ test("visit customer search matches name and code", () => {
 
 test("visit customers are grouped by outstanding balance or a visit without invoice", () => {
   const groups = splitVisitCustomersByOutstanding([
-    { customer_code: "CURRENT", outstanding_0_30: 100, outstanding_above_60: 0 },
-    { customer_code: "OVERDUE", outstanding_30_60: 100, outstanding_above_60: 1 },
-    { customer_code: "CLEAR", outstanding_above_60: 0 },
+    { customer_code: "CURRENT", outstanding_0_30: 100, outstanding_above_90: 0 },
+    { customer_code: "AGING_61_90", outstanding_61_90: 250, outstanding_above_90: 0 },
+    { customer_code: "OVERDUE", outstanding_30_60: 100, outstanding_above_90: 1 },
+    { customer_code: "CLEAR", outstanding_above_90: 0 },
     { customer_code: "VISITED_NO_INVOICE", last_visit_date: "2026-08-10", last_invoice_date: null },
     { customer_code: "NEW_UNVISITED", last_visit_date: null, last_invoice_date: null },
   ]);
 
-  assert.deepEqual(groups.under60.map((row) => row.customer_code), ["CURRENT"]);
-  assert.deepEqual(groups.above60.map((row) => row.customer_code), ["OVERDUE"]);
+  assert.deepEqual(groups.under90.map((row) => row.customer_code), ["CURRENT", "AGING_61_90"]);
+  assert.deepEqual(groups.above90.map((row) => row.customer_code), ["OVERDUE"]);
   assert.deepEqual(groups.withoutInvoice.map((row) => row.customer_code), ["VISITED_NO_INVOICE"]);
   assert.deepEqual(groups.noOutstanding.map((row) => row.customer_code), ["CLEAR", "NEW_UNVISITED"]);
 });

@@ -5,7 +5,7 @@ import {
   customerCodeCandidates,
   findOutstandingForCustomer,
   resolveOutstandingCustomerOwnership,
-  summarizeOutstandingBuckets,
+  summarizeOutstandingBucketsForVisitStatus,
 } from "../../../lib/outstanding";
 import { mergeSalesSnapshots } from "../../../lib/salesHistory";
 import {
@@ -581,13 +581,14 @@ async function attachOutstandingValues(admin, customers) {
       customer.customer_code,
       customer.customer_name
     );
-    const summary = summarizeOutstandingBuckets(outstanding?.buckets);
+    const summary = summarizeOutstandingBucketsForVisitStatus(outstanding?.buckets);
 
     return {
       ...customer,
       outstanding_0_30: summary.days0To30,
       outstanding_30_60: summary.days30To60,
-      outstanding_above_60: summary.daysAbove60,
+      outstanding_61_90: summary.days61To90,
+      outstanding_above_90: summary.daysAbove90,
     };
   });
 }
@@ -642,7 +643,8 @@ export async function buildVisibleCustomersForScope(admin, scope, options = {}) 
         ...customer,
         outstanding_0_30: Number(customer?.outstanding_0_30 || 0),
         outstanding_30_60: Number(customer?.outstanding_30_60 || 0),
-        outstanding_above_60: Number(customer?.outstanding_above_60 || 0),
+        outstanding_61_90: Number(customer?.outstanding_61_90 || 0),
+        outstanding_above_90: Number(customer?.outstanding_above_90 || 0),
       }));
     }
   }

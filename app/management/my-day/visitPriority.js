@@ -46,15 +46,17 @@ export function filterAndRankVisitCustomers(rows, search = "") {
 
 export function splitVisitCustomersByOutstanding(rows) {
   return (rows || []).reduce((groups, row) => {
-    const under60Balance = Number(row?.outstanding_0_30 || 0) + Number(row?.outstanding_30_60 || 0);
-    const above60Balance = Number(row?.outstanding_above_60 || 0);
+    const under90Balance = Number(row?.outstanding_0_30 || 0)
+      + Number(row?.outstanding_30_60 || 0)
+      + Number(row?.outstanding_61_90 || 0);
+    const above90Balance = Number(row?.outstanding_above_90 || 0);
 
-    if (above60Balance > 0) groups.above60.push(row);
-    else if (under60Balance > 0) groups.under60.push(row);
+    if (above90Balance > 0) groups.above90.push(row);
+    else if (under90Balance > 0) groups.under90.push(row);
     else if (row?.last_visit_date && !row?.last_invoice_date) groups.withoutInvoice.push(row);
     else groups.noOutstanding.push(row);
     return groups;
-  }, { under60: [], above60: [], withoutInvoice: [], noOutstanding: [] });
+  }, { under90: [], above90: [], withoutInvoice: [], noOutstanding: [] });
 }
 
 export function buildProspectScheduleRows(rows) {

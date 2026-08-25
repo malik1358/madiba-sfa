@@ -27,6 +27,7 @@ import {
   resolveOverdueDaysFromDueDate,
   sanitizeStoredOverdueDays,
   summarizeOutstandingBuckets,
+  summarizeOutstandingBucketsForVisitStatus,
   visibleOutstandingBucketLabels,
   mapOutstandingBucketsToCollectionFields,
   buildCollectionOutstandingBucketsFromInvoices,
@@ -247,6 +248,19 @@ test("outstanding buckets collapse into the three Visit Status age bands", () =>
       ">120": 500,
     }),
     { days0To30: 100, days30To60: 200, daysAbove60: 1200 }
+  );
+});
+
+test("visit status outstanding buckets split at 90 days", () => {
+  assert.deepEqual(
+    summarizeOutstandingBucketsForVisitStatus({
+      "0-30": 100,
+      "31-60": 200,
+      "61-90": 300,
+      "91-120": 400,
+      ">120": 500,
+    }),
+    { days0To30: 100, days30To60: 200, days61To90: 300, daysAbove90: 900 }
   );
 });
 

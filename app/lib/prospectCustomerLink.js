@@ -3,11 +3,16 @@ import {
   isValidLatitude,
   isValidLongitude,
 } from "./customerLocationImport.js";
-import { resolveCustomerMasterExportFields } from "./customerCode.js";
+import { normalizeCustomerNameKey, resolveCustomerMasterExportFields } from "./customerCode.js";
 import { normalizeCode } from "./outstanding.js";
-import { extractMissingProspectsColumn } from "./prospects.js";
+import { extractMissingProspectsColumn, normalizeProspectSalesmanCode } from "./prospects.js";
 
 const CUSTOMER_LOOKUP_FIELDS = "customer_code,customer_name,current_salesman_code,latitude,longitude,city,area";
+
+const PROSPECT_MATCH_STOP_WORDS = new Set([
+  "FOR", "THE", "AND", "EST", "CO", "OF", "AL", "EL", "IN", "AT", "TO",
+  "LLC", "LTD", "INC", "SA", "BR", "BRANCH",
+]);
 
 function normalizeCustomerCode(value) {
   return normalizeCode(value);
@@ -60,6 +65,140 @@ export async function findCustomerByCode(admin, customerCode) {
   if (error) throw error;
 
   return (candidates || []).find((row) => customerRecordMatchesCode(row, code)) || null;
+}
+
+export function buildProspectNameSearchTokens(value) {
+  const normalized = normalizeCustomerNameKey(value);
+  if (!normalized) return [];
+
+  return normalized
+    .split(" ")
+    .filter((token) => token.length >= 3 && !PROSPECT_MATCH_STOP_WORDS.has(token));
+}
+
+export function scoreProspectCustomerNameMatch(prospect, customer) {
+  const prospectName = String(
+    prospect?.company_name || prospect?.shop_name || prospect?.customer_name || "",
+  ).trim();
+  const preview = formatCustomerLookupPreview(customer);
+  const customerName = preview.customer_name || String(customer?.customer_name || "").trim();
+
+  const prospectKey = normalizeCustomerNameKey(prospectName);
+  const customerKey = normalizeCustomerNameKey(customerName);
+  if (!prospectKey || !customerKey) return 0;
+
+  let score = 0;
+
+  if (prospectKey === customerKey) {
+    score += 1000;
+  } else if (customerKey.includes(prospectKey) || prospectKey.includes(customerKey)) {
+    score += 700;
+  }
+
+  const prospectTokens = buildProspectNameSearchTokens(prospectName);
+  const customerTokens = new Set(buildProspectNameSearchTokens(customerName));
+  if (prospectTokens.length > 0) {
+    const matched = prospectTokens.filter((token) => customerTokens.has(token));
+    score += (matched.length / prospectTokens.length) * 500;
+    if (matched.length >= 2 && matched.length === prospectTokens.length) {
+      score += 200;
+    }
+  }
+
+  const prospectCity = normalizeCustomerNameKey(prospect?.city);
+  const customerCity = normalizeCustomerNameKey(customer?.city);
+  const prospectArea = normalizeCustomerNameKey(prospect?.area);
+  const customerArea = normalizeCustomerNameKey(customer?.area);
+
+  if (prospectCity && customerCity && prospectCity === customerCity) score += 40;
+  if (
+    prospectArea
+    && customerArea
+    && (prospectArea === customerArea || customerArea.includes(prospectArea) || prospectArea.includes(customerArea))
+  ) {
+    score += 60;
+  }
+
+  const prospectSalesman = normalizeProspectSalesmanCode(prospect?.salesman_code);
+  const customerSalesman = normalizeProspectSalesmanCode(customer?.current_salesman_code);
+  if (prospectSalesman && customerSalesman && prospectSalesman === customerSalesman) {
+    score += 30;
+  }
+
+  return score;
+}
+
+export function rankProspectLinkCustomerSuggestions(prospect, customers, limit = 8) {
+  const maxResults = Number(limit) > 0 ? Number(limit) : 8;
+
+  return (customers || [])
+    .filter((customer) => !customerHasStoredLocation(customer))
+    .map((customer) => {
+      const preview = formatCustomerLookupPreview(customer);
+      return {
+        customer_code: preview.customer_code,
+        customer_name: preview.customer_name,
+        city: String(customer?.city || "").trim(),
+        area: String(customer?.area || "").trim(),
+        current_salesman_code: String(customer?.current_salesman_code || "").trim(),
+        match_score: scoreProspectCustomerNameMatch(prospect, customer),
+      };
+    })
+    .filter((row) => row.customer_code && row.match_score > 0)
+    .sort((left, right) => {
+      if (right.match_score !== left.match_score) {
+        return right.match_score - left.match_score;
+      }
+      return String(left.customer_name || "").localeCompare(String(right.customer_name || ""));
+    })
+    .slice(0, maxResults);
+}
+
+async function loadCustomersWithoutGps(admin, scope, prospect, options = {}) {
+  const useNameFilter = options.useNameFilter !== false;
+  const prospectName = String(prospect?.company_name || prospect?.shop_name || prospect?.customer_name || "").trim();
+  const tokens = buildProspectNameSearchTokens(prospectName);
+  const salesmanCode = normalizeProspectSalesmanCode(prospect?.salesman_code);
+
+  let query = admin
+    .from("customers")
+    .select(CUSTOMER_LOOKUP_FIELDS)
+    .or("latitude.is.null,longitude.is.null,latitude.eq.0,longitude.eq.0");
+
+  if (!scope?.hasAllAccess && salesmanCode) {
+    query = query.eq("current_salesman_code", salesmanCode);
+  }
+
+  if (useNameFilter && tokens.length > 0) {
+    query = query.ilike("customer_name", `%${tokens[0]}%`);
+  }
+
+  const { data, error } = await query.limit(Number(options.limit) || 500);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function findProspectLinkCustomerSuggestions(admin, prospect, scope, options = {}) {
+  const limit = Number(options.limit) || 8;
+  const prospectName = String(prospect?.company_name || prospect?.shop_name || prospect?.customer_name || "").trim();
+  const tokens = buildProspectNameSearchTokens(prospectName);
+
+  let customers = await loadCustomersWithoutGps(admin, scope, prospect, {
+    useNameFilter: tokens.length > 0,
+    limit: 500,
+  });
+
+  let suggestions = rankProspectLinkCustomerSuggestions(prospect, customers, limit);
+
+  if (suggestions.length < Math.min(3, limit) && tokens.length > 0) {
+    customers = await loadCustomersWithoutGps(admin, scope, prospect, {
+      useNameFilter: false,
+      limit: 800,
+    });
+    suggestions = rankProspectLinkCustomerSuggestions(prospect, customers, limit);
+  }
+
+  return suggestions;
 }
 
 export function prospectHasStoredLocation(prospect) {

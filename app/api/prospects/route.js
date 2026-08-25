@@ -4,9 +4,10 @@ import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 import {
   canAccessProspectSalesmanCode,
   insertProspectWithColumnFallback,
+  listProspectsWithOrdersForScope,
   normalizeProspectSalesmanCode,
 } from "../../lib/prospects.js";
-import { linkProspectToCustomer } from "../../lib/prospectCustomerLink.js";
+import { linkProspectToCustomer, findProspectLinkCustomerSuggestions } from "../../lib/prospectCustomerLink.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -54,6 +55,54 @@ function resolveSalesmanCode(scope, requestedCode) {
   }
 
   throw new Error("You do not have permission to register prospects for this salesman.");
+}
+
+export async function GET(request) {
+  try {
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
+    }
+
+    const { admin, scope } = await resolveRequestScope(request);
+    const url = new URL(request.url);
+    const linkSuggestionsFor = Number(url.searchParams.get("linkSuggestionsFor"));
+
+    if (Number.isFinite(linkSuggestionsFor) && linkSuggestionsFor > 0) {
+      const { data: prospect, error: prospectError } = await admin
+        .from("prospects")
+        .select("id,salesman_code,company_name,shop_name,customer_name,latitude,longitude,city,area,status,converted_customer_code")
+        .eq("id", linkSuggestionsFor)
+        .maybeSingle();
+
+      if (prospectError) throw prospectError;
+      if (!prospect?.id) {
+        return NextResponse.json({ success: false, error: "Prospect not found." }, { status: 404 });
+      }
+
+      if (!canAccessProspectSalesmanCode(scope, prospect.salesman_code)) {
+        return NextResponse.json({ success: false, error: "You do not have access to this prospect." }, { status: 403 });
+      }
+
+      const suggestions = await findProspectLinkCustomerSuggestions(admin, prospect, scope);
+
+      return NextResponse.json({
+        success: true,
+        suggestions,
+      });
+    }
+
+    const prospects = await listProspectsWithOrdersForScope(admin, scope);
+
+    return NextResponse.json({
+      success: true,
+      prospects,
+      count: prospects.length,
+    });
+  } catch (error) {
+    const message = String(error?.message || "Unable to load prospects.");
+    const status = message.includes("authenticated") || message.includes("login session") ? 401 : 400;
+    return NextResponse.json({ success: false, error: message }, { status });
+  }
 }
 
 export async function POST(request) {

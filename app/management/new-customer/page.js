@@ -53,6 +53,20 @@ const TEXT = {
   viewCustomer: { en: "View", ar: "عرض" },
   prospectGpsAvailable: { en: "Prospect GPS available", ar: "GPS متوفر للعميل المحتمل" },
   customerLookupFailed: { en: "Customer not found for this code.", ar: "لم يتم العثور على عميل بهذا الكود." },
+  suggestedMatches: { en: "Suggested ERP customers without GPS", ar: "عملاء ERP المقترحون بدون GPS" },
+  suggestedMatchesHint: {
+    en: "Best name matches from ERP customers that still need GPS coordinates.",
+    ar: "أفضل التطابقات الاسمية من عملاء ERP الذين ما زالوا يحتاجون إحداثيات GPS.",
+  },
+  loadingSuggestions: { en: "Finding matching customers...", ar: "جاري البحث عن عملاء مطابقين..." },
+  noSuggestedMatches: { en: "No close ERP matches without GPS were found.", ar: "لم يتم العثور على تطابقات ERP قريبة بدون GPS." },
+  useSuggestedCustomer: { en: "Use", ar: "استخدام" },
+  missingGpsLabel: { en: "No GPS", ar: "بدون GPS" },
+  allProspects: { en: "All Prospects", ar: "كل العملاء المحتملين" },
+  allProspectsHint: { en: "All registered prospects in your scope, newest first.", ar: "كل العملاء المحتملين المسجلين ضمن صلاحياتك، الأحدث أولاً." },
+  searchProspects: { en: "Search prospects", ar: "بحث في العملاء المحتملين" },
+  orderNumber: { en: "Order #", ar: "رقم الطلب" },
+  noOrders: { en: "No order", ar: "لا يوجد طلب" },
 };
 
 const INITIAL_FORM = {
@@ -103,6 +117,43 @@ function prospectRowHasGps(row) {
   const lat = Number(row?.latitude);
   const lng = Number(row?.longitude);
   return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+}
+
+function buildProspectOrderHref(order, row) {
+  if (!order?.id) return "";
+  const params = new URLSearchParams({
+    order_id: String(order.id),
+    customer_code: `PROSPECT-${row.id}`,
+    customer_name: String(row.company_name || row.shop_name || row.customer_name || `Prospect ${row.id}`).trim(),
+    salesman_code: String(row.salesman_code || "").trim(),
+    source: "prospect",
+  });
+  return `/management/new-order?${params.toString()}`;
+}
+
+function prospectMatchesSearch(row, searchText) {
+  const query = String(searchText || "").trim().toLowerCase();
+  if (!query) return true;
+
+  const haystack = [
+    row.id,
+    row.company_name,
+    row.shop_name,
+    row.customer_name,
+    row.contact_person,
+    row.owner_name,
+    row.mobile,
+    row.city,
+    row.area,
+    row.status,
+    row.converted_customer_code,
+    ...(Array.isArray(row.order_numbers) ? row.order_numbers : []),
+  ]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+
+  return haystack.includes(query);
 }
 
 async function reverseGeocode(lat, lng) {
@@ -171,6 +222,36 @@ export default function NewCustomerPage() {
   const [linkOverwriteGps, setLinkOverwriteGps] = useState(false);
   const [linkSaving, setLinkSaving] = useState(false);
   const [linkLookupError, setLinkLookupError] = useState("");
+  const [linkSuggestions, setLinkSuggestions] = useState([]);
+  const [loadingLinkSuggestions, setLoadingLinkSuggestions] = useState(false);
+  const [prospectSearch, setProspectSearch] = useState("");
+  const [loadingProspects, setLoadingProspects] = useState(false);
+
+  async function loadProspectsList(accessToken) {
+    if (!accessToken) {
+      setRecent([]);
+      return;
+    }
+
+    setLoadingProspects(true);
+    try {
+      const response = await fetch("/api/prospects", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to load prospects.");
+      }
+      setRecent(Array.isArray(payload.prospects) ? payload.prospects : []);
+    } catch (err) {
+      setRecent([]);
+      setError(err.message || "Unable to load prospects.");
+    } finally {
+      setLoadingProspects(false);
+    }
+  }
 
   useEffect(() => {
     const englishName = String(form.customer_name_en || "").trim();
@@ -284,43 +365,10 @@ export default function NewCustomerPage() {
           }));
         }
 
-        let recentQuery = Promise.resolve({ data: [], error: null });
         if (prospectsCheck.available) {
-          let query = supabase
-            .from("prospects")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(10);
-
-          if (!scope.hasAllAccess) {
-            const visibleCodes = Array.isArray(scope.visibleSalesmanCodes)
-              ? scope.visibleSalesmanCodes.filter(Boolean)
-              : [];
-
-            if (visibleCodes.length > 0) {
-              query = query.in("salesman_code", visibleCodes);
-            } else if (scope.currentSalesmanCode) {
-              query = query.eq("salesman_code", scope.currentSalesmanCode);
-            }
-          }
-
-          recentQuery = query;
-        }
-
-        const recentRes = await recentQuery;
-        if (recentRes.error) {
-          const missingColumn = extractMissingProspectsColumn(recentRes.error.message);
-          if (missingColumn) {
-            setSchemaWarning((current) => {
-              const base = current ? `${current} ` : "";
-              return `${base}Prospects column ${missingColumn} is missing; showing available fields only.`.trim();
-            });
-            setRecent([]);
-          } else {
-            throw recentRes.error;
-          }
+          await loadProspectsList(session.access_token);
         } else {
-          setRecent(recentRes.data || []);
+          setRecent([]);
         }
       } catch (err) {
         setError(err.message || "Unable to load setup data.");
@@ -498,15 +546,7 @@ export default function NewCustomerPage() {
         customerCode: data.id,
       });
 
-      const { data: latest, error: latestError } = await supabase
-        .from("prospects")
-        .select("*")
-        .eq("salesman_code", data.salesman_code || form.salesman_code || currentSalesmanCode)
-        .order("created_at", { ascending: false })
-        .limit(10);
-
-      if (latestError) throw latestError;
-      setRecent(latest || []);
+      await loadProspectsList(session.access_token);
 
       const query = buildProspectOrderParams({
         id: data.id,
@@ -609,7 +649,9 @@ export default function NewCustomerPage() {
     setLinkCopyGps(prospectRowHasGps(row));
     setLinkOverwriteGps(false);
     setLinkLookupError("");
+    setLinkSuggestions([]);
     setError("");
+    void loadLinkSuggestions(row);
   }
 
   function closeLinkProspect() {
@@ -617,6 +659,78 @@ export default function NewCustomerPage() {
     setLinkCustomerCode("");
     setLinkCustomerPreview(null);
     setLinkLookupError("");
+    setLinkSuggestions([]);
+    setLoadingLinkSuggestions(false);
+  }
+
+  async function loadLinkSuggestions(prospectRow) {
+    if (!prospectRow?.id) {
+      setLinkSuggestions([]);
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    setLoadingLinkSuggestions(true);
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const response = await fetch(
+        `/api/prospects?linkSuggestionsFor=${encodeURIComponent(String(prospectRow.id))}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to load customer suggestions.");
+      }
+
+      setLinkSuggestions(Array.isArray(payload.suggestions) ? payload.suggestions : []);
+    } catch {
+      setLinkSuggestions([]);
+    } finally {
+      setLoadingLinkSuggestions(false);
+    }
+  }
+
+  async function selectLinkSuggestion(suggestion) {
+    const code = String(suggestion?.customer_code || "").trim().toUpperCase();
+    if (!code) return;
+
+    setLinkCustomerCode(code);
+    setLinkCustomerPreview({
+      customer_code: code,
+      customer_name: String(suggestion?.customer_name || "").trim(),
+    });
+    setLinkLookupError("");
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) return;
+
+      const response = await fetch(`/api/customers/location?customerCode=${encodeURIComponent(code)}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.success && payload.customer) {
+        setLinkCustomerPreview({
+          customer_code: String(payload.customer.customer_code || code).trim(),
+          customer_name: String(payload.customer.customer_name || suggestion?.customer_name || "").trim(),
+        });
+      }
+    } catch {
+      // Keep the suggestion preview when lookup fails silently.
+    }
   }
 
   async function lookupLinkCustomer() {
@@ -711,6 +825,7 @@ export default function NewCustomerPage() {
       const gpsNote = result.linkedCustomer?.gpsCopied ? " GPS copied to customer." : "";
       setMessage(`Prospect ${linkProspect.id} linked to ${customerCode}.${gpsNote}`);
       closeLinkProspect();
+      await loadProspectsList(session.access_token);
     } catch (err) {
       setError(err.message || "Unable to link prospect to customer.");
     } finally {
@@ -737,6 +852,8 @@ export default function NewCustomerPage() {
       </main>
     );
   }
+
+  const filteredProspects = recent.filter((row) => prospectMatchesSearch(row, prospectSearch));
 
   return (
     <MorningAttendanceGate>
@@ -944,8 +1061,18 @@ export default function NewCustomerPage() {
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>Recent Prospects</h2>
+            <h2>{t("allProspects")}</h2>
+            <span>{t("allProspectsHint")} ({recent.length})</span>
           </div>
+          <label className="moduleFieldFull">
+            {t("searchProspects")}
+            <input
+              className="moduleInput"
+              value={prospectSearch}
+              onChange={(event) => setProspectSearch(event.target.value)}
+              placeholder="Shop, mobile, status, order #..."
+            />
+          </label>
           <div className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
@@ -956,16 +1083,31 @@ export default function NewCustomerPage() {
                   <th>Mobile</th>
                   <th>Area</th>
                   <th>Status</th>
+                  <th>{t("orderNumber")}</th>
                   <th>Linked Customer</th>
                   <th>Created</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {recent.map((row) => {
+                {loadingProspects ? (
+                  <tr>
+                    <td colSpan={10}>{t("loading")}</td>
+                  </tr>
+                ) : recent.length === 0 ? (
+                  <tr>
+                    <td colSpan={10}>No prospects created yet.</td>
+                  </tr>
+                ) : filteredProspects.length === 0 ? (
+                  <tr>
+                    <td colSpan={10}>No prospects match your search.</td>
+                  </tr>
+                ) : (
+                  filteredProspects.map((row) => {
                   const isConverted = String(row.status || "").toUpperCase() === "CONVERTED"
                     || Boolean(row.converted_customer_code);
                   const linkedCode = String(row.converted_customer_code || "").trim().toUpperCase();
+                  const orders = Array.isArray(row.orders) ? row.orders : [];
                   return (
                   <tr key={row.id}>
                     <td>{row.id}</td>
@@ -974,6 +1116,22 @@ export default function NewCustomerPage() {
                     <td>{row.mobile || "-"}</td>
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.status || "-"}</td>
+                    <td>
+                      {orders.length > 0 ? (
+                        <div className="moduleInlineStack">
+                          {orders.map((order, index) => (
+                            <span key={`${row.id}-${order.id || order.order_number || index}`}>
+                              {index > 0 ? ", " : ""}
+                              <Link href={buildProspectOrderHref(order, row)}>
+                                {order.order_number}
+                              </Link>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        t("noOrders")
+                      )}
+                    </td>
                     <td>
                       {linkedCode ? (
                         <Link href={`/management/customer-audit?customer_code=${encodeURIComponent(linkedCode)}`}>
@@ -1020,11 +1178,7 @@ export default function NewCustomerPage() {
                     </td>
                   </tr>
                   );
-                })}
-                {recent.length === 0 && (
-                  <tr>
-                    <td colSpan={9}>No prospects created yet.</td>
-                  </tr>
+                  })
                 )}
               </tbody>
             </table>
@@ -1045,6 +1199,44 @@ export default function NewCustomerPage() {
               {prospectRowHasGps(linkProspect) ? (
                 <p className="moduleHint">{t("prospectGpsAvailable")}: {Number(linkProspect.latitude).toFixed(6)}, {Number(linkProspect.longitude).toFixed(6)}</p>
               ) : null}
+              <div className="moduleFieldFull">
+                <div className="moduleSectionHeader">
+                  <h3>{t("suggestedMatches")}</h3>
+                  <span>{t("suggestedMatchesHint")}</span>
+                </div>
+                {loadingLinkSuggestions ? (
+                  <p className="moduleHint">{t("loadingSuggestions")}</p>
+                ) : linkSuggestions.length > 0 ? (
+                  <ul className="moduleList">
+                    {linkSuggestions.map((suggestion) => (
+                      <li key={suggestion.customer_code}>
+                        <div className="moduleInlineStack" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+                          <div>
+                            <strong>{suggestion.customer_code}</strong>
+                            <span>{suggestion.customer_name || "-"}</span>
+                            <small className="moduleHint">
+                              {[suggestion.city, suggestion.area].filter(Boolean).join(" / ") || "-"}
+                              {" · "}
+                              {t("missingGpsLabel")}
+                            </small>
+                          </div>
+                          <button
+                            type="button"
+                            className="moduleInlineButton"
+                            onClick={() => {
+                              void selectLinkSuggestion(suggestion);
+                            }}
+                          >
+                            {t("useSuggestedCustomer")}
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="moduleHint">{t("noSuggestedMatches")}</p>
+                )}
+              </div>
               <label className="moduleFieldFull">
                 {t("customerCode")}
                 <input

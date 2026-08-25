@@ -12,6 +12,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
 import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const TEXT = {
   title: { en: "Collection Route Report", ar: "تقرير مسار التحصيل" },
@@ -217,6 +218,11 @@ export default function CollectionReportPage() {
   const [collectorId, setCollectorId] = useState("");
   const [userRole, setUserRole] = useState("");
   const [report, setReport] = useState(null);
+
+  usePopupMessages({
+    error,
+    warnings: report?.migrationHint ? [report.migrationHint] : [],
+  });
   const [selectedVisit, setSelectedVisit] = useState(null);
   const [copyStatus, setCopyStatus] = useState("");
 
@@ -381,19 +387,11 @@ export default function CollectionReportPage() {
             </div>
           </section>
 
-          {error && (
-            <div className="moduleError">
-              {error}
-              {error.includes("login") ? (
-                <div style={{ marginTop: "8px" }}>
-                  <Link href="/" className="moduleInlineButton">Go to login</Link>
-                </div>
-              ) : null}
+          {error && error.includes("login") ? (
+            <div className="moduleActionRow" style={{ marginBottom: "12px" }}>
+              <Link href="/" className="moduleInlineButton">Go to login</Link>
             </div>
-          )}
-          {!loading && report?.migrationHint && (
-            <div className="moduleWarning">{report.migrationHint}</div>
-          )}
+          ) : null}
           {loading && <div className="moduleLoading">{t("loading")}</div>}
 
           {!loading && report && (

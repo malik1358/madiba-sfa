@@ -9,6 +9,8 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { useAppPopup } from "../../components/AppPopupProvider";
 
 const TEXT = {
   title: { en: "Customer Master", ar: "سجل العملاء" },
@@ -78,6 +80,7 @@ function formatCoordinate(value) {
 export default function CustomerMasterPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
+  const { showPopup } = useAppPopup();
   const supabaseClient = getSupabaseClient();
 
   const [loading, setLoading] = useState(true);
@@ -93,6 +96,13 @@ export default function CustomerMasterPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [gpsFilter, setGpsFilter] = useState("all");
   const [drafts, setDrafts] = useState({});
+
+  usePopupMessages({ error, message: importSummary });
+
+  useEffect(() => {
+    if (!accessDenied) return;
+    showPopup({ message: t("accessDenied"), variant: "error" });
+  }, [accessDenied, showPopup, t]);
   const [selectedFile, setSelectedFile] = useState(null);
 
   const loadCustomers = useCallback(async (page = 1) => {
@@ -303,9 +313,7 @@ export default function CustomerMasterPage() {
   if (accessDenied) {
     return (
       <main className="modulePage" dir={dir}>
-        <div className="moduleShell">
-          <div className="moduleError">{t("accessDenied")}</div>
-        </div>
+        <div className="moduleShell" />
       </main>
     );
   }
@@ -326,9 +334,6 @@ export default function CustomerMasterPage() {
               <Link href="/management" className="moduleBackLink">{t("back")}</Link>
             </div>
           </div>
-
-          {error ? <div className="moduleError">{error}</div> : null}
-          {importSummary ? <div className="moduleHint">{importSummary}</div> : null}
 
           <section className="moduleSection">
             <div className="moduleSectionHeader">

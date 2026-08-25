@@ -18,7 +18,8 @@ import { isNativeAndroidPlatform } from "../lib/nativeFieldTracking";
 import AndroidApkUpdateRequired from "./AndroidApkUpdateRequired";
 import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
 import { buildGpsActivityNote, resolveGpsCapturePlatform } from "../lib/geo";
-import { queueTransactionAlert } from "../lib/transactionAlertClient";
+import { hasMorningAttendanceToday, MORNING_ATTENDANCE_COMPLETE_EVENT } from "../lib/morningAttendance";
+import { usePopupMessages } from "../hooks/usePopupMessages";
 
 const TEXT = {
   checking: { en: "Checking morning attendance...", ar: "جاري التحقق من حضور الصباح..." },
@@ -138,8 +139,8 @@ export default function MorningAttendanceGate({
   const backgroundGpsEnabled = enableBackgroundGps && shouldRequireTransactionGps(access.role);
   const batteryCheckRequired = shouldRequireTransactionGps(access.role);
   const [checking, setChecking] = useState(requireMorningAttendance);
-  const [capturing, setCapturing] = useState(false);
   const [ready, setReady] = useState(!requireMorningAttendance);
+  const [attendanceComplete, setAttendanceComplete] = useState(!requireMorningAttendance);
   const [batteryReady, setBatteryReady] = useState(false);
   const [checkingBattery, setCheckingBattery] = useState(false);
   const [apkVersionReady, setApkVersionReady] = useState(true);
@@ -148,7 +149,7 @@ export default function MorningAttendanceGate({
   const [nativeAndroidApp, setNativeAndroidApp] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
-  const attemptedAutoRef = useRef(false);
+  usePopupMessages({ error, warnings: warning ? [warning] : [] });
   const autoPingInFlightRef = useRef(false);
   const lastGpsPingAtRef = useRef(0);
   const lastActivityAtRef = useRef(0);
@@ -197,32 +198,86 @@ export default function MorningAttendanceGate({
     }
   }
 
-  async function insertAttendance(sessionUserId, accessToken = "") {
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-      throw new Error("Supabase is not configured.");
+  async function refreshWorkdayState() {
+    const batteryOk = await verifyBatteryAccess();
+    if (!batteryOk) {
+      setReady(false);
+      setChecking(false);
+      return;
     }
 
-    const location = await captureLocation();
-    const capturedAt = new Date().toISOString();
-    const platform = await resolveGpsCapturePlatform();
-    const payload = {
-      user_id: sessionUserId,
-      entry_type: "MORNING_ATTENDANCE",
-      note: buildGpsActivityNote("MORNING_ATTENDANCE", location, {
-        autoCaptured: true,
-        captured_at: capturedAt,
-        platform,
-      }),
-    };
+    const apkOk = await verifyApkVersion();
+    if (!apkOk) {
+      setReady(false);
+      setChecking(false);
+      return;
+    }
 
-    const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
-    if (insertError) throw insertError;
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setAttendanceComplete(true);
+      setReady(true);
+      setChecking(false);
+      return;
+    }
 
-    queueTransactionAlert(accessToken, {
-      transactionType: "MORNING_ATTENDANCE",
-      referenceKey: `activity:${sessionUserId}:MORNING_ATTENDANCE:${capturedAt}`,
-    });
+    setChecking(true);
+    setError("");
+    setWarning("");
+
+    try {
+      const session = await getSessionWithTimeout(supabase);
+
+      if (!session?.user?.id) {
+        setAttendanceComplete(true);
+        setReady(true);
+        return;
+      }
+
+      try {
+        await autoCloseForgottenWorkdays(supabase, session.user.id);
+      } catch {
+        // Do not block access if auto-close fails.
+      }
+
+      if (!attendanceRequired) {
+        setAttendanceComplete(true);
+        setReady(true);
+        return;
+      }
+
+      const logsTable = await withTimeout(
+        detectTable(supabase, "daily_activity_logs"),
+        10000,
+        "ATTENDANCE_CHECK_TIMEOUT",
+      );
+      if (!logsTable.available) {
+        setWarning(t("logsUnavailableBypass"));
+        setAttendanceComplete(false);
+        setReady(true);
+        return;
+      }
+
+      const hasAttendance = await hasMorningAttendanceToday(supabase, session.user.id);
+      setAttendanceComplete(hasAttendance);
+      if (hasAttendance) {
+        await hydrateActivityTimestamps(session.user.id);
+      }
+      setReady(true);
+    } catch (err) {
+      const message = String(err.message || "");
+      if (message === "SESSION_TIMEOUT" || message === "ATTENDANCE_CHECK_TIMEOUT") {
+        setWarning(t("sessionCheckFailed"));
+        setAttendanceComplete(false);
+        setReady(true);
+        return;
+      }
+      setError(err.message || t("sessionCheckFailed"));
+      setAttendanceComplete(false);
+      setReady(false);
+    } finally {
+      setChecking(false);
+    }
   }
 
   async function captureBackgroundPing(sessionUserId) {
@@ -331,126 +386,6 @@ export default function MorningAttendanceGate({
     }
   }
 
-  async function checkAttendance(triggerAutoCapture = false) {
-    if (!attendanceRequired) {
-      setReady(true);
-      setChecking(false);
-      return;
-    }
-
-    const batteryOk = await verifyBatteryAccess();
-    if (!batteryOk) {
-      setReady(false);
-      setChecking(false);
-      return;
-    }
-
-    const apkOk = await verifyApkVersion();
-    if (!apkOk) {
-      setReady(false);
-      setChecking(false);
-      return;
-    }
-
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-      setReady(true);
-      setChecking(false);
-      return;
-    }
-
-    setChecking(true);
-    setError("");
-    setWarning("");
-
-    try {
-      const session = await getSessionWithTimeout(supabase);
-
-      if (!session?.user?.id) {
-        setReady(true);
-        return;
-      }
-
-      try {
-        await autoCloseForgottenWorkdays(supabase, session.user.id);
-      } catch {
-        // Do not block access if auto-close fails.
-      }
-
-      const logsTable = await withTimeout(
-        detectTable(supabase, "daily_activity_logs"),
-        10000,
-        "ATTENDANCE_CHECK_TIMEOUT",
-      );
-      if (!logsTable.available) {
-        setWarning(t("logsUnavailableBypass"));
-        setReady(true);
-        return;
-      }
-
-      const start = new Date();
-      start.setHours(0, 0, 0, 0);
-      const end = new Date();
-      end.setHours(23, 59, 59, 999);
-
-      const { data, error: attendanceError } = await withTimeout(
-        supabase
-          .from("daily_activity_logs")
-          .select("id")
-          .eq("user_id", session.user.id)
-          .eq("entry_type", "MORNING_ATTENDANCE")
-          .gte("created_at", start.toISOString())
-          .lte("created_at", end.toISOString())
-          .limit(1)
-          .maybeSingle(),
-        10000,
-        "ATTENDANCE_CHECK_TIMEOUT",
-      );
-
-      if (attendanceError) throw attendanceError;
-
-      if (data?.id) {
-        await hydrateActivityTimestamps(session.user.id);
-        setReady(true);
-        return;
-      }
-
-      if (triggerAutoCapture) {
-        setCapturing(true);
-        try {
-          await insertAttendance(session.user.id, session.access_token || "");
-          const loginTs = Date.now();
-          lastActivityAtRef.current = loginTs;
-          lastGpsPingAtRef.current = loginTs;
-          writeStoredTimestamp(session.user.id, "lastActivity", loginTs);
-          writeStoredTimestamp(session.user.id, "lastPing", loginTs);
-          setReady(true);
-          return;
-        } finally {
-          setCapturing(false);
-        }
-      }
-
-      setReady(false);
-    } catch (err) {
-      const message = String(err.message || "");
-      if (message === "UNSUPPORTED") {
-        setError(t("locationUnsupported"));
-      } else if (message === "LOCATION_FAILED") {
-        setError(t("locationFailed"));
-      } else if (message === "SESSION_TIMEOUT" || message === "ATTENDANCE_CHECK_TIMEOUT") {
-        setWarning(t("sessionCheckFailed"));
-        setReady(true);
-        return;
-      } else {
-        setError(err.message || t("locationFailed"));
-      }
-      setReady(false);
-    } finally {
-      setChecking(false);
-    }
-  }
-
   useEffect(() => {
     let cancelled = false;
 
@@ -529,18 +464,25 @@ export default function MorningAttendanceGate({
       };
     }
 
-    const shouldAutoAttempt = !attemptedAutoRef.current;
-    attemptedAutoRef.current = true;
-    checkAttendance(shouldAutoAttempt);
+    refreshWorkdayState();
 
     const safetyTimer = window.setTimeout(() => {
       setWarning((current) => current || t("sessionCheckFailed"));
       setReady(true);
       setChecking(false);
-      setCapturing(false);
     }, 12000);
 
-    return () => window.clearTimeout(safetyTimer);
+    function handleAttendanceComplete() {
+      setAttendanceComplete(true);
+      refreshWorkdayState();
+    }
+
+    window.addEventListener(MORNING_ATTENDANCE_COMPLETE_EVENT, handleAttendanceComplete);
+
+    return () => {
+      window.clearTimeout(safetyTimer);
+      window.removeEventListener(MORNING_ATTENDANCE_COMPLETE_EVENT, handleAttendanceComplete);
+    };
   }, [attendanceRequired, accessLoading, batteryCheckRequired]);
 
   useEffect(() => {
@@ -612,7 +554,7 @@ export default function MorningAttendanceGate({
   useEffect(() => {
     if (!backgroundGpsEnabled) return undefined;
 
-    const backgroundGpsReady = (attendanceRequired ? ready : batteryReady && ready)
+    const backgroundGpsReady = (attendanceRequired ? attendanceComplete : ready)
       && batteryReady
       && apkVersionReady;
     if (!backgroundGpsReady) return undefined;
@@ -671,10 +613,11 @@ export default function MorningAttendanceGate({
         window.removeEventListener("online", handleVisibleOrFocused);
       }
     };
-  }, [backgroundGpsEnabled, attendanceRequired, ready, batteryReady, apkVersionReady]);
+  }, [backgroundGpsEnabled, attendanceRequired, attendanceComplete, ready, batteryReady, apkVersionReady]);
 
   useEffect(() => {
     if (!ready || !batteryReady || !apkVersionReady || !backgroundGpsEnabled || typeof window === "undefined") return undefined;
+    if (attendanceRequired && !attendanceComplete) return undefined;
 
     let cancelled = false;
     const supabase = getSupabaseClient();
@@ -692,7 +635,7 @@ export default function MorningAttendanceGate({
     return () => {
       cancelled = true;
     };
-  }, [backgroundGpsEnabled, ready, batteryReady, apkVersionReady]);
+  }, [backgroundGpsEnabled, attendanceComplete, attendanceRequired, ready, batteryReady, apkVersionReady]);
 
   if (accessLoading && requireMorningAttendance) {
     return (
@@ -711,7 +654,7 @@ export default function MorningAttendanceGate({
   if (ready && batteryReady && apkVersionReady) {
     return (
       <>
-        {attendanceRequired ? <WorkdayInactivityPrompt /> : null}
+        {attendanceRequired && attendanceComplete ? <WorkdayInactivityPrompt /> : null}
         {children}
       </>
     );
@@ -775,21 +718,13 @@ export default function MorningAttendanceGate({
       <div className="moduleShell">
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>{capturing ? t("capturing") : checking ? t("checking") : t("title")}</h2>
+            <h2>{checking ? t("checking") : t("title")}</h2>
           </div>
-          {!checking && !capturing && (
-            <>
-              <div className="moduleHint">{t("description")}</div>
-              <div className="moduleHint">{t("gpsHelp")}</div>
-            </>
-          )}
-          {warning && <div className="moduleWarning">{warning}</div>}
-          {error && <div className="moduleError">{error}</div>}
-          {!checking && !capturing && (
-            <button type="button" className="modulePrimaryButton" onClick={() => checkAttendance(true)}>
+          {!checking && error ? (
+            <button type="button" className="modulePrimaryButton" onClick={() => refreshWorkdayState()}>
               {t("retry")}
             </button>
-          )}
+          ) : null}
         </section>
       </div>
     </main>

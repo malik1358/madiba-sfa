@@ -22,6 +22,12 @@ import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
 import { buildGpsActivityNote, resolveGpsCapturePlatform } from "../../lib/geo";
+import {
+  isMorningAttendanceRequiredForRole,
+  notifyMorningAttendanceComplete,
+} from "../../lib/morningAttendance";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { useAppPopup } from "../../components/AppPopupProvider";
 import { postJsonResilient } from "../../lib/offlineApi";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 
@@ -33,6 +39,16 @@ const PAGE_TEXT = {
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading daily planner...", ar: "جاري تحميل خطة اليوم..." },
   cacheRefreshing: { en: "Showing saved data. Refreshing in background...", ar: "عرض البيانات المحفوظة. جاري التحديث في الخلفية..." },
+  morningAttendanceRequired: {
+    en: "Tap Morning Attendance above before starting visits, orders, or other work today.",
+    ar: "اضغط حضور الصباح أعلاه قبل بدء الزيارات أو الطلبات أو أي عمل آخر اليوم.",
+  },
+  morningAttendancePopupTitle: { en: "Start with morning attendance", ar: "ابدأ بحضور الصباح" },
+  morningAttendancePopupMessage: {
+    en: "Morning attendance is required every day. Tap Morning Attendance on this page to unlock the rest of My Day.",
+    ar: "حضور الصباح مطلوب كل يوم. اضغط حضور الصباح في هذه الصفحة لفتح باقي يومي.",
+  },
+  workdayLocked: { en: "Complete morning attendance to unlock today's work.", ar: "أكمل حضور الصباح لفتح عمل اليوم." },
   attendance: { en: "Attendance", ar: "الحضور" },
   morningAttendance: { en: "Morning Attendance", ar: "حضور الصباح" },
   lunchBreakOut: { en: "Lunch Break Out", ar: "خروج استراحة الغداء" },
@@ -194,6 +210,7 @@ async function loadVisibleCustomers(accessToken, scope, options = {}) {
 export default function MyDayPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const { access } = useModuleAccess();
+  const { showPopup } = useAppPopup();
   const t = translate(language, PAGE_TEXT);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -236,6 +253,24 @@ export default function MyDayPage() {
   });
 
   const today = new Date().toISOString().slice(0, 10);
+
+  usePopupMessages({ message, error, warnings });
+
+  const attendanceRequired = isMorningAttendanceRequiredForRole(access.role);
+  const morningAttendanceComplete = todayLogs.some((row) => row.entry_type === "MORNING_ATTENDANCE");
+  const workdayUnlocked = !attendanceRequired || morningAttendanceComplete;
+
+  const morningPopupShownRef = useRef(false);
+
+  useEffect(() => {
+    if (loading || workdayUnlocked || !attendanceRequired || morningPopupShownRef.current) return;
+    morningPopupShownRef.current = true;
+    showPopup({
+      title: t("morningAttendancePopupTitle"),
+      message: t("morningAttendancePopupMessage"),
+      variant: "warning",
+    });
+  }, [attendanceRequired, loading, showPopup, workdayUnlocked, language]);
 
   useEffect(() => {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -794,6 +829,10 @@ export default function MyDayPage() {
       setMessage(entryType === "NOTE"
         ? (location ? "Note saved with GPS." : "Note saved.")
         : (location ? `${entryType} logged with GPS.` : `${entryType} logged.`));
+
+      if (entryType === "MORNING_ATTENDANCE") {
+        notifyMorningAttendanceComplete();
+      }
       if (entryType === "NOTE") setNote("");
 
       const { data: logs, error: logsError } = await supabase
@@ -1460,21 +1499,7 @@ export default function MyDayPage() {
           </div>
         </div>
 
-        {error && <div className="moduleError">{error}</div>}
         {refreshing && <div className="moduleHint">{t("cacheRefreshing")}</div>}
-        {message && <div className="moduleSuccess">{message}</div>}
-        {warnings.map((warning) => (
-          <div key={warning} className="moduleWarning">{warning}</div>
-        ))}
-
-        <div className="moduleMetricGrid">
-          <section className="moduleMetricCard"><span>{t("visitsToday")}</span><strong>{summary.visitsToday}</strong></section>
-          <section className="moduleMetricCard"><span>{t("followUps")}</span><strong>{summary.followUps}</strong></section>
-          <section className="moduleMetricCard"><span>{t("pendingOrders")}</span><strong>{summary.pendingOrders}</strong></section>
-          <section className="moduleMetricCard"><span>{t("overdueVisits")}</span><strong>{summary.overdueVisits}</strong></section>
-          <section className="moduleMetricCard"><span>{t("newCustomers")}</span><strong>{summary.newCustomersAssigned}</strong></section>
-          <section className="moduleMetricCard"><span>{t("completedVisits")}</span><strong>{summary.completedVisits}</strong></section>
-        </div>
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
@@ -1485,16 +1510,18 @@ export default function MyDayPage() {
             <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("MORNING_ATTENDANCE")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
               {attendanceBusy === "MORNING_ATTENDANCE" ? t("saving") : t("morningAttendance")}
             </button>
-            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_OUT")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
+            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_OUT")} disabled={!workdayUnlocked || !logsEnabled || Boolean(attendanceBusy)}>
               {attendanceBusy === "LUNCH_BREAK_OUT" ? t("saving") : t("lunchBreakOut")}
             </button>
-            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_IN")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
+            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_IN")} disabled={!workdayUnlocked || !logsEnabled || Boolean(attendanceBusy)}>
               {attendanceBusy === "LUNCH_BREAK_IN" ? t("saving") : t("lunchBreakIn")}
             </button>
-            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("END_OF_DAY")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
+            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("END_OF_DAY")} disabled={!workdayUnlocked || !logsEnabled || Boolean(attendanceBusy)}>
               {attendanceBusy === "END_OF_DAY" ? t("saving") : t("endOfDay")}
             </button>
           </div>
+          {workdayUnlocked ? (
+            <>
           <div className="moduleMetricGrid" style={{ marginBottom: "10px" }}>
             <section className="moduleMetricCard"><span>{t("checkInToLunchOut")}</span><strong>{attendanceHours.firstHalfLabel}</strong></section>
             <section className="moduleMetricCard"><span>{t("lunchInToEndOfDay")}</span><strong>{attendanceHours.secondHalfLabel}</strong></section>
@@ -1509,9 +1536,11 @@ export default function MyDayPage() {
               placeholder={t("addPlannerNote")}
               disabled={!logsEnabled}
             />
-            <button type="button" className="moduleInlineButton" onClick={() => handleAttendanceAction("NOTE")} disabled={!logsEnabled || Boolean(attendanceBusy)}>{t("saveNote")}</button>
+            <button type="button" className="moduleInlineButton" onClick={() => handleAttendanceAction("NOTE")} disabled={!workdayUnlocked || !logsEnabled || Boolean(attendanceBusy)}>{t("saveNote")}</button>
           </div>
-          {isAdministrator && (
+            </>
+          ) : null}
+          {isAdministrator && workdayUnlocked && (
             <ul className="moduleList">
               {todayLogs.map((row) => (
                 <li key={row.id}>
@@ -1524,6 +1553,17 @@ export default function MyDayPage() {
             </ul>
           )}
         </section>
+
+        {workdayUnlocked ? (
+        <>
+        <div className="moduleMetricGrid">
+          <section className="moduleMetricCard"><span>{t("visitsToday")}</span><strong>{summary.visitsToday}</strong></section>
+          <section className="moduleMetricCard"><span>{t("followUps")}</span><strong>{summary.followUps}</strong></section>
+          <section className="moduleMetricCard"><span>{t("pendingOrders")}</span><strong>{summary.pendingOrders}</strong></section>
+          <section className="moduleMetricCard"><span>{t("overdueVisits")}</span><strong>{summary.overdueVisits}</strong></section>
+          <section className="moduleMetricCard"><span>{t("newCustomers")}</span><strong>{summary.newCustomersAssigned}</strong></section>
+          <section className="moduleMetricCard"><span>{t("completedVisits")}</span><strong>{summary.completedVisits}</strong></section>
+        </div>
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
@@ -1878,6 +1918,12 @@ export default function MyDayPage() {
             </div>
           </div>
         </section>
+        </>
+        ) : (
+          <section className="moduleSection">
+            <div className="moduleHint">{t("workdayLocked")}</div>
+          </section>
+        )}
       </div>
     </main>
     </MorningAttendanceGate>

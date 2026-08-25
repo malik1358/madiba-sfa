@@ -15,6 +15,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { detectTable } from "../../lib/schemaGuards";
 import { insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const TEXT = {
   title: { en: "New Customer", ar: "عميل جديد" },
@@ -170,6 +171,12 @@ export default function NewCustomerPage() {
   const [selectedDocumentType, setSelectedDocumentType] = useState("CR");
   const [gpsStatus, setGpsStatus] = useState("GPS is required before saving.");
   const [gpsPermissionWarning, setGpsPermissionWarning] = useState("");
+
+  usePopupMessages({
+    message,
+    error,
+    warnings: [schemaWarning, gpsPermissionWarning].filter(Boolean),
+  });
   const [arabicNameEdited, setArabicNameEdited] = useState(false);
   const [translatingName, setTranslatingName] = useState(false);
   const [savedProspect, setSavedProspect] = useState(null);
@@ -603,11 +610,6 @@ export default function NewCustomerPage() {
           </div>
           <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
-
-        {error && <div className="moduleError">{error}</div>}
-        {message && <div className="moduleSuccess">{message}</div>}
-        {schemaWarning && <div className="moduleWarning">{schemaWarning}</div>}
-        {gpsPermissionWarning && <div className="moduleWarning">{gpsPermissionWarning}</div>}
 
         {savedProspect && (
           <div className="moduleModalOverlay">

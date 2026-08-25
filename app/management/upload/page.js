@@ -7,6 +7,7 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const TEXT = {
   title: { en: "Upload Sales Data", ar: "رفع بيانات المبيعات" },
@@ -40,6 +41,18 @@ export default function UploadSalesPage() {
   const [lastSalesUpload, setLastSalesUpload] = useState(null);
   const [lastOutstandingUpload, setLastOutstandingUpload] = useState(null);
   const [loadingLastUploads, setLoadingLastUploads] = useState(true);
+
+  const uploadSuccessMessage = result
+    ? String(result.message || result.fileName || "Sales data updated successfully.").trim()
+    : "";
+  const outstandingSuccessMessage = outstandingResult
+    ? String(outstandingResult.message || outstandingResult.fileName || "Outstanding data updated successfully.").trim()
+    : "";
+
+  usePopupMessages({
+    error: error || outstandingError,
+    message: uploadSuccessMessage || outstandingSuccessMessage,
+  });
 
   const supabaseClient = getSupabaseClient();
 
@@ -323,31 +336,8 @@ export default function UploadSalesPage() {
             </div>
           )}
 
-          {error && (
-            <div className="uploadError">
-              <strong>Upload Failed</strong>
-              <p>{error}</p>
-              <p>
-                The live sales dataset was not changed unless the upload had
-                already finished merging.
-              </p>
-            </div>
-          )}
-
           {result && (
             <div className="uploadSuccess">
-
-              <div className="successTitle">
-                <div className="successTick">✓</div>
-
-                <div>
-                  <strong>
-                    Sales Data Updated Successfully
-                  </strong>
-                  <p>{result.message || result.fileName}</p>
-                </div>
-              </div>
-
               <div className="resultGrid">
 
                 <div>
@@ -464,23 +454,8 @@ export default function UploadSalesPage() {
             {outstandingUploading ? "Uploading Outstanding..." : "Upload & Replace Outstanding Data"}
           </button>
 
-          {outstandingError && (
-            <div className="uploadError">
-              <strong>Outstanding Upload Failed</strong>
-              <p>{outstandingError}</p>
-            </div>
-          )}
-
           {outstandingResult && (
             <div className="uploadSuccess">
-              <div className="successTitle">
-                <div className="successTick">✓</div>
-                <div>
-                  <strong>Outstanding Data Updated Successfully</strong>
-                  <p>{outstandingResult.fileName || "Outstanding file"}</p>
-                </div>
-              </div>
-
               <div className="resultGrid">
                 <div>
                   <span>Customers Loaded</span>

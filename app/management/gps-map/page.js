@@ -9,6 +9,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { formatGpsCapturePlatformLabel, inferGpsCapturePlatformFromNote } from "../../lib/geo";
 import { getSupabaseClient } from "../../lib/supabase";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const TEXT = {
   title: { en: "GPS Map", ar: "خريطة GPS" },
@@ -197,6 +198,8 @@ export default function GpsMapPage() {
   const [roleFilter, setRoleFilter] = useState("ALL");
   const [selectedDates, setSelectedDates] = useState([]);
   const [actionFilter, setActionFilter] = useState("ALL");
+
+  usePopupMessages({ error });
   const [customerFilter, setCustomerFilter] = useState("");
   const [selectedCustomerCode, setSelectedCustomerCode] = useState("");
   const [routeSalesman, setRouteSalesman] = useState("");
@@ -747,8 +750,6 @@ export default function GpsMapPage() {
             </div>
             <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/management" className="moduleBackLink">{t("management")}</Link></div>
           </div>
-
-          {error && <div className="moduleError">{error}</div>}
 
           <div className="moduleMetricGrid">
             <section className="moduleMetricCard"><span>Visible field users</span><strong>{new Set(filteredRecords.map((row) => row.user_id)).size}</strong></section>

@@ -12,6 +12,7 @@ import { addPdfBuildFooter } from "../../lib/buildInfo";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -139,6 +140,8 @@ export default function PendingOrdersPage() {
   const [invoiceMetaByOrder, setInvoiceMetaByOrder] = useState({});
   const [statusDraftByOrder, setStatusDraftByOrder] = useState({});
   const [openStartedAtByOrder, setOpenStartedAtByOrder] = useState({});
+
+  usePopupMessages({ error });
   const [selectedInvoiceFile, setSelectedInvoiceFile] = useState(null);
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
   const [savingInvoiceStatus, setSavingInvoiceStatus] = useState(false);
@@ -827,8 +830,6 @@ export default function PendingOrdersPage() {
             </div>
             <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
-
-          {error && <div className="moduleError">{error}</div>}
 
           <div className="moduleMetricGrid">
             <section className="moduleMetricCard"><span>Total pending</span><strong>{summary.total}</strong></section>

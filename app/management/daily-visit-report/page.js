@@ -13,6 +13,7 @@ import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from
 import { useReverseGeocodeCache } from "../../hooks/useReverseGeocodeCache";
 import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const TEXT = {
   title: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومي" },
@@ -75,6 +76,8 @@ export default function DailyVisitReportPage() {
   const [userId, setUserId] = useState("");
   const [report, setReport] = useState(null);
   const [urlParamsApplied, setUrlParamsApplied] = useState(false);
+
+  usePopupMessages({ error });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -245,7 +248,11 @@ export default function DailyVisitReportPage() {
             </div>
           </section>
 
-          {error && <div className="moduleError">{error}</div>}
+          {error && error.includes("login") ? (
+            <div className="moduleActionRow" style={{ marginBottom: "12px" }}>
+              <Link href="/" className="moduleInlineButton">Go to login</Link>
+            </div>
+          ) : null}
           {loading && <div className="moduleLoading">{t("loading")}</div>}
 
           {!loading && report && (

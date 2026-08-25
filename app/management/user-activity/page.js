@@ -12,6 +12,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
 import { formatKsaDateTime, formatWorkingHours, getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const TEXT = {
   title: { en: "User Activity", ar: "نشاط المستخدمين" },
@@ -87,6 +88,8 @@ export default function UserActivityPage() {
   const [reportDate, setReportDate] = useState(() => getKsaDateString());
   const [userId, setUserId] = useState("");
   const [report, setReport] = useState(null);
+
+  usePopupMessages({ error });
 
   const userOptions = useMemo(
     () => (Array.isArray(report?.availableUsers) ? report.availableUsers : []),
@@ -235,7 +238,6 @@ export default function UserActivityPage() {
             </div>
           </section>
 
-          {error && <div className="moduleError">{error}</div>}
           {loading && <div className="moduleLoading">{t("loading")}</div>}
 
           {!loading && report && (

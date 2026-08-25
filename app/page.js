@@ -8,6 +8,8 @@ import MorningAttendanceGate from "./components/MorningAttendanceGate";
 import MostVisitedPages from "./components/MostVisitedPages";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
 import { buildModuleAccess, listAccessibleModules, shouldRequireTransactionGps } from "./lib/moduleAccess";
+import { hasMorningAttendanceToday, isMorningAttendanceRequiredForRole } from "./lib/morningAttendance";
+import { useAppPopup } from "./components/AppPopupProvider";
 import { isAndroidBatteryRestricted } from "./lib/androidBatteryOptimization";
 import { evaluateNativeAndroidApkVersion } from "./lib/androidAppVersion";
 import AndroidApkUpdateRequired from "./components/AndroidApkUpdateRequired";
@@ -22,11 +24,11 @@ export default function Home() {
 
   const [loading, setLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
-  const [error, setError] = useState("");
   const [checkingApkVersion, setCheckingApkVersion] = useState(true);
   const [apkVersionState, setApkVersionState] = useState(null);
 
   const router = useRouter();
+  const { showPopup } = useAppPopup();
   const moduleAccess = buildModuleAccess({
     role: profile?.role,
     salesmanCode: profile?.salesman_code,
@@ -184,11 +186,9 @@ export default function Home() {
     const supabase = getSupabaseClient();
 
     if (!supabase) {
-      setError("Supabase is not configured.");
+      showPopup({ message: "Supabase is not configured.", variant: "error" });
       return;
     }
-
-    setError("");
     setLoginLoading(true);
 
     const apkStatus = await evaluateNativeAndroidApkVersion();
@@ -205,11 +205,12 @@ export default function Home() {
       });
 
     if (error) {
-      setError(
-        ar
+      showPopup({
+        message: ar
           ? "البريد الإلكتروني أو كلمة المرور غير صحيحة"
-          : "Incorrect email or password"
-      );
+          : "Incorrect email or password",
+        variant: "error",
+      });
 
       setLoginLoading(false);
       return;
@@ -225,15 +226,23 @@ export default function Home() {
         await supabase.auth.signOut();
         setUser(null);
         setProfile(null);
-        setError(
-          ar
+        showPopup({
+          message: ar
             ? "يجب ضبط بطارية MADIBA على غير مقيد قبل تسجيل الدخول. افتح الإعدادات واضبط Battery إلى Unrestricted."
-            : "Set MADIBA battery to Unrestricted before signing in. Open settings and choose Battery → Unrestricted."
-        );
+            : "Set MADIBA battery to Unrestricted before signing in. Open settings and choose Battery → Unrestricted.",
+          variant: "warning",
+        });
         setLoginLoading(false);
         return;
       }
       setUser(data.user);
+      showPopup({
+        title: ar ? "تم تسجيل الدخول" : "Signed in",
+        message: ar
+          ? `مرحباً ${profileData?.salesman_name || data.user.email || ""}`.trim()
+          : `Welcome, ${profileData?.salesman_name || data.user.email || "back"}!`,
+        variant: "success",
+      });
     }
 
     setLoginLoading(false);
@@ -256,9 +265,33 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (user && profile && isCollectionOnlyAccess) {
-      router.replace("/management/payment-collections");
+    if (!user || !profile) return;
+
+    let cancelled = false;
+
+    async function routeAfterLogin() {
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      if (isMorningAttendanceRequiredForRole(profile.role)) {
+        const attendanceComplete = await hasMorningAttendanceToday(supabase, user.id);
+        if (cancelled) return;
+        if (!attendanceComplete) {
+          router.replace("/management/my-day");
+          return;
+        }
+      }
+
+      if (isCollectionOnlyAccess) {
+        router.replace("/management/payment-collections");
+      }
     }
+
+    routeAfterLogin();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user, profile, isCollectionOnlyAccess, router]);
 
   if (loading) {
@@ -527,12 +560,6 @@ export default function Home() {
             }
             required
           />
-
-          {error && (
-            <div className="errorMessage">
-              {error}
-            </div>
-          )}
 
           <button
             className="loginButton"

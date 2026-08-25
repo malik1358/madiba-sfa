@@ -8,6 +8,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const TEXT = {
   title: { en: "Salesman Hierarchy", ar: "هيكل مندوبي المبيعات" },
@@ -83,6 +84,8 @@ export default function SalesmanHierarchyPage() {
   const [bulkResetting, setBulkResetting] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  usePopupMessages({ message, error });
   const [salesmen, setSalesmen] = useState([]);
   const [headOptions, setHeadOptions] = useState([]);
   const [headSelections, setHeadSelections] = useState({});
@@ -344,9 +347,6 @@ export default function SalesmanHierarchyPage() {
           </div>
           <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/management" className="moduleBackLink">{t("management")}</Link></div>
         </div>
-
-        {error && <div className="moduleError">{error}</div>}
-        {message && <div className="moduleSuccess">{message}</div>}
 
         <div className="moduleMetricGrid">
           <section className="moduleMetricCard"><span>Total salesmen</span><strong>{summary.total}</strong></section>

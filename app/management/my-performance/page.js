@@ -9,6 +9,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MostVisitedPages from "../../components/MostVisitedPages";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const TEXT = {
   title: { en: "My Performance", ar: "أدائي" },
@@ -42,6 +43,8 @@ export default function MyPerformancePage() {
     averageOrderValue: 0,
     achievement: 0,
   });
+
+  usePopupMessages({ error });
 
   useEffect(() => {
     async function load() {
@@ -241,7 +244,11 @@ export default function MyPerformancePage() {
           <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
-        {error && <div className="moduleError">{error}</div>}
+        {error && error.includes("login") ? (
+          <div className="moduleActionRow" style={{ marginBottom: "12px" }}>
+            <Link href="/" className="moduleInlineButton">Go to login</Link>
+          </div>
+        ) : null}
 
         <div className="moduleMetricGrid">
           {cards.map((card) => (

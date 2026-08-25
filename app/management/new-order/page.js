@@ -25,6 +25,7 @@ import CategoryPerformance from "../customer-audit/components/CategoryPerformanc
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
 import { sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -490,6 +491,8 @@ export default function NewOrderPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  usePopupMessages({ message, error });
   const [customers, setCustomers] = useState([]);
   const [itemsMaster, setItemsMaster] = useState([]);
   const [priceSheetItems, setPriceSheetItems] = useState([]);
@@ -1509,9 +1512,6 @@ export default function NewOrderPage() {
           </div>
           <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
-
-        {error && <div className="moduleError">{error}</div>}
-        {message && <div className="moduleSuccess">{message}</div>}
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">

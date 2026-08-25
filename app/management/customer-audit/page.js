@@ -25,7 +25,7 @@ import { resolveOverdueDaysFromDueDate, sortBucketLabels, toNumber as parseOutst
 import { fetchOutstandingCached } from "../../lib/mobileDataCache";
 
 import { shortDate } from "./lib/format";
-import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 import CustomerList from "./components/CustomerList";
 import CustomerHeader from "./components/CustomerHeader";
@@ -65,6 +65,8 @@ function CustomerAuditPageContent() {
   const t = translate(language, TEXT);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  usePopupMessages({ message, error });
   const [priceList, setPriceList] = useState({});
   const [priceSheetItems, setPriceSheetItems] = useState([]);
   const [requestedCustomerCode, setRequestedCustomerCode] = useState("");
@@ -292,7 +294,6 @@ function CustomerAuditPageContent() {
             <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
 
-          {error && <div className="auditError">{error}</div>}
           {error && error.toLowerCase().includes("login") ? (
             <div style={{ marginTop: "8px" }}>
               <Link href="/" className="moduleInlineButton">Go to login</Link>
@@ -347,7 +348,6 @@ function CustomerAuditPageContent() {
             <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
           <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
-          {error && <div className="auditError">{error}</div>}
           <EmptyState title="No sales history" message={`No sales history was found for ${selectedCustomer.customer_name}.`} />
           <div className="auditVersion">Page updated: {PAGE_VERSION}</div>
         </div>
@@ -369,9 +369,6 @@ function CustomerAuditPageContent() {
         </div>
 
         <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
-
-        {message && <div className="auditSuccess">{message}</div>}
-        {error && <div className="auditError">{error}</div>}
 
         <CustomerHeader customer={selectedCustomer} analytics={analytics} />
 

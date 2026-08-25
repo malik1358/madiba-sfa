@@ -8,7 +8,8 @@ import { translate, useAppLanguage } from "../lib/appLanguage";
 import SupabaseUnavailable from "../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../components/AppLanguageSwitch";
 import MostVisitedPages from "../components/MostVisitedPages";
-import { buildModuleAccess, listAccessibleModules } from "../lib/moduleAccess";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { useAppPopup } from "../../components/AppPopupProvider";
 
 const TEXT = {
   title: { en: "Management", ar: "الإدارة" },
@@ -27,6 +28,7 @@ function number(value) {
 export default function ManagementPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
+  const { showPopup } = useAppPopup();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [accessDenied, setAccessDenied] = useState(false);
@@ -45,6 +47,16 @@ export default function ManagementPage() {
     latestImportAt: "-",
     sessionUser: "-",
   });
+
+  usePopupMessages({ error });
+
+  useEffect(() => {
+    if (!accessDenied) return;
+    showPopup({
+      message: "Only manager/admin/invoice-maker/collector users can access this panel.",
+      variant: "error",
+    });
+  }, [accessDenied, showPopup]);
 
   useEffect(() => {
     async function load() {
@@ -252,7 +264,6 @@ export default function ManagementPage() {
             </div>
             <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
-          <div className="moduleError">Only manager/admin/invoice-maker/collector users can access this panel.</div>
         </div>
       </main>
     );
@@ -270,8 +281,6 @@ export default function ManagementPage() {
           </div>
           <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
-
-        {error && <div className="moduleError">{error}</div>}
 
         <div className="moduleMetricGrid">
           {cards.map((card) => (

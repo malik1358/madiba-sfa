@@ -4,6 +4,8 @@ import GlobalAppStatus from "./components/GlobalAppStatus";
 import GlobalLogoutButton from "./components/GlobalLogoutButton";
 import NativeFieldTracking from "./components/NativeFieldTracking";
 import PwaShell from "./components/PwaShell";
+import { AppPopupProvider } from "./components/AppPopupProvider";
+import MorningAttendanceRedirect from "./components/MorningAttendanceRedirect";
 import { resolveBuildId, resolveBuildTime, formatBuildDateTime } from "./lib/buildInfo";
 
 export const metadata = {
@@ -40,17 +42,20 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body data-build-id={buildId} data-build-time={buildTime}>
-        {isStaging && (
-          <div className="environmentBanner" role="status">
-            STAGING / UAT - TEST DATA ONLY
-          </div>
-        )}
-        <BuildUpdateWatcher />
-        <PwaShell />
-        <NativeFieldTracking />
-        <GlobalAppStatus environment={environment} buildId={buildId} buildTime={buildTime} />
-        <GlobalLogoutButton />
-        {children}
+        <AppPopupProvider>
+          {isStaging && (
+            <div className="environmentBanner" role="status">
+              STAGING / UAT - TEST DATA ONLY
+            </div>
+          )}
+          <BuildUpdateWatcher />
+          <PwaShell />
+          <NativeFieldTracking />
+          <MorningAttendanceRedirect />
+          <GlobalAppStatus environment={environment} buildId={buildId} buildTime={buildTime} />
+          <GlobalLogoutButton />
+          {children}
+        </AppPopupProvider>
       </body>
     </html>
   );

@@ -3355,6 +3355,56 @@ table.auditMatrix td.auditTrendSame {
   border: 1px solid #cfe6d8;
 }
 
+.appPopupOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(7, 31, 36, 0.55);
+}
+
+.appPopupDialog {
+  width: min(420px, 100%);
+  padding: 22px 20px 18px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(7, 31, 36, 0.28);
+  text-align: center;
+}
+
+.appPopupDialog h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+  color: #073f4c;
+}
+
+.appPopupDialog p {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #35515a;
+  white-space: pre-wrap;
+}
+
+.appPopupOkButton {
+  min-width: 120px;
+}
+
+.appPopupDialogSuccess h2 {
+  color: #116843;
+}
+
+.appPopupDialogError h2 {
+  color: #a42c2c;
+}
+
+.appPopupDialogWarning h2 {
+  color: #775b13;
+}
+
 .moduleHint,
 .moduleLoading {
   background: #f7fafb;

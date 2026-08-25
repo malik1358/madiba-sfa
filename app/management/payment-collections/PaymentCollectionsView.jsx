@@ -10,7 +10,8 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveInvoiceAgingDays, resolveOverdueDaysFromDueDate } from "../../lib/outstanding";
-import { GPS_REQUIRED_ERROR, resolveGpsCapturePlatform } from "../../lib/geo";
+import { useAppPopup } from "../../components/AppPopupProvider";
+import { usePopupMessages } from "../../hooks/usePopupMessages";
 import {
   captureGpsLocationWithFallbackConfirm,
 } from "../../lib/customerLocation";
@@ -642,10 +643,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const isMobileLayout = useMobileLayout();
   const recognitionRef = useRef(null);
   const loadSeqRef = useRef(0);
+  const { showPopup } = useAppPopup();
 
-  const showPopup = (message) => {
-    if (typeof window !== "undefined" && message) window.alert(message);
-  };
+  usePopupMessages({ error });
 
   const refreshTodayVisitCount = useCallback(async () => {
     const supabase = getSupabaseClient();
@@ -759,7 +759,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
     if (!supabase) {
       setLoading(false);
-      showPopup(t("msgSupabaseMissing"));
+      showPopup({ message: t("msgSupabaseMissing"), variant: "error" });
       return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
     }
 
@@ -1050,7 +1050,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     const transferToLegal = Boolean(options.transferToLegal);
     const supabase = getSupabaseClient();
     if (!supabase) {
-      showPopup(t("msgSupabaseMissing"));
+      showPopup({ message: t("msgSupabaseMissing"), variant: "error" });
       return;
     }
 
@@ -1173,7 +1173,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         : payload?.whatsapp?.error
           ? `${t("msgVisitSaved")} ${t("msgWhatsappNotSent")}: ${payload.whatsapp.error}`
           : t("msgVisitSaved");
-      showPopup(popupMessage);
+      showPopup({ message: popupMessage, variant: "success" });
       setTodayVisitCount(visitNumberForDay);
       if (!saveResult.queued) {
         setSummaryForWhatsApp(summaryText);
@@ -1182,7 +1182,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           setCopyStatus(t("copied"));
           setTimeout(() => setCopyStatus(""), 1200);
         } else {
-          showPopup(t("msgCopyFailed"));
+          showPopup({ message: t("msgCopyFailed"), variant: "error" });
         }
         await loadQueue(rowKey(row));
       } else {
@@ -1191,7 +1191,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         setForm(buildInitialForm(row));
       }
     } catch (err) {
-      showPopup(localizeApiMessage(err.message || t("msgSaveFailed")));
+      showPopup({ message: localizeApiMessage(err.message || t("msgSaveFailed")), variant: "error" });
     } finally {
       setSavingCustomerCode("");
     }
@@ -1201,7 +1201,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (typeof window === "undefined") return;
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) {
-      showPopup(t("msgSpeechUnsupported"));
+      showPopup({ message: t("msgSpeechUnsupported"), variant: "warning" });
       return;
     }
 
@@ -1249,14 +1249,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
       setTimeout(() => setCopyStatus(""), 1200);
     } catch {
       setCopyStatus("");
-      showPopup(t("msgCopyFailed"));
+      showPopup({ message: t("msgCopyFailed"), variant: "error" });
     }
   }
 
   async function toggleLegal(row, action) {
     const supabase = getSupabaseClient();
     if (!supabase) {
-      showPopup(t("msgSupabaseMissing"));
+      showPopup({ message: t("msgSupabaseMissing"), variant: "error" });
       return;
     }
 
@@ -1300,15 +1300,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
         throw new Error(payload.error || "Unable to update legal transfer status.");
       }
 
-      showPopup(action === "remove"
-        ? `${row.customer_name} ${t("msgLegalRemoved")}`
-        : `${row.customer_name} ${t("msgLegalTransferred")}`);
+      showPopup({
+        message: action === "remove"
+          ? `${row.customer_name} ${t("msgLegalRemoved")}`
+          : `${row.customer_name} ${t("msgLegalTransferred")}`,
+        variant: "success",
+      });
       await loadQueue(rowKey(row));
       if (action !== "remove" && view !== "legal") {
         setActiveRowKey("");
       }
     } catch (err) {
-      showPopup(localizeApiMessage(err.message || t("msgLegalUpdateFailed")));
+      showPopup({ message: localizeApiMessage(err.message || t("msgLegalUpdateFailed")), variant: "error" });
     } finally {
       setLegalBusyCode("");
     }
@@ -1328,18 +1331,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
           </div>
 
           {error ? (
-            <div className="moduleError" style={{ marginBottom: "12px" }}>
-              {error}
+            <div className="moduleActionRow" style={{ marginBottom: "12px" }}>
               {error.toLowerCase().includes("login") ? (
-                <div style={{ marginTop: "8px" }}>
-                  <Link href="/" className="moduleInlineButton moduleActionButton">Go to login</Link>
-                </div>
+                <Link href="/" className="moduleInlineButton moduleActionButton">Go to login</Link>
               ) : (
-                <div style={{ marginTop: "8px" }}>
-                  <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => loadQueue()} disabled={loading}>
-                    Retry
-                  </button>
-                </div>
+                <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => loadQueue()} disabled={loading}>
+                  Retry
+                </button>
               )}
             </div>
           ) : null}

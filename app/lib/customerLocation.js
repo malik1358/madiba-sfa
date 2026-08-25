@@ -34,6 +34,24 @@ export function customerHasArea(customer) {
   return Boolean(String(customer?.area || "").trim());
 }
 
+export async function promptCustomerLocationUpdateAfterVisit({
+  language = "en",
+  customerCode = "",
+  customerName = "",
+  entryLocation,
+  accessToken = "",
+}) {
+  if (!hasGpsCoordinates(entryLocation) || !accessToken || !customerCode) return;
+
+  await maybePromptCustomerLocationUpdate({
+    customerCode,
+    customerName,
+    entryLocation,
+    accessToken,
+    language,
+  });
+}
+
 export async function captureGpsLocationWithFallbackConfirm(language = "en", options = {}) {
   return resolveVisitGpsAndUpdateCustomer({
     language,

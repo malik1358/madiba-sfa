@@ -1,6 +1,7 @@
 import {
   buildCollectionPriority,
   buildCollectionQueues,
+  isCashOnlyQueueCustomer,
   isCashQueueCustomer,
   sortCashQueueCustomers,
 } from "./paymentCollections.js";
@@ -21,9 +22,27 @@ export function extractProbabilityLabelFromSummary(summaryText) {
   return match ? match[1] : "";
 }
 
+export function buildVisibleDueQueuePriorityMap(dueCustomers, todayIso = new Date().toISOString()) {
+  const visibleDueQueuePriority = new Map();
+  let priority = 0;
+
+  (dueCustomers || [])
+    .filter((row) => row.queue_kind !== "not_due")
+    .filter((row) => !isCashOnlyQueueCustomer(row, todayIso))
+    .forEach((row) => {
+      const code = normalizeCustomerCode(row.customer_code);
+      if (!code) return;
+      priority += 1;
+      visibleDueQueuePriority.set(code, priority);
+    });
+
+  return visibleDueQueuePriority;
+}
+
 export function buildCollectionQueuePriorityMaps(records, todayIso = new Date().toISOString()) {
   const queues = buildCollectionQueues(records, todayIso);
   const dueQueuePriority = new Map();
+  const visibleDueQueuePriority = buildVisibleDueQueuePriorityMap(queues.dueCustomers, todayIso);
   const probabilityByCode = new Map();
   const recordByCode = new Map();
 
@@ -64,20 +83,26 @@ export function buildCollectionQueuePriorityMaps(records, todayIso = new Date().
 
   return {
     dueQueuePriority,
+    visibleDueQueuePriority,
     cashQueuePriority,
     probabilityByCode,
     recordByCode,
-    dueQueueSize: dueQueuePriority.size,
+    dueQueueSize: visibleDueQueuePriority.size || dueQueuePriority.size,
   };
 }
 
 export function resolveVisitPriorityMeta(visit, maps, options = {}) {
   const code = normalizeCustomerCode(visit?.customer_code);
-  let queuePriority = Number(visit?.queue_priority || 0);
+  const storedPriority = Number(visit?.queue_priority || 0);
+  let queuePriority = storedPriority;
   let probabilityScore = Number(visit?.probability_score || 0);
   let probabilityLabel = String(visit?.probability_label || "").trim();
-  let prioritySource = "stored";
+  let prioritySource = storedPriority > 0 ? "stored" : "unknown";
   const storedSummary = String(visit?.summary_text || "").trim();
+  const visibleDueRank = maps.visibleDueQueuePriority?.get(code) || 0;
+  const dueRank = maps.dueQueuePriority.get(code) || 0;
+  const cashRank = maps.cashQueuePriority.get(code) || 0;
+  const authoritativeDueRank = visibleDueRank || dueRank;
 
   if (!queuePriority && storedSummary) {
     const fromSummary = extractQueuePriorityFromSummary(storedSummary);
@@ -92,11 +117,16 @@ export function resolveVisitPriorityMeta(visit, maps, options = {}) {
     if (probabilityLabel) prioritySource = prioritySource === "stored" ? "summary_text" : prioritySource;
   }
 
-  if (!queuePriority) {
-    const dueRank = maps.dueQueuePriority.get(code) || 0;
-    const cashRank = maps.cashQueuePriority.get(code) || 0;
-    queuePriority = dueRank || cashRank || 0;
-    if (queuePriority && prioritySource === "stored") prioritySource = "reconstructed";
+  if (authoritativeDueRank > 0) {
+    if (queuePriority !== authoritativeDueRank) {
+      queuePriority = authoritativeDueRank;
+      prioritySource = storedPriority > 0 || prioritySource === "summary_text"
+        ? "reconstructed"
+        : "reconstructed";
+    }
+  } else if (!queuePriority) {
+    queuePriority = cashRank || 0;
+    if (queuePriority) prioritySource = "reconstructed";
   }
 
   if (!probabilityLabel || probabilityLabel === "N/A") {

@@ -241,7 +241,7 @@ function buildVisitReportFields(visit, customerContext, visitNumberForDay, prior
     probabilityScore: probabilityScore || null,
     isPriorityCustomer: priority.isPriority,
     priorityReason: priority.reason,
-    visitNumberForDay: visit.visit_number_for_day || visitNumberForDay || null,
+    visitNumberForDay: priorityMeta.visitNumberForDay || visitNumberForDay || visit.visit_number_for_day || null,
     hasStoredSummary: Boolean(storedSummary),
     prioritySource: priorityMeta.prioritySource || (queuePriority || probabilityLabel ? "stored" : "unknown"),
     queueRankGap: priorityMeta.queueRankGap ?? null,
@@ -469,7 +469,7 @@ function buildCollectorTimelineRows({
     const record = priorityMaps.recordByCode.get(customerCode);
     const priorityMeta = resolveVisitPriorityMeta(row, priorityMaps, {
       reportDate: date,
-      visitNumberForDay: row.visit_number_for_day || visitCounter,
+      visitNumberForDay: visitCounter,
     });
     priorityMeta.isScheduledRevisit = record
       ? isScheduledRevisitQueueCustomer(record, `${date}T12:00:00`)

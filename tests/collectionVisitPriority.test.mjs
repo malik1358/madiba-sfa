@@ -56,9 +56,33 @@ test("resolveVisitPriorityMeta reconstructs queue rank and flags off-priority vi
   }, {
     ...maps,
     dueQueuePriority: new Map([["1053", 25]]),
+    visibleDueQueuePriority: new Map([["1053", 25]]),
   }, {
     reportDate: "2026-08-24",
     visitNumberForDay: 6,
   });
   assert.equal(offPriority.queueCompliance, "off_priority");
+});
+
+test("resolveVisitPriorityMeta prefers visible due queue rank over incorrect stored priority", () => {
+  const maps = {
+    visibleDueQueuePriority: new Map([["1301", 57], ["1071C", 26]]),
+    dueQueuePriority: new Map([["1301", 57], ["1071C", 26]]),
+    cashQueuePriority: new Map([["1301", 1]]),
+    probabilityByCode: new Map(),
+    recordByCode: new Map(),
+    dueQueueSize: 57,
+  };
+
+  const meta = resolveVisitPriorityMeta({
+    customer_code: "1301",
+    queue_priority: 1,
+    visit_number_for_day: 1,
+  }, maps, {
+    reportDate: "2026-08-24",
+    visitNumberForDay: 1,
+  });
+
+  assert.equal(meta.queuePriority, 57);
+  assert.equal(meta.prioritySource, "reconstructed");
 });

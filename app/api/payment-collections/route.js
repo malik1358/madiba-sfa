@@ -772,7 +772,16 @@ export async function POST(request) {
     const remarkArabic = String(formData.get("remarkArabic") || "").trim();
     let remarkEnglish = String(formData.get("remarkEnglish") || "").trim();
     if (needsEnglishTranslation(remarkArabic, remarkEnglish)) {
-      remarkEnglish = await translateText(remarkArabic, { from: "ar", to: "en" }) || remarkArabic;
+      try {
+        remarkEnglish = await Promise.race([
+          translateText(remarkArabic, { from: "ar", to: "en" }),
+          new Promise((resolve) => {
+            setTimeout(() => resolve(remarkArabic), 8000);
+          }),
+        ]) || remarkArabic;
+      } catch {
+        remarkEnglish = remarkArabic;
+      }
     }
     const nonPaymentReason = String(formData.get("nonPaymentReason") || "").trim();
     const legalNote = String(formData.get("legalNote") || "").trim();

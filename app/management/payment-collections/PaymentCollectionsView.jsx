@@ -14,6 +14,7 @@ import { useAppPopup } from "../../components/AppPopupProvider";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import {
   captureGpsLocationWithFallbackConfirm,
+  promptCustomerLocationUpdateAfterVisit,
 } from "../../lib/customerLocation";
 import { postFormDataResilient } from "../../lib/offlineApi";
 import {
@@ -26,6 +27,7 @@ import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { readCollectionQueuesForUser } from "../../lib/mobileDataCache";
 import { getSupabaseClient } from "../../lib/supabase";
+import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
 
 const TEXT = {
@@ -355,11 +357,15 @@ async function resolveEnglishRemark(arabicRemark, englishRemark) {
   if (!arabic || (english && english !== arabic)) return english;
 
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
     const response = await fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: arabic, from: "ar", to: "en" }),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
     const payload = await response.json().catch(() => ({}));
     if (response.ok && payload.success && payload.translatedText) {
       return String(payload.translatedText).trim();
@@ -975,19 +981,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
     return priorities;
   }, [cashQueueSourceRows]);
 
-  const queuePriorityByKey = useMemo(() => {
-    const priorities = new Map();
-    let priority = 0;
-
-    tableRows.forEach((item) => {
-      if (item.type !== "customer") return;
-      if (view === "due" && item.row.queue_kind === "not_due") return;
-      priority += 1;
-      priorities.set(rowKey(item.row), priority);
-    });
-
-    return priorities;
-  }, [tableRows, view]);
+  const dueQueuePriorityByCode = useMemo(
+    () => buildVisibleDueQueuePriorityMap(dueCustomers, queueToday),
+    [dueCustomers, queueToday],
+  );
 
   const allSalesmenSelected = salesmanOptions.length > 0 && selectedSalesmen.length === salesmanOptions.length;
   const allSchedulersSelected = scheduledRevisitSchedulerOptions.length > 0
@@ -1088,19 +1085,27 @@ export default function PaymentCollectionsView({ view = "due" }) {
       const outcomeReason = ["RESPONSIBLE_NOT_AVAILABLE", "WRONG_CREDIT_DAYS", "NO_DUE_AS_PER_CUSTOMER", "TRANSFER_TO_LEGAL"].includes(selectedOutcome)
         ? formatOutcomeLabel(selectedOutcome, t)
         : "";
-      const effectiveEnglishRemark = await resolveEnglishRemark(form.remarkArabic, form.remarkEnglish);
+
+      const [effectiveEnglishRemark, visitNumberForDay, gps] = await Promise.all([
+        resolveEnglishRemark(form.remarkArabic, form.remarkEnglish),
+        fetchTodayCollectionVisitCount(supabase, session.user.id)
+          .then((count) => count + 1)
+          .catch(() => todayVisitCount + 1),
+        captureGpsLocationWithFallbackConfirm(language, {
+          customerCode: row.customer_code,
+          customerName: row.customer_name,
+          accessToken: session.access_token,
+          role: access.role,
+          skipCustomerLocationUpdate: true,
+        }),
+      ]);
+
       if (effectiveEnglishRemark !== form.remarkEnglish) {
         setForm((current) => ({ ...current, remarkEnglish: effectiveEnglishRemark }));
       }
 
-      let visitNumberForDay = todayVisitCount + 1;
-      try {
-        visitNumberForDay = (await fetchTodayCollectionVisitCount(supabase, session.user.id)) + 1;
-      } catch {
-        // Fall back to the latest cached count when lookup fails.
-      }
-
-      const resolvedQueuePriority = queuePriorityByKey.get(rowKey(row))
+      const customerCodeKey = String(row.customer_code || "").trim().toUpperCase();
+      const resolvedQueuePriority = dueQueuePriorityByCode.get(customerCodeKey)
         || cashQueuePriorityByKey.get(rowKey(row))
         || 0;
 
@@ -1134,13 +1139,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("probabilityLabel", String(row.probability_label || ""));
       formData.append("visitNumberForDay", String(visitNumberForDay));
       formData.append("legalNote", form.legalNote || t("defaultLegalNote"));
-
-      const gps = await captureGpsLocationWithFallbackConfirm(language, {
-        customerCode: row.customer_code,
-        customerName: row.customer_name,
-        accessToken: session.access_token,
-        role: access.role,
-      });
 
       if (gps) {
         formData.append("latitude", String(gps.latitude));
@@ -1176,6 +1174,15 @@ export default function PaymentCollectionsView({ view = "due" }) {
       showPopup({ message: popupMessage, variant: "success" });
       setTodayVisitCount(visitNumberForDay);
       if (!saveResult.queued) {
+        if (gps) {
+          void promptCustomerLocationUpdateAfterVisit({
+            language,
+            customerCode: row.customer_code,
+            customerName: row.customer_name,
+            entryLocation: gps,
+            accessToken: session.access_token,
+          });
+        }
         setSummaryForWhatsApp(summaryText);
         const copied = await copyTextToClipboard(summaryText);
         if (copied) {
@@ -1466,7 +1473,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
                           </tr>
                           {group.rows.map((row) => {
                             const key = rowKey(row);
-                            const queuePriority = queuePriorityByKey.get(key) || cashQueuePriorityByKey.get(key) || 0;
+                            const customerCodeKey = String(row.customer_code || "").trim().toUpperCase();
+                            const queuePriority = dueQueuePriorityByCode.get(customerCodeKey)
+                              || cashQueuePriorityByKey.get(key)
+                              || 0;
                             if (isMobileLayout && !isExpanded) return null;
                             return (
                               <tr
@@ -1676,7 +1686,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
                     const row = item.row;
                     const key = rowKey(row);
-                    const queuePriority = queuePriorityByKey.get(key) || 0;
+                    const customerCodeKey = String(row.customer_code || "").trim().toUpperCase();
+                    const queuePriority = dueQueuePriorityByCode.get(customerCodeKey) || 0;
                     const isOpen = activeRowKey === key;
                     const isNotDue = row.queue_kind === "not_due";
                     return (

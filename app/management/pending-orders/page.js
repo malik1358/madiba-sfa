@@ -561,74 +561,51 @@ export default function PendingOrdersPage() {
         y += rowHeight;
       });
 
-      const summaryY = Math.min(y + 20, 740);
-      doc.roundedRect(350, summaryY, 205, 70, 4, 4);
-      doc.text("Subtotal (Excl. VAT)", 360, summaryY + 18);
-      doc.text(formatMoney(subtotal), 546, summaryY + 18, { align: "right" });
-      doc.text("VAT @ 15%", 360, summaryY + 36);
-      doc.text(formatMoney(vatAmount), 546, summaryY + 36, { align: "right" });
-      doc.setFont(undefined, "bold");
-      doc.text("Total (Incl. VAT)", 360, summaryY + 54);
-      doc.text(formatMoney(grandTotal), 546, summaryY + 54, { align: "right" });
-      doc.setFont(undefined, "normal");
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const bottomMargin = 52;
+      let cursorY = y + 20;
 
-      if (orderHistory.length > 0) {
-        let historyY = Math.min(summaryY + 96, 650);
-        if (historyY > 650) {
+      function ensureSpace(requiredHeight) {
+        if (cursorY + requiredHeight > pageHeight - bottomMargin) {
           doc.addPage();
-          historyY = 40;
+          cursorY = 40;
         }
-
-        doc.setFont(undefined, "bold");
-        doc.text("Order Change History", 40, historyY);
-        historyY += 14;
-        doc.setFont(undefined, "normal");
-
-        orderHistory.slice(-8).forEach((entry) => {
-          const header = `${entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-GB") : "-"} • ${entry.action || "UPDATED"}`;
-          const wrappedHeader = doc.splitTextToSize(header, 515);
-          wrappedHeader.forEach((line, index) => doc.text(line, 40, historyY + index * 10));
-          historyY += Math.max(12, wrappedHeader.length * 10);
-
-          (Array.isArray(entry.changes) ? entry.changes : []).forEach((change) => {
-            const changeText = `${change.item_code || "-"}: ${change.type || "UPDATED"} ${Number(change.before_quantity || 0)} -> ${Number(change.after_quantity || 0)} | ${formatMoney(change.before_rate || 0)} -> ${formatMoney(change.after_rate || 0)}`;
-            const wrappedChange = doc.splitTextToSize(changeText, 505);
-            wrappedChange.forEach((line, index) => doc.text(line, 48, historyY + index * 10));
-            historyY += Math.max(12, wrappedChange.length * 10);
-          });
-
-          historyY += 6;
-        });
       }
+
+      const summaryBoxWidth = 205;
+      const summaryBoxHeight = 70;
+      const summaryX = pageWidth - 40 - summaryBoxWidth;
 
       const outstandingInfo = outstandingInfoByOrder?.[activeOrder.id] || null;
       const outstandingCustomer = outstandingInfo?.customer;
       const outstandingBuckets = sortBucketLabels(outstandingInfo?.bucketLabels || []);
+      const bucketRows = outstandingCustomer && outstandingBuckets.length > 0
+        ? [
+            ...outstandingBuckets.map((label) => ({
+              label: `${label} days`,
+              value: formatReceivableMoney(parseOutstandingNumber(outstandingCustomer?.buckets?.[label])),
+            })),
+            { label: "Open invoices", value: String(parseOutstandingNumber(outstandingCustomer?.open_invoices)) },
+            { label: "Total outstanding", value: formatReceivableMoney(parseOutstandingNumber(outstandingCustomer?.total_outstanding)) },
+          ]
+        : [];
+      const outstandingBlockHeight = bucketRows.length > 0
+        ? 14 + 10 + bucketRows.length * 18
+        : 0;
 
-      if (outstandingCustomer && outstandingBuckets.length > 0) {
-        let outstandingY = Math.min(y + 18, 730);
-        if (outstandingY > 680) {
-          doc.addPage();
-          outstandingY = 40;
-        }
+      ensureSpace(Math.max(summaryBoxHeight, outstandingBlockHeight) + 16);
+      const sectionY = cursorY;
 
+      if (bucketRows.length > 0) {
         doc.setFont(undefined, "bold");
-        doc.text("Outstanding Buckets", 40, outstandingY);
+        doc.text("Outstanding Buckets", 40, sectionY);
         doc.setFont(undefined, "normal");
 
-        let rowY = outstandingY + 10;
+        let rowY = sectionY + 14;
         const leftX = 40;
         const labelW = 220;
         const valueW = 120;
-
-        const bucketRows = [
-          ...outstandingBuckets.map((label) => ({
-            label: `${label} days`,
-            value: formatReceivableMoney(parseOutstandingNumber(outstandingCustomer?.buckets?.[label])),
-          })),
-          { label: "Open invoices", value: String(parseOutstandingNumber(outstandingCustomer?.open_invoices)) },
-          { label: "Total outstanding", value: formatReceivableMoney(parseOutstandingNumber(outstandingCustomer?.total_outstanding)) },
-        ];
 
         bucketRows.forEach((row, index) => {
           const rowH = 18;
@@ -643,6 +620,51 @@ export default function PendingOrdersPage() {
             doc.setFont(undefined, "normal");
           }
           rowY += rowH;
+        });
+      }
+
+      doc.roundedRect(summaryX, sectionY, summaryBoxWidth, summaryBoxHeight, 4, 4);
+      doc.text("Subtotal (Excl. VAT)", summaryX + 10, sectionY + 18);
+      doc.text(formatMoney(subtotal), summaryX + summaryBoxWidth - 10, sectionY + 18, { align: "right" });
+      doc.text("VAT @ 15%", summaryX + 10, sectionY + 36);
+      doc.text(formatMoney(vatAmount), summaryX + summaryBoxWidth - 10, sectionY + 36, { align: "right" });
+      doc.setFont(undefined, "bold");
+      doc.text("Total (Incl. VAT)", summaryX + 10, sectionY + 54);
+      doc.text(formatMoney(grandTotal), summaryX + summaryBoxWidth - 10, sectionY + 54, { align: "right" });
+      doc.setFont(undefined, "normal");
+
+      cursorY = sectionY + Math.max(summaryBoxHeight, outstandingBlockHeight) + 24;
+
+      if (orderHistory.length > 0) {
+        ensureSpace(24);
+        doc.setFont(undefined, "bold");
+        doc.text("Order Change History", 40, cursorY);
+        cursorY += 18;
+        doc.setFont(undefined, "normal");
+
+        orderHistory.slice(-8).forEach((entry) => {
+          const header = `${entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-GB") : "-"} • ${entry.action || "UPDATED"}`;
+          const wrappedHeader = doc.splitTextToSize(header, 515);
+          const changeBlocks = (Array.isArray(entry.changes) ? entry.changes : []).map((change) => (
+            doc.splitTextToSize(
+              `${change.item_code || "-"}: ${change.type || "UPDATED"} ${Number(change.before_quantity || 0)} -> ${Number(change.after_quantity || 0)} | ${formatMoney(change.before_rate || 0)} -> ${formatMoney(change.after_rate || 0)}`,
+              505
+            )
+          ));
+          const entryHeight = Math.max(12, wrappedHeader.length * 10)
+            + changeBlocks.reduce((sum, wrappedChange) => sum + Math.max(12, wrappedChange.length * 10), 0)
+            + 6;
+
+          ensureSpace(entryHeight);
+          wrappedHeader.forEach((line, index) => doc.text(line, 40, cursorY + index * 10));
+          cursorY += Math.max(12, wrappedHeader.length * 10);
+
+          changeBlocks.forEach((wrappedChange) => {
+            wrappedChange.forEach((line, index) => doc.text(line, 48, cursorY + index * 10));
+            cursorY += Math.max(12, wrappedChange.length * 10);
+          });
+
+          cursorY += 6;
         });
       }
 

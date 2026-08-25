@@ -916,29 +916,6 @@ export default function NewOrderPage() {
         doc.setFontSize(10);
         doc.text(`Order ID: ${snapshot.orderId}`, marginX + 12, marginTop + 64);
 
-        if (Array.isArray(snapshot.history) && snapshot.history.length > 0) {
-          let historyY = pageHeight - 110;
-          doc.setFont(undefined, "bold");
-          doc.text("Change History", marginX, historyY);
-          historyY += 14;
-          doc.setFont(undefined, "normal");
-
-          snapshot.history.slice(-6).forEach((entry) => {
-            const when = entry.changedAt || entry.savedAt || entry.saved_at || entry.timestamp || "";
-            const label = `${when ? new Date(when).toLocaleString("en-GB") : "-"} • ${entry.action || "UPDATED"}`;
-            const lines = [label, ...(Array.isArray(entry.changes) ? entry.changes.map(formatHistoryChange) : [])].filter(Boolean);
-
-            lines.forEach((line) => {
-              const wrapped = doc.splitTextToSize(line, pageWidth - marginX * 2 - 16);
-              wrapped.forEach((part, index) => {
-                doc.text(part, marginX + 8, historyY + index * 10);
-              });
-              historyY += Math.max(12, wrapped.length * 10);
-            });
-
-            historyY += 4;
-          });
-        }
         doc.text(`Status: ${snapshot.statusLabel}`, marginX + 12, marginTop + 78);
 
         const rightColX = marginX + contentWidth - 210;
@@ -1015,18 +992,17 @@ export default function NewOrderPage() {
         });
 
         const summaryBoxWidth = 220;
+        const summaryBoxHeight = 68;
         const summaryX = pageWidth - marginX - summaryBoxWidth;
-        const summaryY = Math.min(y + 16, pageHeight - 88);
-        doc.roundedRect(summaryX, summaryY, summaryBoxWidth, 68, 4, 4);
-        doc.setFont(undefined, "normal");
-        doc.text("Subtotal (Excl. VAT)", summaryX + 10, summaryY + 18);
-        doc.text(formatMoney(subtotal), summaryX + summaryBoxWidth - 10, summaryY + 18, { align: "right" });
-        doc.text("VAT @ 15%", summaryX + 10, summaryY + 34);
-        doc.text(formatMoney(vatAmount), summaryX + summaryBoxWidth - 10, summaryY + 34, { align: "right" });
-        doc.setFont(undefined, "bold");
-        doc.text("Total (Incl. VAT)", summaryX + 10, summaryY + 54);
-        doc.text(formatMoney(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 54, { align: "right" });
-        doc.setFont(undefined, "normal");
+        const bottomMargin = 52;
+        let cursorY = y + 16;
+
+        function ensureSpace(requiredHeight) {
+          if (cursorY + requiredHeight > pageHeight - bottomMargin) {
+            doc.addPage();
+            cursorY = marginTop;
+          }
+        }
 
         const outstandingCustomer = snapshot.outstanding?.customer || null;
         const outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
@@ -1039,29 +1015,31 @@ export default function NewOrderPage() {
           return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
         }
 
-        if (outstandingCustomer && outstandingBuckets.length > 0) {
-          let outstandingY = summaryY + 90;
-          if (outstandingY > pageHeight - 170) {
-            doc.addPage();
-            outstandingY = marginTop;
-          }
+        const bucketRows = outstandingCustomer && outstandingBuckets.length > 0
+          ? [
+              ...outstandingBuckets.map((label) => ({
+                label: `${label} days`,
+                value: formatOutstandingValue(outstandingCustomer?.buckets?.[label], 0, true),
+              })),
+              { label: "Open invoices", value: formatOutstandingValue(outstandingCustomer?.open_invoices, 0, false) },
+              { label: "Total outstanding", value: formatOutstandingValue(outstandingCustomer?.total_outstanding, 0, true) },
+            ]
+          : [];
+        const outstandingBlockHeight = bucketRows.length > 0
+          ? 14 + 10 + bucketRows.length * 18
+          : 0;
 
+        ensureSpace(Math.max(summaryBoxHeight, outstandingBlockHeight) + 16);
+        const sectionY = cursorY;
+
+        if (bucketRows.length > 0) {
           doc.setFont(undefined, "bold");
-          doc.text("Outstanding Details", marginX, outstandingY);
+          doc.text("Outstanding Details", marginX, sectionY);
           doc.setFont(undefined, "normal");
 
-          let bucketY = outstandingY + 10;
+          let bucketY = sectionY + 14;
           const labelW = 220;
           const valueW = 120;
-
-          const bucketRows = [
-            ...outstandingBuckets.map((label) => ({
-              label: `${label} days`,
-              value: formatOutstandingValue(outstandingCustomer?.buckets?.[label], 0, true),
-            })),
-            { label: "Open invoices", value: formatOutstandingValue(outstandingCustomer?.open_invoices, 0, false) },
-            { label: "Total outstanding", value: formatOutstandingValue(outstandingCustomer?.total_outstanding, 0, true) },
-          ];
 
           bucketRows.forEach((row, index) => {
             const rowH = 18;
@@ -1078,78 +1056,118 @@ export default function NewOrderPage() {
             bucketY += rowH;
           });
 
-          if (outstandingInvoices.length > 0) {
-            let invoicesY = bucketY + 16;
-            if (invoicesY > pageHeight - 130) {
-              doc.addPage();
-              invoicesY = marginTop;
-            }
+          cursorY = bucketY;
+        }
 
+        doc.roundedRect(summaryX, sectionY, summaryBoxWidth, summaryBoxHeight, 4, 4);
+        doc.setFont(undefined, "normal");
+        doc.text("Subtotal (Excl. VAT)", summaryX + 10, sectionY + 18);
+        doc.text(formatMoney(subtotal), summaryX + summaryBoxWidth - 10, sectionY + 18, { align: "right" });
+        doc.text("VAT @ 15%", summaryX + 10, sectionY + 34);
+        doc.text(formatMoney(vatAmount), summaryX + summaryBoxWidth - 10, sectionY + 34, { align: "right" });
+        doc.setFont(undefined, "bold");
+        doc.text("Total (Incl. VAT)", summaryX + 10, sectionY + 54);
+        doc.text(formatMoney(totalWithVat), summaryX + summaryBoxWidth - 10, sectionY + 54, { align: "right" });
+        doc.setFont(undefined, "normal");
+
+        cursorY = Math.max(cursorY, sectionY + summaryBoxHeight) + 24;
+
+        if (outstandingCustomer && outstandingInvoices.length > 0) {
+          ensureSpace(30);
+          doc.setFont(undefined, "bold");
+          doc.text("Outstanding Invoice Rows", marginX, cursorY);
+          doc.setFont(undefined, "normal");
+
+          const invoiceCols = [
+            { label: "Date", width: 72 },
+            { label: "Ref. No.", width: 90 },
+            { label: "Pending Amount", width: 92 },
+            { label: "Due Date", width: 72 },
+            { label: "Overdue Days", width: 62 },
+            { label: "Invoice Day", width: 62 },
+            { label: "Salesman", width: 65 },
+          ];
+          const rowH = 18;
+          let rowY = cursorY + 8;
+
+          function drawInvoiceHeader(atY) {
+            let colX = marginX;
             doc.setFont(undefined, "bold");
-            doc.text("Outstanding Invoice Rows", marginX, invoicesY);
+            doc.setFontSize(9);
+            invoiceCols.forEach((col) => {
+              doc.rect(colX, atY, col.width, rowH);
+              doc.text(col.label, colX + 4, atY + 12);
+              colX += col.width;
+            });
             doc.setFont(undefined, "normal");
+            return atY + rowH;
+          }
 
-            const invoiceCols = [
-              { label: "Date", width: 72 },
-              { label: "Ref. No.", width: 90 },
-              { label: "Pending Amount", width: 92 },
-              { label: "Due Date", width: 72 },
-              { label: "Overdue Days", width: 62 },
-              { label: "Invoice Day", width: 62 },
-              { label: "Salesman", width: 65 },
-            ];
-            const rowH = 18;
-            let rowY = invoicesY + 8;
+          rowY = drawInvoiceHeader(rowY);
 
-            function drawInvoiceHeader(atY) {
-              let colX = marginX;
-              doc.setFont(undefined, "bold");
-              doc.setFontSize(9);
-              invoiceCols.forEach((col) => {
-                doc.rect(colX, atY, col.width, rowH);
-                doc.text(col.label, colX + 4, atY + 12);
-                colX += col.width;
-              });
-              doc.setFont(undefined, "normal");
-              return atY + rowH;
+          outstandingInvoices.slice(0, 12).forEach((invoice) => {
+            if (rowY > pageHeight - bottomMargin) {
+              doc.addPage();
+              rowY = drawInvoiceHeader(marginTop);
             }
 
-            rowY = drawInvoiceHeader(rowY);
+            const values = [
+              String(invoice?.invoice_date || "-"),
+              String(invoice?.ref_no || "-"),
+              formatOutstandingValue(invoice?.pending_amount ?? invoice?.amount, 0, false),
+              String(invoice?.due_date || "-"),
+              formatOutstandingValue(invoice?.overdue_days, 0, false),
+              formatOutstandingValue(invoice?.invoice_day, 0, false),
+              String(invoice?.salesman || "-"),
+            ];
 
-            outstandingInvoices.slice(0, 12).forEach((invoice) => {
-              if (rowY > pageHeight - 70) {
-                doc.addPage();
-                rowY = drawInvoiceHeader(marginTop);
-              }
-
-              const values = [
-                String(invoice?.invoice_date || "-"),
-                String(invoice?.ref_no || "-"),
-                formatOutstandingValue(invoice?.pending_amount ?? invoice?.amount, 0, false),
-                String(invoice?.due_date || "-"),
-                formatOutstandingValue(invoice?.overdue_days, 0, false),
-                formatOutstandingValue(invoice?.invoice_day, 0, false),
-                String(invoice?.salesman || "-"),
-              ];
-
-              let valueX = marginX;
-              values.forEach((value, idx) => {
-                const width = invoiceCols[idx].width;
-                doc.rect(valueX, rowY, width, rowH);
-                const rightAligned = idx === 2 || idx === 4 || idx === 5;
-                if (rightAligned) doc.text(String(value), valueX + width - 4, rowY + 12, { align: "right" });
-                else doc.text(String(value), valueX + 4, rowY + 12);
-                valueX += width;
-              });
-
-              rowY += rowH;
+            let valueX = marginX;
+            values.forEach((value, idx) => {
+              const width = invoiceCols[idx].width;
+              doc.rect(valueX, rowY, width, rowH);
+              const rightAligned = idx === 2 || idx === 4 || idx === 5;
+              if (rightAligned) doc.text(String(value), valueX + width - 4, rowY + 12, { align: "right" });
+              else doc.text(String(value), valueX + 4, rowY + 12);
+              valueX += width;
             });
 
-            doc.setFontSize(10);
-          }
+            rowY += rowH;
+          });
+
+          doc.setFontSize(10);
+          cursorY = rowY + 16;
+        }
+
+        if (Array.isArray(snapshot.history) && snapshot.history.length > 0) {
+          ensureSpace(24);
+          doc.setFont(undefined, "bold");
+          doc.text("Change History", marginX, cursorY);
+          cursorY += 18;
+          doc.setFont(undefined, "normal");
+
+          snapshot.history.slice(-6).forEach((entry) => {
+            const when = entry.changedAt || entry.savedAt || entry.saved_at || entry.timestamp || "";
+            const label = `${when ? new Date(when).toLocaleString("en-GB") : "-"} • ${entry.action || "UPDATED"}`;
+            const lines = [label, ...(Array.isArray(entry.changes) ? entry.changes.map(formatHistoryChange) : [])].filter(Boolean);
+            const entryHeight = lines.reduce((sum, line) => {
+              const wrapped = doc.splitTextToSize(line, pageWidth - marginX * 2 - 16);
+              return sum + Math.max(12, wrapped.length * 10);
+            }, 4);
+
+            ensureSpace(entryHeight);
+            lines.forEach((line) => {
+              const wrapped = doc.splitTextToSize(line, pageWidth - marginX * 2 - 16);
+              wrapped.forEach((part, index) => {
+                doc.text(part, marginX + 8, cursorY + index * 10);
+              });
+              cursorY += Math.max(12, wrapped.length * 10);
+            });
+            cursorY += 4;
+          });
         }
 
         doc.setFontSize(9);
+        ensureSpace(20);
         doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 28);
         addPdfBuildFooter(doc);
 

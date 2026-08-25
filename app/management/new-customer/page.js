@@ -16,6 +16,7 @@ import { detectTable } from "../../lib/schemaGuards";
 import { insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { extractMissingProspectsColumn, normalizeProspectSalesmanCode } from "../../lib/prospects";
 
 const TEXT = {
   title: { en: "New Customer", ar: "عميل جديد" },
@@ -49,18 +50,6 @@ const INITIAL_FORM = {
 };
 
 const DOCUMENT_TYPES = ["CR", "VAT", "ID", "CREDIT_APPLICATION", "OTHER"];
-
-function extractMissingProspectsColumn(errorMessage) {
-  const text = String(errorMessage || "");
-  const postgresStyle = text.match(/column\s+(?:\w+\.)?"?(\w+)"?\s+of\s+relation\s+"?prospects"?\s+does\s+not\s+exist/i);
-  if (postgresStyle?.[1]) return postgresStyle[1];
-
-  const genericPostgresStyle = text.match(/column\s+(?:\w+\.)?"?(\w+)"?\s+does\s+not\s+exist/i);
-  if (genericPostgresStyle?.[1]) return genericPostgresStyle[1];
-
-  const schemaCacheStyle = text.match(/Could not find the ['"](\w+)['"] column of ['"]prospects['"] in the schema cache/i);
-  return schemaCacheStyle?.[1] || "";
-}
 
 function parseGpsCoordinates(rawValue) {
   const text = String(rawValue || "").trim();
@@ -124,34 +113,6 @@ async function translateToArabic(text) {
   return translated.trim();
 }
 
-async function insertProspectWithColumnFallback(supabase, payload) {
-  const workingPayload = { ...payload };
-  const removedColumns = [];
-  const maxAttempts = Object.keys(workingPayload).length + 2;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const { data, error } = await supabase
-      .from("prospects")
-      .insert(workingPayload)
-      .select("id")
-      .single();
-
-    if (!error) {
-      return { data, removedColumns };
-    }
-
-    const missingColumn = extractMissingProspectsColumn(error.message);
-    if (!missingColumn || !Object.prototype.hasOwnProperty.call(workingPayload, missingColumn)) {
-      throw error;
-    }
-
-    removedColumns.push(missingColumn);
-    delete workingPayload[missingColumn];
-  }
-
-  throw new Error("Unable to save prospect because table columns do not match the app form.");
-}
-
 export default function NewCustomerPage() {
   const router = useRouter();
   const { language, dir, setLanguage } = useAppLanguage();
@@ -164,6 +125,7 @@ export default function NewCustomerPage() {
   const [message, setMessage] = useState("");
   const [schemaWarning, setSchemaWarning] = useState("");
   const [prospectsEnabled, setProspectsEnabled] = useState(true);
+  const [currentSalesmanCode, setCurrentSalesmanCode] = useState("");
   const [salesmen, setSalesmen] = useState([]);
   const [recent, setRecent] = useState([]);
   const [form, setForm] = useState(INITIAL_FORM);
@@ -253,6 +215,7 @@ export default function NewCustomerPage() {
 
         const prospectsCheck = await detectTable(supabase, "prospects");
         const scope = await fetchSalesScope();
+        setCurrentSalesmanCode(scope.currentSalesmanCode || "");
         setProspectsEnabled(prospectsCheck.available);
         setSchemaWarning(
           prospectsCheck.available
@@ -282,9 +245,16 @@ export default function NewCustomerPage() {
 
         setSalesmen(salesmanRows);
         if (salesmanRows.length > 0) {
+          const ownRow = salesmanRows.find(
+            (row) => normalizeProspectSalesmanCode(row.salesman_code) === normalizeProspectSalesmanCode(scope.currentSalesmanCode)
+          );
           setForm((current) => ({
             ...current,
-            salesman_code: current.salesman_code || salesmanRows[0].salesman_code || "",
+            salesman_code: current.salesman_code
+              || ownRow?.salesman_code
+              || scope.currentSalesmanCode
+              || salesmanRows[0].salesman_code
+              || "",
           }));
         }
 
@@ -470,11 +440,25 @@ export default function NewCustomerPage() {
         area: form.area,
         latitude: parsedGps ? Number(parsedGps.lat.toFixed(7)) : null,
         longitude: parsedGps ? Number(parsedGps.lng.toFixed(7)) : null,
-        salesman_code: form.salesman_code,
+        salesman_code: form.salesman_code || currentSalesmanCode,
         remarks,
       };
 
-      const { data, removedColumns } = await insertProspectWithColumnFallback(supabase, payload);
+      const response = await fetch("/api/prospects", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to register prospect.");
+      }
+
+      const data = result.data;
+      const removedColumns = Array.isArray(result.removedColumns) ? result.removedColumns : [];
 
       if (removedColumns.length > 0) {
         const removed = Array.from(new Set(removedColumns)).join(", ");
@@ -491,7 +475,7 @@ export default function NewCustomerPage() {
       const { data: latest, error: latestError } = await supabase
         .from("prospects")
         .select("*")
-        .eq("salesman_code", form.salesman_code)
+        .eq("salesman_code", data.salesman_code || form.salesman_code || currentSalesmanCode)
         .order("created_at", { ascending: false })
         .limit(10);
 
@@ -509,7 +493,12 @@ export default function NewCustomerPage() {
       setFollowUpDate("");
       setMessage("Prospect saved. Confirm whether an order was received.");
     } catch (err) {
-      setError(err.message || "Unable to register prospect.");
+      const message = String(err.message || "Unable to register prospect.");
+      if (message.toLowerCase().includes("row-level security")) {
+        setError("Unable to save this prospect. Confirm the Salesman field shows your code, then try again.");
+      } else {
+        setError(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -538,12 +527,21 @@ export default function NewCustomerPage() {
 
       const location = await requireGpsLocation({ role: access.role });
 
-      const { error: updateError } = await supabase
-        .from("prospects")
-        .update({ status: "FOLLOW_UP", follow_up_date: followUpDate })
-        .eq("id", savedProspect.id);
-
-      if (updateError) throw updateError;
+      const response = await fetch("/api/prospects", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          id: savedProspect.id,
+          follow_up_date: followUpDate,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to schedule follow-up visit.");
+      }
 
       if (location) {
         await insertGpsActivityLog(supabase, session.user.id, "PROSPECT_FOLLOW_UP", location, {

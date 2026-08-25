@@ -38,7 +38,7 @@ import {
   sortCashQueueCustomers,
 } from "../../lib/paymentCollections";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
-import { shareTextOnWhatsapp } from "../../lib/whatsappShare";
+import { shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp } from "../../lib/whatsappShare";
 import { getSupabaseClient } from "../../lib/supabase";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
@@ -133,9 +133,14 @@ const TEXT = {
   },
   copySummary: { en: "Copy Summary", ar: "نسخ الملخص" },
   shareWhatsapp: { en: "Share on WhatsApp", ar: "مشاركة على واتساب" },
+  shareWhatsappWithReceipt: { en: "Share receipt & summary on WhatsApp", ar: "مشاركة الإيصال والملخص على واتساب" },
   whatsappShareHint: {
     en: "Visit saved. Share this summary on WhatsApp now — works offline too.",
     ar: "تم حفظ الزيارة. شارك هذا الملخص على واتساب الآن — يعمل بدون اتصال أيضاً.",
+  },
+  whatsappShareReceiptHint: {
+    en: "Receipt attached — you can share the photo/PDF together with the summary.",
+    ar: "تم إرفاق الإيصال — يمكنك مشاركة الصورة/‏PDF مع الملخص.",
   },
   copied: { en: "Copied", ar: "تم النسخ" },
   paymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
@@ -222,6 +227,10 @@ const TEXT = {
   msgLegalUpdateFailed: { en: "Unable to update legal transfer status.", ar: "تعذر تحديث حالة التحويل للقانوني." },
   msgCopyFailed: { en: "Could not copy WhatsApp message automatically.", ar: "تعذر نسخ رسالة واتساب تلقائياً." },
   msgWhatsappShareFailed: { en: "Could not open WhatsApp. Use Copy Summary and paste manually.", ar: "تعذر فتح واتساب. استخدم نسخ الملخص واللصق يدوياً." },
+  msgWhatsappReceiptFallback: {
+    en: "WhatsApp opened with the summary. Attach the receipt manually if it was not included.",
+    ar: "تم فتح واتساب مع الملخص. أرفق الإيصال يدوياً إذا لم يُضمَّن.",
+  },
   salesmanFilterHint: { en: "Tap to select one or more salesmen", ar: "اضغط لاختيار مندوب واحد أو أكثر" },
   allSalesmen: { en: "All salesmen", ar: "كل المندوبين" },
   clearSalesmanFilter: { en: "Clear selection", ar: "مسح التحديد" },
@@ -699,6 +708,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [selectedSchedulers, setSelectedSchedulers] = useState([]);
   const [activeRowKey, setActiveRowKey] = useState("");
   const [summaryForWhatsApp, setSummaryForWhatsApp] = useState("");
+  const [receiptFileForWhatsapp, setReceiptFileForWhatsapp] = useState(null);
   const [copyStatus, setCopyStatus] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
   const [isDictating, setIsDictating] = useState(false);
@@ -815,6 +825,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   useEffect(() => {
     setSummaryForWhatsApp("");
     setCopyStatus("");
+    setReceiptFileForWhatsapp(null);
   }, [activeRowKey]);
 
   useEffect(() => {
@@ -1290,8 +1301,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (form.paymentCopy) {
         formData.append("paymentCopy", await prepareUploadFile(form.paymentCopy));
       }
+
+      let receiptFileForShare = null;
       if (form.receiptCopy) {
-        formData.append("receiptCopy", await prepareUploadFile(form.receiptCopy));
+        receiptFileForShare = await prepareUploadFile(form.receiptCopy);
+        formData.append("receiptCopy", receiptFileForShare);
       }
 
       const saveResult = await postFormDataResilient({
@@ -1345,7 +1359,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       await presentWhatsappSummaryAfterSave(summaryText, {
         autoOpenWhatsapp: Boolean(saveResult.queued),
+        receiptFile: receiptFileForShare,
       });
+      setReceiptFileForWhatsapp(receiptFileForShare);
     } catch (err) {
       showPopup({ message: localizeApiMessage(err.message || t("msgSaveFailed")), variant: "error" });
     } finally {
@@ -1419,6 +1435,29 @@ export default function PaymentCollectionsView({ view = "due" }) {
     }, 120);
   }
 
+  async function shareSummaryWithReceiptOnWhatsapp(summaryText = summaryForWhatsApp, receiptFile = receiptFileForWhatsapp) {
+    const text = String(summaryText || "").trim();
+    const file = receiptFile instanceof Blob ? receiptFile : null;
+    if (!text || !file) {
+      return shareSummaryOnWhatsapp(summaryText);
+    }
+
+    const result = await shareTextAndFilesOnWhatsapp(text, [file], {
+      title: t("summary"),
+      dialogTitle: t("shareWhatsappWithReceipt"),
+    });
+
+    if (result.success) {
+      if (result.fallback) {
+        showPopup({ message: t("msgWhatsappReceiptFallback"), variant: "warning" });
+      }
+      return;
+    }
+    if (result.reason === "cancelled") return;
+
+    showPopup({ message: t("msgWhatsappShareFailed"), variant: "warning" });
+  }
+
   async function shareSummaryOnWhatsapp(summaryText = summaryForWhatsApp) {
     const text = String(summaryText || "").trim();
     if (!text) return;
@@ -1436,6 +1475,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   async function presentWhatsappSummaryAfterSave(summaryText, options = {}) {
     setSummaryForWhatsApp(summaryText);
+    if (options.receiptFile instanceof Blob) {
+      setReceiptFileForWhatsapp(options.receiptFile);
+    }
     scrollToWhatsappSummary();
 
     const copied = await copyTextToClipboard(summaryText);
@@ -1446,7 +1488,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
     if (options.autoOpenWhatsapp) {
       window.setTimeout(() => {
-        void shareSummaryOnWhatsapp(summaryText);
+        if (options.receiptFile instanceof Blob) {
+          void shareSummaryWithReceiptOnWhatsapp(summaryText, options.receiptFile);
+        } else {
+          void shareSummaryOnWhatsapp(summaryText);
+        }
       }, 450);
     }
   }
@@ -2151,7 +2197,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   {summaryForWhatsApp ? (
                                     <>
                                       <div className="moduleHint" style={{ marginTop: "6px", color: "#166534" }}>
-                                        {t("whatsappShareHint")}
+                                        {receiptFileForWhatsapp ? t("whatsappShareReceiptHint") : t("whatsappShareHint")}
                                       </div>
                                       <textarea className="moduleTextArea" rows={8} value={summaryForWhatsApp} readOnly />
                                     </>
@@ -2161,9 +2207,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                 </label>
                                 {summaryForWhatsApp ? (
                                   <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
+                                    {receiptFileForWhatsapp ? (
+                                      <button
+                                        type="button"
+                                        className="modulePrimaryButton"
+                                        onClick={() => shareSummaryWithReceiptOnWhatsapp()}
+                                      >
+                                        {t("shareWhatsappWithReceipt")}
+                                      </button>
+                                    ) : null}
                                     <button
                                       type="button"
-                                      className="modulePrimaryButton"
+                                      className={receiptFileForWhatsapp ? "moduleInlineButton moduleActionButton" : "modulePrimaryButton"}
                                       onClick={() => shareSummaryOnWhatsapp()}
                                     >
                                       {t("shareWhatsapp")}

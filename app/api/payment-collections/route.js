@@ -20,6 +20,8 @@ import {
 } from "../../lib/outstanding.js";
 import { needsEnglishTranslation, translateText } from "../../lib/translateText.js";
 import { formatCollectionUserDisplayName } from "../../lib/geo.js";
+import { patchCollectionVisitSummaryVisitNumber } from "../../lib/collectionVisitSummary.js";
+import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -195,6 +197,19 @@ function isMissingTableError(error) {
 function isMissingColumnError(error) {
   const message = String(error?.message || error?.details || "").toLowerCase();
   return error?.code === "42703" || (message.includes("column") && message.includes("does not exist"));
+}
+
+async function countCollectionVisitsForUserDay(admin, userId, dateString = getKsaDateString()) {
+  const { startIso, endIso } = ksaDayBounds(dateString);
+  const { count, error } = await admin
+    .from("collection_visits")
+    .select("id", { count: "exact", head: true })
+    .eq("created_by", userId)
+    .gte("saved_at", startIso)
+    .lte("saved_at", endIso);
+
+  if (error) throw error;
+  return Number(count || 0);
 }
 
 function storageExtension(file) {
@@ -875,6 +890,12 @@ export async function POST(request) {
     }
 
     // Insert new collection visit
+    const existingVisitCount = await countCollectionVisitsForUserDay(admin, user.id);
+    const authoritativeVisitNumber = Math.max(visitNumberForDay, existingVisitCount + 1);
+    const finalSummaryText = summaryText && authoritativeVisitNumber !== visitNumberForDay
+      ? patchCollectionVisitSummaryVisitNumber(summaryText, authoritativeVisitNumber)
+      : summaryText;
+
     const visitInsertBase = {
       customer_code: customerCode,
       visit_outcome: visitOutcome,
@@ -887,11 +908,11 @@ export async function POST(request) {
       non_payment_reason: nonPaymentReason,
       payment_copy_url: paymentCopyUrl,
       receipt_copy_url: receiptCopyUrl,
-      summary_text: summaryText || null,
+      summary_text: finalSummaryText || null,
       queue_priority: queuePriority > 0 ? queuePriority : null,
       probability_score: probabilityScore > 0 ? probabilityScore : null,
       probability_label: probabilityLabel || null,
-      visit_number_for_day: visitNumberForDay > 0 ? visitNumberForDay : null,
+      visit_number_for_day: authoritativeVisitNumber > 0 ? authoritativeVisitNumber : null,
       created_by: user.id,
       saved_at: new Date().toISOString(),
     };

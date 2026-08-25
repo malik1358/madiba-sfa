@@ -12,6 +12,8 @@ import {
   formatCollectorDisplayName,
   formatGpsCapturePlatformLabel,
   computeSpeedKmh,
+  computeWaitingMinutes,
+  computeEstimatedTransitHours,
   hasGpsCoordinates,
   inferGpsCapturePlatformFromNote,
   parseGpsFromActivityNote,
@@ -271,6 +273,12 @@ function enrichEntries(entries, customerMap, profileMap) {
     const speedKmh = previous
       ? computeSpeedKmh(entry.distanceFromPreviousKm, previous.saved_at, entry.saved_at)
       : null;
+    const waitingMinutesFromPrevious = previous
+      ? computeWaitingMinutes(entry.distanceFromPreviousKm, previous.saved_at, entry.saved_at)
+      : null;
+    const estimatedTransitMinutesFromPrevious = previous
+      ? Math.round((computeEstimatedTransitHours(entry.distanceFromPreviousKm) || 0) * 60)
+      : null;
     const area = String(customer.area || extractAreaFromActivityNote(entry.meta?.activityNote) || "").trim();
     const street = extractStreetFromActivityNote(entry.meta?.activityNote);
     const capturePlatform = entry.meta?.activityNote
@@ -300,6 +308,8 @@ function enrichEntries(entries, customerMap, profileMap) {
       distanceFromCustomerKm: distanceKm,
       distanceFromPreviousKm: entry.distanceFromPreviousKm,
       speedKmh,
+      waitingMinutesFromPrevious,
+      estimatedTransitMinutesFromPrevious,
       area,
       street,
       capturePlatform,

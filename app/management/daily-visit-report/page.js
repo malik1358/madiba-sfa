@@ -7,7 +7,17 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
-import { applyReverseGeocoding, buildGoogleMapsPointUrl, buildGpsActivityNote, resolveGpsCapturePlatform } from "../../lib/geo";
+import {
+  DEFAULT_TRANSIT_SPEED_KMH,
+  TRANSIT_SPEED_OPTIONS_KMH,
+  applyReverseGeocoding,
+  buildGoogleMapsPointUrl,
+  buildGpsActivityNote,
+  formatDurationMinutes,
+  resolveWaitingMinutesFromPrevious,
+  resolveGpsCapturePlatform,
+  sumWaitingMinutesFromTimeline,
+} from "../../lib/geo";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
 import { useReverseGeocodeCache } from "../../hooks/useReverseGeocodeCache";
@@ -45,6 +55,14 @@ const TEXT = {
   area: { en: "Area", ar: "المنطقة" },
   street: { en: "Street", ar: "الشارع" },
   speed: { en: "Speed (km/h)", ar: "السرعة (كم/س)" },
+  waitingTime: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
+  waitingTimeHint: {
+    en: "Elapsed time minus estimated driving time at the assumed speed below.",
+    ar: "الوقت المنقضي ناقص وقت القيادة التقديري بالسرعة المفترضة أدناه.",
+  },
+  transitSpeed: { en: "Assumed driving speed", ar: "سرعة القيادة المفترضة" },
+  totalWaiting: { en: "Est. total waiting", ar: "إجمالي وقت الانتظار التقديري" },
+  waitingTotalShort: { en: "Est. waiting total", ar: "إجمالي الانتظار التقديري" },
   map: { en: "Map", ar: "الخريطة" },
   openMap: { en: "Open", ar: "فتح" },
   noCustomerLocation: { en: "No customer location", ar: "لا موقع للعميل" },
@@ -76,6 +94,7 @@ export default function DailyVisitReportPage() {
   const [userId, setUserId] = useState("");
   const [report, setReport] = useState(null);
   const [urlParamsApplied, setUrlParamsApplied] = useState(false);
+  const [transitSpeedKmh, setTransitSpeedKmh] = useState(DEFAULT_TRANSIT_SPEED_KMH);
 
   usePopupMessages({ error });
 
@@ -111,6 +130,14 @@ export default function DailyVisitReportPage() {
       entries: (entryUser.entries || []).map((entry) => applyReverseGeocoding(entry, geocodeCache)),
     }));
   }, [report, geocodeCache]);
+
+  const totalWaitingMinutes = useMemo(() => {
+    if (!displayUsers.length) return 0;
+    return displayUsers.reduce(
+      (total, entryUser) => total + sumWaitingMinutesFromTimeline(entryUser.entries, transitSpeedKmh),
+      0,
+    );
+  }, [displayUsers, transitSpeedKmh]);
 
   useEffect(() => {
     if (!urlParamsApplied) return undefined;
@@ -245,6 +272,20 @@ export default function DailyVisitReportPage() {
                   ))}
                 </select>
               </label>
+              <label className="moduleField">
+                {t("transitSpeed")}
+                <select
+                  className="moduleInput"
+                  value={transitSpeedKmh}
+                  onChange={(event) => setTransitSpeedKmh(Number(event.target.value))}
+                >
+                  {TRANSIT_SPEED_OPTIONS_KMH.map((speed) => (
+                    <option key={speed} value={speed}>
+                      {speed} km/h
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           </section>
 
@@ -274,9 +315,19 @@ export default function DailyVisitReportPage() {
                   <span>{t("usersActive")}</span>
                   <strong>{report.userCount || 0}</strong>
                 </section>
+                <section className="moduleMetricCard">
+                  <span>{t("totalWaiting")}</span>
+                  <strong>{formatDurationMinutes(totalWaitingMinutes)}</strong>
+                </section>
               </div>
 
-              {displayUsers.map((entryUser) => (
+              {displayUsers.map((entryUser) => {
+                const userWaitingMinutes = sumWaitingMinutesFromTimeline(
+                  entryUser.entries,
+                  transitSpeedKmh,
+                );
+
+                return (
                 <section key={entryUser.userId} className="moduleSection">
                   <div className="moduleSectionHeader">
                     <h2>{entryUser.userName}</h2>
@@ -286,6 +337,8 @@ export default function DailyVisitReportPage() {
                       {entryUser.farFromCustomerCount} {t("farFromCustomer")}
                       {" · "}
                       {t("routeTotal")}: {formatNumber(entryUser.totalRouteDistanceKm)} km
+                      {" · "}
+                      {t("waitingTotalShort")}: {formatDurationMinutes(userWaitingMinutes)}
                     </span>
                   </div>
 
@@ -303,12 +356,13 @@ export default function DailyVisitReportPage() {
                           <th>{t("area")}</th>
                           <th>{t("street")}</th>
                           <th>{t("speed")}</th>
+                          <th title={t("waitingTimeHint")}>{t("waitingTime")}</th>
                           <th>{t("platform")}</th>
                           <th>{t("map")}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {(entryUser.entries || []).map((entry) => (
+                        {(entryUser.entries || []).map((entry, entryIndex, entries) => (
                           <tr key={entry.id}>
                             <td>{entry.visitSequence}</td>
                             <td>{formatTime(entry.savedAt)}</td>
@@ -351,6 +405,16 @@ export default function DailyVisitReportPage() {
                                 ? "-"
                                 : `${formatNumber(entry.speedKmh, 1)} km/h`}
                             </td>
+                            <td>
+                              {(() => {
+                                const waiting = resolveWaitingMinutesFromPrevious(
+                                  entry,
+                                  entryIndex > 0 ? entries[entryIndex - 1] : null,
+                                  transitSpeedKmh,
+                                );
+                                return waiting === null ? "-" : formatDurationMinutes(waiting);
+                              })()}
+                            </td>
                             <td>{entry.capturePlatformLabel || "-"}</td>
                             <td>
                               {entry.hasEntryGps ? (
@@ -368,14 +432,15 @@ export default function DailyVisitReportPage() {
                         ))}
                         {(entryUser.entries || []).length === 0 && (
                           <tr>
-                            <td colSpan={12}>{t("noEntries")}</td>
+                            <td colSpan={13}>{t("noEntries")}</td>
                           </tr>
                         )}
                       </tbody>
                     </table>
                   </div>
                 </section>
-              ))}
+                );
+              })}
 
               {displayUsers.length === 0 && (
                 <section className="moduleSection">

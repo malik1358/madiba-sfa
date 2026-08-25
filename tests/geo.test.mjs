@@ -4,6 +4,13 @@ import assert from "node:assert/strict";
 import {
   applyReverseGeocoding,
   computeSpeedKmh,
+  computeWaitingMinutes,
+  computeEstimatedTransitHours,
+  DEFAULT_TRANSIT_SPEED_KMH,
+  formatDurationMinutes,
+  resolveWaitingMinutesFromPrevious,
+  sumWaitingMinutesFromTimeline,
+  TRANSIT_SPEED_OPTIONS_KMH,
   coordinateCacheKey,
   enrichVisitsWithDistances,
   extractAreaFromActivityNote,
@@ -167,6 +174,39 @@ test("computeSpeedKmh converts distance and elapsed time", () => {
   );
 
   assert.equal(speed, 10);
+});
+
+test("computeWaitingMinutes subtracts estimated transit time at 40 km/h", () => {
+  const waiting = computeWaitingMinutes(
+    35.82,
+    "2026-08-17T10:12:00.000Z",
+    "2026-08-17T12:43:00.000Z",
+    DEFAULT_TRANSIT_SPEED_KMH,
+  );
+
+  assert.equal(waiting, 97);
+});
+
+test("formatDurationMinutes renders hours and minutes", () => {
+  assert.equal(formatDurationMinutes(97), "1h 37m");
+  assert.equal(formatDurationMinutes(45), "45 min");
+  assert.equal(formatDurationMinutes(0), "0 min");
+});
+
+test("sumWaitingMinutesFromTimeline totals waiting across consecutive visits", () => {
+  const rows = [
+    {
+      savedAt: "2026-08-17T10:12:00.000Z",
+      distanceFromPreviousKm: null,
+    },
+    {
+      savedAt: "2026-08-17T12:43:00.000Z",
+      distanceFromPreviousKm: 35.82,
+    },
+  ];
+
+  assert.equal(sumWaitingMinutesFromTimeline(rows, DEFAULT_TRANSIT_SPEED_KMH), 97);
+  assert.equal(sumWaitingMinutesFromTimeline(rows, 30), 79);
 });
 
 test("parseReverseGeocodeAddress maps OpenStreetMap fields", () => {

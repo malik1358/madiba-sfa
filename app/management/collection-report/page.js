@@ -7,7 +7,14 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
-import { buildGoogleMapsPointUrl } from "../../lib/geo";
+import {
+  DEFAULT_TRANSIT_SPEED_KMH,
+  TRANSIT_SPEED_OPTIONS_KMH,
+  buildGoogleMapsPointUrl,
+  formatDurationMinutes,
+  resolveWaitingMinutesFromPrevious,
+  sumWaitingMinutesFromTimeline,
+} from "../../lib/geo";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
 import { getKsaDateString } from "../../lib/workdayActivity";
@@ -62,6 +69,14 @@ const TEXT = {
   gps: { en: "GPS", ar: "GPS" },
   distance: { en: "Distance from previous", ar: "المسافة من السابق" },
   speed: { en: "Speed from previous", ar: "السرعة من السابق" },
+  waitingTime: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
+  waitingTimeHint: {
+    en: "Elapsed time minus estimated driving time at the assumed speed below.",
+    ar: "الوقت المنقضي ناقص وقت القيادة التقديري بالسرعة المفترضة أدناه.",
+  },
+  transitSpeed: { en: "Assumed driving speed", ar: "سرعة القيادة المفترضة" },
+  totalWaiting: { en: "Est. total waiting", ar: "إجمالي وقت الانتظار التقديري" },
+  waitingTotalShort: { en: "Est. waiting total", ar: "إجمالي الانتظار التقديري" },
   map: { en: "Map", ar: "الخريطة" },
   visits: { en: "visits", ar: "زيارات" },
   uniqueCustomersShort: { en: "unique customers", ar: "عملاء مختلفون" },
@@ -225,11 +240,20 @@ export default function CollectionReportPage() {
   });
   const [selectedVisit, setSelectedVisit] = useState(null);
   const [copyStatus, setCopyStatus] = useState("");
+  const [transitSpeedKmh, setTransitSpeedKmh] = useState(DEFAULT_TRANSIT_SPEED_KMH);
 
   const collectorOptions = useMemo(
     () => (Array.isArray(report?.availableCollectors) ? report.availableCollectors : []),
     [report],
   );
+
+  const totalWaitingMinutes = useMemo(() => {
+    if (!report?.collectors?.length) return 0;
+    return report.collectors.reduce(
+      (total, collector) => total + sumWaitingMinutesFromTimeline(collector.visits, transitSpeedKmh),
+      0,
+    );
+  }, [report, transitSpeedKmh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -384,6 +408,20 @@ export default function CollectionReportPage() {
                   ))}
                 </select>
               </label>
+              <label className="moduleField">
+                {t("transitSpeed")}
+                <select
+                  className="moduleInput"
+                  value={transitSpeedKmh}
+                  onChange={(event) => setTransitSpeedKmh(Number(event.target.value))}
+                >
+                  {TRANSIT_SPEED_OPTIONS_KMH.map((speed) => (
+                    <option key={speed} value={speed}>
+                      {speed} km/h
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           </section>
 
@@ -419,9 +457,19 @@ export default function CollectionReportPage() {
                   <span>{t("collectorsActive")}</span>
                   <strong>{report.collectorCount || 0}</strong>
                 </section>
+                <section className="moduleMetricCard">
+                  <span>{t("totalWaiting")}</span>
+                  <strong>{formatDurationMinutes(totalWaitingMinutes)}</strong>
+                </section>
               </div>
 
-              {(report.collectors || []).map((collector) => (
+              {(report.collectors || []).map((collector) => {
+                const collectorWaitingMinutes = sumWaitingMinutesFromTimeline(
+                  collector.visits,
+                  transitSpeedKmh,
+                );
+
+                return (
                 <section key={collector.collectorId} className="moduleSection">
                   <div className="moduleSectionHeader">
                     <h2>
@@ -436,6 +484,8 @@ export default function CollectionReportPage() {
                       {collector.gpsVisitCount} {t("gpsCaptured")}
                       {" · "}
                       {t("routeTotal")}: {formatNumber(collector.totalDistanceKm)} km
+                      {" · "}
+                      {t("waitingTotalShort")}: {formatDurationMinutes(collectorWaitingMinutes)}
                     </span>
                   </div>
 
@@ -465,11 +515,12 @@ export default function CollectionReportPage() {
                           <th>{t("gps")}</th>
                           <th>{t("distance")}</th>
                           <th>{t("speed")}</th>
+                          <th title={t("waitingTimeHint")}>{t("waitingTime")}</th>
                           <th>{t("map")}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {(collector.visits || []).map((visit) => (
+                        {(collector.visits || []).map((visit, visitIndex, visits) => (
                           <tr key={visit.id}>
                             <td>{visit.visitSequence}</td>
                             <td>{formatTime(visit.savedAt)}</td>
@@ -550,6 +601,16 @@ export default function CollectionReportPage() {
                                 : `${formatNumber(visit.speedFromPreviousKmH, 1)} km/h`}
                             </td>
                             <td>
+                              {(() => {
+                                const waiting = resolveWaitingMinutesFromPrevious(
+                                  visit,
+                                  visitIndex > 0 ? visits[visitIndex - 1] : null,
+                                  transitSpeedKmh,
+                                );
+                                return waiting === null ? "-" : formatDurationMinutes(waiting);
+                              })()}
+                            </td>
+                            <td>
                               {visit.hasGps ? (
                                 <a
                                   className="moduleInlineButton"
@@ -565,14 +626,15 @@ export default function CollectionReportPage() {
                         ))}
                         {(collector.visits || []).length === 0 && (
                           <tr>
-                            <td colSpan={15}>{t("noVisits")}</td>
+                            <td colSpan={16}>{t("noVisits")}</td>
                           </tr>
                         )}
                       </tbody>
                     </table>
                   </div>
                 </section>
-              ))}
+                );
+              })}
 
               {(report.collectors || []).length === 0 && (
                 <section className="moduleSection">

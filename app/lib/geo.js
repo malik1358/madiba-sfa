@@ -277,6 +277,85 @@ export function computeSpeedKmh(distanceKm, fromSavedAt, toSavedAt) {
   return distanceKm / hours;
 }
 
+export const DEFAULT_TRANSIT_SPEED_KMH = 40;
+
+export function computeElapsedHours(fromSavedAt, toSavedAt) {
+  const fromTs = new Date(fromSavedAt).getTime();
+  const toTs = new Date(toSavedAt).getTime();
+  if (!Number.isFinite(fromTs) || !Number.isFinite(toTs) || toTs <= fromTs) return null;
+  return (toTs - fromTs) / (3600 * 1000);
+}
+
+export function computeEstimatedTransitHours(
+  distanceKm,
+  assumedSpeedKmh = DEFAULT_TRANSIT_SPEED_KMH,
+) {
+  if (distanceKm === null || distanceKm === undefined || !Number.isFinite(distanceKm) || distanceKm < 0) {
+    return null;
+  }
+
+  const speed = Number(assumedSpeedKmh);
+  if (!Number.isFinite(speed) || speed <= 0) return null;
+  return distanceKm / speed;
+}
+
+export function computeWaitingMinutes(
+  distanceKm,
+  fromSavedAt,
+  toSavedAt,
+  assumedSpeedKmh = DEFAULT_TRANSIT_SPEED_KMH,
+) {
+  const elapsedHours = computeElapsedHours(fromSavedAt, toSavedAt);
+  const transitHours = computeEstimatedTransitHours(distanceKm, assumedSpeedKmh);
+  if (elapsedHours === null || transitHours === null) return null;
+
+  return Math.max(0, Math.round((elapsedHours - transitHours) * 60));
+}
+
+export function resolveWaitingMinutesFromPrevious(
+  row,
+  previousRow,
+  assumedSpeedKmh = DEFAULT_TRANSIT_SPEED_KMH,
+) {
+  if (!previousRow || row?.distanceFromPreviousKm === null || row?.distanceFromPreviousKm === undefined) {
+    return null;
+  }
+
+  const fromSavedAt = previousRow.savedAt ?? previousRow.saved_at;
+  const toSavedAt = row.savedAt ?? row.saved_at;
+  return computeWaitingMinutes(row.distanceFromPreviousKm, fromSavedAt, toSavedAt, assumedSpeedKmh);
+}
+
+export function sumWaitingMinutesFromTimeline(
+  rows,
+  assumedSpeedKmh = DEFAULT_TRANSIT_SPEED_KMH,
+) {
+  let total = 0;
+
+  for (let index = 0; index < (rows || []).length; index += 1) {
+    const row = rows[index];
+    const previous = index > 0 ? rows[index - 1] : null;
+    const waiting = resolveWaitingMinutesFromPrevious(row, previous, assumedSpeedKmh);
+    if (waiting !== null) total += waiting;
+  }
+
+  return total;
+}
+
+export const TRANSIT_SPEED_OPTIONS_KMH = [30, 40, 50];
+
+export function formatDurationMinutes(totalMinutes) {
+  const minutes = Number(totalMinutes);
+  if (!Number.isFinite(minutes) || minutes < 0) return "-";
+  if (minutes === 0) return "0 min";
+
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (hours <= 0) return `${remainder} min`;
+  if (remainder === 0) return `${hours}h`;
+  return `${hours}h ${remainder}m`;
+}
+
 export function coordinateCacheKey(latitude, longitude, precision = 5) {
   const lat = Number(latitude);
   const lng = Number(longitude);

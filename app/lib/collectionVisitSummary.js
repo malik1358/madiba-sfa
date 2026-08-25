@@ -130,6 +130,41 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   return lines.join("\n");
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function patchCollectionVisitSummaryVisitNumber(
+  summary,
+  visitNumberForDay,
+  labels = COLLECTION_VISIT_SUMMARY_LABELS,
+) {
+  const visitNumber = Number(visitNumberForDay || 0);
+  const text = String(summary || "");
+  if (!text || visitNumber <= 0) return text;
+
+  const labelVariants = [
+    labels.summaryVisitNumber,
+    "Visit number today",
+    "رقم الزيارة لليوم",
+  ].filter(Boolean);
+
+  for (const label of labelVariants) {
+    const pattern = new RegExp(`^(${escapeRegExp(label)}:\\s*)\\d+(\\.?\\s*)$`, "m");
+    if (pattern.test(text)) {
+      return text.replace(pattern, `$1${visitNumber}$2`);
+    }
+  }
+
+  const outstandingLabel = labels.summaryOutstanding;
+  const insertLine = `${labels.summaryVisitNumber}: ${visitNumber}.`;
+  if (text.includes(`${outstandingLabel}:`)) {
+    return text.replace(`${outstandingLabel}:`, `${insertLine}\n${outstandingLabel}:`);
+  }
+
+  return `${text}\n${insertLine}`;
+}
+
 export function buildStoredCollectionVisitSummary(row, visit, options = {}, labels = COLLECTION_VISIT_SUMMARY_LABELS) {
   if (!visit) return "";
 

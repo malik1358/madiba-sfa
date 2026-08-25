@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildCollectionVisitSummary,
   isPriorityCollectionVisit,
+  patchCollectionVisitSummaryVisitNumber,
 } from "../app/lib/collectionVisitSummary.js";
 
 test("isPriorityCollectionVisit marks high and medium probability as priority", () => {
@@ -40,4 +41,27 @@ test("buildCollectionVisitSummary includes queue priority and outstanding bucket
   assert.match(summary, /Customer: Acme Trading/);
   assert.match(summary, /0-30: 1,000/);
   assert.match(summary, /Visit number today: 2/);
+});
+
+test("patchCollectionVisitSummaryVisitNumber replaces stale visit numbers in stored summaries", () => {
+  const stored = `Customer: Khaled Waleed Bin Salem Al Mahri Electronic Est.
+Queue priority: 12.
+Payment probability: High.
+Code: 1164C
+Salesman: Abdul Rehman
+Outcome: Funds received
+Amount received: 1,500.
+Receipt mode: Cash.
+Next visit: 31/08/2026.
+Visit number today: 1.
+Outstanding:
+0-30: 0
+31-60: 0
+61-90: 0
+91-120: 0
+>120: 5,311`;
+
+  const patched = patchCollectionVisitSummaryVisitNumber(stored, 11);
+  assert.match(patched, /^Visit number today: 11\.$/m);
+  assert.doesNotMatch(patched, /^Visit number today: 1\.$/m);
 });

@@ -8,6 +8,7 @@ import {
 import {
   buildStoredCollectionVisitSummary,
   isPriorityCollectionVisit,
+  patchCollectionVisitSummaryVisitNumber,
 } from "../../../lib/collectionVisitSummary.js";
 import {
   buildCollectionQueuePriorityMaps,
@@ -15,6 +16,8 @@ import {
 } from "../../../lib/collectionVisitPriority.js";
 import {
   computeSpeedKmh,
+  computeWaitingMinutes,
+  computeEstimatedTransitHours,
   enrichVisitsWithDistances,
   extractAreaFromActivityNote,
   extractStreetFromActivityNote,
@@ -210,6 +213,9 @@ function buildVisitReportFields(visit, customerContext, visitNumberForDay, prior
   const probabilityScore = Number(priorityMeta.probabilityScore || visit.probability_score || 0);
   const storedSummary = String(visit.summary_text || "").trim();
   const priority = isPriorityCollectionVisit({ queuePriority, probabilityLabel });
+  const effectiveVisitNumber = Number(
+    visitNumberForDay || priorityMeta.visitNumberForDay || visit.visit_number_for_day || 0,
+  ) || null;
   const customerRow = customerContext || {
     customer_code: visit.customer_code,
     customer_name: visit.customer_code,
@@ -223,16 +229,18 @@ function buildVisitReportFields(visit, customerContext, visitNumberForDay, prior
     probability_label: probabilityLabel,
   };
 
-  const whatsappSummary = storedSummary || buildStoredCollectionVisitSummary(customerRow, {
-    ...visit,
-    visit_number_for_day: visit.visit_number_for_day || visitNumberForDay,
-    queue_priority: queuePriority,
-    probability_label: probabilityLabel,
-  }, {
-    visitNumberForDay: visit.visit_number_for_day || visitNumberForDay,
-    queuePriority,
-    probabilityLabel,
-  });
+  const whatsappSummary = storedSummary
+    ? patchCollectionVisitSummaryVisitNumber(storedSummary, effectiveVisitNumber)
+    : buildStoredCollectionVisitSummary(customerRow, {
+      ...visit,
+      visit_number_for_day: effectiveVisitNumber,
+      queue_priority: queuePriority,
+      probability_label: probabilityLabel,
+    }, {
+      visitNumberForDay: effectiveVisitNumber,
+      queuePriority,
+      probabilityLabel,
+    });
 
   return {
     whatsappSummary,
@@ -241,7 +249,7 @@ function buildVisitReportFields(visit, customerContext, visitNumberForDay, prior
     probabilityScore: probabilityScore || null,
     isPriorityCustomer: priority.isPriority,
     priorityReason: priority.reason,
-    visitNumberForDay: priorityMeta.visitNumberForDay || visitNumberForDay || visit.visit_number_for_day || null,
+    visitNumberForDay: effectiveVisitNumber,
     hasStoredSummary: Boolean(storedSummary),
     prioritySource: priorityMeta.prioritySource || (queuePriority || probabilityLabel ? "stored" : "unknown"),
     queueRankGap: priorityMeta.queueRankGap ?? null,
@@ -441,6 +449,12 @@ function buildCollectorTimelineRows({
     const speedFromPreviousKmH = previous
       ? computeSpeedKmh(row.distanceFromPreviousKm, previous.saved_at, row.saved_at)
       : null;
+    const estimatedTransitMinutesFromPrevious = previous
+      ? Math.round((computeEstimatedTransitHours(row.distanceFromPreviousKm) || 0) * 60)
+      : null;
+    const waitingMinutesFromPrevious = previous
+      ? computeWaitingMinutes(row.distanceFromPreviousKm, previous.saved_at, row.saved_at)
+      : null;
 
     if (row.rowType === "lunch") {
       return {
@@ -460,6 +474,8 @@ function buildCollectorTimelineRows({
         gpsSource: row.hasGps ? "activity_log" : null,
         distanceFromPreviousKm: row.distanceFromPreviousKm,
         speedFromPreviousKmH,
+        estimatedTransitMinutesFromPrevious,
+        waitingMinutesFromPrevious,
       };
     }
 
@@ -504,6 +520,8 @@ function buildCollectorTimelineRows({
       gpsSource: row.gpsSource || (row.hasGps ? "collection_visit" : null),
       distanceFromPreviousKm: row.distanceFromPreviousKm,
       speedFromPreviousKmH,
+      estimatedTransitMinutesFromPrevious,
+      waitingMinutesFromPrevious,
       whatsappSummary: reportFields.whatsappSummary,
       queuePriority: reportFields.queuePriority,
       probabilityLabel: reportFields.probabilityLabel,

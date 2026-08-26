@@ -203,7 +203,7 @@ export function useOrder({
     setOrderQuantities((current) => decreaseOrderQty(current, itemCode));
   }, []);
 
-  const saveDraft = useCallback(async () => {
+  const saveDraft = useCallback(async (options = {}) => {
     if (!selectedCustomer) return null;
     if (orderItems.length === 0) {
       if (selectedQuantityCount > 0) {
@@ -267,7 +267,9 @@ export function useOrder({
         if (!draftOrderId) {
           setDraftOrderId(pendingOrderId);
         }
-        setMessage(saveResult.message || 'Draft saved on device. It will sync automatically when you are back online.');
+        if (!options.silent) {
+          setMessage(saveResult.message || 'Draft saved on device. It will sync automatically when you are back online.');
+        }
         return pendingOrderId;
       }
 
@@ -279,7 +281,9 @@ export function useOrder({
       setDraftOrderId(payload.orderId);
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'DRAFT').toUpperCase());
-      setMessage('Draft order saved successfully.');
+      if (!options.silent) {
+        setMessage('Draft order saved successfully.');
+      }
       return payload.orderId;
     } catch (err) {
       setError(err.message || 'Unable to save draft order.');
@@ -289,7 +293,7 @@ export function useOrder({
     }
   }, [draftOrderId, language, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole]);
 
-  const submitOrder = useCallback(async () => {
+  const submitOrder = useCallback(async (options = {}) => {
     if (orderItems.length === 0) {
       if (selectedQuantityCount > 0) {
         setError('Selected items are not allowed for ordering. Please choose active items and try again.');
@@ -352,7 +356,9 @@ export function useOrder({
         if (!draftOrderId) {
           setDraftOrderId(pendingOrderId);
         }
-        setMessage(saveResult.message || 'Order saved on device. It will submit automatically when you are back online.');
+        if (!options.silent) {
+          setMessage(saveResult.message || 'Order saved on device. It will submit automatically when you are back online.');
+        }
         setShowOrderReview(false);
         setLoadedOrderStatus('SUBMITTED');
         return pendingOrderId;
@@ -366,7 +372,9 @@ export function useOrder({
       setDraftOrderId(payload.orderId);
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'SUBMITTED').toUpperCase());
-      setMessage(`Order #${payload.orderId} submitted successfully.`);
+      if (!options.silent) {
+        setMessage(`Order #${payload.orderId} submitted successfully.`);
+      }
       setShowOrderReview(false);
       return payload.orderId;
     } catch (err) {

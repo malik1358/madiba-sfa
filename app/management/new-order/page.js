@@ -26,9 +26,12 @@ import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
 import { sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { useAppPopup } from "../../components/AppPopupProvider";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
+import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
+import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -496,6 +499,7 @@ export default function NewOrderPage() {
   const [message, setMessage] = useState("");
 
   usePopupMessages({ message, error });
+  const { showPopup } = useAppPopup();
   const [customers, setCustomers] = useState([]);
   const [itemsMaster, setItemsMaster] = useState([]);
   const [priceSheetItems, setPriceSheetItems] = useState([]);
@@ -852,8 +856,8 @@ export default function NewOrderPage() {
   );
 
   const downloadOrderPdf = useCallback(
-    async (snapshot) => {
-      if (!snapshot) return;
+    async (snapshot, options = {}) => {
+      if (!snapshot) return null;
 
       setDownloadingPdf(true);
       try {
@@ -1186,9 +1190,21 @@ export default function NewOrderPage() {
           customerCode: snapshot.customerCode,
           savedAtIso: snapshot.savedAtIso,
         });
+        const summaryText = buildOrderWhatsappSummary(snapshot, language);
+
+        if (options.returnFileOnly) {
+          const blob = doc.output("blob");
+          return {
+            method: "prepared",
+            file: new File([blob], fileName, { type: "application/pdf" }),
+            fileName,
+            summaryText,
+          };
+        }
+
         const shareResult = await saveOrShareOrderPdf(doc, fileName, {
           title: `Order #${snapshot.orderId}`,
-          text: `${snapshot.statusLabel} order for ${snapshot.customerName || snapshot.customerCode}`,
+          text: summaryText,
           dialogTitle: "Save or share order PDF",
         });
         return shareResult;
@@ -1202,17 +1218,43 @@ export default function NewOrderPage() {
         setDownloadingPdf(false);
       }
     },
-    [setError]
+    [language, setError]
   );
 
+  const presentOrderWhatsappShare = useCallback(async (snapshot, { savedMessage, queued = false } = {}) => {
+    if (!snapshot) return;
+
+    setMessage("");
+    setLastSavedOrder(snapshot);
+
+    const prepared = await downloadOrderPdf(snapshot, { returnFileOnly: true });
+    if (!prepared?.file) {
+      showPopup({
+        message: language === "ar"
+          ? "تم حفظ الطلب، لكن تعذر تجهيز PDF. حاول Share PDF مرة أخرى."
+          : "Order saved, but PDF could not be prepared. Tap Share PDF to try again.",
+        variant: "warning",
+      });
+      return;
+    }
+
+    const isNative = await isNativeMobilePlatform();
+    showPopup({
+      message: savedMessage,
+      variant: "success",
+      whatsappText: prepared.summaryText,
+      whatsappFile: prepared.file,
+      autoShareWhatsapp: isNative || queued,
+    });
+  }, [downloadOrderPdf, language, showPopup]);
+
   const handleSaveDraft = useCallback(async () => {
-    const orderId = await saveDraft();
+    const orderId = await saveDraft({ silent: true });
     if (!orderId) return;
 
     const snapshot = buildOrderSnapshot(orderId, "Draft Saved");
     if (!snapshot) return;
 
-    setLastSavedOrder(snapshot);
     setPreviousDrafts((current) => {
       const next = current.filter((draft) => draft.id !== orderId);
       return [
@@ -1227,13 +1269,21 @@ export default function NewOrderPage() {
       ].slice(0, 25);
     });
 
-    await downloadOrderPdf(snapshot);
-    setMessage(`Draft order #${orderId} saved. Choose an app to save or share the PDF.`);
-  }, [buildOrderSnapshot, downloadOrderPdf, saveDraft]);
+    const queued = String(orderId).startsWith("pending:");
+    const savedMessage = queued
+      ? (language === "ar"
+        ? `تم حفظ مسودة الطلب #${orderId} على الجهاز وسيتم المزامنة تلقائياً.`
+        : `Draft order #${orderId} saved on device and will sync automatically.`)
+      : (language === "ar"
+        ? `تم حفظ مسودة الطلب #${orderId}.`
+        : `Draft order #${orderId} saved.`);
+
+    await presentOrderWhatsappShare(snapshot, { savedMessage, queued });
+  }, [buildOrderSnapshot, language, presentOrderWhatsappShare, saveDraft]);
 
   const handleSubmitOrder = useCallback(async () => {
     const pendingSnapshot = buildOrderSnapshot(draftOrderId || "pending", "Submitted");
-    const orderId = await submitOrder();
+    const orderId = await submitOrder({ silent: true });
     if (!orderId || !pendingSnapshot) return;
 
     const snapshot = {
@@ -1243,14 +1293,17 @@ export default function NewOrderPage() {
       statusLabel: "Submitted",
     };
 
-    setLastSavedOrder(snapshot);
-    const shareResult = await downloadOrderPdf(snapshot);
-    if (shareResult?.method === "cancelled") {
-      setMessage(`Order #${orderId} submitted. Tap Save / Share PDF to send it later.`);
-      return;
-    }
-    setMessage(`Order #${orderId} submitted. Choose WhatsApp, Drive, Files, or another app to save or share the PDF.`);
-  }, [buildOrderSnapshot, downloadOrderPdf, draftOrderId, submitOrder]);
+    const queued = String(orderId).startsWith("pending:");
+    const savedMessage = queued
+      ? (language === "ar"
+        ? `تم حفظ الطلب #${orderId} على الجهاز وسيتم الإرسال عند عودة الاتصال.`
+        : `Order #${orderId} saved on device and will submit when back online.`)
+      : (language === "ar"
+        ? `تم إرسال الطلب #${orderId}.`
+        : `Order #${orderId} submitted.`);
+
+    await presentOrderWhatsappShare(snapshot, { savedMessage, queued });
+  }, [buildOrderSnapshot, draftOrderId, language, presentOrderWhatsappShare, submitOrder]);
 
   const shareText = useMemo(() => {
     if (!lastSavedOrder) return "";
@@ -1987,15 +2040,21 @@ export default function NewOrderPage() {
                     type="button"
                     className="modulePrimaryButton"
                     disabled={downloadingPdf || !lastSavedOrder}
-                    onClick={() => downloadOrderPdf(lastSavedOrder)}
+                    onClick={() => {
+                      void presentOrderWhatsappShare(lastSavedOrder, {
+                        savedMessage: language === "ar"
+                          ? `PDF للطلب #${lastSavedOrder.orderId} جاهز للمشاركة.`
+                          : `Order #${lastSavedOrder.orderId} PDF is ready to share.`,
+                      });
+                    }}
                   >
-                    {downloadingPdf ? "Preparing PDF..." : "Save / Share PDF"}
+                    {downloadingPdf ? "Preparing PDF..." : "Share PDF on WhatsApp"}
                   </button>
                   <a className="moduleShareLink" href={emailShareUrl}>Share order details via Email</a>
                 </div>
 
                 <p className="moduleReviewNote">
-                  After save or submit, Android opens a share menu so you can send the PDF to WhatsApp, save to Files/Drive, or another app.
+                  After save or submit, the app opens WhatsApp sharing with the order PDF attached, same as collection visits.
                 </p>
               </section>
             )}

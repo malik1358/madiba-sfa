@@ -16,6 +16,10 @@ test("buildFieldVisitWhatsappSummary builds compact visit message", () => {
     customer: {
       customer_code: "1542",
       customer_name: "Sultan Salem Ahmed Al-Shehri Accessories Establishment",
+      outstanding_0_30: 1200,
+      outstanding_30_60: 800,
+      outstanding_61_90: 500,
+      outstanding_above_90: 300,
     },
     visitForm: {
       outcome: "PAYMENT_FOLLOWUP",
@@ -38,4 +42,10 @@ test("buildFieldVisitWhatsappSummary builds compact visit message", () => {
   assert.match(summary, /Notes: Customer asked for invoice copy\./);
   assert.match(summary, /Cable A: Available/);
   assert.match(summary, /Switch B: Not available/);
+  assert.match(summary, /Outstanding:/);
+  assert.match(summary, /0-30: 1,200/);
+  assert.match(summary, /31-60: 800/);
+  assert.match(summary, /61-90: 500/);
+  assert.match(summary, />90: 300/);
+  assert.match(summary, /Total: 2,800/);
 });

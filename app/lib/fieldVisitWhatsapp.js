@@ -10,6 +10,10 @@ function formatDateOnly(value) {
   return date.toLocaleDateString("en-GB");
 }
 
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
 const OUTCOME_LABELS = {
   PAYMENT_FOLLOWUP: { en: "Payment follow-up", ar: "متابعة دفع" },
   COME_BACK_LATER: { en: "Asked to come back later", ar: "طلب العودة لاحقاً" },
@@ -45,6 +49,12 @@ export function buildFieldVisitWhatsappSummary({
     available: isAr ? "متوفر" : "Available",
     notAvailable: isAr ? "غير متوفر" : "Not available",
     notSpecified: isAr ? "غير محدد" : "not specified",
+    outstanding: isAr ? "المستحقات" : "Outstanding",
+    bucket0To30: isAr ? "0-30 يوماً" : "0-30",
+    bucket31To60: isAr ? "31-60 يوماً" : "31-60",
+    bucket61To90: isAr ? "61-90 يوماً" : "61-90",
+    bucketAbove90: isAr ? ">90 يوماً" : ">90",
+    totalOutstanding: isAr ? "الإجمالي" : "Total",
   };
 
   const outcome = formatFieldVisitOutcome(visitForm.outcome, language);
@@ -76,6 +86,19 @@ export function buildFieldVisitWhatsappSummary({
       lines.push(`- ${itemName}: ${status}`);
     });
   }
+
+  const bucket0To30 = Number(customer.outstanding_0_30 || 0);
+  const bucket31To60 = Number(customer.outstanding_30_60 || 0);
+  const bucket61To90 = Number(customer.outstanding_61_90 || 0);
+  const bucketAbove90 = Number(customer.outstanding_above_90 || 0);
+  const totalOutstanding = bucket0To30 + bucket31To60 + bucket61To90 + bucketAbove90;
+
+  lines.push(`${labels.outstanding}:`);
+  lines.push(`${labels.bucket0To30}: ${formatMoney(bucket0To30)}`);
+  lines.push(`${labels.bucket31To60}: ${formatMoney(bucket31To60)}`);
+  lines.push(`${labels.bucket61To90}: ${formatMoney(bucket61To90)}`);
+  lines.push(`${labels.bucketAbove90}: ${formatMoney(bucketAbove90)}`);
+  lines.push(`${labels.totalOutstanding}: ${formatMoney(totalOutstanding)}`);
 
   return lines.join("\n");
 }

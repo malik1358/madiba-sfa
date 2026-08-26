@@ -1,9 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildCollectionQueues, filterCollectionQueueInvoices } from "../../lib/paymentCollections.js";
+import { buildCollectionQueues, customerMatchesCollectionScope, filterCollectionQueueInvoices, redactCollectionVisitScheduleForViewer } from "../../lib/paymentCollections.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
-import { resolveMutualGroupProfiles, buildSalesmanScopeMatchers, salesmanValueMatchesScope, normalizeSalesmanCode } from "../../lib/mutualSalesmanGroups.js";
+import { resolveMutualGroupProfiles, buildSalesmanScopeMatchers, normalizeSalesmanCode } from "../../lib/mutualSalesmanGroups.js";
 import {
   OUTSTANDING_DATASET_KEY,
   extractLeadingCustomerCodeAndName,
@@ -359,6 +359,10 @@ export async function getSalesScope(admin, userId) {
   let visibleSalesmanCodes = [profile.salesman_code];
   let scopeProfiles = [profile];
   let hasAllAccess = false;
+  let subordinateUserIds = [];
+  let visibleSchedulerProfiles = [profile];
+  let canSeeAllSchedulers = false;
+  let visibleSchedulerUserIds = [userId];
 
   const userRole = String(profile?.role || "").toLowerCase();
   const normalizedProfileCode = String(profile.salesman_code || "").trim().toUpperCase();
@@ -397,7 +401,7 @@ export async function getSalesScope(admin, userId) {
 
       if (!usersError && allAuthUsers?.users) {
         const subordinateCodes = [normalizedProfileCode];
-        const subordinateUserIds = [];
+        subordinateUserIds = [];
 
         for (const authU of allAuthUsers.users) {
           const metadata = authU?.user_metadata || authU?.app_metadata || {};
@@ -411,12 +415,15 @@ export async function getSalesScope(admin, userId) {
         if (subordinateUserIds.length > 0) {
           const { data: subProfiles } = await admin
             .from("profiles")
-            .select("salesman_code")
+            .select("id,salesman_code,salesman_name,role,email")
             .in("id", subordinateUserIds);
 
           (subProfiles || []).forEach((subProfile) => {
             if (subProfile?.salesman_code) {
               subordinateCodes.push(subProfile.salesman_code);
+            }
+            if (subProfile?.id) {
+              visibleSchedulerProfiles.push(subProfile);
             }
           });
         }
@@ -452,10 +459,45 @@ export async function getSalesScope(admin, userId) {
         }
       });
       scopeProfiles = [...scopeProfilesByKey.values()];
+
+      visibleSchedulerProfiles = [profile];
+      (subordinateUserIds || []).forEach((subordinateId) => {
+        const match = (scopeProfiles || []).find((entry) => entry?.id === subordinateId);
+        if (match) visibleSchedulerProfiles.push(match);
+      });
+      mutualProfiles.forEach((entry) => {
+        if (entry?.id) visibleSchedulerProfiles.push(entry);
+      });
+
+      const schedulerIdSet = new Set();
+      visibleSchedulerProfiles.forEach((entry) => {
+        if (entry?.id) schedulerIdSet.add(entry.id);
+      });
+      visibleSchedulerUserIds = [...schedulerIdSet];
     } catch {
       // Keep the existing scope if team profile lookup fails.
     }
   }
+
+  if (userRole === "admin" || userRole === "manager") {
+    canSeeAllSchedulers = true;
+    visibleSchedulerUserIds = null;
+  } else if (hasAllAccess) {
+    canSeeAllSchedulers = false;
+    visibleSchedulerUserIds = [userId];
+    visibleSchedulerProfiles = [profile];
+  }
+
+  const visibleSchedulers = canSeeAllSchedulers
+    ? null
+    : [...new Map(
+      visibleSchedulerProfiles
+        .filter((entry) => entry?.id)
+        .map((entry) => [entry.id, {
+          id: entry.id,
+          label: formatCollectionUserDisplayName(entry),
+        }]),
+    ).values()];
 
   return {
     visibleSalesmanCodes: [...new Set(visibleSalesmanCodes.filter(Boolean))],
@@ -463,6 +505,10 @@ export async function getSalesScope(admin, userId) {
     identitySearchPatterns: [profile.salesman_code],
     hasAllAccess,
     userRole,
+    userId,
+    canSeeAllSchedulers,
+    visibleSchedulerUserIds,
+    visibleSchedulers,
   };
 }
 
@@ -674,22 +720,27 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     const customerInvoices = filterCollectionQueueInvoices(allCustomerInvoices);
     if (customerInvoices.length === 0) return;
 
-    const visits = latestCustomerVisits(customer.customer_code);
+    const visits = latestCustomerVisits(customer.customer_code).map((visit) => {
+      const schedulerProfile = visit?.created_by ? creatorProfileMap.get(visit.created_by) : null;
+      return redactCollectionVisitScheduleForViewer(visit, schedulerProfile, {
+        userId: scope.userId,
+        userRole: scope.userRole,
+        canSeeAllSchedulers: scope.canSeeAllSchedulers,
+        visibleSchedulerUserIds: scope.visibleSchedulerUserIds,
+      });
+    });
     const legalTransfer = legalTransfersByCustomer.get(customer.customer_code);
 
-    // The uploaded file decides who collects, since customer assignments drift out of date.
+    // The uploaded outstanding file decides who collects when invoice salesman is present.
     const uploadSalesman = pickOutstandingSalesmanName(customerInvoices);
-    const invoiceSalesmen = customerInvoices
-      .map((invoice) => invoice.salesman)
-      .filter((name) => name && !isPlaceholderSalesmanValue(name));
-    if (!scope.hasAllAccess) {
-      const invoiceOwned = (uploadSalesman && salesmanValueMatchesScope(uploadSalesman, scopeMatchers))
-        || invoiceSalesmen.some((name) => salesmanValueMatchesScope(name, scopeMatchers));
-      const customerCode = customer.current_salesman_code;
-      const customerOwned = !isPlaceholderSalesmanValue(customerCode)
-        && (salesmanValueMatchesScope(customerCode, scopeMatchers)
-          || normalizedScopeCodes.has(normalizeCode(customerCode)));
-      if (!invoiceOwned && !customerOwned) return;
+    if (!customerMatchesCollectionScope({
+      customer,
+      customerInvoices,
+      scopeMatchers,
+      normalizedScopeCodes: [...normalizedScopeCodes],
+      hasAllAccess: scope.hasAllAccess,
+    })) {
+      return;
     }
 
     const uploadedOutstanding = findOutstandingForCustomer(
@@ -750,6 +801,12 @@ export async function GET(request) {
       dueCustomers: queues.dueCustomers,
       notDueCustomers: queues.notDueCustomers,
       legalCustomers: queues.legalCustomers,
+      schedulerScope: {
+        userId: scope.userId,
+        canSeeAllSchedulers: scope.canSeeAllSchedulers,
+        visibleSchedulerUserIds: scope.visibleSchedulerUserIds,
+        visibleSchedulers: scope.visibleSchedulers,
+      },
     });
   } catch (error) {
     console.error("Error fetching payment collections:", error);

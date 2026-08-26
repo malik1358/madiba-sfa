@@ -34,7 +34,9 @@ const TEXT = {
 
 const PENDING_STATUSES = PENDING_ORDER_STATUSES;
 const INVOICE_STATUS_PENDING_CREDIT = "Pending for credit approval";
+const INVOICE_STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
 const INVOICE_STATUS_REJECTED = "Rejected by management";
+const INVOICE_STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
 const INVOICE_STATUS_MADE = "Invoice made";
 const OUTSTANDING_API = "/api/outstanding";
 const EMPTY_FILTERS = {
@@ -1005,6 +1007,14 @@ export default function PendingOrdersPage() {
                                   <span> | <strong>Time to make:</strong> {formatDuration(meta?.invoiceBuildSeconds)}</span>
                                 </div>
 
+                                {meta?.prospectLinkedCustomerCode ? (
+                                  <div className="moduleHint" style={{ marginTop: "8px" }}>
+                                    <strong>Prospect linked:</strong> {meta.prospectLinkedCustomerCode}
+                                    {meta.prospectLinkedCustomerName ? ` - ${meta.prospectLinkedCustomerName}` : ""}
+                                    {meta.prospectGpsCopied ? " | GPS copied to customer" : ""}
+                                  </div>
+                                ) : null}
+
                                 <InvoiceComparisonPanel meta={meta} />
 
                                 {isInvoiceMaker && (
@@ -1019,7 +1029,9 @@ export default function PendingOrdersPage() {
                                         >
                                           <option value="">Select status</option>
                                           <option value={INVOICE_STATUS_PENDING_CREDIT}>{INVOICE_STATUS_PENDING_CREDIT}</option>
+                                          <option value={INVOICE_STATUS_WAITING_CREDIT_APPLICATION}>{INVOICE_STATUS_WAITING_CREDIT_APPLICATION}</option>
                                           <option value={INVOICE_STATUS_REJECTED}>{INVOICE_STATUS_REJECTED}</option>
+                                          <option value={INVOICE_STATUS_STOCK_UNAVAILABLE}>{INVOICE_STATUS_STOCK_UNAVAILABLE}</option>
                                           <option value={INVOICE_STATUS_MADE} disabled={!meta?.invoiceFilePath}>{INVOICE_STATUS_MADE}</option>
                                         </select>
                                       </label>

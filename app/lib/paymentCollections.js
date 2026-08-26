@@ -1,4 +1,5 @@
-import { resolveInvoiceAgingDays } from "./outstanding.js";
+import { isPlaceholderSalesmanValue, pickOutstandingSalesmanName, resolveInvoiceAgingDays } from "./outstanding.js";
+import { salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -39,6 +40,74 @@ export function isExcludedCollectionQueueSalesman(value, {
 
 export function filterCollectionQueueInvoices(invoices, options = {}) {
   return (invoices || []).filter((invoice) => !isExcludedCollectionQueueSalesman(invoice?.salesman, options));
+}
+
+export function customerMatchesCollectionScope({
+  customer = {},
+  customerInvoices = [],
+  scopeMatchers,
+  normalizedScopeCodes = [],
+  hasAllAccess = false,
+} = {}) {
+  if (hasAllAccess) return true;
+
+  const scopeCodeSet = new Set(
+    (normalizedScopeCodes || []).map((code) => normalizeCode(code)).filter(Boolean),
+  );
+  const uploadSalesman = pickOutstandingSalesmanName(customerInvoices);
+  const invoiceSalesmen = (customerInvoices || [])
+    .map((invoice) => invoice.salesman)
+    .filter((name) => name && !isPlaceholderSalesmanValue(name));
+
+  const invoiceOwned = (uploadSalesman && !isPlaceholderSalesmanValue(uploadSalesman)
+    && salesmanValueMatchesScope(uploadSalesman, scopeMatchers))
+    || invoiceSalesmen.some((name) => salesmanValueMatchesScope(name, scopeMatchers));
+
+  const hasInvoiceSalesman = Boolean(
+    (uploadSalesman && !isPlaceholderSalesmanValue(uploadSalesman))
+    || invoiceSalesmen.length > 0,
+  );
+
+  if (hasInvoiceSalesman) {
+    return invoiceOwned;
+  }
+
+  const customerCode = customer.current_salesman_code;
+  return !isPlaceholderSalesmanValue(customerCode)
+    && (salesmanValueMatchesScope(customerCode, scopeMatchers)
+      || scopeCodeSet.has(normalizeCode(customerCode)));
+}
+
+export function canViewerSeeScheduledRevisit(visit, _schedulerProfile, viewer = {}) {
+  if (!visit?.next_visit_at || !visit?.created_by) return true;
+  if (viewer.canSeeAllSchedulers) return true;
+
+  const schedulerId = String(visit.created_by || visit.scheduled_by_id || "").trim();
+  const allowedIds = (viewer.visibleSchedulerUserIds || [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  if (allowedIds.length === 0) {
+    const viewerId = String(viewer.userId || "").trim();
+    return Boolean(viewerId && viewerId === schedulerId);
+  }
+
+  return allowedIds.includes(schedulerId);
+}
+
+export function canViewerSeeCollectorScheduledRevisit(visit, schedulerProfile, viewer = {}) {
+  return canViewerSeeScheduledRevisit(visit, schedulerProfile, viewer);
+}
+
+export function redactCollectionVisitScheduleForViewer(visit, schedulerProfile, viewer = {}) {
+  if (!visit || canViewerSeeScheduledRevisit(visit, schedulerProfile, viewer)) {
+    return visit;
+  }
+
+  return {
+    ...visit,
+    next_visit_at: null,
+  };
 }
 
 export function shouldExcludeCollectionQueueRecord(record, options = {}) {

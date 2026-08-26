@@ -6,6 +6,10 @@ import {
   buildCollectionQueues,
   buildExposureScore,
   buildExposureScoreFromInvoices,
+  customerMatchesCollectionScope,
+  canViewerSeeScheduledRevisit,
+  canViewerSeeCollectorScheduledRevisit,
+  redactCollectionVisitScheduleForViewer,
   filterCollectionQueueInvoices,
   hasCollectionVisit,
   invoiceHasCashRef,
@@ -16,6 +20,7 @@ import {
   normalizeWhatsappNumber,
   sortCashQueueCustomers,
 } from "../app/lib/paymentCollections.js";
+import { buildSalesmanScopeMatchers } from "../app/lib/mutualSalesmanGroups.js";
 import { hydrateOutstandingInvoices } from "../app/lib/outstanding.js";
 
 test("invoiceHasCashRef matches C in Ref. No. only", () => {
@@ -576,4 +581,97 @@ test("buildCollectionQueues drops customers with only excluded salesman invoices
   ], "2026-08-14T10:00:00Z");
 
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["C-KEEP"]);
+});
+
+test("customerMatchesCollectionScope prefers outstanding invoice salesman over customer master", () => {
+  const abdulScope = buildSalesmanScopeMatchers([
+    { salesman_code: "ABDUL REHMAN", salesman_name: "ABDUL REHMAN" },
+  ]);
+
+  assert.equal(customerMatchesCollectionScope({
+    customer: { current_salesman_code: "ABDUL REHMAN" },
+    customerInvoices: [{ salesman: "Parvez", pending_amount: 1000 }],
+    scopeMatchers: abdulScope,
+    normalizedScopeCodes: ["ABDUL REHMAN"],
+    hasAllAccess: false,
+  }), false);
+
+  const parvezScope = buildSalesmanScopeMatchers([
+    { salesman_code: "PARVEZ", salesman_name: "Parvez (PARVEZ)" },
+  ]);
+
+  assert.equal(customerMatchesCollectionScope({
+    customer: { current_salesman_code: "ABDUL REHMAN" },
+    customerInvoices: [{ salesman: "Parvez", pending_amount: 1000 }],
+    scopeMatchers: parvezScope,
+    normalizedScopeCodes: ["PARVEZ"],
+    hasAllAccess: false,
+  }), true);
+});
+
+test("customerMatchesCollectionScope falls back to customer master when invoice salesman is missing", () => {
+  const abdulScope = buildSalesmanScopeMatchers([
+    { salesman_code: "ABDUL REHMAN", salesman_name: "ABDUL REHMAN" },
+  ]);
+
+  assert.equal(customerMatchesCollectionScope({
+    customer: { current_salesman_code: "ABDUL REHMAN" },
+    customerInvoices: [{ salesman: "", pending_amount: 1000 }],
+    scopeMatchers: abdulScope,
+    normalizedScopeCodes: ["ABDUL REHMAN"],
+    hasAllAccess: false,
+  }), true);
+});
+
+test("canViewerSeeScheduledRevisit hides other users schedules from salesmen", () => {
+  const visit = {
+    created_by: "collector-user-1",
+    scheduled_by_id: "collector-user-1",
+    next_visit_at: "2026-08-20",
+  };
+
+  assert.equal(canViewerSeeScheduledRevisit(visit, null, {
+    userId: "collector-user-1",
+    visibleSchedulerUserIds: ["collector-user-1"],
+  }), true);
+
+  assert.equal(canViewerSeeScheduledRevisit(visit, null, {
+    userId: "abdul-user",
+    visibleSchedulerUserIds: ["abdul-user"],
+  }), false);
+
+  assert.equal(canViewerSeeScheduledRevisit(visit, null, {
+    userId: "manager-user",
+    canSeeAllSchedulers: true,
+  }), true);
+});
+
+test("canViewerSeeCollectorScheduledRevisit delegates to scheduled revisit visibility", () => {
+  const collectorProfile = { role: "collector", salesman_code: "SM001" };
+  const visit = {
+    created_by: "collector-user-1",
+    next_visit_at: "2026-08-20",
+  };
+
+  assert.equal(canViewerSeeCollectorScheduledRevisit(visit, collectorProfile, {
+    userId: "salesman-user",
+    visibleSchedulerUserIds: ["salesman-user"],
+  }), false);
+});
+
+test("redactCollectionVisitScheduleForViewer removes next visit date for unauthorized viewers", () => {
+  const collectorProfile = { role: "collector", salesman_code: "SM001" };
+  const visit = {
+    created_by: "collector-user-1",
+    next_visit_at: "2026-08-20",
+    payment_status: "PROMISED",
+  };
+
+  const redacted = redactCollectionVisitScheduleForViewer(visit, collectorProfile, {
+    userId: "salesman-user",
+    visibleSchedulerUserIds: ["salesman-user"],
+  });
+
+  assert.equal(redacted.next_visit_at, null);
+  assert.equal(redacted.payment_status, "PROMISED");
 });

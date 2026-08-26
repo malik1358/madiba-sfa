@@ -6,6 +6,8 @@ import {
   compareStoredInvoiceWithOrder,
   INVOICE_BUCKET,
 } from "../../lib/orderInvoiceComparison.js";
+import { attachProspectLinkToMeta } from "../../lib/prospectInvoiceLink.js";
+import { isProspectCustomerCode } from "../../lib/customerCode.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -15,7 +17,9 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 const STATUS_PENDING_CREDIT = "Pending for credit approval";
+const STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
 const STATUS_REJECTED = "Rejected by management";
+const STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
 const STATUS_INVOICE_MADE = "Invoice made";
 
 function normalizeCode(value) {
@@ -265,10 +269,19 @@ export async function GET(request) {
     const compare = String(url.searchParams.get("compare") || "").trim() === "1";
 
     if (singleOrderId) {
-      await ensureOrderVisible(admin, singleOrderId, scope);
+      const order = await ensureOrderVisible(admin, singleOrderId, scope);
       const metaMap = await readMetaMap(admin, [singleOrderId]);
       let meta = metaMap.get(singleOrderId) || { orderId: singleOrderId };
       meta = await hydrateMetaWithComparison(admin, meta, { forceCompare: compare });
+
+      if (compare && isProspectCustomerCode(order.customer_code)) {
+        const linked = await attachProspectLinkToMeta(admin, order, meta);
+        if (linked.meta !== meta) {
+          await upsertMeta(admin, linked.meta);
+        }
+        meta = linked.meta;
+      }
+
       const hydrated = await withSignedUrl(admin, meta);
       return NextResponse.json({ success: true, item: hydrated });
     }
@@ -388,6 +401,7 @@ export async function POST(request) {
       }
 
       let enriched = updated;
+      let prospectLink = null;
       try {
         const comparison = await compareInvoiceBufferWithOrder(admin, orderId, arrayBuffer);
         enriched = attachComparisonToMeta(updated, comparison);
@@ -395,10 +409,16 @@ export async function POST(request) {
         // Keep upload successful even if PDF text extraction fails.
       }
 
+      if (isProspectCustomerCode(order.customer_code)) {
+        const linked = await attachProspectLinkToMeta(admin, order, enriched, arrayBuffer);
+        enriched = linked.meta;
+        prospectLink = linked.prospectLink;
+      }
+
       await upsertMeta(admin, enriched);
       const hydrated = await withSignedUrl(admin, enriched);
 
-      return NextResponse.json({ success: true, item: hydrated });
+      return NextResponse.json({ success: true, item: hydrated, prospectLink });
     }
 
     const body = await request.json();
@@ -428,12 +448,16 @@ export async function POST(request) {
         return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
       }
 
-      await ensureOrderVisible(admin, orderId, scope);
+      const order = await ensureOrderVisible(admin, orderId, scope);
       const metaMap = await readMetaMap(admin, [orderId]);
       const meta = metaMap.get(orderId) || { orderId };
       const compared = await hydrateMetaWithComparison(admin, meta, { forceCompare: true });
-      const hydrated = await withSignedUrl(admin, compared);
-      return NextResponse.json({ success: true, item: hydrated });
+      const linked = await attachProspectLinkToMeta(admin, order, compared);
+      if (linked.meta !== compared) {
+        await upsertMeta(admin, linked.meta);
+      }
+      const hydrated = await withSignedUrl(admin, linked.meta);
+      return NextResponse.json({ success: true, item: hydrated, prospectLink: linked.prospectLink });
     }
 
     if (mode !== "set-status") {
@@ -451,7 +475,7 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
     }
 
-    if (![STATUS_PENDING_CREDIT, STATUS_REJECTED, STATUS_INVOICE_MADE].includes(status)) {
+    if (![STATUS_PENDING_CREDIT, STATUS_WAITING_CREDIT_APPLICATION, STATUS_REJECTED, STATUS_STOCK_UNAVAILABLE, STATUS_INVOICE_MADE].includes(status)) {
       return NextResponse.json({ success: false, error: "Unsupported status value." }, { status: 400 });
     }
 

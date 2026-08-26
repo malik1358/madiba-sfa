@@ -37,6 +37,7 @@ import {
   isCashOnlyQueueCustomer,
   isCashQueueCustomer,
   isScheduledRevisitQueueCustomer,
+  canViewerSeeScheduledRevisit,
   sortCashQueueCustomers,
 } from "../../lib/paymentCollections";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
@@ -579,6 +580,15 @@ function getScheduledByKey(row) {
   return String(row?.latest_collection?.scheduled_by_id || row?.latest_collection?.created_by || "").trim();
 }
 
+function buildSchedulerViewerContext(schedulerScope) {
+  if (!schedulerScope) return null;
+  return {
+    userId: schedulerScope.userId,
+    canSeeAllSchedulers: schedulerScope.canSeeAllSchedulers,
+    visibleSchedulerUserIds: schedulerScope.visibleSchedulerUserIds,
+  };
+}
+
 function VisitRemarkCell({ row, t }) {
   const visit = row?.latest_collection;
   const arabic = String(visit?.remark_arabic || "").trim();
@@ -708,6 +718,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [customerFilter, setCustomerFilter] = useState("");
   const [selectedSalesmen, setSelectedSalesmen] = useState([]);
   const [selectedSchedulers, setSelectedSchedulers] = useState([]);
+  const [schedulerScope, setSchedulerScope] = useState(null);
   const [activeRowKey, setActiveRowKey] = useState("");
   const [summaryForWhatsApp, setSummaryForWhatsApp] = useState("");
   const [receiptFileForWhatsapp, setReceiptFileForWhatsapp] = useState(null);
@@ -853,6 +864,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
     setDueCustomers(due);
     setNotDueCustomers(notDue);
     setLegalCustomers(legal);
+    if (payload.schedulerScope) {
+      setSchedulerScope(payload.schedulerScope);
+    }
 
     const allRows = [...due, ...notDue, ...legal];
     if (preferredKey) {
@@ -913,7 +927,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (loadSeqRef.current !== seq) return cachedResult || queueResult.queues;
 
-      const result = await applyQueuePayload(queueResult.queues, preferredKey);
+      const result = await applyQueuePayload({
+        ...queueResult.queues,
+        schedulerScope: queueResult.queues?.schedulerScope || queueResult.schedulerScope || null,
+      }, preferredKey);
       setQueueFromCache(Boolean(queueResult.fromCache));
       setQueueOffline(Boolean(queueResult.offline));
       setRefreshingQueue(Boolean(queueResult.fromCache && !queueResult.offline));
@@ -1053,32 +1070,48 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   const scheduledRevisitSourceRows = useMemo(() => {
     if (view !== "due") return [];
+    const viewer = buildSchedulerViewerContext(schedulerScope);
     return filterQueueRows([...dueCustomers, ...notDueCustomers], customerFilter, selectedSalesmen)
       .filter((row) => isScheduledRevisitQueueCustomer(row, queueToday))
+      .filter((row) => !viewer || canViewerSeeScheduledRevisit(row?.latest_collection, null, viewer))
       .sort((left, right) => (
         toDateInputValue(left?.latest_collection?.next_visit_at)
           .localeCompare(toDateInputValue(right?.latest_collection?.next_visit_at))
       ));
-  }, [customerFilter, dueCustomers, notDueCustomers, queueToday, selectedSalesmen, view]);
+  }, [customerFilter, dueCustomers, notDueCustomers, queueToday, schedulerScope, selectedSalesmen, view]);
 
   const scheduledRevisitSchedulerOptions = useMemo(() => {
-    const options = new Map();
-    scheduledRevisitSourceRows.forEach((row) => {
-      const key = getScheduledByKey(row);
-      const label = getScheduledByLabel(row);
-      if (!key || label === "-") return;
-      if (!options.has(key)) {
-        options.set(key, { key, label });
-      }
-    });
-    return [...options.values()].sort((left, right) => left.label.localeCompare(right.label));
-  }, [scheduledRevisitSourceRows]);
+    if (schedulerScope?.canSeeAllSchedulers) {
+      const options = new Map();
+      scheduledRevisitSourceRows.forEach((row) => {
+        const key = getScheduledByKey(row);
+        const label = getScheduledByLabel(row);
+        if (!key || label === "-") return;
+        if (!options.has(key)) {
+          options.set(key, { key, label });
+        }
+      });
+      return [...options.values()].sort((left, right) => left.label.localeCompare(right.label));
+    }
+
+    return (schedulerScope?.visibleSchedulers || [])
+      .map((entry) => ({ key: entry.id, label: entry.label }))
+      .sort((left, right) => left.label.localeCompare(right.label));
+  }, [scheduledRevisitSourceRows, schedulerScope]);
 
   const scheduledRevisitRows = useMemo(() => {
-    if (selectedSchedulers.length === 0) return scheduledRevisitSourceRows;
-    const selected = new Set(selectedSchedulers);
+    if (schedulerScope?.canSeeAllSchedulers) {
+      if (selectedSchedulers.length === 0) return scheduledRevisitSourceRows;
+      const selected = new Set(selectedSchedulers);
+      return scheduledRevisitSourceRows.filter((row) => selected.has(getScheduledByKey(row)));
+    }
+
+    const defaultSelection = schedulerScope?.visibleSchedulerUserIds || [];
+    const activeSelection = selectedSchedulers.length > 0 ? selectedSchedulers : defaultSelection;
+    if (activeSelection.length === 0) return scheduledRevisitSourceRows;
+    const selected = new Set(activeSelection);
     return scheduledRevisitSourceRows.filter((row) => selected.has(getScheduledByKey(row)));
-  }, [scheduledRevisitSourceRows, selectedSchedulers]);
+  }, [scheduledRevisitSourceRows, schedulerScope, selectedSchedulers]);
 
   const scheduledRevisitGroups = useMemo(() => {
     const groups = new Map();

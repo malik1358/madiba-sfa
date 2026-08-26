@@ -3,6 +3,7 @@ import BuildUpdateWatcher from "./components/BuildUpdateWatcher";
 import GlobalAppStatus from "./components/GlobalAppStatus";
 import WorkdayTimesBar from "./components/WorkdayTimesBar";
 import GlobalLogoutButton from "./components/GlobalLogoutButton";
+import AppBackButton from "./components/AppBackButton";
 import AppMainNav from "./components/AppMainNav";
 import NativeFieldTracking from "./components/NativeFieldTracking";
 import PwaShell from "./components/PwaShell";
@@ -57,6 +58,7 @@ export default function RootLayout({ children }) {
           <GlobalAppStatus environment={environment} buildId={buildId} buildTime={buildTime} />
           <WorkdayTimesBar />
           <AppMainNav />
+          <AppBackButton />
           <GlobalLogoutButton />
           {children}
         </AppPopupProvider>

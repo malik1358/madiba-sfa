@@ -36,6 +36,18 @@ export function getClientBuildId() {
   return String(document.body?.dataset?.buildId || "local").trim() || "local";
 }
 
+export function buildCacheBustingReloadUrl(serverBuildId, currentHref = "") {
+  const buildToken = String(serverBuildId || "").trim();
+  const href = String(currentHref || "").trim() || "/";
+  const url = new URL(href, "http://local");
+  if (buildToken) {
+    url.searchParams.set("_build", buildToken);
+  } else {
+    url.searchParams.set("_build", String(Date.now()));
+  }
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export function addPdfBuildFooter(doc, buildId = getClientBuildId()) {
   const label = `Build: ${String(buildId || "local").trim() || "local"}`;
   const pageCount = doc.getNumberOfPages();

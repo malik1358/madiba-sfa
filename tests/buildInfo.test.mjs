@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveBuildId, resolveBuildTime, formatBuildDateTime } from "../app/lib/buildInfo.js";
+import {
+  buildCacheBustingReloadUrl,
+  resolveBuildId,
+  resolveBuildTime,
+  formatBuildDateTime,
+} from "../app/lib/buildInfo.js";
 
 test("resolveBuildId prefers Vercel commit sha", () => {
   assert.equal(
@@ -35,4 +40,11 @@ test("formatBuildDateTime formats build timestamp", () => {
   const formatted = formatBuildDateTime("2026-08-20T08:30:00.000Z", "en-GB");
   assert.match(formatted, /20 Aug 2026/);
   assert.match(formatted, /08:30|12:30/);
+});
+
+test("buildCacheBustingReloadUrl adds build query param", () => {
+  assert.equal(
+    buildCacheBustingReloadUrl("1e56c2b", "https://madiba-sfa.vercel.app/management/my-day"),
+    "/management/my-day?_build=1e56c2b",
+  );
 });

@@ -26,6 +26,46 @@ export function todayAttendanceBounds() {
   return { startIso: start.toISOString(), endIso: end.toISOString() };
 }
 
+const GATE_READY_STORAGE_PREFIX = "madiba-sfa:gate-ready:";
+
+export function todayDateKey(referenceDate = new Date()) {
+  return referenceDate.toISOString().slice(0, 10);
+}
+
+export function readGateReadyState(userId, referenceDate = new Date()) {
+  if (typeof window === "undefined" || !userId) return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(`${GATE_READY_STORAGE_PREFIX}${userId}`);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (parsed?.day !== todayDateKey(referenceDate)) return null;
+
+    return {
+      attendanceComplete: Boolean(parsed.attendanceComplete),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function writeGateReadyState(userId, attendanceComplete, referenceDate = new Date()) {
+  if (typeof window === "undefined" || !userId) return;
+
+  try {
+    window.sessionStorage.setItem(
+      `${GATE_READY_STORAGE_PREFIX}${userId}`,
+      JSON.stringify({
+        day: todayDateKey(referenceDate),
+        attendanceComplete: Boolean(attendanceComplete),
+      }),
+    );
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 export async function hasMorningAttendanceToday(supabase, userId) {
   if (!supabase || !userId) return false;
 

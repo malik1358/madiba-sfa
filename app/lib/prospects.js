@@ -66,6 +66,15 @@ export function buildProspectCustomerCode(prospectId) {
   return `PROSPECT-${id}`;
 }
 
+export function parseProspectIdFromCustomerCode(customerCode) {
+  const match = String(customerCode || "").trim().match(/^PROSPECT-(\d+)$/i);
+  if (!match) return null;
+
+  const id = Number(match[1]);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return id;
+}
+
 export function formatProspectOrderLabel(order) {
   const orderNumber = String(order?.order_number || "").trim();
   if (orderNumber) return orderNumber;

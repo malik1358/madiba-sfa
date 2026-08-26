@@ -112,7 +112,27 @@ body {
   cursor: pointer;
 }
 
+.globalBackButton {
+  position: fixed;
+  top: 4px;
+  left: 12px;
+  z-index: 10001;
+  min-height: 26px;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 4px;
+  background: #ffffff;
+  color: #123f49;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .environmentBanner + .globalAppStatus + .globalLogoutButton {
+  top: 38px;
+}
+
+.environmentBanner + .globalAppStatus + .globalBackButton {
   top: 38px;
 }
 
@@ -121,6 +141,7 @@ body {
     gap: 8px 14px;
     flex-wrap: wrap;
     padding-right: 82px;
+    padding-left: 72px;
     font-size: 10px;
   }
 
@@ -172,7 +193,7 @@ body {
 .appMainNavDropdown {
   display: none;
   position: absolute;
-  top: calc(100% + 4px);
+  top: 100%;
   left: 0;
   min-width: 210px;
   padding: 6px;
@@ -180,6 +201,16 @@ body {
   border-radius: 10px;
   background: #ffffff;
   box-shadow: 0 8px 24px rgba(7, 63, 76, 0.12);
+  z-index: 10002;
+}
+
+.appMainNavDropdown::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -6px;
+  height: 6px;
 }
 
 .appMainNavDropdown--open {
@@ -226,8 +257,12 @@ body {
 
   .appMainNav {
     top: 56px;
-    overflow-x: auto;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .appMainNavGroup--open {
+    z-index: 10003;
   }
 
   .environmentBanner + .globalAppStatus + .appMainNav {

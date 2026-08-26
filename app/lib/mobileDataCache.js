@@ -295,6 +295,7 @@ async function fetchCollectionQueuesNetwork(accessToken) {
     dueCustomers: payload.dueCustomers || [],
     notDueCustomers: payload.notDueCustomers || [],
     legalCustomers: payload.legalCustomers || [],
+    schedulerScope: payload.schedulerScope || null,
   };
 }
 
@@ -306,9 +307,16 @@ export async function writeCollectionQueuesForUser(userId, scope, queues) {
     visibleSalesmanCodes: Array.isArray(scope?.visibleSalesmanCodes) ? scope.visibleSalesmanCodes : [],
   };
 
+  const cachePayload = {
+    dueCustomers: queues.dueCustomers || [],
+    notDueCustomers: queues.notDueCustomers || [],
+    legalCustomers: queues.legalCustomers || [],
+    schedulerScope: queues.schedulerScope || null,
+  };
+
   await Promise.all([
     writeCacheEntry(collectionScopeCacheKey(userId), collectionScope, { ttlMs: CACHE_TTL.scopeMs }),
-    writeCacheEntry(collectionQueuesCacheKey(collectionScope), queues, { ttlMs: CACHE_TTL.collectionQueuesMs }),
+    writeCacheEntry(collectionQueuesCacheKey(collectionScope), cachePayload, { ttlMs: CACHE_TTL.collectionQueuesMs }),
   ]);
 
   return true;

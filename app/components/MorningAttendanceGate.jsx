@@ -17,7 +17,7 @@ import { evaluateNativeAndroidApkVersion } from "../lib/androidAppVersion";
 import { isNativeAndroidPlatform } from "../lib/nativeFieldTracking";
 import AndroidApkUpdateRequired from "./AndroidApkUpdateRequired";
 import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
-import { buildGpsActivityNote, GPS_PERMISSION_DENIED_ERROR, GPS_POSITION_UNAVAILABLE_ERROR, GPS_UNSUPPORTED_ERROR, probeGpsLocation, resolveGpsCapturePlatform } from "../lib/geo";
+import { buildGpsActivityNote, GPS_PERMISSION_DENIED_ERROR, GPS_POSITION_UNAVAILABLE_ERROR, GPS_UNSUPPORTED_ERROR, probeGpsLocationWithRetries, resolveGpsCapturePlatform } from "../lib/geo";
 import { hasMorningAttendanceToday, MORNING_ATTENDANCE_COMPLETE_EVENT } from "../lib/morningAttendance";
 import { usePopupMessages } from "../hooks/usePopupMessages";
 
@@ -66,7 +66,38 @@ const TEXT = {
 };
 
 async function captureLocation() {
-  return probeGpsLocation();
+  return probeGpsLocationWithRetries();
+}
+
+function gpsVerifiedStorageKey(userId) {
+  return `madiba-sfa:gps-verified:${userId}`;
+}
+
+function isGpsVerifiedForSession(userId) {
+  if (typeof window === "undefined" || !userId) return false;
+  try {
+    return window.sessionStorage.getItem(gpsVerifiedStorageKey(userId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markGpsVerifiedForSession(userId) {
+  if (typeof window === "undefined" || !userId) return;
+  try {
+    window.sessionStorage.setItem(gpsVerifiedStorageKey(userId), "1");
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function clearGpsVerifiedForSession(userId) {
+  if (typeof window === "undefined" || !userId) return;
+  try {
+    window.sessionStorage.removeItem(gpsVerifiedStorageKey(userId));
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 function readCapturedAt(note, fallbackDate) {
@@ -183,8 +214,27 @@ export default function MorningAttendanceGate({
     }
   }
 
-  async function verifyLocationAccess(hasActiveSession = true) {
+  async function verifyLocationAccess(hasActiveSession = true, options = {}) {
+    const forceRecheck = options.force === true;
+
     if (!locationCheckRequired || !hasActiveSession) {
+      setLocationReady(true);
+      setLocationError("");
+      return true;
+    }
+
+    let userId = "";
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const session = await getSessionWithTimeout(supabase);
+        userId = session?.user?.id || "";
+      } catch {
+        userId = "";
+      }
+    }
+
+    if (!forceRecheck && userId && isGpsVerifiedForSession(userId)) {
       setLocationReady(true);
       setLocationError("");
       return true;
@@ -194,10 +244,13 @@ export default function MorningAttendanceGate({
     setLocationError("");
 
     try {
-      await probeGpsLocation();
+      await probeGpsLocationWithRetries({ attempts: 3 });
+      if (userId) markGpsVerifiedForSession(userId);
       setLocationReady(true);
+      setLocationError("");
       return true;
     } catch (err) {
+      if (userId) clearGpsVerifiedForSession(userId);
       const reason = String(err?.message || "");
       if (reason === GPS_PERMISSION_DENIED_ERROR) {
         setLocationError(t("locationPermissionDenied"));
@@ -505,6 +558,26 @@ export default function MorningAttendanceGate({
           setChecking(false);
           return;
         }
+
+        const supabase = getSupabaseClient();
+        let hasActiveSession = false;
+        if (supabase) {
+          try {
+            const session = await getSessionWithTimeout(supabase);
+            hasActiveSession = Boolean(session?.user?.id);
+          } catch {
+            hasActiveSession = false;
+          }
+        }
+
+        const locationOk = await verifyLocationAccess(hasActiveSession);
+        if (cancelled) return;
+        if (!locationOk) {
+          setReady(false);
+          setChecking(false);
+          return;
+        }
+
         await runAutoClose();
         if (!cancelled) {
           setReady(true);
@@ -775,7 +848,7 @@ export default function MorningAttendanceGate({
                   <button
                     type="button"
                     className="modulePrimaryButton"
-                    onClick={() => verifyLocationAccess(true)}
+                    onClick={() => verifyLocationAccess(true, { force: true })}
                   >
                     {t("checkLocationAgain")}
                   </button>

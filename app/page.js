@@ -11,7 +11,7 @@ import { buildModuleAccess, listAccessibleModules, shouldRequireTransactionGps }
 import { hasMorningAttendanceToday, isMorningAttendanceRequiredForRole } from "./lib/morningAttendance";
 import { useAppPopup } from "./components/AppPopupProvider";
 import { isAndroidBatteryRestricted } from "./lib/androidBatteryOptimization";
-import { probeGpsLocation } from "./lib/geo";
+import { probeGpsLocationWithRetries } from "./lib/geo";
 import { evaluateNativeAndroidApkVersion } from "./lib/androidAppVersion";
 import AndroidApkUpdateRequired from "./components/AndroidApkUpdateRequired";
 import { useLogoutWithDaySummary } from "./hooks/useLogoutWithDaySummary";
@@ -240,7 +240,7 @@ export default function Home() {
         }
 
         try {
-          await probeGpsLocation();
+          await probeGpsLocationWithRetries({ attempts: 3 });
         } catch {
           await supabase.auth.signOut();
           setUser(null);

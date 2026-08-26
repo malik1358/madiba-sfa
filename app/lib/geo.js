@@ -70,6 +70,14 @@ export const GPS_UNSUPPORTED_ERROR = "UNSUPPORTED";
 export const GPS_PERMISSION_DENIED_ERROR = "PERMISSION_DENIED";
 export const GPS_POSITION_UNAVAILABLE_ERROR = "POSITION_UNAVAILABLE";
 export const GPS_LOCATION_FAILED_ERROR = "LOCATION_FAILED";
+export const GPS_PROBE_DEFAULT_ATTEMPTS = 3;
+export const GPS_PROBE_RETRY_DELAY_MS = 1500;
+
+function delayMs(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 export function probeGpsLocation(options = {}) {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -104,8 +112,32 @@ export function probeGpsLocation(options = {}) {
   });
 }
 
+export async function probeGpsLocationWithRetries(options = {}) {
+  const attempts = Math.max(1, Number(options.attempts || GPS_PROBE_DEFAULT_ATTEMPTS));
+  const retryDelayMs = Number.isFinite(Number(options.retryDelayMs))
+    ? Number(options.retryDelayMs)
+    : GPS_PROBE_RETRY_DELAY_MS;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await probeGpsLocation(options);
+    } catch (error) {
+      lastError = error;
+      if (error?.message === GPS_UNSUPPORTED_ERROR || attempt >= attempts) {
+        throw error;
+      }
+      if (retryDelayMs > 0) {
+        await delayMs(retryDelayMs);
+      }
+    }
+  }
+
+  throw lastError || new Error(GPS_LOCATION_FAILED_ERROR);
+}
+
 export function captureGpsLocation() {
-  return probeGpsLocation().catch((error) => {
+  return probeGpsLocationWithRetries().catch((error) => {
     if (error?.message === GPS_PERMISSION_DENIED_ERROR
       || error?.message === GPS_POSITION_UNAVAILABLE_ERROR
       || error?.message === GPS_LOCATION_FAILED_ERROR

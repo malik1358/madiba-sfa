@@ -6,6 +6,7 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
+import DaySummaryBox from "../../components/DaySummaryBox";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import {
   DEFAULT_TRANSIT_SPEED_KMH,
@@ -205,22 +206,6 @@ function formatTimelineEventLabel(row, t) {
   if (row.entryType === "LUNCH_BREAK_OUT") return t("lunchOut");
   if (row.entryType === "LUNCH_BREAK_IN") return t("lunchIn");
   return row.eventLabel || "-";
-}
-
-function DaySummaryBox({ summary, language, title }) {
-  if (!summary?.lines?.length) return null;
-  const lines = language === "ar" ? (summary.linesAr || summary.lines) : summary.lines;
-
-  return (
-    <section className="moduleDaySummary" aria-label={title}>
-      <h3>{title}</h3>
-      <ul className="moduleDaySummaryList">
-        {lines.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
-    </section>
-  );
 }
 
 export default function CollectionReportPage() {

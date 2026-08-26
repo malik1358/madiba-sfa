@@ -1,0 +1,62 @@
+name: Auto Close Workdays
+
+on:
+  schedule:
+    # 21:05 UTC = 00:05 KSA — closes any open workday from the previous KSA date.
+    - cron: "5 21 * * *"
+    # 20:59 UTC = 23:59 KSA — same-day close at end of workday.
+    - cron: "59 20 * * *"
+  workflow_dispatch:
+
+jobs:
+  auto-close:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger auto-close workdays endpoint
+        env:
+          AUTO_CLOSE_WORKDAYS_URL: ${{ secrets.AUTO_CLOSE_WORKDAYS_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          DEFAULT_AUTO_CLOSE_WORKDAYS_URL='https://madiba-sfa.vercel.app/api/cron/auto-close-workdays'
+          AUTO_CLOSE_WORKDAYS_URL_TRIMMED="$(printf '%s' "$AUTO_CLOSE_WORKDAYS_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          AUTO_CLOSE_WORKDAYS_URL_EFFECTIVE="$AUTO_CLOSE_WORKDAYS_URL_TRIMMED"
+
+          if [[ -z "$AUTO_CLOSE_WORKDAYS_URL_EFFECTIVE" ]]; then
+            echo "AUTO_CLOSE_WORKDAYS_URL secret is missing; falling back to default endpoint."
+            AUTO_CLOSE_WORKDAYS_URL_EFFECTIVE="$DEFAULT_AUTO_CLOSE_WORKDAYS_URL"
+          elif [[ ! "$AUTO_CLOSE_WORKDAYS_URL_EFFECTIVE" =~ /api/cron/auto-close-workdays([/?].*)?$ ]]; then
+            echo "AUTO_CLOSE_WORKDAYS_URL secret does not point to /api/cron/auto-close-workdays; falling back to default endpoint."
+            AUTO_CLOSE_WORKDAYS_URL_EFFECTIVE="$DEFAULT_AUTO_CLOSE_WORKDAYS_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          post_auto_close() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data '{}'
+          }
+
+          status_code="$(post_auto_close "$AUTO_CLOSE_WORKDAYS_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$AUTO_CLOSE_WORKDAYS_URL_EFFECTIVE" != "$DEFAULT_AUTO_CLOSE_WORKDAYS_URL" ]]; then
+            echo "Primary AUTO_CLOSE_WORKDAYS_URL failed with HTTP $status_code; retrying default endpoint."
+            AUTO_CLOSE_WORKDAYS_URL_EFFECTIVE="$DEFAULT_AUTO_CLOSE_WORKDAYS_URL"
+            status_code="$(post_auto_close "$AUTO_CLOSE_WORKDAYS_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Auto-close workdays failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Auto-close workdays succeeded with HTTP $status_code"
+          cat response.json

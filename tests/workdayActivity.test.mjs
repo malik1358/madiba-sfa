@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   BACKGROUND_GPS_IDLE_MS,
+  buildAutoCloseEndOfDayPayload,
   calculateWorkingHoursMinutes,
+  collectWorkdaysNeedingAutoClose,
   deriveActivityStatus,
   extractLunchTimes,
   filterLogsByKsaEventDate,
@@ -376,4 +378,47 @@ test("inactivity prompt snooze persists across reads", () => {
 
   writeInactivityPromptSnoozeUntil(now + 15 * 60 * 1000, mockStorage);
   assert.equal(isInactivityPromptSnoozed(now + 10 * 60 * 1000, mockStorage), true);
+});
+
+test("collectWorkdaysNeedingAutoClose closes past days and waits until 23:59 for today", () => {
+  const userId = "user-1";
+  const logs = [
+    {
+      user_id: userId,
+      entry_type: "MORNING_ATTENDANCE",
+      note: JSON.stringify({ captured_at: "2026-08-24T06:00:00.000Z" }),
+      created_at: "2026-08-24T06:00:00.000Z",
+    },
+    {
+      user_id: userId,
+      entry_type: "MORNING_ATTENDANCE",
+      note: JSON.stringify({ captured_at: "2026-08-25T06:00:00.000Z" }),
+      created_at: "2026-08-25T06:00:00.000Z",
+    },
+  ];
+
+  const nextDayMorning = new Date("2026-08-26T06:00:00.000Z");
+  const pendingPast = collectWorkdaysNeedingAutoClose(logs, nextDayMorning);
+  assert.deepEqual(pendingPast, [
+    { userId, day: "2026-08-24" },
+    { userId, day: "2026-08-25" },
+  ]);
+
+  const sameDayBeforeCutoff = new Date("2026-08-25T18:00:00.000Z");
+  const pendingSameDayEarly = collectWorkdaysNeedingAutoClose(logs, sameDayBeforeCutoff, userId);
+  assert.deepEqual(pendingSameDayEarly, [{ userId, day: "2026-08-24" }]);
+
+  const sameDayAtCutoff = new Date("2026-08-25T20:59:00.000Z");
+  const pendingSameDayLate = collectWorkdaysNeedingAutoClose(
+    logs.filter((row) => row.note.includes("2026-08-25")),
+    sameDayAtCutoff,
+    userId,
+  );
+  assert.deepEqual(pendingSameDayLate, [{ userId, day: "2026-08-25" }]);
+});
+
+test("buildAutoCloseEndOfDayPayload stores auto-closed logout at 11:59 PM KSA", () => {
+  const payload = buildAutoCloseEndOfDayPayload("user-1", "2026-08-25");
+  assert.equal(payload.created_at, "2026-08-25T20:59:59.999Z");
+  assert.equal(JSON.parse(payload.note).autoClosed, true);
 });

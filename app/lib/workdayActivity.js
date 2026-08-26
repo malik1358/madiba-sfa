@@ -194,6 +194,17 @@ export function formatKsaDateTime(value) {
   });
 }
 
+export function formatKsaTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("en-GB", {
+    timeZone: KSA_TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function parseEventTimestamp(value) {
   const ts = Date.parse(String(value || ""));
   return Number.isFinite(ts) ? ts : null;
@@ -384,6 +395,65 @@ export function deriveActivityStatus({
   return "idle";
 }
 
+export function buildAutoCloseEndOfDayPayload(userId, day) {
+  const capturedAt = ksaMidnightEndIso(day);
+  if (!userId || !capturedAt) return null;
+
+  return {
+    user_id: userId,
+    entry_type: "END_OF_DAY",
+    created_at: capturedAt,
+    note: JSON.stringify({
+      action: "END_OF_DAY",
+      autoClosed: true,
+      reason: "Forgotten end of day auto-closed at 11:59 PM KSA",
+      captured_at: capturedAt,
+    }),
+  };
+}
+
+export function collectWorkdaysNeedingAutoClose(logs, now = new Date(), userIdFilter = "") {
+  const morningKeys = new Map();
+  const closedKeys = new Set();
+  const filterUserId = String(userIdFilter || "").trim();
+
+  for (const row of logs || []) {
+    const userId = String(row?.user_id || "").trim();
+    if (!userId || (filterUserId && userId !== filterUserId)) continue;
+
+    const day = getKsaDateString(new Date(logEventTimestamp(row) || row.created_at));
+    if (!day) continue;
+
+    const key = `${userId}|${day}`;
+    if (row.entry_type === "MORNING_ATTENDANCE") {
+      morningKeys.set(key, { userId, day });
+    }
+    if (row.entry_type === "END_OF_DAY") {
+      closedKeys.add(key);
+    }
+  }
+
+  const todayKsa = getKsaDateString(now);
+  const { hour, minute } = getKsaDateTimeParts(now);
+  const pending = [];
+
+  for (const [key, entry] of morningKeys) {
+    if (closedKeys.has(key)) continue;
+    if (entry.day > todayKsa) continue;
+
+    const isPastDay = entry.day < todayKsa;
+    const isTodayAfterCutoff = entry.day === todayKsa && hour === 23 && minute >= 59;
+    if (!isPastDay && !isTodayAfterCutoff) continue;
+
+    pending.push(entry);
+  }
+
+  return pending.sort((left, right) => {
+    if (left.day !== right.day) return left.day.localeCompare(right.day);
+    return left.userId.localeCompare(right.userId);
+  });
+}
+
 export async function autoCloseForgottenWorkdays(supabase, userId) {
   if (!supabase || !userId) return [];
 
@@ -392,7 +462,7 @@ export async function autoCloseForgottenWorkdays(supabase, userId) {
 
   const { data, error } = await supabase
     .from("daily_activity_logs")
-    .select("entry_type,note,created_at")
+    .select("user_id,entry_type,note,created_at")
     .eq("user_id", userId)
     .in("entry_type", ["MORNING_ATTENDANCE", "END_OF_DAY"])
     .gte("created_at", lookbackStart.toISOString())
@@ -400,41 +470,12 @@ export async function autoCloseForgottenWorkdays(supabase, userId) {
 
   if (error) throw error;
 
-  const morningDays = new Set();
-  const closedDays = new Set();
-
-  for (const row of data || []) {
-    const day = getKsaDateString(new Date(logEventTimestamp(row) || row.created_at));
-    if (row.entry_type === "MORNING_ATTENDANCE") morningDays.add(day);
-    if (row.entry_type === "END_OF_DAY") closedDays.add(day);
-  }
-
-  const todayKsa = getKsaDateString();
+  const pending = collectWorkdaysNeedingAutoClose(data || [], new Date(), userId);
   const closed = [];
 
-  for (const day of morningDays) {
-    if (closedDays.has(day)) continue;
-    if (day > todayKsa) continue;
-
-    const { hour, minute } = getKsaDateTimeParts();
-    const isPastDay = day < todayKsa;
-    const isTodayAfterCutoff = day === todayKsa && hour === 23 && minute >= 59;
-    if (!isPastDay && !isTodayAfterCutoff) continue;
-
-    const capturedAt = ksaMidnightEndIso(day);
-    if (!capturedAt) continue;
-
-    const payload = {
-      user_id: userId,
-      entry_type: "END_OF_DAY",
-      created_at: capturedAt,
-      note: JSON.stringify({
-        action: "END_OF_DAY",
-        autoClosed: true,
-        reason: "Forgotten end of day auto-closed at 11:59 PM KSA",
-        captured_at: capturedAt,
-      }),
-    };
+  for (const { day } of pending) {
+    const payload = buildAutoCloseEndOfDayPayload(userId, day);
+    if (!payload) continue;
 
     const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
     if (insertError) throw insertError;

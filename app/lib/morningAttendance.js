@@ -1,6 +1,7 @@
 import { normalizeAccessRole, shouldRequireTransactionGps } from "./moduleAccess.js";
 
 export const MORNING_ATTENDANCE_COMPLETE_EVENT = "madiba-morning-attendance-complete";
+export const WORKDAY_TIMES_UPDATED_EVENT = "madiba-workday-times-updated";
 
 export function isMorningAttendanceRequiredForRole(role) {
   return normalizeAccessRole(role) !== "admin" && shouldRequireTransactionGps(role);
@@ -12,7 +13,9 @@ export function isMorningAttendanceRoute(pathname) {
 
 export function canAccessWithoutMorningAttendance(pathname) {
   const path = String(pathname || "").trim();
-  return path === "/" || path === "/management/my-day";
+  return path === "/"
+    || path === "/management/my-day"
+    || path === "/management/visit-without-order";
 }
 
 export function todayAttendanceBounds() {
@@ -49,6 +52,11 @@ export async function hasMorningAttendanceToday(supabase, userId) {
 }
 
 export function notifyMorningAttendanceComplete() {
+  notifyWorkdayTimesUpdated();
+}
+
+export function notifyWorkdayTimesUpdated() {
   if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(WORKDAY_TIMES_UPDATED_EVENT));
   window.dispatchEvent(new CustomEvent(MORNING_ATTENDANCE_COMPLETE_EVENT));
 }

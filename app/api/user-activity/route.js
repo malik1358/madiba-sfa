@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { runAutoCloseWorkdaysCycle } from "../../lib/autoCloseWorkdaysServer.js";
 import {
   formatCollectorDisplayName,
   parseGpsFromActivityNote,
@@ -291,6 +292,12 @@ export async function GET(request) {
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    try {
+      await runAutoCloseWorkdaysCycle(admin);
+    } catch (autoCloseError) {
+      console.error("Auto-close workdays before user activity report failed:", autoCloseError);
+    }
 
     const profile = await getProfile(admin, user.id);
     const viewAll = canViewAllUsers(profile);

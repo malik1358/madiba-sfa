@@ -1,6 +1,7 @@
 import "./globals.css";
 import BuildUpdateWatcher from "./components/BuildUpdateWatcher";
 import GlobalAppStatus from "./components/GlobalAppStatus";
+import WorkdayTimesBar from "./components/WorkdayTimesBar";
 import GlobalLogoutButton from "./components/GlobalLogoutButton";
 import AppMainNav from "./components/AppMainNav";
 import NativeFieldTracking from "./components/NativeFieldTracking";
@@ -54,6 +55,7 @@ export default function RootLayout({ children }) {
           <NativeFieldTracking />
           <MorningAttendanceRedirect />
           <GlobalAppStatus environment={environment} buildId={buildId} buildTime={buildTime} />
+          <WorkdayTimesBar />
           <AppMainNav />
           <GlobalLogoutButton />
           {children}

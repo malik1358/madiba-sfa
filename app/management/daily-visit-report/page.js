@@ -6,6 +6,7 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
+import DaySummaryBox from "../../components/DaySummaryBox";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import {
   DEFAULT_TRANSIT_SPEED_KMH,
@@ -72,6 +73,8 @@ const TEXT = {
   routeTotal: { en: "Route total", ar: "إجمالي المسار" },
   autoClosed: { en: "Auto-closed", ar: "إغلاق تلقائي" },
   platform: { en: "Platform", ar: "المنصة" },
+  daySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
+  userDaySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
 };
 
 function formatNumber(value, digits = 2) {
@@ -298,6 +301,12 @@ export default function DailyVisitReportPage() {
 
           {!loading && report && (
             <>
+              <DaySummaryBox
+                summary={report.daySummary}
+                language={language}
+                title={t("daySummaryTitle")}
+              />
+
               <div className="moduleMetricGrid">
                 <section className="moduleMetricCard">
                   <span>{t("totalEntries")}</span>
@@ -341,6 +350,14 @@ export default function DailyVisitReportPage() {
                       {t("waitingTotalShort")}: {formatDurationMinutes(userWaitingMinutes)}
                     </span>
                   </div>
+
+                  {displayUsers.length > 1 && entryUser.daySummary ? (
+                    <DaySummaryBox
+                      summary={entryUser.daySummary}
+                      language={language}
+                      title={t("userDaySummaryTitle")}
+                    />
+                  ) : null}
 
                   <div className="moduleTableWrap">
                     <table className="moduleTable">

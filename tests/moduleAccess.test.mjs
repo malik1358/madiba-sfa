@@ -26,6 +26,8 @@ test("salesmen see field modules but not admin tools", () => {
   const access = buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" });
 
   assert.equal(access.canAccess("myDay"), true);
+  assert.equal(access.canAccess("newOrder"), true);
+  assert.equal(access.canAccess("visitWithoutOrder"), true);
   assert.equal(access.canAccess("myCollections"), true);
   assert.equal(access.canAccess("dailyVisitReport"), true);
   assert.equal(access.canAccess("gpsMap"), false);

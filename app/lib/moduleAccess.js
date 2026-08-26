@@ -3,7 +3,8 @@ export const MODULES = {
   management: { href: "/management", label: "Management" },
   myDay: { href: "/management/my-day", label: "My Day" },
   customerAudit: { href: "/management/customer-audit", label: "Customers Audit" },
-  newOrder: { href: "/management/new-order", label: "Orders Workflow" },
+  newOrder: { href: "/management/new-order", label: "New Order" },
+  visitWithoutOrder: { href: "/management/visit-without-order", label: "Visit Without Order" },
   pendingOrders: { href: "/management/pending-orders", label: "Old Pending Orders" },
   newCustomer: { href: "/management/new-customer", label: "New Customers" },
   myPerformance: { href: "/management/my-performance", label: "Performance" },
@@ -23,7 +24,7 @@ export const NAV_GROUPS = [
   {
     key: "field",
     label: "Field Sales",
-    modules: ["myDay", "customerAudit", "newOrder", "pendingOrders", "newCustomer", "myPerformance", "myCollections"],
+    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "myCollections"],
   },
   {
     key: "collections",
@@ -83,6 +84,7 @@ export function buildModuleAccess(context = {}) {
       myDay: isFieldSales && !isCollector,
       customerAudit: isFieldSales && !isCollector,
       newOrder: isFieldSales && !isCollector,
+      visitWithoutOrder: isFieldSales && !isCollector,
       pendingOrders: isFieldSales && !isCollector,
       newCustomer: isFieldSales && !isCollector,
       myPerformance: isFieldSales && !isCollector,

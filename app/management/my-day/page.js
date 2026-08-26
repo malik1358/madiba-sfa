@@ -26,6 +26,7 @@ import { buildGpsActivityNote, resolveGpsCapturePlatform } from "../../lib/geo";
 import {
   isMorningAttendanceRequiredForRole,
   notifyMorningAttendanceComplete,
+  notifyWorkdayTimesUpdated,
 } from "../../lib/morningAttendance";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
@@ -100,6 +101,10 @@ const PAGE_TEXT = {
   inactiveSince: { en: "Inactive Since", ar: "غير نشط منذ" },
   noCustomers: { en: "No customers available for route status.", ar: "لا يوجد عملاء متاحون لحالة المسار." },
   visitWithoutOrder: { en: "Visit Without Order", ar: "زيارة بدون طلب" },
+  visitWithoutOrderSubtitle: {
+    en: "Record customer visits and follow-ups without creating an order",
+    ar: "تسجيل زيارات العملاء والمتابعات بدون إنشاء طلب",
+  },
   closeReport: { en: "Close", ar: "إغلاق" },
   visitReport: { en: "Visit Report", ar: "تقرير الزيارة" },
   visitOutcome: { en: "Visit Outcome", ar: "نتيجة الزيارة" },
@@ -209,7 +214,8 @@ async function loadVisibleCustomers(accessToken, scope, options = {}) {
   return result.data;
 }
 
-export default function MyDayPage() {
+export default function MyDayPage({ mode = "default" } = {}) {
+  const visitOnlyMode = mode === "visits";
   const { language, dir, setLanguage } = useAppLanguage();
   const { access } = useModuleAccess();
   const { showPopup } = useAppPopup();
@@ -265,7 +271,17 @@ export default function MyDayPage() {
   const morningPopupShownRef = useRef(false);
 
   useEffect(() => {
-    if (loading || workdayUnlocked || !attendanceRequired || morningPopupShownRef.current) return;
+    if (!visitOnlyMode || loading) return undefined;
+
+    const timer = window.setTimeout(() => {
+      document.getElementById("visit-schedule")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
+
+    return () => window.clearTimeout(timer);
+  }, [visitOnlyMode, loading]);
+
+  useEffect(() => {
+    if (loading || workdayUnlocked || !attendanceRequired || morningPopupShownRef.current || visitOnlyMode) return;
     morningPopupShownRef.current = true;
     showPopup({
       title: t("morningAttendancePopupTitle"),
@@ -870,6 +886,8 @@ export default function MyDayPage() {
 
       if (entryType === "MORNING_ATTENDANCE") {
         notifyMorningAttendanceComplete();
+      } else if (["LUNCH_BREAK_OUT", "LUNCH_BREAK_IN", "END_OF_DAY"].includes(entryType)) {
+        notifyWorkdayTimesUpdated();
       }
       if (entryType === "NOTE") setNote("");
 
@@ -1528,8 +1546,8 @@ export default function MyDayPage() {
         <div className="moduleHeader">
           <div>
             <p className="moduleEyebrow">MADIBA SFA</p>
-            <h1>{t("title")}</h1>
-            <p className="moduleSubtitle">{t("subtitle")}</p>
+            <h1>{visitOnlyMode ? t("visitWithoutOrder") : t("title")}</h1>
+            <p className="moduleSubtitle">{visitOnlyMode ? t("visitWithoutOrderSubtitle") : t("subtitle")}</p>
           </div>
           <div className="moduleHeaderMeta">
             <AppLanguageSwitch language={language} setLanguage={setLanguage} />
@@ -1540,6 +1558,14 @@ export default function MyDayPage() {
 
         {refreshing && <div className="moduleHint">{t("cacheRefreshing")}</div>}
 
+        {visitOnlyMode && !workdayUnlocked ? (
+          <div className="moduleHint">
+            {t("workdayLocked")} {" "}
+            <Link href="/management/my-day" className="moduleInlineButton">{t("title")}</Link>
+          </div>
+        ) : null}
+
+        {!visitOnlyMode ? (
         <section className="moduleSection">
           <div className="moduleSectionHeader">
             <h2>{t("attendance")}</h2>
@@ -1592,6 +1618,7 @@ export default function MyDayPage() {
             </ul>
           )}
         </section>
+        ) : null}
 
         {workdayUnlocked ? (
         <>
@@ -1616,7 +1643,7 @@ export default function MyDayPage() {
           </div>
         </section>
 
-        <section className="moduleSection">
+        <section id="visit-schedule" className="moduleSection">
           <div className="moduleSectionHeader">
             <h2>{t("visitSchedule")}</h2>
             <span>{plannedVisitRows.length} {t("plannedVisitsCount")}</span>

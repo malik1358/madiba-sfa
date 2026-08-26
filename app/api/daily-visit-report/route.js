@@ -21,6 +21,7 @@ import {
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
 } from "../../lib/geo.js";
+import { loadCollectionDaySummaryForUser } from "../../lib/collectionDaySummaryServer.js";
 import { filterLogsByKsaEventDate, getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -430,28 +431,61 @@ export async function GET(request) {
     const allDayUserIds = [...new Set([
       ...allCollectionEntries.map((entry) => entry.user_id),
       ...allActivityResult.entries.map((entry) => entry.user_id),
+      ...(userIdFilter ? [userIdFilter] : []),
     ].filter(Boolean))];
     const { data: dayProfiles } = allDayUserIds.length
       ? await admin.from("profiles").select("id,salesman_code,salesman_name,role,email").in("id", allDayUserIds)
       : { data: [] };
 
+    const dayProfileMap = new Map((dayProfiles || []).map((row) => [row.id, row]));
     const availableUsers = (dayProfiles || []).map((row) => ({
       userId: row.id,
       userName: formatCollectorDisplayName(row),
     })).sort((left, right) => left.userName.localeCompare(right.userName));
 
-    const flatEntries = users.flatMap((entryUser) => entryUser.entries || []);
+    const summaryUserIds = userIdFilter
+      ? [userIdFilter]
+      : [...new Set(users.map((entryUser) => entryUser.userId).filter(Boolean))];
+
+    const summaryEntries = await Promise.all(
+      summaryUserIds.map(async (entryUserId) => {
+        const summaryPayload = await loadCollectionDaySummaryForUser(admin, entryUserId, date);
+        return [entryUserId, summaryPayload.daySummary];
+      }),
+    );
+    const summaryByUserId = new Map(summaryEntries);
+
+    const usersWithSummary = users.map((entryUser) => ({
+      ...entryUser,
+      daySummary: summaryByUserId.get(entryUser.userId) || null,
+    }));
+
+    if (userIdFilter && !usersWithSummary.some((entryUser) => entryUser.userId === userIdFilter)) {
+      usersWithSummary.push({
+        userId: userIdFilter,
+        userName: formatCollectorDisplayName(dayProfileMap.get(userIdFilter) || {}),
+        visitCount: 0,
+        farFromCustomerCount: 0,
+        totalRouteDistanceKm: 0,
+        entries: [],
+        daySummary: summaryByUserId.get(userIdFilter) || null,
+      });
+      usersWithSummary.sort((left, right) => left.userName.localeCompare(right.userName));
+    }
+
+    const flatEntries = usersWithSummary.flatMap((entryUser) => entryUser.entries || []);
 
     return Response.json({
       success: true,
       date,
       thresholdKm: CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM,
       visitCount: flatEntries.length,
-      userCount: users.length,
+      userCount: usersWithSummary.length,
       farFromCustomerCount: flatEntries.filter((entry) => entry.isFarFromCustomer).length,
-      totalRouteDistanceKm: users.reduce((sum, entryUser) => sum + Number(entryUser.totalRouteDistanceKm || 0), 0),
+      totalRouteDistanceKm: usersWithSummary.reduce((sum, entryUser) => sum + Number(entryUser.totalRouteDistanceKm || 0), 0),
+      daySummary: usersWithSummary.length === 1 ? usersWithSummary[0].daySummary : null,
       availableUsers,
-      users,
+      users: usersWithSummary,
     });
   } catch (error) {
     console.error("Error building daily visit report:", error);

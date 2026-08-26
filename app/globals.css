@@ -3564,6 +3564,28 @@ table.auditMatrix td.auditTrendSame {
   min-width: 120px;
 }
 
+.appPopupWhatsappHint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #166534;
+  text-align: center;
+}
+
+.appPopupWhatsappSummary {
+  width: 100%;
+  margin: 0 0 12px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.appPopupActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
 .appPopupDialogSuccess h2 {
   color: #116843;
 }

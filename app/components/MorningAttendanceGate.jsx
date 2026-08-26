@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useModuleAccess } from "../hooks/useModuleAccess";
-import { shouldRequireTransactionGps } from "../lib/moduleAccess";
+import { shouldRequireGpsAccessGate, shouldRequireTransactionGps } from "../lib/moduleAccess";
 import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { autoCloseForgottenWorkdays, BACKGROUND_GPS_IDLE_MS, IDLE_GPS_ACTIVITY_ENTRY_TYPES, shouldCaptureIdleGpsPing } from "../lib/workdayActivity";
@@ -166,9 +166,9 @@ export default function MorningAttendanceGate({
   const attendanceRequired = requireMorningAttendance
     && access.role !== "admin"
     && shouldRequireTransactionGps(access.role);
-  const backgroundGpsEnabled = enableBackgroundGps && shouldRequireTransactionGps(access.role);
-  const batteryCheckRequired = shouldRequireTransactionGps(access.role);
-  const locationCheckRequired = shouldRequireTransactionGps(access.role);
+  const backgroundGpsEnabled = enableBackgroundGps && shouldRequireGpsAccessGate(access.role);
+  const batteryCheckRequired = shouldRequireGpsAccessGate(access.role);
+  const locationCheckRequired = shouldRequireGpsAccessGate(access.role);
   const [checking, setChecking] = useState(requireMorningAttendance);
   const [ready, setReady] = useState(!requireMorningAttendance);
   const [attendanceComplete, setAttendanceComplete] = useState(!requireMorningAttendance);

@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useAppLanguage } from "../lib/appLanguage";
+import { copyTextToClipboard, shareTextOnWhatsapp } from "../lib/whatsappShare";
 
 const AppPopupContext = createContext(null);
 
@@ -29,8 +30,50 @@ export function AppPopupProvider({ children }) {
       title: String(payload.title || VARIANT_LABELS[payload.variant || "info"]?.[language] || VARIANT_LABELS.info[language]).trim(),
       message,
       variant: payload.variant || "info",
+      whatsappText: String(payload.whatsappText || "").trim(),
+      autoShareWhatsapp: Boolean(payload.autoShareWhatsapp),
     });
   }, [language]);
+
+  useEffect(() => {
+    if (!popup?.whatsappText) return undefined;
+
+    void copyTextToClipboard(popup.whatsappText);
+
+    if (!popup.autoShareWhatsapp) return undefined;
+
+    const timer = window.setTimeout(() => {
+      void shareTextOnWhatsapp(popup.whatsappText, {
+        title: language === "ar" ? "ملخص الزيارة" : "Visit summary",
+        dialogTitle: language === "ar" ? "مشاركة على واتساب" : "Share on WhatsApp",
+      });
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [popup?.whatsappText, popup?.autoShareWhatsapp, language]);
+
+  const shareWhatsappFromPopup = useCallback(async () => {
+    const text = String(popup?.whatsappText || "").trim();
+    if (!text) return;
+
+    const result = await shareTextOnWhatsapp(text, {
+      title: language === "ar" ? "ملخص الزيارة" : "Visit summary",
+      dialogTitle: language === "ar" ? "مشاركة على واتساب" : "Share on WhatsApp",
+    });
+
+    if (result.success || result.reason === "cancelled") return;
+
+    setPopup((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        message: language === "ar"
+          ? "تعذر فتح واتساب. انسخ الملخص أدناه والصقه يدوياً."
+          : "Could not open WhatsApp. Copy the summary below and paste manually.",
+        variant: "warning",
+      };
+    });
+  }, [popup?.whatsappText, language]);
 
   const value = useMemo(() => ({ showPopup, closePopup }), [showPopup, closePopup]);
 
@@ -49,9 +92,33 @@ export function AppPopupProvider({ children }) {
           >
             <h2 id="app-popup-title">{popup.title}</h2>
             <p id="app-popup-message">{popup.message}</p>
-            <button type="button" className="modulePrimaryButton appPopupOkButton" onClick={closePopup}>
-              {language === "ar" ? "حسناً" : "OK"}
-            </button>
+            {popup.whatsappText ? (
+              <>
+                <p className="appPopupWhatsappHint">
+                  {language === "ar"
+                    ? "تم نسخ الملخص. شاركه على واتساب الآن."
+                    : "Summary copied. Share it on WhatsApp now."}
+                </p>
+                <textarea
+                  className="moduleTextArea appPopupWhatsappSummary"
+                  rows={7}
+                  value={popup.whatsappText}
+                  readOnly
+                />
+                <div className="appPopupActions">
+                  <button type="button" className="modulePrimaryButton" onClick={() => { void shareWhatsappFromPopup(); }}>
+                    {language === "ar" ? "مشاركة على واتساب" : "Share on WhatsApp"}
+                  </button>
+                  <button type="button" className="moduleInlineButton moduleActionButton appPopupOkButton" onClick={closePopup}>
+                    {language === "ar" ? "حسناً" : "OK"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button type="button" className="modulePrimaryButton appPopupOkButton" onClick={closePopup}>
+                {language === "ar" ? "حسناً" : "OK"}
+              </button>
+            )}
           </div>
         </div>
       ) : null}

@@ -2,6 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import { runAutoCloseWorkdaysCycle } from "../../lib/autoCloseWorkdaysServer.js";
 import {
   formatCollectorDisplayName,
+  formatGpsCapturePlatformLabel,
+  inferGpsCapturePlatformFromNote,
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
 } from "../../lib/geo.js";
@@ -136,6 +138,7 @@ function buildUserActivityRow(profile, logs, collections, orders, reportDate, op
     ? logEventIso(loginLog)
     : null;
   const logoutAt = logoutLog ? logEventIso(logoutLog) : null;
+  const loginPlatform = loginLog ? inferGpsCapturePlatformFromNote(loginLog.note) : null;
 
   const lastActivityTs = Math.max(
     ...userLogs.map((row) => logEventTimestamp(row)),
@@ -175,6 +178,8 @@ function buildUserActivityRow(profile, logs, collections, orders, reportDate, op
     salesmanCode: profile.salesman_code || "",
     loginAt,
     logoutAt,
+    loginPlatform,
+    loginPlatformLabel: loginPlatform ? formatGpsCapturePlatformLabel(loginPlatform) : null,
     logoutAutoClosed: autoLogoutLog,
     lunchOutAt,
     lunchInAt,

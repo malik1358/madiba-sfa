@@ -38,6 +38,7 @@ const TEXT = {
   },
   colUser: { en: "User", ar: "المستخدم" },
   colRole: { en: "Role", ar: "الدور" },
+  colPlatform: { en: "Platform", ar: "المنصة" },
   colLogin: { en: "Login", ar: "تسجيل الدخول" },
   colLogout: { en: "Logout", ar: "تسجيل الخروج" },
   colLastActivity: { en: "Last activity", ar: "آخر نشاط" },
@@ -301,6 +302,7 @@ export default function UserActivityPage() {
                       <tr>
                         <th>{t("colUser")}</th>
                         <th>{t("colRole")}</th>
+                        <th>{t("colPlatform")}</th>
                         <th>{t("colLogin")}</th>
                         <th>{t("colLogout")}</th>
                         <th>{t("colLunchOut")}</th>
@@ -332,6 +334,7 @@ export default function UserActivityPage() {
                             {row.email ? <div className="moduleCode">{row.email}</div> : null}
                           </td>
                           <td>{row.role || "-"}</td>
+                          <td>{row.loginPlatformLabel || "-"}</td>
                           <td>{formatDateTime(row.loginAt)}</td>
                           <td>
                             {formatDateTime(row.logoutAt)}
@@ -354,7 +357,7 @@ export default function UserActivityPage() {
                       ))}
                       {(report.users || []).length === 0 && (
                         <tr>
-                          <td colSpan={15}>{t("noEntries")}</td>
+                          <td colSpan={16}>{t("noEntries")}</td>
                         </tr>
                       )}
                     </tbody>

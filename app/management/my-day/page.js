@@ -22,7 +22,8 @@ import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
-import { buildGpsActivityNote, resolveGpsCapturePlatform } from "../../lib/geo";
+import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
+import { buildGpsActivityNote, formatCollectorDisplayName, resolveGpsCapturePlatform } from "../../lib/geo";
 import {
   isMorningAttendanceRequiredForRole,
   notifyMorningAttendanceComplete,
@@ -1133,13 +1134,26 @@ export default function MyDayPage({ mode = "default" } = {}) {
         }
       }
 
-      setMessage(
-        saveResult?.queued
-          ? (language === "ar"
-            ? `${customer.customer_name} تم حفظ تقرير الزيارة على الجهاز وسيتم المزامنة تلقائياً`
-            : `${customer.customer_name} visit report saved on device and will sync automatically`)
-          : `${customer.customer_name} ${language === "ar" ? "تم حفظ تقرير الزيارة" : "visit report saved"}.`,
-      );
+      const summaryText = buildFieldVisitWhatsappSummary({
+        customer,
+        visitForm,
+        salesmanName: formatCollectorDisplayName(profile || {}),
+        salesmanCode: profile?.salesman_code || "",
+        language,
+      });
+
+      const savedMessage = saveResult?.queued
+        ? (language === "ar"
+          ? `${customer.customer_name} تم حفظ تقرير الزيارة على الجهاز وسيتم المزامنة تلقائياً`
+          : `${customer.customer_name} visit report saved on device and will sync automatically`)
+        : `${customer.customer_name} ${language === "ar" ? "تم حفظ تقرير الزيارة" : "visit report saved"}.`;
+
+      showPopup({
+        message: savedMessage,
+        variant: "success",
+        whatsappText: summaryText,
+        autoShareWhatsapp: Boolean(saveResult?.queued),
+      });
       setVisitStatusRows((current) =>
         current.map((row) => {
           if (row.customer_code !== customer.customer_code) return row;

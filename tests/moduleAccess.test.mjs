@@ -9,6 +9,7 @@ import {
   localizedNavGroupLabel,
   moduleLabelForPath,
   shouldRequireTransactionGps,
+  shouldRequireGpsAccessGate,
 } from "../app/lib/moduleAccess.js";
 
 test("collector-only users only see collection modules", () => {
@@ -71,6 +72,13 @@ test("invoice-makers are exempt from transaction GPS requirements", () => {
   assert.equal(shouldRequireTransactionGps("salesman"), true);
   assert.equal(shouldRequireTransactionGps("invoice-maker"), false);
   assert.equal(shouldRequireTransactionGps("invoice_maker"), false);
+});
+
+test("admin and manager bypass GPS access gate on management pages", () => {
+  assert.equal(shouldRequireGpsAccessGate("admin"), false);
+  assert.equal(shouldRequireGpsAccessGate("manager"), false);
+  assert.equal(shouldRequireGpsAccessGate("salesman"), true);
+  assert.equal(shouldRequireGpsAccessGate("invoice-maker"), false);
 });
 
 test("localized module and nav labels return Arabic text", () => {

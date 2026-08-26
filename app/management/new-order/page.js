@@ -26,6 +26,8 @@ import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
 import { sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
+import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
@@ -690,6 +692,13 @@ export default function NewOrderPage() {
     () => customerSearch.trim() ? filteredCustomers.slice(0, 10) : [],
     [customerSearch, filteredCustomers]
   );
+
+  const {
+    suggestions: nearestCustomerSuggestions,
+    loading: nearestCustomersLoading,
+    locationUnavailable: nearestCustomersUnavailable,
+    refresh: refreshNearestCustomers,
+  } = useNearestCustomerSuggestions(customers);
 
   const filteredItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
@@ -1657,6 +1666,14 @@ export default function NewOrderPage() {
             <h2>Customer Search</h2>
             {editOrderId && <span>Editing order #{editOrderId}</span>}
           </div>
+          <NearestCustomerSuggestions
+            suggestions={nearestCustomerSuggestions}
+            loading={nearestCustomersLoading}
+            locationUnavailable={nearestCustomersUnavailable}
+            onSelect={(customer) => selectCustomer(customer.customer_code, customer.customer_name)}
+            onRefresh={refreshNearestCustomers}
+            actionLabel="Select"
+          />
           <div className="moduleFilterRow">
             <div className="moduleCustomerSearch">
               <input

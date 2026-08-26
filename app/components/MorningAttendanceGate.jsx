@@ -17,7 +17,7 @@ import { evaluateNativeAndroidApkVersion } from "../lib/androidAppVersion";
 import { isNativeAndroidPlatform } from "../lib/nativeFieldTracking";
 import AndroidApkUpdateRequired from "./AndroidApkUpdateRequired";
 import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
-import { buildGpsActivityNote, resolveGpsCapturePlatform } from "../lib/geo";
+import { buildGpsActivityNote, GPS_PERMISSION_DENIED_ERROR, GPS_POSITION_UNAVAILABLE_ERROR, GPS_UNSUPPORTED_ERROR, probeGpsLocation, resolveGpsCapturePlatform } from "../lib/geo";
 import { hasMorningAttendanceToday, MORNING_ATTENDANCE_COMPLETE_EVENT } from "../lib/morningAttendance";
 import { usePopupMessages } from "../hooks/usePopupMessages";
 
@@ -47,26 +47,26 @@ const TEXT = {
   allowUnrestrictedBattery: { en: "Allow unrestricted battery", ar: "السماح ببطارية غير مقيدة" },
   checkBatteryAgain: { en: "Check again", ar: "تحقق مرة أخرى" },
   checkingBattery: { en: "Checking battery settings...", ar: "جاري التحقق من إعدادات البطارية..." },
+  locationTitle: { en: "Location access required", ar: "الوصول إلى الموقع مطلوب" },
+  locationDescription: {
+    en: "MADIBA cannot work without GPS. Allow location access for this app in your browser or phone settings, then tap Check again.",
+    ar: "لا يمكن لـ MADIBA العمل بدون GPS. اسمح بالوصول إلى الموقع لهذا التطبيق في المتصفح أو إعدادات الهاتف، ثم اضغط تحقق مرة أخرى.",
+  },
+  checkingLocation: { en: "Checking location access...", ar: "جاري التحقق من الوصول إلى الموقع..." },
+  checkLocationAgain: { en: "Check location again", ar: "تحقق من الموقع مرة أخرى" },
+  locationPermissionDenied: {
+    en: "Location permission is blocked. Enable location for MADIBA SFA to continue.",
+    ar: "إذن الموقع محظور. فعّل الموقع لتطبيق MADIBA SFA للمتابعة.",
+  },
+  locationUnsupported: { en: "Geolocation is not supported on this device.", ar: "خدمة تحديد الموقع غير مدعومة على هذا الجهاز." },
+  locationUnavailable: {
+    en: "Unable to read GPS right now. Move to an open area and try again.",
+    ar: "تعذر قراءة GPS الآن. انتقل إلى منطقة مفتوحة وحاول مرة أخرى.",
+  },
 };
 
-function captureLocation() {
-  if (typeof navigator === "undefined" || !navigator.geolocation) {
-    throw new Error("UNSUPPORTED");
-  }
-
-  return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        resolve({
-          latitude: Number(position.coords.latitude.toFixed(6)),
-          longitude: Number(position.coords.longitude.toFixed(6)),
-          accuracy: Number(position.coords.accuracy.toFixed(1)),
-        });
-      },
-      () => reject(new Error("LOCATION_FAILED")),
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  });
+async function captureLocation() {
+  return probeGpsLocation();
 }
 
 function readCapturedAt(note, fallbackDate) {
@@ -138,11 +138,15 @@ export default function MorningAttendanceGate({
     && shouldRequireTransactionGps(access.role);
   const backgroundGpsEnabled = enableBackgroundGps && shouldRequireTransactionGps(access.role);
   const batteryCheckRequired = shouldRequireTransactionGps(access.role);
+  const locationCheckRequired = shouldRequireTransactionGps(access.role);
   const [checking, setChecking] = useState(requireMorningAttendance);
   const [ready, setReady] = useState(!requireMorningAttendance);
   const [attendanceComplete, setAttendanceComplete] = useState(!requireMorningAttendance);
   const [batteryReady, setBatteryReady] = useState(false);
   const [checkingBattery, setCheckingBattery] = useState(false);
+  const [locationReady, setLocationReady] = useState(false);
+  const [checkingLocation, setCheckingLocation] = useState(false);
+  const [locationError, setLocationError] = useState("");
   const [apkVersionReady, setApkVersionReady] = useState(true);
   const [checkingApkVersion, setCheckingApkVersion] = useState(false);
   const [apkVersionState, setApkVersionState] = useState(null);
@@ -179,6 +183,38 @@ export default function MorningAttendanceGate({
     }
   }
 
+  async function verifyLocationAccess(hasActiveSession = true) {
+    if (!locationCheckRequired || !hasActiveSession) {
+      setLocationReady(true);
+      setLocationError("");
+      return true;
+    }
+
+    setCheckingLocation(true);
+    setLocationError("");
+
+    try {
+      await probeGpsLocation();
+      setLocationReady(true);
+      return true;
+    } catch (err) {
+      const reason = String(err?.message || "");
+      if (reason === GPS_PERMISSION_DENIED_ERROR) {
+        setLocationError(t("locationPermissionDenied"));
+      } else if (reason === GPS_UNSUPPORTED_ERROR) {
+        setLocationError(t("locationUnsupported"));
+      } else if (reason === GPS_POSITION_UNAVAILABLE_ERROR) {
+        setLocationError(t("locationUnavailable"));
+      } else {
+        setLocationError(t("locationFailed"));
+      }
+      setLocationReady(false);
+      return false;
+    } finally {
+      setCheckingLocation(false);
+    }
+  }
+
   async function verifyBatteryAccess() {
     if (!batteryCheckRequired) {
       setBatteryReady(true);
@@ -199,6 +235,25 @@ export default function MorningAttendanceGate({
   }
 
   async function refreshWorkdayState() {
+    const supabase = getSupabaseClient();
+    let hasActiveSession = false;
+
+    if (supabase) {
+      try {
+        const session = await getSessionWithTimeout(supabase);
+        hasActiveSession = Boolean(session?.user?.id);
+      } catch {
+        hasActiveSession = false;
+      }
+    }
+
+    const locationOk = await verifyLocationAccess(hasActiveSession);
+    if (!locationOk) {
+      setReady(false);
+      setChecking(false);
+      return;
+    }
+
     const batteryOk = await verifyBatteryAccess();
     if (!batteryOk) {
       setReady(false);
@@ -213,7 +268,6 @@ export default function MorningAttendanceGate({
       return;
     }
 
-    const supabase = getSupabaseClient();
     if (!supabase) {
       setAttendanceComplete(true);
       setReady(true);
@@ -229,6 +283,7 @@ export default function MorningAttendanceGate({
       const session = await getSessionWithTimeout(supabase);
 
       if (!session?.user?.id) {
+        setLocationReady(true);
         setAttendanceComplete(true);
         setReady(true);
         return;
@@ -519,6 +574,39 @@ export default function MorningAttendanceGate({
   }, [nativeAndroidApp, apkVersionReady]);
 
   useEffect(() => {
+    if (!locationCheckRequired || locationReady || accessLoading) return undefined;
+
+    let cancelled = false;
+
+    async function recheckOnResume() {
+      if (cancelled) return;
+      await verifyLocationAccess(true);
+    }
+
+    const handleResume = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      recheckOnResume();
+    };
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleResume);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", handleResume);
+    }
+
+    return () => {
+      cancelled = true;
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleResume);
+      }
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", handleResume);
+      }
+    };
+  }, [locationCheckRequired, locationReady, accessLoading]);
+
+  useEffect(() => {
     if (!batteryCheckRequired || batteryReady || accessLoading) return undefined;
 
     let cancelled = false;
@@ -556,7 +644,8 @@ export default function MorningAttendanceGate({
 
     const backgroundGpsReady = (attendanceRequired ? attendanceComplete : ready)
       && batteryReady
-      && apkVersionReady;
+      && apkVersionReady
+      && locationReady;
     if (!backgroundGpsReady) return undefined;
 
     let cancelled = false;
@@ -613,7 +702,7 @@ export default function MorningAttendanceGate({
         window.removeEventListener("online", handleVisibleOrFocused);
       }
     };
-  }, [backgroundGpsEnabled, attendanceRequired, attendanceComplete, ready, batteryReady, apkVersionReady]);
+  }, [backgroundGpsEnabled, attendanceRequired, attendanceComplete, ready, batteryReady, apkVersionReady, locationReady]);
 
   useEffect(() => {
     if (!ready || !batteryReady || !apkVersionReady || !backgroundGpsEnabled || typeof window === "undefined") return undefined;
@@ -635,7 +724,7 @@ export default function MorningAttendanceGate({
     return () => {
       cancelled = true;
     };
-  }, [backgroundGpsEnabled, attendanceComplete, attendanceRequired, ready, batteryReady, apkVersionReady]);
+  }, [backgroundGpsEnabled, attendanceComplete, attendanceRequired, ready, batteryReady, apkVersionReady, locationReady]);
 
   if (accessLoading && requireMorningAttendance) {
     return (
@@ -651,7 +740,7 @@ export default function MorningAttendanceGate({
     );
   }
 
-  if (ready && batteryReady && apkVersionReady) {
+  if (ready && batteryReady && apkVersionReady && locationReady) {
     return (
       <>
         {attendanceRequired && attendanceComplete ? <WorkdayInactivityPrompt /> : null}
@@ -668,6 +757,34 @@ export default function MorningAttendanceGate({
         checking={checkingApkVersion}
         onRecheck={() => verifyApkVersion()}
       />
+    );
+  }
+
+  if (locationCheckRequired && !locationReady) {
+    return (
+      <main className="modulePage" dir={dir}>
+        <div className="moduleShell">
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>{checkingLocation ? t("checkingLocation") : t("locationTitle")}</h2>
+            </div>
+            {!checkingLocation && (
+              <>
+                <div className="moduleHint">{locationError || t("locationDescription")}</div>
+                <div className="moduleActionRow">
+                  <button
+                    type="button"
+                    className="modulePrimaryButton"
+                    onClick={() => verifyLocationAccess(true)}
+                  >
+                    {t("checkLocationAgain")}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      </main>
     );
   }
 

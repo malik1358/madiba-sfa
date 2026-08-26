@@ -491,7 +491,7 @@ async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
     ]).join(",");
     const { data, error } = await admin
       .from("customers")
-      .select("customer_code,customer_name,current_salesman_code,city,area")
+      .select("customer_code,customer_name,current_salesman_code,city,area,latitude,longitude")
       .or(filters);
 
     if (error) throw error;
@@ -714,6 +714,8 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
           : ""),
       city: customer.city,
       area: customer.area,
+      latitude: customer.latitude,
+      longitude: customer.longitude,
       invoices: customerInvoices,
       latest_collection: visits[0] || null,
       collection_history: visits,

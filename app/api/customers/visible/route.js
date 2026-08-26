@@ -328,7 +328,7 @@ async function fetchVisibleCustomers(admin, scope) {
   while (true) {
     let query = admin
       .from("customers")
-      .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,customer_type,city,area,mobile")
+      .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,customer_type,city,area,mobile,latitude,longitude")
       .eq("is_active", true)
       .order("customer_name")
       .range(from, from + pageSize - 1);
@@ -370,7 +370,7 @@ async function fetchBasicVisibleCustomers(admin, scope) {
   while (true) {
     let query = admin
       .from("customers")
-      .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,customer_type,city,area,mobile")
+      .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,customer_type,city,area,mobile,latitude,longitude")
       .eq("is_active", true)
       .order("customer_name")
       .range(from, from + pageSize - 1);
@@ -481,7 +481,7 @@ async function fetchInactiveCustomers(admin, scope) {
 
   let query = admin
     .from("customers")
-    .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,city,area,updated_at")
+    .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,city,area,updated_at,latitude,longitude")
     .eq("is_active", false)
     .order("customer_name")
     .limit(5000);

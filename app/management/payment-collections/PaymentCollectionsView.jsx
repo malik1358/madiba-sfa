@@ -6,7 +6,9 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
+import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveInvoiceAgingDays, resolveOverdueDaysFromDueDate } from "../../lib/outstanding";
@@ -1136,6 +1138,37 @@ export default function PaymentCollectionsView({ view = "due" }) {
     [dueCustomers, queueToday],
   );
 
+  const nearestCustomerSourceRows = useMemo(
+    () => [...dueCustomers, ...notDueCustomers],
+    [dueCustomers, notDueCustomers],
+  );
+
+  const {
+    suggestions: nearestCustomerSuggestions,
+    loading: nearestCustomersLoading,
+    locationUnavailable: nearestCustomersUnavailable,
+    refresh: refreshNearestCustomers,
+  } = useNearestCustomerSuggestions(nearestCustomerSourceRows);
+
+  const openNearestCustomer = useCallback((customer) => {
+    const code = String(customer?.customer_code || "").trim().toUpperCase();
+    const row = nearestCustomerSourceRows.find(
+      (entry) => String(entry.customer_code || "").trim().toUpperCase() === code,
+    );
+    if (!row) return;
+
+    const key = rowKey(row);
+    setActiveRowKey(key);
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        document.getElementById(`collector-detail-${key}`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+    }
+  }, [nearestCustomerSourceRows]);
+
   const allSalesmenSelected = salesmanOptions.length > 0 && selectedSalesmen.length === salesmanOptions.length;
   const allSchedulersSelected = scheduledRevisitSchedulerOptions.length > 0
     && selectedSchedulers.length === scheduledRevisitSchedulerOptions.length;
@@ -1613,6 +1646,15 @@ export default function PaymentCollectionsView({ view = "due" }) {
           </div>
 
           {view === "due" ? (
+            <>
+            <NearestCustomerSuggestions
+              suggestions={nearestCustomerSuggestions}
+              loading={nearestCustomersLoading}
+              locationUnavailable={nearestCustomersUnavailable}
+              onSelect={openNearestCustomer}
+              onRefresh={refreshNearestCustomers}
+              actionLabel={t("open")}
+            />
             <section className="moduleSection" style={{ marginBottom: "12px" }}>
               <div className="moduleSectionHeader">
                 <h2>{t("scheduledRevisitsTitle")}</h2>
@@ -1777,6 +1819,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                 </div>
               )}
             </section>
+            </>
           ) : null}
 
           <section className="moduleSection">

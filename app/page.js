@@ -11,6 +11,7 @@ import { buildModuleAccess, listAccessibleModules, shouldRequireTransactionGps }
 import { hasMorningAttendanceToday, isMorningAttendanceRequiredForRole } from "./lib/morningAttendance";
 import { useAppPopup } from "./components/AppPopupProvider";
 import { isAndroidBatteryRestricted } from "./lib/androidBatteryOptimization";
+import { probeGpsLocation } from "./lib/geo";
 import { evaluateNativeAndroidApkVersion } from "./lib/androidAppVersion";
 import AndroidApkUpdateRequired from "./components/AndroidApkUpdateRequired";
 import { useLogoutWithDaySummary } from "./hooks/useLogoutWithDaySummary";
@@ -223,19 +224,36 @@ export default function Home() {
       if (
         profileData
         && shouldRequireTransactionGps(profileData.role)
-        && await isAndroidBatteryRestricted()
       ) {
-        await supabase.auth.signOut();
-        setUser(null);
-        setProfile(null);
-        showPopup({
-          message: ar
-            ? "يجب ضبط بطارية MADIBA على غير مقيد قبل تسجيل الدخول. افتح الإعدادات واضبط Battery إلى Unrestricted."
-            : "Set MADIBA battery to Unrestricted before signing in. Open settings and choose Battery → Unrestricted.",
-          variant: "warning",
-        });
-        setLoginLoading(false);
-        return;
+        if (await isAndroidBatteryRestricted()) {
+          await supabase.auth.signOut();
+          setUser(null);
+          setProfile(null);
+          showPopup({
+            message: ar
+              ? "يجب ضبط بطارية MADIBA على غير مقيد قبل تسجيل الدخول. افتح الإعدادات واضبط Battery إلى Unrestricted."
+              : "Set MADIBA battery to Unrestricted before signing in. Open settings and choose Battery → Unrestricted.",
+            variant: "warning",
+          });
+          setLoginLoading(false);
+          return;
+        }
+
+        try {
+          await probeGpsLocation();
+        } catch {
+          await supabase.auth.signOut();
+          setUser(null);
+          setProfile(null);
+          showPopup({
+            message: ar
+              ? "لا يمكن استخدام MADIBA بدون GPS. اسمح بالوصول إلى الموقع ثم سجّل الدخول مرة أخرى."
+              : "MADIBA cannot be used without GPS. Allow location access, then sign in again.",
+            variant: "warning",
+          });
+          setLoginLoading(false);
+          return;
+        }
       }
       setUser(data.user);
       showPopup({

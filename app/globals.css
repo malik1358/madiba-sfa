@@ -3605,6 +3605,49 @@ table.auditMatrix td.auditTrendSame {
   font-size: 12px;
 }
 
+.moduleNearestCustomers {
+  margin-bottom: 12px;
+}
+
+.moduleNearestCustomersList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.moduleNearestCustomersCard {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #b8cdd2;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #073f4c;
+  text-align: start;
+  cursor: pointer;
+}
+
+.moduleNearestCustomersCard:hover,
+.moduleNearestCustomersCard:focus-visible {
+  background: #edf6f7;
+  border-color: #7aa9b3;
+}
+
+.moduleNearestCustomersCard > span:first-of-type {
+  color: #1d6573;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.moduleNearestCustomersAction {
+  grid-column: 1 / -1;
+  color: #607b82;
+  font-size: 12px;
+}
+
 .moduleInput,
 .moduleTextArea,
 .moduleInlineButton,

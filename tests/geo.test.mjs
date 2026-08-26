@@ -8,6 +8,8 @@ import {
   computeEstimatedTransitHours,
   DEFAULT_TRANSIT_SPEED_KMH,
   formatDurationMinutes,
+  findNearestCustomers,
+  formatDistanceKm,
   resolveWaitingMinutesFromPreviousVisit,
   isIdleGpsPingTimelineRow,
   sumWaitingMinutesFromTimeline,
@@ -213,6 +215,26 @@ test("sumWaitingMinutesFromTimeline totals waiting across consecutive visits", (
 
   assert.equal(sumWaitingMinutesFromTimeline(rows, DEFAULT_TRANSIT_SPEED_KMH), 97);
   assert.equal(sumWaitingMinutesFromTimeline(rows, 30), 79);
+});
+
+test("findNearestCustomers returns the closest saved customer locations", () => {
+  const customers = [
+    { customer_code: "1001", customer_name: "Near", latitude: 24.71, longitude: 46.71 },
+    { customer_code: "1002", customer_name: "Far", latitude: 25.00, longitude: 47.00 },
+    { customer_code: "1003", customer_name: "Mid", latitude: 24.80, longitude: 46.80 },
+    { customer_code: "1004", customer_name: "No GPS" },
+  ];
+
+  const nearest = findNearestCustomers(customers, 24.70, 46.70, 3);
+  assert.equal(nearest.length, 3);
+  assert.equal(nearest[0].customer_code, "1001");
+  assert.equal(nearest[1].customer_code, "1003");
+  assert.equal(nearest[2].customer_code, "1002");
+});
+
+test("formatDistanceKm renders meters and kilometers", () => {
+  assert.equal(formatDistanceKm(0.45), "450 m");
+  assert.equal(formatDistanceKm(2.4), "2.4 km");
 });
 
 test("resolveWaitingMinutesFromPreviousVisit skips idle GPS pings between visits", () => {

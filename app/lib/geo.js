@@ -13,6 +13,46 @@ export function haversineDistanceKm(fromLat, fromLng, toLat, toLng) {
   return earthRadiusKm * c;
 }
 
+export function formatDistanceKm(distanceKm) {
+  const km = Number(distanceKm);
+  if (!Number.isFinite(km) || km < 0) return "-";
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return `${km.toFixed(km < 10 ? 1 : 0)} km`;
+}
+
+export function findNearestCustomers(customers, latitude, longitude, limit = 3) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+
+  const ranked = (customers || [])
+    .map((customer) => {
+      const customerLat = customer.latitude ?? customer.customer_latitude;
+      const customerLng = customer.longitude ?? customer.customer_longitude;
+      if (!hasGpsCoordinates({ latitude: customerLat, longitude: customerLng })) return null;
+
+      return {
+        ...customer,
+        distanceKm: haversineDistanceKm(lat, lng, Number(customerLat), Number(customerLng)),
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.distanceKm - right.distanceKm);
+
+  const seen = new Set();
+  const nearest = [];
+
+  for (const customer of ranked) {
+    const code = String(customer.customer_code || "").trim().toUpperCase();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    nearest.push(customer);
+    if (nearest.length >= limit) break;
+  }
+
+  return nearest;
+}
+
 export function hasGpsCoordinates(record) {
   const latitudeRaw = record?.latitude;
   const longitudeRaw = record?.longitude;
@@ -26,11 +66,18 @@ export function hasGpsCoordinates(record) {
 import { shouldRequireTransactionGps } from "./moduleAccess.js";
 
 export const GPS_REQUIRED_ERROR = "GPS is required. Allow location access in the browser and try again.";
+export const GPS_UNSUPPORTED_ERROR = "UNSUPPORTED";
+export const GPS_PERMISSION_DENIED_ERROR = "PERMISSION_DENIED";
+export const GPS_POSITION_UNAVAILABLE_ERROR = "POSITION_UNAVAILABLE";
+export const GPS_LOCATION_FAILED_ERROR = "LOCATION_FAILED";
 
-export function captureGpsLocation() {
+export function probeGpsLocation(options = {}) {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
-    return Promise.reject(new Error("Geolocation is not supported on this device."));
+    return Promise.reject(new Error(GPS_UNSUPPORTED_ERROR));
   }
+
+  const timeoutMs = Number(options.timeoutMs || 10000);
+  const maximumAge = Number.isFinite(Number(options.maximumAge)) ? Number(options.maximumAge) : 0;
 
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
@@ -41,9 +88,31 @@ export function captureGpsLocation() {
           accuracy: Number(position.coords.accuracy.toFixed(1)),
         });
       },
-      () => reject(new Error(GPS_REQUIRED_ERROR)),
-      { enableHighAccuracy: true, timeout: 10000 },
+      (error) => {
+        if (error?.code === 1) {
+          reject(new Error(GPS_PERMISSION_DENIED_ERROR));
+          return;
+        }
+        if (error?.code === 2) {
+          reject(new Error(GPS_POSITION_UNAVAILABLE_ERROR));
+          return;
+        }
+        reject(new Error(GPS_LOCATION_FAILED_ERROR));
+      },
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge },
     );
+  });
+}
+
+export function captureGpsLocation() {
+  return probeGpsLocation().catch((error) => {
+    if (error?.message === GPS_PERMISSION_DENIED_ERROR
+      || error?.message === GPS_POSITION_UNAVAILABLE_ERROR
+      || error?.message === GPS_LOCATION_FAILED_ERROR
+      || error?.message === GPS_UNSUPPORTED_ERROR) {
+      throw new Error(GPS_REQUIRED_ERROR);
+    }
+    throw error;
   });
 }
 

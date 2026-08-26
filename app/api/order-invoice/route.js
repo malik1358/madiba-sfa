@@ -6,7 +6,7 @@ import {
   compareStoredInvoiceWithOrder,
   INVOICE_BUCKET,
 } from "../../lib/orderInvoiceComparison.js";
-import { attachProspectLinkToMeta } from "../../lib/prospectInvoiceLink.js";
+import { attachProspectLinkToMeta, backfillProspectInvoiceLinks } from "../../lib/prospectInvoiceLink.js";
 import { isProspectCustomerCode } from "../../lib/customerCode.js";
 
 export const runtime = "nodejs";
@@ -267,6 +267,7 @@ export async function GET(request) {
     const orderIdsCsv = String(url.searchParams.get("orderIds") || "").trim();
 
     const compare = String(url.searchParams.get("compare") || "").trim() === "1";
+    const linkProspects = String(url.searchParams.get("linkProspects") || "").trim() === "1";
 
     if (singleOrderId) {
       const order = await ensureOrderVisible(admin, singleOrderId, scope);
@@ -303,6 +304,16 @@ export async function GET(request) {
       .filter(Boolean);
 
     const metaMap = await readMetaMap(admin, visibleIds);
+
+    if (linkProspects) {
+      const backfill = await backfillProspectInvoiceLinks(admin, orders.filter((order) => canSeeOrder(order, scope)), metaMap, {
+        limit: 20,
+      });
+      for (const meta of Object.values(backfill.updatedMeta)) {
+        await upsertMeta(admin, meta);
+      }
+    }
+
     const items = {};
 
     for (const orderId of visibleIds) {
@@ -430,16 +441,65 @@ export async function POST(request) {
         .filter(Boolean)
         .slice(0, 15);
 
+      const orders = await loadOrders(admin, orderIds);
+      const visibleOrders = orders.filter((order) => canSeeOrder(order, scope));
+      const visibleIds = visibleOrders.map((order) => String(order.id || "").trim()).filter(Boolean);
+      const metaMap = await readMetaMap(admin, visibleIds);
+
       const items = {};
-      for (const orderId of orderIds) {
-        await ensureOrderVisible(admin, orderId, scope);
-        const metaMap = await readMetaMap(admin, [orderId]);
+      const prospectLinks = {};
+
+      for (const orderId of visibleIds) {
+        const order = visibleOrders.find((entry) => String(entry.id) === orderId);
         const meta = metaMap.get(orderId) || { orderId };
         const compared = await hydrateMetaWithComparison(admin, meta, { forceCompare: true });
+        metaMap.set(orderId, compared);
+
+        if (order && isProspectCustomerCode(order.customer_code)) {
+          const linked = await attachProspectLinkToMeta(admin, order, compared);
+          if (linked.meta !== compared) {
+            await upsertMeta(admin, linked.meta);
+            metaMap.set(orderId, linked.meta);
+          }
+          prospectLinks[orderId] = linked.prospectLink;
+          items[orderId] = await withSignedUrl(admin, linked.meta);
+          continue;
+        }
+
         items[orderId] = await withSignedUrl(admin, compared);
       }
 
-      return NextResponse.json({ success: true, items });
+      return NextResponse.json({ success: true, items, prospectLinks });
+    }
+
+    if (mode === "backfill-prospect-links") {
+      const orderIds = (Array.isArray(body?.orderIds) ? body.orderIds : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .slice(0, 20);
+
+      const orders = await loadOrders(admin, orderIds);
+      const visibleOrders = orders.filter((order) => canSeeOrder(order, scope));
+      const visibleIds = visibleOrders.map((order) => String(order.id || "").trim()).filter(Boolean);
+      const metaMap = await readMetaMap(admin, visibleIds);
+      const backfill = await backfillProspectInvoiceLinks(admin, visibleOrders, metaMap, { limit: 20 });
+
+      for (const meta of Object.values(backfill.updatedMeta)) {
+        await upsertMeta(admin, meta);
+      }
+
+      const items = {};
+      for (const orderId of visibleIds) {
+        const meta = metaMap.get(orderId) || { orderId };
+        items[orderId] = await withSignedUrl(admin, meta);
+      }
+
+      return NextResponse.json({
+        success: true,
+        processed: backfill.processed,
+        results: backfill.results,
+        items,
+      });
     }
 
     if (mode === "compare") {

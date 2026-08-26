@@ -186,7 +186,7 @@ export default function PendingOrdersPage() {
 
     try {
       const token = await getAuthToken();
-      const response = await fetch(`/api/order-invoice?orderIds=${encodeURIComponent(orderIds.join(","))}`, {
+      const response = await fetch(`/api/order-invoice?orderIds=${encodeURIComponent(orderIds.join(","))}&linkProspects=1`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },

@@ -44,7 +44,7 @@ function outstandingCacheKey(customerCode, customerName) {
 }
 
 function collectionQueuesCacheKey(scope) {
-  return `collectionQueues:v1:${buildScopeHash(scope)}`;
+  return `collectionQueues:v2:${buildScopeHash(scope)}`;
 }
 
 function collectionScopeCacheKey(userId) {
@@ -295,6 +295,7 @@ async function fetchCollectionQueuesNetwork(accessToken) {
     dueCustomers: payload.dueCustomers || [],
     notDueCustomers: payload.notDueCustomers || [],
     legalCustomers: payload.legalCustomers || [],
+    salesScope: payload.salesScope || null,
     schedulerScope: payload.schedulerScope || null,
   };
 }
@@ -311,6 +312,7 @@ export async function writeCollectionQueuesForUser(userId, scope, queues) {
     dueCustomers: queues.dueCustomers || [],
     notDueCustomers: queues.notDueCustomers || [],
     legalCustomers: queues.legalCustomers || [],
+    salesScope: queues.salesScope || null,
     schedulerScope: queues.schedulerScope || null,
   };
 

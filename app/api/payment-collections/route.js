@@ -447,7 +447,7 @@ export async function getSalesScope(admin, userId) {
 
       const scopeCodeSet = new Set(visibleSalesmanCodes.map((code) => normalizeSalesmanCode(code)).filter(Boolean));
       const scopeProfilesByKey = new Map();
-      [profile, ...(teamProfiles || []), ...mutualProfiles].forEach((entry) => {
+      [profile, ...mutualProfiles].forEach((entry) => {
         if (!entry) return;
         const key = String(entry.id || entry.salesman_code || entry.salesman_name || "").trim();
         if (key) scopeProfilesByKey.set(key, entry);
@@ -801,6 +801,10 @@ export async function GET(request) {
       dueCustomers: queues.dueCustomers,
       notDueCustomers: queues.notDueCustomers,
       legalCustomers: queues.legalCustomers,
+      salesScope: {
+        hasAllAccess: scope.hasAllAccess,
+        visibleSalesmanCodes: scope.visibleSalesmanCodes,
+      },
       schedulerScope: {
         userId: scope.userId,
         canSeeAllSchedulers: scope.canSeeAllSchedulers,

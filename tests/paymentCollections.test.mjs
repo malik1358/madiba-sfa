@@ -20,7 +20,7 @@ import {
   normalizeWhatsappNumber,
   sortCashQueueCustomers,
 } from "../app/lib/paymentCollections.js";
-import { buildSalesmanScopeMatchers } from "../app/lib/mutualSalesmanGroups.js";
+import { buildSalesmanScopeMatchers, salesmanValueMatchesScope } from "../app/lib/mutualSalesmanGroups.js";
 import { hydrateOutstandingInvoices } from "../app/lib/outstanding.js";
 
 test("invoiceHasCashRef matches C in Ref. No. only", () => {
@@ -621,6 +621,22 @@ test("customerMatchesCollectionScope falls back to customer master when invoice 
     normalizedScopeCodes: ["ABDUL REHMAN"],
     hasAllAccess: false,
   }), true);
+});
+
+test("scoped salesman matchers exclude other salesmen such as Ahmed Nabil", () => {
+  const abdulScope = buildSalesmanScopeMatchers([
+    { salesman_code: "ABDUL REHMAN", salesman_name: "ABDUL REHMAN" },
+  ]);
+
+  assert.equal(salesmanValueMatchesScope("ABDUL REHMAN", abdulScope), true);
+  assert.equal(salesmanValueMatchesScope("Ahmed Nabil", abdulScope), false);
+  assert.equal(customerMatchesCollectionScope({
+    customer: { current_salesman_code: "ABDUL REHMAN" },
+    customerInvoices: [{ salesman: "Ahmed Nabil", pending_amount: 4186 }],
+    scopeMatchers: abdulScope,
+    normalizedScopeCodes: ["ABDUL REHMAN"],
+    hasAllAccess: false,
+  }), false);
 });
 
 test("canViewerSeeScheduledRevisit hides other users schedules from salesmen", () => {

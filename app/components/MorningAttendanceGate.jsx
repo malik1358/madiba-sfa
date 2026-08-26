@@ -559,6 +559,17 @@ export default function MorningAttendanceGate({
   }, [accessLoading, batteryCheckRequired]);
 
   useEffect(() => {
+    if (accessLoading) return undefined;
+
+    if (!locationCheckRequired) {
+      setLocationReady(true);
+      return undefined;
+    }
+
+    return undefined;
+  }, [accessLoading, locationCheckRequired]);
+
+  useEffect(() => {
     if (accessLoading) {
       return undefined;
     }
@@ -585,6 +596,8 @@ export default function MorningAttendanceGate({
           if (!cancelled) {
             setReady(true);
             setChecking(false);
+            setBatteryReady(true);
+            setLocationReady(true);
             const supabase = getSupabaseClient();
             supabase?.auth.getSession().then(({ data }) => {
               const userId = data?.session?.user?.id;
@@ -872,6 +885,10 @@ export default function MorningAttendanceGate({
     };
   }, [backgroundGpsEnabled, attendanceComplete, attendanceRequired, ready, batteryReady, apkVersionReady, locationReady]);
 
+  const batteryGateReady = !batteryCheckRequired || batteryReady;
+  const locationGateReady = !locationCheckRequired || locationReady;
+  const accessGateReady = ready && batteryGateReady && apkVersionReady && locationGateReady;
+
   if (accessLoading && requireMorningAttendance) {
     return (
       <main className="modulePage" dir={dir}>
@@ -886,7 +903,7 @@ export default function MorningAttendanceGate({
     );
   }
 
-  if (ready && batteryReady && apkVersionReady && locationReady) {
+  if (accessGateReady) {
     return (
       <>
         {attendanceRequired && attendanceComplete ? <WorkdayInactivityPrompt /> : null}

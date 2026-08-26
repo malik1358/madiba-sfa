@@ -81,6 +81,13 @@ test("admin and manager bypass GPS access gate on management pages", () => {
   assert.equal(shouldRequireGpsAccessGate("invoice-maker"), false);
 });
 
+test("business dashboard is limited to admin and manager", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("businessDashboard"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("businessDashboard"), true);
+  assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("businessDashboard"), false);
+  assert.equal(buildModuleAccess({ role: "collector" }).canAccess("businessDashboard"), false);
+});
+
 test("localized module and nav labels return Arabic text", () => {
   assert.equal(localizedModuleLabel("newOrder", "ar"), "طلب جديد");
   assert.equal(localizedNavGroupLabel("collections", "ar"), "التحصيلات");

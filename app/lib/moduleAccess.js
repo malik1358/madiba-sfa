@@ -13,6 +13,7 @@ export const MODULES = {
   collectionReport: { href: "/management/collection-report", label: "Collection Report" },
   dailyVisitReport: { href: "/management/daily-visit-report", label: "Daily Visit Report" },
   userActivity: { href: "/management/user-activity", label: "User Activity" },
+  businessDashboard: { href: "/management/business-dashboard", label: "Business Dashboard" },
   customerMaster: { href: "/management/customer-master", label: "Customer Master" },
   salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
   gpsMap: { href: "/management/gps-map", label: "GPS Map" },
@@ -34,7 +35,7 @@ export const NAV_GROUPS = [
   {
     key: "admin",
     label: "Admin",
-    modules: ["customerMaster", "userActivity", "salesmanHierarchy", "gpsMap", "upload"],
+    modules: ["businessDashboard", "customerMaster", "userActivity", "salesmanHierarchy", "gpsMap", "upload"],
   },
 ];
 
@@ -101,6 +102,7 @@ export function buildModuleAccess(context = {}) {
       collectionReport: isAdmin || isManager || isCollector,
       dailyVisitReport: isAdmin || isManager || isCollector || isSalesman,
       userActivity: isAdmin || isManager || isCollector,
+      businessDashboard: isAdmin || isManager,
       customerMaster: isAdmin || isManager,
       salesmanHierarchy: isAdmin || isManager || isInvoiceMaker,
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
@@ -158,6 +160,7 @@ export const MODULE_LABELS = {
   collectionReport: { en: "Collection Report", ar: "تقرير التحصيل" },
   dailyVisitReport: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومية" },
   userActivity: { en: "User Activity", ar: "نشاط المستخدمين" },
+  businessDashboard: { en: "Business Dashboard", ar: "لوحة الأعمال" },
   customerMaster: { en: "Customer Master", ar: "سجل العملاء" },
   salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },

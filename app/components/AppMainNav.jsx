@@ -4,13 +4,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listAccessibleNavGroups, localizedModuleLabel, localizedNavGroupLabel } from "../lib/moduleAccess";
-import { useAppLanguage } from "../lib/appLanguage";
+import { translate, useAppLanguage } from "../lib/appLanguage";
 import { useModuleAccess } from "../hooks/useModuleAccess";
 import { getSupabaseClient } from "../lib/supabase";
+
+const NAV_TEXT = {
+  mainNavigation: { en: "Main navigation", ar: "التنقل الرئيسي" },
+};
 
 export default function AppMainNav() {
   const pathname = usePathname();
   const { language, dir } = useAppLanguage();
+  const t = translate(language, NAV_TEXT);
   const { access, loading } = useModuleAccess();
   const [signedIn, setSignedIn] = useState(false);
   const [openGroup, setOpenGroup] = useState("");
@@ -66,7 +71,7 @@ export default function AppMainNav() {
   }
 
   return (
-    <nav className="appMainNav" aria-label="Main navigation" dir={dir} ref={navRef}>
+    <nav className="appMainNav" aria-label={t("mainNavigation")} dir={dir} ref={navRef}>
       {groups.map((group) => {
         const isOpen = openGroup === group.key;
         const hasActiveItem = group.items.some((item) => item.href === pathname);

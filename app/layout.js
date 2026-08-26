@@ -7,6 +7,7 @@ import AppBackButton from "./components/AppBackButton";
 import AppMainNav from "./components/AppMainNav";
 import NativeFieldTracking from "./components/NativeFieldTracking";
 import PwaShell from "./components/PwaShell";
+import { AppLanguageProvider } from "./lib/appLanguage";
 import { AppPopupProvider } from "./components/AppPopupProvider";
 import MorningAttendanceRedirect from "./components/MorningAttendanceRedirect";
 import { resolveBuildId, resolveBuildTime, formatBuildDateTime } from "./lib/buildInfo";
@@ -45,23 +46,25 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body data-build-id={buildId} data-build-time={buildTime}>
-        <AppPopupProvider>
-          {isStaging && (
-            <div className="environmentBanner" role="status">
-              STAGING / UAT - TEST DATA ONLY
-            </div>
-          )}
-          <BuildUpdateWatcher />
-          <PwaShell />
-          <NativeFieldTracking />
-          <MorningAttendanceRedirect />
-          <GlobalAppStatus environment={environment} buildId={buildId} buildTime={buildTime} />
-          <WorkdayTimesBar />
-          <AppMainNav />
-          <AppBackButton />
-          <GlobalLogoutButton />
-          {children}
-        </AppPopupProvider>
+        <AppLanguageProvider>
+          <AppPopupProvider>
+            {isStaging && (
+              <div className="environmentBanner" role="status">
+                STAGING / UAT - TEST DATA ONLY
+              </div>
+            )}
+            <BuildUpdateWatcher />
+            <PwaShell />
+            <NativeFieldTracking />
+            <MorningAttendanceRedirect />
+            <GlobalAppStatus environment={environment} buildId={buildId} buildTime={buildTime} />
+            <WorkdayTimesBar />
+            <AppMainNav />
+            <AppBackButton />
+            <GlobalLogoutButton />
+            {children}
+          </AppPopupProvider>
+        </AppLanguageProvider>
       </body>
     </html>
   );

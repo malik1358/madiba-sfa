@@ -10,7 +10,7 @@ import AppLanguageSwitch from "../components/AppLanguageSwitch";
 import MostVisitedPages from "../components/MostVisitedPages";
 import { usePopupMessages } from "../hooks/usePopupMessages";
 import { useAppPopup } from "../components/AppPopupProvider";
-import { buildModuleAccess, listAccessibleModules } from "../lib/moduleAccess";
+import { buildModuleAccess, listAccessibleModules, localizedModuleLabel } from "../lib/moduleAccess";
 
 const TEXT = {
   title: { en: "Management", ar: "الإدارة" },
@@ -20,6 +20,12 @@ const TEXT = {
   modules: { en: "Management Modules", ar: "وحدات الإدارة" },
   health: { en: "System Health", ar: "حالة النظام" },
   recentOrders: { en: "Recent Orders", ar: "الطلبات الأخيرة" },
+  customers: { en: "Customers", ar: "العملاء" },
+  salesmen: { en: "Salesmen", ar: "المندوبون" },
+  orders: { en: "Orders", ar: "الطلبات" },
+  draftOrders: { en: "Draft Orders", ar: "طلبات مسودة" },
+  submittedOrders: { en: "Submitted Orders", ar: "طلبات مُرسلة" },
+  imports: { en: "Imports", ar: "الاستيراد" },
 };
 
 function number(value) {
@@ -225,14 +231,14 @@ export default function ManagementPage() {
 
   const cards = useMemo(
     () => [
-      { label: "Customers", value: number(summary.customers) },
-      { label: "Salesmen", value: number(summary.salesmen) },
-      { label: "Orders", value: number(summary.orders) },
-      { label: "Draft Orders", value: number(summary.drafts) },
-      { label: "Submitted Orders", value: number(summary.submitted) },
-      { label: "Imports", value: number(summary.imports) },
+      { label: t("customers"), value: number(summary.customers) },
+      { label: t("salesmen"), value: number(summary.salesmen) },
+      { label: t("orders"), value: number(summary.orders) },
+      { label: t("draftOrders"), value: number(summary.drafts) },
+      { label: t("submittedOrders"), value: number(summary.submitted) },
+      { label: t("imports"), value: number(summary.imports) },
     ],
-    [summary],
+    [summary, t],
   );
 
   const supabaseClient = getSupabaseClient();
@@ -300,7 +306,7 @@ export default function ManagementPage() {
           <div className="moduleNavGrid">
             {managementModules.map((module) => (
               <Link key={module.moduleKey} href={module.href} className="moduleNavCard">
-                {module.label}
+                {localizedModuleLabel(module.moduleKey, language)}
               </Link>
             ))}
           </div>

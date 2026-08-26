@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess";
 import MostVisitedPages from "../../components/MostVisitedPages";

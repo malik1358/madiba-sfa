@@ -5,6 +5,9 @@ import {
   buildModuleAccess,
   isCollectionOnlyAccess,
   listAccessibleModules,
+  localizedModuleLabel,
+  localizedNavGroupLabel,
+  moduleLabelForPath,
   shouldRequireTransactionGps,
 } from "../app/lib/moduleAccess.js";
 
@@ -68,4 +71,10 @@ test("invoice-makers are exempt from transaction GPS requirements", () => {
   assert.equal(shouldRequireTransactionGps("salesman"), true);
   assert.equal(shouldRequireTransactionGps("invoice-maker"), false);
   assert.equal(shouldRequireTransactionGps("invoice_maker"), false);
+});
+
+test("localized module and nav labels return Arabic text", () => {
+  assert.equal(localizedModuleLabel("newOrder", "ar"), "طلب جديد");
+  assert.equal(localizedNavGroupLabel("collections", "ar"), "التحصيلات");
+  assert.equal(moduleLabelForPath("/management/new-order", "ar"), "طلب جديد");
 });

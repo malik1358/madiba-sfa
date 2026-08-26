@@ -2,8 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { translate, useAppLanguage } from "../lib/appLanguage";
 import { useLogoutWithDaySummary } from "../hooks/useLogoutWithDaySummary";
 import { getSupabaseClient } from "../lib/supabase";
+
+const TEXT = {
+  logout: { en: "Logout", ar: "تسجيل الخروج" },
+  loggingOut: { en: "Logging out...", ar: "جارٍ تسجيل الخروج..." },
+};
 
 function hasPersistedSession() {
   if (typeof window === "undefined") return false;
@@ -16,6 +22,8 @@ function hasPersistedSession() {
 
 export default function GlobalLogoutButton() {
   const pathname = usePathname();
+  const { language } = useAppLanguage();
+  const t = translate(language, TEXT);
   const [visible, setVisible] = useState(false);
   const { requestLogout, dialog, busy } = useLogoutWithDaySummary();
 
@@ -68,9 +76,9 @@ export default function GlobalLogoutButton() {
         className="globalLogoutButton"
         onClick={requestLogout}
         disabled={busy}
-        aria-label="Logout"
+        aria-label={t("logout")}
       >
-        {busy ? "Logging out..." : "Logout"}
+        {busy ? t("loggingOut") : t("logout")}
       </button>
       {dialog}
     </>

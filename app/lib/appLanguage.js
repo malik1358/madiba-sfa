@@ -4,29 +4,50 @@ import { useCallback, useEffect, useState } from "react";
 import { getSupabaseClient } from "./supabase";
 
 const STORAGE_KEY = "madiba-language";
+export const APP_LANGUAGE_EVENT = "madiba-language-change";
+
+function readStoredLanguage() {
+  if (typeof window === "undefined") return "en";
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  return stored === "ar" ? "ar" : "en";
+}
+
+function applyDocumentLanguage(language) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(STORAGE_KEY, language);
+  document.documentElement.lang = language;
+  document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
+  document.body.dir = language === "ar" ? "rtl" : "ltr";
+}
 
 export function useAppLanguage() {
   const [language, setLanguageState] = useState("en");
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === "ar" || stored === "en") {
-      setLanguageState(stored);
+    const stored = readStoredLanguage();
+    setLanguageState(stored);
+    applyDocumentLanguage(stored);
+
+    function handleLanguageChange(event) {
+      const next = event?.detail?.language;
+      if (next === "ar" || next === "en") {
+        setLanguageState(next);
+      }
     }
+
+    window.addEventListener(APP_LANGUAGE_EVENT, handleLanguageChange);
+    return () => window.removeEventListener(APP_LANGUAGE_EVENT, handleLanguageChange);
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEY, language);
-    document.documentElement.lang = language;
-    document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
-    document.body.dir = language === "ar" ? "rtl" : "ltr";
+    applyDocumentLanguage(language);
   }, [language]);
 
   const setLanguage = useCallback(async (nextLanguage) => {
     const next = nextLanguage === "ar" ? "ar" : "en";
     setLanguageState(next);
+    applyDocumentLanguage(next);
+    window.dispatchEvent(new CustomEvent(APP_LANGUAGE_EVENT, { detail: { language: next } }));
 
     const supabase = getSupabaseClient();
     if (!supabase) return;

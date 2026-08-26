@@ -128,8 +128,67 @@ export function listAccessibleNavGroups(access) {
     .filter((group) => group.items.length > 0);
 }
 
-export function moduleLabelForPath(href) {
+export function moduleLabelForPath(href, language = "en") {
   const normalizedHref = String(href || "").trim();
-  const match = Object.values(MODULES).find((module) => module.href === normalizedHref);
-  return match?.label || null;
+  const match = Object.entries(MODULES).find(([, module]) => module.href === normalizedHref);
+  if (!match) return null;
+  return localizedModuleLabel(match[0], language);
+}
+
+export const MODULE_LABELS = {
+  dashboard: { en: "Dashboard", ar: "الرئيسية" },
+  management: { en: "Management", ar: "الإدارة" },
+  myDay: { en: "My Day", ar: "يومي" },
+  customerAudit: { en: "Customers Audit", ar: "عملائي" },
+  newOrder: { en: "New Order", ar: "طلب جديد" },
+  visitWithoutOrder: { en: "Visit Without Order", ar: "زيارة بدون طلب" },
+  pendingOrders: { en: "Old Pending Orders", ar: "طلبات معلقة قديمة" },
+  newCustomer: { en: "New Customers", ar: "عميل جديد" },
+  myPerformance: { en: "Performance", ar: "أدائي" },
+  myCollections: { en: "My Customer Collections", ar: "تحصيلات عملائي" },
+  paymentCollections: { en: "Payment Collections", ar: "التحصيلات" },
+  collectionReport: { en: "Collection Report", ar: "تقرير التحصيل" },
+  dailyVisitReport: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومية" },
+  userActivity: { en: "User Activity", ar: "نشاط المستخدمين" },
+  customerMaster: { en: "Customer Master", ar: "سجل العملاء" },
+  salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },
+  gpsMap: { en: "GPS Map", ar: "خريطة GPS" },
+  upload: { en: "Imports", ar: "الاستيراد" },
+};
+
+export const NAV_GROUP_LABELS = {
+  home: { en: "Home", ar: "الرئيسية" },
+  field: { en: "Field Sales", ar: "المبيعات الميدانية" },
+  collections: { en: "Collections", ar: "التحصيلات" },
+  admin: { en: "Admin", ar: "الإدارة" },
+};
+
+export const ROLE_LABELS = {
+  admin: { en: "admin", ar: "مدير النظام" },
+  manager: { en: "manager", ar: "مدير" },
+  salesman: { en: "salesman", ar: "مندوب مبيعات" },
+  collector: { en: "collector", ar: "محصل" },
+  "invoice-maker": { en: "invoice-maker", ar: "مُصدر فواتير" },
+  "invoice_maker": { en: "invoice_maker", ar: "مُصدر فواتير" },
+  "product-promoter": { en: "product-promoter", ar: "مروج منتجات" },
+};
+
+export function localizedModuleLabel(moduleKey, language = "en") {
+  const labels = MODULE_LABELS[moduleKey];
+  if (labels) return labels[language] || labels.en || "";
+  return MODULES[moduleKey]?.label || "";
+}
+
+export function localizedNavGroupLabel(groupKey, language = "en") {
+  const labels = NAV_GROUP_LABELS[groupKey];
+  if (labels) return labels[language] || labels.en || "";
+  const group = NAV_GROUPS.find((entry) => entry.key === groupKey);
+  return group?.label || "";
+}
+
+export function localizedRoleLabel(role, language = "en") {
+  const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
+  const labels = ROLE_LABELS[normalized] || ROLE_LABELS[String(role || "").trim().toLowerCase()];
+  if (labels) return labels[language] || labels.en || normalized;
+  return String(role || "").trim();
 }

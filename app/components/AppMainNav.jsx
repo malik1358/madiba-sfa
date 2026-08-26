@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listAccessibleNavGroups } from "../lib/moduleAccess";
+import { listAccessibleNavGroups, localizedModuleLabel, localizedNavGroupLabel } from "../lib/moduleAccess";
+import { useAppLanguage } from "../lib/appLanguage";
 import { useModuleAccess } from "../hooks/useModuleAccess";
 import { getSupabaseClient } from "../lib/supabase";
 
 export default function AppMainNav() {
   const pathname = usePathname();
+  const { language, dir } = useAppLanguage();
   const { access, loading } = useModuleAccess();
   const [signedIn, setSignedIn] = useState(false);
   const [openGroup, setOpenGroup] = useState("");
@@ -64,7 +66,7 @@ export default function AppMainNav() {
   }
 
   return (
-    <nav className="appMainNav" aria-label="Main navigation" ref={navRef}>
+    <nav className="appMainNav" aria-label="Main navigation" dir={dir} ref={navRef}>
       {groups.map((group) => {
         const isOpen = openGroup === group.key;
         const hasActiveItem = group.items.some((item) => item.href === pathname);
@@ -86,7 +88,7 @@ export default function AppMainNav() {
                 setOpenGroup((current) => (current === group.key ? "" : group.key));
               }}
             >
-              {group.label}
+              {localizedNavGroupLabel(group.key, language)}
             </button>
             <div className={`appMainNavDropdown${isOpen ? " appMainNavDropdown--open" : ""}`}>
               {group.items.map((item) => (
@@ -96,7 +98,7 @@ export default function AppMainNav() {
                   className={`appMainNavLink${pathname === item.href ? " appMainNavLink--active" : ""}`}
                   onClick={() => setOpenGroup("")}
                 >
-                  {item.label}
+                  {localizedModuleLabel(item.moduleKey, language)}
                 </Link>
               ))}
             </div>

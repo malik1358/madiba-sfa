@@ -24,7 +24,7 @@ function hasPersistedSession() {
 export default function AppBackButton() {
   const pathname = usePathname();
   const router = useRouter();
-  const { language } = useAppLanguage();
+  const { language, dir } = useAppLanguage();
   const t = translate(language, TEXT);
   const [visible, setVisible] = useState(false);
 
@@ -89,8 +89,9 @@ export default function AppBackButton() {
       className="globalBackButton"
       onClick={handleBack}
       aria-label={t("back")}
+      dir={dir}
     >
-      ← {t("back")}
+      {dir === "rtl" ? `${t("back")} →` : `← ${t("back")}`}
     </button>
   );
 }

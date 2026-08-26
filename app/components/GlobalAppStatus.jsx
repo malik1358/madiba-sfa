@@ -1,11 +1,28 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { translate, useAppLanguage } from "../lib/appLanguage";
+import { localizedRoleLabel } from "../lib/moduleAccess";
 import { countPendingOfflineQueue } from "../lib/offlineSyncQueue";
 import { getSupabaseClient } from "../lib/supabase";
 
+const TEXT = {
+  user: { en: "User", ar: "المستخدم" },
+  server: { en: "Server", ar: "الخادم" },
+  build: { en: "Build", ar: "الإصدار" },
+  network: { en: "Network", ar: "الشبكة" },
+  sync: { en: "Sync", ar: "المزامنة" },
+  online: { en: "Online", ar: "متصل" },
+  offline: { en: "Offline", ar: "غير متصل" },
+  pending: { en: "pending", ar: "معلق" },
+  notSignedIn: { en: "Not signed in", ar: "غير مسجل" },
+  supabaseUnavailable: { en: "Supabase unavailable", ar: "Supabase غير متاح" },
+};
+
 export default function GlobalAppStatus({ environment, buildId, buildTime = "" }) {
-  const [identity, setIdentity] = useState("Not signed in");
+  const { language, dir } = useAppLanguage();
+  const t = translate(language, TEXT);
+  const [identity, setIdentity] = useState("");
   const [online, setOnline] = useState(true);
   const [pendingSync, setPendingSync] = useState(0);
 
@@ -50,15 +67,17 @@ export default function GlobalAppStatus({ environment, buildId, buildTime = "" }
   useEffect(() => {
     const supabase = getSupabaseClient();
     if (!supabase) {
-      setIdentity("Supabase unavailable");
+      setIdentity(t("supabaseUnavailable"));
       return undefined;
     }
 
     let mounted = true;
 
     async function loadIdentity(session) {
+      const translateStatus = translate(language, TEXT);
+
       if (!session?.user) {
-        if (mounted) setIdentity("Not signed in");
+        if (mounted) setIdentity(translateStatus("notSignedIn"));
         return;
       }
 
@@ -72,7 +91,7 @@ export default function GlobalAppStatus({ environment, buildId, buildTime = "" }
 
       const name = String(profile?.salesman_name || session.user.email || session.user.id).trim();
       const code = String(profile?.salesman_code || "").trim();
-      const role = String(profile?.role || "").trim();
+      const role = localizedRoleLabel(profile?.role, language);
       const details = [code, role].filter(Boolean).join(" / ");
       setIdentity(details ? `${name} (${details})` : name);
     }
@@ -89,19 +108,19 @@ export default function GlobalAppStatus({ environment, buildId, buildTime = "" }
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [language]);
 
   return (
-    <div className={`globalAppStatus globalAppStatus${environment}`} role="status">
-      <span><strong>User:</strong> {identity}</span>
-      <span><strong>Server:</strong> {environment}</span>
+    <div className={`globalAppStatus globalAppStatus${environment}`} role="status" dir={dir}>
+      <span><strong>{t("user")}:</strong> {identity || t("notSignedIn")}</span>
+      <span><strong>{t("server")}:</strong> {environment}</span>
       <span>
-        <strong>Build:</strong> {buildId}
+        <strong>{t("build")}:</strong> {buildId}
         {buildTime ? ` · ${buildTime}` : ""}
       </span>
-      <span><strong>Network:</strong> {online ? "Online" : "Offline"}</span>
+      <span><strong>{t("network")}:</strong> {online ? t("online") : t("offline")}</span>
       {pendingSync > 0 ? (
-        <span><strong>Sync:</strong> {pendingSync} pending</span>
+        <span><strong>{t("sync")}:</strong> {pendingSync} {t("pending")}</span>
       ) : null}
     </div>
   );

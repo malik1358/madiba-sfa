@@ -1,4 +1,10 @@
-import { isPlaceholderSalesmanValue, pickOutstandingSalesmanName, resolveInvoiceAgingDays } from "./outstanding.js";
+import {
+  extractLeadingCustomerCodeAndName,
+  isPlaceholderSalesmanValue,
+  parseOutstandingSheetDate,
+  pickOutstandingSalesmanName,
+  resolveInvoiceAgingDays,
+} from "./outstanding.js";
 import { salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
 
 function normalizeCode(value) {
@@ -139,12 +145,27 @@ function toNumber(value) {
 }
 
 function dateOnly(value) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toISOString().slice(0, 10);
+  return parseOutstandingSheetDate(value);
+}
+
+export function collectionRowMatchesCustomerQuery(row, customerFilter) {
+  const customerQuery = String(customerFilter || "").trim().toLowerCase();
+  if (!customerQuery) return true;
+
+  const fields = [
+    row?.customer_code,
+    row?.customer_name,
+    extractLeadingCustomerCodeAndName(row?.customer_code).customer_code,
+    extractLeadingCustomerCodeAndName(row?.customer_name).customer_code,
+    extractLeadingCustomerCodeAndName(row?.customer_name).customer_name,
+  ];
+  if (fields.some((value) => String(value || "").toLowerCase().includes(customerQuery))) {
+    return true;
+  }
+
+  const compactQuery = customerQuery.replace(/[^a-z0-9]/g, "");
+  if (!compactQuery) return false;
+  return fields.some((value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "").includes(compactQuery));
 }
 
 export function scheduledRevisitDate(record) {

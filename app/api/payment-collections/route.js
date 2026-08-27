@@ -3,7 +3,7 @@ import { buildCollectionQueues, customerMatchesCollectionScope, filterCollection
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
-import { resolveMutualGroupProfiles, buildSalesmanScopeMatchers, normalizeSalesmanCode } from "../../lib/mutualSalesmanGroups.js";
+import { resolveMutualGroupProfiles, buildSalesmanScopeMatchers, normalizeSalesmanCode, isSoyebProfile } from "../../lib/mutualSalesmanGroups.js";
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import {
   OUTSTANDING_DATASET_KEY,
@@ -371,10 +371,12 @@ export async function getSalesScope(admin, userId) {
   const normalizedProfileCode = String(profile.salesman_code || "").trim().toUpperCase();
 
   const isCollectorCode = /^CL\d+$/i.test(normalizedProfileCode);
+  const soyebAccess = isSoyebProfile(profile);
   const likelyFullAccess = userRole === "admin"
     || userRole === "manager"
     || userRole === "collector"
-    || isCollectorCode;
+    || isCollectorCode
+    || soyebAccess;
 
   let collectionOnlyAccess = false;
   if (!likelyFullAccess) {
@@ -395,6 +397,7 @@ export async function getSalesScope(admin, userId) {
     || userRole === "collector"
     || collectionOnlyAccess
     || isCollectorCode
+    || soyebAccess
   ) {
     hasAllAccess = true;
     visibleSalesmanCodes = [];

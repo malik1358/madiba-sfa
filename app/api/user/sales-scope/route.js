@@ -4,6 +4,7 @@ import {
   resolvePeersUnderSameHeadUserIds,
   resolveSubordinateUserIds,
 } from "../../../lib/salesHierarchy.js";
+import { isSoyebProfile } from "../../../lib/mutualSalesmanGroups.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -95,11 +96,6 @@ function fuzzyMatchedProfileCodes(allProfiles, authUser) {
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "invoice_maker" || normalized === "invoice-maker";
-}
-
-function isSoyebProfile(profile) {
-  const normalizedName = normalizeName(profile?.salesman_name);
-  return normalizedName === "SOYEB";
 }
 
 export async function resolveSalesScopeForUserId(admin, userId) {

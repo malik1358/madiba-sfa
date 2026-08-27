@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildSalesmanScopeMatchers,
+  isSoyebProfile,
   resolveMutualGroupCodes,
   salesmanValueMatchesScope,
 } from "../app/lib/mutualSalesmanGroups.js";
@@ -44,4 +45,11 @@ test("buildSalesmanScopeMatchers for Parvez includes Junaid identities", () => {
   const parvezScope = buildSalesmanScopeMatchers([TEAM_PROFILES[0], TEAM_PROFILES[1]]);
   assert.equal(salesmanValueMatchesScope("Junaid", parvezScope), true);
   assert.equal(salesmanValueMatchesScope("JUNAID", parvezScope), true);
+});
+
+test("isSoyebProfile matches Soyeb name, alias, and ST103 code", () => {
+  assert.equal(isSoyebProfile({ salesman_name: "Soyeb", salesman_code: "SOYEB" }), true);
+  assert.equal(isSoyebProfile({ salesman_name: "Soyeb (SOYEB)", salesman_code: "ST103" }), true);
+  assert.equal(isSoyebProfile({ salesman_name: "ST103 SOYEB", salesman_code: "ST103" }), true);
+  assert.equal(isSoyebProfile({ salesman_name: "Abdalla Anthanath", salesman_code: "ABDALLA" }), false);
 });

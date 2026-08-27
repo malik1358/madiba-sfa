@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isSoyebProfile } from "../../lib/mutualSalesmanGroups.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -13,10 +14,6 @@ function normalizeCode(value) {
 
 function normalizeName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
-}
-
-function isSoyebProfile(profile) {
-  return normalizeName(profile?.salesman_name) === "SOYEB";
 }
 
 function isInvoiceMakerRole(role) {

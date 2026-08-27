@@ -8,6 +8,14 @@ export function normalizeSalesmanCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+export function isSoyebProfile(profile) {
+  const tokens = new Set([
+    ...comparableSalesmanName(profile?.salesman_name).split(/\s+/).filter(Boolean),
+    ...comparableSalesmanName(profile?.salesman_code).split(/\s+/).filter(Boolean),
+  ]);
+  return tokens.has("SOYEB");
+}
+
 function comparableSalesmanName(value) {
   return normalizeSalesmanName(value).replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }

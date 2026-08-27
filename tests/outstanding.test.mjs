@@ -35,6 +35,7 @@ import {
   summarizeOutstandingBucketsForVisitStatus,
   visibleOutstandingBucketLabels,
   mapOutstandingBucketsToCollectionFields,
+  parseOutstandingSheetDate,
   buildCollectionOutstandingBucketsFromInvoices,
   resolveCollectionOutstandingBuckets,
 } from "../app/lib/outstanding.js";
@@ -43,6 +44,13 @@ test("detectOutstandingSalesmanColumn prefers Salesman over Sales Person", () =>
   const header = ["Date", "Ref. No.", "Party's Name", "Sales Person", "City Name", "State Name", "Pending", "Due on", "Overdue", "Invoice Days", "Salesman"];
 
   assert.equal(detectOutstandingSalesmanColumn(header), 10);
+});
+
+test("parseOutstandingSheetDate accepts Excel day-month-year text", () => {
+  assert.equal(parseOutstandingSheetDate("23-Apr-26"), "2026-04-23");
+  assert.equal(parseOutstandingSheetDate("23-May-26"), "2026-05-23");
+  assert.equal(parseOutstandingSheetDate("29-Jul-26"), "2026-07-29");
+  assert.equal(parseOutstandingSheetDate("2026-05-23"), "2026-05-23");
 });
 
 test("isPlaceholderSalesmanValue detects voucher placeholders", () => {

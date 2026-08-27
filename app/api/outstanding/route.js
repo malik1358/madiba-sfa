@@ -19,6 +19,7 @@ import {
   normalizeOutstandingHeader,
   normalizeName,
   parseBucketLabelFromHeader,
+  parseOutstandingSheetDate,
   pickOutstandingSalesmanName,
   mergeParsedOutstandingSheets,
   prioritizeOutstandingSheets,
@@ -104,9 +105,6 @@ async function readDataset(admin) {
 
 function formatSheetDateValue(value) {
   if (value === null || value === undefined) return "";
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
-  }
 
   if (typeof value === "number") {
     const parsed = XLSX.SSF?.parse_date_code?.(value);
@@ -116,25 +114,7 @@ function formatSheetDateValue(value) {
     }
   }
 
-  const text = String(value || "").trim();
-  if (!text) return "";
-
-  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
-
-  const dmyMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
-  if (dmyMatch) {
-    const day = Number(dmyMatch[1]);
-    const month = Number(dmyMatch[2]);
-    let year = Number(dmyMatch[3]);
-    if (year < 100) year += 2000;
-
-    if (Number.isFinite(day) && Number.isFinite(month) && Number.isFinite(year)) {
-      const utc = new Date(Date.UTC(year, month - 1, day));
-      if (!Number.isNaN(utc.getTime())) return utc.toISOString().slice(0, 10);
-    }
-  }
-
-  return text;
+  return parseOutstandingSheetDate(value) || String(value || "").trim();
 }
 
 function detectColumnIndexes(headerRow) {
@@ -175,7 +155,16 @@ function detectColumnIndexes(headerRow) {
       indexes.refNo = idx;
     }
 
-    if (indexes.dueDate < 0 && normalized.includes("due")) {
+    if (
+      indexes.dueDate < 0
+      && !normalized.includes("overdue")
+      && !normalized.includes("overd")
+      && (normalized === "due"
+        || normalized.startsWith("due ")
+        || normalized.endsWith(" due")
+        || normalized.includes("due date")
+        || normalized.includes("due on"))
+    ) {
       indexes.dueDate = idx;
     }
 

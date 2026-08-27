@@ -6,6 +6,7 @@ import {
   buildCollectionQueues,
   buildExposureScore,
   buildExposureScoreFromInvoices,
+  collectionRowMatchesCustomerQuery,
   customerMatchesCollectionScope,
   canViewerSeeScheduledRevisit,
   canViewerSeeCollectorScheduledRevisit,
@@ -615,6 +616,66 @@ test("buildCollectionQueues drops customers with only excluded salesman invoices
   ], "2026-08-14T10:00:00Z");
 
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["C-KEEP"]);
+});
+
+test("buildCollectionQueues includes Abdalla overdue invoices with Excel month-name dates", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "1435",
+      customer_name: "Toot Al-Noor Trading Establishment",
+      salesman_name: "ABDALLA ANTHANATH",
+      invoices: [
+        { ref_no: "NFD/478", pending_amount: 2031, due_date: "23-May-26", salesman: "ABDALLA ANTHANATH" },
+        { ref_no: "RNFD/055", pending_amount: 1140, due_date: "29-Jul-26", salesman: "ABDALLA ANTHANATH" },
+      ],
+    },
+  ], "2026-08-27T10:00:00Z");
+
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["1435"]);
+  assert.equal(queues.dueCustomers[0].due_invoice_count, 2);
+  assert.equal(queues.dueCustomers[0].total_due_amount, 3171);
+});
+
+test("collectionRowMatchesCustomerQuery finds 1435 in code, name prefix, and 1435C", () => {
+  assert.equal(collectionRowMatchesCustomerQuery({
+    customer_code: "1435",
+    customer_name: "Toot Al-Noor Trading Establishment",
+  }, "1435"), true);
+  assert.equal(collectionRowMatchesCustomerQuery({
+    customer_code: "1435C",
+    customer_name: "Toot Al-Noor Trading Establishment",
+  }, "1435"), true);
+  assert.equal(collectionRowMatchesCustomerQuery({
+    customer_code: "",
+    customer_name: "1435 Toot Al-Noor Trading Establishment",
+  }, "1435"), true);
+  assert.equal(collectionRowMatchesCustomerQuery({
+    customer_code: "1209",
+    customer_name: "Other Customer",
+  }, "1435"), false);
+});
+
+test("customerMatchesCollectionScope lets Soyeb see Abdalla invoices when hasAllAccess", () => {
+  const soyebScope = buildSalesmanScopeMatchers([
+    { salesman_code: "ST103", salesman_name: "SOYEB" },
+    { salesman_code: "JUNAID", salesman_name: "Junaid" },
+    { salesman_code: "PARVEZ", salesman_name: "Parvez" },
+  ]);
+  const abdallaCustomer = {
+    customer: { current_salesman_code: "ABDALLA" },
+    customerInvoices: [{ salesman: "ABDALLA ANTHANATH", pending_amount: 2031 }],
+    scopeMatchers: soyebScope,
+    normalizedScopeCodes: ["ST103", "JUNAID", "PARVEZ", "SOYEB"],
+  };
+
+  assert.equal(customerMatchesCollectionScope({
+    ...abdallaCustomer,
+    hasAllAccess: false,
+  }), false);
+  assert.equal(customerMatchesCollectionScope({
+    ...abdallaCustomer,
+    hasAllAccess: true,
+  }), true);
 });
 
 test("customerMatchesCollectionScope prefers outstanding invoice salesman over customer master", () => {

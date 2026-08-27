@@ -303,12 +303,81 @@ export function toNumber(value) {
 const EXCEL_SERIAL_MIN = 10000;
 const MAX_PLAUSIBLE_AGING_DAYS = 999;
 
-function dateOnlyFromIso(value) {
+const MONTH_NAME_INDEX = {
+  JAN: 1,
+  JANUARY: 1,
+  FEB: 2,
+  FEBRUARY: 2,
+  MAR: 3,
+  MARCH: 3,
+  APR: 4,
+  APRIL: 4,
+  MAY: 5,
+  JUN: 6,
+  JUNE: 6,
+  JUL: 7,
+  JULY: 7,
+  AUG: 8,
+  AUGUST: 8,
+  SEP: 9,
+  SEPT: 9,
+  SEPTEMBER: 9,
+  OCT: 10,
+  OCTOBER: 10,
+  NOV: 11,
+  NOVEMBER: 11,
+  DEC: 12,
+  DECEMBER: 12,
+};
+
+function utcDateString(year, month, day) {
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return "";
+  if (month < 1 || month > 12 || day < 1 || day > 31) return "";
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(utc.getTime())) return "";
+  if (utc.getUTCFullYear() !== year || utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) {
+    return "";
+  }
+  return utc.toISOString().slice(0, 10);
+}
+
+export function parseOutstandingSheetDate(value) {
+  if (value === null || value === undefined || value === "") return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
   const text = String(value || "").trim();
+  if (!text) return "";
   if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+
+  const monthNameMatch = text.match(/^(\d{1,2})[\/\-\s.]+([A-Za-z]{3,9})[\/\-\s.,]+(\d{2,4})$/);
+  if (monthNameMatch) {
+    const day = Number(monthNameMatch[1]);
+    const month = MONTH_NAME_INDEX[monthNameMatch[2].toUpperCase()] || 0;
+    let year = Number(monthNameMatch[3]);
+    if (year < 100) year += 2000;
+    const parsed = utcDateString(year, month, day);
+    if (parsed) return parsed;
+  }
+
+  const dmyMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]);
+    let year = Number(dmyMatch[3]);
+    if (year < 100) year += 2000;
+    const parsed = utcDateString(year, month, day);
+    if (parsed) return parsed;
+  }
+
   const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toISOString().slice(0, 10);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return "";
+}
+
+function dateOnlyFromIso(value) {
+  return parseOutstandingSheetDate(value);
 }
 
 function daysBetweenDates(laterIso, earlierIso) {

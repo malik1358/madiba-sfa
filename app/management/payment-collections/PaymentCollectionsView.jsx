@@ -34,6 +34,7 @@ import {
 } from "../../lib/mobileDataCache";
 import { resolveAuthSession } from "../../lib/authSession";
 import {
+  collectionRowMatchesCustomerQuery,
   isCashOnlyQueueCustomer,
   isCashQueueCustomer,
   isScheduledRevisitQueueCustomer,
@@ -530,13 +531,11 @@ function useMobileLayout(breakpointPx = 700) {
 }
 
 function filterQueueRows(rows, customerFilter, selectedSalesmen) {
-  const customerQuery = String(customerFilter || "").trim().toLowerCase();
   const selectedSalesmanSet = new Set(selectedSalesmen);
-  return (rows || []).filter((row) => {
-    const customerMatch = !customerQuery || [row.customer_code, row.customer_name]
-      .some((value) => String(value || "").toLowerCase().includes(customerQuery));
-    return customerMatch && rowMatchesSalesmanSelection(row, selectedSalesmanSet);
-  });
+  return (rows || []).filter((row) => (
+    collectionRowMatchesCustomerQuery(row, customerFilter)
+    && rowMatchesSalesmanSelection(row, selectedSalesmanSet)
+  ));
 }
 
 function formatMoney(value) {

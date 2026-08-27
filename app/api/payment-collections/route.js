@@ -11,6 +11,7 @@ import {
   hydrateOutstandingInvoices,
   isPlaceholderSalesmanValue,
   mergeOutstandingInvoiceSources,
+  pickLongestCustomerName,
   pickOutstandingSalesmanName,
   customerAccountCodesMatch,
   resolveCustomerAccountCode,
@@ -652,6 +653,16 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
   const invoicesByCustomer = new Map();
   const nameByCustomer = new Map();
+  const rowNameByCustomer = new Map();
+  (outstandingRows || []).forEach((row) => {
+    const key = canonicalCustomerCode(row?.customer_code);
+    if (!key) return;
+    rowNameByCustomer.set(
+      key,
+      pickLongestCustomerName(rowNameByCustomer.get(key), row?.customer_name),
+    );
+  });
+
   outstandingInvoices.forEach((invoice) => {
     const key = resolveOutstandingInvoiceCustomerCode(invoice)
       || canonicalCustomerCode(invoice.customer_code)
@@ -678,7 +689,14 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
     if (!nameByCustomer.has(key)) {
       const label = String(invoice.customer_name || invoice.customer_code || "").trim();
-      nameByCustomer.set(key, extractLeadingCustomerCodeAndName(label).customer_name || label);
+      nameByCustomer.set(
+        key,
+        pickLongestCustomerName(
+          extractLeadingCustomerCodeAndName(label).customer_name,
+          label,
+          rowNameByCustomer.get(key),
+        ),
+      );
     }
   });
 
@@ -707,7 +725,11 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
     uniqueCustomers.set(matchedKey, {
       customer_code: matchedKey,
-      customer_name: nameByCustomer.get(key) || matchedKey,
+      customer_name: pickLongestCustomerName(
+        nameByCustomer.get(key),
+        rowNameByCustomer.get(key),
+        matchedKey,
+      ),
       current_salesman_code: "",
       city: "",
       area: "",
@@ -757,7 +779,11 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
     records.push({
       customer_code: customer.customer_code,
-      customer_name: customer.customer_name,
+      customer_name: pickLongestCustomerName(
+        nameByCustomer.get(customer.customer_code),
+        rowNameByCustomer.get(customer.customer_code),
+        customer.customer_name,
+      ),
       current_salesman_code: customer.current_salesman_code,
       salesman_name: pickOutstandingSalesmanName(customerInvoices)
         || (!isPlaceholderSalesmanValue(customer.current_salesman_code)

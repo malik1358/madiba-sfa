@@ -107,6 +107,11 @@ const TEXT = {
   complianceOnPriority: { en: "On priority — visited a top-ranked customer for this visit order", ar: "ضمن الأولوية — زار عميلاً ذا ترتيب مناسب لهذه الزيارة" },
   complianceSlightlyDelayed: { en: "Slightly off — customer was a few places lower in queue", ar: "انحراف بسيط — العميل كان أدنى قليلاً في القائمة" },
   complianceOffPriority: { en: "Off priority — collector skipped many higher-ranked customers", ar: "خارج الأولوية — تم تجاوز عملاء أعلى في القائمة" },
+  complianceOffPrioritySalesman: { en: "Off priority — skipped higher-ranked customers from your list", ar: "خارج الأولوية — تم تجاوز عملاء أعلى في قائمتك" },
+  complianceOnPrioritySalesman: { en: "On priority — visited a top-ranked customer from your list", ar: "ضمن الأولوية — زار عميلاً ذا ترتيب مناسب في قائمتك" },
+  complianceSlightlyDelayedSalesman: { en: "Slightly off — customer was a few places lower in your list", ar: "انحراف بسيط — العميل كان أدنى قليلاً في قائمتك" },
+  priorityYesSalesman: { en: "Yes — priority customer in your list", ar: "نعم — عميل ذو أولوية في قائمتك" },
+  queuePrioritySalesman: { en: "Your customer priority", ar: "أولوية عميلك" },
   complianceUnknown: { en: "Queue rank unavailable for this visit", ar: "ترتيب القائمة غير متاح لهذه الزيارة" },
   visitOrderVsQueue: { en: "Visit # vs queue rank", ar: "رقم الزيارة مقابل ترتيب القائمة" },
   scheduledRevisitOnly: { en: "Scheduled revisit (not in due queue rank)", ar: "زيارة مجدولة (ليست ضمن ترتيب القائمة المستحقة)" },
@@ -185,11 +190,18 @@ function formatProbabilityLabel(label, t) {
   return String(label);
 }
 
-function formatQueueCompliance(visit, t) {
+function formatQueueCompliance(visit, t, queueScope = "collector") {
+  const isSalesman = queueScope === "salesman";
   if (visit.isScheduledRevisit && !visit.queuePriority) return t("scheduledRevisitOnly");
-  if (visit.queueCompliance === "on_priority") return t("complianceOnPriority");
-  if (visit.queueCompliance === "slightly_delayed") return t("complianceSlightlyDelayed");
-  if (visit.queueCompliance === "off_priority") return t("complianceOffPriority");
+  if (visit.queueCompliance === "on_priority") {
+    return isSalesman ? t("complianceOnPrioritySalesman") : t("complianceOnPriority");
+  }
+  if (visit.queueCompliance === "slightly_delayed") {
+    return isSalesman ? t("complianceSlightlyDelayedSalesman") : t("complianceSlightlyDelayed");
+  }
+  if (visit.queueCompliance === "off_priority") {
+    return isSalesman ? t("complianceOffPrioritySalesman") : t("complianceOffPriority");
+  }
   return t("complianceUnknown");
 }
 
@@ -453,6 +465,7 @@ export default function CollectionReportPage() {
                   collector.visits,
                   transitSpeedKmh,
                 );
+                const isSalesmanQueue = collector.queueScope === "salesman";
 
                 return (
                 <section key={collector.collectorId} className="moduleSection">
@@ -490,7 +503,7 @@ export default function CollectionReportPage() {
                           <th>{t("time")}</th>
                           <th>{t("userName")}</th>
                           <th>{t("viewReport")}</th>
-                          <th>{t("queuePriority")}</th>
+                          <th>{isSalesmanQueue ? t("queuePrioritySalesman") : t("queuePriority")}</th>
                           <th>{t("customer")}</th>
                           <th>{t("area")}</th>
                           <th>{t("street")}</th>
@@ -532,11 +545,11 @@ export default function CollectionReportPage() {
                                   <div className="moduleCode">{formatVisitOrderVsQueue(visit)}</div>
                                   {visit.queueCompliance === "off_priority" ? (
                                     <div className="moduleCollectorProbability moduleCollectorProbabilityLOW">
-                                      {t("complianceOffPriority")}
+                                      {formatQueueCompliance(visit, t, collector.queueScope)}
                                     </div>
                                   ) : visit.queueCompliance === "on_priority" ? (
                                     <div className="moduleCollectorProbability moduleCollectorProbabilityHIGH">
-                                      {t("complianceOnPriority")}
+                                      {formatQueueCompliance(visit, t, collector.queueScope)}
                                     </div>
                                   ) : null}
                                 </>
@@ -551,7 +564,7 @@ export default function CollectionReportPage() {
                                   <div className="moduleCode">{visit.customerCode}</div>
                                   {visit.isPriorityCustomer ? (
                                     <div className="moduleCollectorProbability moduleCollectorProbabilityHIGH">
-                                      {t("priorityYes")}
+                                      {isSalesmanQueue ? t("priorityYesSalesman") : t("priorityYes")}
                                     </div>
                                   ) : visit.probabilityLabel || visit.queuePriority ? (
                                     <div className="moduleCollectorProbability moduleCollectorProbabilityLOW">
@@ -661,7 +674,7 @@ export default function CollectionReportPage() {
                 </section>
               </section>
 
-              <div className="moduleHint">{formatQueueCompliance(selectedVisit.visit, t)}</div>
+              <div className="moduleHint">{formatQueueCompliance(selectedVisit.visit, t, selectedVisit.collector.queueScope)}</div>
 
               {selectedVisit.visit.prioritySource === "reconstructed" ? (
                 <div className="moduleHint">{t("priorityEstimated")}</div>

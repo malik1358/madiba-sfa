@@ -220,6 +220,7 @@ async function resolveScopeForUser(admin, user) {
     visibleSalesmanCodes,
     identitySearchPatterns,
     outstandingSalesmanIdentities,
+    scopeMatchers,
   };
 }
 
@@ -317,7 +318,11 @@ async function fetchVisibleCustomers(admin, scope) {
 
     try {
       const dataset = JSON.parse(setting?.setting_value || "null");
-      const ownership = resolveOutstandingCustomerOwnership(dataset, scope.outstandingSalesmanIdentities || scope.visibleSalesmanCodes);
+      const ownership = resolveOutstandingCustomerOwnership(
+        dataset,
+        scope.outstandingSalesmanIdentities || scope.visibleSalesmanCodes,
+        scope.scopeMatchers,
+      );
       ownership.assignedCustomerCodes.forEach((code) => outstandingAssignedCustomerCodes.add(normalizeCode(code)));
       ownership.ownedCustomerCodes.forEach((code) => outstandingOwnedCustomerCodes.add(normalizeCode(code)));
     } catch {

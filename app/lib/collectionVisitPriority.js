@@ -1,10 +1,12 @@
 import {
   buildCollectionPriority,
   buildCollectionQueues,
+  customerMatchesCollectionScope,
   isCashOnlyQueueCustomer,
   isCashQueueCustomer,
   sortCashQueueCustomers,
 } from "./paymentCollections.js";
+import { buildSalesmanScopeMatchers } from "./mutualSalesmanGroups.js";
 
 function normalizeCustomerCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -89,6 +91,30 @@ export function buildCollectionQueuePriorityMaps(records, todayIso = new Date().
     recordByCode,
     dueQueueSize: visibleDueQueuePriority.size || dueQueuePriority.size,
   };
+}
+
+export function filterCollectionRecordsForScope(records, scope = {}) {
+  if (scope.hasAllAccess) return Array.isArray(records) ? records : [];
+
+  const scopeMatchers = buildSalesmanScopeMatchers(scope.scopeProfiles || []);
+  const normalizedScopeCodes = (scope.visibleSalesmanCodes || [])
+    .map((code) => normalizeCustomerCode(code))
+    .filter(Boolean);
+
+  return (records || []).filter((record) => customerMatchesCollectionScope({
+    customer: record,
+    customerInvoices: record?.invoices || [],
+    scopeMatchers,
+    normalizedScopeCodes,
+    hasAllAccess: false,
+  }));
+}
+
+export function buildScopedCollectionQueuePriorityMaps(records, scope, todayIso = new Date().toISOString()) {
+  return buildCollectionQueuePriorityMaps(
+    filterCollectionRecordsForScope(records, scope),
+    todayIso,
+  );
 }
 
 export function resolveVisitPriorityMeta(visit, maps, options = {}) {

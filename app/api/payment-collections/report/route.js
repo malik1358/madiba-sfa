@@ -12,6 +12,7 @@ import {
 } from "../../../lib/collectionVisitSummary.js";
 import {
   buildCollectionQueuePriorityMaps,
+  buildScopedCollectionQueuePriorityMaps,
   resolveVisitPriorityMeta,
 } from "../../../lib/collectionVisitPriority.js";
 import {
@@ -36,7 +37,7 @@ import {
 import { filterCollectionQueueInvoices, invoiceHasCashRef, isScheduledRevisitQueueCustomer } from "../../../lib/paymentCollections.js";
 import { resolveInvoiceAgingDays, toNumber } from "../../../lib/outstanding.js";
 import { filterLogsByKsaEventDate, getKsaDateString, ksaDayBounds } from "../../../lib/workdayActivity.js";
-import { fetchOutstandingAndCollectionRecords } from "../route.js";
+import { fetchOutstandingAndCollectionRecords, getSalesScope } from "../route.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -754,7 +755,25 @@ export async function GET(request) {
       visibleSalesmanCodes: [],
       scopeProfiles: [],
     });
-    const priorityMaps = buildCollectionQueuePriorityMaps(collectionRecords, `${date}T12:00:00`);
+    const reportDateIso = `${date}T12:00:00`;
+    const globalPriorityMaps = buildCollectionQueuePriorityMaps(collectionRecords, reportDateIso);
+    const salesmanPriorityMapsByUserId = new Map();
+
+    async function resolvePriorityMapsForUser(userId, userProfile) {
+      if (isCollectionReportCollector(userProfile)) {
+        return { maps: globalPriorityMaps, queueScope: "collector" };
+      }
+
+      if (salesmanPriorityMapsByUserId.has(userId)) {
+        return salesmanPriorityMapsByUserId.get(userId);
+      }
+
+      const scope = await getSalesScope(admin, userId);
+      const maps = buildScopedCollectionQueuePriorityMaps(collectionRecords, scope, reportDateIso);
+      const resolved = { maps, queueScope: "salesman" };
+      salesmanPriorityMapsByUserId.set(userId, resolved);
+      return resolved;
+    }
 
     const activityGpsByUser = await loadActivityGpsByUser(admin, allCollectorIds, startIso, endIso);
     const visitRowsWithGpsFallback = visitRows
@@ -775,11 +794,12 @@ export async function GET(request) {
     const timelineUserIds = [...grouped.keys()].filter((id) => id && id !== "unknown");
     const lunchEventsByUser = await loadLunchBreakEventsByUser(admin, timelineUserIds, startIso, endIso, date);
 
-    const collectors = [...grouped.entries()].map(([createdBy, rows]) => {
+    const collectors = await Promise.all([...grouped.entries()].map(async ([createdBy, rows]) => {
       const collectorProfile = profileMap.get(createdBy) || {};
       const userName = formatCollectorDisplayName(collectorProfile);
       const userRole = String(collectorProfile.role || "").trim().toLowerCase().replace(/_/g, "-");
       const userRoleLabel = formatCollectionUserRoleLabel(collectorProfile.role);
+      const { maps: priorityMaps, queueScope } = await resolvePriorityMapsForUser(createdBy, collectorProfile);
       const lunchRows = lunchEventsByUser.get(createdBy) || [];
       const lunchEvents = extractLunchTimesFromTimelineRows(lunchRows);
       const daySummaryEn = buildCollectionDaySummary(rows, customerLocationByCode, lunchEvents, COLLECTION_DAY_SUMMARY_LABELS);
@@ -805,6 +825,7 @@ export async function GET(request) {
         collectorName: userName,
         userRole,
         userRoleLabel,
+        queueScope,
         salesmanCode: collectorProfile.salesman_code || "",
         visitCount: rows.length,
         uniqueCustomerVisitCount: countUniqueCustomerVisits(rows),
@@ -813,7 +834,8 @@ export async function GET(request) {
         daySummary,
         visits: enrichedVisits,
       };
-    }).sort((left, right) => left.collectorName.localeCompare(right.collectorName));
+    }));
+    collectors.sort((left, right) => left.collectorName.localeCompare(right.collectorName));
 
     const availableUserIds = new Set([
       ...fieldUsers.map((row) => row.id),

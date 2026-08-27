@@ -1,3 +1,5 @@
+import { salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
+
 export const OUTSTANDING_DATASET_KEY = "outstanding_customerwise_dataset_v1";
 
 export function normalizeCode(value) {
@@ -34,13 +36,31 @@ export function resolveOutstandingInvoiceCustomerCode(invoice) {
 
 export function repairOutstandingInvoice(invoice) {
   const code = resolveOutstandingInvoiceCustomerCode(invoice);
-  const combined = String(invoice?.customer_name || invoice?.customer_code || "").trim();
-  const extracted = extractLeadingCustomerCodeAndName(combined);
+  const codeField = normalizeCode(invoice?.customer_code);
+  const nameField = String(invoice?.customer_name || "").trim();
+  const combinedCandidates = [...new Set([
+    nameField,
+    codeField && nameField && !nameField.toUpperCase().startsWith(`${codeField} `)
+      ? `${codeField} ${nameField}`.trim()
+      : "",
+    String(invoice?.customer_code || "").trim(),
+  ].filter(Boolean))];
+
+  let resolvedCode = code || codeField;
+  let resolvedName = nameField;
+
+  combinedCandidates.forEach((combined) => {
+    const extracted = extractLeadingCustomerCodeAndName(combined);
+    if (extracted.customer_code && !resolvedCode) {
+      resolvedCode = normalizeCode(extracted.customer_code);
+    }
+    resolvedName = pickLongestCustomerName(resolvedName, extracted.customer_name, combined);
+  });
 
   return {
     ...invoice,
-    customer_code: code || extracted.customer_code || normalizeCode(invoice?.customer_code),
-    customer_name: String(extracted.customer_name || invoice?.customer_name || combined || code || "").trim(),
+    customer_code: resolvedCode || normalizeCode(invoice?.customer_code),
+    customer_name: resolvedName || codeField || "",
   };
 }
 
@@ -115,7 +135,16 @@ export function mergeOutstandingInvoiceSources(primary, supplemental) {
   return merged;
 }
 
-export function resolveOutstandingCustomerOwnership(dataset, salesmanIdentities) {
+function invoiceOwnedByScope(invoice, identityNames, scopeMatchers) {
+  const salesman = invoice?.salesman;
+  if (!String(salesman || "").trim()) return false;
+  if (scopeMatchers) return salesmanValueMatchesScope(salesman, scopeMatchers);
+
+  const salesmanName = normalizeComparableName(salesman);
+  return Boolean(salesmanName && identityNames.has(salesmanName));
+}
+
+export function resolveOutstandingCustomerOwnership(dataset, salesmanIdentities, scopeMatchers = null) {
   const identityNames = new Set(
     (salesmanIdentities || []).map(normalizeComparableName).filter(Boolean)
   );
@@ -123,12 +152,14 @@ export function resolveOutstandingCustomerOwnership(dataset, salesmanIdentities)
   const ownedCustomerCodes = new Set();
 
   (Array.isArray(dataset?.invoices) ? dataset.invoices : []).forEach((invoice) => {
-    const salesmanName = normalizeComparableName(invoice?.salesman);
     const customerCode = outstandingInvoiceCustomerCode(invoice);
+    const salesmanName = normalizeComparableName(invoice?.salesman);
     if (!salesmanName || !customerCode) return;
 
     assignedCustomerCodes.add(customerCode);
-    if (identityNames.has(salesmanName)) ownedCustomerCodes.add(customerCode);
+    if (invoiceOwnedByScope(invoice, identityNames, scopeMatchers)) {
+      ownedCustomerCodes.add(customerCode);
+    }
   });
 
   return { assignedCustomerCodes, ownedCustomerCodes };
@@ -190,14 +221,21 @@ export function customerAccountCodesMatch(left, right) {
   return false;
 }
 
+function leadingTokenLooksLikeCustomerCode(token) {
+  const word = String(token || "").trim();
+  if (!word) return false;
+  if (/^PROSPECT-\d+$/i.test(word)) return true;
+  return /\d/.test(word);
+}
+
 export function extractLeadingCustomerCodeAndName(value) {
   const text = String(value || "").trim();
   if (!text) {
     return { customer_code: "", customer_name: "" };
   }
 
-  const match = text.match(/^([A-Z0-9]{3,12})\s+(.+)$/i);
-  if (!match) {
+  const match = text.match(/^([A-Z0-9-]{3,20})\s+(.+)$/i);
+  if (!match || !leadingTokenLooksLikeCustomerCode(match[1])) {
     return { customer_code: "", customer_name: text };
   }
 
@@ -205,6 +243,14 @@ export function extractLeadingCustomerCodeAndName(value) {
     customer_code: String(match[1] || "").trim(),
     customer_name: String(match[2] || "").trim(),
   };
+}
+
+export function pickLongestCustomerName(...candidates) {
+  const names = [...new Set(
+    candidates.map((value) => String(value || "").trim()).filter(Boolean),
+  )];
+  if (names.length === 0) return "";
+  return names.sort((left, right) => right.length - left.length)[0];
 }
 
 export function toNumber(value) {

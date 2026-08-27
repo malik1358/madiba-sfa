@@ -1,16 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { buildSalesmanScopeMatchers } from "../app/lib/mutualSalesmanGroups.js";
 import {
   combineOutstandingHeaderRows,
   customerAccountCodesMatch,
   customerCodeCandidates,
   detectOutstandingPendingAmountColumn,
   detectOutstandingSalesmanColumn,
+  extractLeadingCustomerCodeAndName,
   applyOutstandingRowSalesman,
   buildOutstandingRowSalesmanByCode,
   isPlaceholderSalesmanValue,
   pickOutstandingSalesmanName,
+  pickLongestCustomerName,
   findOutstandingForCustomer,
   findOutstandingHeaderRow,
   isSameOutstandingCustomer,
@@ -123,10 +126,64 @@ test("outstanding ownership records other salesman assignments as authoritative"
   assert.deepEqual([...ownership.ownedCustomerCodes], ["1173C"]);
 });
 
+test("outstanding ownership uses scope matchers for parenthetical salesman labels", () => {
+  const dataset = {
+    invoices: [
+      { customer_code: "1542", salesman: "Parvez (PARVEZ)" },
+      { customer_code: "1290", salesman: "Junaid" },
+    ],
+  };
+  const parvezScope = buildSalesmanScopeMatchers([
+    { salesman_code: "PARVEZ", salesman_name: "Parvez (PARVEZ)" },
+    { salesman_code: "JUNAID", salesman_name: "Junaid (JUNAID)" },
+    { salesman_code: "SOYEB", salesman_name: "Soyeb (SOYEB)" },
+  ]);
+
+  const ownership = resolveOutstandingCustomerOwnership(
+    dataset,
+    ["PARVEZ", "JUNAID", "SOYEB"],
+    parvezScope,
+  );
+
+  assert.deepEqual([...ownership.ownedCustomerCodes].sort(), ["1290", "1542"]);
+});
+
 test("customerCodeCandidates extracts code from a combined customer master value", () => {
   assert.deepEqual(
     customerCodeCandidates("1173C LOULOAT AL NILE TRADING CO."),
     ["1173C LOULOAT AL NILE TRADING CO.", "1173C"]
+  );
+});
+
+test("extractLeadingCustomerCodeAndName only splits real customer codes", () => {
+  assert.deepEqual(
+    extractLeadingCustomerCodeAndName("1542 RENEWABLE TECHNOLOGY FOR TRADING EST"),
+    { customer_code: "1542", customer_name: "RENEWABLE TECHNOLOGY FOR TRADING EST" },
+  );
+  assert.deepEqual(
+    extractLeadingCustomerCodeAndName("RENEWABLE TECHNOLOGY FOR TRADING EST"),
+    { customer_code: "", customer_name: "RENEWABLE TECHNOLOGY FOR TRADING EST" },
+  );
+  assert.deepEqual(
+    extractLeadingCustomerCodeAndName("TECHNOLOGY FOR TRADING EST"),
+    { customer_code: "", customer_name: "TECHNOLOGY FOR TRADING EST" },
+  );
+});
+
+test("repairOutstandingInvoice keeps the longest available party label", () => {
+  const repaired = repairOutstandingInvoice({
+    customer_code: "1542",
+    customer_name: "FOR TRADING EST",
+  });
+
+  assert.equal(repaired.customer_code, "1542");
+  assert.equal(repaired.customer_name, "1542 FOR TRADING EST");
+});
+
+test("pickLongestCustomerName prefers the fullest available label", () => {
+  assert.equal(
+    pickLongestCustomerName("FOR TRADING EST", "RENEWABLE TECHNOLOGY FOR TRADING EST", "1542"),
+    "RENEWABLE TECHNOLOGY FOR TRADING EST",
   );
 });
 

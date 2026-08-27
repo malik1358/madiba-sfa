@@ -40,8 +40,9 @@ test("buildFieldVisitWhatsappSummary builds compact visit message", () => {
   assert.match(summary, /Salesman: ABADALLA ANTHANATH/);
   assert.match(summary, /Outcome: Payment follow-up/);
   assert.match(summary, /Notes: Customer asked for invoice copy\./);
-  assert.match(summary, /Cable A: Available/);
-  assert.match(summary, /Switch B: Not available/);
+  assert.doesNotMatch(summary, /Stock check/);
+  assert.doesNotMatch(summary, /Cable A/);
+  assert.doesNotMatch(summary, /Switch B/);
   assert.match(summary, /Outstanding:/);
   assert.match(summary, /0-30: 1,200/);
   assert.match(summary, /31-60: 800/);

@@ -35,3 +35,20 @@ test("customerHasArea requires a non-empty area value", async () => {
   assert.equal(customerHasArea({ area: "  " }), false);
   assert.equal(customerHasArea({}), false);
 });
+
+test("withSalesScopeMatchers lets a team lead match subordinate customer assignments", async () => {
+  const { withSalesScopeMatchers } = await import("../app/lib/customerAccess.js");
+  const { customerSalesmanAssignmentMatchesScope } = await import("../app/lib/salesHierarchy.js");
+
+  const scope = withSalesScopeMatchers({
+    visibleSalesmanCodes: ["AHMED NABIL", "AHMED NABIL", "GEORGE"],
+    visibleMembers: [
+      { salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil" },
+      { salesman_code: "GEORGE", salesman_name: "George" },
+    ],
+  });
+
+  assert.equal(customerSalesmanAssignmentMatchesScope("GEORGE", scope), true);
+  assert.equal(customerSalesmanAssignmentMatchesScope("NABIL", scope), true);
+  assert.equal(customerSalesmanAssignmentMatchesScope("JUNAID", scope), false);
+});

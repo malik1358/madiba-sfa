@@ -53,3 +53,16 @@ test("customerSalesmanAssignmentMatchesScope accepts subordinate salesman labels
   assert.equal(customerSalesmanAssignmentMatchesScope("George", scope), true);
   assert.equal(customerSalesmanAssignmentMatchesScope("JUNAID", scope), false);
 });
+
+test("customerSalesmanAssignmentMatchesScope accepts Ahmed Nabil name variants", () => {
+  const scope = {
+    visibleSalesmanCodes: ["AHMED NABIL"],
+    scopeMatchers: buildSalesmanScopeMatchers([
+      { salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil" },
+    ]),
+  };
+
+  assert.equal(customerSalesmanAssignmentMatchesScope("AHMED NABIL", scope), true);
+  assert.equal(customerSalesmanAssignmentMatchesScope("NABIL", scope), true);
+  assert.equal(customerSalesmanAssignmentMatchesScope("GEORGE", scope), false);
+});

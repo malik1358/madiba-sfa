@@ -244,6 +244,8 @@ export async function maybePromptCustomerLocationUpdate({
   }
 
   const customer = await fetchCustomerLocation(accessToken, customerCode);
+  if (!customer) return;
+
   const displayName = customerName || customer?.customer_name || customerCode;
 
   if (!hasGpsCoordinates(entryLocation)) {

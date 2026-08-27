@@ -13,6 +13,31 @@ export function buildWhatsappShareUrl(text, phoneNumber = "") {
   return `https://api.whatsapp.com/send?text=${encoded}`;
 }
 
+export function buildWhatsappAppUrl(text) {
+  const message = String(text || "").trim();
+  if (!message) return "";
+  return `whatsapp://send?text=${encodeURIComponent(message)}`;
+}
+
+export function openWhatsappDirect(text, options = {}) {
+  const message = String(text || "").trim();
+  if (!message) {
+    return { success: false, reason: "empty" };
+  }
+  if (typeof window === "undefined") {
+    return { success: false, reason: "unavailable" };
+  }
+
+  const phoneNumber = String(options.phoneNumber || process.env.NEXT_PUBLIC_COLLECTION_WHATSAPP_NUMBER || "").trim();
+  const url = buildWhatsappShareUrl(message, phoneNumber);
+  if (!url) {
+    return { success: false, reason: "unavailable" };
+  }
+
+  window.location.assign(url);
+  return { success: true, method: "whatsapp-web" };
+}
+
 export async function isNativeMobilePlatform() {
   if (typeof window === "undefined") return false;
 
@@ -117,8 +142,9 @@ export async function shareTextOnWhatsapp(text, options = {}) {
 
   const phoneNumber = String(options.phoneNumber || process.env.NEXT_PUBLIC_COLLECTION_WHATSAPP_NUMBER || "").trim();
   const dialogTitle = String(options.dialogTitle || "Share collection visit on WhatsApp").trim();
+  const preferWhatsappUrl = options.preferWhatsappUrl === true;
 
-  if (typeof navigator !== "undefined" && typeof navigator.share === "function" && options.preferNativeShare !== false) {
+  if (!preferWhatsappUrl && typeof navigator !== "undefined" && typeof navigator.share === "function" && options.preferNativeShare !== false) {
     try {
       await navigator.share({
         title: String(options.title || "Collection visit").trim(),
@@ -132,7 +158,7 @@ export async function shareTextOnWhatsapp(text, options = {}) {
     }
   }
 
-  if (await isNativeMobilePlatform()) {
+  if (!preferWhatsappUrl && await isNativeMobilePlatform()) {
     try {
       const { Share } = await import("@capacitor/share");
       await Share.share({
@@ -153,10 +179,18 @@ export async function shareTextOnWhatsapp(text, options = {}) {
     return { success: false, reason: "unavailable" };
   }
 
+  if (preferWhatsappUrl) {
+    return openWhatsappDirect(message, { phoneNumber });
+  }
+
   if (isMobileUserAgent()) {
     window.location.assign(url);
-  } else {
-    window.open(url, "_blank", "noopener,noreferrer");
+    return { success: true, method: "whatsapp-url" };
+  }
+
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    return openWhatsappDirect(message, { phoneNumber });
   }
 
   return { success: true, method: "whatsapp-url" };

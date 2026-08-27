@@ -45,9 +45,6 @@ export function buildFieldVisitWhatsappSummary({
     outcome: isAr ? "النتيجة" : "Outcome",
     nextVisit: isAr ? "الزيارة القادمة" : "Next visit",
     notes: isAr ? "ملاحظات" : "Notes",
-    stock: isAr ? "فحص المخزون" : "Stock check",
-    available: isAr ? "متوفر" : "Available",
-    notAvailable: isAr ? "غير متوفر" : "Not available",
     notSpecified: isAr ? "غير محدد" : "not specified",
     outstanding: isAr ? "المستحقات" : "Outstanding",
     bucket0To30: isAr ? "0-30 يوماً" : "0-30",
@@ -61,7 +58,6 @@ export function buildFieldVisitWhatsappSummary({
   const nextVisit = formatDateOnly(visitForm.nextVisitAt);
   const note = String(visitForm.note || "").trim();
   const salesman = String(salesmanName || salesmanCode || "-").trim() || "-";
-  const stockChecks = Array.isArray(visitForm.stockChecks) ? visitForm.stockChecks : [];
 
   const lines = [
     labels.title,
@@ -74,17 +70,6 @@ export function buildFieldVisitWhatsappSummary({
 
   if (note) {
     lines.push(`${labels.notes}: ${note}`);
-  }
-
-  if (stockChecks.length > 0) {
-    lines.push(`${labels.stock}:`);
-    stockChecks.forEach((stockCheck) => {
-      const itemName = String(stockCheck.itemName || stockCheck.itemCode || "-").trim() || "-";
-      const status = String(stockCheck.status || "").trim().toUpperCase() === "NOT_AVAILABLE"
-        ? labels.notAvailable
-        : labels.available;
-      lines.push(`- ${itemName}: ${status}`);
-    });
   }
 
   const bucket0To30 = Number(customer.outstanding_0_30 || 0);

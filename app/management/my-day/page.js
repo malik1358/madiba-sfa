@@ -33,6 +33,7 @@ import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
 import { postJsonResilient } from "../../lib/offlineApi";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
+import { copyTextToClipboard, openWhatsappDirect } from "../../lib/whatsappShare";
 
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 
@@ -110,6 +111,7 @@ const PAGE_TEXT = {
   visitReport: { en: "Visit Report", ar: "تقرير الزيارة" },
   visitOutcome: { en: "Visit Outcome", ar: "نتيجة الزيارة" },
   nextVisit: { en: "Next Visit Schedule", ar: "موعد الزيارة القادمة" },
+  nextVisitRequired: { en: "Next visit date is required.", ar: "تاريخ الزيارة القادمة مطلوب." },
   visitNotes: { en: "Visit Notes", ar: "ملاحظات الزيارة" },
   startDictation: { en: "Start Dictation", ar: "بدء الإملاء" },
   stopDictation: { en: "Stop Dictation", ar: "إيقاف الإملاء" },
@@ -179,18 +181,16 @@ function formatDurationFromMs(durationMs) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
-function toDatetimeLocalValue(value) {
-  if (!value) return "";
-  const date = new Date(value);
+function toDateInputValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+
+  const date = new Date(text);
   if (Number.isNaN(date.getTime())) return "";
 
   const pad = (n) => String(n).padStart(2, "0");
-  const year = date.getFullYear();
-  const month = pad(date.getMonth() + 1);
-  const day = pad(date.getDate());
-  const hours = pad(date.getHours());
-  const minutes = pad(date.getMinutes());
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function getLogPreview(row) {
@@ -930,7 +930,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     setVisitItemsLoading(true);
     setVisitForm({
       outcome: "PAYMENT_FOLLOWUP",
-      nextVisitAt: toDatetimeLocalValue(customer?.next_visit_at),
+      nextVisitAt: toDateInputValue(customer?.next_visit_at),
       note: "",
       stockChecks: [],
     });
@@ -1043,6 +1043,11 @@ export default function MyDayPage({ mode = "default" } = {}) {
       return;
     }
 
+    if (!String(visitForm.nextVisitAt || "").trim()) {
+      setError(t("nextVisitRequired"));
+      return;
+    }
+
     setVisitSaving(true);
     setError("");
     setMessage("");
@@ -1058,13 +1063,17 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
       const location = await captureLocation();
       if (location) {
-        await maybePromptCustomerLocationUpdate({
-          customerCode: customer.customer_code,
-          customerName: customer.customer_name,
-          entryLocation: location,
-          accessToken: session.access_token,
-          language,
-        });
+        try {
+          await maybePromptCustomerLocationUpdate({
+            customerCode: customer.customer_code,
+            customerName: customer.customer_name,
+            entryLocation: location,
+            accessToken: session.access_token,
+            language,
+          });
+        } catch (locationError) {
+          console.warn("Customer location update skipped", locationError);
+        }
       }
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
@@ -1132,18 +1141,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
         language,
       });
 
-      const savedMessage = saveResult?.queued
-        ? (language === "ar"
-          ? `${customer.customer_name} تم حفظ تقرير الزيارة على الجهاز وسيتم المزامنة تلقائياً`
-          : `${customer.customer_name} visit report saved on device and will sync automatically`)
-        : `${customer.customer_name} ${language === "ar" ? "تم حفظ تقرير الزيارة" : "visit report saved"}.`;
+      await copyTextToClipboard(summaryText);
 
-      showPopup({
-        message: savedMessage,
-        variant: "success",
-        whatsappText: summaryText,
-        autoShareWhatsapp: Boolean(saveResult?.queued),
-      });
       setVisitStatusRows((current) =>
         current.map((row) => {
           if (row.customer_code !== customer.customer_code) return row;
@@ -1163,6 +1162,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
         note: "",
         stockChecks: [],
       });
+
+      openWhatsappDirect(summaryText);
     } catch (err) {
       setError(err.message || "Unable to save visit report.");
     } finally {
@@ -1671,7 +1672,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                   <tbody>
                     {day.rows.map((row) => (
                       <tr key={`planned-${day.dateKey}-${row.customer_code}`}>
-                        <td data-label={t("calendarTime")}>{row.is_prospect ? "-" : row.next_visit_at ? new Date(row.next_visit_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "-"}</td>
+                        <td data-label={t("calendarTime")}>{row.is_prospect || !/T\d{2}:\d{2}/.test(String(row.next_visit_at || "")) ? "-" : new Date(row.next_visit_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</td>
                         <td data-label={t("customer")} className="moduleScheduleCellPrimary">{row.customer_name || row.customer_code}</td>
                         <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                         <td data-label={t("actions")} className="moduleScheduleCellActions">
@@ -1882,8 +1883,14 @@ export default function MyDayPage({ mode = "default" } = {}) {
                               </select>
                             </label>
                             <label>
-                              {t("nextVisit")}
-                              <input className="moduleInput" type="datetime-local" value={visitForm.nextVisitAt} onChange={(event) => setVisitForm((current) => ({ ...current, nextVisitAt: event.target.value }))} />
+                              {t("nextVisit")} *
+                              <input
+                                className="moduleInput"
+                                type="date"
+                                required
+                                value={visitForm.nextVisitAt}
+                                onChange={(event) => setVisitForm((current) => ({ ...current, nextVisitAt: event.target.value }))}
+                              />
                             </label>
                             <label className="moduleFieldFull">
                               {t("visitNotes")}

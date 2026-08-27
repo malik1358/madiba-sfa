@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { ensureCustomerVisibleToScope, withSalesScopeMatchers } from "../../lib/customerAccess.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
+import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -12,37 +14,6 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
-}
-
-function normalizeName(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
-}
-
-function normalizeRole(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function isProductPromoterRole(role) {
-  const normalized = normalizeRole(role);
-  return normalized === "product-promoter" || normalized === "product_promoter";
-}
-
-function isInvoiceMakerRole(role) {
-  const normalized = String(role || "").toLowerCase();
-  return normalized === "invoice-maker" || normalized === "invoice_maker";
-}
-
-const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
-
-function resolveMutualGroupCodes(allProfiles, currentProfile) {
-  const currentName = normalizeName(currentProfile?.salesman_name);
-  const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => group.includes(currentName));
-  if (!matchedGroup) return [];
-
-  return allProfiles
-    .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
-    .map((profile) => normalizeCode(profile.salesman_code))
-    .filter(Boolean);
 }
 
 function latestSettingKey(customerCode) {
@@ -67,91 +38,18 @@ async function resolveScope(admin, token) {
     throw new Error("Invalid login session");
   }
 
-  const { data: currentProfile, error: profileError } = await admin
-    .from("profiles")
-    .select("id,role,salesman_code,salesman_name")
-    .eq("id", user.id)
-    .single();
-
-  if (profileError || !currentProfile) {
-    throw new Error("Profile not found.");
-  }
-
-  const role = normalizeRole(currentProfile.role);
-  const currentSalesmanCode = normalizeCode(currentProfile.salesman_code);
-
-  const [profilesRes, usersRes] = await Promise.all([
-    admin
-      .from("profiles")
-      .select("id,role,salesman_code,salesman_name")
-      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter"]),
-    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-  ]);
-
-  if (profilesRes.error) throw profilesRes.error;
-  if (usersRes.error) throw usersRes.error;
-
-  const authUsers = usersRes.data?.users || [];
-  const subordinateIds = new Set();
-  const currentAuthUser = authUsers.find((authUser) => authUser.id === currentProfile.id) || user;
-  const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
-  const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
-
-  if (isProductPromoterRole(role) && inheritedHeadCode) {
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      if (normalizeCode(metadata.head_salesman_code) === inheritedHeadCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
-  } else if (!["admin", "manager"].includes(role) && !isInvoiceMakerRole(role)) {
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      if (normalizeCode(metadata.head_salesman_code) === currentSalesmanCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
-  }
-
-  const allProfiles = profilesRes.data || [];
-  const visibleProfiles = allProfiles.filter((profile) => {
-    if (["admin", "manager"].includes(role) || isInvoiceMakerRole(role)) return true;
-    if (isProductPromoterRole(role) && inheritedHeadCode) {
-      return normalizeCode(profile.salesman_code) === inheritedHeadCode || subordinateIds.has(profile.id);
-    }
-    return profile.id === currentProfile.id || subordinateIds.has(profile.id);
-  });
-
-  const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
-
-  return {
+  const payload = await resolveSalesScopeForUserId(admin, user.id);
+  return withSalesScopeMatchers({
     userId: user.id,
-    role,
-    hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
-    visibleSalesmanCodes: [...new Set([
-      ...visibleProfiles.map((profile) => normalizeCode(profile.salesman_code)).filter(Boolean),
-      ...mutualGroupCodes,
-    ])],
-  };
+    role: payload.role,
+    hasAllAccess: payload.hasAllAccess,
+    visibleSalesmanCodes: payload.visibleSalesmanCodes || [],
+    visibleMembers: payload.visibleMembers || [],
+  });
 }
 
 async function ensureCustomerVisible(admin, customerCode, scope) {
-  const { data: customer, error } = await admin
-    .from("customers")
-    .select("customer_code,current_salesman_code")
-    .eq("customer_code", customerCode)
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!customer) {
-    throw new Error("Customer not found.");
-  }
-
-  if (!scope.hasAllAccess && !scope.visibleSalesmanCodes.includes(normalizeCode(customer.current_salesman_code))) {
-    throw new Error("You do not have access to this customer.");
-  }
-
-  return customer;
+  return ensureCustomerVisibleToScope(admin, customerCode, scope);
 }
 
 function getBearerToken(request) {
@@ -191,12 +89,13 @@ export async function PATCH(request) {
       );
     }
 
-    await ensureCustomerVisible(admin, customerCode, scope);
+    const visibleCustomer = await ensureCustomerVisible(admin, customerCode, scope);
+    const storedCustomerCode = normalizeCode(visibleCustomer.customer_code || customerCode);
 
     const { data: updatedCustomer, error: updateError } = await admin
       .from("customers")
       .update({ is_active: body?.isActive !== false })
-      .eq("customer_code", customerCode)
+      .eq("customer_code", storedCustomerCode)
       .select("customer_code,is_active")
       .maybeSingle();
 
@@ -205,7 +104,7 @@ export async function PATCH(request) {
 
     if (updatedCustomer.is_active === false) {
       const inactiveMetaValue = {
-        customer_code: customerCode,
+        customer_code: storedCustomerCode,
         marked_at: new Date().toISOString(),
         marked_by_user_id: scope.userId,
       };
@@ -214,7 +113,7 @@ export async function PATCH(request) {
         .from("system_settings")
         .upsert(
           {
-            setting_key: inactiveMetaKey(customerCode),
+            setting_key: inactiveMetaKey(storedCustomerCode),
             setting_value: JSON.stringify(inactiveMetaValue),
           },
           { onConflict: "setting_key" }
@@ -225,7 +124,7 @@ export async function PATCH(request) {
       const { error: clearMetaError } = await admin
         .from("system_settings")
         .delete()
-        .eq("setting_key", inactiveMetaKey(customerCode));
+        .eq("setting_key", inactiveMetaKey(storedCustomerCode));
 
       if (clearMetaError) throw clearMetaError;
     }
@@ -240,7 +139,7 @@ export async function PATCH(request) {
         }
         : null,
       {
-        customer_code: customerCode,
+        customer_code: storedCustomerCode,
         platform: normalizeGpsCapturePlatform(body?.platform),
       },
     );
@@ -303,11 +202,16 @@ export async function POST(request) {
 
     await ensureCustomerVisible(admin, customerCode, scope);
 
+    const nextVisitAt = String(body?.nextVisitAt || "").trim();
+    if (!nextVisitAt) {
+      return NextResponse.json({ success: false, error: "Next visit date is required." }, { status: 400 });
+    }
+
     const value = {
       customer_code: customerCode,
       customer_name: String(body?.customerName || "").trim(),
       outcome: String(body?.outcome || "").trim(),
-      next_visit_at: body?.nextVisitAt ? String(body.nextVisitAt) : null,
+      next_visit_at: nextVisitAt,
       note: body?.note ? String(body.note) : null,
       stock_checks: Array.isArray(body?.stockChecks)
         ? body.stockChecks.map((item) => ({

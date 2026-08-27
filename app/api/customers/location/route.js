@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
-import { findCustomerByCode, formatCustomerLookupPreview } from "../../../lib/prospectCustomerLink.js";
+import { ensureCustomerVisibleToScope, withSalesScopeMatchers } from "../../../lib/customerAccess.js";
+import { formatCustomerLookupPreview } from "../../../lib/prospectCustomerLink.js";
 import { shouldRequireTransactionGps } from "../../../lib/moduleAccess.js";
+import { resolveSalesScopeForUserId } from "../../user/sales-scope/route.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -39,21 +41,19 @@ async function getProfile(admin, userId) {
 }
 
 async function ensureCustomerAccess(admin, profile, customerCode) {
-  const customer = await findCustomerByCode(admin, customerCode);
-  if (!customer) throw new Error("Customer not found.");
-
   const role = String(profile.role || "").toLowerCase();
   if (role === "admin" || role === "manager" || role === "collector") {
-    return customer;
+    const scope = { hasAllAccess: true, visibleSalesmanCodes: [], visibleMembers: [] };
+    return ensureCustomerVisibleToScope(admin, customerCode, scope);
   }
 
-  const visibleCode = normalizeCode(profile.salesman_code);
-  const customerSalesman = normalizeCode(customer.current_salesman_code);
-  if (visibleCode && customerSalesman && visibleCode !== customerSalesman) {
-    throw new Error("You do not have access to this customer.");
-  }
-
-  return customer;
+  const payload = await resolveSalesScopeForUserId(admin, profile.id);
+  const scope = withSalesScopeMatchers({
+    hasAllAccess: payload.hasAllAccess,
+    visibleSalesmanCodes: payload.visibleSalesmanCodes || [],
+    visibleMembers: payload.visibleMembers || [],
+  });
+  return ensureCustomerVisibleToScope(admin, customerCode, scope);
 }
 
 export async function GET(request) {
@@ -126,7 +126,8 @@ export async function PATCH(request) {
       throw new Error("GPS is required. Allow location access in the browser and try again.");
     }
 
-    await ensureCustomerAccess(admin, profile, customerCode);
+    const customer = await ensureCustomerAccess(admin, profile, customerCode);
+    const storedCustomerCode = String(customer.customer_code || customerCode).trim();
 
     const updatePayload = {
       latitude,
@@ -138,7 +139,7 @@ export async function PATCH(request) {
     const { data, error } = await admin
       .from("customers")
       .update(updatePayload)
-      .eq("customer_code", customerCode)
+      .eq("customer_code", storedCustomerCode)
       .select("customer_code,customer_name,latitude,longitude,city,area")
       .maybeSingle();
 

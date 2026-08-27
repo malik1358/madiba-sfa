@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   resolvePeersUnderSameHeadUserIds,
   resolveSubordinateUserIds,
-} from "../../lib/salesHierarchy.js";
+} from "../../../lib/salesHierarchy.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;

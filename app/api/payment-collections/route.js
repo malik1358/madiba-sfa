@@ -6,6 +6,7 @@ import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { resolveMutualGroupProfiles, buildSalesmanScopeMatchers, normalizeSalesmanCode } from "../../lib/mutualSalesmanGroups.js";
 import {
   OUTSTANDING_DATASET_KEY,
+  buildOutstandingRowSalesmanByCode,
   extractLeadingCustomerCodeAndName,
   findOutstandingForCustomer,
   hydrateOutstandingInvoices,
@@ -587,6 +588,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
   if (legalError && !isMissingTableError(legalError)) throw legalError;
 
   const customers = await fetchCustomersForOutstanding(admin, outstandingInvoices);
+  const aggregateRowSalesmanByCode = buildOutstandingRowSalesmanByCode(outstandingRows);
 
   const visits = Array.isArray(visitsData) ? visitsData : [];
   const legalTransfers = Array.isArray(legalData) ? legalData : [];
@@ -760,6 +762,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       customerInvoices,
       scopeMatchers,
       normalizedScopeCodes: [...normalizedScopeCodes],
+      aggregateRowSalesman: aggregateRowSalesmanByCode.get(customer.customer_code) || "",
       hasAllAccess: scope.hasAllAccess,
     })) {
       return;

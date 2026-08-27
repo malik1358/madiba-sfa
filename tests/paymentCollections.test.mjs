@@ -639,6 +639,23 @@ test("scoped salesman matchers exclude other salesmen such as Ahmed Nabil", () =
   }), false);
 });
 
+test("customerMatchesCollectionScope honors aggregate outstanding row salesman for team salesmen", () => {
+  const parvezScope = buildSalesmanScopeMatchers([
+    { salesman_code: "PARVEZ", salesman_name: "Parvez (PARVEZ)" },
+    { salesman_code: "JUNAID", salesman_name: "Junaid (JUNAID)" },
+    { salesman_code: "SOYEB", salesman_name: "Soyeb (SOYEB)" },
+  ]);
+
+  assert.equal(customerMatchesCollectionScope({
+    customer: { current_salesman_code: "ABDUL REHMAN" },
+    customerInvoices: [{ salesman: "Ahmed Nabil", pending_amount: 5000 }],
+    aggregateRowSalesman: "Parvez",
+    scopeMatchers: parvezScope,
+    normalizedScopeCodes: ["PARVEZ", "JUNAID", "SOYEB"],
+    hasAllAccess: false,
+  }), true);
+});
+
 test("canViewerSeeScheduledRevisit hides other users schedules from salesmen", () => {
   const visit = {
     created_by: "collector-user-1",

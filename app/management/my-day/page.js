@@ -1807,7 +1807,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
             { key: "under-90", title: t("outstandingUnder90"), rows: groupedVisitStatusRows.under90 },
             { key: "above-90", title: t("outstandingAbove90"), rows: groupedVisitStatusRows.above90 },
             { key: "no-outstanding", title: t("noOutstanding"), rows: groupedVisitStatusRows.noOutstanding },
-          ].map((group) => (
+          ].filter((group) => group.rows.length > 0).map((group) => (
           <div key={group.key} style={{ marginTop: "14px" }}>
             <div className="moduleSectionHeader">
               <h2>{group.title}</h2>
@@ -1936,17 +1936,13 @@ export default function MyDayPage({ mode = "default" } = {}) {
                   )}
                   </Fragment>
                 ))}
-                {group.rows.length === 0 && (
-                  <tr>
-                    <td colSpan={11}>{t("noCustomers")}</td>
-                  </tr>
-                )}
               </tbody>
             </table>
             </div>
           </div>
           ))}
 
+          {filteredInactiveCustomers.length > 0 ? (
           <div style={{ marginTop: "14px" }}>
             <div className="moduleSectionHeader">
               <h2>{t("inactiveCustomers")}</h2>
@@ -1990,15 +1986,11 @@ export default function MyDayPage({ mode = "default" } = {}) {
                     </td>
                   </tr>
                 ))}
-                {filteredInactiveCustomers.length === 0 && (
-                  <tr>
-                    <td colSpan={5}>{t("noCustomers")}</td>
-                  </tr>
-                )}
               </tbody>
             </table>
             </div>
           </div>
+          ) : null}
         </section>
         </>
         ) : (

@@ -42,11 +42,19 @@ export function filterCollectionQueueInvoices(invoices, options = {}) {
   return (invoices || []).filter((invoice) => !isExcludedCollectionQueueSalesman(invoice?.salesman, options));
 }
 
+function customerMasterInScope(customer, scopeMatchers, scopeCodeSet) {
+  const customerCode = customer.current_salesman_code;
+  return !isPlaceholderSalesmanValue(customerCode)
+    && (salesmanValueMatchesScope(customerCode, scopeMatchers)
+      || scopeCodeSet.has(normalizeCode(customerCode)));
+}
+
 export function customerMatchesCollectionScope({
   customer = {},
   customerInvoices = [],
   scopeMatchers,
   normalizedScopeCodes = [],
+  aggregateRowSalesman = "",
   hasAllAccess = false,
 } = {}) {
   if (hasAllAccess) return true;
@@ -63,19 +71,20 @@ export function customerMatchesCollectionScope({
     && salesmanValueMatchesScope(uploadSalesman, scopeMatchers))
     || invoiceSalesmen.some((name) => salesmanValueMatchesScope(name, scopeMatchers));
 
+  const rowOwned = aggregateRowSalesman && !isPlaceholderSalesmanValue(aggregateRowSalesman)
+    && salesmanValueMatchesScope(aggregateRowSalesman, scopeMatchers);
+  const masterInScope = customerMasterInScope(customer, scopeMatchers, scopeCodeSet);
+
   const hasInvoiceSalesman = Boolean(
     (uploadSalesman && !isPlaceholderSalesmanValue(uploadSalesman))
     || invoiceSalesmen.length > 0,
   );
 
   if (hasInvoiceSalesman) {
-    return invoiceOwned;
+    return Boolean(invoiceOwned || rowOwned);
   }
 
-  const customerCode = customer.current_salesman_code;
-  return !isPlaceholderSalesmanValue(customerCode)
-    && (salesmanValueMatchesScope(customerCode, scopeMatchers)
-      || scopeCodeSet.has(normalizeCode(customerCode)));
+  return Boolean(masterInScope || rowOwned);
 }
 
 export function canViewerSeeScheduledRevisit(visit, _schedulerProfile, viewer = {}) {

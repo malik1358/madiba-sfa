@@ -44,7 +44,7 @@ function outstandingCacheKey(customerCode, customerName) {
 }
 
 function collectionQueuesCacheKey(scope) {
-  return `collectionQueues:v2:${buildScopeHash(scope)}`;
+  return `collectionQueues:v3:${buildScopeHash(scope)}`;
 }
 
 function collectionScopeCacheKey(userId) {

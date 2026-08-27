@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { buildSalesmanScopeMatchers } from "../../lib/mutualSalesmanGroups.js";
+import {
+  customerSalesmanAssignmentMatchesScope,
+  resolvePeersUnderSameHeadUserIds,
+  resolveSubordinateUserIds,
+} from "../../lib/salesHierarchy.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -130,33 +136,27 @@ async function resolveScope(admin, token) {
   const currentAuthUser = authMap.get(currentProfile.id) || user;
   const currentMetadata = currentAuthUser?.user_metadata || currentAuthUser?.app_metadata || {};
   const inheritedHeadCode = normalizeCode(currentMetadata.head_salesman_code);
-  const subordinateIds = new Set();
-
-  if (isProductPromoterRole(role) && inheritedHeadCode) {
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      if (normalizeCode(metadata.head_salesman_code) === inheritedHeadCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
-  } else if (!["admin", "manager"].includes(role)) {
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      if (normalizeCode(metadata.head_salesman_code) === currentSalesmanCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
-  }
-
   const allProfiles = profilesRes.data || [];
   const scopedProfiles = allProfiles.filter((profile) => isSalesTeamRole(profile.role));
-  let visibleProfiles = scopedProfiles.filter((profile) => {
-    if (["admin", "manager"].includes(role)) return true;
+
+  let visibleProfiles = scopedProfiles;
+  if (!["admin", "manager"].includes(role)) {
     if (isProductPromoterRole(role) && inheritedHeadCode) {
-      return normalizeCode(profile.salesman_code) === inheritedHeadCode || subordinateIds.has(profile.id);
+      const headProfile = {
+        salesman_code: inheritedHeadCode,
+        salesman_name: currentMetadata.head_salesman_name || inheritedHeadCode,
+      };
+      const peerIds = resolvePeersUnderSameHeadUserIds(authUsers, headProfile);
+      visibleProfiles = scopedProfiles.filter((profile) => (
+        normalizeCode(profile.salesman_code) === inheritedHeadCode || peerIds.has(profile.id)
+      ));
+    } else {
+      const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile);
+      visibleProfiles = scopedProfiles.filter((profile) => (
+        profile.id === currentProfile.id || subordinateIds.has(profile.id)
+      ));
     }
-    return profile.id === currentProfile.id || subordinateIds.has(profile.id);
-  });
+  }
 
   if (!["admin", "manager"].includes(role) && !visibleProfiles.some((profile) => profile.id === currentProfile.id)) {
     visibleProfiles = [currentProfile, ...visibleProfiles];
@@ -164,6 +164,7 @@ async function resolveScope(admin, token) {
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
   const identitySearchPattern = normalizeCode(extractEmailLocalPart(currentAuthUser?.email)).replace(/[._-]+/g, "%");
+  const scopeMatchers = buildSalesmanScopeMatchers(visibleProfiles);
 
   return {
     hasAllAccess: ["admin", "manager"].includes(role),
@@ -174,6 +175,7 @@ async function resolveScope(admin, token) {
       ...fuzzyMatchedProfileCodes(scopedProfiles, currentAuthUser),
       ...mutualGroupCodes,
     ])],
+    scopeMatchers,
   };
 }
 
@@ -189,7 +191,7 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
     throw new Error("Customer not found.");
   }
 
-  if (!scope.hasAllAccess && !scope.visibleSalesmanCodes.includes(normalizeCode(customer.current_salesman_code))) {
+  if (!scope.hasAllAccess && !customerSalesmanAssignmentMatchesScope(customer.current_salesman_code, scope)) {
     const normalizedInput = normalizeCode(customerCode);
     const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
     const leadingCode = normalizeCode(leadingCodeMatch?.[1] || "");

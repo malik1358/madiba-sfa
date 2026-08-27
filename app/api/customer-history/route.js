@@ -3,9 +3,16 @@ import { createClient } from "@supabase/supabase-js";
 import {
   OUTSTANDING_DATASET_KEY,
   customerCodeCandidates,
+  customerMatchesOutstandingCodeSet,
   resolveOutstandingCustomerOwnership,
 } from "../../lib/outstanding";
 import { mergeSalesSnapshots } from "../../lib/salesHistory";
+import { buildSalesmanScopeMatchers } from "../../lib/mutualSalesmanGroups.js";
+import {
+  customerSalesmanAssignmentMatchesScope,
+  resolvePeersUnderSameHeadUserIds,
+  resolveSubordinateUserIds,
+} from "../../lib/salesHierarchy.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,7 +23,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const HISTORY_MONTHS = 6;
 const HISTORY_LIMIT = 30000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 8;
+const CACHE_VERSION = 9;
 const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function normalizeCode(value) {
@@ -207,9 +214,7 @@ async function hasOutstandingCustomerAccess(admin, customerCode, scope) {
   try {
     const dataset = JSON.parse(data?.setting_value || "null");
     const ownership = resolveOutstandingCustomerOwnership(dataset, scope.visibleSalesmanCodes);
-    return customerCodeCandidates(customerCode)
-      .map(normalizeCode)
-      .some((code) => ownership.ownedCustomerCodes.has(code));
+    return customerMatchesOutstandingCodeSet(customerCode, ownership.ownedCustomerCodes);
   } catch {
     return false;
   }
@@ -261,30 +266,18 @@ async function resolveScope(admin, token) {
   if (["admin", "manager"].includes(role)) {
     members = scopedProfiles;
   } else if (isProductPromoterRole(role) && inheritedHeadCode) {
-    const subordinateIds = new Set();
-
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      const headCode = normalizeCode(metadata.head_salesman_code);
-      if (headCode && headCode === inheritedHeadCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
+    const headProfile = {
+      salesman_code: inheritedHeadCode,
+      salesman_name: currentMetadata.head_salesman_name || inheritedHeadCode,
+    };
+    const peerIds = resolvePeersUnderSameHeadUserIds(authUsers, headProfile);
 
     members = scopedProfiles.filter((profile) => {
       const profileCode = normalizeCode(profile.salesman_code);
-      return profileCode === inheritedHeadCode || subordinateIds.has(profile.id);
+      return profileCode === inheritedHeadCode || peerIds.has(profile.id);
     });
   } else {
-    const subordinateIds = new Set();
-
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      const headCode = normalizeCode(metadata.head_salesman_code);
-      if (headCode && headCode === currentSalesmanCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
+    const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile);
 
     members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
 
@@ -295,6 +288,7 @@ async function resolveScope(admin, token) {
   }
 
   const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
+  const scopeMatchers = buildSalesmanScopeMatchers(members);
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),
     ...authCodeCandidates(currentAuthUser),
@@ -310,6 +304,7 @@ async function resolveScope(admin, token) {
     visibleSalesmanCodes,
     mutualSalesmanCodes: mutualGroupCodes,
     identitySearchPatterns,
+    scopeMatchers,
   };
 }
 
@@ -393,7 +388,7 @@ async function ensureCustomerVisible(admin, customerCode, customerName, scope) {
     return Boolean(Array.isArray(rawRows) && rawRows[0]?.id);
   }
 
-  if (!scope.hasAllAccess && !scope.visibleSalesmanCodes.includes(normalizeCode(customer.current_salesman_code))) {
+  if (!scope.hasAllAccess && !customerSalesmanAssignmentMatchesScope(customer.current_salesman_code, scope)) {
     const normalizedInput = normalizeCode(customerCode);
     const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
     const leadingCode = normalizeCode(leadingCodeMatch?.[1] || "");

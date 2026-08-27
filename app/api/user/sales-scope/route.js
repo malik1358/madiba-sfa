@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  resolvePeersUnderSameHeadUserIds,
+  resolveSubordinateUserIds,
+} from "../../lib/salesHierarchy.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -142,30 +146,18 @@ export async function resolveSalesScopeForUserId(admin, userId) {
   if (["admin", "manager"].includes(role)) {
     members = scopedProfiles;
   } else if (isProductPromoterRole(role) && inheritedHeadCode) {
-    const subordinateIds = new Set();
-
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      const headCode = normalizeCode(metadata.head_salesman_code);
-      if (headCode && headCode === inheritedHeadCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
+    const headProfile = {
+      salesman_code: inheritedHeadCode,
+      salesman_name: currentMetadata.head_salesman_name || inheritedHeadCode,
+    };
+    const peerIds = resolvePeersUnderSameHeadUserIds(authUsers, headProfile);
 
     members = scopedProfiles.filter((profile) => {
       const profileCode = normalizeCode(profile.salesman_code);
-      return profileCode === inheritedHeadCode || subordinateIds.has(profile.id);
+      return profileCode === inheritedHeadCode || peerIds.has(profile.id);
     });
   } else {
-    const subordinateIds = new Set();
-
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      const headCode = normalizeCode(metadata.head_salesman_code);
-      if (headCode && headCode === currentSalesmanCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
+    const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile);
 
     members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
 

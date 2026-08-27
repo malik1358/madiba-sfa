@@ -20,6 +20,7 @@ import {
   normalizeName,
   parseBucketLabelFromHeader,
   pickOutstandingSalesmanName,
+  mergeParsedOutstandingSheets,
   prioritizeOutstandingSheets,
   sortBucketLabels,
   sanitizeStoredOverdueDays,
@@ -425,10 +426,9 @@ export async function POST(request) {
     }
 
     const candidateSheetNames = prioritizeOutstandingSheets(workbook.SheetNames);
-    let rows = [];
-    let headerRowIndex = -1;
-    let workbookHasRows = false;
+    const parsedSheets = [];
     const sheetPreviews = [];
+    let workbookHasRows = false;
 
     for (const sheetName of candidateSheetNames) {
       const sheetRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
@@ -440,21 +440,21 @@ export async function POST(request) {
       sheetPreviews.push(`${sheetName}: ${previewRows.join(" / ")}`);
       const sheetHeaderRowIndex = findOutstandingHeaderRow(sheetRows);
       if (sheetHeaderRowIndex < 0) continue;
-      rows = sheetRows;
-      headerRowIndex = sheetHeaderRowIndex;
-      break;
+      parsedSheets.push(parseOutstandingRows(sheetRows, sheetHeaderRowIndex));
     }
 
     if (!workbookHasRows) {
       throw new Error("Excel file is empty.");
     }
 
-    if (headerRowIndex < 0) {
+    if (parsedSheets.length === 0) {
       const preview = sheetPreviews.join("; ").slice(0, 1200);
       throw new Error(`Unable to detect header row. Found: ${preview || "no readable cells"}`);
     }
 
-    const parsed = parseOutstandingRows(rows, headerRowIndex);
+    const parsed = parsedSheets.length === 1
+      ? parsedSheets[0]
+      : mergeParsedOutstandingSheets(parsedSheets);
     const nowIso = new Date().toISOString();
 
     const payload = {

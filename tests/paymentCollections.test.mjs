@@ -34,6 +34,40 @@ test("invoiceHasCashRef matches C in Ref. No. only", () => {
   assert.equal(invoiceHasCashRef({ ref_no: "1098", reference: "RC/001" }), false);
 });
 
+test("buildCollectionQueues includes 1235 Rokn Al-Muhareb overdue invoices", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "1235",
+      customer_name: "1235 Rokn Al-Muhareb Trading Company",
+      invoices: [
+        {
+          ref_no: "RNFD/024",
+          pending_amount: 2531,
+          due_date: "2026-07-20",
+          overdue_days: 37,
+          invoice_day: 67,
+          salesman: "Ahmed Nabil",
+        },
+        {
+          ref_no: "RNFD/105",
+          pending_amount: 1542,
+          due_date: "2026-08-12",
+          overdue_days: 14,
+          invoice_day: 44,
+          salesman: "ABDALLA ANTHANATH",
+        },
+      ],
+      latest_collection: null,
+      legal_transfer: null,
+    },
+  ], "2026-08-27T10:00:00Z");
+
+  assert.equal(queues.dueCustomers.length, 1);
+  assert.equal(queues.dueCustomers[0].customer_code, "1235");
+  assert.equal(queues.dueCustomers[0].total_due_amount, 4073);
+  assert.equal(queues.dueCustomers[0].due_invoice_count, 2);
+});
+
 test("buildCollectionQueues does not treat customer code ending in C as cash without C in ref_no", () => {
   const queues = buildCollectionQueues([
     {

@@ -4,6 +4,7 @@ import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { resolveMutualGroupProfiles, buildSalesmanScopeMatchers, normalizeSalesmanCode } from "../../lib/mutualSalesmanGroups.js";
+import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import {
   OUTSTANDING_DATASET_KEY,
   buildOutstandingRowSalesmanByCode,
@@ -403,16 +404,7 @@ export async function getSalesScope(admin, userId) {
 
       if (!usersError && allAuthUsers?.users) {
         const subordinateCodes = [normalizedProfileCode];
-        subordinateUserIds = [];
-
-        for (const authU of allAuthUsers.users) {
-          const metadata = authU?.user_metadata || authU?.app_metadata || {};
-          const subHeadCode = String(metadata.head_salesman_code || "").trim().toUpperCase();
-
-          if (subHeadCode === normalizedProfileCode) {
-            subordinateUserIds.push(authU.id);
-          }
-        }
+        subordinateUserIds = [...resolveSubordinateUserIds(allAuthUsers.users, profile)];
 
         if (subordinateUserIds.length > 0) {
           const { data: subProfiles } = await admin

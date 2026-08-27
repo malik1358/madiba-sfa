@@ -144,6 +144,14 @@ function invoiceOwnedByScope(invoice, identityNames, scopeMatchers) {
   return Boolean(salesmanName && identityNames.has(salesmanName));
 }
 
+function rowSalesmanOwnedByScope(rowSalesman, identityNames, scopeMatchers) {
+  if (!String(rowSalesman || "").trim() || isPlaceholderSalesmanValue(rowSalesman)) return false;
+  if (scopeMatchers) return salesmanValueMatchesScope(rowSalesman, scopeMatchers);
+
+  const salesmanName = normalizeComparableName(rowSalesman);
+  return Boolean(salesmanName && identityNames.has(salesmanName));
+}
+
 export function resolveOutstandingCustomerOwnership(dataset, salesmanIdentities, scopeMatchers = null) {
   const identityNames = new Set(
     (salesmanIdentities || []).map(normalizeComparableName).filter(Boolean)
@@ -151,13 +159,30 @@ export function resolveOutstandingCustomerOwnership(dataset, salesmanIdentities,
   const assignedCustomerCodes = new Set();
   const ownedCustomerCodes = new Set();
 
-  (Array.isArray(dataset?.invoices) ? dataset.invoices : []).forEach((invoice) => {
+  hydrateOutstandingInvoices(dataset).forEach((invoice) => {
     const customerCode = outstandingInvoiceCustomerCode(invoice);
     const salesmanName = normalizeComparableName(invoice?.salesman);
-    if (!salesmanName || !customerCode) return;
+    if (!customerCode) return;
+
+    if (salesmanName) {
+      assignedCustomerCodes.add(customerCode);
+      if (invoiceOwnedByScope(invoice, identityNames, scopeMatchers)) {
+        ownedCustomerCodes.add(customerCode);
+      }
+    }
+  });
+
+  (Array.isArray(dataset?.rows) ? dataset.rows : []).forEach((rawRow) => {
+    const row = buildOutstandingRow(rawRow);
+    const customerCode = resolveOutstandingInvoiceCustomerCode({
+      customer_code: row.customer_code,
+      customer_name: row.customer_name,
+    });
+    const aggregateSalesman = row.salesman;
+    if (!customerCode || !aggregateSalesman || isPlaceholderSalesmanValue(aggregateSalesman)) return;
 
     assignedCustomerCodes.add(customerCode);
-    if (invoiceOwnedByScope(invoice, identityNames, scopeMatchers)) {
+    if (rowSalesmanOwnedByScope(aggregateSalesman, identityNames, scopeMatchers)) {
       ownedCustomerCodes.add(customerCode);
     }
   });
@@ -215,6 +240,19 @@ export function customerAccountCodesMatch(left, right) {
 
       const suffix = longer.slice(shorter.length);
       if (/^\d{3,6}$/.test(shorter) && /^[A-Z]$/.test(suffix)) return true;
+    }
+  }
+
+  return false;
+}
+
+export function customerMatchesOutstandingCodeSet(customerCode, codeSet) {
+  if (!codeSet || codeSet.size === 0) return false;
+
+  const candidates = customerCodeCandidates(customerCode);
+  for (const candidate of candidates) {
+    for (const ownedCode of codeSet) {
+      if (customerAccountCodesMatch(candidate, ownedCode)) return true;
     }
   }
 
@@ -621,6 +659,85 @@ export function prioritizeOutstandingSheets(sheetNames) {
     const bPriority = bIndex < 0 ? priorities.length : bIndex;
     return aPriority - bPriority;
   });
+}
+
+function parsedOutstandingAggregateKey(row) {
+  return normalizeCode(row?.customer_code) || normalizeName(row?.customer_name);
+}
+
+function parsedOutstandingInvoiceKey(invoice) {
+  return [
+    normalizeCode(resolveOutstandingInvoiceCustomerCode(invoice) || invoice?.customer_code),
+    String(invoice?.ref_no || "").trim().toUpperCase(),
+    String(invoice?.due_date || "").trim(),
+    toNumber(invoice?.pending_amount),
+  ].join("|");
+}
+
+export function mergeParsedOutstandingSheets(parsedSheets) {
+  const aggregate = new Map();
+  const invoices = [];
+  const seenInvoices = new Set();
+  let bucketLabels = [];
+
+  (parsedSheets || []).forEach((parsed) => {
+    if (!parsed) return;
+
+    if (!bucketLabels.length && Array.isArray(parsed.bucketLabels) && parsed.bucketLabels.length > 0) {
+      bucketLabels = parsed.bucketLabels;
+    }
+
+    (parsed.invoices || []).forEach((invoice) => {
+      const key = parsedOutstandingInvoiceKey(invoice);
+      if (seenInvoices.has(key)) return;
+      seenInvoices.add(key);
+      invoices.push(invoice);
+    });
+
+    (parsed.rows || []).forEach((rawRow) => {
+      const row = buildOutstandingRow(rawRow);
+      const key = parsedOutstandingAggregateKey(row);
+      if (!key) return;
+
+      const current = aggregate.get(key);
+      if (!current) {
+        aggregate.set(key, {
+          customer_code: row.customer_code,
+          customer_name: row.customer_name,
+          open_invoices: row.open_invoices,
+          buckets: { ...(row.buckets || {}) },
+          total_outstanding: row.total_outstanding,
+          ...(row.salesman ? { salesman: row.salesman } : {}),
+        });
+        return;
+      }
+
+      current.customer_name = pickLongestCustomerName(current.customer_name, row.customer_name);
+      current.open_invoices = toNumber(current.open_invoices) + toNumber(row.open_invoices);
+      Object.entries(row.buckets || {}).forEach(([label, value]) => {
+        current.buckets[label] = toNumber(current.buckets[label]) + toNumber(value);
+      });
+      current.total_outstanding = toNumber(current.total_outstanding) + toNumber(row.total_outstanding);
+      if (row.salesman) {
+        current.salesman = pickOutstandingSalesmanName([
+          ...(current.salesman ? [{ salesman: current.salesman }] : []),
+          { salesman: row.salesman },
+        ]);
+      }
+    });
+  });
+
+  const rows = Array.from(aggregate.values())
+    .map((row) => buildOutstandingRow(row))
+    .sort((a, b) => normalizeName(a.customer_name).localeCompare(normalizeName(b.customer_name)));
+
+  return {
+    rows,
+    bucketLabels: bucketLabels.length
+      ? bucketLabels
+      : sortBucketLabels([...new Set(rows.flatMap((row) => Object.keys(row.buckets || {})))]),
+    invoices,
+  };
 }
 
 function rowMatchesOutstandingHeader(row) {

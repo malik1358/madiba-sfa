@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   OUTSTANDING_DATASET_KEY,
   customerCodeCandidates,
+  customerMatchesOutstandingCodeSet,
   findOutstandingForCustomer,
   resolveOutstandingCustomerOwnership,
   summarizeOutstandingBucketsForVisitStatus,
@@ -13,6 +14,10 @@ import {
   resolveMutualGroupCodes,
   resolveMutualGroupProfiles,
 } from "../../../lib/mutualSalesmanGroups.js";
+import {
+  resolvePeersUnderSameHeadUserIds,
+  resolveSubordinateUserIds,
+} from "../../../lib/salesHierarchy.js";
 import { dedupeCustomerMasterRows } from "../../../lib/customerMasterQuery.js";
 
 export const runtime = "nodejs";
@@ -163,30 +168,18 @@ async function resolveScopeForUser(admin, user) {
   if (["admin", "manager"].includes(role)) {
     members = scopedProfiles;
   } else if (isProductPromoterRole(role) && inheritedHeadCode) {
-    const subordinateIds = new Set();
-
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      const headCode = normalizeCode(metadata.head_salesman_code);
-      if (headCode && headCode === inheritedHeadCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
+    const headProfile = {
+      salesman_code: inheritedHeadCode,
+      salesman_name: currentMetadata.head_salesman_name || inheritedHeadCode,
+    };
+    const peerIds = resolvePeersUnderSameHeadUserIds(authUsers, headProfile);
 
     members = scopedProfiles.filter((profile) => {
       const profileCode = normalizeCode(profile.salesman_code);
-      return profileCode === inheritedHeadCode || subordinateIds.has(profile.id);
+      return profileCode === inheritedHeadCode || peerIds.has(profile.id);
     });
   } else {
-    const subordinateIds = new Set();
-
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      const headCode = normalizeCode(metadata.head_salesman_code);
-      if (headCode && headCode === currentSalesmanCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
+    const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile);
 
     members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
 
@@ -251,7 +244,6 @@ async function fetchVisibleCustomers(admin, scope) {
   const rows = [];
   const normalizedScopeCodes = new Set((scope.visibleSalesmanCodes || []).map((code) => normalizeCode(code)).filter(Boolean));
   const historyVisibleCustomerCodes = new Set();
-  const outstandingAssignedCustomerCodes = new Set();
   const outstandingOwnedCustomerCodes = new Set();
 
   if (!scope.hasAllAccess && normalizedScopeCodes.size > 0) {
@@ -323,7 +315,6 @@ async function fetchVisibleCustomers(admin, scope) {
         scope.outstandingSalesmanIdentities || scope.visibleSalesmanCodes,
         scope.scopeMatchers,
       );
-      ownership.assignedCustomerCodes.forEach((code) => outstandingAssignedCustomerCodes.add(normalizeCode(code)));
       ownership.ownedCustomerCodes.forEach((code) => outstandingOwnedCustomerCodes.add(normalizeCode(code)));
     } catch {
       // Ignore malformed optional outstanding data and retain sales-based visibility.
@@ -350,8 +341,8 @@ async function fetchVisibleCustomers(admin, scope) {
       // Always include customers currently assigned to the visible scope.
       if (normalizedScopeCodes.has(rowSalesmanCode)) return true;
 
-      if (codeCandidates.some((code) => outstandingAssignedCustomerCodes.has(code))) {
-        return codeCandidates.some((code) => outstandingOwnedCustomerCodes.has(code));
+      if (customerMatchesOutstandingCodeSet(row.customer_code, outstandingOwnedCustomerCodes)) {
+        return true;
       }
 
       // Fallback: include customers that have sales history under visible salesman codes.

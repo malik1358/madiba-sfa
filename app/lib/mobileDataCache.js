@@ -27,7 +27,7 @@ function scopeCacheKey(userId) {
 }
 
 function customersCacheKey(scope, enriched = false) {
-  const prefix = enriched ? "customers:visible:enriched:v2" : "customers:visible:basic:v2";
+  const prefix = enriched ? "customers:visible:enriched:v3" : "customers:visible:basic:v3";
   return `${prefix}:${buildScopeHash(scope)}`;
 }
 
@@ -44,7 +44,7 @@ function outstandingCacheKey(customerCode, customerName) {
 }
 
 function collectionQueuesCacheKey(scope) {
-  return `collectionQueues:v3:${buildScopeHash(scope)}`;
+  return `collectionQueues:v4:${buildScopeHash(scope)}`;
 }
 
 function collectionScopeCacheKey(userId) {
@@ -52,7 +52,7 @@ function collectionScopeCacheKey(userId) {
 }
 
 function myDaySnapshotCacheKey(userId, dateKey) {
-  return `myday:v2:${String(userId || "").trim()}:${String(dateKey || "").trim()}`;
+  return `myday:v3:${String(userId || "").trim()}:${String(dateKey || "").trim()}`;
 }
 
 function pendingOrdersCacheKey(userId, scope) {

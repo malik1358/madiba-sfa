@@ -6,6 +6,7 @@ import {
   combineOutstandingHeaderRows,
   customerAccountCodesMatch,
   customerCodeCandidates,
+  customerMatchesOutstandingCodeSet,
   detectOutstandingPendingAmountColumn,
   detectOutstandingSalesmanColumn,
   extractLeadingCustomerCodeAndName,
@@ -22,6 +23,7 @@ import {
   hydrateOutstandingInvoices,
   isOutstandingInvoiceDayHeader,
   normalizeOutstandingHeader,
+  mergeParsedOutstandingSheets,
   prioritizeOutstandingSheets,
   repairOutstandingInvoice,
   resolveOutstandingCustomerOwnership,
@@ -146,6 +148,39 @@ test("outstanding ownership uses scope matchers for parenthetical salesman label
   );
 
   assert.deepEqual([...ownership.ownedCustomerCodes].sort(), ["1290", "1542"]);
+});
+
+test("outstanding ownership honors aggregate pending-bills row salesman over invoice labels", () => {
+  const junaidScope = buildSalesmanScopeMatchers([
+    { salesman_code: "JUNAID", salesman_name: "Junaid (JUNAID)" },
+    { salesman_code: "PARVEZ", salesman_name: "Parvez (PARVEZ)" },
+    { salesman_code: "SOYEB", salesman_name: "Soyeb (SOYEB)" },
+  ]);
+
+  const ownership = resolveOutstandingCustomerOwnership({
+    invoices: [{
+      customer_code: "1177",
+      customer_name: "MAK MARKETING COMPANY",
+      salesman: "Abdul Rehman",
+    }],
+    rows: [{
+      customer_code: "1177 MAK MARKETING COMPANY",
+      customer_name: "1177 MAK MARKETING COMPANY",
+      salesman: "Junaid",
+      buckets: { ">120": 5000 },
+      total_outstanding: 5000,
+    }],
+  }, ["JUNAID", "PARVEZ", "SOYEB"], junaidScope);
+
+  assert.equal(customerMatchesOutstandingCodeSet("1177C", ownership.ownedCustomerCodes), true);
+  assert.equal(customerMatchesOutstandingCodeSet("1177", ownership.ownedCustomerCodes), true);
+});
+
+test("customerMatchesOutstandingCodeSet matches numeric suffix account variants", () => {
+  const owned = new Set(["1177"]);
+  assert.equal(customerMatchesOutstandingCodeSet("1177C", owned), true);
+  assert.equal(customerMatchesOutstandingCodeSet("1177 MAK MARKETING COMPANY", owned), true);
+  assert.equal(customerMatchesOutstandingCodeSet("1173C", owned), false);
 });
 
 test("customerCodeCandidates extracts code from a combined customer master value", () => {
@@ -283,6 +318,69 @@ test("Pending Bills is preferred over an older Bills Receivable sheet", () => {
     prioritizeOutstandingSheets(["Bills Receivable", "Summary", "Pending Bills"]),
     ["Pending Bills", "Bills Receivable", "Summary"]
   );
+});
+
+test("mergeParsedOutstandingSheets keeps invoice detail rows from secondary sheets", () => {
+  const merged = mergeParsedOutstandingSheets([
+    {
+      bucketLabels: ["0-30", "31-60", "61-90", "91-120", ">120"],
+      rows: [{
+        customer_code: "1001",
+        customer_name: "1001 Example Trading",
+        open_invoices: 1,
+        buckets: { ">120": 1000 },
+        total_outstanding: 1000,
+        salesman: "Ahmed Hadia",
+      }],
+      invoices: [{
+        customer_code: "1001",
+        customer_name: "1001 Example Trading",
+        ref_no: "INV-001",
+        pending_amount: 1000,
+        due_date: "2026-07-01",
+        overdue_days: 30,
+        invoice_day: 60,
+        salesman: "Ahmed Hadia",
+      }],
+    },
+    {
+      bucketLabels: ["0-30", "31-60", "61-90", "91-120", ">120"],
+      rows: [{
+        customer_code: "1235",
+        customer_name: "1235 Rokn Al-Muhareb Trading Company",
+        open_invoices: 2,
+        buckets: { "61-90": 4073 },
+        total_outstanding: 4073,
+        salesman: "Ahmed Nabil",
+      }],
+      invoices: [
+        {
+          customer_code: "1235",
+          customer_name: "1235 Rokn Al-Muhareb Trading Company",
+          ref_no: "RNFD/024",
+          pending_amount: 2531,
+          due_date: "2026-07-20",
+          overdue_days: 37,
+          invoice_day: 67,
+          salesman: "Ahmed Nabil",
+        },
+        {
+          customer_code: "1235",
+          customer_name: "1235 Rokn Al-Muhareb Trading Company",
+          ref_no: "RNFD/105",
+          pending_amount: 1542,
+          due_date: "2026-08-12",
+          overdue_days: 14,
+          invoice_day: 44,
+          salesman: "ABDALLA ANTHANATH",
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(merged.rows.length, 2);
+  assert.equal(findOutstandingForCustomer(merged, "1235", "Rokn Al-Muhareb Trading Company")?.total_outstanding, 4073);
+  assert.equal(merged.invoices.filter((invoice) => invoice.customer_code === "1235").length, 2);
 });
 
 test("visible outstanding buckets keep empty gaps through the oldest balance", () => {

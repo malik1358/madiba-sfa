@@ -1042,11 +1042,16 @@ export default function NewOrderPage() {
         const outstandingBlockHeight = bucketRows.length > 0
           ? 14 + 10 + bucketRows.length * 18
           : 0;
+        const hasOutstandingBuckets = bucketRows.length > 0;
+        const combinedSectionHeight = hasOutstandingBuckets
+          ? outstandingBlockHeight + 12 + summaryBoxHeight
+          : summaryBoxHeight;
 
-        ensureSpace(Math.max(summaryBoxHeight, outstandingBlockHeight) + 16);
+        ensureSpace(combinedSectionHeight + 16);
         const sectionY = cursorY;
+        let summaryY = sectionY;
 
-        if (bucketRows.length > 0) {
+        if (hasOutstandingBuckets) {
           doc.setFont(undefined, "bold");
           doc.text("Outstanding Details", marginX, sectionY);
           doc.setFont(undefined, "normal");
@@ -1071,20 +1076,21 @@ export default function NewOrderPage() {
           });
 
           cursorY = bucketY;
+          summaryY = bucketY + 12;
         }
 
-        doc.roundedRect(summaryX, sectionY, summaryBoxWidth, summaryBoxHeight, 4, 4);
+        doc.roundedRect(summaryX, summaryY, summaryBoxWidth, summaryBoxHeight, 4, 4);
         doc.setFont(undefined, "normal");
-        doc.text("Subtotal (Excl. VAT)", summaryX + 10, sectionY + 18);
-        doc.text(formatMoney(subtotal), summaryX + summaryBoxWidth - 10, sectionY + 18, { align: "right" });
-        doc.text("VAT @ 15%", summaryX + 10, sectionY + 34);
-        doc.text(formatMoney(vatAmount), summaryX + summaryBoxWidth - 10, sectionY + 34, { align: "right" });
+        doc.text("Subtotal (Excl. VAT)", summaryX + 10, summaryY + 18);
+        doc.text(formatMoney(subtotal), summaryX + summaryBoxWidth - 10, summaryY + 18, { align: "right" });
+        doc.text("VAT @ 15%", summaryX + 10, summaryY + 34);
+        doc.text(formatMoney(vatAmount), summaryX + summaryBoxWidth - 10, summaryY + 34, { align: "right" });
         doc.setFont(undefined, "bold");
-        doc.text("Total (Incl. VAT)", summaryX + 10, sectionY + 54);
-        doc.text(formatMoney(totalWithVat), summaryX + summaryBoxWidth - 10, sectionY + 54, { align: "right" });
+        doc.text("Total (Incl. VAT)", summaryX + 10, summaryY + 54);
+        doc.text(formatMoney(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 54, { align: "right" });
         doc.setFont(undefined, "normal");
 
-        cursorY = Math.max(cursorY, sectionY + summaryBoxHeight) + 24;
+        cursorY = Math.max(cursorY, summaryY + summaryBoxHeight) + 24;
 
         if (outstandingCustomer && outstandingInvoices.length > 0) {
           ensureSpace(30);

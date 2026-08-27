@@ -52,7 +52,7 @@ function collectionScopeCacheKey(userId) {
 }
 
 function myDaySnapshotCacheKey(userId, dateKey) {
-  return `myday:v1:${String(userId || "").trim()}:${String(dateKey || "").trim()}`;
+  return `myday:v2:${String(userId || "").trim()}:${String(dateKey || "").trim()}`;
 }
 
 function pendingOrdersCacheKey(userId, scope) {

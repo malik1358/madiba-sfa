@@ -489,17 +489,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
         const customerRows = visibilityPayload.customers || [];
         const inactiveCustomerRows = visibilityPayload.inactiveCustomers || [];
-
-        const normalizedScopeCodes = new Set(
-          (scope.visibleSalesmanCodes || [])
-            .map((code) => String(code || "").trim().toUpperCase())
-            .filter(Boolean)
-        );
-        const scopedCustomerRows = scope.hasAllAccess
-          ? customerRows
-          : customerRows.filter((row) =>
-              normalizedScopeCodes.has(String(row.current_salesman_code || "").trim().toUpperCase())
-            );
+        const scopedCustomerRows = customerRows;
 
         const visibleSalesmanCodes = [...new Set(
           [...scopedCustomerRows, ...inactiveCustomerRows]

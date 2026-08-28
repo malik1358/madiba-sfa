@@ -81,7 +81,8 @@ jobs:
             echo "ANDROID_KEYSTORE_BASE64 secret is not set."
             exit 1
           fi
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/madiba-upload.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '\n\r\t ' | base64 --decode > "$RUNNER_TEMP/madiba-upload.keystore"
+          test -s "$RUNNER_TEMP/madiba-upload.keystore"
 
       - name: Build release app bundle
         working-directory: android

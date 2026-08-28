@@ -79,7 +79,8 @@ jobs:
             echo "ANDROID_KEYSTORE_BASE64 secret is not set. Building debug APK instead."
           else
             echo "has_keystore=true" >> "$GITHUB_OUTPUT"
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/madiba-upload.keystore"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '\n\r\t ' | base64 --decode > "$RUNNER_TEMP/madiba-upload.keystore"
+            test -s "$RUNNER_TEMP/madiba-upload.keystore"
           fi
 
       - name: Build signed release APK

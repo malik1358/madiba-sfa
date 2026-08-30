@@ -1,4 +1,5 @@
 import { normalizeAccessRole, shouldRequireTransactionGps } from "./moduleAccess.js";
+import { getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
 export const MORNING_ATTENDANCE_COMPLETE_EVENT = "madiba-morning-attendance-complete";
 export const WORKDAY_TIMES_UPDATED_EVENT = "madiba-workday-times-updated";
@@ -18,18 +19,14 @@ export function canAccessWithoutMorningAttendance(pathname) {
     || path === "/management/visit-without-order";
 }
 
-export function todayAttendanceBounds() {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const end = new Date();
-  end.setHours(23, 59, 59, 999);
-  return { startIso: start.toISOString(), endIso: end.toISOString() };
+export function todayAttendanceBounds(referenceDate = new Date()) {
+  return ksaDayBounds(getKsaDateString(referenceDate));
 }
 
 const GATE_READY_STORAGE_PREFIX = "madiba-sfa:gate-ready:";
 
 export function todayDateKey(referenceDate = new Date()) {
-  return referenceDate.toISOString().slice(0, 10);
+  return getKsaDateString(referenceDate);
 }
 
 export function readGateReadyState(userId, referenceDate = new Date()) {
@@ -77,8 +74,7 @@ export async function hasMorningAttendanceToday(supabase, userId) {
     .eq("entry_type", "MORNING_ATTENDANCE")
     .gte("created_at", startIso)
     .lte("created_at", endIso)
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
 
   if (error) {
     const message = String(error.message || "").toLowerCase();
@@ -88,7 +84,7 @@ export async function hasMorningAttendanceToday(supabase, userId) {
     throw error;
   }
 
-  return Boolean(data?.id);
+  return Boolean(data?.[0]?.id);
 }
 
 export function notifyMorningAttendanceComplete() {

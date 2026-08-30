@@ -28,6 +28,7 @@ import {
   isMorningAttendanceRequiredForRole,
   notifyMorningAttendanceComplete,
   notifyWorkdayTimesUpdated,
+  todayAttendanceBounds,
 } from "../../lib/morningAttendance";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
@@ -53,6 +54,7 @@ const PAGE_TEXT = {
     ar: "حضور الصباح مطلوب كل يوم. اضغط حضور الصباح في هذه الصفحة لفتح باقي يومي.",
   },
   workdayLocked: { en: "Complete morning attendance to unlock today's work.", ar: "أكمل حضور الصباح لفتح عمل اليوم." },
+  morningAttendanceDone: { en: "Morning attendance recorded for today.", ar: "تم تسجيل حضور الصباح اليوم." },
   attendance: { en: "Attendance", ar: "الحضور" },
   morningAttendance: { en: "Morning Attendance", ar: "حضور الصباح" },
   lunchBreakOut: { en: "Lunch Break Out", ar: "خروج استراحة الغداء" },
@@ -244,6 +246,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
   const [todayLogs, setTodayLogs] = useState([]);
   const [note, setNote] = useState("");
   const [attendanceBusy, setAttendanceBusy] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [attendanceLogsReady, setAttendanceLogsReady] = useState(false);
   const [accessScope, setAccessScope] = useState(null);
   const [activeVisitCustomerCode, setActiveVisitCustomerCode] = useState("");
   const [visitSaving, setVisitSaving] = useState(false);
@@ -266,7 +270,10 @@ export default function MyDayPage({ mode = "default" } = {}) {
   usePopupMessages({ message, error, warnings });
 
   const attendanceRequired = isMorningAttendanceRequiredForRole(access.role);
-  const morningAttendanceComplete = todayLogs.some((row) => row.entry_type === "MORNING_ATTENDANCE");
+  const morningAttendanceComplete = todayLogs.some((row) => (
+    row.entry_type === "MORNING_ATTENDANCE"
+    && (!currentUserId || !row.user_id || row.user_id === currentUserId)
+  ));
   const workdayUnlocked = !attendanceRequired || morningAttendanceComplete;
 
   const morningPopupShownRef = useRef(false);
@@ -282,14 +289,14 @@ export default function MyDayPage({ mode = "default" } = {}) {
   }, [visitOnlyMode, loading]);
 
   useEffect(() => {
-    if (loading || workdayUnlocked || !attendanceRequired || morningPopupShownRef.current || visitOnlyMode) return;
+    if (!attendanceLogsReady || workdayUnlocked || !attendanceRequired || morningPopupShownRef.current || visitOnlyMode) return;
     morningPopupShownRef.current = true;
     showPopup({
       title: t("morningAttendancePopupTitle"),
       message: t("morningAttendancePopupMessage"),
       variant: "warning",
     });
-  }, [attendanceRequired, loading, showPopup, workdayUnlocked, language]);
+  }, [attendanceLogsReady, attendanceRequired, showPopup, workdayUnlocked, language]);
 
   useEffect(() => {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -384,6 +391,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
         if (!session?.user) {
           throw new Error("Please login again.");
         }
+
+        setCurrentUserId(session.user.id);
 
         const cachedSnapshot = await readMyDaySnapshot(session.user.id, today);
         if (cachedSnapshot) {
@@ -553,13 +562,16 @@ export default function MyDayPage({ mode = "default" } = {}) {
         }
 
         if (logsCheck.available) {
+          const { startIso, endIso } = todayAttendanceBounds();
+          const logUserIds = [...new Set([session.user.id, ...(scope.visibleUserIds || [])].filter(Boolean))];
           let logsQuery = supabase
             .from("daily_activity_logs")
             .select("id,user_id,entry_type,note,created_at")
-            .gte("created_at", `${today}T00:00:00`)
+            .gte("created_at", startIso)
+            .lte("created_at", endIso);
 
           if (!scope.hasAllAccess) {
-            logsQuery = logsQuery.in("user_id", scope.visibleUserIds);
+            logsQuery = logsQuery.in("user_id", logUserIds);
           }
 
           const { data: logsData, error: logsError } = await logsQuery;
@@ -567,13 +579,13 @@ export default function MyDayPage({ mode = "default" } = {}) {
           if (!logsError) {
             const rows = (logsData || []).filter((row) => isGpsLog(row.entry_type));
             setTodayLogs(rows);
-
           } else {
             setTodayLogs([]);
           }
         } else {
           setTodayLogs([]);
         }
+        setAttendanceLogsReady(true);
 
         const visibleTodayOrders = (todayOrdersRes.data || []).filter((row) => {
           if (scope.hasAllAccess) return true;
@@ -798,6 +810,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       } catch (err) {
         setError(err.message || "Unable to load My Day planner.");
       } finally {
+        setAttendanceLogsReady(true);
         setRefreshing(false);
         setLoading(false);
       }
@@ -871,6 +884,16 @@ export default function MyDayPage({ mode = "default" } = {}) {
         referenceKey: `activity:${session.user.id}:${entryType}:${payload.note}`,
       });
 
+      const optimisticRow = {
+        id: `local-${Date.now()}`,
+        user_id: session.user.id,
+        entry_type: entryType,
+        note: payload.note,
+        created_at: new Date().toISOString(),
+      };
+      setTodayLogs((current) => [optimisticRow, ...current]);
+      setCurrentUserId(session.user.id);
+
       setMessage(entryType === "NOTE"
         ? (location ? "Note saved with GPS." : "Note saved.")
         : (location ? `${entryType} logged with GPS.` : `${entryType} logged.`));
@@ -882,17 +905,23 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
       if (entryType === "NOTE") setNote("");
 
+      const { startIso, endIso } = todayAttendanceBounds();
       const { data: logs, error: logsError } = await supabase
         .from("daily_activity_logs")
         .select("id,user_id,entry_type,note,created_at")
         .eq("user_id", session.user.id)
-        .gte("created_at", `${today}T00:00:00`)
-        .lte("created_at", `${today}T23:59:59`)
+        .gte("created_at", startIso)
+        .lte("created_at", endIso)
         .order("created_at", { ascending: false });
 
       if (logsError) throw logsError;
       const rows = (logs || []).filter((row) => isGpsLog(row.entry_type));
-      setTodayLogs(rows);
+      if (rows.length) {
+        setTodayLogs((current) => {
+          const others = current.filter((row) => row.user_id && row.user_id !== session.user.id);
+          return [...rows, ...others];
+        });
+      }
     } catch (err) {
       setError(err.message || "Unable to save activity log.");
     }
@@ -1545,7 +1574,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   }
 
   return (
-    <MorningAttendanceGate>
+    <MorningAttendanceGate requireMorningAttendance={false}>
     <main className="modulePage" dir={dir}>
       <div className="moduleShell">
         <div className="moduleHeader">
@@ -1577,9 +1606,13 @@ export default function MyDayPage({ mode = "default" } = {}) {
             <span>{profile?.salesman_name || profile?.salesman_code || ""}</span>
           </div>
           <div className="moduleActionRow">
-            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("MORNING_ATTENDANCE")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
-              {attendanceBusy === "MORNING_ATTENDANCE" ? t("saving") : t("morningAttendance")}
-            </button>
+            {morningAttendanceComplete ? (
+              <div className="moduleHint" style={{ margin: 0 }}>{t("morningAttendanceDone")}</div>
+            ) : (
+              <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("MORNING_ATTENDANCE")} disabled={!logsEnabled || Boolean(attendanceBusy)}>
+                {attendanceBusy === "MORNING_ATTENDANCE" ? t("saving") : t("morningAttendance")}
+              </button>
+            )}
             <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_OUT")} disabled={!workdayUnlocked || !logsEnabled || Boolean(attendanceBusy)}>
               {attendanceBusy === "LUNCH_BREAK_OUT" ? t("saving") : t("lunchBreakOut")}
             </button>

@@ -110,6 +110,11 @@ const TEXT = {
     en: "Customers with cash invoices where Ref. No. contains C (for example RC/, DC/, CNFD/). Collect these before credit follow-ups.",
     ar: "عملاء لديهم فواتير نقدية حيث رقم المرجع يحتوي على C (مثل RC/ أو DC/ أو CNFD/). حصل هذه قبل متابعة الائتمان.",
   },
+  creditQueueTitle: { en: "Credit Collection", ar: "تحصيل الائتمان" },
+  creditQueueHint: {
+    en: "Credit collection starts here. Follow up outstanding credit invoices after cash-due customers.",
+    ar: "يبدأ تحصيل الائتمان من هنا. تابع فواتير الائتمان المستحقة بعد العملاء النقديين.",
+  },
   noCashQueue: { en: "No cash-due customers in the outstanding file.", ar: "لا يوجد عملاء بفواتير نقدية مستحقة في ملف المديونية." },
   cashDueAmount: { en: "Cash Due", ar: "المبلغ النقدي المستحق" },
   notDueAmount: { en: "Pending Amount", ar: "المبلغ المعلق" },
@@ -1974,6 +1979,16 @@ export default function PaymentCollectionsView({ view = "due" }) {
                   </div>
                 )}
               </div>
+            ) : null}
+
+            {view === "due" ? (
+              <div className="moduleSectionHeader" style={{ marginTop: "4px" }}>
+                <h3 style={{ margin: 0, fontSize: "1rem" }}>{t("creditQueueTitle")}</h3>
+                <span>{visibleRows.length}</span>
+              </div>
+            ) : null}
+            {view === "due" ? (
+              <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("creditQueueHint")}</div>
             ) : null}
 
             <div className="moduleTableWrap moduleCollectorTableWrap">

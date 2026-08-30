@@ -411,6 +411,18 @@ export function resolveInvoiceAgingDays(invoice, todayIso = new Date().toISOStri
   return 0;
 }
 
+export function resolveInvoiceDays(invoice, todayIso = new Date().toISOString()) {
+  const invoiceDay = toNumber(invoice?.invoice_day);
+  if (isPlausibleAgingDayCount(invoiceDay)) return invoiceDay;
+
+  const invoiceDate = dateOnlyFromIso(invoice?.invoice_date);
+  if (invoiceDate) {
+    return daysBetweenDates(todayIso, invoiceDate);
+  }
+
+  return 0;
+}
+
 export function bucketLabelForAgingDays(dayValue) {
   const day = toNumber(dayValue);
   if (!Number.isFinite(day) || day <= 0) return "0-30";

@@ -4,6 +4,7 @@ import {
   parseOutstandingSheetDate,
   pickOutstandingSalesmanName,
   resolveInvoiceAgingDays,
+  resolveInvoiceDays,
 } from "./outstanding.js";
 import { salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
 
@@ -317,9 +318,9 @@ export function normalizeWhatsappNumber(value, defaultCountryCode = "966") {
   return digits;
 }
 
-export function buildExposureScore(totalDueAmount, maxOverdueDays) {
+export function buildExposureScore(totalDueAmount, invoiceDays) {
   const amount = Math.max(0, Number(totalDueAmount || 0));
-  const days = Math.max(0, Number(maxOverdueDays || 0));
+  const days = Math.max(0, Number(invoiceDays || 0));
   return amount * days;
 }
 
@@ -329,7 +330,7 @@ export function buildExposureScoreFromInvoices(invoices, todayIso = new Date().t
   return (invoices || []).reduce((sum, invoice) => {
     const amount = toNumber(invoice?.pending_amount);
     if (amount <= 0) return sum;
-    const days = Math.max(0, resolveInvoiceAgingDays(invoice, today));
+    const days = Math.max(0, resolveInvoiceDays(invoice, today));
     return sum + (amount * days);
   }, 0);
 }

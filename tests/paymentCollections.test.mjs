@@ -90,7 +90,7 @@ test("buildCollectionQueues keeps 1119C high-exposure credit customer in due que
     {
       customer_code: "1119C",
       customer_name: "Fahd Ali Sulaiman Al Subaie Trading Est",
-      invoices: [{ pending_amount: 2805538, due_date: "2026-06-01", overdue_days: 82, ref_no: "SI/9901" }],
+      invoices: [{ pending_amount: 2805538, due_date: "2026-06-01", overdue_days: 82, invoice_day: 112, ref_no: "SI/9901" }],
       latest_collection: null,
       legal_transfer: null,
     },
@@ -162,21 +162,32 @@ test("buildCollectionQueues keeps 1119C with future due date in not-yet-due queu
   assert.equal(queues.notDueCustomers[0].total_not_due_amount, 2805538);
 });
 
-test("buildExposureScoreFromInvoices sums amount x days per invoice", () => {
+test("buildExposureScoreFromInvoices sums amount x invoice days per invoice", () => {
   const exposure = buildExposureScoreFromInvoices([
-    { pending_amount: 4132.68, overdue_days: 29 },
-    { pending_amount: 3185.5, overdue_days: 75 },
-    { pending_amount: 3811.45, overdue_days: 93 },
+    { pending_amount: 4132.68, invoice_day: 59, overdue_days: 29 },
+    { pending_amount: 3185.5, invoice_day: 105, overdue_days: 75 },
+    { pending_amount: 3811.45, invoice_day: 123, overdue_days: 93 },
   ], "2026-08-22T00:00:00Z");
 
-  assert.ok(exposure > 0);
-  assert.notEqual(exposure, buildExposureScore(11129.63, 93));
+  assert.equal(exposure, (4132.68 * 59) + (3185.5 * 105) + (3811.45 * 123));
+  assert.notEqual(exposure, (4132.68 * 29) + (3185.5 * 75) + (3811.45 * 93));
+  assert.notEqual(exposure, buildExposureScore(11129.63, 123));
 });
 
-test("buildExposureScore multiplies amount by overdue days for single-invoice shorthand", () => {
-  assert.equal(buildExposureScore(13566.32, 195), 13566.32 * 195);
-  assert.equal(buildExposureScore(5311, 241), 5311 * 241);
-  assert.ok(buildExposureScore(13566.32, 195) > buildExposureScore(5311, 241));
+test("buildExposureScoreFromInvoices ignores overdue days when invoice days are missing", () => {
+  assert.equal(buildExposureScoreFromInvoices([
+    { pending_amount: 1000, overdue_days: 40, due_date: "2026-07-13" },
+  ], "2026-08-22T00:00:00Z"), 0);
+
+  assert.equal(buildExposureScoreFromInvoices([
+    { pending_amount: 1000, invoice_date: "2026-07-23", overdue_days: 40 },
+  ], "2026-08-22T00:00:00Z"), 30000);
+});
+
+test("buildExposureScore multiplies amount by invoice days for single-invoice shorthand", () => {
+  assert.equal(buildExposureScore(13566.32, 225), 13566.32 * 225);
+  assert.equal(buildExposureScore(5311, 271), 5311 * 271);
+  assert.ok(buildExposureScore(13566.32, 225) > buildExposureScore(5311, 271));
 });
 
 test("normalizeWhatsappNumber converts local KSA mobile to country format", () => {
@@ -252,7 +263,7 @@ test("buildCollectionQueues ranks exposure before cash bucket tie-breaker", () =
       customer_code: "NONCASH",
       customer_name: "Non Cash Customer",
       outstanding_cash: 0,
-      invoices: [{ pending_amount: 800, due_date: "2026-08-10", overdue_days: 4, ref_no: "INV-100" }],
+      invoices: [{ pending_amount: 800, due_date: "2026-08-10", overdue_days: 4, invoice_day: 4, ref_no: "INV-100" }],
       latest_collection: { payment_status: "NOT_PAID" },
       legal_transfer: null,
     },
@@ -260,7 +271,7 @@ test("buildCollectionQueues ranks exposure before cash bucket tie-breaker", () =
       customer_code: "CASH",
       customer_name: "Cash Customer",
       outstanding_cash: 500,
-      invoices: [{ pending_amount: 500, due_date: "2026-08-12", overdue_days: 2, ref_no: "DC/008" }],
+      invoices: [{ pending_amount: 500, due_date: "2026-08-12", overdue_days: 2, invoice_day: 2, ref_no: "DC/008" }],
       latest_collection: { payment_status: "NOT_PAID" },
       legal_transfer: null,
     },
@@ -291,7 +302,7 @@ test("buildCollectionQueues ranks cash by exposure when cash exposure is higher"
       customer_code: "NONCASH",
       customer_name: "Non Cash Customer",
       outstanding_cash: 0,
-      invoices: [{ pending_amount: 500, due_date: "2026-08-10", overdue_days: 2, ref_no: "INV-100" }],
+      invoices: [{ pending_amount: 500, due_date: "2026-08-10", overdue_days: 2, invoice_day: 2, ref_no: "INV-100" }],
       latest_collection: { payment_status: "NOT_PAID" },
       legal_transfer: null,
     },
@@ -299,7 +310,7 @@ test("buildCollectionQueues ranks cash by exposure when cash exposure is higher"
       customer_code: "CASH",
       customer_name: "Cash Customer",
       outstanding_cash: 5000,
-      invoices: [{ pending_amount: 5000, due_date: "2026-08-12", overdue_days: 20, ref_no: "RC/001" }],
+      invoices: [{ pending_amount: 5000, due_date: "2026-08-12", overdue_days: 20, invoice_day: 20, ref_no: "RC/001" }],
       latest_collection: { payment_status: "NOT_PAID" },
       legal_transfer: null,
     },
@@ -313,7 +324,7 @@ test("buildCollectionQueues ranks 1115C above 1416 when exposure is higher", () 
     {
       customer_code: "1416",
       customer_name: "Zuhour Al Madina Trading Company",
-      invoices: [{ pending_amount: 6375, overdue_days: 12, ref_no: "SI/1416" }],
+      invoices: [{ pending_amount: 6375, overdue_days: 12, invoice_day: 12, ref_no: "SI/1416" }],
       latest_collection: {
         payment_status: "NOT_PAID",
         saved_at: "2026-08-20T10:00:00Z",
@@ -325,8 +336,8 @@ test("buildCollectionQueues ranks 1115C above 1416 when exposure is higher", () 
       customer_code: "1115C",
       customer_name: "Ealam Almanzil Trading Establishment",
       invoices: [
-        { pending_amount: 5416.5, overdue_days: 45, ref_no: "SI/2001" },
-        { pending_amount: 5580, overdue_days: 154, ref_no: "SI/2002" },
+        { pending_amount: 5416.5, overdue_days: 45, invoice_day: 45, ref_no: "SI/2001" },
+        { pending_amount: 5580, overdue_days: 154, invoice_day: 154, ref_no: "SI/2002" },
       ],
       latest_collection: { payment_status: "NOT_PAID" },
       legal_transfer: null,
@@ -358,13 +369,13 @@ test("buildCollectionQueues keeps future scheduled revisit ahead of cash", () =>
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["SCHEDULED", "CASHNOW"]);
 });
 
-test("buildCollectionQueues ranks higher exposure (amount x overdue days) first", () => {
+test("buildCollectionQueues ranks higher exposure (amount x invoice days) first", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "1164C",
       customer_name: "Khaled Waleed",
       outstanding_cash: 0,
-      invoices: [{ pending_amount: 5311, due_date: "2025-12-25", overdue_days: 241 }],
+      invoices: [{ pending_amount: 5311, due_date: "2025-12-25", overdue_days: 241, invoice_day: 241 }],
       latest_collection: { payment_status: "NOT_PAID", saved_at: "2026-08-20T10:00:00Z" },
       legal_transfer: null,
     },
@@ -372,7 +383,7 @@ test("buildCollectionQueues ranks higher exposure (amount x overdue days) first"
       customer_code: "1209C",
       customer_name: "NOON SAVING",
       outstanding_cash: 0,
-      invoices: [{ pending_amount: 13566.32, due_date: "2026-02-08", overdue_days: 195 }],
+      invoices: [{ pending_amount: 13566.32, due_date: "2026-02-08", overdue_days: 195, invoice_day: 195 }],
       latest_collection: { payment_status: "NOT_PAID", saved_at: "2026-08-20T10:00:00Z" },
       legal_transfer: null,
     },
@@ -381,15 +392,38 @@ test("buildCollectionQueues ranks higher exposure (amount x overdue days) first"
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["1209C", "1164C"]);
 });
 
+test("buildCollectionQueues ranks by invoice days even when overdue days would reverse the order", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "OVERDUE",
+      customer_name: "High overdue short invoice age",
+      invoices: [{ pending_amount: 10000, overdue_days: 80, invoice_day: 90, due_date: "2026-06-03" }],
+      latest_collection: { payment_status: "NOT_PAID" },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "INVOICE",
+      customer_name: "Low overdue long invoice age",
+      invoices: [{ pending_amount: 10000, overdue_days: 5, invoice_day: 200, due_date: "2026-08-17" }],
+      latest_collection: { payment_status: "NOT_PAID" },
+      legal_transfer: null,
+    },
+  ], "2026-08-22T10:00:00Z");
+
+  assert.equal(queues.dueCustomers[0].exposure_score, 10000 * 200);
+  assert.equal(queues.dueCustomers[1].exposure_score, 10000 * 90);
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["INVOICE", "OVERDUE"]);
+});
+
 test("buildCollectionQueues ranks 1162C above 1042 when invoice-level exposure is higher", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "1042",
       customer_name: "Al-Khamsa Al-Mumayaza Trading Company",
       invoices: [
-        { pending_amount: 4132.68, overdue_days: 29 },
-        { pending_amount: 3185.5, overdue_days: 75 },
-        { pending_amount: 3811.45, overdue_days: 93 },
+        { pending_amount: 4132.68, overdue_days: 29, invoice_day: 29 },
+        { pending_amount: 3185.5, overdue_days: 75, invoice_day: 75 },
+        { pending_amount: 3811.45, overdue_days: 93, invoice_day: 93 },
       ],
       latest_collection: { payment_status: "NOT_PAID", saved_at: "2026-08-20T10:00:00Z" },
       legal_transfer: null,
@@ -398,8 +432,8 @@ test("buildCollectionQueues ranks 1162C above 1042 when invoice-level exposure i
       customer_code: "1162C",
       customer_name: "Kanooz Al-Rayan Trading Establishment",
       invoices: [
-        { pending_amount: 3134.74, overdue_days: 160 },
-        { pending_amount: 3134.74, overdue_days: 112 },
+        { pending_amount: 3134.74, overdue_days: 160, invoice_day: 160 },
+        { pending_amount: 3134.74, overdue_days: 112, invoice_day: 112 },
       ],
       latest_collection: { payment_status: "NOT_PAID", saved_at: "2026-08-20T10:00:00Z" },
       legal_transfer: null,
@@ -415,21 +449,21 @@ test("buildCollectionQueues orders future scheduled revisits by exposure in back
     {
       customer_code: "LATE",
       customer_name: "No Schedule",
-      invoices: [{ pending_amount: 900, due_date: "2026-08-01", overdue_days: 17 }],
+      invoices: [{ pending_amount: 900, due_date: "2026-08-01", overdue_days: 17, invoice_day: 17 }],
       latest_collection: { payment_status: "NOT_PAID" },
       legal_transfer: null,
     },
     {
       customer_code: "SOON",
       customer_name: "Future Revisit",
-      invoices: [{ pending_amount: 500, due_date: "2026-08-01", overdue_days: 17 }],
+      invoices: [{ pending_amount: 500, due_date: "2026-08-01", overdue_days: 17, invoice_day: 17 }],
       latest_collection: { payment_status: "PROMISED", next_visit_at: "2026-08-25" },
       legal_transfer: null,
     },
     {
       customer_code: "NEXT",
       customer_name: "Earlier Future Revisit",
-      invoices: [{ pending_amount: 300, due_date: "2026-08-05", overdue_days: 13 }],
+      invoices: [{ pending_amount: 300, due_date: "2026-08-05", overdue_days: 13, invoice_day: 13 }],
       latest_collection: { payment_status: "PROMISED", next_visit_at: "2026-08-20" },
       legal_transfer: null,
     },
@@ -447,7 +481,7 @@ test("buildCollectionQueues prioritizes higher exposure over visit status", () =
       customer_code: "UNVISITED_LOW",
       customer_name: "Unvisited Customer",
       outstanding_cash: 0,
-      invoices: [{ pending_amount: 300, due_date: "2026-08-05", overdue_days: 13 }],
+      invoices: [{ pending_amount: 300, due_date: "2026-08-05", overdue_days: 13, invoice_day: 13 }],
       latest_collection: null,
       legal_transfer: null,
     },
@@ -456,8 +490,8 @@ test("buildCollectionQueues prioritizes higher exposure over visit status", () =
       customer_name: "Al-Haram Plaza Company Limited",
       outstanding_cash: 0,
       invoices: [
-        { pending_amount: 45581.07, overdue_days: 91 },
-        { pending_amount: 1695.5, overdue_days: 120 },
+        { pending_amount: 45581.07, overdue_days: 91, invoice_day: 91 },
+        { pending_amount: 1695.5, overdue_days: 120, invoice_day: 120 },
       ],
       latest_collection: {
         payment_status: "NOT_PAID",

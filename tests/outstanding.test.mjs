@@ -28,6 +28,7 @@ import {
   repairOutstandingInvoice,
   resolveOutstandingCustomerOwnership,
   resolveInvoiceAgingDays,
+  resolveInvoiceDays,
   resolveOutstandingInvoiceCustomerCode,
   resolveOverdueDaysFromDueDate,
   sanitizeStoredOverdueDays,
@@ -444,6 +445,25 @@ test("resolveInvoiceAgingDays prefers invoice day over excel serial overdue valu
 
   assert.equal(resolveInvoiceAgingDays(invoice, "2026-08-18T12:00:00"), 41);
   assert.equal(resolveOverdueDaysFromDueDate(invoice, "2026-08-18T12:00:00"), 11);
+});
+
+test("resolveInvoiceDays uses invoice day and never overdue days", () => {
+  assert.equal(resolveInvoiceDays({
+    invoice_day: 90,
+    overdue_days: 5,
+    due_date: "2026-08-17",
+  }, "2026-08-22T12:00:00"), 90);
+
+  assert.equal(resolveInvoiceDays({
+    invoice_date: "2026-07-23",
+    overdue_days: 40,
+    due_date: "2026-07-13",
+  }, "2026-08-22T12:00:00"), 30);
+
+  assert.equal(resolveInvoiceDays({
+    overdue_days: 82,
+    due_date: "2026-06-01",
+  }, "2026-08-22T12:00:00"), 0);
 });
 
 test("sanitizeStoredOverdueDays drops excel serial values from uploads", () => {

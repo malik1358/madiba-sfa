@@ -60,7 +60,7 @@ export async function findCustomerByCode(admin, customerCode) {
   const { data: candidates, error } = await admin
     .from("customers")
     .select(CUSTOMER_LOOKUP_FIELDS)
-    .or(`customer_code.ilike.%${code}%,customer_name.ilike.${code}%`)
+    .or(`customer_code.ilike.*${code}*,customer_name.ilike.*${code}*`)
     .limit(50);
   if (error) throw error;
 

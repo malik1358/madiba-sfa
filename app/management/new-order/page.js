@@ -25,6 +25,7 @@ import CategoryPerformance from "../customer-audit/components/CategoryPerformanc
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
 import { sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
@@ -530,6 +531,7 @@ export default function NewOrderPage() {
     needsInvoiceRowsReupload: false,
     rowsCount: 0,
   });
+  const [customerDocumentCompliance, setCustomerDocumentCompliance] = useState(null);
   const [accessScope, setAccessScope] = useState(null);
   const [prefilledCustomer, setPrefilledCustomer] = useState(null);
   const [editOrderId, setEditOrderId] = useState("");
@@ -805,6 +807,20 @@ export default function NewOrderPage() {
     language,
   });
 
+  const orderGrandTotal = useMemo(
+    () => calculateGrandTotal(orderItems, priceList),
+    [orderItems, priceList]
+  );
+
+  const creditApproval = useMemo(
+    () => evaluateCreditApproval({
+      outstanding: outstandingInfo.customer || {},
+      orderValue: orderGrandTotal,
+      creditApplication: customerDocumentCompliance?.creditApplication || { present: false },
+    }),
+    [customerDocumentCompliance, orderGrandTotal, outstandingInfo.customer]
+  );
+
   const buildOrderSnapshot = useCallback(
     (orderId, statusLabel) => {
       if (!selectedCustomer || orderItems.length === 0) return null;
@@ -836,6 +852,7 @@ export default function NewOrderPage() {
         grandTotal: calculateGrandTotal(orderItems, priceList),
         lines,
         history: orderHistory,
+        creditApprovalRemark: creditApproval.remark,
         outstanding: {
           bucketLabels: Array.isArray(outstandingInfo?.bucketLabels) ? outstandingInfo.bucketLabels : [],
           customer: outstandingInfo?.customer || null,
@@ -849,6 +866,7 @@ export default function NewOrderPage() {
       orderSummary.itemCount,
       orderSummary.totalQuantity,
       outstandingInfo,
+      creditApproval.remark,
       priceList,
       selectedCustomer,
       visibleOutstandingBuckets,
@@ -1186,6 +1204,14 @@ export default function NewOrderPage() {
           });
         }
 
+        cursorY = appendCreditControlRemarkToPdf(doc, {
+          remark: snapshot.creditApprovalRemark,
+          x: marginX,
+          y: () => cursorY,
+          maxWidth: contentWidth,
+          ensureSpace,
+        });
+
         doc.setFontSize(9);
         ensureSpace(20);
         doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 28);
@@ -1377,6 +1403,34 @@ export default function NewOrderPage() {
       setOutstandingLoading(false);
     }
   }, [setError]);
+
+  const fetchCustomerDocuments = useCallback(async (customer) => {
+    if (!customer?.customer_code) {
+      setCustomerDocumentCompliance(null);
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      const accessToken = await waitForAccessToken(supabase);
+      if (!accessToken) return;
+
+      const response = await fetch(
+        `/api/customer-documents?customerCode=${encodeURIComponent(customer.customer_code)}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        setCustomerDocumentCompliance(null);
+        return;
+      }
+      setCustomerDocumentCompliance(payload.compliance || null);
+    } catch {
+      setCustomerDocumentCompliance(null);
+    }
+  }, []);
 
   const handleOutstandingUpload = useCallback(async () => {
     if (!outstandingUploadFile) {
@@ -1576,6 +1630,10 @@ export default function NewOrderPage() {
   useEffect(() => {
     fetchOutstandingForCustomer(selectedCustomer);
   }, [fetchOutstandingForCustomer, selectedCustomer]);
+
+  useEffect(() => {
+    fetchCustomerDocuments(selectedCustomer);
+  }, [fetchCustomerDocuments, selectedCustomer]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -1977,7 +2035,7 @@ export default function NewOrderPage() {
               <div className="moduleOrderBar">
                 <div>
                   <span>Current Order</span>
-                  <strong>{formatMoney(calculateGrandTotal(orderItems, priceList))}</strong>
+                  <strong>{formatMoney(orderGrandTotal)}</strong>
                 </div>
                 <div className="moduleOrderActions">
                   <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>
@@ -1987,6 +2045,16 @@ export default function NewOrderPage() {
                     {submittingOrder ? "Submitting..." : "Submit Order"}
                   </button>
                 </div>
+              </div>
+              <div
+                className="moduleHint"
+                style={{
+                  marginTop: "10px",
+                  fontWeight: 700,
+                  color: creditApproval.required ? "#9b1c1c" : undefined,
+                }}
+              >
+                {creditApproval.remark}
               </div>
             </section>
 
@@ -2015,6 +2083,19 @@ export default function NewOrderPage() {
                     <strong>{formatMoney(lastSavedOrder.grandTotal)}</strong>
                   </div>
                 </div>
+
+                {lastSavedOrder.creditApprovalRemark ? (
+                  <div
+                    className="moduleHint"
+                    style={{
+                      marginTop: "10px",
+                      fontWeight: 700,
+                      color: /approval required/i.test(lastSavedOrder.creditApprovalRemark) ? "#9b1c1c" : undefined,
+                    }}
+                  >
+                    {lastSavedOrder.creditApprovalRemark}
+                  </div>
+                ) : null}
 
                 <div className="moduleTableWrap">
                   <table className="moduleTable">

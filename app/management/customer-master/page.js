@@ -8,10 +8,12 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveCustomerMasterExportFields } from "../../lib/customerCode.js";
+import { normalizeCustomerMasterSearch } from "../../lib/customerMasterQuery.js";
 import { resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
+import CustomerDocumentsPanel from "./CustomerDocumentsPanel";
 
 const TEXT = {
   title: { en: "Customer Master", ar: "سجل العملاء" },
@@ -78,6 +80,30 @@ const TEXT = {
   filterWithoutOutstanding: { en: "no outstanding", ar: "بدون مستحقات" },
   exportExcel: { en: "Export Excel", ar: "تصدير Excel" },
   exporting: { en: "Exporting...", ar: "جاري التصدير..." },
+  documents: { en: "Documents", ar: "المستندات" },
+  documentsTitle: { en: "Customer documents", ar: "مستندات العميل" },
+  closeDocuments: { en: "Close", ar: "إغلاق" },
+  documentsHint: {
+    en: "Compulsory: CR, VAT, and national address. Optional: Balady license and credit application. Files are linked on CR National Number.",
+    ar: "إلزامي: السجل التجاري وضريبة القيمة المضافة والعنوان الوطني. اختياري: رخصة بلدي وطلب التسهيلات. الربط برقم السجل الوطني.",
+  },
+  missingCompulsory: { en: "Missing compulsory documents", ar: "مستندات إلزامية ناقصة" },
+  compulsoryComplete: { en: "Compulsory documents are on file.", ar: "المستندات الإلزامية موجودة." },
+  creditExpiry: { en: "Credit application expiry", ar: "انتهاء طلب التسهيلات" },
+  creditExpired: { en: "Expired", ar: "منتهٍ" },
+  creditMissing: { en: "No credit application on file (optional, used for order approval).", ar: "لا يوجد طلب تسهيلات (اختياري، يُستخدم لاعتماد الطلب)." },
+  loadingDocuments: { en: "Loading documents...", ar: "جاري تحميل المستندات..." },
+  compulsory: { en: "Compulsory", ar: "إلزامي" },
+  optional: { en: "Optional", ar: "اختياري" },
+  issueDate: { en: "Issue date", ar: "تاريخ الإصدار" },
+  expiryDate: { en: "Expiry date", ar: "تاريخ الانتهاء" },
+  datesRequired: { en: "Enter issue date and expiry date before uploading.", ar: "أدخل تاريخ الإصدار وتاريخ الانتهاء قبل الرفع." },
+  openFile: { en: "Open file", ar: "فتح الملف" },
+  noFileYet: { en: "No file uploaded yet.", ar: "لم يُرفع ملف بعد." },
+  creditCr: { en: "CR on the form", ar: "رقم السجل في النموذج" },
+  vatNumber: { en: "VAT registration number", ar: "الرقم الضريبي" },
+  uploadDocument: { en: "Upload", ar: "رفع" },
+  uploadingDocument: { en: "Uploading...", ar: "جاري الرفع..." },
 };
 
 function hasSavedGps(row) {
@@ -118,6 +144,8 @@ export default function CustomerMasterPage() {
   const [activeFilter, setActiveFilter] = useState("all");
   const [outstandingFilter, setOutstandingFilter] = useState("all");
   const [drafts, setDrafts] = useState({});
+  const [documentsCustomer, setDocumentsCustomer] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
 
   usePopupMessages({ error, message: importSummary });
 
@@ -125,7 +153,13 @@ export default function CustomerMasterPage() {
     if (!accessDenied) return;
     showPopup({ message: t("accessDenied"), variant: "error" });
   }, [accessDenied, showPopup, t]);
-  const [selectedFile, setSelectedFile] = useState(null);
+
+  useEffect(() => {
+    if (!documentsCustomer) return;
+    window.requestAnimationFrame(() => {
+      document.getElementById("customer-documents-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [documentsCustomer]);
 
   const loadCustomers = useCallback(async (page = 1) => {
     const supabase = getSupabaseClient();
@@ -178,7 +212,7 @@ export default function CustomerMasterPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setDebouncedSearch(search.trim());
+      setDebouncedSearch(normalizeCustomerMasterSearch(search));
     }, 400);
     return () => window.clearTimeout(timer);
   }, [search]);
@@ -489,6 +523,14 @@ export default function CustomerMasterPage() {
               </div>
             </div>
 
+            {documentsCustomer ? (
+              <CustomerDocumentsPanel
+                customer={documentsCustomer}
+                t={t}
+                onClose={() => setDocumentsCustomer(null)}
+              />
+            ) : null}
+
             <div className="moduleTableWrap moduleCustomerMasterTableWrap">
               <table className="moduleTable moduleCustomerMasterTable">
                 <thead>
@@ -563,6 +605,13 @@ export default function CustomerMasterPage() {
                             >
                               {t("audit")}
                             </Link>
+                            <button
+                              type="button"
+                              className="moduleInlineButton moduleActionButton"
+                              onClick={() => setDocumentsCustomer(row)}
+                            >
+                              {t("documents")}
+                            </button>
                           </div>
                         </td>
                       </tr>

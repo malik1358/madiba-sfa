@@ -17,6 +17,32 @@ export async function GET(request) {
   return handleRequest(request);
 }
 
+async function readRebuildOptions(request) {
+  const url = new URL(request.url);
+  let body = {};
+  if (request.method === "POST") {
+    try {
+      const parsed = await request.json();
+      if (parsed && typeof parsed === "object") body = parsed;
+    } catch {
+      body = {};
+    }
+  }
+
+  const cursor = String(body.cursor || url.searchParams.get("cursor") || "").trim();
+  const parsedLimit = Number(body.limit || url.searchParams.get("limit") || 1);
+  const start = body.start === true || url.searchParams.get("start") === "true";
+
+  return {
+    trigger: "cron",
+    cursor,
+    limit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.floor(parsedLimit) : 1,
+    timeBudgetMs: 220000,
+    start,
+    resume: start ? false : true,
+  };
+}
+
 async function handleRequest(request) {
   try {
     if (!isCronAuthorized(request)) {
@@ -31,7 +57,8 @@ async function handleRequest(request) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const meta = await rebuildAllMobileFieldSnapshots(admin, { trigger: "cron" });
+    const options = await readRebuildOptions(request);
+    const meta = await rebuildAllMobileFieldSnapshots(admin, options);
 
     return NextResponse.json({
       success: true,

@@ -193,20 +193,10 @@ export async function getMobileFieldSnapshotForUser(admin, userId) {
   return snapshot;
 }
 
-export async function rebuildAllMobileFieldSnapshots(admin, options = {}) {
-  const trigger = String(options.trigger || "upload");
-  const startedAt = new Date().toISOString();
+const REBUILD_RESUME_MAX_MS = 3 * 60 * 60 * 1000;
 
-  const { data: profiles, error: profilesError } = await admin
-    .from("profiles")
-    .select("id,role")
-    .order("salesman_name");
-
-  if (profilesError) throw profilesError;
-
-  const fieldUsers = (profiles || []).filter((profile) => isFieldUserRole(profile.role));
+async function collectSnapshotPlan(admin, fieldUsers) {
   const uniqueKeys = new Map();
-
   for (const profile of fieldUsers) {
     try {
       const snapshotKey = await resolveSnapshotKeyForUser(admin, profile.id);
@@ -217,11 +207,68 @@ export async function rebuildAllMobileFieldSnapshots(admin, options = {}) {
       // Skip users we cannot resolve.
     }
   }
+  return [...uniqueKeys.entries()].sort((left, right) => String(left[0]).localeCompare(String(right[0])));
+}
 
-  const builtSnapshots = {};
-  const userSnapshotKeys = {};
+function rebuildInProgressIsFresh(progress) {
+  const startedAt = Date.parse(progress?.startedAt || 0);
+  return Number.isFinite(startedAt) && Date.now() - startedAt < REBUILD_RESUME_MAX_MS;
+}
 
-  for (const [snapshotKey, sampleUserId] of uniqueKeys.entries()) {
+export async function rebuildAllMobileFieldSnapshots(admin, options = {}) {
+  const trigger = String(options.trigger || "upload");
+  const startedAt = new Date().toISOString();
+  const startedMs = Date.now();
+  const limit = Number(options.limit);
+  const batchLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 0;
+  const timeBudgetMs = Number(options.timeBudgetMs) > 0 ? Number(options.timeBudgetMs) : 0;
+  const requestedCursor = String(options.cursor || "").trim();
+  const forceStart = options.start === true;
+
+  const previousMeta = await readSnapshotMeta(admin);
+  const previousProgress = previousMeta?.rebuildInProgress || null;
+
+  const { data: profiles, error: profilesError } = await admin
+    .from("profiles")
+    .select("id,role")
+    .order("salesman_name");
+
+  if (profilesError) throw profilesError;
+
+  const fieldUsers = (profiles || []).filter((profile) => isFieldUserRole(profile.role));
+  const resume = !forceStart && (
+    Boolean(requestedCursor)
+    || (options.resume !== false && rebuildInProgressIsFresh(previousProgress))
+  );
+  const plan = resume && Array.isArray(previousProgress?.plan) && previousProgress.plan.length
+    ? previousProgress.plan
+    : await collectSnapshotPlan(admin, fieldUsers);
+
+  let startIndex = 0;
+  const cursor = requestedCursor || (resume ? String(previousProgress?.nextCursor || "") : "");
+  if (cursor) {
+    const found = plan.findIndex((entry) => entry?.[0] === cursor);
+    startIndex = found >= 0 ? found : 0;
+  }
+
+  const builtSnapshots = { ...(previousMeta.snapshots || {}) };
+  const processedKeys = [];
+  let nextCursor = "";
+  let complete = startIndex >= plan.length;
+
+  for (let index = startIndex; index < plan.length; index += 1) {
+    if (batchLimit && processedKeys.length >= batchLimit) {
+      complete = false;
+      nextCursor = plan[index][0];
+      break;
+    }
+    if (timeBudgetMs && processedKeys.length > 0 && Date.now() - startedMs >= timeBudgetMs) {
+      complete = false;
+      nextCursor = plan[index][0];
+      break;
+    }
+
+    const [snapshotKey, sampleUserId] = plan[index];
     try {
       const snapshot = await buildMobileFieldSnapshot(admin, sampleUserId);
       await saveMobileFieldSnapshot(admin, snapshot);
@@ -234,23 +281,64 @@ export async function rebuildAllMobileFieldSnapshots(admin, options = {}) {
         error: error?.message || "build failed",
       };
     }
+    processedKeys.push(snapshotKey);
+    nextCursor = plan[index + 1]?.[0] || "";
+    complete = !nextCursor;
+
+    const meta = {
+      lastRebuildAt: new Date().toISOString(),
+      lastRebuildStartedAt: resume ? (previousProgress?.startedAt || previousMeta.lastRebuildStartedAt || startedAt) : startedAt,
+      lastRebuildTrigger: trigger,
+      snapshotCount: Object.keys(builtSnapshots).length,
+      snapshots: builtSnapshots,
+      userSnapshotKeys: previousMeta.userSnapshotKeys || {},
+      complete,
+      nextCursor,
+      processedCount: processedKeys.length,
+      remainingCount: Math.max(plan.length - index - 1, 0),
+      rebuildInProgress: complete ? null : {
+        startedAt: resume ? (previousProgress?.startedAt || startedAt) : startedAt,
+        trigger,
+        nextCursor,
+        plan,
+        processedKeys: [...(resume ? previousProgress?.processedKeys || [] : []), ...processedKeys],
+      },
+    };
+    await writeSnapshotMeta(admin, meta);
+
+    if (!complete && batchLimit && processedKeys.length >= batchLimit) break;
   }
 
-  for (const profile of fieldUsers) {
-    try {
-      userSnapshotKeys[profile.id] = await resolveSnapshotKeyForUser(admin, profile.id);
-    } catch {
-      // Ignore mapping failures for individual users.
+  let userSnapshotKeys = previousMeta.userSnapshotKeys || {};
+  if (complete) {
+    userSnapshotKeys = {};
+    for (const profile of fieldUsers) {
+      try {
+        userSnapshotKeys[profile.id] = await resolveSnapshotKeyForUser(admin, profile.id);
+      } catch {
+        // Ignore mapping failures for individual users.
+      }
     }
   }
 
   const meta = {
     lastRebuildAt: new Date().toISOString(),
-    lastRebuildStartedAt: startedAt,
+    lastRebuildStartedAt: resume ? (previousProgress?.startedAt || previousMeta.lastRebuildStartedAt || startedAt) : startedAt,
     lastRebuildTrigger: trigger,
     snapshotCount: Object.keys(builtSnapshots).length,
     snapshots: builtSnapshots,
     userSnapshotKeys,
+    complete,
+    nextCursor,
+    processedCount: processedKeys.length,
+    remainingCount: complete ? 0 : Math.max(plan.length - startIndex - processedKeys.length, 0),
+    rebuildInProgress: complete ? null : {
+      startedAt: resume ? (previousProgress?.startedAt || startedAt) : startedAt,
+      trigger,
+      nextCursor,
+      plan,
+      processedKeys: [...(resume ? previousProgress?.processedKeys || [] : []), ...processedKeys],
+    },
   };
 
   await writeSnapshotMeta(admin, meta);
@@ -258,5 +346,9 @@ export async function rebuildAllMobileFieldSnapshots(admin, options = {}) {
 }
 
 export async function scheduleMobileFieldSnapshotRebuild(admin, options = {}) {
-  return rebuildAllMobileFieldSnapshots(admin, options);
+  return rebuildAllMobileFieldSnapshots(admin, {
+    limit: 1,
+    timeBudgetMs: 20000,
+    ...options,
+  });
 }

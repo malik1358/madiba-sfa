@@ -31,16 +31,51 @@ jobs:
 
           CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
-          status_code="$(curl -sS -L --post301 --post302 --post303 -o response.json -w "%{http_code}" -X POST "$MOBILE_SNAPSHOT_URL_EFFECTIVE" \
-            -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
-            -H "Content-Type: application/json" \
-            --data '{}')"
+          cursor=""
+          start="true"
 
-          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
-            echo "Mobile snapshot sync failed with HTTP $status_code"
+          for batch in $(seq 1 40); do
+            echo "Mobile snapshot batch ${batch}"
+            export SNAP_CURSOR="$cursor"
+            export SNAP_START="$start"
+            python3 -c 'import json,os; c=os.environ.get("SNAP_CURSOR") or ""; s=os.environ.get("SNAP_START")=="true"; p={"limit":1,"start":s and not c,"resume":not (s and not c)};
+p.update({"cursor":c} if c else {}); print(json.dumps(p))' > payload.json
+
+            set +e
+            status_code="$(curl -sS -L --post301 --post302 --post303 --max-time 260 -o response.json -w "%{http_code}" -X POST "$MOBILE_SNAPSHOT_URL_EFFECTIVE" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data-binary @payload.json)"
+            curl_status=$?
+            set -e
+
+            if [[ "$curl_status" -ne 0 || "$status_code" == "504" || "$status_code" == "000" ]]; then
+              echo "Batch ${batch} timed out (curl=${curl_status} http=${status_code}); resuming from saved progress."
+              cat response.json 2>/dev/null || true
+              cursor=""
+              start="false"
+              sleep 5
+              continue
+            fi
+
+            if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+              echo "Mobile snapshot sync failed with HTTP $status_code"
+              cat response.json
+              exit 1
+            fi
+
+            complete="$(python3 -c 'import json; d=json.load(open("response.json")); print("true" if d.get("complete") is True else "false")')"
+            cursor="$(python3 -c 'import json; print(json.load(open("response.json")).get("nextCursor") or "")')"
+
+            echo "Batch ${batch} succeeded with HTTP ${status_code}"
             cat response.json
-            exit 1
-          fi
+            start="false"
 
-          echo "Mobile snapshot sync succeeded with HTTP $status_code"
-          cat response.json
+            if [[ "$complete" == "true" ]]; then
+              echo "Mobile snapshot rebuild complete."
+              exit 0
+            fi
+          done
+
+          echo "Mobile snapshot rebuild did not finish after 40 batches."
+          exit 1

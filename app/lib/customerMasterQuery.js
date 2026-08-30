@@ -2,7 +2,45 @@ import { findOutstandingForCustomer, OUTSTANDING_DATASET_KEY } from "./outstandi
 import { normalizeCustomerNameKey, resolveCustomerMasterExportFields } from "./customerCode.js";
 
 export function normalizeCustomerMasterSearch(value) {
-  return String(value || "").trim();
+  return String(value || "").trim().replace(/^\*+|\*+$/g, "").trim();
+}
+
+export function looksLikeCustomerCodeSearch(value) {
+  return /^[0-9]{3,6}[A-Za-z]?$/i.test(normalizeCustomerMasterSearch(value));
+}
+
+export function postgrestIlikeContains(value) {
+  const escaped = normalizeCustomerMasterSearch(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/\*/g, "\\*")
+    .replace(/,/g, " ")
+    .replace(/[()]/g, "")
+    .trim();
+  if (!escaped) return "";
+  return `*${escaped}*`;
+}
+
+export function customerMatchesMasterSearch(row, search) {
+  const needle = normalizeCustomerMasterSearch(search).toUpperCase();
+  if (!needle) return true;
+
+  const display = resolveCustomerMasterExportFields(row);
+  const code = String(display.customer_code || "").trim().toUpperCase();
+  const rawCode = String(row?.customer_code || "").trim().toUpperCase();
+  const name = String(display.customer_name || row?.customer_name || "").trim().toUpperCase();
+  const party = `${code} ${name}`.trim();
+
+  if (looksLikeCustomerCodeSearch(needle)) {
+    return code === needle
+      || rawCode === needle
+      || code.startsWith(`${needle} `)
+      || rawCode.startsWith(`${needle} `)
+      || rawCode.startsWith(`${needle}_`)
+      || name.startsWith(`${needle} `)
+      || party.startsWith(`${needle} `);
+  }
+
+  return `${rawCode} ${party}`.includes(needle);
 }
 
 export function normalizeCustomerMasterGpsFilter(rawValue, legacyMissingGps = false) {
@@ -21,12 +59,59 @@ export function normalizeCustomerMasterOutstandingFilter(rawValue) {
   return "all";
 }
 
-export function applyCustomerMasterFilters(query, { search = "", gpsFilter = "all", activeFilter = "all" } = {}) {
-  let nextQuery = query;
+export function customerRowFromSalesRaw(row) {
+  const display = resolveCustomerMasterExportFields({
+    customer_code: row?.customer_code,
+    customer_name: row?.customer_name,
+  });
+  return {
+    customer_code: display.customer_code || String(row?.customer_code || "").trim(),
+    customer_name: display.customer_name || String(row?.customer_name || row?.customer_code || "").trim(),
+    current_salesman_code: row?.salesman_code || null,
+    latest_transaction_date: row?.transaction_date || null,
+    is_active: true,
+  };
+}
 
-  if (search) {
-    nextQuery = nextQuery.or(`customer_code.ilike.%${search}%,customer_name.ilike.%${search}%`);
-  }
+export async function backfillCustomersFromSalesRaw(admin, search) {
+  const code = normalizeCustomerMasterSearch(search);
+  if (!looksLikeCustomerCodeSearch(code)) return [];
+
+  const select = "customer_code,customer_name,salesman_code,transaction_date";
+  const [exact, prefixCode, prefixName] = await Promise.all([
+    admin.from("sales_raw").select(select).eq("customer_code", code).order("transaction_date", { ascending: false }).limit(5),
+    admin.from("sales_raw").select(select).ilike("customer_code", `${code} %`).order("transaction_date", { ascending: false }).limit(5),
+    admin.from("sales_raw").select(select).ilike("customer_name", `${code} %`).order("transaction_date", { ascending: false }).limit(5),
+  ]);
+
+  if (exact.error) throw exact.error;
+  if (prefixCode.error) throw prefixCode.error;
+  if (prefixName.error) throw prefixName.error;
+
+  const latest = [...(exact.data || []), ...(prefixCode.data || []), ...(prefixName.data || [])]
+    .sort((left, right) => String(right.transaction_date || "").localeCompare(String(left.transaction_date || "")))[0];
+
+  if (!latest) return [];
+
+  const payload = customerRowFromSalesRaw(latest);
+  if (!payload.customer_code) return [];
+
+  const { error: upsertError } = await admin
+    .from("customers")
+    .upsert(payload, { onConflict: "customer_code" });
+  if (upsertError) throw upsertError;
+
+  const { data, error } = await admin
+    .from("customers")
+    .select("customer_code,customer_name,current_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
+    .eq("customer_code", payload.customer_code)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? [data] : [payload];
+}
+
+export function applyCustomerMasterFilters(query, { gpsFilter = "all", activeFilter = "all" } = {}) {
+  let nextQuery = query;
 
   if (activeFilter === "active") {
     nextQuery = nextQuery.eq("is_active", true);
@@ -161,8 +246,20 @@ export async function fetchAllFilteredCustomers(admin, filters) {
   }
 
   const deduped = dedupeCustomerMasterRows(rows);
+  let searched = (deduped || []).filter((row) => customerMatchesMasterSearch(row, filters.search));
+
+  if (looksLikeCustomerCodeSearch(filters.search) && searched.length === 0) {
+    try {
+      const created = await backfillCustomersFromSalesRaw(admin, filters.search);
+      searched = dedupeCustomerMasterRows([...(deduped || []), ...created])
+        .filter((row) => customerMatchesMasterSearch(row, filters.search));
+    } catch {
+      // Keep the empty search result if sales_raw cannot be read.
+    }
+  }
+
   const outstandingDataset = await readOutstandingDataset(admin);
-  const enriched = enrichCustomerMasterOutstanding(deduped, outstandingDataset);
+  const enriched = enrichCustomerMasterOutstanding(searched, outstandingDataset);
   return applyCustomerMasterOutstandingFilter(enriched, filters.outstandingFilter);
 }
 

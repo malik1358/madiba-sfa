@@ -64,9 +64,10 @@ export async function prepareUploadFile(file) {
   if (!file || typeof File === "undefined" || !(file instanceof Blob)) return file;
 
   const mime = String(file.type || "").toLowerCase();
-  if (mime === "application/pdf") {
-    if (file.size > MAX_UPLOAD_BYTES) {
-      throw new Error("PDF file is too large. Choose a file under 3 MB.");
+  const name = String(file.name || "").toLowerCase();
+  if (mime === "application/pdf" || name.endsWith(".pdf")) {
+    if (file.size > 10 * 1024 * 1024) {
+      throw new Error("PDF file is too large. Choose a file under 10 MB, or upload a JPG/PNG photo of the certificate.");
     }
     return file;
   }

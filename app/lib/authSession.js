@@ -125,7 +125,7 @@ export async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 30000)
       throw new Error("Request timed out. Please refresh and try again.");
     }
     if (error instanceof TypeError || String(error?.message || "").includes("NetworkError")) {
-      throw new Error("Unable to reach the server. Restart dev server and refresh the page.");
+      throw new Error("Unable to reach the server. Refresh the page and try again.");
     }
     throw error;
   } finally {

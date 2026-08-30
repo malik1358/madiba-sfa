@@ -17,6 +17,7 @@ import {
   writePendingOrdersInvoiceMeta,
 } from "../../lib/mobileDataCache";
 import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
+import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
@@ -156,6 +157,7 @@ export default function PendingOrdersPage() {
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
   const [savingInvoiceStatus, setSavingInvoiceStatus] = useState(false);
   const [outstandingInfoByOrder, setOutstandingInfoByOrder] = useState({});
+  const [creditApprovalByOrder, setCreditApprovalByOrder] = useState({});
   const [columnFilters, setColumnFilters] = useState(EMPTY_FILTERS);
 
   const startOfTodayIso = useMemo(() => {
@@ -305,6 +307,38 @@ export default function PendingOrdersPage() {
             bucketLabels: sortBucketLabels(outstandingPayload.bucketLabels || []),
             customer: outstandingPayload.customer || null,
           },
+        }));
+      }
+
+      try {
+        const documentsResponse = await fetch(
+          `/api/customer-documents?customerCode=${encodeURIComponent(currentOrder?.customer_code || "")}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const documentsPayload = await documentsResponse.json().catch(() => ({}));
+        const outstandingCustomer = outstandingResponse.ok && outstandingPayload.success
+          ? outstandingPayload.customer
+          : null;
+        const orderValue = (data || []).reduce((sum, line) => sum + Number(line.line_value || 0), 0);
+        const evaluation = evaluateCreditApproval({
+          outstanding: outstandingCustomer || {},
+          orderValue,
+          creditApplication: documentsResponse.ok && documentsPayload.success
+            ? documentsPayload.compliance?.creditApplication
+            : { present: false },
+        });
+        setCreditApprovalByOrder((current) => ({
+          ...current,
+          [orderId]: evaluation,
+        }));
+      } catch {
+        setCreditApprovalByOrder((current) => ({
+          ...current,
+          [orderId]: evaluateCreditApproval({
+            outstanding: {},
+            orderValue: (data || []).reduce((sum, line) => sum + Number(line.line_value || 0), 0),
+            creditApplication: { present: false },
+          }),
         }));
       }
 
@@ -673,6 +707,37 @@ export default function PendingOrdersPage() {
         });
       }
 
+      let creditEvaluation = creditApprovalByOrder?.[activeOrder.id] || null;
+      try {
+        const token = await getAuthToken();
+        const documentsResponse = await fetch(
+          `/api/customer-documents?customerCode=${encodeURIComponent(activeOrder.customer_code || "")}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const documentsPayload = await documentsResponse.json().catch(() => ({}));
+        creditEvaluation = evaluateCreditApproval({
+          outstanding: outstandingCustomer || {},
+          orderValue: subtotal,
+          creditApplication: documentsResponse.ok && documentsPayload.success
+            ? documentsPayload.compliance?.creditApplication
+            : { present: false },
+        });
+      } catch {
+        creditEvaluation = creditEvaluation || evaluateCreditApproval({
+          outstanding: outstandingCustomer || {},
+          orderValue: subtotal,
+          creditApplication: { present: false },
+        });
+      }
+
+      cursorY = appendCreditControlRemarkToPdf(doc, {
+        remark: creditEvaluation.remark,
+        x: 40,
+        y: () => cursorY,
+        maxWidth: 515,
+        ensureSpace,
+      });
+
       addPdfBuildFooter(doc);
 
       const fileName = buildOrderPdfFileName({
@@ -1006,6 +1071,19 @@ export default function PendingOrdersPage() {
                                     </tbody>
                                   </table>
                                 </div>
+
+                                {creditApprovalByOrder?.[order.id]?.remark ? (
+                                  <div
+                                    className="moduleHint"
+                                    style={{
+                                      marginTop: "8px",
+                                      fontWeight: 700,
+                                      color: creditApprovalByOrder[order.id].required ? "#9b1c1c" : undefined,
+                                    }}
+                                  >
+                                    {creditApprovalByOrder[order.id].remark}
+                                  </div>
+                                ) : null}
 
                                 <div className="moduleHint" style={{ marginTop: "10px" }}>
                                   <strong>Invoice status:</strong> {invoiceStatusText(meta)}

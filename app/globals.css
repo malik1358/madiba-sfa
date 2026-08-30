@@ -4221,7 +4221,8 @@ table.auditMatrix td.auditTrendSame {
 }
 
 .moduleCollectorTableWrap {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: calc(100dvh - var(--sticky-table-top) - 12px);
 }
 
 .moduleCustomerMasterTableWrap {
@@ -4489,15 +4490,23 @@ table.auditMatrix td.auditTrendSame {
   min-width: 1180px;
 }
 
-/* Sticky headers resolve against the scrolling wrapper and would cover the first row. */
-.moduleCollectorTable th {
+.moduleCollectorTableWrap .moduleTable th {
   position: static;
+  top: auto;
+}
+
+.moduleCollectorTableWrap > .moduleCollectorTable > thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: #edf4f5;
 }
 
 @media (max-width: 900px) {
   /* Too many columns for a phone, so each row becomes a labelled card. */
   .moduleCollectorTableWrap {
     overflow-x: visible;
+    max-height: none;
     border: 0;
     background: transparent;
   }

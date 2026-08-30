@@ -1923,7 +1923,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                 {cashQueueSourceRows.length === 0 ? (
                   <div className="moduleHint">{t("noCashQueue")}</div>
                 ) : (
-                  <div className="moduleTableWrap">
+                  <div className="moduleTableWrap moduleCollectorTableWrap">
                     <table className="moduleTable moduleCollectorTable">
                       <thead>
                         <tr>

@@ -14,6 +14,7 @@ import {
   isIdleGpsPingTimelineRow,
   sumWaitingMinutesFromTimeline,
   coordinateCacheKey,
+  countUniqueGpsLocations,
   enrichVisitsWithDistances,
   extractAreaFromActivityNote,
   extractStreetFromActivityNote,
@@ -303,4 +304,14 @@ test("applyReverseGeocoding fills missing area and street from cache", () => {
 
 test("coordinateCacheKey rounds coordinates for lookup dedupe", () => {
   assert.equal(coordinateCacheKey(24.713551, 46.675301), "24.71355,46.67530");
+});
+
+test("countUniqueGpsLocations counts the same standing point once", () => {
+  assert.equal(countUniqueGpsLocations([
+    { latitude: 24.57151, longitude: 46.73935 },
+    { latitude: 24.57151, longitude: 46.73935 },
+    { latitude: 24.571509, longitude: 46.739351 },
+    { latitude: 24.58000, longitude: 46.75000 },
+    { latitude: null, longitude: null },
+  ]), 2);
 });

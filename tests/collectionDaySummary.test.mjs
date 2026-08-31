@@ -240,3 +240,34 @@ test("formatNarrativeTime uses KSA clock", () => {
   const label = formatNarrativeTime(ksaIso({ year: 2026, month: 8, day: 23 }, 14, 0));
   assert.equal(label, "2 pm");
 });
+
+test("buildCollectionDaySummary counts two same-GPS saves as one location", () => {
+  const date = { year: 2026, month: 8, day: 30 };
+  const visits = [
+    {
+      customer_code: "1234",
+      saved_at: ksaIso(date, 19, 45),
+      visit_outcome: "FUNDS_RECEIVED",
+      amount_received: 1000,
+      latitude: 24.57151,
+      longitude: 46.73935,
+    },
+    {
+      customer_code: "1234",
+      saved_at: ksaIso(date, 20, 14),
+      visit_outcome: "FUNDS_RECEIVED",
+      amount_received: 1000,
+      latitude: 24.57151,
+      longitude: 46.73935,
+    },
+  ];
+
+  const summary = buildCollectionDaySummary(visits, new Map([
+    ["1234", { city: "Riyadh", area: "Al Marqab" }],
+  ]));
+
+  assert.equal(summary.stats.uniqueCustomers, 1);
+  assert.equal(summary.stats.totalVisits, 2);
+  assert.equal(summary.stats.uniqueGpsLocations, 1);
+  assert.match(summary.lines.join("\n"), /Visited 1 customer\(s\) at 1 unique GPS location/);
+});

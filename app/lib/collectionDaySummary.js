@@ -1,3 +1,4 @@
+import { countUniqueGpsLocations } from "./geo.js";
 import { getKsaDateTimeParts, KSA_TIMEZONE } from "./workdayActivity.js";
 
 function normalizeCode(value) {
@@ -83,6 +84,7 @@ function computeStats(visits) {
 
   return {
     uniqueCustomers: customerCodes.size,
+    uniqueGpsLocations: countUniqueGpsLocations(visits),
     totalVisits: (visits || []).length,
     successfulCollections,
     totalCollected,
@@ -197,6 +199,7 @@ export const UNLOGGED_IDLE_THRESHOLD_MINUTES = 30;
 
 export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
   visitedCustomers: "تمت زيارة {count} عميل.",
+  visitedCustomersWithGps: "تمت زيارة {count} عميل في {locations} موقع GPS مختلف.",
   lunchBreak: "استراحة غداء من {from} إلى {to}.",
   loginLogged: "تسجيل الدخول عند {time}.",
   loginNotLogged: "تسجيل الدخول غير مسجل.",
@@ -224,6 +227,7 @@ export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
 
 export const COLLECTION_DAY_SUMMARY_LABELS = {
   visitedCustomers: "Visited {count} customer(s).",
+  visitedCustomersWithGps: "Visited {count} customer(s) at {locations} unique GPS location(s).",
   lunchBreak: "Lunch break from {from} to {to}.",
   loginLogged: "Login at {time}.",
   loginNotLogged: "Login not logged.",
@@ -524,7 +528,15 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
     : [];
 
   const headerItem = sorted.length
-    ? makeSummaryItem("header", fill(labels.visitedCustomers, { count: stats.uniqueCustomers }))
+    ? makeSummaryItem(
+      "header",
+      stats.uniqueGpsLocations
+        ? fill(labels.visitedCustomersWithGps, {
+          count: stats.uniqueCustomers,
+          locations: stats.uniqueGpsLocations,
+        })
+        : fill(labels.visitedCustomers, { count: stats.uniqueCustomers }),
+    )
     : makeSummaryItem("header", labels.noVisits);
   const footerItem = sorted.length
     ? makeSummaryItem("footer", fill(labels.totalFooter, {
@@ -568,6 +580,7 @@ export function buildAggregateCollectionDaySummary(collectorSummaries, labels = 
       lines: [labels.noVisits],
       stats: {
         uniqueCustomers: 0,
+        uniqueGpsLocations: 0,
         totalVisits: 0,
         successfulCollections: 0,
         totalCollected: 0,
@@ -583,6 +596,7 @@ export function buildAggregateCollectionDaySummary(collectorSummaries, labels = 
     return acc;
   }, {
     uniqueCustomers: 0,
+    uniqueGpsLocations: 0,
     totalVisits: 0,
     successfulCollections: 0,
     totalCollected: 0,

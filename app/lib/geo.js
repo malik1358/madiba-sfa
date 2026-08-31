@@ -526,6 +526,18 @@ export function coordinateCacheKey(latitude, longitude, precision = 5) {
   return `${lat.toFixed(precision)},${lng.toFixed(precision)}`;
 }
 
+export function countUniqueGpsLocations(records, precision = 5) {
+  const keys = new Set();
+  (records || []).forEach((record) => {
+    const latitude = record?.latitude ?? record?.entryLatitude;
+    const longitude = record?.longitude ?? record?.entryLongitude;
+    if (!hasGpsCoordinates({ latitude, longitude })) return;
+    const key = coordinateCacheKey(latitude, longitude, precision);
+    if (key) keys.add(key);
+  });
+  return keys.size;
+}
+
 export function parseReverseGeocodeAddress(payload) {
   const address = payload?.address || {};
   const street = String(

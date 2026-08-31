@@ -52,6 +52,9 @@ const TEXT = {
   },
   totalVisits: { en: "Total visits", ar: "إجمالي الزيارات" },
   uniqueCustomers: { en: "Unique customers visited", ar: "عملاء مختلفون تمت زيارتهم" },
+  uniqueGpsLocations: { en: "Unique GPS locations visited", ar: "مواقع GPS مختلفة تمت زيارتها" },
+  uniqueGpsLocationsShort: { en: "unique GPS locations", ar: "مواقع GPS مختلفة" },
+  sameGpsLocation: { en: "Same location", ar: "نفس الموقع" },
   totalDistance: { en: "Total route distance", ar: "إجمالي مسافة المسار" },
   collectorsActive: { en: "Users active", ar: "المستخدمون النشطون" },
   userName: { en: "User name", ar: "اسم المستخدم" },
@@ -460,7 +463,7 @@ export default function CollectionReportPage() {
                 title={t("daySummaryTitle")}
               />
 
-              <div className="moduleMetricGrid">
+              <div className="moduleMetricGrid moduleMetricGridCols6">
                 <section className="moduleMetricCard">
                   <span>{t("totalVisits")}</span>
                   <strong>{report.visitCount || 0}</strong>
@@ -468,6 +471,10 @@ export default function CollectionReportPage() {
                 <section className="moduleMetricCard">
                   <span>{t("uniqueCustomers")}</span>
                   <strong>{report.uniqueCustomerVisitCount || 0}</strong>
+                </section>
+                <section className="moduleMetricCard">
+                  <span>{t("uniqueGpsLocations")}</span>
+                  <strong>{report.uniqueGpsLocationCount || 0}</strong>
                 </section>
                 <section className="moduleMetricCard">
                   <span>{t("totalDistance")}</span>
@@ -501,6 +508,8 @@ export default function CollectionReportPage() {
                       {collector.visitCount} {t("visits")}
                       {" · "}
                       {collector.uniqueCustomerVisitCount ?? collector.visitCount} {t("uniqueCustomersShort")}
+                      {" · "}
+                      {collector.uniqueGpsLocationCount ?? 0} {t("uniqueGpsLocationsShort")}
                       {" · "}
                       {collector.gpsVisitCount} {t("gpsCaptured")}
                       {" · "}
@@ -634,7 +643,9 @@ export default function CollectionReportPage() {
                             <td>
                               {visit.distanceFromPreviousKm === null
                                 ? "-"
-                                : `${formatNumber(visit.distanceFromPreviousKm)} km`}
+                                : Number(visit.distanceFromPreviousKm) === 0
+                                  ? `0.00 km · ${t("sameGpsLocation")}`
+                                  : `${formatNumber(visit.distanceFromPreviousKm)} km`}
                             </td>
                             <td>
                               {visit.speedFromPreviousKmH === null || visit.speedFromPreviousKmH === undefined

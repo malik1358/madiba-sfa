@@ -38,6 +38,7 @@ import {
   nearestActivityGps,
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
+  countUniqueGpsLocations,
 } from "../../../lib/geo.js";
 import { filterCollectionQueueInvoices, invoiceHasCashRef, isScheduledRevisitQueueCustomer } from "../../../lib/paymentCollections.js";
 import { resolveInvoiceAgingDays, toNumber } from "../../../lib/outstanding.js";
@@ -791,6 +792,7 @@ export async function GET(request) {
         salesmanCode: collectorProfile.salesman_code || "",
         visitCount: rows.length,
         uniqueCustomerVisitCount: countUniqueCustomerVisits(rows),
+        uniqueGpsLocationCount: countUniqueGpsLocations(rows),
         gpsVisitCount: rows.filter((visit) => hasGpsCoordinates(visit)).length,
         totalDistanceKm: summarizeRouteDistanceKm(rows),
         workdayTimes,
@@ -854,6 +856,7 @@ export async function GET(request) {
         : "Apply sql/add_collection_visit_gps.sql in Supabase SQL Editor to enable GPS distance reporting.",
       visitCount: visitRowsWithGpsFallback.length,
       uniqueCustomerVisitCount: countUniqueCustomerVisits(visitRowsWithGpsFallback),
+      uniqueGpsLocationCount: countUniqueGpsLocations(visitRowsWithGpsFallback),
       collectorCount: visibleCollectors.length,
       gpsVisitCount: visibleCollectors.reduce((sum, collector) => sum + Number(collector.gpsVisitCount || 0), 0),
       totalDistanceKm: visibleCollectors.reduce((sum, collector) => sum + Number(collector.totalDistanceKm || 0), 0),

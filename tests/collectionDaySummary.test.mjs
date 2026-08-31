@@ -64,6 +64,7 @@ test("buildCollectionDaySummary matches SM001-style day narrative", () => {
   assert.match(joined, /Came back to Riyadh and visited 1 customer/);
   assert.match(joined, /Total 10 visit/);
   assert.match(joined, /2 successful collection/);
+  assert.match(joined, /4,625 SAR collected/);
 });
 
 test("buildCollectionDaySummary includes lunch break when provided", () => {
@@ -183,8 +184,53 @@ test("buildCollectionDaySummary lists unlogged idle periods", () => {
 
   assert.match(
     summary.lines.join("\n"),
-    /Unlogged idle from 11:31 am to 12:45 pm \(1h 14m\)/,
+    /Unlogged idle from 11:31 am to 12:45 pm \(1h 14m\) — no activity logged\./,
   );
+  assert.doesNotMatch(summary.lines.join("\n"), /lunch was not marked/);
+});
+
+test("buildCollectionDaySummary sorts idle with visits and uses last visit instead of midnight logout", () => {
+  const date = { year: 2026, month: 8, day: 30 };
+  const visits = [
+    {
+      customer_code: "C1",
+      saved_at: ksaIso(date, 11, 31),
+      visit_outcome: "FUNDS_RECEIVED",
+      amount_received: 3700,
+    },
+    {
+      customer_code: "C2",
+      saved_at: ksaIso(date, 20, 23),
+      visit_outcome: "FUNDS_RECEIVED",
+      amount_received: 1000,
+    },
+  ];
+
+  const summary = buildCollectionDaySummary(
+    visits,
+    new Map([
+      ["C1", { city: "Riyadh" }],
+      ["C2", { city: "Riyadh" }],
+    ]),
+    {
+      loginAt: ksaIso(date, 10, 18),
+      logoutAt: ksaIso(date, 23, 59),
+      logoutAutoClosed: true,
+    },
+  );
+
+  const joined = summary.lines.join("\n");
+  assert.match(joined, /Login at 10:18 am/);
+  assert.match(joined, /Logout at 8:23 pm/);
+  assert.doesNotMatch(joined, /11:59/);
+  assert.doesNotMatch(joined, /lunch was not marked/);
+  assert.match(joined, /4,700 SAR collected/);
+
+  const idleIndex = summary.lines.findIndex((line) => line.includes("Unlogged idle from 10:18 am"));
+  const visitIndex = summary.lines.findIndex((line) => line.includes("Started at 11:31 am"));
+  const logoutIndex = summary.lines.findIndex((line) => line.includes("Logout at 8:23 pm"));
+  assert.ok(idleIndex > 0 && visitIndex > idleIndex);
+  assert.ok(logoutIndex > visitIndex);
 });
 
 test("formatNarrativeTime uses KSA clock", () => {

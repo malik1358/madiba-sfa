@@ -206,7 +206,7 @@ export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
   lunchOutNotLogged: "خروج الغداء غير مسجل.",
   lunchInLogged: "عودة الغداء عند {time}.",
   lunchInNotLogged: "عودة الغداء غير مسجل.",
-  unloggedIdle: "توقف غير مسجل من {from} إلى {to} ({duration}) — لا نشاط مسجل ولم تُسجل استراحة الغداء.",
+  unloggedIdle: "توقف غير مسجل من {from} إلى {to} ({duration}) — لا نشاط مسجل.",
   startedTill: "بدأ عند {start} وحتى {end} زار {count} عميل{collections}",
   betweenTill: "بين {start} إلى {end} زار {count} عميل{collections}",
   inCityTill: "في {city} زار {count} عميل حتى {end}{collections}",
@@ -216,7 +216,7 @@ export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
   withCollectionSingle: " مع تحصيل من عميل واحد بمبلغ {amount} ريال",
   withCollectionMultiple: " مع تحصيل من {count} عملاء بإجمالي {amount} ريال",
   collectedAmount: " وتم تحصيل {amount} ريال",
-  totalFooter: "إجمالي {visits} زيارة، {collections} تحصيل ناجح.",
+  totalFooter: "إجمالي {visits} زيارة، {collections} تحصيل ناجح، {amount} ريال.",
   noVisits: "لا توجد زيارات تحصيل مسجلة في هذا اليوم.",
   aggregateHeader: "{count} مستخدم نشط: {visits} زيارة، {collections} تحصيل ناجح، {amount} ريال.",
 };
@@ -232,7 +232,7 @@ export const COLLECTION_DAY_SUMMARY_LABELS = {
   lunchOutNotLogged: "Lunch out not logged.",
   lunchInLogged: "Lunch in at {time}.",
   lunchInNotLogged: "Lunch in not logged.",
-  unloggedIdle: "Unlogged idle from {from} to {to} ({duration}) — no activity logged and lunch was not marked.",
+  unloggedIdle: "Unlogged idle from {from} to {to} ({duration}) — no activity logged.",
   startedTill: "Started at {start} and till {end} visited {count} customer(s){collections}",
   betweenTill: "Between {start} to {end} visited {count} customer(s){collections}",
   inCityTill: "In {city} visited {count} customer(s) till {end}{collections}",
@@ -242,7 +242,7 @@ export const COLLECTION_DAY_SUMMARY_LABELS = {
   withCollectionSingle: " with collection only from 1 customer of {amount} SAR",
   withCollectionMultiple: " with collection from {count} customers totalling {amount} SAR",
   collectedAmount: " and collected {amount} SAR",
-  totalFooter: "Total {visits} visit(s), {collections} successful collection(s).",
+  totalFooter: "Total {visits} visit(s), {collections} successful collection(s), {amount} SAR collected.",
   noVisits: "No collection visits recorded for this day.",
   aggregateHeader: "{count} active user(s): {visits} visit(s), {collections} successful collection(s), {amount} SAR collected.",
 };
@@ -365,26 +365,110 @@ export function findUnloggedIdleGaps({
   return gaps;
 }
 
-function appendWorkdayStatusLines(lines, workdayEvents, visits, labels) {
-  if (!workdayEvents) return;
+export function lastVisitTimestamp(visits) {
+  return (visits || []).reduce((latest, visit) => Math.max(latest, visitTimestamp(visit)), 0);
+}
 
-  const loginAt = workdayEvents.loginAt || null;
-  const logoutAt = workdayEvents.logoutAt || null;
-  const lunchOutAt = workdayEvents.lunchOutAt || null;
-  const lunchInAt = workdayEvents.lunchInAt || null;
+export function isMidnightAutoLogout(value) {
+  const ts = parseEventTs(value);
+  if (!ts) return false;
+  const { hour, minute } = getKsaDateTimeParts(new Date(ts));
+  return hour === 23 && minute >= 59;
+}
 
-  lines.push(loginAt
-    ? fill(labels.loginLogged || "Login at {time}.", { time: formatNarrativeTime(loginAt) })
-    : (labels.loginNotLogged || "Login not logged."));
-  lines.push(logoutAt
-    ? fill(labels.logoutLogged || "Logout at {time}.", { time: formatNarrativeTime(logoutAt) })
-    : (labels.logoutNotLogged || "Logout not logged."));
-  lines.push(lunchOutAt
-    ? fill(labels.lunchOutLogged || "Lunch out at {time}.", { time: formatNarrativeTime(lunchOutAt) })
-    : (labels.lunchOutNotLogged || "Lunch out not logged."));
-  lines.push(lunchInAt
-    ? fill(labels.lunchInLogged || "Lunch in at {time}.", { time: formatNarrativeTime(lunchInAt) })
-    : (labels.lunchInNotLogged || "Lunch in not logged."));
+export function resolveEffectiveLogoutAt({
+  logoutAt = null,
+  logoutAutoClosed = false,
+  visits = [],
+} = {}) {
+  const lastVisitTs = lastVisitTimestamp(visits);
+  const treatAsLastVisit = Boolean(logoutAutoClosed) || isMidnightAutoLogout(logoutAt);
+  if (treatAsLastVisit && lastVisitTs) return new Date(lastVisitTs).toISOString();
+  return logoutAt || null;
+}
+
+export function normalizeWorkdayEvents(workdayEvents, visits = []) {
+  if (!workdayEvents) return null;
+  return {
+    ...workdayEvents,
+    logoutAt: resolveEffectiveLogoutAt({
+      logoutAt: workdayEvents.logoutAt,
+      logoutAutoClosed: workdayEvents.logoutAutoClosed,
+      visits,
+    }),
+  };
+}
+
+function makeSummaryItem(kind, text, ts = 0) {
+  return { kind, text, ts };
+}
+
+function timelineKindRank(kind) {
+  if (kind === "login") return 0;
+  if (kind === "lunch") return 1;
+  if (kind === "visit" || kind === "visit_collected") return 2;
+  if (kind === "idle") return 3;
+  if (kind === "logout") return 4;
+  return 5;
+}
+
+function sortTimelineItems(items) {
+  return [...items].sort((left, right) => {
+    if (left.ts !== right.ts) return left.ts - right.ts;
+    return timelineKindRank(left.kind) - timelineKindRank(right.kind);
+  });
+}
+
+function collectWorkdayItems(workdayEvents, visits, labels) {
+  const statusItems = [];
+  const timelineItems = [];
+  if (!workdayEvents) return { statusItems, timelineItems, events: null };
+
+  const events = normalizeWorkdayEvents(workdayEvents, visits);
+  const loginAt = events.loginAt || null;
+  const logoutAt = events.logoutAt || null;
+  const lunchOutAt = events.lunchOutAt || null;
+  const lunchInAt = events.lunchInAt || null;
+
+  if (loginAt) {
+    timelineItems.push(makeSummaryItem(
+      "login",
+      fill(labels.loginLogged || "Login at {time}.", { time: formatNarrativeTime(loginAt) }),
+      parseEventTs(loginAt),
+    ));
+  } else {
+    statusItems.push(makeSummaryItem("missing", labels.loginNotLogged || "Login not logged."));
+  }
+
+  if (logoutAt) {
+    timelineItems.push(makeSummaryItem(
+      "logout",
+      fill(labels.logoutLogged || "Logout at {time}.", { time: formatNarrativeTime(logoutAt) }),
+      parseEventTs(logoutAt),
+    ));
+  } else {
+    statusItems.push(makeSummaryItem("missing", labels.logoutNotLogged || "Logout not logged."));
+  }
+
+  if (lunchOutAt) {
+    timelineItems.push(makeSummaryItem(
+      "lunch",
+      fill(labels.lunchOutLogged || "Lunch out at {time}.", { time: formatNarrativeTime(lunchOutAt) }),
+      parseEventTs(lunchOutAt),
+    ));
+  } else {
+    statusItems.push(makeSummaryItem("missing", labels.lunchOutNotLogged || "Lunch out not logged."));
+  }
+
+  if (lunchInAt) {
+    timelineItems.push(makeSummaryItem(
+      "lunch",
+      fill(labels.lunchInLogged || "Lunch in at {time}.", { time: formatNarrativeTime(lunchInAt) }),
+      parseEventTs(lunchInAt),
+    ));
+  } else {
+    statusItems.push(makeSummaryItem("missing", labels.lunchInNotLogged || "Lunch in not logged."));
+  }
 
   findUnloggedIdleGaps({
     visits,
@@ -393,54 +477,74 @@ function appendWorkdayStatusLines(lines, workdayEvents, visits, labels) {
     lunchOutAt,
     lunchInAt,
   }).forEach((gap) => {
-    lines.push(fill(labels.unloggedIdle || "Unlogged idle from {from} to {to} ({duration}).", {
-      from: formatNarrativeTime(gap.fromAt),
-      to: formatNarrativeTime(gap.toAt),
-      duration: formatIdleDuration(gap.minutes),
-    }));
+    timelineItems.push(makeSummaryItem(
+      "idle",
+      fill(labels.unloggedIdle || "Unlogged idle from {from} to {to} ({duration}) — no activity logged.", {
+        from: formatNarrativeTime(gap.fromAt),
+        to: formatNarrativeTime(gap.toAt),
+        duration: formatIdleDuration(gap.minutes),
+      }),
+      parseEventTs(gap.fromAt),
+    ));
   });
+
+  return { statusItems, timelineItems, events };
+}
+
+function itemsToLines(items) {
+  return (items || []).map((item) => item.text);
 }
 
 export function buildCollectionDaySummary(visits, customerLocationByCode = {}, lunchEvents = null, labels = COLLECTION_DAY_SUMMARY_LABELS) {
   const sorted = [...(visits || [])].sort((left, right) => visitTimestamp(left) - visitTimestamp(right));
   const stats = computeStats(sorted);
+  const workday = collectWorkdayItems(lunchEvents, sorted, labels);
   const idleGaps = lunchEvents
     ? findUnloggedIdleGaps({
       visits: sorted,
-      loginAt: lunchEvents.loginAt,
-      logoutAt: lunchEvents.logoutAt,
-      lunchOutAt: lunchEvents.lunchOutAt,
-      lunchInAt: lunchEvents.lunchInAt,
+      loginAt: workday.events?.loginAt,
+      logoutAt: workday.events?.logoutAt,
+      lunchOutAt: workday.events?.lunchOutAt,
+      lunchInAt: workday.events?.lunchInAt,
     })
     : [];
 
-  if (!sorted.length) {
-    const lines = [labels.noVisits];
-    appendWorkdayStatusLines(lines, lunchEvents, sorted, labels);
-    return {
-      lines,
-      stats,
-      idleGaps,
-    };
-  }
+  const headerItem = sorted.length
+    ? makeSummaryItem("header", fill(labels.visitedCustomers, { count: stats.uniqueCustomers }))
+    : makeSummaryItem("header", labels.noVisits);
+  const footerItem = sorted.length
+    ? makeSummaryItem("footer", fill(labels.totalFooter, {
+      visits: stats.totalVisits,
+      collections: stats.successfulCollections,
+      amount: formatMoney(stats.totalCollected),
+    }))
+    : null;
 
-  const lines = [
-    fill(labels.visitedCustomers, { count: stats.uniqueCustomers }),
-  ];
-
-  appendWorkdayStatusLines(lines, lunchEvents, sorted, labels);
-
-  const segments = buildLocationSegments(sorted, customerLocationByCode);
+  const timelineItems = [...workday.timelineItems];
+  const segments = sorted.length ? buildLocationSegments(sorted, customerLocationByCode) : [];
   segments.forEach((segment, index) => {
-    lines.push(describeSegment(segment, index, segments, labels));
+    const hasCollection = segment.visits.some(isSuccessfulCollection);
+    timelineItems.push(makeSummaryItem(
+      hasCollection ? "visit_collected" : "visit",
+      describeSegment(segment, index, segments, labels),
+      segment.startTs,
+    ));
   });
 
-  lines.push(fill(labels.totalFooter, {
-    visits: stats.totalVisits,
-    collections: stats.successfulCollections,
-  }));
+  const items = [
+    headerItem,
+    ...workday.statusItems,
+    ...sortTimelineItems(timelineItems),
+    ...(footerItem ? [footerItem] : []),
+  ];
 
-  return { lines, stats, segments, idleGaps };
+  return {
+    lines: itemsToLines(items),
+    items,
+    stats,
+    segments,
+    idleGaps,
+  };
 }
 
 export function buildAggregateCollectionDaySummary(collectorSummaries, labels = COLLECTION_DAY_SUMMARY_LABELS) {

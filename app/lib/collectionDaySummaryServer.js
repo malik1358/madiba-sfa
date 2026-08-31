@@ -58,6 +58,7 @@ export function mapWorkdayLogToTimelineRow(row) {
     entryType,
     saved_at: savedAt,
     created_by: row.user_id,
+    autoClosed: Boolean(parsed.autoClosed),
     latitude: gps.latitude,
     longitude: gps.longitude,
     gps_accuracy_meters: gps.accuracy,
@@ -69,6 +70,7 @@ export function mapWorkdayLogToTimelineRow(row) {
 export function extractWorkdayTimesFromTimelineRows(workdayRows) {
   let loginAt = null;
   let logoutAt = null;
+  let logoutAutoClosed = false;
   let lunchOutAt = null;
   let lunchInAt = null;
 
@@ -78,6 +80,7 @@ export function extractWorkdayTimesFromTimelineRows(workdayRows) {
     }
     if (row.entryType === "END_OF_DAY") {
       logoutAt = row.saved_at;
+      logoutAutoClosed = Boolean(row.autoClosed);
     }
     if (row.entryType === "LUNCH_BREAK_OUT" && !lunchOutAt) {
       lunchOutAt = row.saved_at;
@@ -87,7 +90,7 @@ export function extractWorkdayTimesFromTimelineRows(workdayRows) {
     }
   });
 
-  return { loginAt, logoutAt, lunchOutAt, lunchInAt };
+  return { loginAt, logoutAt, logoutAutoClosed, lunchOutAt, lunchInAt };
 }
 
 export async function loadWorkdayEventsByUser(admin, userIds, startIso, endIso, reportDate) {
@@ -174,6 +177,8 @@ export async function loadCollectionDaySummaryForUser(admin, userId, date = getK
         daySummary: {
           lines: emptyEn.lines,
           linesAr: emptyAr.lines,
+          items: emptyEn.items,
+          itemsAr: emptyAr.items,
           stats: emptyEn.stats,
         },
         summaryTextEn: emptyEn.lines.join("\n"),
@@ -210,6 +215,8 @@ export async function loadCollectionDaySummaryForUser(admin, userId, date = getK
     daySummary: {
       lines: daySummaryEn.lines,
       linesAr: daySummaryAr.lines,
+      items: daySummaryEn.items,
+      itemsAr: daySummaryAr.items,
       stats: daySummaryEn.stats,
     },
     summaryTextEn: daySummaryEn.lines.join("\n"),

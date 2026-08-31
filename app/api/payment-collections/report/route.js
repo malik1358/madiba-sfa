@@ -5,6 +5,7 @@ import {
   COLLECTION_DAY_SUMMARY_LABELS,
   COLLECTION_DAY_SUMMARY_LABELS_AR,
   findUnloggedIdleGaps,
+  normalizeWorkdayEvents,
 } from "../../../lib/collectionDaySummary.js";
 import {
   extractWorkdayTimesFromTimelineRows,
@@ -743,7 +744,10 @@ export async function GET(request) {
       const userRoleLabel = formatCollectionUserRoleLabel(collectorProfile.role);
       const { maps: priorityMaps, queueScope } = await resolvePriorityMapsForUser(createdBy, collectorProfile);
       const workdayRows = workdayEventsByUser.get(createdBy) || [];
-      const workdayTimes = extractWorkdayTimesFromTimelineRows(workdayRows);
+      const workdayTimes = normalizeWorkdayEvents(
+        extractWorkdayTimesFromTimelineRows(workdayRows),
+        rows,
+      ) || {};
       const idleGaps = findUnloggedIdleGaps({
         visits: rows,
         loginAt: workdayTimes.loginAt,
@@ -756,12 +760,20 @@ export async function GET(request) {
       const daySummary = {
         lines: daySummaryEn.lines,
         linesAr: daySummaryAr.lines,
+        items: daySummaryEn.items,
+        itemsAr: daySummaryAr.items,
         stats: daySummaryEn.stats,
       };
 
+      const timelineWorkdayRows = workdayRows.map((row) => {
+        if (row.entryType !== "END_OF_DAY" || !workdayTimes.logoutAt) return row;
+        if (!row.autoClosed && row.saved_at === workdayTimes.logoutAt) return row;
+        return { ...row, saved_at: workdayTimes.logoutAt };
+      });
+
       const enrichedVisits = buildCollectorTimelineRows({
         visitRows: rows,
-        workdayRows,
+        workdayRows: timelineWorkdayRows,
         idleRows: buildIdleTimelineRows(idleGaps),
         userName,
         customerDetailsMap,

@@ -3631,6 +3631,45 @@ table.auditMatrix td.auditTrendSame {
   margin-top: 4px;
 }
 
+.moduleDaySummaryKind-header,
+.moduleDaySummaryKind-footer {
+  color: #073f4c;
+  font-weight: 800;
+}
+
+.moduleDaySummaryKind-login {
+  color: #0f6b5c;
+  font-weight: 700;
+}
+
+.moduleDaySummaryKind-logout {
+  color: #5b3d99;
+  font-weight: 700;
+}
+
+.moduleDaySummaryKind-lunch {
+  color: #b86a00;
+  font-weight: 700;
+}
+
+.moduleDaySummaryKind-missing {
+  color: #8a4b08;
+}
+
+.moduleDaySummaryKind-idle {
+  color: #9b1c1c;
+  font-weight: 700;
+}
+
+.moduleDaySummaryKind-visit {
+  color: #0b4f6c;
+}
+
+.moduleDaySummaryKind-visit-collected {
+  color: #166534;
+  font-weight: 700;
+}
+
 .moduleWorkdayStatus {
   display: flex;
   flex-wrap: wrap;

@@ -226,8 +226,11 @@ test("buildCollectionDaySummary sorts idle with visits and uses last visit inste
   assert.doesNotMatch(joined, /lunch was not marked/);
   assert.match(joined, /4,700 SAR collected/);
 
+  assert.match(joined, /At 11:31 am visited 1 customer/);
+  assert.doesNotMatch(joined, /Started at 11:31 am and till 11:31 am/);
+
   const idleIndex = summary.lines.findIndex((line) => line.includes("Unlogged idle from 10:18 am"));
-  const visitIndex = summary.lines.findIndex((line) => line.includes("Started at 11:31 am"));
+  const visitIndex = summary.lines.findIndex((line) => line.includes("At 11:31 am visited"));
   const logoutIndex = summary.lines.findIndex((line) => line.includes("Logout at 8:23 pm"));
   assert.ok(idleIndex > 0 && visitIndex > idleIndex);
   assert.ok(logoutIndex > visitIndex);

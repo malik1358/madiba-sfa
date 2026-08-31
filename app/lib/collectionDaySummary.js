@@ -208,6 +208,7 @@ export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
   lunchInNotLogged: "عودة الغداء غير مسجل.",
   unloggedIdle: "توقف غير مسجل من {from} إلى {to} ({duration}) — لا نشاط مسجل.",
   startedTill: "بدأ عند {start} وحتى {end} زار {count} عميل{collections}",
+  atTime: "عند {start} زار {count} عميل{collections}",
   betweenTill: "بين {start} إلى {end} زار {count} عميل{collections}",
   inCityTill: "في {city} زار {count} عميل حتى {end}{collections}",
   cameBack: "عاد إلى {city} وزار {count} عميل{collections}",
@@ -234,6 +235,7 @@ export const COLLECTION_DAY_SUMMARY_LABELS = {
   lunchInNotLogged: "Lunch in not logged.",
   unloggedIdle: "Unlogged idle from {from} to {to} ({duration}) — no activity logged.",
   startedTill: "Started at {start} and till {end} visited {count} customer(s){collections}",
+  atTime: "At {start} visited {count} customer(s){collections}",
   betweenTill: "Between {start} to {end} visited {count} customer(s){collections}",
   inCityTill: "In {city} visited {count} customer(s) till {end}{collections}",
   cameBack: "Came back to {city} and visited {count} customer(s){collections}",
@@ -266,7 +268,13 @@ function describeSegment(segment, segmentIndex, segments, labels) {
 
   let line = "";
   if (segmentIndex === 0) {
-    line = fill(labels.startedTill, { start, end, count, collections: collections + transition });
+    line = start === end
+      ? fill(labels.atTime || "At {start} visited {count} customer(s){collections}", {
+        start,
+        count,
+        collections: collections + transition,
+      })
+      : fill(labels.startedTill, { start, end, count, collections: collections + transition });
   } else if (isReturnToCity(segmentIndex, segments)) {
     const successful = segment.visits.filter(isSuccessfulCollection);
     const collectionText = successful.length === 1 && count === 1
@@ -276,7 +284,13 @@ function describeSegment(segment, segmentIndex, segments, labels) {
       : collections;
     line = fill(labels.cameBack, { city: segment.city, count, collections: collectionText });
   } else if (segments[segmentIndex - 1]?.cityKey === segment.cityKey) {
-    line = fill(labels.betweenTill, { start, end, count, collections: collections + transition });
+    line = start === end
+      ? fill(labels.atTime || "At {start} visited {count} customer(s){collections}", {
+        start,
+        count,
+        collections: collections + transition,
+      })
+      : fill(labels.betweenTill, { start, end, count, collections: collections + transition });
   } else {
     line = fill(labels.inCityTill, { city: segment.city, end, count, collections: collections + transition });
   }

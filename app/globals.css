@@ -3631,6 +3631,34 @@ table.auditMatrix td.auditTrendSame {
   margin-top: 4px;
 }
 
+.moduleWorkdayStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: #fff8e8;
+  border: 1px solid #e6d3a3;
+  border-radius: 10px;
+  color: #4a3708;
+  font-size: 13px;
+}
+
+.moduleWorkdayStatusIdle {
+  display: block;
+  background: #fdeeee;
+  border-color: #e3b6b6;
+  color: #7a1f1f;
+}
+
+.moduleWorkdayStatusIdle .moduleDaySummaryList {
+  margin-top: 6px;
+}
+
+.moduleTableIdleRow td {
+  background: #fdeeee;
+}
+
 .moduleMetricGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

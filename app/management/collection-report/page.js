@@ -89,8 +89,8 @@ const TEXT = {
   visitReportTitle: { en: "Collection Visit Report", ar: "تقرير زيارة التحصيل" },
   whatsappSummary: { en: "WhatsApp summary", ar: "ملخص الواتساب" },
   priorityCustomer: { en: "Priority customer visit", ar: "زيارة عميل ذو أولوية" },
-  priorityYes: { en: "Yes — higher collection probability", ar: "نعم — احتمالية تحصيل أعلى" },
-  priorityNo: { en: "No — lower priority / not recorded", ar: "لا — أولوية أقل / غير مسجل" },
+  priorityYes: { en: "Likely to pay", ar: "مرجح أن يدفع" },
+  priorityNo: { en: "Lower payment likelihood", ar: "احتمالية دفع أقل" },
   queuePriority: { en: "Queue priority", ar: "أولوية الزيارة" },
   probability: { en: "Payment probability", ar: "احتمالية التحصيل" },
   copySummary: { en: "Copy summary", ar: "نسخ الملخص" },
@@ -110,7 +110,7 @@ const TEXT = {
   complianceOffPrioritySalesman: { en: "Off priority — skipped higher-ranked customers from your list", ar: "خارج الأولوية — تم تجاوز عملاء أعلى في قائمتك" },
   complianceOnPrioritySalesman: { en: "On priority — visited a top-ranked customer from your list", ar: "ضمن الأولوية — زار عميلاً ذا ترتيب مناسب في قائمتك" },
   complianceSlightlyDelayedSalesman: { en: "Slightly off — customer was a few places lower in your list", ar: "انحراف بسيط — العميل كان أدنى قليلاً في قائمتك" },
-  priorityYesSalesman: { en: "Yes — priority customer in your list", ar: "نعم — عميل ذو أولوية في قائمتك" },
+  priorityYesSalesman: { en: "Likely to pay from your list", ar: "مرجح أن يدفع من قائمتك" },
   queuePrioritySalesman: { en: "Your customer priority", ar: "أولوية عميلك" },
   complianceUnknown: { en: "Queue rank unavailable for this visit", ar: "ترتيب القائمة غير متاح لهذه الزيارة" },
   visitOrderVsQueue: { en: "Visit # vs queue rank", ar: "رقم الزيارة مقابل ترتيب القائمة" },
@@ -119,6 +119,15 @@ const TEXT = {
   street: { en: "Street", ar: "الشارع" },
   lunchOut: { en: "Lunch out", ar: "خروج استراحة الغداء" },
   lunchIn: { en: "Lunch in", ar: "العودة من استراحة الغداء" },
+  login: { en: "Login", ar: "تسجيل الدخول" },
+  logout: { en: "Logout", ar: "تسجيل الخروج" },
+  notLogged: { en: "Not logged", ar: "غير مسجل" },
+  unloggedIdle: { en: "Unlogged idle", ar: "توقف غير مسجل" },
+  workdayStatusTitle: { en: "Login, lunch, and logout", ar: "الدخول والغداء والخروج" },
+  idleGapsTitle: {
+    en: "Unlogged idle (30+ min with no activity and lunch not marked)",
+    ar: "توقف غير مسجل (30 دقيقة فأكثر بدون نشاط ولم تُسجل استراحة الغداء)",
+  },
   daySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
   collectorDaySummaryTitle: { en: "Route summary", ar: "ملخص المسار" },
 };
@@ -181,6 +190,23 @@ async function copyTextToClipboard(text) {
   }
 }
 
+function probabilityBadgeClass(label) {
+  const normalized = String(label || "").trim().toLowerCase();
+  if (normalized === "high") return "moduleCollectorProbabilityHIGH";
+  if (normalized === "medium") return "moduleCollectorProbabilityMEDIUM";
+  if (normalized === "low") return "moduleCollectorProbabilityLOW";
+  return "moduleCollectorProbabilityLOW";
+}
+
+function formatProbabilityBadge(visit, t) {
+  const label = formatProbabilityLabel(visit?.probabilityLabel, t);
+  if (!visit?.probabilityLabel && !visit?.isPriorityCustomer) return null;
+  if (!visit?.probabilityLabel) {
+    return visit.isPriorityCustomer ? t("priorityYes") : t("priorityNo");
+  }
+  return `${t("probability")}: ${label}`;
+}
+
 function formatProbabilityLabel(label, t) {
   const normalized = String(label || "").trim().toLowerCase();
   if (normalized === "high") return "High";
@@ -210,14 +236,28 @@ function formatVisitOrderVsQueue(visit) {
   return `#${visit.visitNumberForDay} visit · queue #${visit.queuePriority}`;
 }
 
-function isLunchTimelineRow(row) {
-  return row?.rowType === "lunch";
+function isNonVisitTimelineRow(row) {
+  return row?.rowType === "lunch" || row?.rowType === "attendance" || row?.rowType === "idle";
 }
 
 function formatTimelineEventLabel(row, t) {
   if (row.entryType === "LUNCH_BREAK_OUT") return t("lunchOut");
   if (row.entryType === "LUNCH_BREAK_IN") return t("lunchIn");
+  if (row.entryType === "MORNING_ATTENDANCE") return t("login");
+  if (row.entryType === "END_OF_DAY") return t("logout");
+  if (row.entryType === "UNLOGGED_IDLE") return t("unloggedIdle");
   return row.eventLabel || "-";
+}
+
+function formatLoggedTime(value, t) {
+  return value ? formatTime(value) : t("notLogged");
+}
+
+function formatTimelineTime(row) {
+  if (row?.rowType === "idle" && row.idleUntil) {
+    return `${formatTime(row.savedAt)} – ${formatTime(row.idleUntil)}`;
+  }
+  return formatTime(row?.savedAt);
 }
 
 export default function CollectionReportPage() {
@@ -487,6 +527,27 @@ export default function CollectionReportPage() {
                     </span>
                   </div>
 
+                  <div className="moduleWorkdayStatus" aria-label={t("workdayStatusTitle")}>
+                    <span><strong>{t("login")}:</strong> {formatLoggedTime(collector.workdayTimes?.loginAt, t)}</span>
+                    <span><strong>{t("logout")}:</strong> {formatLoggedTime(collector.workdayTimes?.logoutAt, t)}</span>
+                    <span><strong>{t("lunchOut")}:</strong> {formatLoggedTime(collector.workdayTimes?.lunchOutAt, t)}</span>
+                    <span><strong>{t("lunchIn")}:</strong> {formatLoggedTime(collector.workdayTimes?.lunchInAt, t)}</span>
+                  </div>
+                  {(collector.idleGaps || []).length > 0 ? (
+                    <div className="moduleWorkdayStatus moduleWorkdayStatusIdle" aria-label={t("idleGapsTitle")}>
+                      <strong>{t("idleGapsTitle")}:</strong>
+                      <ul className="moduleDaySummaryList">
+                        {(collector.idleGaps || []).map((gap) => (
+                          <li key={`${gap.fromAt}-${gap.toAt}`}>
+                            {formatTime(gap.fromAt)} – {formatTime(gap.toAt)}
+                            {" · "}
+                            {formatDurationMinutes(gap.minutes)}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
                   {(report.collectors || []).length > 1 && collector.daySummary ? (
                     <DaySummaryBox
                       summary={collector.daySummary}
@@ -519,12 +580,15 @@ export default function CollectionReportPage() {
                       </thead>
                       <tbody>
                         {(collector.visits || []).map((visit, visitIndex, visits) => (
-                          <tr key={visit.id}>
+                          <tr
+                            key={visit.id}
+                            className={visit.rowType === "idle" ? "moduleTableIdleRow" : undefined}
+                          >
                             <td>{visit.visitSequence}</td>
-                            <td>{formatTime(visit.savedAt)}</td>
+                            <td>{formatTimelineTime(visit)}</td>
                             <td>{visit.userName || collector.collectorName}</td>
                             <td>
-                              {isLunchTimelineRow(visit) ? (
+                              {isNonVisitTimelineRow(visit) ? (
                                 "-"
                               ) : (
                                 <button
@@ -537,7 +601,7 @@ export default function CollectionReportPage() {
                               )}
                             </td>
                             <td>
-                              {isLunchTimelineRow(visit) ? (
+                              {isNonVisitTimelineRow(visit) ? (
                                 "-"
                               ) : (
                                 <>
@@ -556,19 +620,15 @@ export default function CollectionReportPage() {
                               )}
                             </td>
                             <td>
-                              {isLunchTimelineRow(visit) ? (
+                              {isNonVisitTimelineRow(visit) ? (
                                 "-"
                               ) : (
                                 <>
                                   {visit.customerName}
                                   <div className="moduleCode">{visit.customerCode}</div>
-                                  {visit.isPriorityCustomer ? (
-                                    <div className="moduleCollectorProbability moduleCollectorProbabilityHIGH">
-                                      {isSalesmanQueue ? t("priorityYesSalesman") : t("priorityYes")}
-                                    </div>
-                                  ) : visit.probabilityLabel || visit.queuePriority ? (
-                                    <div className="moduleCollectorProbability moduleCollectorProbabilityLOW">
-                                      {t("priorityNo")}
+                                  {formatProbabilityBadge(visit, t) ? (
+                                    <div className={`moduleCollectorProbability ${probabilityBadgeClass(visit.probabilityLabel)}`}>
+                                      {formatProbabilityBadge(visit, t)}
                                     </div>
                                   ) : null}
                                 </>
@@ -577,12 +637,12 @@ export default function CollectionReportPage() {
                             <td>{visit.area || "-"}</td>
                             <td>{visit.street || "-"}</td>
                             <td>
-                              {isLunchTimelineRow(visit)
+                              {isNonVisitTimelineRow(visit)
                                 ? formatTimelineEventLabel(visit, t)
                                 : (visit.visitOutcomeLabel || visit.visitOutcome)}
                             </td>
-                            <td>{isLunchTimelineRow(visit) ? "-" : formatDateOnly(visit.nextVisitAt)}</td>
-                            <td>{isLunchTimelineRow(visit) ? "-" : formatAmount(visit.amountReceived)}</td>
+                            <td>{isNonVisitTimelineRow(visit) ? "-" : formatDateOnly(visit.nextVisitAt)}</td>
+                            <td>{isNonVisitTimelineRow(visit) ? "-" : formatAmount(visit.amountReceived)}</td>
                             <td>
                               {visit.hasGps
                                 ? `${Number(visit.latitude).toFixed(5)}, ${Number(visit.longitude).toFixed(5)}${visit.gpsSource === "activity_log_fallback" ? ` (${t("gpsEstimated")})` : ""}`
@@ -600,6 +660,9 @@ export default function CollectionReportPage() {
                             </td>
                             <td>
                               {(() => {
+                                if (visit.rowType === "idle") {
+                                  return formatDurationMinutes(visit.idleMinutes);
+                                }
                                 const waiting = resolveWaitingMinutesFromPreviousVisit(
                                   collector.visits,
                                   visitIndex,
@@ -657,8 +720,8 @@ export default function CollectionReportPage() {
 
               <section className="moduleMetricGrid">
                 <section className="moduleMetricCard">
-                  <span>{t("priorityCustomer")}</span>
-                  <strong>{selectedVisit.visit.isPriorityCustomer ? t("priorityYes") : t("priorityNo")}</strong>
+                  <span>{t("queueCompliance")}</span>
+                  <strong>{formatQueueCompliance(selectedVisit.visit, t, selectedVisit.collector.queueScope)}</strong>
                 </section>
                 <section className="moduleMetricCard">
                   <span>{t("probability")}</span>

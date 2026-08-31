@@ -193,9 +193,20 @@ function isReturnToCity(segmentIndex, segments) {
   return segments.slice(0, segmentIndex - 1).some((segment) => segment.cityKey === cityKey);
 }
 
+export const UNLOGGED_IDLE_THRESHOLD_MINUTES = 30;
+
 export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
   visitedCustomers: "تمت زيارة {count} عميل.",
   lunchBreak: "استراحة غداء من {from} إلى {to}.",
+  loginLogged: "تسجيل الدخول عند {time}.",
+  loginNotLogged: "تسجيل الدخول غير مسجل.",
+  logoutLogged: "تسجيل الخروج عند {time}.",
+  logoutNotLogged: "تسجيل الخروج غير مسجل.",
+  lunchOutLogged: "خروج الغداء عند {time}.",
+  lunchOutNotLogged: "خروج الغداء غير مسجل.",
+  lunchInLogged: "عودة الغداء عند {time}.",
+  lunchInNotLogged: "عودة الغداء غير مسجل.",
+  unloggedIdle: "توقف غير مسجل من {from} إلى {to} ({duration}) — لا نشاط مسجل ولم تُسجل استراحة الغداء.",
   startedTill: "بدأ عند {start} وحتى {end} زار {count} عميل{collections}",
   betweenTill: "بين {start} إلى {end} زار {count} عميل{collections}",
   inCityTill: "في {city} زار {count} عميل حتى {end}{collections}",
@@ -213,6 +224,15 @@ export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
 export const COLLECTION_DAY_SUMMARY_LABELS = {
   visitedCustomers: "Visited {count} customer(s).",
   lunchBreak: "Lunch break from {from} to {to}.",
+  loginLogged: "Login at {time}.",
+  loginNotLogged: "Login not logged.",
+  logoutLogged: "Logout at {time}.",
+  logoutNotLogged: "Logout not logged.",
+  lunchOutLogged: "Lunch out at {time}.",
+  lunchOutNotLogged: "Lunch out not logged.",
+  lunchInLogged: "Lunch in at {time}.",
+  lunchInNotLogged: "Lunch in not logged.",
+  unloggedIdle: "Unlogged idle from {from} to {to} ({duration}) — no activity logged and lunch was not marked.",
   startedTill: "Started at {start} and till {end} visited {count} customer(s){collections}",
   betweenTill: "Between {start} to {end} visited {count} customer(s){collections}",
   inCityTill: "In {city} visited {count} customer(s) till {end}{collections}",
@@ -265,14 +285,142 @@ function describeSegment(segment, segmentIndex, segments, labels) {
   return line;
 }
 
+function parseEventTs(value) {
+  const ts = typeof value === "number" ? value : Date.parse(String(value || ""));
+  return Number.isFinite(ts) && ts > 0 ? ts : 0;
+}
+
+export function formatIdleDuration(minutes) {
+  const value = Math.max(0, Math.round(Number(minutes) || 0));
+  if (value <= 0) return "0 min";
+  const hours = Math.floor(value / 60);
+  const remainder = value % 60;
+  if (hours <= 0) return `${remainder} min`;
+  if (remainder === 0) return `${hours}h`;
+  return `${hours}h ${remainder}m`;
+}
+
+function splitIntervalMinusLunch(start, end, lunchOutTs, lunchInTs) {
+  if (end <= start) return [];
+  if (!lunchOutTs) return [{ start, end }];
+
+  const lunchEnd = lunchInTs && lunchInTs > lunchOutTs ? lunchInTs : 0;
+
+  if (!lunchEnd) {
+    if (end <= lunchOutTs) return [{ start, end }];
+    if (start >= lunchOutTs) return [];
+    return [{ start, end: lunchOutTs }];
+  }
+
+  if (end <= lunchOutTs || start >= lunchEnd) return [{ start, end }];
+
+  const parts = [];
+  if (start < lunchOutTs) parts.push({ start, end: Math.min(end, lunchOutTs) });
+  if (end > lunchEnd) parts.push({ start: Math.max(start, lunchEnd), end });
+  return parts.filter((part) => part.end > part.start);
+}
+
+export function findUnloggedIdleGaps({
+  visits = [],
+  loginAt = null,
+  logoutAt = null,
+  lunchOutAt = null,
+  lunchInAt = null,
+} = {}) {
+  const points = [];
+  const addPoint = (value, type) => {
+    const ts = parseEventTs(value);
+    if (ts) points.push({ ts, type });
+  };
+
+  addPoint(loginAt, "login");
+  (visits || []).forEach((visit) => addPoint(visit?.saved_at || visit?.savedAt, "visit"));
+  addPoint(lunchOutAt, "lunch_out");
+  addPoint(lunchInAt, "lunch_in");
+  addPoint(logoutAt, "logout");
+  points.sort((left, right) => left.ts - right.ts);
+
+  const lunchOutTs = parseEventTs(lunchOutAt);
+  const lunchInTs = parseEventTs(lunchInAt);
+  const thresholdMs = UNLOGGED_IDLE_THRESHOLD_MINUTES * 60 * 1000;
+  const gaps = [];
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const from = points[index];
+    const to = points[index + 1];
+    if (to.ts - from.ts < thresholdMs) continue;
+    if (from.type === "lunch_out" && to.type === "lunch_in") continue;
+
+    splitIntervalMinusLunch(from.ts, to.ts, lunchOutTs, lunchInTs).forEach((part) => {
+      const durationMs = part.end - part.start;
+      if (durationMs < thresholdMs) return;
+      gaps.push({
+        fromAt: new Date(part.start).toISOString(),
+        toAt: new Date(part.end).toISOString(),
+        minutes: Math.round(durationMs / 60000),
+      });
+    });
+  }
+
+  return gaps;
+}
+
+function appendWorkdayStatusLines(lines, workdayEvents, visits, labels) {
+  if (!workdayEvents) return;
+
+  const loginAt = workdayEvents.loginAt || null;
+  const logoutAt = workdayEvents.logoutAt || null;
+  const lunchOutAt = workdayEvents.lunchOutAt || null;
+  const lunchInAt = workdayEvents.lunchInAt || null;
+
+  lines.push(loginAt
+    ? fill(labels.loginLogged || "Login at {time}.", { time: formatNarrativeTime(loginAt) })
+    : (labels.loginNotLogged || "Login not logged."));
+  lines.push(logoutAt
+    ? fill(labels.logoutLogged || "Logout at {time}.", { time: formatNarrativeTime(logoutAt) })
+    : (labels.logoutNotLogged || "Logout not logged."));
+  lines.push(lunchOutAt
+    ? fill(labels.lunchOutLogged || "Lunch out at {time}.", { time: formatNarrativeTime(lunchOutAt) })
+    : (labels.lunchOutNotLogged || "Lunch out not logged."));
+  lines.push(lunchInAt
+    ? fill(labels.lunchInLogged || "Lunch in at {time}.", { time: formatNarrativeTime(lunchInAt) })
+    : (labels.lunchInNotLogged || "Lunch in not logged."));
+
+  findUnloggedIdleGaps({
+    visits,
+    loginAt,
+    logoutAt,
+    lunchOutAt,
+    lunchInAt,
+  }).forEach((gap) => {
+    lines.push(fill(labels.unloggedIdle || "Unlogged idle from {from} to {to} ({duration}).", {
+      from: formatNarrativeTime(gap.fromAt),
+      to: formatNarrativeTime(gap.toAt),
+      duration: formatIdleDuration(gap.minutes),
+    }));
+  });
+}
+
 export function buildCollectionDaySummary(visits, customerLocationByCode = {}, lunchEvents = null, labels = COLLECTION_DAY_SUMMARY_LABELS) {
   const sorted = [...(visits || [])].sort((left, right) => visitTimestamp(left) - visitTimestamp(right));
   const stats = computeStats(sorted);
+  const idleGaps = lunchEvents
+    ? findUnloggedIdleGaps({
+      visits: sorted,
+      loginAt: lunchEvents.loginAt,
+      logoutAt: lunchEvents.logoutAt,
+      lunchOutAt: lunchEvents.lunchOutAt,
+      lunchInAt: lunchEvents.lunchInAt,
+    })
+    : [];
 
   if (!sorted.length) {
+    const lines = [labels.noVisits];
+    appendWorkdayStatusLines(lines, lunchEvents, sorted, labels);
     return {
-      lines: [labels.noVisits],
+      lines,
       stats,
+      idleGaps,
     };
   }
 
@@ -280,12 +428,7 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
     fill(labels.visitedCustomers, { count: stats.uniqueCustomers }),
   ];
 
-  if (lunchEvents?.lunchOutAt && lunchEvents?.lunchInAt) {
-    lines.push(fill(labels.lunchBreak, {
-      from: formatNarrativeTime(lunchEvents.lunchOutAt),
-      to: formatNarrativeTime(lunchEvents.lunchInAt),
-    }));
-  }
+  appendWorkdayStatusLines(lines, lunchEvents, sorted, labels);
 
   const segments = buildLocationSegments(sorted, customerLocationByCode);
   segments.forEach((segment, index) => {
@@ -297,7 +440,7 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
     collections: stats.successfulCollections,
   }));
 
-  return { lines, stats, segments };
+  return { lines, stats, segments, idleGaps };
 }
 
 export function buildAggregateCollectionDaySummary(collectorSummaries, labels = COLLECTION_DAY_SUMMARY_LABELS) {

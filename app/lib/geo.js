@@ -430,7 +430,18 @@ export function resolveWaitingMinutesFromPrevious(
 export function isIdleGpsPingTimelineRow(row) {
   const transactionType = String(row?.transactionType || row?.transaction_type || "").trim().toUpperCase();
   if (transactionType === "GPS_PING") return true;
-  if (row?.rowType === "lunch") return true;
+  const rowType = String(row?.rowType || "").trim().toLowerCase();
+  if (rowType === "lunch" || rowType === "attendance" || rowType === "idle") return true;
+  const entryType = String(row?.entryType || row?.entry_type || "").trim().toUpperCase();
+  if (
+    entryType === "MORNING_ATTENDANCE"
+    || entryType === "END_OF_DAY"
+    || entryType === "LUNCH_BREAK_OUT"
+    || entryType === "LUNCH_BREAK_IN"
+    || entryType === "UNLOGGED_IDLE"
+  ) {
+    return true;
+  }
   return false;
 }
 

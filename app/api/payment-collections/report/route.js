@@ -4,7 +4,13 @@ import {
   buildCollectionDaySummary,
   COLLECTION_DAY_SUMMARY_LABELS,
   COLLECTION_DAY_SUMMARY_LABELS_AR,
+  findUnloggedIdleGaps,
 } from "../../../lib/collectionDaySummary.js";
+import {
+  extractWorkdayTimesFromTimelineRows,
+  loadWorkdayEventsByUser,
+  WORKDAY_EVENT_LABELS,
+} from "../../../lib/collectionDaySummaryServer.js";
 import {
   buildStoredCollectionVisitSummary,
   isPriorityCollectionVisit,
@@ -22,8 +28,6 @@ import {
   haversineDistanceKm,
   findPreviousWaitingAnchorRow,
   enrichVisitsWithDistances,
-  extractAreaFromActivityNote,
-  extractStreetFromActivityNote,
   formatCollectionUserDisplayName,
   formatCollectionUserRoleLabel,
   formatCollectorDisplayName,
@@ -36,7 +40,7 @@ import {
 } from "../../../lib/geo.js";
 import { filterCollectionQueueInvoices, invoiceHasCashRef, isScheduledRevisitQueueCustomer } from "../../../lib/paymentCollections.js";
 import { resolveInvoiceAgingDays, toNumber } from "../../../lib/outstanding.js";
-import { filterLogsByKsaEventDate, getKsaDateString, ksaDayBounds } from "../../../lib/workdayActivity.js";
+import { getKsaDateString, ksaDayBounds } from "../../../lib/workdayActivity.js";
 import { fetchOutstandingAndCollectionRecords, getSalesScope } from "../route.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -279,22 +283,6 @@ async function loadCollectionFieldUsers(admin) {
   return Array.isArray(data) ? data : [];
 }
 
-function extractLunchTimesFromTimelineRows(lunchRows) {
-  let lunchOutAt = null;
-  let lunchInAt = null;
-
-  (lunchRows || []).forEach((row) => {
-    if (row.entryType === "LUNCH_BREAK_OUT" && !lunchOutAt) {
-      lunchOutAt = row.saved_at;
-    }
-    if (row.entryType === "LUNCH_BREAK_IN" && lunchOutAt && !lunchInAt) {
-      lunchInAt = row.saved_at;
-    }
-  });
-
-  return { lunchOutAt, lunchInAt };
-}
-
 function buildCustomerLocationMap(customerDetailsMap) {
   const locationMap = new Map();
   (customerDetailsMap || new Map()).forEach((row, code) => {
@@ -371,66 +359,21 @@ async function loadActivityGpsByUser(admin, userIds, startIso, endIso) {
   return grouped;
 }
 
-function parseActivityNote(note) {
-  if (!note) return null;
-  try {
-    return typeof note === "string" ? JSON.parse(note) : note;
-  } catch {
-    return null;
-  }
-}
-
-async function loadLunchBreakEventsByUser(admin, userIds, startIso, endIso, reportDate) {
-  if (!userIds.length) return new Map();
-
-  const widenedStart = new Date(startIso);
-  widenedStart.setUTCDate(widenedStart.getUTCDate() - 1);
-  const widenedEnd = new Date(endIso);
-  widenedEnd.setUTCDate(widenedEnd.getUTCDate() + 1);
-
-  const { data, error } = await admin
-    .from("daily_activity_logs")
-    .select("id,user_id,entry_type,note,created_at")
-    .in("entry_type", LUNCH_ENTRY_TYPES)
-    .in("user_id", userIds)
-    .gte("created_at", widenedStart.toISOString())
-    .lte("created_at", widenedEnd.toISOString())
-    .order("created_at", { ascending: true });
-
-  if (error) {
-    if (isMissingTableError(error)) return new Map();
-    throw error;
-  }
-
-  const grouped = new Map();
-  filterLogsByKsaEventDate(data || [], reportDate).forEach((row) => {
-    const parsed = parseActivityNote(row.note) || {};
-    const gps = parseGpsFromActivityNote(row.note) || {};
-    const savedAt = parsed.captured_at || parsed.capturedAt || row.created_at;
-
-    const event = {
-      id: `lunch-${row.id}`,
-      rowType: "lunch",
-      entryType: row.entry_type,
-      saved_at: savedAt,
-      created_by: row.user_id,
-      latitude: gps.latitude,
-      longitude: gps.longitude,
-      gps_accuracy_meters: gps.accuracy,
-      area: extractAreaFromActivityNote(row.note),
-      street: extractStreetFromActivityNote(row.note),
-    };
-
-    if (!grouped.has(row.user_id)) grouped.set(row.user_id, []);
-    grouped.get(row.user_id).push(event);
-  });
-
-  return grouped;
+function buildIdleTimelineRows(idleGaps) {
+  return (idleGaps || []).map((gap, index) => ({
+    id: `idle-${gap.fromAt}-${index}`,
+    rowType: "idle",
+    entryType: "UNLOGGED_IDLE",
+    saved_at: gap.fromAt,
+    idleUntil: gap.toAt,
+    idleMinutes: gap.minutes,
+  }));
 }
 
 function buildCollectorTimelineRows({
   visitRows,
-  lunchRows,
+  workdayRows,
+  idleRows,
   userName,
   customerDetailsMap,
   outstandingByCustomer,
@@ -439,7 +382,8 @@ function buildCollectorTimelineRows({
 }) {
   const timelineRows = [
     ...visitRows.map((visit) => ({ ...visit, rowType: "visit" })),
-    ...(lunchRows || []),
+    ...(workdayRows || []),
+    ...(idleRows || []),
   ].sort(
     (left, right) => new Date(left.saved_at).getTime() - new Date(right.saved_at).getTime(),
   );
@@ -473,15 +417,17 @@ function buildCollectorTimelineRows({
       : Math.round((computeEstimatedTransitHours(anchorDistanceKm) || 0) * 60);
     const waitingMinutesFromPrevious = resolveWaitingMinutesFromPreviousVisit(timelineForWaiting, index);
 
-    if (row.rowType === "lunch") {
+    if (row.rowType === "lunch" || row.rowType === "attendance" || row.rowType === "idle") {
       return {
         id: row.id,
-        rowType: "lunch",
+        rowType: row.rowType,
         visitSequence: row.visitSequence,
         userName,
         entryType: row.entryType,
-        eventLabel: LUNCH_EVENT_LABELS[row.entryType] || formatOutcome(row.entryType),
+        eventLabel: WORKDAY_EVENT_LABELS[row.entryType] || formatOutcome(row.entryType),
         savedAt: row.saved_at,
+        idleUntil: row.idleUntil || null,
+        idleMinutes: row.idleMinutes ?? null,
         area: row.area || "",
         street: row.street || "",
         latitude: row.latitude,
@@ -492,7 +438,7 @@ function buildCollectorTimelineRows({
         distanceFromPreviousKm: row.distanceFromPreviousKm,
         speedFromPreviousKmH,
         estimatedTransitMinutesFromPrevious,
-        waitingMinutesFromPrevious,
+        waitingMinutesFromPrevious: row.rowType === "idle" ? row.idleMinutes : waitingMinutesFromPrevious,
       };
     }
 
@@ -571,13 +517,6 @@ function applyNearestActivityGpsFallback(visit, activityGpsByUser) {
     gpsSource: "activity_log_fallback",
   };
 }
-
-const LUNCH_ENTRY_TYPES = ["LUNCH_BREAK_OUT", "LUNCH_BREAK_IN"];
-
-const LUNCH_EVENT_LABELS = {
-  LUNCH_BREAK_OUT: "Lunch out",
-  LUNCH_BREAK_IN: "Lunch in",
-};
 
 const VISIT_SELECT_WITH_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,latitude,longitude,gps_accuracy_meters,created_by,summary_text,queue_priority,probability_score,probability_label,visit_number_for_day";
 const VISIT_SELECT_WITHOUT_GPS = "id,customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,created_by,summary_text,queue_priority,probability_score,probability_label,visit_number_for_day";
@@ -791,19 +730,29 @@ export async function GET(request) {
       grouped.get(key).push(visit);
     });
 
-    const timelineUserIds = [...grouped.keys()].filter((id) => id && id !== "unknown");
-    const lunchEventsByUser = await loadLunchBreakEventsByUser(admin, timelineUserIds, startIso, endIso, date);
+    const timelineUserIds = [...new Set([
+      ...[...grouped.keys()].filter((id) => id && id !== "unknown"),
+      collectorId,
+    ].filter(Boolean))];
+    const workdayEventsByUser = await loadWorkdayEventsByUser(admin, timelineUserIds, startIso, endIso, date);
 
-    const collectors = await Promise.all([...grouped.entries()].map(async ([createdBy, rows]) => {
+    async function buildCollectorEntry(createdBy, rows) {
       const collectorProfile = profileMap.get(createdBy) || {};
       const userName = formatCollectorDisplayName(collectorProfile);
       const userRole = String(collectorProfile.role || "").trim().toLowerCase().replace(/_/g, "-");
       const userRoleLabel = formatCollectionUserRoleLabel(collectorProfile.role);
       const { maps: priorityMaps, queueScope } = await resolvePriorityMapsForUser(createdBy, collectorProfile);
-      const lunchRows = lunchEventsByUser.get(createdBy) || [];
-      const lunchEvents = extractLunchTimesFromTimelineRows(lunchRows);
-      const daySummaryEn = buildCollectionDaySummary(rows, customerLocationByCode, lunchEvents, COLLECTION_DAY_SUMMARY_LABELS);
-      const daySummaryAr = buildCollectionDaySummary(rows, customerLocationByCode, lunchEvents, COLLECTION_DAY_SUMMARY_LABELS_AR);
+      const workdayRows = workdayEventsByUser.get(createdBy) || [];
+      const workdayTimes = extractWorkdayTimesFromTimelineRows(workdayRows);
+      const idleGaps = findUnloggedIdleGaps({
+        visits: rows,
+        loginAt: workdayTimes.loginAt,
+        logoutAt: workdayTimes.logoutAt,
+        lunchOutAt: workdayTimes.lunchOutAt,
+        lunchInAt: workdayTimes.lunchInAt,
+      });
+      const daySummaryEn = buildCollectionDaySummary(rows, customerLocationByCode, workdayTimes, COLLECTION_DAY_SUMMARY_LABELS);
+      const daySummaryAr = buildCollectionDaySummary(rows, customerLocationByCode, workdayTimes, COLLECTION_DAY_SUMMARY_LABELS_AR);
       const daySummary = {
         lines: daySummaryEn.lines,
         linesAr: daySummaryAr.lines,
@@ -812,7 +761,8 @@ export async function GET(request) {
 
       const enrichedVisits = buildCollectorTimelineRows({
         visitRows: rows,
-        lunchRows,
+        workdayRows,
+        idleRows: buildIdleTimelineRows(idleGaps),
         userName,
         customerDetailsMap,
         outstandingByCustomer,
@@ -831,10 +781,16 @@ export async function GET(request) {
         uniqueCustomerVisitCount: countUniqueCustomerVisits(rows),
         gpsVisitCount: rows.filter((visit) => hasGpsCoordinates(visit)).length,
         totalDistanceKm: summarizeRouteDistanceKm(rows),
+        workdayTimes,
+        idleGaps,
         daySummary,
         visits: enrichedVisits,
       };
-    }));
+    }
+
+    const collectors = await Promise.all([...grouped.entries()].map(async ([createdBy, rows]) => (
+      buildCollectorEntry(createdBy, rows)
+    )));
     collectors.sort((left, right) => left.collectorName.localeCompare(right.collectorName));
 
     const availableUserIds = new Set([
@@ -858,20 +814,8 @@ export async function GET(request) {
 
     let visibleCollectors = collectors;
     if (collectorId) {
-      const selectedProfile = profileMap.get(collectorId) || {};
-      const selectedSection = collectors.find((row) => row.collectorId === collectorId) || {
-        collectorId,
-        collectorName: formatCollectorDisplayName(selectedProfile),
-        userRole: String(selectedProfile.role || "").trim().toLowerCase().replace(/_/g, "-"),
-        userRoleLabel: formatCollectionUserRoleLabel(selectedProfile.role),
-        salesmanCode: selectedProfile.salesman_code || "",
-        visitCount: 0,
-        uniqueCustomerVisitCount: 0,
-        gpsVisitCount: 0,
-        totalDistanceKm: 0,
-        daySummary: buildCollectionDaySummary([], customerLocationByCode),
-        visits: [],
-      };
+      const selectedSection = collectors.find((row) => row.collectorId === collectorId)
+        || await buildCollectorEntry(collectorId, []);
       visibleCollectors = [selectedSection];
     }
 

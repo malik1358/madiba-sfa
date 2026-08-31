@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildCollectionDaySummary,
+  findUnloggedIdleGaps,
   formatNarrativeTime,
   isSuccessfulCollection,
 } from "../app/lib/collectionDaySummary.js";
@@ -88,12 +89,102 @@ test("buildCollectionDaySummary includes lunch break when provided", () => {
       ["C2", { city: "Riyadh" }],
     ]),
     {
+      loginAt: ksaIso({ year: 2026, month: 8, day: 23 }, 7, 30),
+      logoutAt: ksaIso({ year: 2026, month: 8, day: 23 }, 16, 0),
       lunchOutAt: ksaIso({ year: 2026, month: 8, day: 23 }, 12, 0),
       lunchInAt: ksaIso({ year: 2026, month: 8, day: 23 }, 13, 0),
     },
   );
 
-  assert.match(summary.lines.join("\n"), /Lunch break from 12 pm to 1 pm/);
+  const joined = summary.lines.join("\n");
+  assert.match(joined, /Login at 7:30 am/);
+  assert.match(joined, /Logout at 4 pm/);
+  assert.match(joined, /Lunch out at 12 pm/);
+  assert.match(joined, /Lunch in at 1 pm/);
+  assert.doesNotMatch(joined, /not logged/);
+});
+
+test("buildCollectionDaySummary says login lunch and logout are not logged", () => {
+  const visits = [
+    {
+      customer_code: "C1",
+      saved_at: ksaIso({ year: 2026, month: 8, day: 23 }, 11, 31),
+      visit_outcome: "NOT_PAID",
+      amount_received: 0,
+    },
+  ];
+
+  const summary = buildCollectionDaySummary(visits, new Map([["C1", { city: "Riyadh" }]]), {});
+  const joined = summary.lines.join("\n");
+  assert.match(joined, /Login not logged/);
+  assert.match(joined, /Logout not logged/);
+  assert.match(joined, /Lunch out not logged/);
+  assert.match(joined, /Lunch in not logged/);
+});
+
+test("findUnloggedIdleGaps flags 30+ minute gaps without lunch", () => {
+  const date = { year: 2026, month: 8, day: 30 };
+  const visits = [
+    { customer_code: "C1", saved_at: ksaIso(date, 11, 31) },
+    { customer_code: "C2", saved_at: ksaIso(date, 12, 45) },
+  ];
+
+  const gaps = findUnloggedIdleGaps({ visits });
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].minutes, 74);
+});
+
+test("findUnloggedIdleGaps does not flag logged lunch windows", () => {
+  const date = { year: 2026, month: 8, day: 30 };
+  const visits = [
+    { customer_code: "C1", saved_at: ksaIso(date, 11, 0) },
+    { customer_code: "C2", saved_at: ksaIso(date, 14, 0) },
+  ];
+
+  const gaps = findUnloggedIdleGaps({
+    visits,
+    lunchOutAt: ksaIso(date, 12, 0),
+    lunchInAt: ksaIso(date, 13, 0),
+  });
+
+  assert.deepEqual(
+    gaps.map((gap) => gap.minutes),
+    [60, 60],
+  );
+});
+
+test("findUnloggedIdleGaps ignores an open lunch-out until the next activity", () => {
+  const date = { year: 2026, month: 8, day: 30 };
+  const gaps = findUnloggedIdleGaps({
+    visits: [
+      { customer_code: "C1", saved_at: ksaIso(date, 11, 0) },
+      { customer_code: "C2", saved_at: ksaIso(date, 15, 0) },
+    ],
+    lunchOutAt: ksaIso(date, 12, 0),
+  });
+
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].minutes, 60);
+});
+
+test("buildCollectionDaySummary lists unlogged idle periods", () => {
+  const date = { year: 2026, month: 8, day: 30 };
+  const summary = buildCollectionDaySummary(
+    [
+      { customer_code: "C1", saved_at: ksaIso(date, 11, 31), visit_outcome: "NOT_PAID", amount_received: 0 },
+      { customer_code: "C2", saved_at: ksaIso(date, 12, 45), visit_outcome: "NOT_PAID", amount_received: 0 },
+    ],
+    new Map([
+      ["C1", { city: "Riyadh" }],
+      ["C2", { city: "Riyadh" }],
+    ]),
+    {},
+  );
+
+  assert.match(
+    summary.lines.join("\n"),
+    /Unlogged idle from 11:31 am to 12:45 pm \(1h 14m\)/,
+  );
 });
 
 test("formatNarrativeTime uses KSA clock", () => {

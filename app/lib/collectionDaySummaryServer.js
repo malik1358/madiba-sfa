@@ -10,7 +10,20 @@ import {
 } from "./geo.js";
 import { filterLogsByKsaEventDate, getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
-const LUNCH_ENTRY_TYPES = ["LUNCH_BREAK_OUT", "LUNCH_BREAK_IN"];
+export const WORKDAY_ENTRY_TYPES = [
+  "MORNING_ATTENDANCE",
+  "LUNCH_BREAK_OUT",
+  "LUNCH_BREAK_IN",
+  "END_OF_DAY",
+];
+
+export const WORKDAY_EVENT_LABELS = {
+  MORNING_ATTENDANCE: "Login",
+  END_OF_DAY: "Logout",
+  LUNCH_BREAK_OUT: "Lunch out",
+  LUNCH_BREAK_IN: "Lunch in",
+  UNLOGGED_IDLE: "Unlogged idle",
+};
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -32,11 +45,40 @@ function parseActivityNote(note) {
   }
 }
 
-function extractLunchTimesFromTimelineRows(lunchRows) {
+export function mapWorkdayLogToTimelineRow(row) {
+  const parsed = parseActivityNote(row.note) || {};
+  const gps = parseGpsFromActivityNote(row.note) || {};
+  const savedAt = parsed.captured_at || parsed.capturedAt || row.created_at;
+  const entryType = row.entry_type;
+  const isLunch = entryType === "LUNCH_BREAK_OUT" || entryType === "LUNCH_BREAK_IN";
+
+  return {
+    id: `workday-${row.id}`,
+    rowType: isLunch ? "lunch" : "attendance",
+    entryType,
+    saved_at: savedAt,
+    created_by: row.user_id,
+    latitude: gps.latitude,
+    longitude: gps.longitude,
+    gps_accuracy_meters: gps.accuracy,
+    area: extractAreaFromActivityNote(row.note),
+    street: extractStreetFromActivityNote(row.note),
+  };
+}
+
+export function extractWorkdayTimesFromTimelineRows(workdayRows) {
+  let loginAt = null;
+  let logoutAt = null;
   let lunchOutAt = null;
   let lunchInAt = null;
 
-  (lunchRows || []).forEach((row) => {
+  (workdayRows || []).forEach((row) => {
+    if (row.entryType === "MORNING_ATTENDANCE" && !loginAt) {
+      loginAt = row.saved_at;
+    }
+    if (row.entryType === "END_OF_DAY") {
+      logoutAt = row.saved_at;
+    }
     if (row.entryType === "LUNCH_BREAK_OUT" && !lunchOutAt) {
       lunchOutAt = row.saved_at;
     }
@@ -45,10 +87,13 @@ function extractLunchTimesFromTimelineRows(lunchRows) {
     }
   });
 
-  return { lunchOutAt, lunchInAt };
+  return { loginAt, logoutAt, lunchOutAt, lunchInAt };
 }
 
-async function loadLunchEventsForUser(admin, userId, startIso, endIso, reportDate) {
+export async function loadWorkdayEventsByUser(admin, userIds, startIso, endIso, reportDate) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
+
   const widenedStart = new Date(startIso);
   widenedStart.setUTCDate(widenedStart.getUTCDate() - 1);
   const widenedEnd = new Date(endIso);
@@ -57,33 +102,30 @@ async function loadLunchEventsForUser(admin, userId, startIso, endIso, reportDat
   const { data, error } = await admin
     .from("daily_activity_logs")
     .select("id,user_id,entry_type,note,created_at")
-    .in("entry_type", LUNCH_ENTRY_TYPES)
-    .eq("user_id", userId)
+    .in("entry_type", WORKDAY_ENTRY_TYPES)
+    .in("user_id", ids)
     .gte("created_at", widenedStart.toISOString())
     .lte("created_at", widenedEnd.toISOString())
     .order("created_at", { ascending: true });
 
   if (error) {
-    if (isMissingTableError(error)) return [];
+    if (isMissingTableError(error)) return new Map();
     throw error;
   }
 
-  return filterLogsByKsaEventDate(data || [], reportDate).map((row) => {
-    const parsed = parseActivityNote(row.note) || {};
-    const gps = parseGpsFromActivityNote(row.note) || {};
-    const savedAt = parsed.captured_at || parsed.capturedAt || row.created_at;
-
-    return {
-      id: `lunch-${row.id}`,
-      rowType: "lunch",
-      entryType: row.entry_type,
-      saved_at: savedAt,
-      area: extractAreaFromActivityNote(row.note),
-      street: extractStreetFromActivityNote(row.note),
-      latitude: gps.latitude,
-      longitude: gps.longitude,
-    };
+  const grouped = new Map();
+  filterLogsByKsaEventDate(data || [], reportDate).forEach((row) => {
+    const event = mapWorkdayLogToTimelineRow(row);
+    if (!grouped.has(row.user_id)) grouped.set(row.user_id, []);
+    grouped.get(row.user_id).push(event);
   });
+
+  return grouped;
+}
+
+async function loadWorkdayEventsForUser(admin, userId, startIso, endIso, reportDate) {
+  const grouped = await loadWorkdayEventsByUser(admin, [userId], startIso, endIso, reportDate);
+  return grouped.get(userId) || [];
 }
 
 async function loadCustomerLocationMap(admin, customerCodes) {
@@ -124,8 +166,8 @@ export async function loadCollectionDaySummaryForUser(admin, userId, date = getK
 
   if (error) {
     if (isMissingTableError(error)) {
-      const emptyEn = buildCollectionDaySummary([], new Map(), null, COLLECTION_DAY_SUMMARY_LABELS);
-      const emptyAr = buildCollectionDaySummary([], new Map(), null, COLLECTION_DAY_SUMMARY_LABELS_AR);
+      const emptyEn = buildCollectionDaySummary([], new Map(), {}, COLLECTION_DAY_SUMMARY_LABELS);
+      const emptyAr = buildCollectionDaySummary([], new Map(), {}, COLLECTION_DAY_SUMMARY_LABELS_AR);
       return {
         date,
         hasVisits: false,
@@ -143,22 +185,22 @@ export async function loadCollectionDaySummaryForUser(admin, userId, date = getK
 
   const visitRows = Array.isArray(visits) ? visits : [];
   const customerCodes = [...new Set(visitRows.map((row) => normalizeCode(row.customer_code)).filter(Boolean))];
-  const [customerLocationByCode, lunchRows] = await Promise.all([
+  const [customerLocationByCode, workdayRows] = await Promise.all([
     loadCustomerLocationMap(admin, customerCodes),
-    loadLunchEventsForUser(admin, userId, startIso, endIso, date),
+    loadWorkdayEventsForUser(admin, userId, startIso, endIso, date),
   ]);
-  const lunchEvents = extractLunchTimesFromTimelineRows(lunchRows);
+  const workdayEvents = extractWorkdayTimesFromTimelineRows(workdayRows);
 
   const daySummaryEn = buildCollectionDaySummary(
     visitRows,
     customerLocationByCode,
-    lunchEvents,
+    workdayEvents,
     COLLECTION_DAY_SUMMARY_LABELS,
   );
   const daySummaryAr = buildCollectionDaySummary(
     visitRows,
     customerLocationByCode,
-    lunchEvents,
+    workdayEvents,
     COLLECTION_DAY_SUMMARY_LABELS_AR,
   );
 

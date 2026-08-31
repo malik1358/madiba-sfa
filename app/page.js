@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "./lib/supabase";
 import { useAppLanguage } from "./lib/appLanguage";
 import MorningAttendanceGate from "./components/MorningAttendanceGate";
+import DashboardNearestCustomers from "./components/DashboardNearestCustomers";
 import MostVisitedPages from "./components/MostVisitedPages";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
 import { buildModuleAccess, listAccessibleModules, shouldRequireTransactionGps } from "./lib/moduleAccess";
@@ -415,6 +416,8 @@ export default function Home() {
             </button>
 
           </div>
+
+          <DashboardNearestCustomers moduleAccess={moduleAccess} language={language} />
 
           <h3 className="sectionTitle">
             {ar ? "القائمة الرئيسية" : "Main Menu"}

@@ -3822,6 +3822,17 @@ table.auditMatrix td.auditTrendSame {
   border-color: #7aa9b3;
 }
 
+.moduleNearestCustomersCardHasActions {
+  cursor: default;
+}
+
+.moduleNearestCustomersCardHasActions:hover,
+.moduleNearestCustomersCardHasActions:focus-visible {
+  background: #ffffff;
+  border-color: #b8cdd2;
+}
+
+.moduleNearestCustomersDistance,
 .moduleNearestCustomersCard > span:first-of-type {
   color: #1d6573;
   font-size: 13px;
@@ -3832,6 +3843,86 @@ table.auditMatrix td.auditTrendSame {
   grid-column: 1 / -1;
   color: #607b82;
   font-size: 12px;
+}
+
+.moduleNearestCustomersActions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.moduleNearestCustomersActionLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #bfd2d8;
+  border-radius: 8px;
+  background: #edf4f5;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.moduleNearestCustomersActionLink:hover,
+.moduleNearestCustomersActionLink:focus-visible {
+  background: #dcecee;
+  border-color: #7aa9b3;
+}
+
+.dashboardNearestCustomers {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 20px 24px;
+}
+
+.dashboardNearestCustomers .moduleNearestCustomers {
+  margin-bottom: 0;
+}
+
+.dashboardNearestCustomers .moduleNearestCustomersList {
+  grid-template-columns: 1fr;
+}
+
+.dashboardNearestCustomers .moduleNearestCustomersCardHasActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.dashboardNearestCustomers .moduleNearestCustomersInfo {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.dashboardNearestCustomers .moduleNearestCustomersDistance {
+  order: 3;
+}
+
+.dashboardNearestCustomers .moduleNearestCustomersActions {
+  grid-column: auto;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+@media (max-width: 700px) {
+  .dashboardNearestCustomers {
+    padding: 16px;
+  }
+
+  .dashboardNearestCustomers .moduleNearestCustomersActions {
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+
+  .dashboardNearestCustomers .moduleNearestCustomersDistance {
+    order: 0;
+  }
 }
 
 .moduleInput,

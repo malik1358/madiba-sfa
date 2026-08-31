@@ -35,6 +35,8 @@ import { useAppPopup } from "../../components/AppPopupProvider";
 import { postJsonResilient } from "../../lib/offlineApi";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { copyTextToClipboard, openWhatsappDirect } from "../../lib/whatsappShare";
+import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
+import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 
@@ -280,6 +282,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
   useEffect(() => {
     if (!visitOnlyMode || loading) return undefined;
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("customer_code")) {
+      return undefined;
+    }
 
     const timer = window.setTimeout(() => {
       document.getElementById("visit-schedule")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -737,6 +742,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
               outstanding_30_60: Number(row.outstanding_30_60 || 0),
               outstanding_61_90: Number(row.outstanding_61_90 || 0),
               outstanding_above_90: Number(row.outstanding_above_90 || 0),
+              latitude: row.latitude,
+              longitude: row.longitude,
               status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
                 : daysBetween(row.latest_transaction_date) > 21
@@ -788,6 +795,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
               outstanding_30_60: Number(row.outstanding_30_60 || 0),
               outstanding_61_90: Number(row.outstanding_61_90 || 0),
               outstanding_above_90: Number(row.outstanding_above_90 || 0),
+              latitude: row.latitude,
+              longitude: row.longitude,
               status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
                 : daysBetween(row.latest_transaction_date) > 21
@@ -1333,6 +1342,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
           outstanding_30_60: Number(activatedRow.outstanding_30_60 || 0),
           outstanding_61_90: Number(activatedRow.outstanding_61_90 || 0),
           outstanding_above_90: Number(activatedRow.outstanding_above_90 || 0),
+          latitude: activatedRow.latitude,
+          longitude: activatedRow.longitude,
           status: daysBetween(activatedRow.latest_transaction_date) > 21 ? "Overdue" : "Planned",
         };
 
@@ -1490,6 +1501,54 @@ export default function MyDayPage({ mode = "default" } = {}) {
     () => splitVisitCustomersByOutstanding(rankedVisitStatusRows),
     [rankedVisitStatusRows]
   );
+
+  const {
+    suggestions: nearestCustomerSuggestions,
+    loading: nearestCustomersLoading,
+    locationUnavailable: nearestCustomersUnavailable,
+    refresh: refreshNearestCustomers,
+  } = useNearestCustomerSuggestions(visitStatusRows, {
+    enabled: visitOnlyMode && workdayUnlocked,
+  });
+
+  function openNearestCustomer(customer) {
+    const code = String(customer?.customer_code || "").trim();
+    const row = (visitStatusRows || []).find(
+      (entry) => String(entry.customer_code || "").trim().toUpperCase() === code.toUpperCase(),
+    ) || customer;
+    setSelectedVisitStatusSalesmen([]);
+    setVisitStatusSearch(code || String(customer?.customer_name || "").trim());
+    openVisitReport(row);
+    window.setTimeout(() => {
+      document.getElementById(`visit-customer-${row.customer_code || code}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 250);
+  }
+
+  const prefilledVisitOpenedRef = useRef(false);
+
+  useEffect(() => {
+    if (!visitOnlyMode || loading || !workdayUnlocked || prefilledVisitOpenedRef.current) return;
+    if (typeof window === "undefined") return;
+
+    const code = String(new URLSearchParams(window.location.search).get("customer_code") || "").trim();
+    if (!code) return;
+
+    const row = (visitStatusRows || []).find(
+      (entry) => String(entry.customer_code || "").trim().toUpperCase() === code.toUpperCase(),
+    );
+    if (!row) {
+      if (refreshing) return;
+      setVisitStatusSearch(code);
+      prefilledVisitOpenedRef.current = true;
+      return;
+    }
+
+    prefilledVisitOpenedRef.current = true;
+    openNearestCustomer(row);
+  }, [visitOnlyMode, loading, refreshing, workdayUnlocked, visitStatusRows]);
 
   const filteredInactiveCustomers = useMemo(() => {
     const query = String(visitStatusSearch || "").trim().toLowerCase();
@@ -1686,6 +1745,16 @@ export default function MyDayPage({ mode = "default" } = {}) {
             <h2>{t("visitSchedule")}</h2>
             <span>{plannedVisitRows.length} {t("plannedVisitsCount")}</span>
           </div>
+          {visitOnlyMode ? (
+            <NearestCustomerSuggestions
+              suggestions={nearestCustomerSuggestions}
+              loading={nearestCustomersLoading}
+              locationUnavailable={nearestCustomersUnavailable}
+              onSelect={openNearestCustomer}
+              onRefresh={refreshNearestCustomers}
+              actionLabel={t("visitWithoutOrder")}
+            />
+          ) : null}
           {visitCalendar.days.map((day) => (
             <div key={day.dateKey} style={{ marginTop: "10px" }}>
               <div className="moduleSectionHeader">
@@ -1704,7 +1773,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                   </thead>
                   <tbody>
                     {day.rows.map((row) => (
-                      <tr key={`planned-${day.dateKey}-${row.customer_code}`}>
+                      <tr key={`planned-${day.dateKey}-${row.customer_code}`} id={`visit-customer-${row.customer_code}`}>
                         <td data-label={t("calendarTime")}>{row.is_prospect || !/T\d{2}:\d{2}/.test(String(row.next_visit_at || "")) ? "-" : new Date(row.next_visit_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</td>
                         <td data-label={t("customer")} className="moduleScheduleCellPrimary">{row.customer_name || row.customer_code}</td>
                         <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
@@ -1761,7 +1830,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                   </thead>
                   <tbody>
                     {visitCalendar.unscheduled.map((row) => (
-                      <tr key={`unscheduled-${row.customer_code}`}>
+                      <tr key={`unscheduled-${row.customer_code}`} id={`visit-customer-${row.customer_code}`}>
                         <td data-label={t("customer")} className="moduleScheduleCellPrimary">{row.customer_name || row.customer_code}</td>
                         <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                         <td data-label={t("actions")} className="moduleScheduleCellActions">
@@ -1858,7 +1927,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
               <tbody>
                 {group.rows.map((row) => (
                   <Fragment key={row.customer_code}>
-                  <tr>
+                  <tr id={`visit-customer-${row.customer_code}`}>
                     <td>
                       <div className="moduleInlineStack moduleCustomerActionStack">
                         <span>{row.customer_name || row.customer_code}</span>

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { formatDistanceKm } from "../lib/geo.js";
 import { translate, useAppLanguage } from "../lib/appLanguage.js";
 
@@ -17,6 +18,12 @@ const TEXT = {
   refresh: { en: "Refresh", ar: "تحديث" },
 };
 
+function resolveActions(actions, customer) {
+  if (typeof actions === "function") return actions(customer) || [];
+  if (Array.isArray(actions)) return actions;
+  return [];
+}
+
 export default function NearestCustomerSuggestions({
   suggestions = [],
   loading = false,
@@ -24,6 +31,7 @@ export default function NearestCustomerSuggestions({
   onSelect,
   onRefresh,
   actionLabel,
+  actions,
 }) {
   const { language, dir } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -48,21 +56,54 @@ export default function NearestCustomerSuggestions({
         <div className="moduleLoading">{t("loading")}</div>
       ) : suggestions.length > 0 ? (
         <div className="moduleNearestCustomersList">
-          {suggestions.map((customer) => (
-            <button
-              type="button"
-              key={`nearest-${customer.customer_code}`}
-              className="moduleNearestCustomersCard"
-              onClick={() => onSelect?.(customer)}
-            >
-              <div>
-                <strong>{customer.customer_name || customer.customer_code}</strong>
-                <div className="moduleCode">{customer.customer_code}</div>
-              </div>
-              <span>{formatDistanceKm(customer.distanceKm)}</span>
-              {actionLabel ? <span className="moduleNearestCustomersAction">{actionLabel}</span> : null}
-            </button>
-          ))}
+          {suggestions.map((customer) => {
+            const actionItems = resolveActions(actions, customer);
+            const hasActions = actionItems.length > 0;
+            const cardClassName = `moduleNearestCustomersCard${hasActions ? " moduleNearestCustomersCardHasActions" : ""}`;
+            const body = (
+              <>
+                <div className="moduleNearestCustomersInfo">
+                  <strong>{customer.customer_name || customer.customer_code}</strong>
+                  <div className="moduleCode">{customer.customer_code}</div>
+                </div>
+                <span className="moduleNearestCustomersDistance">{formatDistanceKm(customer.distanceKm)}</span>
+                {hasActions ? (
+                  <div className="moduleNearestCustomersActions">
+                    {actionItems.map((action) => (
+                      <Link
+                        key={`${customer.customer_code}-${action.key}`}
+                        href={action.href}
+                        className="moduleNearestCustomersActionLink"
+                      >
+                        {action.label}
+                      </Link>
+                    ))}
+                  </div>
+                ) : actionLabel ? (
+                  <span className="moduleNearestCustomersAction">{actionLabel}</span>
+                ) : null}
+              </>
+            );
+
+            if (hasActions) {
+              return (
+                <div key={`nearest-${customer.customer_code}`} className={cardClassName}>
+                  {body}
+                </div>
+              );
+            }
+
+            return (
+              <button
+                type="button"
+                key={`nearest-${customer.customer_code}`}
+                className={cardClassName}
+                onClick={() => onSelect?.(customer)}
+              >
+                {body}
+              </button>
+            );
+          })}
         </div>
       ) : (
         <div className="moduleHint">{t("unavailable")}</div>

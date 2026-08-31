@@ -744,6 +744,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const queuesRef = useRef({ dueCustomers: [], notDueCustomers: [], legalCustomers: [] });
   const pendingSyncCountRef = useRef(0);
   const activeRowKeyRef = useRef("");
+  const urlCustomerFilterAppliedRef = useRef(false);
+  const prefilledCollectionOpenedRef = useRef(false);
   const { showPopup } = useAppPopup();
 
   usePopupMessages({ error });
@@ -1213,6 +1215,33 @@ export default function PaymentCollectionsView({ view = "due" }) {
       });
     }
   }, [nearestCustomerSourceRows]);
+
+  useEffect(() => {
+    if (urlCustomerFilterAppliedRef.current || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const query = String(params.get("customer") || params.get("customer_code") || "").trim();
+    urlCustomerFilterAppliedRef.current = true;
+    if (query) setCustomerFilter(query);
+  }, []);
+
+  useEffect(() => {
+    if (prefilledCollectionOpenedRef.current || loading || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const query = String(params.get("customer") || params.get("customer_code") || "").trim();
+    if (!query) {
+      prefilledCollectionOpenedRef.current = true;
+      return;
+    }
+    if (String(customerFilter || "").trim() !== query) return;
+
+    const match = [...dueCustomers, ...notDueCustomers, ...legalCustomers].find((row) => (
+      matchesCollectionCustomerQuery(row, query)
+    ));
+    if (!match) return;
+
+    prefilledCollectionOpenedRef.current = true;
+    setActiveRowKey(rowKey(match));
+  }, [loading, customerFilter, dueCustomers, notDueCustomers, legalCustomers]);
 
   const allSalesmenSelected = salesmanOptions.length > 0 && selectedSalesmen.length === salesmanOptions.length;
   const allSchedulersSelected = scheduledRevisitSchedulerOptions.length > 0

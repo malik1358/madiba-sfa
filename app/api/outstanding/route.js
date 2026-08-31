@@ -5,27 +5,14 @@ import * as XLSX from "xlsx";
 import {
   OUTSTANDING_DATASET_KEY,
   buildOutstandingRow,
-  combineOutstandingHeaderRows,
-  detectOutstandingPendingAmountColumn,
-  detectOutstandingSalesmanColumn,
-  extractLeadingCustomerCodeAndName,
   findOutstandingForCustomer,
   findOutstandingHeaderRow,
-  findOutstandingInvoiceDayColumn,
   isSameOutstandingCustomer,
-  isOutstandingAmountHeader,
-  isPlaceholderSalesmanValue,
-  normalizeCode,
-  normalizeOutstandingHeader,
-  normalizeName,
-  parseBucketLabelFromHeader,
-  parseOutstandingSheetDate,
-  pickOutstandingSalesmanName,
+  parseOutstandingRows,
   mergeParsedOutstandingSheets,
   prioritizeOutstandingSheets,
+  selectPreferredOutstandingParses,
   sortBucketLabels,
-  sanitizeStoredOverdueDays,
-  toNumber,
 } from "../../lib/outstanding";
 import { scheduleMobileFieldSnapshotRebuild } from "../../lib/server/mobileFieldSnapshot.js";
 
@@ -100,226 +87,6 @@ async function readDataset(admin) {
     bucketLabels: sortBucketLabels(parsed.bucketLabels || []),
     rows: Array.isArray(parsed.rows) ? parsed.rows.map(buildOutstandingRow) : [],
     invoices: Array.isArray(parsed.invoices) ? parsed.invoices : [],
-  };
-}
-
-function formatSheetDateValue(value) {
-  if (value === null || value === undefined) return "";
-
-  if (typeof value === "number") {
-    const parsed = XLSX.SSF?.parse_date_code?.(value);
-    if (parsed && parsed.y && parsed.m && parsed.d) {
-      const utc = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
-      if (!Number.isNaN(utc.getTime())) return utc.toISOString().slice(0, 10);
-    }
-  }
-
-  return parseOutstandingSheetDate(value) || String(value || "").trim();
-}
-
-function detectColumnIndexes(headerRow) {
-  const indexes = {
-    customerCode: -1,
-    customerName: -1,
-    openInvoices: -1,
-    pendingAmount: -1,
-    date: -1,
-    refNo: -1,
-    dueDate: -1,
-    overdueDays: -1,
-    invoiceDay: -1,
-    salesman: -1,
-    buckets: [],
-  };
-
-  const codeAliases = ["customer code", "customer_code", "cust code", "customer no", "account code", "code"];
-  const nameAliases = ["customer name", "customer", "party name", "party's name", "partys name", "name", "account name"];
-
-  headerRow.forEach((cell, idx) => {
-    const text = String(cell || "").trim();
-    const normalized = normalizeOutstandingHeader(text);
-
-    if (indexes.customerCode < 0 && codeAliases.some((alias) => normalized === alias || normalized.includes(alias))) {
-      indexes.customerCode = idx;
-    }
-
-    if (indexes.customerName < 0 && nameAliases.some((alias) => normalized === alias || normalized.includes(alias))) {
-      indexes.customerName = idx;
-    }
-
-    if (indexes.date < 0 && (normalized === "date" || normalized.startsWith("date "))) {
-      indexes.date = idx;
-    }
-
-    if (indexes.refNo < 0 && (normalized.includes("ref") || normalized.includes("invoice no") || normalized.includes("voucher"))) {
-      indexes.refNo = idx;
-    }
-
-    if (
-      indexes.dueDate < 0
-      && !normalized.includes("overdue")
-      && !normalized.includes("overd")
-      && (normalized === "due"
-        || normalized.startsWith("due ")
-        || normalized.endsWith(" due")
-        || normalized.includes("due date")
-        || normalized.includes("due on"))
-    ) {
-      indexes.dueDate = idx;
-    }
-
-    if (indexes.overdueDays < 0 && normalized.includes("overd")) {
-      indexes.overdueDays = idx;
-    }
-
-    const bucketLabel = parseBucketLabelFromHeader(text);
-    if (!bucketLabel) return;
-
-    if (bucketLabel === "open_invoices") {
-      indexes.openInvoices = idx;
-      return;
-    }
-
-    indexes.buckets.push({ idx, label: bucketLabel });
-  });
-
-  indexes.salesman = detectOutstandingSalesmanColumn(headerRow);
-
-  indexes.invoiceDay = findOutstandingInvoiceDayColumn(
-    headerRow,
-    indexes.overdueDays,
-    indexes.salesman
-  );
-
-  indexes.pendingAmount = detectOutstandingPendingAmountColumn(headerRow);
-
-  return indexes;
-}
-
-function bucketLabelForInvoiceDay(dayValue) {
-  const day = toNumber(dayValue);
-  if (!Number.isFinite(day) || day <= 0) return "0-30";
-  if (day <= 30) return "0-30";
-  if (day <= 60) return "31-60";
-  if (day <= 90) return "61-90";
-  if (day <= 120) return "91-120";
-  return ">120";
-}
-
-function parseOutstandingRows(rows, headerRowIndex) {
-  const headerRow = combineOutstandingHeaderRows(rows, headerRowIndex);
-  const columns = detectColumnIndexes(headerRow);
-  const ageColumnIndex = columns.invoiceDay >= 0 ? columns.invoiceDay : columns.overdueDays;
-
-  const hasInvoiceDayLayout = columns.pendingAmount >= 0 && ageColumnIndex >= 0;
-
-  if (!hasInvoiceDayLayout && columns.buckets.length === 0 && columns.openInvoices < 0) {
-    throw new Error("Could not detect bucket columns or open invoices column in uploaded file.");
-  }
-
-  const aggregate = new Map();
-  const invoices = [];
-  const bucketLabels = hasInvoiceDayLayout
-    ? ["0-30", "31-60", "61-90", "91-120", ">120"]
-    : sortBucketLabels(columns.buckets.map((bucket) => bucket.label));
-
-  for (let r = headerRowIndex + 1; r < rows.length; r += 1) {
-    const row = Array.isArray(rows[r]) ? rows[r] : [];
-    const rawCustomerCode = columns.customerCode >= 0 ? String(row[columns.customerCode] || "").trim() : "";
-    const rawCustomerName = columns.customerName >= 0 ? String(row[columns.customerName] || "").trim() : "";
-    const extractedCode = extractLeadingCustomerCodeAndName(rawCustomerCode);
-    const extractedName = extractLeadingCustomerCodeAndName(rawCustomerName);
-    const customerCode = extractedCode.customer_code || rawCustomerCode || extractedName.customer_code;
-    const customerName = extractedName.customer_name || extractedCode.customer_name || rawCustomerName;
-
-    if (!customerCode && !customerName) continue;
-
-    const rowBuckets = {};
-    let hasAnyValue = false;
-
-    if (hasInvoiceDayLayout) {
-      const pendingValue = toNumber(row[columns.pendingAmount]);
-      const dayBucket = bucketLabelForInvoiceDay(row[ageColumnIndex]);
-      bucketLabels.forEach((label) => {
-        rowBuckets[label] = label === dayBucket ? pendingValue : 0;
-      });
-      hasAnyValue = pendingValue !== 0;
-    } else {
-      columns.buckets.forEach((bucket) => {
-        const value = toNumber(row[bucket.idx]);
-        rowBuckets[bucket.label] = value;
-        if (value !== 0) hasAnyValue = true;
-      });
-    }
-
-    const openInvoices = hasInvoiceDayLayout
-      ? (toNumber(row[columns.pendingAmount]) > 0 ? 1 : 0)
-      : (columns.openInvoices >= 0 ? toNumber(row[columns.openInvoices]) : 0);
-    if (openInvoices !== 0) hasAnyValue = true;
-
-    if (!hasAnyValue) continue;
-
-    const key = normalizeCode(customerCode) || normalizeName(customerName);
-    if (!key) continue;
-
-    const current = aggregate.get(key) || {
-      customer_code: customerCode,
-      customer_name: customerName,
-      open_invoices: 0,
-      buckets: {},
-    };
-
-    if (!current.customer_code && customerCode) current.customer_code = customerCode;
-    if (!current.customer_name && customerName) current.customer_name = customerName;
-
-    current.open_invoices += openInvoices;
-    bucketLabels.forEach((label) => {
-      current.buckets[label] = toNumber(current.buckets[label]) + toNumber(rowBuckets[label]);
-    });
-
-    if (columns.salesman >= 0) {
-      const rowSalesman = String(row[columns.salesman] || "").trim();
-      if (rowSalesman && !isPlaceholderSalesmanValue(rowSalesman)) {
-        current.salesman = pickOutstandingSalesmanName([
-          ...(current.salesman ? [{ salesman: current.salesman }] : []),
-          { salesman: rowSalesman },
-        ]);
-      }
-    }
-
-    aggregate.set(key, current);
-
-    const pendingAmount = columns.pendingAmount >= 0
-      ? toNumber(row[columns.pendingAmount])
-      : Object.values(rowBuckets).reduce((sum, value) => sum + toNumber(value), 0);
-    if (pendingAmount > 0) {
-      invoices.push({
-        customer_code: customerCode,
-        customer_name: customerName,
-        invoice_date: columns.date >= 0 ? formatSheetDateValue(row[columns.date]) : "",
-        ref_no: columns.refNo >= 0 ? String(row[columns.refNo] || "").trim() : "",
-        pending_amount: pendingAmount,
-        due_date: columns.dueDate >= 0 ? formatSheetDateValue(row[columns.dueDate]) : "",
-        overdue_days: columns.overdueDays >= 0
-          ? sanitizeStoredOverdueDays(
-            row[columns.overdueDays],
-            ageColumnIndex >= 0 ? toNumber(row[ageColumnIndex]) : 0,
-          )
-          : 0,
-        invoice_day: ageColumnIndex >= 0 ? toNumber(row[ageColumnIndex]) : 0,
-        salesman: columns.salesman >= 0 ? String(row[columns.salesman] || "").trim() : "",
-      });
-    }
-  }
-
-  const parsedRows = Array.from(aggregate.values())
-    .map((row) => buildOutstandingRow(row))
-    .sort((a, b) => normalizeName(a.customer_name).localeCompare(normalizeName(b.customer_name)));
-
-  return {
-    rows: parsedRows,
-    bucketLabels,
-    invoices,
   };
 }
 
@@ -415,7 +182,7 @@ export async function POST(request) {
     }
 
     const candidateSheetNames = prioritizeOutstandingSheets(workbook.SheetNames);
-    const parsedSheets = [];
+    const parsedBySheetName = [];
     const sheetPreviews = [];
     let workbookHasRows = false;
 
@@ -429,12 +196,17 @@ export async function POST(request) {
       sheetPreviews.push(`${sheetName}: ${previewRows.join(" / ")}`);
       const sheetHeaderRowIndex = findOutstandingHeaderRow(sheetRows);
       if (sheetHeaderRowIndex < 0) continue;
-      parsedSheets.push(parseOutstandingRows(sheetRows, sheetHeaderRowIndex));
+      parsedBySheetName.push({
+        sheetName,
+        parsed: parseOutstandingRows(sheetRows, sheetHeaderRowIndex),
+      });
     }
 
     if (!workbookHasRows) {
       throw new Error("Excel file is empty.");
     }
+
+    const parsedSheets = selectPreferredOutstandingParses(parsedBySheetName);
 
     if (parsedSheets.length === 0) {
       const preview = sheetPreviews.join("; ").slice(0, 1200);

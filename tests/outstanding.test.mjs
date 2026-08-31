@@ -37,6 +37,13 @@ import {
   visibleOutstandingBucketLabels,
   mapOutstandingBucketsToCollectionFields,
   parseOutstandingSheetDate,
+  parseOutstandingRows,
+  detectOutstandingColumnIndexes,
+  findOutstandingDueDateColumn,
+  excelSerialToIsoDate,
+  formatSheetDateValue,
+  sanitizeStoredInvoiceDays,
+  selectPreferredOutstandingParses,
   buildCollectionOutstandingBucketsFromInvoices,
   resolveCollectionOutstandingBuckets,
 } from "../app/lib/outstanding.js";
@@ -260,12 +267,84 @@ test("Invoice Day is distinguished from Overdue Days", () => {
   assert.equal(isOutstandingInvoiceDayHeader("Overdue Days"), false);
   assert.equal(isOutstandingInvoiceDayHeader("Invoice Day"), true);
   assert.equal(isOutstandingInvoiceDayHeader("Invoice Days"), true);
+  assert.equal(isOutstandingInvoiceDayHeader("Invoice Da"), true);
+  assert.equal(isOutstandingInvoiceDayHeader("Invoice Date"), false);
 });
 
 test("Invoice Day falls back to the distinct column after Overdue Days", () => {
   const headers = ["Date", "Ref. No.", "Party's Name", "Pending Amount", "Due Date", "Overdue Days", "Invoice Da", "Salesman"];
 
   assert.equal(findOutstandingInvoiceDayColumn(headers, 5, 7), 6);
+});
+
+test("Invoice Day is found even when Sales Person sits before Overdue", () => {
+  const headers = ["Date", "Ref. No.", "Party's Name", "Sales Person", "Pending", "Due", "Overdue", "Invoice Da"];
+  const columns = detectOutstandingColumnIndexes(headers);
+
+  assert.equal(columns.dueDate, 5);
+  assert.equal(columns.overdueDays, 6);
+  assert.equal(columns.invoiceDay, 7);
+});
+
+test("exact Due / Due on wins over a Due 90 Days ageing column", () => {
+  const headers = ["Date", "Ref. No.", "Party's Name", "Pending", "Due 90 Days", "Due on", "Overdue", "Invoice Days"];
+
+  assert.equal(findOutstandingDueDateColumn(headers), 5);
+  assert.equal(detectOutstandingColumnIndexes(headers).dueDate, 5);
+});
+
+test("Abdullah Hamad July invoice keeps Excel due date and invoice days", () => {
+  const parsed = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Sales Person", "Pending", "Due", "Overdue", "Invoice Da", "Salesman"],
+    ["30-Jul-26", "NFD/1247", "1006 ABDULLAH HAMAD AL DAKHEEL TRADING EST.", "", 11843, "29-Aug-26", 0, 30, "Junaid"],
+    ["22-Aug-26", "RNFD/283", "1006 ABDULLAH HAMAD AL DAKHEEL TRADING EST.", "", 1638, "21-Sep-26", 0, 7, "Parvez"],
+  ], 0);
+
+  assert.equal(parsed.invoices.length, 2);
+  assert.equal(parsed.invoices[0].ref_no, "NFD/1247");
+  assert.equal(parsed.invoices[0].invoice_date, "2026-07-30");
+  assert.equal(parsed.invoices[0].due_date, "2026-08-29");
+  assert.equal(parsed.invoices[0].invoice_day, 30);
+  assert.equal(parsed.invoices[1].ref_no, "RNFD/283");
+  assert.equal(parsed.invoices[1].due_date, "2026-09-21");
+  assert.equal(parsed.invoices[1].invoice_day, 7);
+  assert.equal(parsed.rows[0].buckets["0-30"], 13481);
+});
+
+test("Excel date serials are not treated as invoice days or 1900 due dates", () => {
+  assert.equal(excelSerialToIsoDate(46233), "2026-07-30");
+  assert.equal(formatSheetDateValue(90), "");
+  assert.equal(sanitizeStoredInvoiceDays(46233), 0);
+  assert.equal(sanitizeStoredInvoiceDays(30), 30);
+
+  const parsed = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Pending", "Due on", "Overdue", "Invoice Days", "Salesman"],
+    [46233, "NFD/1247", "1006 ABDULLAH HAMAD AL DAKHEEL TRADING EST.", 11843, 46263, 0, 30, "Junaid"],
+  ], 0);
+
+  assert.equal(parsed.invoices[0].invoice_date, "2026-07-30");
+  assert.equal(parsed.invoices[0].due_date, "2026-08-29");
+  assert.equal(parsed.invoices[0].invoice_day, 30);
+});
+
+test("Pending Bills parse is preferred over Bills Receivable 90-day rows", () => {
+  const pending = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Pending", "Due", "Overdue", "Invoice Days"],
+    ["30-Jul-26", "NFD/1247", "1006 ABDULLAH HAMAD AL DAKHEEL TRADING EST.", 11843, "29-Aug-26", 0, 30],
+  ], 0);
+  const receivable = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Pending", "Due", "Overdue", "Invoice Days"],
+    ["30-Jul-26", "NFD/1247", "1006 ABDULLAH HAMAD AL DAKHEEL TRADING EST.", 11843, "28-Oct-26", 0, 64],
+  ], 0);
+
+  const chosen = selectPreferredOutstandingParses([
+    { sheetName: "Bills Receivable", parsed: receivable },
+    { sheetName: "Pending Bills", parsed: pending },
+  ]);
+
+  assert.equal(chosen.length, 1);
+  assert.equal(chosen[0].invoices[0].due_date, "2026-08-29");
+  assert.equal(chosen[0].invoices[0].invoice_day, 30);
 });
 
 test("findOutstandingHeaderRow accepts short Party, Balance, and Days headers", () => {

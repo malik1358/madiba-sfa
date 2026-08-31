@@ -10,7 +10,6 @@ import DaySummaryBox from "../../components/DaySummaryBox";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import {
   DEFAULT_TRANSIT_SPEED_KMH,
-  TRANSIT_SPEED_OPTIONS_KMH,
   applyReverseGeocoding,
   buildGoogleMapsPointUrl,
   buildGpsActivityNote,
@@ -58,10 +57,9 @@ const TEXT = {
   speed: { en: "Speed (km/h)", ar: "السرعة (كم/س)" },
   waitingTime: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
   waitingTimeHint: {
-    en: "Elapsed time between visits minus estimated driving time. Idle GPS pings are ignored.",
-    ar: "الوقت المنقضي بين الزيارات ناقص وقت القيادة التقديري. يتم تجاهل نبضات GPS الخاملة.",
+    en: "Elapsed time between visits minus estimated driving time at 50 km/h. Idle GPS pings are ignored.",
+    ar: "الوقت المنقضي بين الزيارات ناقص وقت القيادة التقديري بسرعة 50 كم/س. يتم تجاهل نبضات GPS الخاملة.",
   },
-  transitSpeed: { en: "Assumed driving speed", ar: "سرعة القيادة المفترضة" },
   totalWaiting: { en: "Est. total waiting", ar: "إجمالي وقت الانتظار التقديري" },
   waitingTotalShort: { en: "Est. waiting total", ar: "إجمالي الانتظار التقديري" },
   map: { en: "Map", ar: "الخريطة" },
@@ -97,7 +95,6 @@ export default function DailyVisitReportPage() {
   const [userId, setUserId] = useState("");
   const [report, setReport] = useState(null);
   const [urlParamsApplied, setUrlParamsApplied] = useState(false);
-  const [transitSpeedKmh, setTransitSpeedKmh] = useState(DEFAULT_TRANSIT_SPEED_KMH);
 
   usePopupMessages({ error });
 
@@ -137,10 +134,10 @@ export default function DailyVisitReportPage() {
   const totalWaitingMinutes = useMemo(() => {
     if (!displayUsers.length) return 0;
     return displayUsers.reduce(
-      (total, entryUser) => total + sumWaitingMinutesFromTimeline(entryUser.entries, transitSpeedKmh),
+      (total, entryUser) => total + sumWaitingMinutesFromTimeline(entryUser.entries, DEFAULT_TRANSIT_SPEED_KMH),
       0,
     );
-  }, [displayUsers, transitSpeedKmh]);
+  }, [displayUsers]);
 
   useEffect(() => {
     if (!urlParamsApplied) return undefined;
@@ -275,20 +272,6 @@ export default function DailyVisitReportPage() {
                   ))}
                 </select>
               </label>
-              <label className="moduleField">
-                {t("transitSpeed")}
-                <select
-                  className="moduleInput"
-                  value={transitSpeedKmh}
-                  onChange={(event) => setTransitSpeedKmh(Number(event.target.value))}
-                >
-                  {TRANSIT_SPEED_OPTIONS_KMH.map((speed) => (
-                    <option key={speed} value={speed}>
-                      {speed} km/h
-                    </option>
-                  ))}
-                </select>
-              </label>
             </div>
           </section>
 
@@ -333,7 +316,7 @@ export default function DailyVisitReportPage() {
               {displayUsers.map((entryUser) => {
                 const userWaitingMinutes = sumWaitingMinutesFromTimeline(
                   entryUser.entries,
-                  transitSpeedKmh,
+                  DEFAULT_TRANSIT_SPEED_KMH,
                 );
 
                 return (
@@ -427,7 +410,7 @@ export default function DailyVisitReportPage() {
                                 const waiting = resolveWaitingMinutesFromPreviousVisit(
                                   entryUser.entries,
                                   entryIndex,
-                                  transitSpeedKmh,
+                                  DEFAULT_TRANSIT_SPEED_KMH,
                                 );
                                 return waiting === null ? "-" : formatDurationMinutes(waiting);
                               })()}

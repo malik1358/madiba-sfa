@@ -378,7 +378,7 @@ export function computeSpeedKmh(distanceKm, fromSavedAt, toSavedAt) {
   return distanceKm / hours;
 }
 
-export const DEFAULT_TRANSIT_SPEED_KMH = 40;
+export const DEFAULT_TRANSIT_SPEED_KMH = 50;
 
 export function computeElapsedHours(fromSavedAt, toSavedAt) {
   const fromTs = new Date(fromSavedAt).getTime();
@@ -506,8 +506,6 @@ export function sumWaitingMinutesFromTimeline(
 
   return total;
 }
-
-export const TRANSIT_SPEED_OPTIONS_KMH = [30, 40, 50];
 
 export function formatDurationMinutes(totalMinutes) {
   const minutes = Number(totalMinutes);

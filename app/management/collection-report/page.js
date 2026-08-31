@@ -10,7 +10,6 @@ import DaySummaryBox from "../../components/DaySummaryBox";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import {
   DEFAULT_TRANSIT_SPEED_KMH,
-  TRANSIT_SPEED_OPTIONS_KMH,
   buildGoogleMapsPointUrl,
   formatDurationMinutes,
   resolveWaitingMinutesFromPreviousVisit,
@@ -72,10 +71,9 @@ const TEXT = {
   speed: { en: "Speed from previous", ar: "السرعة من السابق" },
   waitingTime: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
   waitingTimeHint: {
-    en: "Elapsed time between visits minus estimated driving time. Idle GPS pings and lunch breaks are ignored.",
-    ar: "الوقت المنقضي بين الزيارات ناقص وقت القيادة التقديري. يتم تجاهل نبضات GPS الخاملة واستراحات الغداء.",
+    en: "Elapsed time between visits minus estimated driving time at 50 km/h. Idle GPS pings and lunch breaks are ignored.",
+    ar: "الوقت المنقضي بين الزيارات ناقص وقت القيادة التقديري بسرعة 50 كم/س. يتم تجاهل نبضات GPS الخاملة واستراحات الغداء.",
   },
-  transitSpeed: { en: "Assumed driving speed", ar: "سرعة القيادة المفترضة" },
   totalWaiting: { en: "Est. total waiting", ar: "إجمالي وقت الانتظار التقديري" },
   waitingTotalShort: { en: "Est. waiting total", ar: "إجمالي الانتظار التقديري" },
   map: { en: "Map", ar: "الخريطة" },
@@ -277,7 +275,6 @@ export default function CollectionReportPage() {
   });
   const [selectedVisit, setSelectedVisit] = useState(null);
   const [copyStatus, setCopyStatus] = useState("");
-  const [transitSpeedKmh, setTransitSpeedKmh] = useState(DEFAULT_TRANSIT_SPEED_KMH);
 
   const collectorOptions = useMemo(
     () => (Array.isArray(report?.availableCollectors) ? report.availableCollectors : []),
@@ -287,10 +284,10 @@ export default function CollectionReportPage() {
   const totalWaitingMinutes = useMemo(() => {
     if (!report?.collectors?.length) return 0;
     return report.collectors.reduce(
-      (total, collector) => total + sumWaitingMinutesFromTimeline(collector.visits, transitSpeedKmh),
+      (total, collector) => total + sumWaitingMinutesFromTimeline(collector.visits, DEFAULT_TRANSIT_SPEED_KMH),
       0,
     );
-  }, [report, transitSpeedKmh]);
+  }, [report]);
 
   useEffect(() => {
     let cancelled = false;
@@ -445,20 +442,6 @@ export default function CollectionReportPage() {
                   ))}
                 </select>
               </label>
-              <label className="moduleField">
-                {t("transitSpeed")}
-                <select
-                  className="moduleInput"
-                  value={transitSpeedKmh}
-                  onChange={(event) => setTransitSpeedKmh(Number(event.target.value))}
-                >
-                  {TRANSIT_SPEED_OPTIONS_KMH.map((speed) => (
-                    <option key={speed} value={speed}>
-                      {speed} km/h
-                    </option>
-                  ))}
-                </select>
-              </label>
             </div>
           </section>
 
@@ -503,7 +486,7 @@ export default function CollectionReportPage() {
               {(report.collectors || []).map((collector) => {
                 const collectorWaitingMinutes = sumWaitingMinutesFromTimeline(
                   collector.visits,
-                  transitSpeedKmh,
+                  DEFAULT_TRANSIT_SPEED_KMH,
                 );
                 const isSalesmanQueue = collector.queueScope === "salesman";
 
@@ -666,7 +649,7 @@ export default function CollectionReportPage() {
                                 const waiting = resolveWaitingMinutesFromPreviousVisit(
                                   collector.visits,
                                   visitIndex,
-                                  transitSpeedKmh,
+                                  DEFAULT_TRANSIT_SPEED_KMH,
                                 );
                                 return waiting === null ? "-" : formatDurationMinutes(waiting);
                               })()}

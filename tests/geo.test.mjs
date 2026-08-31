@@ -13,7 +13,6 @@ import {
   resolveWaitingMinutesFromPreviousVisit,
   isIdleGpsPingTimelineRow,
   sumWaitingMinutesFromTimeline,
-  TRANSIT_SPEED_OPTIONS_KMH,
   coordinateCacheKey,
   enrichVisitsWithDistances,
   extractAreaFromActivityNote,
@@ -36,6 +35,10 @@ import {
 
 test("haversineDistanceKm returns zero for identical coordinates", () => {
   assert.equal(haversineDistanceKm(24.7136, 46.6753, 24.7136, 46.6753), 0);
+});
+
+test("default assumed driving speed is 50 km/h", () => {
+  assert.equal(DEFAULT_TRANSIT_SPEED_KMH, 50);
 });
 
 test("enrichVisitsWithDistances computes distance between consecutive GPS visits", () => {
@@ -184,7 +187,7 @@ test("computeWaitingMinutes subtracts estimated transit time at 40 km/h", () => 
     35.82,
     "2026-08-17T10:12:00.000Z",
     "2026-08-17T12:43:00.000Z",
-    DEFAULT_TRANSIT_SPEED_KMH,
+    40,
   );
 
   assert.equal(waiting, 97);
@@ -213,7 +216,7 @@ test("sumWaitingMinutesFromTimeline totals waiting across consecutive visits", (
     },
   ];
 
-  assert.equal(sumWaitingMinutesFromTimeline(rows, DEFAULT_TRANSIT_SPEED_KMH), 97);
+  assert.equal(sumWaitingMinutesFromTimeline(rows, 40), 97);
   assert.equal(sumWaitingMinutesFromTimeline(rows, 30), 79);
 });
 
@@ -266,7 +269,7 @@ test("resolveWaitingMinutesFromPreviousVisit skips idle GPS pings between visits
   ];
 
   assert.equal(resolveWaitingMinutesFromPreviousVisit(rows, 1), null);
-  assert.equal(resolveWaitingMinutesFromPreviousVisit(rows, 3, DEFAULT_TRANSIT_SPEED_KMH), 80);
+  assert.equal(resolveWaitingMinutesFromPreviousVisit(rows, 3, 40), 80);
 });
 
 test("parseReverseGeocodeAddress maps OpenStreetMap fields", () => {

@@ -34,13 +34,16 @@ import {
 } from "../../lib/mobileDataCache";
 import { resolveAuthSession } from "../../lib/authSession";
 import {
-  collectionRowMatchesCustomerQuery,
   isCashOnlyQueueCustomer,
   isCashQueueCustomer,
   isScheduledRevisitQueueCustomer,
   canViewerSeeScheduledRevisit,
   sortCashQueueCustomers,
 } from "../../lib/paymentCollections";
+import {
+  matchesCollectionCustomerQuery,
+  mergeLegalMatchesIntoDueRows,
+} from "../../lib/collectionQueueSearch";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp } from "../../lib/whatsappShare";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -78,6 +81,7 @@ const TEXT = {
   open: { en: "Open", ar: "فتح" },
   close: { en: "Close", ar: "إغلاق" },
   noDue: { en: "No due customers available for collection.", ar: "لا يوجد عملاء مستحقون للتحصيل حالياً." },
+  legalSearchMatch: { en: "Legal", ar: "قانوني" },
   notDueQueue: { en: "Not Yet Due Invoices", ar: "فواتير غير مستحقة بعد" },
   notDueHint: {
     en: "Customers with pending invoices that are not overdue yet. Collect early payments here if needed.",
@@ -538,7 +542,7 @@ function useMobileLayout(breakpointPx = 700) {
 function filterQueueRows(rows, customerFilter, selectedSalesmen) {
   const selectedSalesmanSet = new Set(selectedSalesmen);
   return (rows || []).filter((row) => (
-    collectionRowMatchesCustomerQuery(row, customerFilter)
+    matchesCollectionCustomerQuery(row, customerFilter)
     && rowMatchesSalesmanSelection(row, selectedSalesmanSet)
   ));
 }
@@ -1041,8 +1045,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }
 
   const filteredDueRows = useMemo(
-    () => filterQueueRows(dueCustomers, customerFilter, selectedSalesmen),
-    [customerFilter, dueCustomers, selectedSalesmen],
+    () => mergeLegalMatchesIntoDueRows(
+      filterQueueRows(dueCustomers, customerFilter, selectedSalesmen),
+      filterQueueRows(legalCustomers, customerFilter, selectedSalesmen),
+      customerFilter,
+    ),
+    [customerFilter, dueCustomers, legalCustomers, selectedSalesmen],
   );
 
   const cashQueueSourceRows = useMemo(() => {
@@ -2037,7 +2045,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
                       <Fragment key={`${key}-${tableIndex}`}>
                         <tr key={key}>
                           <td data-label={t("customerCode")}>{formatCustomerCodeWithPriority(row.customer_code, queuePriority)}</td>
-                          <td data-label={t("customer")} className="moduleCollectorCellPrimary">{row.customer_name || row.customer_code}</td>
+                          <td data-label={t("customer")} className="moduleCollectorCellPrimary">
+                            {row.customer_name || row.customer_code}
+                            {view !== "legal" && row.legal_transfer?.is_transferred ? (
+                              <div className="moduleHint">{t("legalSearchMatch")}</div>
+                            ) : null}
+                          </td>
                           <td data-label={t("salesman")}>{row.salesman_name || row.salesman_code || "-"}</td>
                           <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                           <td data-label={t("amount")} className="moduleCollectorCellPrimary">{formatMoney(isNotDue ? row.total_not_due_amount : row.total_due_amount)}</td>

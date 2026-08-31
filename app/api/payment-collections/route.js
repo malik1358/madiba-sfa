@@ -93,7 +93,7 @@ async function readOutstandingInvoicesFromTable(admin) {
 
   const { data: customers, error: customersError } = await admin
     .from("customers")
-    .select("customer_code,customer_name,current_salesman_code");
+      .select("customer_code,customer_name,current_salesman_code");
 
   if (customersError) throw customersError;
 
@@ -682,6 +682,8 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
         ? null
         : toNumber(invoice.overdue_days),
       salesman: String(invoice.salesman || "").trim(),
+      customer_code: resolveOutstandingInvoiceCustomerCode(invoice) || canonicalCustomerCode(invoice.customer_code),
+      customer_name: String(invoice.customer_name || "").trim(),
     });
 
     if (!nameByCustomer.has(key)) {
@@ -716,6 +718,14 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
         const existingInvoices = invoicesByCustomer.get(matchedKey) || [];
         invoicesByCustomer.set(matchedKey, [...existingInvoices, ...customerInvoices]);
         invoicesByCustomer.delete(key);
+        nameByCustomer.set(matchedKey, pickLongestCustomerName(
+          nameByCustomer.get(matchedKey),
+          nameByCustomer.get(key),
+        ));
+        rowNameByCustomer.set(matchedKey, pickLongestCustomerName(
+          rowNameByCustomer.get(matchedKey),
+          rowNameByCustomer.get(key),
+        ));
       }
       return;
     }

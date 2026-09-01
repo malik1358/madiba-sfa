@@ -62,6 +62,8 @@ const PAGE_TEXT = {
   morningAttendance: { en: "Morning Attendance", ar: "حضور الصباح" },
   lunchBreakOut: { en: "Lunch Break Out", ar: "خروج استراحة الغداء" },
   lunchBreakIn: { en: "Lunch Break In", ar: "العودة من استراحة الغداء" },
+  lunchBreakOutDone: { en: "Lunch out recorded for today.", ar: "تم تسجيل خروج الغداء اليوم." },
+  lunchBreakInDone: { en: "Lunch in recorded for today.", ar: "تم تسجيل العودة من الغداء اليوم." },
   endOfDay: { en: "End of Day", ar: "نهاية اليوم" },
   saveNote: { en: "Save Note", ar: "حفظ الملاحظة" },
   addPlannerNote: { en: "Add planner note", ar: "أضف ملاحظة لليوم" },
@@ -293,10 +295,13 @@ export default function MyDayPage({ mode = "default" } = {}) {
   usePopupMessages({ message, error, warnings });
 
   const attendanceRequired = isMorningAttendanceRequiredForRole(access.role);
-  const morningAttendanceComplete = todayLogs.some((row) => (
-    row.entry_type === "MORNING_ATTENDANCE"
+  const hasOwnAttendanceLog = (entryType) => todayLogs.some((row) => (
+    row.entry_type === entryType
     && (!currentUserId || !row.user_id || row.user_id === currentUserId)
   ));
+  const morningAttendanceComplete = hasOwnAttendanceLog("MORNING_ATTENDANCE");
+  const lunchOutComplete = hasOwnAttendanceLog("LUNCH_BREAK_OUT");
+  const lunchInComplete = hasOwnAttendanceLog("LUNCH_BREAK_IN");
   const workdayUnlocked = !attendanceRequired || morningAttendanceComplete;
 
   const morningPopupShownRef = useRef(false);
@@ -964,6 +969,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
   }
 
   async function handleAttendanceAction(entryType) {
+    if (entryType === "LUNCH_BREAK_OUT" && lunchOutComplete) return;
+    if (entryType === "LUNCH_BREAK_IN" && (lunchInComplete || !lunchOutComplete)) return;
+
     setAttendanceBusy(entryType);
     setError("");
     setMessage("");
@@ -1699,11 +1707,21 @@ export default function MyDayPage({ mode = "default" } = {}) {
                 {attendanceBusy === "MORNING_ATTENDANCE" ? t("saving") : t("morningAttendance")}
               </button>
             )}
-            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_OUT")} disabled={!workdayUnlocked || !logsEnabled || Boolean(attendanceBusy)}>
-              {attendanceBusy === "LUNCH_BREAK_OUT" ? t("saving") : t("lunchBreakOut")}
+            <button
+              type="button"
+              className="modulePrimaryButton"
+              onClick={() => handleAttendanceAction("LUNCH_BREAK_OUT")}
+              disabled={!workdayUnlocked || !logsEnabled || Boolean(attendanceBusy) || lunchOutComplete}
+            >
+              {attendanceBusy === "LUNCH_BREAK_OUT" ? t("saving") : lunchOutComplete ? t("lunchBreakOutDone") : t("lunchBreakOut")}
             </button>
-            <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("LUNCH_BREAK_IN")} disabled={!workdayUnlocked || !logsEnabled || Boolean(attendanceBusy)}>
-              {attendanceBusy === "LUNCH_BREAK_IN" ? t("saving") : t("lunchBreakIn")}
+            <button
+              type="button"
+              className="modulePrimaryButton"
+              onClick={() => handleAttendanceAction("LUNCH_BREAK_IN")}
+              disabled={!workdayUnlocked || !logsEnabled || Boolean(attendanceBusy) || !lunchOutComplete || lunchInComplete}
+            >
+              {attendanceBusy === "LUNCH_BREAK_IN" ? t("saving") : lunchInComplete ? t("lunchBreakInDone") : t("lunchBreakIn")}
             </button>
             <button type="button" className="modulePrimaryButton" onClick={() => handleAttendanceAction("END_OF_DAY")} disabled={!workdayUnlocked || !logsEnabled || Boolean(attendanceBusy)}>
               {attendanceBusy === "END_OF_DAY" ? t("saving") : t("endOfDay")}

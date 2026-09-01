@@ -42,6 +42,9 @@ import {
   findOutstandingDueDateColumn,
   excelSerialToIsoDate,
   formatSheetDateValue,
+  laterDateOnly,
+  latestOutstandingInvoiceDate,
+  outstandingInvoiceDate,
   sanitizeStoredInvoiceDays,
   selectPreferredOutstandingParses,
   buildCollectionOutstandingBucketsFromInvoices,
@@ -59,6 +62,31 @@ test("parseOutstandingSheetDate accepts Excel day-month-year text", () => {
   assert.equal(parseOutstandingSheetDate("23-May-26"), "2026-05-23");
   assert.equal(parseOutstandingSheetDate("29-Jul-26"), "2026-07-29");
   assert.equal(parseOutstandingSheetDate("2026-05-23"), "2026-05-23");
+});
+
+test("laterDateOnly keeps the newest real invoice or sale date", () => {
+  assert.equal(laterDateOnly("2026-06-13", "2026-08-24", "2026-08-10"), "2026-08-24");
+  assert.equal(laterDateOnly("2026-06-13T00:00:00", "", null), "2026-06-13");
+  assert.equal(laterDateOnly("", null, undefined), "");
+});
+
+test("outstandingInvoiceDate prefers invoice_date then invoice days", () => {
+  assert.equal(outstandingInvoiceDate({ invoice_date: "2026-08-10", invoice_day: 80 }), "2026-08-10");
+  assert.equal(outstandingInvoiceDate({ invoice_day: 21 }, "2026-09-01"), "2026-08-11");
+});
+
+test("latestOutstandingInvoiceDate uses the newest matching invoice not the customer master date", () => {
+  assert.equal(
+    latestOutstandingInvoiceDate(
+      [
+        { customer_code: "1409", customer_name: "Rawa'i Al-Kutub Trading Company", invoice_date: "2026-08-10" },
+        { customer_code: "9999", customer_name: "Other", invoice_date: "2026-08-30" },
+      ],
+      "1409",
+      "Rawa'i Al-Kutub Trading Company",
+    ),
+    "2026-08-10",
+  );
 });
 
 test("isPlaceholderSalesmanValue detects voucher placeholders", () => {

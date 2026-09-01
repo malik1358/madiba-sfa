@@ -1257,3 +1257,46 @@ export function isSameOutstandingCustomer(rowCustomerCode, rowCustomerName, cust
 
   return false;
 }
+
+export function laterDateOnly(...values) {
+  let latest = "";
+  values.forEach((value) => {
+    const date = parseOutstandingSheetDate(value);
+    if (date && date > latest) latest = date;
+  });
+  return latest;
+}
+
+export function outstandingInvoiceDate(invoice, todayIso = new Date().toISOString()) {
+  const fromField = parseOutstandingSheetDate(invoice?.invoice_date);
+  if (fromField) return fromField;
+
+  const days = resolveInvoiceDays(invoice, todayIso);
+  if (!days) return "";
+
+  const today = parseOutstandingSheetDate(todayIso) || new Date().toISOString().slice(0, 10);
+  const dt = new Date(`${today}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() - days);
+  return dt.toISOString().slice(0, 10);
+}
+
+export function latestOutstandingInvoiceDate(invoices, customerCode, customerName, todayIso) {
+  let latest = "";
+
+  (invoices || []).forEach((invoice) => {
+    const invoiceCode = resolveOutstandingInvoiceCustomerCode(invoice) || invoice?.customer_code;
+    const matchesCustomer = isSameOutstandingCustomer(
+      invoiceCode,
+      invoice?.customer_name,
+      customerCode,
+      customerName,
+    ) || customerAccountCodesMatch(invoiceCode, customerCode);
+    if (!matchesCustomer) return;
+
+    const date = outstandingInvoiceDate(invoice, todayIso);
+    if (date > latest) latest = date;
+  });
+
+  return latest;
+}
+

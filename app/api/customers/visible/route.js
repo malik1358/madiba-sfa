@@ -5,6 +5,9 @@ import {
   customerCodeCandidates,
   customerMatchesOutstandingCodeSet,
   findOutstandingForCustomer,
+  hydrateOutstandingInvoices,
+  laterDateOnly,
+  latestOutstandingInvoiceDate,
   resolveOutstandingCustomerOwnership,
   summarizeOutstandingBucketsForVisitStatus,
 } from "../../../lib/outstanding";
@@ -505,6 +508,7 @@ async function fetchInactiveCustomers(admin, scope) {
 async function attachRecentSalesValues(admin, customers) {
   const canonicalCodeByCandidate = new Map();
   const salesValueByCustomer = new Map();
+  const latestSalesDateByCustomer = new Map();
 
   customers.forEach((customer) => {
     const canonicalCode = normalizeCode(customer.customer_code);
@@ -542,17 +546,30 @@ async function attachRecentSalesValues(admin, customers) {
     }
 
     mergeSalesSnapshots(salesRows).forEach((row) => {
-      const canonicalCode = canonicalCodeByCandidate.get(normalizeCode(row.customer_code));
+      const canonicalCode = customerCodeCandidates(row.customer_code)
+        .map((candidate) => canonicalCodeByCandidate.get(normalizeCode(candidate)))
+        .find(Boolean);
       if (!canonicalCode) return;
       const currentValue = salesValueByCustomer.get(canonicalCode) || 0;
       salesValueByCustomer.set(canonicalCode, currentValue + Math.max(Number(row.sales_amount || 0), 0));
+      const saleDate = laterDateOnly(row.transaction_date);
+      const currentDate = latestSalesDateByCustomer.get(canonicalCode) || "";
+      if (saleDate && saleDate > currentDate) {
+        latestSalesDateByCustomer.set(canonicalCode, saleDate);
+      }
     });
   }
 
-  return customers.map((customer) => ({
-    ...customer,
-    recent_sales_value: salesValueByCustomer.get(normalizeCode(customer.customer_code)) || 0,
-  }));
+  return customers.map((customer) => {
+    const code = normalizeCode(customer.customer_code);
+    const latestSalesDate = latestSalesDateByCustomer.get(code) || "";
+    return {
+      ...customer,
+      recent_sales_value: salesValueByCustomer.get(code) || 0,
+      latest_transaction_date: laterDateOnly(customer.latest_transaction_date, latestSalesDate)
+        || customer.latest_transaction_date,
+    };
+  });
 }
 
 async function attachOutstandingValues(admin, customers) {
@@ -571,6 +588,8 @@ async function attachOutstandingValues(admin, customers) {
     dataset = null;
   }
 
+  const invoices = hydrateOutstandingInvoices(dataset);
+
   return customers.map((customer) => {
     const outstanding = findOutstandingForCustomer(
       dataset,
@@ -578,9 +597,16 @@ async function attachOutstandingValues(admin, customers) {
       customer.customer_name
     );
     const summary = summarizeOutstandingBucketsForVisitStatus(outstanding?.buckets);
+    const latestInvoiceDate = latestOutstandingInvoiceDate(
+      invoices,
+      customer.customer_code,
+      customer.customer_name,
+    );
 
     return {
       ...customer,
+      latest_transaction_date: laterDateOnly(customer.latest_transaction_date, latestInvoiceDate)
+        || customer.latest_transaction_date,
       outstanding_0_30: summary.days0To30,
       outstanding_30_60: summary.days30To60,
       outstanding_61_90: summary.days61To90,

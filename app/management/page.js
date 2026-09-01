@@ -223,6 +223,7 @@ export default function ManagementPage() {
       "pendingOrders",
       "newCustomer",
       "myPerformance",
+      "mySalesInvoices",
       "myDay",
       "upload",
     ]),

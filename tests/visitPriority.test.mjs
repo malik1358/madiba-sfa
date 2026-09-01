@@ -5,6 +5,7 @@ import {
   buildProspectScheduleRows,
   buildRecentSalesByCustomer,
   filterAndRankVisitCustomers,
+  summarizeMonthlySales,
   splitVisitCustomersByOutstanding,
 } from "../app/management/my-day/visitPriority.js";
 
@@ -53,6 +54,60 @@ test("visit customer search matches name and code", () => {
 
   assert.deepEqual(filterAndRankVisitCustomers(rows, "rawaa").map((row) => row.customer_code), ["1173C"]);
   assert.deepEqual(filterAndRankVisitCustomers(rows, "1173").map((row) => row.customer_code), ["1173C"]);
+});
+
+test("visit customers with outstanding over 60 days rank after current outstanding", () => {
+  const ranked = filterAndRankVisitCustomers([
+    {
+      customer_code: "OLD",
+      customer_name: "Top Family",
+      recent_sales_value: 75990,
+      days_since_last_invoice: 41,
+      outstanding_30_60: 17947,
+      outstanding_61_90: 39034,
+      status: "Overdue",
+    },
+    {
+      customer_code: "CURRENT",
+      customer_name: "Bin Khamis",
+      recent_sales_value: 110508,
+      days_since_last_invoice: 21,
+      outstanding_0_30: 33433,
+      outstanding_61_90: 7366,
+      status: "Planned",
+    },
+    {
+      customer_code: "MID",
+      customer_name: "Hamsat",
+      recent_sales_value: 55914,
+      days_since_last_invoice: 40,
+      outstanding_30_60: 60333,
+      status: "Overdue",
+    },
+    {
+      customer_code: "AGING",
+      customer_name: "Old Debt Only",
+      recent_sales_value: 200000,
+      days_since_last_invoice: 70,
+      outstanding_61_90: 50000,
+      status: "Overdue",
+    },
+  ]);
+
+  assert.deepEqual(ranked.map((row) => row.customer_code), ["CURRENT", "OLD", "MID", "AGING"]);
+});
+
+test("average monthly purchase uses operational months and highest monthly sales", () => {
+  const stats = summarizeMonthlySales(new Map([
+    ["2026-03", 10000],
+    ["2026-04", 25000],
+    ["2026-06", 5000],
+  ]));
+
+  assert.equal(stats.operationalMonths, 3);
+  assert.equal(stats.salesValue, 40000);
+  assert.equal(stats.averageMonthlyPurchase, 40000 / 3);
+  assert.equal(stats.highestMonthlySales, 25000);
 });
 
 test("visit customers are grouped by outstanding balance or a visit without invoice", () => {

@@ -18,12 +18,48 @@ export function buildRecentSalesByCustomer(rows) {
   return byCustomer;
 }
 
+export function monthKeyFromDate(value) {
+  const text = String(value || "").trim();
+  const iso = text.match(/^(\d{4})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+
+  const parsed = Date.parse(text);
+  if (!Number.isFinite(parsed)) return "";
+
+  const date = new Date(parsed);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+export function summarizeMonthlySales(byMonth) {
+  const monthlyValues = [...(byMonth instanceof Map ? byMonth.values() : Object.values(byMonth || {}))]
+    .map((value) => Math.max(Number(value || 0), 0))
+    .filter((value) => value > 0);
+  const salesValue = monthlyValues.reduce((sum, value) => sum + value, 0);
+  const operationalMonths = monthlyValues.length;
+
+  return {
+    salesValue,
+    operationalMonths,
+    averageMonthlyPurchase: operationalMonths > 0 ? salesValue / operationalMonths : 0,
+    highestMonthlySales: monthlyValues.length ? Math.max(...monthlyValues) : 0,
+  };
+}
+
 export function visitOrderPriority(row) {
   const recentSalesValue = Math.max(Number(row?.recent_sales_value || 0), 0);
   const daysSinceInvoice = Math.max(Number(row?.days_since_last_invoice || 0), 0);
   const purchaseGapFactor = Math.min(2, Math.max(0.5, daysSinceInvoice / 30));
   const completionFactor = row?.status === "Visited" ? 0.1 : 1;
   return recentSalesValue * purchaseGapFactor * completionFactor;
+}
+
+export function outstandingVisitBand(row) {
+  if (Number(row?.outstanding_0_30 || 0) > 0) return 0;
+  if (Number(row?.outstanding_30_60 || 0) > 0) return 1;
+  if (Number(row?.outstanding_61_90 || 0) > 0) return 2;
+  if (Number(row?.outstanding_above_90 || 0) > 0) return 3;
+  return 4;
 }
 
 export function filterAndRankVisitCustomers(rows, search = "") {
@@ -36,6 +72,9 @@ export function filterAndRankVisitCustomers(rows, search = "") {
         .some((value) => String(value || "").toLowerCase().includes(query));
     })
     .sort((a, b) => {
+      const byAging = outstandingVisitBand(a) - outstandingVisitBand(b);
+      if (byAging !== 0) return byAging;
+
       const byPriority = visitOrderPriority(b) - visitOrderPriority(a);
       if (byPriority !== 0) return byPriority;
       const byValue = Number(b?.recent_sales_value || 0) - Number(a?.recent_sales_value || 0);

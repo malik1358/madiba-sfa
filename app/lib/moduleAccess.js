@@ -8,6 +8,7 @@ export const MODULES = {
   pendingOrders: { href: "/management/pending-orders", label: "Old Pending Orders" },
   newCustomer: { href: "/management/new-customer", label: "New Customers" },
   myPerformance: { href: "/management/my-performance", label: "Performance" },
+  mySalesInvoices: { href: "/management/my-sales-invoices", label: "My Sales Invoices" },
   myCollections: { href: "/management/my-collections", label: "My Customer Collections" },
   paymentCollections: { href: "/management/payment-collections", label: "Payment Collections" },
   collectionReport: { href: "/management/collection-report", label: "Collection Report" },
@@ -25,7 +26,7 @@ export const NAV_GROUPS = [
   {
     key: "field",
     label: "Field Sales",
-    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "myCollections"],
+    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "myCollections"],
   },
   {
     key: "collections",
@@ -97,6 +98,7 @@ export function buildModuleAccess(context = {}) {
       pendingOrders: isFieldSales && !isCollector,
       newCustomer: isFieldSales && !isCollector,
       myPerformance: isFieldSales && !isCollector,
+      mySalesInvoices: isFieldSales && !isCollector,
       myCollections: isSalesman,
       paymentCollections: isAdmin || isManager || isCollector || isInvoiceMaker,
       collectionReport: isAdmin || isManager || isCollector,
@@ -155,6 +157,7 @@ export const MODULE_LABELS = {
   pendingOrders: { en: "Old Pending Orders", ar: "طلبات معلقة قديمة" },
   newCustomer: { en: "New Customers", ar: "عميل جديد" },
   myPerformance: { en: "Performance", ar: "أدائي" },
+  mySalesInvoices: { en: "My Sales Invoices", ar: "فواتير المبيعات" },
   myCollections: { en: "My Customer Collections", ar: "تحصيلات عملائي" },
   paymentCollections: { en: "Payment Collections", ar: "التحصيلات" },
   collectionReport: { en: "Collection Report", ar: "تقرير التحصيل" },

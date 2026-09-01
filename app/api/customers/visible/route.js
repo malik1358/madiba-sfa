@@ -13,6 +13,7 @@ import {
   summarizeOutstandingBucketsForVisitStatus,
 } from "../../../lib/outstanding";
 import { mergeSalesSnapshots } from "../../../lib/salesHistory";
+import { monthKeyFromDate, summarizeMonthlySales } from "../../../management/my-day/visitPriority";
 import {
   buildSalesmanScopeMatchers,
   resolveMutualGroupCodes,
@@ -509,6 +510,7 @@ async function fetchInactiveCustomers(admin, scope) {
 async function attachRecentSalesValues(admin, customers) {
   const canonicalCodeByCandidate = new Map();
   const salesValueByCustomer = new Map();
+  const monthlySalesByCustomer = new Map();
   const latestSalesDateByCustomer = new Map();
 
   customers.forEach((customer) => {
@@ -551,8 +553,15 @@ async function attachRecentSalesValues(admin, customers) {
         .map((candidate) => canonicalCodeByCandidate.get(normalizeCode(candidate)))
         .find(Boolean);
       if (!canonicalCode) return;
+      const amount = Math.max(Number(row.sales_amount || 0), 0);
       const currentValue = salesValueByCustomer.get(canonicalCode) || 0;
-      salesValueByCustomer.set(canonicalCode, currentValue + Math.max(Number(row.sales_amount || 0), 0));
+      salesValueByCustomer.set(canonicalCode, currentValue + amount);
+      const monthKey = monthKeyFromDate(row.transaction_date);
+      if (monthKey && amount > 0) {
+        const months = monthlySalesByCustomer.get(canonicalCode) || new Map();
+        months.set(monthKey, (months.get(monthKey) || 0) + amount);
+        monthlySalesByCustomer.set(canonicalCode, months);
+      }
       const saleDate = laterDateOnly(row.transaction_date);
       const currentDate = latestSalesDateByCustomer.get(canonicalCode) || "";
       if (saleDate && saleDate > currentDate) {
@@ -564,9 +573,13 @@ async function attachRecentSalesValues(admin, customers) {
   return customers.map((customer) => {
     const code = normalizeCode(customer.customer_code);
     const latestSalesDate = latestSalesDateByCustomer.get(code) || "";
+    const monthlyStats = summarizeMonthlySales(monthlySalesByCustomer.get(code) || new Map());
     return {
       ...customer,
       recent_sales_value: salesValueByCustomer.get(code) || 0,
+      average_monthly_purchase: monthlyStats.averageMonthlyPurchase,
+      highest_monthly_sales: monthlyStats.highestMonthlySales,
+      operational_months: monthlyStats.operationalMonths,
       latest_transaction_date: laterDateOnly(customer.latest_transaction_date, latestSalesDate)
         || customer.latest_transaction_date,
     };
@@ -656,6 +669,9 @@ export async function buildVisibleCustomersForScope(admin, scope, options = {}) 
       responseCustomers = responseCustomers.map((customer) => ({
         ...customer,
         recent_sales_value: Number(customer?.recent_sales_value || 0),
+        average_monthly_purchase: Number(customer?.average_monthly_purchase || 0),
+        highest_monthly_sales: Number(customer?.highest_monthly_sales || 0),
+        operational_months: Number(customer?.operational_months || 0),
       }));
     }
   }

@@ -27,7 +27,7 @@ function scopeCacheKey(userId) {
 }
 
 function customersCacheKey(scope, enriched = false) {
-  const prefix = enriched ? "customers:visible:enriched:v5" : "customers:visible:basic:v3";
+  const prefix = enriched ? "customers:visible:enriched:v6" : "customers:visible:basic:v3";
   return `${prefix}:${buildScopeHash(scope)}`;
 }
 

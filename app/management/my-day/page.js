@@ -92,6 +92,8 @@ const PAGE_TEXT = {
   allSalesmen: { en: "All salesmen", ar: "كل رجال البيع" },
   unassignedSalesman: { en: "Unassigned", ar: "غير محدد" },
   recentValue: { en: "Recent 6M Value", ar: "قيمة آخر 6 أشهر" },
+  averageMonthlyPurchase: { en: "Avg Monthly Purchase", ar: "متوسط المشتريات الشهرية" },
+  highestMonthlySales: { en: "Highest Monthly Sales", ar: "أعلى مبيعات شهرية" },
   customer: { en: "Customer", ar: "العميل" },
   cityArea: { en: "City / Area", ar: "المدينة / المنطقة" },
   daysSinceLastInvoice: { en: "Days From Last Invoice", ar: "الأيام منذ آخر فاتورة" },
@@ -757,6 +759,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
               days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
               next_visit_at: nextVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               recent_sales_value: Number(row.recent_sales_value || 0),
+              average_monthly_purchase: Number(row.average_monthly_purchase || 0),
+              highest_monthly_sales: Number(row.highest_monthly_sales || 0),
               outstanding_0_30: Number(row.outstanding_0_30 || 0),
               outstanding_30_60: Number(row.outstanding_30_60 || 0),
               outstanding_61_90: Number(row.outstanding_61_90 || 0),
@@ -811,6 +815,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
               days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
               next_visit_at: nextVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               recent_sales_value: Number(row.recent_sales_value || 0),
+              average_monthly_purchase: Number(row.average_monthly_purchase || 0),
+              highest_monthly_sales: Number(row.highest_monthly_sales || 0),
               outstanding_0_30: Number(row.outstanding_0_30 || 0),
               outstanding_30_60: Number(row.outstanding_30_60 || 0),
               outstanding_61_90: Number(row.outstanding_61_90 || 0),
@@ -1936,6 +1942,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
                   <th>{t("daysSinceLastInvoice")}</th>
                   <th>{t("daysSinceLastVisit")}</th>
                   <th>{t("recentValue")}</th>
+                  <th>{t("averageMonthlyPurchase")}</th>
+                  <th>{t("highestMonthlySales")}</th>
                   <th>{t("outstanding0To30")}</th>
                   <th>{t("outstanding30To60")}</th>
                   <th>{t("outstanding61To90")}</th>
@@ -1961,6 +1969,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
                     <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
                     <td>{row.days_since_last_visit == null ? "-" : row.days_since_last_visit}</td>
                     <td>{Number(row.recent_sales_value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number(row.average_monthly_purchase || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
+                    <td>{Number(row.highest_monthly_sales || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     <td>{Number(row.outstanding_0_30 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     <td>{Number(row.outstanding_30_60 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
                     <td>{Number(row.outstanding_61_90 || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</td>
@@ -1988,7 +1998,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                   </tr>
                   {activeVisitCustomerCode === row.customer_code && (
                     <tr>
-                      <td colSpan={11}>
+                      <td colSpan={14}>
                         <div className="moduleVisitPanel">
                           <div className="moduleSectionHeader">
                             <h2>{t("visitReport")}</h2>

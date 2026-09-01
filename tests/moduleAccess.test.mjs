@@ -22,6 +22,7 @@ test("collector-only users only see collection modules", () => {
   assert.equal(access.canAccess("paymentCollections"), true);
   assert.equal(access.canAccess("collectionReport"), true);
   assert.equal(access.canAccess("myDay"), false);
+  assert.equal(access.canAccess("mySalesInvoices"), false);
   assert.equal(access.canAccess("salesmanHierarchy"), false);
   assert.equal(access.canAccess("upload"), false);
 });
@@ -33,6 +34,7 @@ test("salesmen see field modules but not admin tools", () => {
   assert.equal(access.canAccess("newOrder"), true);
   assert.equal(access.canAccess("visitWithoutOrder"), true);
   assert.equal(access.canAccess("myCollections"), true);
+  assert.equal(access.canAccess("mySalesInvoices"), true);
   assert.equal(access.canAccess("dailyVisitReport"), true);
   assert.equal(access.canAccess("gpsMap"), false);
   assert.equal(access.canAccess("salesmanHierarchy"), false);

@@ -24,6 +24,7 @@ import {
   resolveSubordinateUserIds,
 } from "../../../lib/salesHierarchy.js";
 import { dedupeCustomerMasterRows } from "../../../lib/customerMasterQuery.js";
+import { applyCustomerSalesmanScopeFilter } from "../../../lib/customerSalesmanAssignment.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -329,7 +330,7 @@ async function fetchVisibleCustomers(admin, scope) {
   while (true) {
     let query = admin
       .from("customers")
-      .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,customer_type,city,area,mobile,latitude,longitude")
+      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,customer_type,city,area,mobile,latitude,longitude")
       .eq("is_active", true)
       .order("customer_name")
       .range(from, from + pageSize - 1);
@@ -342,9 +343,10 @@ async function fetchVisibleCustomers(admin, scope) {
       if (normalizedScopeCodes.size === 0) return false;
       const codeCandidates = customerCodeCandidates(row.customer_code).map(normalizeCode);
       const rowSalesmanCode = normalizeCode(row.current_salesman_code);
+      const previousSalesmanCode = normalizeCode(row.previous_salesman_code);
 
-      // Always include customers currently assigned to the visible scope.
-      if (normalizedScopeCodes.has(rowSalesmanCode)) return true;
+      // Always include customers currently assigned to the visible scope, including transfers.
+      if (normalizedScopeCodes.has(rowSalesmanCode) || normalizedScopeCodes.has(previousSalesmanCode)) return true;
 
       if (customerMatchesOutstandingCodeSet(row.customer_code, outstandingOwnedCustomerCodes)) {
         return true;
@@ -371,14 +373,14 @@ async function fetchBasicVisibleCustomers(admin, scope) {
   while (true) {
     let query = admin
       .from("customers")
-      .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,customer_type,city,area,mobile,latitude,longitude")
+      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,customer_type,city,area,mobile,latitude,longitude")
       .eq("is_active", true)
       .order("customer_name")
       .range(from, from + pageSize - 1);
 
     if (!scope.hasAllAccess) {
       if (scopedCodes.length === 0) return [];
-      query = query.in("current_salesman_code", scopedCodes);
+      query = applyCustomerSalesmanScopeFilter(query, scopedCodes);
     }
 
     const { data, error } = await query;
@@ -424,7 +426,7 @@ async function autoReactivateCustomers(admin, scope) {
 
   let inactiveQuery = admin
     .from("customers")
-    .select("customer_code,current_salesman_code,latest_transaction_date,updated_at")
+    .select("customer_code,current_salesman_code,previous_salesman_code,latest_transaction_date,updated_at")
     .eq("is_active", false)
     .not("latest_transaction_date", "is", null)
     .limit(5000);
@@ -432,7 +434,7 @@ async function autoReactivateCustomers(admin, scope) {
   if (!scope.hasAllAccess) {
     const scopedCodes = Array.from(normalizedScopeCodes);
     if (scopedCodes.length === 0) return 0;
-    inactiveQuery = inactiveQuery.in("current_salesman_code", scopedCodes);
+    inactiveQuery = applyCustomerSalesmanScopeFilter(inactiveQuery, scopedCodes);
   }
 
   const { data: inactiveRows, error: inactiveError } = await inactiveQuery;
@@ -482,7 +484,7 @@ async function fetchInactiveCustomers(admin, scope) {
 
   let query = admin
     .from("customers")
-    .select("customer_code,customer_name,current_salesman_code,latest_transaction_date,city,area,updated_at,latitude,longitude")
+    .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,city,area,updated_at,latitude,longitude")
     .eq("is_active", false)
     .order("customer_name")
     .limit(5000);
@@ -490,7 +492,7 @@ async function fetchInactiveCustomers(admin, scope) {
   if (!scope.hasAllAccess) {
     const scopedCodes = Array.from(normalizedScopeCodes);
     if (scopedCodes.length === 0) return [];
-    query = query.in("current_salesman_code", scopedCodes);
+    query = applyCustomerSalesmanScopeFilter(query, scopedCodes);
   }
 
   const { data, error } = await query;

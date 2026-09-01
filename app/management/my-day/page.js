@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
+import { applyCustomerSalesmanScopeFilter } from "../../lib/customerSalesmanAssignment";
 import {
   fetchVisibleCustomersCached,
   hydrateFoundationFromCache,
@@ -501,7 +502,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
           // no-op
         } else {
           todaySalesQuery = todaySalesQuery.in("salesman_code", scope.visibleSalesmanCodes);
-          routeQuery = routeQuery.in("current_salesman_code", scope.visibleSalesmanCodes);
+          routeQuery = applyCustomerSalesmanScopeFilter(routeQuery, scope.visibleSalesmanCodes);
           todayOrdersQuery = todayOrdersQuery.in("salesman_code", scope.visibleSalesmanCodes);
         }
 

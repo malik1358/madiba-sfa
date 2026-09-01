@@ -11,6 +11,7 @@ import { resolveCustomerMasterExportFields } from "../../lib/customerCode.js";
 import { normalizeCustomerMasterSearch } from "../../lib/customerMasterQuery.js";
 import { resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
+import { fetchSalesScope } from "../../lib/salesScope";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
 import CustomerDocumentsPanel from "./CustomerDocumentsPanel";
@@ -104,6 +105,19 @@ const TEXT = {
   vatNumber: { en: "VAT registration number", ar: "الرقم الضريبي" },
   uploadDocument: { en: "Upload", ar: "رفع" },
   uploadingDocument: { en: "Uploading...", ar: "جاري الرفع..." },
+  transfer: { en: "Transfer", ar: "نقل" },
+  transferTitle: { en: "Transfer customer", ar: "نقل العميل" },
+  transferHint: {
+    en: "Assign to another salesman. Both the previous and new salesman will still see this customer.",
+    ar: "تعيين لمندوب آخر. سيبقى العميل ظاهراً للمندوب السابق والمندوب الجديد.",
+  },
+  transferTo: { en: "New salesman", ar: "المندوب الجديد" },
+  currentSalesman: { en: "Current salesman", ar: "المندوب الحالي" },
+  sharedWith: { en: "shared with", ar: "مشترك مع" },
+  confirmTransfer: { en: "Transfer", ar: "نقل" },
+  cancel: { en: "Cancel", ar: "إلغاء" },
+  transferring: { en: "Transferring...", ar: "جاري النقل..." },
+  selectSalesman: { en: "Select salesman", ar: "اختر المندوب" },
 };
 
 function hasSavedGps(row) {
@@ -146,6 +160,10 @@ export default function CustomerMasterPage() {
   const [drafts, setDrafts] = useState({});
   const [documentsCustomer, setDocumentsCustomer] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [salesmen, setSalesmen] = useState([]);
+  const [transferCustomer, setTransferCustomer] = useState(null);
+  const [transferSalesmanCode, setTransferSalesmanCode] = useState("");
+  const [transferring, setTransferring] = useState(false);
 
   usePopupMessages({ error, message: importSummary });
 
@@ -221,6 +239,29 @@ export default function CustomerMasterPage() {
     loadCustomers(1);
   }, [loadCustomers]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchSalesScope()
+      .then((scope) => {
+        if (cancelled) return;
+        const rows = (Array.isArray(scope?.visibleMembers) ? scope.visibleMembers : [])
+          .map((member) => ({
+            id: member.id || member.salesman_code,
+            salesman_code: String(member.salesman_code || "").trim(),
+            salesman_name: String(member.salesman_name || member.salesman_code || "").trim(),
+          }))
+          .filter((member) => member.salesman_code)
+          .sort((left, right) => (left.salesman_name || left.salesman_code).localeCompare(right.salesman_name || right.salesman_code));
+        setSalesmen(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setSalesmen([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const filterLabel = useMemo(() => {
     const parts = [];
     if (gpsFilter === "with") parts.push(t("filterWithGps"));
@@ -272,7 +313,9 @@ export default function CustomerMasterPage() {
       }
 
       setCustomers((current) => current.map((row) => (
-        row.customer_code === customer.customer_code ? payload.customer : row
+        row.customer_code === customer.customer_code
+          ? { ...row, ...payload.customer, total_outstanding: row.total_outstanding }
+          : row
       )));
       setDrafts((current) => {
         const next = { ...current };
@@ -283,6 +326,49 @@ export default function CustomerMasterPage() {
       setError(err.message || "Unable to save customer location.");
     } finally {
       setSavingCode("");
+    }
+  }
+
+  async function transferCustomerSalesman() {
+    const supabase = getSupabaseClient();
+    if (!supabase || !transferCustomer) return;
+
+    setTransferring(true);
+    setError("");
+
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const response = await fetch("/api/admin/customers", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customerCode: transferCustomer.customer_code,
+          salesmanCode: transferSalesmanCode,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to transfer customer.");
+      }
+
+      setCustomers((current) => current.map((row) => (
+        row.customer_code === transferCustomer.customer_code
+          ? { ...row, ...payload.customer, total_outstanding: row.total_outstanding }
+          : row
+      )));
+      setTransferCustomer(null);
+      setTransferSalesmanCode("");
+      setImportSummary(`${transferCustomer.customer_code} transferred to ${payload.customer?.current_salesman_code || transferSalesmanCode}.`);
+    } catch (err) {
+      setError(err.message || "Unable to transfer customer.");
+    } finally {
+      setTransferring(false);
     }
   }
 
@@ -556,7 +642,12 @@ export default function CustomerMasterPage() {
                       <tr key={row.customer_code || customerName} className="moduleCustomerMasterRow">
                         <td data-label={t("code")} className="moduleCustomerMasterSticky moduleCustomerMasterCode">{customerCode}</td>
                         <td data-label={t("customer")} className="moduleCustomerMasterSticky moduleCustomerMasterName">{customerName}</td>
-                        <td data-label={t("salesman")}>{row.current_salesman_code || "-"}</td>
+                        <td data-label={t("salesman")}>
+                          <div>{row.current_salesman_code || "-"}</div>
+                          {row.previous_salesman_code ? (
+                            <div className="moduleHint">{t("sharedWith")} {row.previous_salesman_code}</div>
+                          ) : null}
+                        </td>
                         <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                         <td data-label={t("outstanding")}>{formatOutstanding(row.total_outstanding)}</td>
                         <td data-label={t("latitude")}>
@@ -612,6 +703,16 @@ export default function CustomerMasterPage() {
                             >
                               {t("documents")}
                             </button>
+                            <button
+                              type="button"
+                              className="moduleInlineButton moduleActionButton"
+                              onClick={() => {
+                                setTransferCustomer(row);
+                                setTransferSalesmanCode("");
+                              }}
+                            >
+                              {t("transfer")}
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -648,6 +749,65 @@ export default function CustomerMasterPage() {
           </section>
         </div>
       </main>
+      {transferCustomer ? (
+        <div className="moduleModalOverlay" role="presentation" onClick={() => !transferring && setTransferCustomer(null)}>
+          <div className="moduleModal" role="dialog" aria-labelledby="transfer-customer-title" onClick={(event) => event.stopPropagation()}>
+            <h2 id="transfer-customer-title">{t("transferTitle")}</h2>
+            <p className="moduleHint">{t("transferHint")}</p>
+            <div className="moduleModalForm">
+              <label>
+                {t("code")}
+                <div>{transferCustomer.customer_code}</div>
+              </label>
+              <label>
+                {t("customer")}
+                <div>{transferCustomer.customer_name}</div>
+              </label>
+              <label>
+                {t("currentSalesman")}
+                <div>{transferCustomer.current_salesman_code || "-"}</div>
+              </label>
+              <label>
+                {t("transferTo")}
+                <select
+                  className="moduleInput"
+                  value={transferSalesmanCode}
+                  onChange={(event) => setTransferSalesmanCode(event.target.value)}
+                >
+                  <option value="">{t("selectSalesman")}</option>
+                  {salesmen
+                    .filter((salesman) => String(salesman.salesman_code || "").trim().toUpperCase()
+                      !== String(transferCustomer.current_salesman_code || "").trim().toUpperCase())
+                    .map((salesman) => (
+                      <option key={salesman.id || salesman.salesman_code} value={salesman.salesman_code}>
+                        {(salesman.salesman_name || salesman.salesman_code)
+                          + (salesman.salesman_code ? ` (${salesman.salesman_code})` : "")}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <div className="moduleOrderActions">
+                <button
+                  type="button"
+                  className="modulePrimaryButton"
+                  disabled={!transferSalesmanCode || transferring}
+                  onClick={transferCustomerSalesman}
+                >
+                  {transferring ? t("transferring") : t("confirmTransfer")}
+                </button>
+                <button
+                  type="button"
+                  className="moduleInlineButton moduleActionButton"
+                  disabled={transferring}
+                  onClick={() => setTransferCustomer(null)}
+                >
+                  {t("cancel")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </MorningAttendanceGate>
   );
 }

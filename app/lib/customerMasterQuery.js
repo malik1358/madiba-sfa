@@ -103,7 +103,7 @@ export async function backfillCustomersFromSalesRaw(admin, search) {
 
   const { data, error } = await admin
     .from("customers")
-    .select("customer_code,customer_name,current_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
+    .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
     .eq("customer_code", payload.customer_code)
     .maybeSingle();
   if (error) throw error;
@@ -231,7 +231,7 @@ export async function fetchAllFilteredCustomers(admin, filters) {
   while (true) {
     let query = admin
       .from("customers")
-      .select("customer_code,customer_name,current_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
+      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
       .order("customer_name", { ascending: true });
 
     query = applyCustomerMasterFilters(query, filters);
@@ -271,6 +271,7 @@ export function customerMasterExportRows(customers) {
       "Customer Code": display.customer_code,
       "Customer Name": display.customer_name,
       "Salesman Code": row.current_salesman_code || "",
+      "Previous Salesman": row.previous_salesman_code || "",
       City: row.city || "",
       Area: row.area || "",
       Lattitude: row.latitude ?? "",

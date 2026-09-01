@@ -10,6 +10,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { applyCustomerSalesmanScopeFilter } from "../../lib/customerSalesmanAssignment";
 
 const TEXT = {
   title: { en: "My Performance", ar: "أدائي" },
@@ -117,7 +118,7 @@ export default function MyPerformancePage() {
           salesTodayQuery = salesTodayQuery.in("salesman_code", scope.visibleSalesmanCodes);
           salesMonthQuery = salesMonthQuery.in("salesman_code", scope.visibleSalesmanCodes);
           monthRowsQuery = monthRowsQuery.in("salesman_code", scope.visibleSalesmanCodes);
-          customersQuery = customersQuery.in("current_salesman_code", scope.visibleSalesmanCodes);
+          customersQuery = applyCustomerSalesmanScopeFilter(customersQuery, scope.visibleSalesmanCodes);
         }
 
         const [salesTodayRes, salesMonthRes, monthRowsRes, ordersRes, customersRes] = await Promise.all([

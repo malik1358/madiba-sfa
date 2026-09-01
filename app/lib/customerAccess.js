@@ -6,6 +6,7 @@ import {
 import { buildSalesmanScopeMatchers } from "./mutualSalesmanGroups.js";
 import { findCustomerByCode } from "./prospectCustomerLink.js";
 import { customerSalesmanAssignmentMatchesScope } from "./salesHierarchy.js";
+import { assignedSalesmanCodes } from "./customerSalesmanAssignment.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -75,7 +76,7 @@ export async function ensureCustomerVisibleToScope(admin, customerCode, scope) {
 
   const { data: exactCustomer, error } = await admin
     .from("customers")
-    .select("customer_code,customer_name,current_salesman_code,latitude,longitude,city,area")
+    .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latitude,longitude,city,area")
     .eq("customer_code", normalizedCode)
     .maybeSingle();
 
@@ -88,7 +89,7 @@ export async function ensureCustomerVisibleToScope(admin, customerCode, scope) {
 
   if (matchedScope.hasAllAccess) return customer;
 
-  if (customerSalesmanAssignmentMatchesScope(customer.current_salesman_code, matchedScope)) {
+  if (assignedSalesmanCodes(customer).some((code) => customerSalesmanAssignmentMatchesScope(code, matchedScope))) {
     return customer;
   }
 

@@ -7,6 +7,10 @@ import {
   resolveInvoiceDays,
 } from "./outstanding.js";
 import { salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
+import {
+  customerAssignmentMatchesScope,
+  customerHasActiveSalesmanTransfer,
+} from "./customerSalesmanAssignment.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -50,10 +54,7 @@ export function filterCollectionQueueInvoices(invoices, options = {}) {
 }
 
 function customerMasterInScope(customer, scopeMatchers, scopeCodeSet) {
-  const customerCode = customer.current_salesman_code;
-  return !isPlaceholderSalesmanValue(customerCode)
-    && (salesmanValueMatchesScope(customerCode, scopeMatchers)
-      || scopeCodeSet.has(normalizeCode(customerCode)));
+  return customerAssignmentMatchesScope(customer, scopeMatchers, scopeCodeSet);
 }
 
 export function customerMatchesCollectionScope({
@@ -88,7 +89,9 @@ export function customerMatchesCollectionScope({
   );
 
   if (hasInvoiceSalesman) {
-    return Boolean(invoiceOwned || rowOwned);
+    return Boolean(invoiceOwned || rowOwned || (
+      customerHasActiveSalesmanTransfer(customer) && masterInScope
+    ));
   }
 
   return Boolean(masterInScope || rowOwned);

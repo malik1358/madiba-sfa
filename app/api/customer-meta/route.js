@@ -6,6 +6,7 @@ import {
   resolvePeersUnderSameHeadUserIds,
   resolveSubordinateUserIds,
 } from "../../lib/salesHierarchy.js";
+import { assignedSalesmanCodes } from "../../lib/customerSalesmanAssignment.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -182,7 +183,7 @@ async function resolveScope(admin, token) {
 async function ensureCustomerVisible(admin, customerCode, scope) {
   const { data: customer, error } = await admin
     .from("customers")
-    .select("customer_code,current_salesman_code")
+    .select("customer_code,current_salesman_code,previous_salesman_code")
     .eq("customer_code", customerCode)
     .maybeSingle();
 
@@ -191,7 +192,7 @@ async function ensureCustomerVisible(admin, customerCode, scope) {
     throw new Error("Customer not found.");
   }
 
-  if (!scope.hasAllAccess && !customerSalesmanAssignmentMatchesScope(customer.current_salesman_code, scope)) {
+  if (!scope.hasAllAccess && !assignedSalesmanCodes(customer).some((code) => customerSalesmanAssignmentMatchesScope(code, scope))) {
     const normalizedInput = normalizeCode(customerCode);
     const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
     const leadingCode = normalizeCode(leadingCodeMatch?.[1] || "");

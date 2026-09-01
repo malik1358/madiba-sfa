@@ -192,6 +192,19 @@ async function loadLatestCustomersFromBatch(admin, batchId, customerCodes) {
 }
 
 async function upsertCustomersFromLatestMap(admin, latestCustomer) {
+  const transferredByCode = new Map();
+  const { data: transferredRows, error: transferredError } = await admin
+    .from("customers")
+    .select("customer_code,current_salesman_code,previous_salesman_code")
+    .not("previous_salesman_code", "is", null);
+
+  if (transferredError) throw transferredError;
+  (transferredRows || []).forEach((row) => {
+    const previous = String(row.previous_salesman_code || "").trim();
+    if (!previous) return;
+    transferredByCode.set(String(row.customer_code || "").trim().toUpperCase(), row);
+  });
+
   const customerUpserts = [];
 
   for (
@@ -200,6 +213,7 @@ async function upsertCustomersFromLatestMap(admin, latestCustomer) {
       row,
     ] of latestCustomer
   ) {
+    const transferred = transferredByCode.get(String(customerCode || "").trim().toUpperCase());
     customerUpserts.push({
       customer_code:
         customerCode,
@@ -209,6 +223,7 @@ async function upsertCustomersFromLatestMap(admin, latestCustomer) {
         customerCode,
 
       current_salesman_code:
+        transferred?.current_salesman_code ||
         row.salesman_code,
 
       latest_transaction_date:

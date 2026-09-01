@@ -93,7 +93,7 @@ async function readOutstandingInvoicesFromTable(admin) {
 
   const { data: customers, error: customersError } = await admin
     .from("customers")
-      .select("customer_code,customer_name,current_salesman_code");
+      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code");
 
   if (customersError) throw customersError;
 
@@ -534,7 +534,7 @@ async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
     ]).join(",");
     const { data, error } = await admin
       .from("customers")
-      .select("customer_code,customer_name,current_salesman_code,city,area,latitude,longitude")
+      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude")
       .or(filters);
 
     if (error) throw error;

@@ -224,7 +224,9 @@ function CustomerAuditPageContent() {
     const q = search.trim().toLowerCase();
 
     return customers.filter((customer) => {
-      const salesmanOK = selectedSalesman === "ALL" || customer.current_salesman_code === selectedSalesman;
+      const salesmanOK = selectedSalesman === "ALL"
+        || customer.current_salesman_code === selectedSalesman
+        || customer.previous_salesman_code === selectedSalesman;
       if (!salesmanOK) return false;
       if (!q) return true;
 

@@ -112,6 +112,59 @@ export async function PATCH(request) {
 
     const body = await request.json();
     const customerCode = String(body.customerCode || "").trim().toUpperCase();
+    const transferToSalesmanCode = String(body.salesmanCode || body.transferToSalesmanCode || "").trim();
+
+    if (!customerCode) throw new Error("Customer code is required");
+
+    if (transferToSalesmanCode) {
+      const { data: existing, error: existingError } = await admin
+        .from("customers")
+        .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
+        .eq("customer_code", customerCode)
+        .maybeSingle();
+
+      if (existingError) throw existingError;
+      if (!existing) throw new Error("Customer not found.");
+
+      const nextSalesman = transferToSalesmanCode.toUpperCase().replace(/\s+/g, " ");
+      const currentSalesman = String(existing.current_salesman_code || "").trim();
+      if (!nextSalesman) throw new Error("Salesman is required.");
+      if (nextSalesman.toUpperCase() === currentSalesman.toUpperCase()) {
+        throw new Error("Customer is already assigned to this salesman.");
+      }
+
+      const { data: salesmanProfiles, error: salesmanError } = await admin
+        .from("profiles")
+        .select("salesman_code,salesman_name");
+
+      if (salesmanError) throw salesmanError;
+      const salesmanProfile = (salesmanProfiles || []).find((row) => {
+        const code = String(row.salesman_code || "").trim().toUpperCase().replace(/\s+/g, " ");
+        const name = String(row.salesman_name || "").trim().toUpperCase().replace(/\s+/g, " ");
+        return code === nextSalesman || name === nextSalesman;
+      });
+
+      if (!salesmanProfile?.salesman_code) {
+        throw new Error("Salesman not found. Use an existing salesman code.");
+      }
+
+      const assignedCode = String(salesmanProfile.salesman_code).trim();
+      const { data, error } = await admin
+        .from("customers")
+        .update({
+          previous_salesman_code: currentSalesman || null,
+          current_salesman_code: assignedCode,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("customer_code", customerCode)
+        .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) throw new Error("Customer not found.");
+      return NextResponse.json({ success: true, customer: data });
+    }
+
     const latitude = body.latitude === null || body.latitude === undefined || body.latitude === ""
       ? null
       : Number(body.latitude);
@@ -137,7 +190,7 @@ export async function PATCH(request) {
       .from("customers")
       .update(updatePayload)
       .eq("customer_code", customerCode)
-      .select("customer_code,customer_name,current_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
+      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
       .maybeSingle();
 
     if (error) throw error;

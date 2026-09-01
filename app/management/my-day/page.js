@@ -21,6 +21,7 @@ import { shouldRequireTransactionGps } from "../../lib/moduleAccess";
 import { detectTable } from "../../lib/schemaGuards";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
+import { resolveVisitLastInvoiceDate } from "../../lib/outstanding";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
 import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
 import { buildGpsActivityNote, formatCollectorDisplayName, resolveGpsCapturePlatform } from "../../lib/geo";
@@ -167,6 +168,24 @@ function daysBetweenNullable(date) {
   const now = new Date();
   const diff = now.getTime() - target.getTime();
   return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+}
+
+function visitLastInvoiceDate(row) {
+  return resolveVisitLastInvoiceDate(row) || row?.latest_transaction_date || row?.last_invoice_date || null;
+}
+
+function withVisitLastInvoice(row) {
+  const lastInvoiceDate = visitLastInvoiceDate(row);
+  return {
+    ...row,
+    last_invoice_date: lastInvoiceDate,
+    days_since_last_invoice: daysBetweenNullable(lastInvoiceDate),
+    status: row.status === "Visited"
+      ? "Visited"
+      : daysBetween(lastInvoiceDate) > 21
+        ? "Overdue"
+        : "Planned",
+  };
 }
 
 function getSortTimestamp(date) {
@@ -403,7 +422,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
         if (cachedSnapshot) {
           setSummary(cachedSnapshot.summary || summary);
           setRouteRows(cachedSnapshot.routeRows || []);
-          setVisitStatusRows(cachedSnapshot.visitStatusRows || []);
+          setVisitStatusRows((cachedSnapshot.visitStatusRows || []).map(withVisitLastInvoice));
           setInactiveCustomers(cachedSnapshot.inactiveCustomers || []);
           setProspectScheduleRows(cachedSnapshot.prospectScheduleRows || []);
           setLoading(false);
@@ -698,8 +717,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
           }
         }
 
-        const overdueRows = scopedCustomerRows.filter((row) => daysBetween(row.latest_transaction_date) > 21);
-        const followUpRows = scopedCustomerRows.filter((row) => daysBetween(row.latest_transaction_date) > 10);
+        const overdueRows = scopedCustomerRows.filter((row) => daysBetween(visitLastInvoiceDate(row)) > 21);
+        const followUpRows = scopedCustomerRows.filter((row) => daysBetween(visitLastInvoiceDate(row)) > 10);
 
         const visiblePendingOrders = (pendingOrdersRes.data || []).filter((row) => {
           if (scope.hasAllAccess) return true;
@@ -725,7 +744,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
         setVisitStatusRows(
           scopedCustomerRows
             .filter(isVisitStatusCustomer)
-            .map((row) => ({
+            .map((row) => withVisitLastInvoice({
               customer_code: row.customer_code,
               customer_name: row.customer_name,
               city: row.city,
@@ -733,8 +752,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
               salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
               salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
               last_invoice_date: row.latest_transaction_date || null,
+              latest_transaction_date: row.latest_transaction_date || null,
               last_visit_date: latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
-              days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
               days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
               next_visit_at: nextVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               recent_sales_value: Number(row.recent_sales_value || 0),
@@ -746,24 +765,25 @@ export default function MyDayPage({ mode = "default" } = {}) {
               longitude: row.longitude,
               status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
-                : daysBetween(row.latest_transaction_date) > 21
-                ? "Overdue"
                 : "Planned",
             }))
         );
 
         setInactiveCustomers(
-          inactiveCustomerRows.map((row) => ({
-            customer_code: row.customer_code,
-            customer_name: row.customer_name,
-            city: row.city,
-            area: row.area,
-            salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
-            salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
-            last_invoice_date: row.latest_transaction_date || null,
-            days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
-            inactive_marked_at: row.inactive_marked_at || null,
-          }))
+          inactiveCustomerRows.map((row) => {
+            const lastInvoiceDate = visitLastInvoiceDate(row);
+            return {
+              customer_code: row.customer_code,
+              customer_name: row.customer_name,
+              city: row.city,
+              area: row.area,
+              salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
+              salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
+              last_invoice_date: lastInvoiceDate,
+              days_since_last_invoice: daysBetweenNullable(lastInvoiceDate),
+              inactive_marked_at: row.inactive_marked_at || null,
+            };
+          })
         );
 
         await writeMyDaySnapshot(session.user.id, today, {
@@ -778,7 +798,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
           routeRows: (routeRes.data || []).filter(isVisitStatusCustomer),
           visitStatusRows: scopedCustomerRows
             .filter(isVisitStatusCustomer)
-            .map((row) => ({
+            .map((row) => withVisitLastInvoice({
               customer_code: row.customer_code,
               customer_name: row.customer_name,
               city: row.city,
@@ -786,8 +806,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
               salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
               salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
               last_invoice_date: row.latest_transaction_date || null,
+              latest_transaction_date: row.latest_transaction_date || null,
               last_visit_date: latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
-              days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
               days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null),
               next_visit_at: nextVisitByCustomer.get(String(row.customer_code || "").trim().toUpperCase()) || null,
               recent_sales_value: Number(row.recent_sales_value || 0),
@@ -799,21 +819,22 @@ export default function MyDayPage({ mode = "default" } = {}) {
               longitude: row.longitude,
               status: todayCustomers.has(String(row.customer_code || "").trim().toUpperCase())
                 ? "Visited"
-                : daysBetween(row.latest_transaction_date) > 21
-                ? "Overdue"
                 : "Planned",
             })),
-          inactiveCustomers: inactiveCustomerRows.map((row) => ({
-            customer_code: row.customer_code,
-            customer_name: row.customer_name,
-            city: row.city,
-            area: row.area,
-            salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
-            salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
-            last_invoice_date: row.latest_transaction_date || null,
-            days_since_last_invoice: daysBetweenNullable(row.latest_transaction_date),
-            inactive_marked_at: row.inactive_marked_at || null,
-          })),
+          inactiveCustomers: inactiveCustomerRows.map((row) => {
+            const lastInvoiceDate = visitLastInvoiceDate(row);
+            return {
+              customer_code: row.customer_code,
+              customer_name: row.customer_name,
+              city: row.city,
+              area: row.area,
+              salesman_code: String(row.current_salesman_code || "").trim().toUpperCase(),
+              salesman_name: salesmanNameByCode.get(String(row.current_salesman_code || "").trim().toUpperCase()) || String(row.current_salesman_code || "").trim().toUpperCase(),
+              last_invoice_date: lastInvoiceDate,
+              days_since_last_invoice: daysBetweenNullable(lastInvoiceDate),
+              inactive_marked_at: row.inactive_marked_at || null,
+            };
+          }),
           prospectScheduleRows: loadedProspectScheduleRows,
         });
       } catch (err) {
@@ -1325,7 +1346,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       );
 
       if (activatedRow) {
-        const nextVisitStatusRow = {
+        const nextVisitStatusRow = withVisitLastInvoice({
           customer_code: activatedRow.customer_code,
           customer_name: activatedRow.customer_name,
           city: activatedRow.city,
@@ -1333,8 +1354,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
           salesman_code: String(activatedRow.current_salesman_code || "").trim().toUpperCase(),
           salesman_name: String(customer.salesman_name || activatedRow.current_salesman_code || "").trim().toUpperCase(),
           last_invoice_date: activatedRow.latest_transaction_date || null,
+          latest_transaction_date: activatedRow.latest_transaction_date || null,
           last_visit_date: null,
-          days_since_last_invoice: daysBetweenNullable(activatedRow.latest_transaction_date),
           days_since_last_visit: null,
           next_visit_at: null,
           recent_sales_value: Number(activatedRow.recent_sales_value || 0),
@@ -1344,8 +1365,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
           outstanding_above_90: Number(activatedRow.outstanding_above_90 || 0),
           latitude: activatedRow.latitude,
           longitude: activatedRow.longitude,
-          status: daysBetween(activatedRow.latest_transaction_date) > 21 ? "Overdue" : "Planned",
-        };
+          status: "Planned",
+        });
 
         setVisitStatusRows((current) => {
           const filtered = current.filter(

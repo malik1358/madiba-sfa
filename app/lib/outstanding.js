@@ -1300,3 +1300,44 @@ export function latestOutstandingInvoiceDate(invoices, customerCode, customerNam
   return latest;
 }
 
+export function youngestPositiveVisitBucketMaxAge(summary) {
+  if (Number(summary?.days0To30 || 0) > 0) return 30;
+  if (Number(summary?.days30To60 || 0) > 0) return 60;
+  if (Number(summary?.days61To90 || 0) > 0) return 90;
+  return null;
+}
+
+export function visitOutstandingSummaryFromRow(row) {
+  return {
+    days0To30: Number(row?.outstanding_0_30 || row?.days0To30 || 0),
+    days30To60: Number(row?.outstanding_30_60 || row?.days30To60 || 0),
+    days61To90: Number(row?.outstanding_61_90 || row?.days61To90 || 0),
+    daysAbove90: Number(row?.outstanding_above_90 || row?.daysAbove90 || 0),
+  };
+}
+
+function subtractDaysFromDateOnly(todayIso, days) {
+  const today = parseOutstandingSheetDate(todayIso) || new Date().toISOString().slice(0, 10);
+  const dt = new Date(`${today}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() - Math.max(0, Number(days || 0)));
+  return dt.toISOString().slice(0, 10);
+}
+
+export function clampLatestInvoiceDateToOutstandingBuckets(latestDate, summary, todayIso = new Date().toISOString()) {
+  const current = laterDateOnly(latestDate);
+  const maxAge = youngestPositiveVisitBucketMaxAge(summary);
+  if (maxAge == null) return current;
+
+  const floorDate = subtractDaysFromDateOnly(todayIso, maxAge);
+  return laterDateOnly(current, floorDate) || floorDate;
+}
+
+export function resolveVisitLastInvoiceDate(row, todayIso = new Date().toISOString()) {
+  return clampLatestInvoiceDateToOutstandingBuckets(
+    laterDateOnly(row?.latest_transaction_date, row?.last_invoice_date),
+    visitOutstandingSummaryFromRow(row),
+    todayIso,
+  ) || laterDateOnly(row?.latest_transaction_date, row?.last_invoice_date) || "";
+}
+
+

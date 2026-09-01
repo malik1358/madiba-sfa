@@ -8,6 +8,7 @@ import {
   hydrateOutstandingInvoices,
   laterDateOnly,
   latestOutstandingInvoiceDate,
+  clampLatestInvoiceDateToOutstandingBuckets,
   resolveOutstandingCustomerOwnership,
   summarizeOutstandingBucketsForVisitStatus,
 } from "../../../lib/outstanding";
@@ -602,11 +603,14 @@ async function attachOutstandingValues(admin, customers) {
       customer.customer_code,
       customer.customer_name,
     );
+    const latestDate = clampLatestInvoiceDateToOutstandingBuckets(
+      laterDateOnly(customer.latest_transaction_date, latestInvoiceDate),
+      summary,
+    );
 
     return {
       ...customer,
-      latest_transaction_date: laterDateOnly(customer.latest_transaction_date, latestInvoiceDate)
-        || customer.latest_transaction_date,
+      latest_transaction_date: latestDate || customer.latest_transaction_date,
       outstanding_0_30: summary.days0To30,
       outstanding_30_60: summary.days30To60,
       outstanding_61_90: summary.days61To90,

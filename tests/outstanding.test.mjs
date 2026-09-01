@@ -45,6 +45,8 @@ import {
   laterDateOnly,
   latestOutstandingInvoiceDate,
   outstandingInvoiceDate,
+  clampLatestInvoiceDateToOutstandingBuckets,
+  resolveVisitLastInvoiceDate,
   sanitizeStoredInvoiceDays,
   selectPreferredOutstandingParses,
   buildCollectionOutstandingBucketsFromInvoices,
@@ -86,6 +88,27 @@ test("latestOutstandingInvoiceDate uses the newest matching invoice not the cust
       "Rawa'i Al-Kutub Trading Company",
     ),
     "2026-08-10",
+  );
+});
+
+test("0-30 outstanding clamps a 250-day master date to at most 30 days", () => {
+  assert.equal(
+    clampLatestInvoiceDateToOutstandingBuckets("2025-12-26", { days0To30: 33433 }, "2026-09-01"),
+    "2026-08-02",
+  );
+  assert.equal(
+    resolveVisitLastInvoiceDate({
+      latest_transaction_date: "2025-12-26",
+      outstanding_0_30: 33433,
+    }, "2026-09-01"),
+    "2026-08-02",
+  );
+});
+
+test("keeps a real August sale date when 0-30 outstanding also exists", () => {
+  assert.equal(
+    clampLatestInvoiceDateToOutstandingBuckets("2026-08-24", { days0To30: 3753 }, "2026-09-01"),
+    "2026-08-24",
   );
 });
 

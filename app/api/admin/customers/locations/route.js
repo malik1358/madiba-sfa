@@ -6,6 +6,7 @@ import {
   parseLocationSpreadsheetRow,
   planCustomerLocationUpdates,
 } from "../../../../lib/customerLocationImport.js";
+import { CUSTOMER_GPS_SOURCE } from "../../../../lib/customerGpsHistory.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -27,7 +28,7 @@ async function requireAdminAccess(admin, request) {
 
   const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("role")
+    .select("role,salesman_code,salesman_name")
     .eq("id", user.id)
     .single();
 
@@ -36,7 +37,7 @@ async function requireAdminAccess(admin, request) {
     return { error: NextResponse.json({ success: false, error: "Only admin or manager can import customer locations." }, { status: 403 }) };
   }
 
-  return { user, role };
+    return { user, role, profile };
 }
 
 async function fetchAllCustomers(admin) {
@@ -101,7 +102,16 @@ export async function POST(request) {
 
     const customers = await fetchAllCustomers(admin);
     const plan = planCustomerLocationUpdates(parsedRows, customers);
-    const result = await applyCustomerLocationUpdates(admin, plan.updates);
+    const result = await applyCustomerLocationUpdates(admin, plan.updates, {
+      actor: {
+        id: access.user.id,
+        email: access.user.email,
+        salesman_code: access.profile?.salesman_code,
+        salesman_name: access.profile?.salesman_name,
+        role: access.role,
+      },
+      source: CUSTOMER_GPS_SOURCE.excelImport,
+    });
 
     return NextResponse.json({
       success: true,

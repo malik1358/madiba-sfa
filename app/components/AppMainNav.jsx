@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listAccessibleNavGroups, localizedModuleLabel, localizedNavGroupLabel } from "../lib/moduleAccess";
+import { listAccessibleNavGroups, localizedModuleLabel, localizedNavGroupLabel, pathMatchesModuleHref } from "../lib/moduleAccess";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { useModuleAccess } from "../hooks/useModuleAccess";
 import { getSupabaseClient } from "../lib/supabase";
@@ -74,7 +74,7 @@ export default function AppMainNav() {
     <nav className="appMainNav" aria-label={t("mainNavigation")} dir={dir} ref={navRef}>
       {groups.map((group) => {
         const isOpen = openGroup === group.key;
-        const hasActiveItem = group.items.some((item) => item.href === pathname);
+        const hasActiveItem = group.items.some((item) => pathMatchesModuleHref(pathname, item.href));
 
         return (
           <div
@@ -100,7 +100,7 @@ export default function AppMainNav() {
                 <Link
                   key={item.moduleKey}
                   href={item.href}
-                  className={`appMainNavLink${pathname === item.href ? " appMainNavLink--active" : ""}`}
+                  className={`appMainNavLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavLink--active" : ""}`}
                   onClick={() => setOpenGroup("")}
                 >
                   {localizedModuleLabel(item.moduleKey, language)}

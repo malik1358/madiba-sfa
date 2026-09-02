@@ -7,6 +7,11 @@ import {
   normalizeCustomerMasterOutstandingFilter,
   normalizeCustomerMasterSearch,
 } from "../../../lib/customerMasterQuery.js";
+import {
+  applyCustomerGpsUpdate,
+  CUSTOMER_GPS_SOURCE,
+  CUSTOMER_MASTER_GPS_SELECT,
+} from "../../../lib/customerGpsHistory.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -26,18 +31,18 @@ async function requireAdminAccess(admin, request) {
     return { error: NextResponse.json({ success: false, error: "Invalid login session" }, { status: 401 }) };
   }
 
-  const { data: profile, error: profileError } = await admin
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+    const { data: profile, error: profileError } = await admin
+      .from("profiles")
+      .select("role,salesman_code,salesman_name")
+      .eq("id", user.id)
+      .single();
 
-  const role = String(profile?.role || "").toLowerCase();
-  if (profileError || !profile || !["admin", "manager"].includes(role)) {
-    return { error: NextResponse.json({ success: false, error: "Only admin or manager can access customer master." }, { status: 403 }) };
-  }
+    const role = String(profile?.role || "").toLowerCase();
+    if (profileError || !profile || !["admin", "manager"].includes(role)) {
+      return { error: NextResponse.json({ success: false, error: "Only admin or manager can access customer master." }, { status: 403 }) };
+    }
 
-  return { user, role };
+    return { user, role, profile };
 }
 
 export async function GET(request) {
@@ -186,15 +191,20 @@ export async function PATCH(request) {
       updatePayload.longitude = longitude;
     }
 
-    const { data, error } = await admin
-      .from("customers")
-      .update(updatePayload)
-      .eq("customer_code", customerCode)
-      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
-      .maybeSingle();
-
-    if (error) throw error;
-    if (!data) throw new Error("Customer not found.");
+    const data = await applyCustomerGpsUpdate(admin, {
+      customerCode,
+      latitude: updatePayload.latitude,
+      longitude: updatePayload.longitude,
+      actor: {
+        id: access.user.id,
+        email: access.user.email,
+        salesman_code: access.profile?.salesman_code,
+        salesman_name: access.profile?.salesman_name,
+        role: access.role,
+      },
+      source: CUSTOMER_GPS_SOURCE.customerMaster,
+      selectColumns: CUSTOMER_MASTER_GPS_SELECT,
+    });
 
     return NextResponse.json({ success: true, customer: data });
   } catch (error) {

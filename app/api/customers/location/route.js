@@ -3,6 +3,11 @@ import { ensureCustomerVisibleToScope, withSalesScopeMatchers } from "../../../l
 import { formatCustomerLookupPreview } from "../../../lib/prospectCustomerLink.js";
 import { shouldRequireTransactionGps } from "../../../lib/moduleAccess.js";
 import { resolveSalesScopeForUserId } from "../../user/sales-scope/route.js";
+import {
+  applyCustomerGpsUpdate,
+  CUSTOMER_GPS_SOURCE,
+  CUSTOMER_LOCATION_SELECT,
+} from "../../../lib/customerGpsHistory.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -129,22 +134,27 @@ export async function PATCH(request) {
     const customer = await ensureCustomerAccess(admin, profile, customerCode);
     const storedCustomerCode = String(customer.customer_code || customerCode).trim();
 
-    const updatePayload = {
-      latitude,
-      longitude,
-    };
-    if (area !== undefined) updatePayload.area = area;
-    if (city !== undefined) updatePayload.city = city;
+    const extraUpdate = {};
+    if (area !== undefined) extraUpdate.area = area;
+    if (city !== undefined) extraUpdate.city = city;
 
-    const { data, error } = await admin
-      .from("customers")
-      .update(updatePayload)
-      .eq("customer_code", storedCustomerCode)
-      .select("customer_code,customer_name,latitude,longitude,city,area")
-      .maybeSingle();
-
-    if (error) throw error;
-    if (!data) throw new Error("Customer location was not updated.");
+    const data = await applyCustomerGpsUpdate(admin, {
+      customerCode: storedCustomerCode,
+      latitude: Number.isFinite(latitude) ? latitude : null,
+      longitude: Number.isFinite(longitude) ? longitude : null,
+      previousLatitude: customer.latitude,
+      previousLongitude: customer.longitude,
+      actor: {
+        id: user.id,
+        email: user.email,
+        salesman_code: profile.salesman_code,
+        salesman_name: profile.salesman_name,
+        role: profile.role,
+      },
+      source: CUSTOMER_GPS_SOURCE.visit,
+      extraUpdate,
+      selectColumns: CUSTOMER_LOCATION_SELECT,
+    });
 
     return Response.json({ success: true, customer: data });
   } catch (error) {

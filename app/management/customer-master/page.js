@@ -9,6 +9,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveCustomerMasterExportFields } from "../../lib/customerCode.js";
 import { normalizeCustomerMasterSearch } from "../../lib/customerMasterQuery.js";
+import { formatGpsUpdatedAt, gpsSourceLabel } from "../../lib/customerGpsHistory.js";
 import { resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
@@ -48,6 +49,15 @@ const TEXT = {
   cityArea: { en: "City / Area", ar: "المدينة / المنطقة" },
   latitude: { en: "Latitude", ar: "خط العرض" },
   longitude: { en: "Longitude", ar: "خط الطول" },
+  gpsUpdated: { en: "GPS updated", ar: "تحديث GPS" },
+  gpsUpdatedBy: { en: "Updated by", ar: "حدّثه" },
+  gpsHistory: { en: "GPS history", ar: "سجل GPS" },
+  gpsHistoryTitle: { en: "GPS update history", ar: "سجل تحديثات GPS" },
+  gpsSource: { en: "Source", ar: "المصدر" },
+  previousGps: { en: "Previous GPS", ar: "GPS السابق" },
+  noGpsHistory: { en: "No GPS updates recorded yet. Run sql/setup_customer_gps_history.sql in Supabase if this stays empty after saves.", ar: "لا يوجد سجل لتحديثات GPS بعد." },
+  loadingHistory: { en: "Loading GPS history...", ar: "جاري تحميل سجل GPS..." },
+  closeHistory: { en: "Close", ar: "إغلاق" },
   status: { en: "Status", ar: "الحالة" },
   actions: { en: "Actions", ar: "الإجراءات" },
   save: { en: "Save", ar: "حفظ" },
@@ -159,6 +169,9 @@ export default function CustomerMasterPage() {
   const [outstandingFilter, setOutstandingFilter] = useState("all");
   const [drafts, setDrafts] = useState({});
   const [documentsCustomer, setDocumentsCustomer] = useState(null);
+  const [historyCustomer, setHistoryCustomer] = useState(null);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [salesmen, setSalesmen] = useState([]);
   const [transferCustomer, setTransferCustomer] = useState(null);
@@ -178,6 +191,13 @@ export default function CustomerMasterPage() {
       document.getElementById("customer-documents-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }, [documentsCustomer]);
+
+  useEffect(() => {
+    if (!historyCustomer) return;
+    window.requestAnimationFrame(() => {
+      document.getElementById("customer-gps-history-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [historyCustomer]);
 
   const loadCustomers = useCallback(async (page = 1) => {
     const supabase = getSupabaseClient();
@@ -326,6 +346,36 @@ export default function CustomerMasterPage() {
       setError(err.message || "Unable to save customer location.");
     } finally {
       setSavingCode("");
+    }
+  }
+
+  async function loadGpsHistory(customer) {
+    const supabase = getSupabaseClient();
+    if (!supabase || !customer?.customer_code) return;
+
+    setHistoryCustomer(customer);
+    setHistoryLoading(true);
+    setHistoryRows([]);
+    setError("");
+
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const response = await fetch(
+        `/api/admin/customers/gps-history?customerCode=${encodeURIComponent(customer.customer_code)}`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to load GPS history.");
+      }
+      setHistoryRows(Array.isArray(payload.history) ? payload.history : []);
+    } catch (err) {
+      setError(err.message || "Unable to load GPS history.");
+      setHistoryRows([]);
+    } finally {
+      setHistoryLoading(false);
     }
   }
 
@@ -617,6 +667,58 @@ export default function CustomerMasterPage() {
               />
             ) : null}
 
+            {historyCustomer ? (
+              <section id="customer-gps-history-panel" className="moduleSection" style={{ marginBottom: "14px" }}>
+                <div className="moduleSectionHeader">
+                  <h2>{t("gpsHistoryTitle")}</h2>
+                  <button type="button" className="moduleInlineButton" onClick={() => { setHistoryCustomer(null); setHistoryRows([]); }}>
+                    {t("closeHistory")}
+                  </button>
+                </div>
+                <div className="moduleHint">
+                  {historyCustomer.customer_name || historyCustomer.customer_code}
+                  {" · "}
+                  {historyCustomer.customer_code}
+                </div>
+                {historyLoading ? (
+                  <div className="moduleLoading">{t("loadingHistory")}</div>
+                ) : historyRows.length === 0 ? (
+                  <div className="moduleHint">{t("noGpsHistory")}</div>
+                ) : (
+                  <div className="moduleTableWrap">
+                    <table className="moduleTable">
+                      <thead>
+                        <tr>
+                          <th>{t("gpsUpdated")}</th>
+                          <th>{t("gpsUpdatedBy")}</th>
+                          <th>{t("gpsSource")}</th>
+                          <th>{t("latitude")}</th>
+                          <th>{t("longitude")}</th>
+                          <th>{t("previousGps")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {historyRows.map((entry) => (
+                          <tr key={entry.id}>
+                            <td>{formatGpsUpdatedAt(entry.created_at) || "-"}</td>
+                            <td>{entry.updated_by_name || "-"}</td>
+                            <td>{gpsSourceLabel(entry.source)}</td>
+                            <td>{entry.latitude ?? "-"}</td>
+                            <td>{entry.longitude ?? "-"}</td>
+                            <td>
+                              {entry.previous_latitude != null && entry.previous_longitude != null
+                                ? `${entry.previous_latitude}, ${entry.previous_longitude}`
+                                : "-"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            ) : null}
+
             <div className="moduleTableWrap moduleCustomerMasterTableWrap">
               <table className="moduleTable moduleCustomerMasterTable">
                 <thead>
@@ -628,6 +730,8 @@ export default function CustomerMasterPage() {
                     <th>{t("outstanding")}</th>
                     <th>{t("latitude")}</th>
                     <th>{t("longitude")}</th>
+                    <th>{t("gpsUpdated")}</th>
+                    <th>{t("gpsUpdatedBy")}</th>
                     <th>{t("status")}</th>
                     <th>{t("actions")}</th>
                   </tr>
@@ -676,6 +780,13 @@ export default function CustomerMasterPage() {
                             }))}
                           />
                         </td>
+                        <td data-label={t("gpsUpdated")}>
+                          {formatGpsUpdatedAt(row.gps_updated_at) || "-"}
+                          {row.gps_update_source ? (
+                            <div className="moduleHint">{gpsSourceLabel(row.gps_update_source)}</div>
+                          ) : null}
+                        </td>
+                        <td data-label={t("gpsUpdatedBy")}>{row.gps_updated_by_name || "-"}</td>
                         <td data-label={t("status")}>
                           <div>{row.is_active ? t("active") : t("inactive")}</div>
                           <div className="moduleHint">{hasSavedGps(row) ? t("hasGps") : t("noGps")}</div>
@@ -689,6 +800,13 @@ export default function CustomerMasterPage() {
                               onClick={() => saveCustomerLocation(row)}
                             >
                               {savingCode === row.customer_code ? "..." : t("save")}
+                            </button>
+                            <button
+                              type="button"
+                              className="moduleInlineButton moduleActionButton"
+                              onClick={() => loadGpsHistory(row)}
+                            >
+                              {t("gpsHistory")}
                             </button>
                             <Link
                               href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`}

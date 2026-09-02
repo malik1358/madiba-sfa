@@ -187,6 +187,30 @@ export const ROLE_LABELS = {
   "product-promoter": { en: "product-promoter", ar: "مروج منتجات" },
 };
 
+export const PINNED_MODULE_KEYS = {
+  admin: ["customerAudit", "paymentCollections", "upload", "dailyVisitReport"],
+  manager: ["customerAudit", "paymentCollections", "upload", "dailyVisitReport"],
+  salesman: ["myDay", "customerAudit", "newOrder", "myCollections"],
+  collector: ["paymentCollections", "collectionReport", "dailyVisitReport", "userActivity"],
+  "invoice-maker": ["customerAudit", "pendingOrders", "upload", "paymentCollections"],
+  "product-promoter": ["myDay", "customerAudit", "newOrder", "gpsMap"],
+};
+
+export function pinnedModuleKeysForAccess(access) {
+  const role = access?.collectionOnly ? "collector" : normalizeAccessRole(access?.role);
+  const keys = PINNED_MODULE_KEYS[role] || PINNED_MODULE_KEYS.salesman;
+  return keys.filter((moduleKey) => access?.canAccess?.(moduleKey));
+}
+
+export function pathMatchesModuleHref(pathname, href) {
+  const path = String(pathname || "").trim();
+  const target = String(href || "").trim();
+  if (!path || !target) return false;
+  if (path === target) return true;
+  if (target === "/") return false;
+  return path.startsWith(`${target}/`);
+}
+
 export function localizedModuleLabel(moduleKey, language = "en") {
   const labels = MODULE_LABELS[moduleKey];
   if (labels) return labels[language] || labels.en || "";

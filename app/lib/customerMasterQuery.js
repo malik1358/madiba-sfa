@@ -1,5 +1,10 @@
 import { findOutstandingForCustomer, OUTSTANDING_DATASET_KEY } from "./outstanding.js";
 import { normalizeCustomerNameKey, resolveCustomerMasterExportFields } from "./customerCode.js";
+import {
+  CUSTOMER_MASTER_GPS_SELECT,
+  CUSTOMER_MASTER_GPS_SELECT_FALLBACK,
+  isMissingGpsAuditError,
+} from "./customerGpsHistory.js";
 
 export function normalizeCustomerMasterSearch(value) {
   return String(value || "").trim().replace(/^\*+|\*+$/g, "").trim();
@@ -103,9 +108,18 @@ export async function backfillCustomersFromSalesRaw(admin, search) {
 
   const { data, error } = await admin
     .from("customers")
-    .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
+    .select(CUSTOMER_MASTER_GPS_SELECT)
     .eq("customer_code", payload.customer_code)
     .maybeSingle();
+  if (error && isMissingGpsAuditError(error)) {
+    const fallback = await admin
+      .from("customers")
+      .select(CUSTOMER_MASTER_GPS_SELECT_FALLBACK)
+      .eq("customer_code", payload.customer_code)
+      .maybeSingle();
+    if (fallback.error) throw fallback.error;
+    return fallback.data ? [fallback.data] : [payload];
+  }
   if (error) throw error;
   return data ? [data] : [payload];
 }
@@ -227,16 +241,23 @@ export async function fetchAllFilteredCustomers(admin, filters) {
   const pageSize = 1000;
   let from = 0;
   const rows = [];
+  let selectColumns = CUSTOMER_MASTER_GPS_SELECT;
 
   while (true) {
     let query = admin
       .from("customers")
-      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude,is_active,latest_transaction_date")
+      .select(selectColumns)
       .order("customer_name", { ascending: true });
 
     query = applyCustomerMasterFilters(query, filters);
 
     const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error && isMissingGpsAuditError(error) && selectColumns === CUSTOMER_MASTER_GPS_SELECT) {
+      selectColumns = CUSTOMER_MASTER_GPS_SELECT_FALLBACK;
+      from = 0;
+      rows.length = 0;
+      continue;
+    }
     if (error) throw error;
     if (!Array.isArray(data) || data.length === 0) break;
 
@@ -277,6 +298,9 @@ export function customerMasterExportRows(customers) {
       Lattitude: row.latitude ?? "",
       Longitutde: row.longitude ?? "",
       "GPS Status": customerHasSavedGps(row) ? "With GPS" : "Missing GPS",
+      "GPS Updated At": row.gps_updated_at || "",
+      "GPS Updated By": row.gps_updated_by_name || "",
+      "GPS Update Source": row.gps_update_source || "",
       Active: row.is_active ? "Yes" : "No",
       "Total Outstanding": Number(row.total_outstanding || 0),
       "Latest Transaction Date": row.latest_transaction_date || "",

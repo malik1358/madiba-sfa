@@ -8,6 +8,8 @@ import {
   localizedModuleLabel,
   localizedNavGroupLabel,
   moduleLabelForPath,
+  pathMatchesModuleHref,
+  pinnedModuleKeysForAccess,
   shouldRequireTransactionGps,
   shouldRequireGpsAccessGate,
 } from "../app/lib/moduleAccess.js";
@@ -88,6 +90,29 @@ test("business dashboard is limited to admin and manager", () => {
   assert.equal(buildModuleAccess({ role: "manager" }).canAccess("businessDashboard"), true);
   assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("businessDashboard"), false);
   assert.equal(buildModuleAccess({ role: "collector" }).canAccess("businessDashboard"), false);
+});
+
+test("admin shortcut buttons stay the same set on every page", () => {
+  const access = buildModuleAccess({ role: "admin" });
+  assert.deepEqual(pinnedModuleKeysForAccess(access), [
+    "customerAudit",
+    "paymentCollections",
+    "upload",
+    "dailyVisitReport",
+  ]);
+  assert.equal(pathMatchesModuleHref("/management/customer-audit", "/management/customer-audit"), true);
+  assert.equal(pathMatchesModuleHref("/management/payment-collections/legal", "/management/payment-collections"), true);
+  assert.equal(pathMatchesModuleHref("/management/customer-audit", "/"), false);
+});
+
+test("salesman shortcut buttons include field work not admin imports", () => {
+  const access = buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" });
+  assert.deepEqual(pinnedModuleKeysForAccess(access), [
+    "myDay",
+    "customerAudit",
+    "newOrder",
+    "myCollections",
+  ]);
 });
 
 test("localized module and nav labels return Arabic text", () => {

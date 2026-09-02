@@ -1,4 +1,5 @@
 import { canonicalCustomerCode, normalizeCustomerNameKey, parsePartyName } from "./customerCode.js";
+import { applyCustomerGpsUpdate, CUSTOMER_GPS_SOURCE } from "./customerGpsHistory.js";
 
 const LOCATION_COLUMN_ALIASES = {
   partyName: ["party name", "party_name", "customer", "customer name"],
@@ -153,6 +154,8 @@ export function planCustomerLocationUpdates(rows, customers, options = {}) {
       customer_name: customer.customer_name,
       latitude: Number(row.latitude),
       longitude: Number(row.longitude),
+      previous_latitude: customer.latitude ?? null,
+      previous_longitude: customer.longitude ?? null,
       source_party_name: row.party_name || "",
     });
   });
@@ -160,27 +163,31 @@ export function planCustomerLocationUpdates(rows, customers, options = {}) {
   return { updates, skipped, notFound, alreadySet };
 }
 
-export async function applyCustomerLocationUpdates(admin, updates, chunkSize = 100) {
+export async function applyCustomerLocationUpdates(admin, updates, options = {}) {
+  const chunkSize = Number(options.chunkSize || 100);
+  const actor = options.actor || {};
+  const source = options.source || CUSTOMER_GPS_SOURCE.excelImport;
   let updated = 0;
   const failures = [];
 
   for (let index = 0; index < updates.length; index += chunkSize) {
     const chunk = updates.slice(index, index + chunkSize);
     const results = await Promise.all(chunk.map(async (row) => {
-      const { error } = await admin
-        .from("customers")
-        .update({
+      try {
+        await applyCustomerGpsUpdate(admin, {
+          customerCode: row.customer_code,
           latitude: row.latitude,
           longitude: row.longitude,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("customer_code", row.customer_code);
-
-      if (error) {
+          previousLatitude: row.previous_latitude,
+          previousLongitude: row.previous_longitude,
+          actor,
+          source,
+        });
+        return true;
+      } catch (error) {
         failures.push({ customer_code: row.customer_code, error: error.message });
         return false;
       }
-      return true;
     }));
 
     updated += results.filter(Boolean).length;

@@ -1,4 +1,5 @@
 import {
+  customerAccountCodesMatch,
   extractLeadingCustomerCodeAndName,
   isPlaceholderSalesmanValue,
   parseOutstandingSheetDate,
@@ -182,21 +183,18 @@ export function hasCollectionVisit(record) {
 
 function scheduledRevisitTier(record, today) {
   const revisitAt = scheduledRevisitDate(record);
-  if (!revisitAt) return 2;
-  if (revisitAt >= today) return 0;
-  return 1;
+  if (revisitAt && revisitAt > today) return 1;
+  return 0;
 }
 
 function compareScheduledRevisitPriority(left, right, today) {
   const byTier = scheduledRevisitTier(left, today) - scheduledRevisitTier(right, today);
   if (byTier !== 0) return byTier;
 
-  const leftDate = scheduledRevisitDate(left);
-  const rightDate = scheduledRevisitDate(right);
-  if (leftDate && rightDate) {
-    const byDate = compareDateText(leftDate, rightDate);
-    if (byDate !== 0) return byDate;
-  }
+  if (scheduledRevisitTier(left, today) !== 1) return 0;
+
+  const byDate = compareDateText(scheduledRevisitDate(left), scheduledRevisitDate(right));
+  if (byDate !== 0) return byDate;
 
   return 0;
 }
@@ -321,6 +319,14 @@ export function normalizeWhatsappNumber(value, defaultCountryCode = "966") {
   return digits;
 }
 
+export function collectionAgingWeight(invoiceDays) {
+  const days = Math.max(0, Number(invoiceDays || 0));
+  if (days > 120) return 3;
+  if (days > 90) return 2.5;
+  if (days > 60) return 2;
+  return 1;
+}
+
 export function buildExposureScore(totalDueAmount, invoiceDays) {
   const amount = Math.max(0, Number(totalDueAmount || 0));
   const days = Math.max(0, Number(invoiceDays || 0));
@@ -334,7 +340,7 @@ export function buildExposureScoreFromInvoices(invoices, todayIso = new Date().t
     const amount = toNumber(invoice?.pending_amount);
     if (amount <= 0) return sum;
     const days = Math.max(0, resolveInvoiceDays(invoice, today));
-    return sum + (amount * days);
+    return sum + (amount * days * collectionAgingWeight(days));
   }, 0);
 }
 
@@ -423,6 +429,20 @@ export function isInvoiceNotYetDue(invoice, today) {
   if (toNumber(invoice?.pending_amount) <= 0) return false;
   if (isInvoiceCashDue(invoice)) return false;
   return !isInvoicePastDue(invoice, today);
+}
+
+export function findLegalTransferForCustomer(transfers, customerCode) {
+  const target = String(customerCode || "").trim();
+  if (!target || !Array.isArray(transfers) || transfers.length === 0) return null;
+
+  const direct = transfers.find((transfer) => String(transfer?.customer_code || "").trim() === target);
+  if (direct) return direct;
+
+  return transfers.find((transfer) => customerAccountCodesMatch(transfer?.customer_code, target)) || null;
+}
+
+export function findLegalTransferCustomerCode(transfers, customerCode) {
+  return String(findLegalTransferForCustomer(transfers, customerCode)?.customer_code || "").trim();
 }
 
 export function buildCollectionQueues(records, todayIso = new Date().toISOString()) {
@@ -525,6 +545,9 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
   });
 
   dueCustomers.sort((left, right) => {
+    const bySchedule = compareScheduledRevisitPriority(left, right, today);
+    if (bySchedule !== 0) return bySchedule;
+
     const byExposure = Number(right.exposure_score || 0) - Number(left.exposure_score || 0);
     if (byExposure !== 0) return byExposure;
 

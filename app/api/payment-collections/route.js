@@ -1,5 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildCollectionQueues, customerMatchesCollectionScope, filterCollectionQueueInvoices, redactCollectionVisitScheduleForViewer } from "../../lib/paymentCollections.js";
+import {
+  buildCollectionQueues,
+  customerMatchesCollectionScope,
+  filterCollectionQueueInvoices,
+  findLegalTransferCustomerCode,
+  findLegalTransferForCustomer,
+  redactCollectionVisitScheduleForViewer,
+} from "../../lib/paymentCollections.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
@@ -756,7 +763,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
         visibleSchedulerUserIds: scope.visibleSchedulerUserIds,
       });
     });
-    const legalTransfer = legalTransfersByCustomer.get(customer.customer_code);
+    const legalTransfer = findLegalTransferForCustomer(legalTransfers, customer.customer_code);
 
     // The uploaded outstanding file decides who collects when invoice salesman is present.
     const uploadSalesman = pickOutstandingSalesmanName(customerInvoices);
@@ -1144,20 +1151,38 @@ export async function PATCH(request) {
       throw new Error("GPS is required. Allow location access in the browser and try again.");
     }
 
+    const records = await fetchOutstandingAndCollectionRecords(admin, scope);
+    const matchedRecord = findScopedCollectionRecord(records, customerCode);
     if (!scope.hasAllAccess) {
-      const records = await fetchOutstandingAndCollectionRecords(admin, scope);
-      const matchedRecord = findScopedCollectionRecord(records, customerCode);
       if (!matchedRecord) {
         throw new Error("You do not have access to this customer");
       }
       customerCode = matchedRecord.customer_code;
+    } else if (matchedRecord) {
+      customerCode = matchedRecord.customer_code;
     }
 
     if (action === "remove") {
+      const { data: legalRows, error: legalLookupError } = await admin
+        .from("legal_transfers")
+        .select("customer_code");
+
+      if (legalLookupError) {
+        if (isMissingTableError(legalLookupError)) {
+          throw new Error("Collection tables are not initialized in this environment yet.");
+        }
+        throw legalLookupError;
+      }
+
+      const deleteCode = findLegalTransferCustomerCode(legalRows || [], customerCode);
+      if (!deleteCode) {
+        throw new Error("This customer is not in the legal queue.");
+      }
+
       const { error } = await admin
         .from("legal_transfers")
         .delete()
-        .eq("customer_code", customerCode);
+        .eq("customer_code", deleteCode);
 
       if (error) {
         if (isMissingTableError(error)) {
@@ -1166,10 +1191,15 @@ export async function PATCH(request) {
         throw error;
       }
     } else if (action === "transfer") {
+      const transferCode = await ensureCollectionCustomerRecord(
+        admin,
+        customerCode,
+        String(body.customerName || "").trim(),
+      );
       const { error } = await admin
         .from("legal_transfers")
         .upsert({
-          customer_code: customerCode,
+          customer_code: transferCode,
           is_transferred: true,
           transferred_at: new Date().toISOString(),
           transferred_by: user.id,

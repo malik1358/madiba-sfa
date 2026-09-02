@@ -10,6 +10,9 @@ import {
 
 export const CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM = 0.5;
 export const GPS_CANCELLED_ERROR = "Location update cancelled.";
+export const CUSTOMER_LOCATION_UPDATE_UPDATE = "update";
+export const CUSTOMER_LOCATION_UPDATE_SKIP = "skip";
+export const CUSTOMER_LOCATION_UPDATE_CANCEL = "cancel";
 const CUSTOMER_LOCATION_FETCH_TIMEOUT_MS = 8000;
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = CUSTOMER_LOCATION_FETCH_TIMEOUT_MS) {
@@ -232,7 +235,24 @@ function applyCustomerLocation(customer, updatePayload) {
   if (updatePayload.city) customer.city = updatePayload.city;
 }
 
-export async function maybePromptCustomerLocationUpdate({
+function buildCustomerLocationUpdateMessage({
+  language = "en",
+  displayName = "",
+  distanceKm = 0,
+  hasSavedLocation = true,
+}) {
+  if (!hasSavedLocation) {
+    return language === "ar"
+      ? `لا يوجد موقع محفوظ للعميل ${displayName}. هل تريد تحديث موقع العميل إلى GPS الحالي؟`
+      : `No saved location for ${displayName}. Update customer location to your current GPS?`;
+  }
+
+  return language === "ar"
+    ? `أنت على بعد ${distanceKm.toFixed(2)} كم من موقع ${displayName} المحفوظ. هل تريد تحديث موقع العميل إلى GPS الحالي؟`
+    : `You are ${distanceKm.toFixed(2)} km from ${displayName}'s saved location. Update customer location to your current GPS?`;
+}
+
+export async function evaluateCustomerLocationUpdatePrompt({
   customerCode,
   customerName = "",
   entryLocation,
@@ -240,16 +260,16 @@ export async function maybePromptCustomerLocationUpdate({
   language = "en",
 }) {
   if (isProspectCustomerCode(customerCode)) {
-    return;
+    return null;
   }
 
   const customer = await fetchCustomerLocation(accessToken, customerCode);
-  if (!customer) return;
+  if (!customer) return null;
 
   const displayName = customerName || customer?.customer_name || customerCode;
 
   if (!hasGpsCoordinates(entryLocation)) {
-    return;
+    return null;
   }
 
   const geocoded = await reverseGeocodeCoordinates(entryLocation.latitude, entryLocation.longitude);
@@ -261,24 +281,60 @@ export async function maybePromptCustomerLocationUpdate({
     applyCustomerLocation(customer, updatePayload);
   }
 
-  if (!customerHasSavedLocation(customer)) {
-    const message = language === "ar"
-      ? `لا يوجد موقع محفوظ للعميل ${displayName}. هل تريد تحديث موقع العميل إلى GPS الحالي؟`
-      : `No saved location for ${displayName}. Update customer location to your current GPS?`;
-    if (window.confirm(message)) {
-      await updateCustomerLocation(accessToken, customerCode, updatePayload);
-    }
-    return;
-  }
+  const needsPrompt = !customerHasSavedLocation(customer)
+    || isFarFromCustomer(entryLocation, customer);
+  if (!needsPrompt) return null;
 
   const distanceKm = distanceFromCustomerKm(entryLocation, customer);
-  if (!isFarFromCustomer(entryLocation, customer)) return;
 
-  const message = language === "ar"
-    ? `أنت على بعد ${distanceKm.toFixed(2)} كم من موقع ${displayName} المحفوظ. هل تريد تحديث موقع العميل إلى GPS الحالي؟`
-    : `You are ${distanceKm.toFixed(2)} km from ${displayName}'s saved location. Update customer location to your current GPS?`;
+  return {
+    message: buildCustomerLocationUpdateMessage({
+      language,
+      displayName,
+      distanceKm: distanceKm ?? 0,
+      hasSavedLocation: customerHasSavedLocation(customer),
+    }),
+    accessToken,
+    customerCode,
+    updatePayload,
+  };
+}
 
-  if (window.confirm(message)) {
-    await updateCustomerLocation(accessToken, customerCode, updatePayload);
+export async function applyCustomerLocationUpdateFromPrompt(promptDetails) {
+  if (!promptDetails) return null;
+  return updateCustomerLocation(
+    promptDetails.accessToken,
+    promptDetails.customerCode,
+    promptDetails.updatePayload,
+  );
+}
+
+async function defaultLegacyLocationUpdatePrompt(promptDetails) {
+  return window.confirm(promptDetails.message)
+    ? CUSTOMER_LOCATION_UPDATE_UPDATE
+    : CUSTOMER_LOCATION_UPDATE_SKIP;
+}
+
+export async function maybePromptCustomerLocationUpdate({
+  customerCode,
+  customerName = "",
+  entryLocation,
+  accessToken,
+  language = "en",
+  promptChoice,
+}) {
+  const promptDetails = await evaluateCustomerLocationUpdatePrompt({
+    customerCode,
+    customerName,
+    entryLocation,
+    accessToken,
+    language,
+  });
+  if (!promptDetails) return;
+
+  const resolveChoice = promptChoice || defaultLegacyLocationUpdatePrompt;
+  const choice = await resolveChoice(promptDetails);
+  if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE) {
+    await applyCustomerLocationUpdateFromPrompt(promptDetails);
   }
 }

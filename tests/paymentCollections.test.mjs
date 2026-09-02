@@ -6,12 +6,15 @@ import {
   buildCollectionQueues,
   buildExposureScore,
   buildExposureScoreFromInvoices,
+  collectionAgingWeight,
   collectionRowMatchesCustomerQuery,
   customerMatchesCollectionScope,
   canViewerSeeScheduledRevisit,
   canViewerSeeCollectorScheduledRevisit,
   redactCollectionVisitScheduleForViewer,
   filterCollectionQueueInvoices,
+  findLegalTransferCustomerCode,
+  findLegalTransferForCustomer,
   hasCollectionVisit,
   invoiceHasCashRef,
   isCashOnlyQueueCustomer,
@@ -22,7 +25,7 @@ import {
   sortCashQueueCustomers,
 } from "../app/lib/paymentCollections.js";
 import { buildSalesmanScopeMatchers, salesmanValueMatchesScope } from "../app/lib/mutualSalesmanGroups.js";
-import { hydrateOutstandingInvoices } from "../app/lib/outstanding.js";
+import { hydrateOutstandingInvoices, parseOutstandingRows } from "../app/lib/outstanding.js";
 
 test("invoiceHasCashRef matches C in Ref. No. only", () => {
   assert.equal(invoiceHasCashRef({ ref_no: "RC/056" }), true);
@@ -33,6 +36,25 @@ test("invoiceHasCashRef matches C in Ref. No. only", () => {
   assert.equal(invoiceHasCashRef({ ref_no: "SI/12345" }), false);
   assert.equal(invoiceHasCashRef({ ref_no: "1098", customer_code: "1119C" }), false);
   assert.equal(invoiceHasCashRef({ ref_no: "1098", reference: "RC/001" }), false);
+});
+
+test("buildCollectionQueues includes 1468 underscore party overdue invoice from pending bills", () => {
+  const invoices = hydrateOutstandingInvoices(parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Sales Person", "Pending", "Due", "Overdue", "Invoice Days", "Salesman"],
+    ["13-Jun-26", "NFD/986", "1468_Bahr Al-Takhfid Trading Company", "", 19315, "13-Jul-26", 51, 81, "Ahmed Nabil"],
+  ], 0));
+
+  const queues = buildCollectionQueues([{
+    customer_code: "1468",
+    customer_name: "Bahr Al-Takhfid Trading Company",
+    invoices,
+    latest_collection: null,
+    legal_transfer: null,
+  }], "2026-09-02T10:00:00Z");
+
+  assert.equal(queues.dueCustomers.length, 1);
+  assert.equal(queues.dueCustomers[0].customer_code, "1468");
+  assert.equal(queues.dueCustomers[0].total_due_amount, 19315);
 });
 
 test("buildCollectionQueues includes 1235 Rokn Al-Muhareb overdue invoices", () => {
@@ -162,14 +184,27 @@ test("buildCollectionQueues keeps 1119C with future due date in not-yet-due queu
   assert.equal(queues.notDueCustomers[0].total_not_due_amount, 2805538);
 });
 
-test("buildExposureScoreFromInvoices sums amount x invoice days per invoice", () => {
+test("collectionAgingWeight steps up after 60, 90, and 120 invoice days", () => {
+  assert.equal(collectionAgingWeight(60), 1);
+  assert.equal(collectionAgingWeight(61), 2);
+  assert.equal(collectionAgingWeight(90), 2);
+  assert.equal(collectionAgingWeight(91), 2.5);
+  assert.equal(collectionAgingWeight(120), 2.5);
+  assert.equal(collectionAgingWeight(121), 3);
+});
+
+test("buildExposureScoreFromInvoices sums amount x invoice days with aging weights", () => {
   const exposure = buildExposureScoreFromInvoices([
     { pending_amount: 4132.68, invoice_day: 59, overdue_days: 29 },
     { pending_amount: 3185.5, invoice_day: 105, overdue_days: 75 },
     { pending_amount: 3811.45, invoice_day: 123, overdue_days: 93 },
   ], "2026-08-22T00:00:00Z");
 
-  assert.equal(exposure, (4132.68 * 59) + (3185.5 * 105) + (3811.45 * 123));
+  assert.equal(
+    exposure,
+    (4132.68 * 59 * 1) + (3185.5 * 105 * 2.5) + (3811.45 * 123 * 3),
+  );
+  assert.notEqual(exposure, (4132.68 * 59) + (3185.5 * 105) + (3811.45 * 123));
   assert.notEqual(exposure, (4132.68 * 29) + (3185.5 * 75) + (3811.45 * 93));
   assert.notEqual(exposure, buildExposureScore(11129.63, 123));
 });
@@ -202,6 +237,20 @@ test("buildCollectionPriority favors recent due accounts over stale non-payment"
   assert.equal(high.label, "Medium");
   assert.equal(low.label, "High");
   assert.ok(low.score > high.score);
+});
+
+test("findLegalTransferForCustomer matches numeric suffix variants", () => {
+  const transfers = [{
+    customer_code: "1468C",
+    is_transferred: true,
+    transferred_at: "2026-08-14T08:00:00Z",
+    note: "Legal",
+  }];
+
+  assert.equal(findLegalTransferCustomerCode(transfers, "1468"), "1468C");
+  assert.equal(findLegalTransferCustomerCode(transfers, "1468C"), "1468C");
+  assert.equal(findLegalTransferForCustomer(transfers, "1468")?.note, "Legal");
+  assert.equal(findLegalTransferCustomerCode(transfers, "1173C"), "");
 });
 
 test("buildCollectionQueues lists only past-due customers and routes legal ones separately", () => {
@@ -348,7 +397,7 @@ test("buildCollectionQueues ranks 1115C above 1416 when exposure is higher", () 
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["1115C", "1416"]);
 });
 
-test("buildCollectionQueues keeps future scheduled revisit ahead of cash", () => {
+test("buildCollectionQueues keeps unscheduled customers ahead of a future scheduled revisit", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "CASHNOW",
@@ -366,7 +415,7 @@ test("buildCollectionQueues keeps future scheduled revisit ahead of cash", () =>
     },
   ], "2026-08-22T10:00:00Z");
 
-  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["SCHEDULED", "CASHNOW"]);
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["CASHNOW", "SCHEDULED"]);
 });
 
 test("buildCollectionQueues ranks higher exposure (amount x invoice days) first", () => {
@@ -410,9 +459,32 @@ test("buildCollectionQueues ranks by invoice days even when overdue days would r
     },
   ], "2026-08-22T10:00:00Z");
 
-  assert.equal(queues.dueCustomers[0].exposure_score, 10000 * 200);
-  assert.equal(queues.dueCustomers[1].exposure_score, 10000 * 90);
+  assert.equal(queues.dueCustomers[0].exposure_score, 10000 * 200 * 3);
+  assert.equal(queues.dueCustomers[1].exposure_score, 10000 * 90 * 2);
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["INVOICE", "OVERDUE"]);
+});
+
+test("buildCollectionQueues ranks older medium balances above large fresh balances", () => {
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "FRESH",
+      customer_name: "Large recent balance",
+      invoices: [{ pending_amount: 50000, invoice_day: 40, overdue_days: 10 }],
+      latest_collection: { payment_status: "NOT_PAID" },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "AGED",
+      customer_name: "Older medium balance",
+      invoices: [{ pending_amount: 8000, invoice_day: 121, overdue_days: 91 }],
+      latest_collection: { payment_status: "NOT_PAID" },
+      legal_transfer: null,
+    },
+  ], "2026-08-29T10:00:00Z");
+
+  assert.ok(8000 * 121 * 3 > 50000 * 40);
+  assert.ok(8000 * 121 < 50000 * 40);
+  assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["AGED", "FRESH"]);
 });
 
 test("buildCollectionQueues ranks 1162C above 1042 when invoice-level exposure is higher", () => {
@@ -444,7 +516,7 @@ test("buildCollectionQueues ranks 1162C above 1042 when invoice-level exposure i
   assert.deepEqual(queues.dueCustomers.map((row) => row.customer_code), ["1162C", "1042"]);
 });
 
-test("buildCollectionQueues orders future scheduled revisits by exposure in backend list", () => {
+test("buildCollectionQueues puts never-visited customers ahead of future schedules, then sorts those by date", () => {
   const queues = buildCollectionQueues([
     {
       customer_code: "LATE",
@@ -471,7 +543,58 @@ test("buildCollectionQueues orders future scheduled revisits by exposure in back
 
   assert.deepEqual(
     queues.dueCustomers.map((row) => row.customer_code),
-    ["LATE", "SOON", "NEXT"],
+    ["LATE", "NEXT", "SOON"],
+  );
+});
+
+test("buildCollectionQueues keeps today's schedule with unscheduled work and parks later dates at the bottom", () => {
+  const today = "2026-08-31T10:00:00Z";
+  const queues = buildCollectionQueues([
+    {
+      customer_code: "FUTURE_HIGH",
+      customer_name: "Huge but later",
+      invoices: [{ pending_amount: 80000, due_date: "2026-03-01", overdue_days: 180, invoice_day: 180 }],
+      latest_collection: {
+        payment_status: "PROMISED",
+        saved_at: "2026-08-20T10:00:00Z",
+        next_visit_at: "2026-09-10",
+      },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "NEVER",
+      customer_name: "Never visited",
+      invoices: [{ pending_amount: 4000, due_date: "2026-08-01", overdue_days: 30, invoice_day: 30 }],
+      latest_collection: null,
+      legal_transfer: null,
+    },
+    {
+      customer_code: "TODAY",
+      customer_name: "Scheduled today",
+      invoices: [{ pending_amount: 2000, due_date: "2026-07-15", overdue_days: 47, invoice_day: 47 }],
+      latest_collection: {
+        payment_status: "PROMISED",
+        saved_at: "2026-08-28T10:00:00Z",
+        next_visit_at: "2026-08-31",
+      },
+      legal_transfer: null,
+    },
+    {
+      customer_code: "FUTURE_SOON",
+      customer_name: "Scheduled next week",
+      invoices: [{ pending_amount: 60000, due_date: "2026-04-01", overdue_days: 150, invoice_day: 150 }],
+      latest_collection: {
+        payment_status: "PROMISED",
+        saved_at: "2026-08-21T10:00:00Z",
+        next_visit_at: "2026-09-03",
+      },
+      legal_transfer: null,
+    },
+  ], today);
+
+  assert.deepEqual(
+    queues.dueCustomers.map((row) => row.customer_code),
+    ["NEVER", "TODAY", "FUTURE_SOON", "FUTURE_HIGH"],
   );
 });
 

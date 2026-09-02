@@ -263,6 +263,10 @@ test("extractLeadingCustomerCodeAndName only splits real customer codes", () => 
     { customer_code: "1542", customer_name: "RENEWABLE TECHNOLOGY FOR TRADING EST" },
   );
   assert.deepEqual(
+    extractLeadingCustomerCodeAndName("1468_Bahr Al-Takhfid Trading Company"),
+    { customer_code: "1468", customer_name: "Bahr Al-Takhfid Trading Company" },
+  );
+  assert.deepEqual(
     extractLeadingCustomerCodeAndName("RENEWABLE TECHNOLOGY FOR TRADING EST"),
     { customer_code: "", customer_name: "RENEWABLE TECHNOLOGY FOR TRADING EST" },
   );
@@ -270,6 +274,17 @@ test("extractLeadingCustomerCodeAndName only splits real customer codes", () => 
     extractLeadingCustomerCodeAndName("TECHNOLOGY FOR TRADING EST"),
     { customer_code: "", customer_name: "TECHNOLOGY FOR TRADING EST" },
   );
+});
+
+test("parseOutstandingRows keeps 1468 underscore party invoices for collection queue", () => {
+  const parsed = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Sales Person", "Pending", "Due", "Overdue", "Invoice Days", "Salesman"],
+    ["13-Jun-26", "NFD/986", "1468_Bahr Al-Takhfid Trading Company", "", 19315, "13-Jul-26", 51, 81, "Ahmed Nabil"],
+  ], 0);
+
+  assert.equal(parsed.invoices.length, 1);
+  assert.equal(resolveOutstandingInvoiceCustomerCode(parsed.invoices[0]), "1468");
+  assert.equal(hydrateOutstandingInvoices(parsed).length, 1);
 });
 
 test("repairOutstandingInvoice keeps the longest available party label", () => {

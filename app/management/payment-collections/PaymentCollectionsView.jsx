@@ -15,8 +15,12 @@ import { resolveInvoiceAgingDays, resolveOverdueDaysFromDueDate } from "../../li
 import { useAppPopup } from "../../components/AppPopupProvider";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import {
+  applyCustomerLocationUpdateFromPrompt,
   captureGpsLocationWithFallbackConfirm,
-  promptCustomerLocationUpdateAfterVisit,
+  CUSTOMER_LOCATION_UPDATE_CANCEL,
+  CUSTOMER_LOCATION_UPDATE_SKIP,
+  CUSTOMER_LOCATION_UPDATE_UPDATE,
+  evaluateCustomerLocationUpdatePrompt,
 } from "../../lib/customerLocation";
 import { postFormDataResilient } from "../../lib/offlineApi";
 import {
@@ -29,6 +33,7 @@ import { listOfflineQueue, processOfflineQueue } from "../../lib/offlineSyncQueu
 import {
   fetchCollectionQueuesCached,
   fetchSalesScopeCached,
+  invalidateCollectionQueuesForUser,
   readCollectionQueuesForUser,
   writeCollectionQueuesForUser,
 } from "../../lib/mobileDataCache";
@@ -47,6 +52,7 @@ import {
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp } from "../../lib/whatsappShare";
 import { getSupabaseClient } from "../../lib/supabase";
+import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
 
@@ -84,9 +90,10 @@ const TEXT = {
   legalSearchMatch: { en: "Legal", ar: "قانوني" },
   notDueQueue: { en: "Not Yet Due Invoices", ar: "فواتير غير مستحقة بعد" },
   notDueHint: {
-    en: "Customers with pending invoices that are not overdue yet. Collect early payments here if needed.",
-    ar: "عملاء لديهم فواتير معلقة غير مستحقة بعد. يمكن تحصيل دفعات مبكرة من هنا.",
+    en: "These customers still have pending invoices that are not overdue yet. They stay in this list so a collector can take payment early if the customer is ready.",
+    ar: "هؤلاء العملاء لديهم فواتير معلقة غير متأخرة بعد. يبقون في هذه القائمة حتى يتمكن المحصل من قبض المبلغ مبكراً إذا كان العميل جاهزاً.",
   },
+  notYetDueBadge: { en: "Not yet due — collect if needed", ar: "غير مستحق بعد — يمكن التحصيل عند الحاجة" },
   scheduledRevisitsTitle: { en: "Scheduled Revisits", ar: "زيارات التحصيل المجدولة" },
   scheduledRevisitsHint: {
     en: "Customers with a collection revisit date saved from the last visit, including overdue dates not yet visited. Nearest dates appear first.",
@@ -116,8 +123,8 @@ const TEXT = {
   },
   creditQueueTitle: { en: "Credit Collection", ar: "تحصيل الائتمان" },
   creditQueueHint: {
-    en: "Credit collection starts here. Follow up outstanding credit invoices after cash-due customers.",
-    ar: "يبدأ تحصيل الائتمان من هنا. تابع فواتير الائتمان المستحقة بعد العملاء النقديين.",
+    en: "Overdue credit customers appear first. Not-yet-due customers stay at the bottom of this same list so collectors can still collect if the customer pays early.",
+    ar: "عملاء الائتمان المتأخرون يظهرون أولاً. العملاء غير المستحقين بعد يبقون في أسفل نفس القائمة حتى يتمكن المحصل من القبض إذا دفع العميل مبكراً.",
   },
   noCashQueue: { en: "No cash-due customers in the outstanding file.", ar: "لا يوجد عملاء بفواتير نقدية مستحقة في ملف المديونية." },
   cashDueAmount: { en: "Cash Due", ar: "المبلغ النقدي المستحق" },
@@ -161,8 +168,17 @@ const TEXT = {
   capturePhoto: { en: "Take Photo", ar: "التقاط صورة" },
   chooseFile: { en: "Choose File / PDF", ar: "اختيار ملف / PDF" },
   saveVisit: { en: "Save Collection Visit", ar: "حفظ زيارة التحصيل" },
+  locationUpdateTitle: { en: "Update customer location?", ar: "تحديث موقع العميل؟" },
+  locationUpdateAndSave: { en: "Update location and save", ar: "تحديث الموقع والحفظ" },
+  locationSaveWithoutUpdate: { en: "Save without updating location", ar: "حفظ دون تحديث الموقع" },
+  cancel: { en: "Cancel", ar: "إلغاء" },
   transferLegal: { en: "Transfer To Legal", ar: "تحويل إلى القانوني" },
   removeLegal: { en: "Remove From Legal", ar: "إزالة من القانوني" },
+  removingLegal: { en: "Removing...", ar: "جاري الإزالة..." },
+  confirmRemoveLegal: {
+    en: "Remove this customer from the legal queue? They will go back to the due queue.",
+    ar: "إزالة هذا العميل من قائمة القانوني؟ سيعود إلى قائمة المستحق.",
+  },
   legalNote: { en: "Legal Transfer Note", ar: "ملاحظة التحويل القانوني" },
   paid: { en: "Paid", ar: "مدفوع" },
   partial: { en: "Partial", ar: "جزئي" },
@@ -267,12 +283,32 @@ const TEXT = {
   viewPaymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
   viewReceiptCopy: { en: "Receipt Copy", ar: "صورة الإيصال" },
   customerFilterPlaceholder: { en: "Filter customer name/code", ar: "تصفية اسم/كود العميل" },
+  clearColumnFilters: { en: "Clear", ar: "مسح" },
+  numericFilterHint: { en: "Use >1000 or >=500", ar: "استخدم >1000 أو >=500" },
+  filterCode: { en: "Filter code", ar: "تصفية الكود" },
+  filterCustomer: { en: "Filter customer", ar: "تصفية العميل" },
+  filterSalesman: { en: "Filter salesman", ar: "تصفية المندوب" },
+  filterCityArea: { en: "Filter city/area", ar: "تصفية المدينة/المنطقة" },
+  filterAmount: { en: "Filter amount", ar: "تصفية المبلغ" },
+  filterNumeric: { en: "Filter", ar: "تصفية" },
+  filterOverdue: { en: "Filter overdue", ar: "تصفية التأخير" },
+  filterInvoices: { en: "Filter invoices", ar: "تصفية الفواتير" },
+  filterProbability: { en: "Filter probability", ar: "تصفية الاحتمالية" },
+  filterOutcome: { en: "Filter outcome", ar: "تصفية النتيجة" },
+  filterLastUpdate: { en: "Filter last update", ar: "تصفية آخر تحديث" },
   invDate: { en: "Date", ar: "التاريخ" },
   invRef: { en: "Ref", ar: "المرجع" },
   invPending: { en: "Pending", ar: "المعلق" },
   invDue: { en: "Due", ar: "الاستحقاق" },
   invOverdue: { en: "Overdue", ar: "التأخير" },
   defaultLegalNote: { en: "Transferred during visit report", ar: "تم التحويل أثناء تقرير الزيارة" },
+  downloadDueQueue: { en: "Download Excel", ar: "تنزيل Excel" },
+  downloadingDueQueue: { en: "Downloading...", ar: "جاري التنزيل..." },
+  downloadDueQueueHint: {
+    en: "Downloads the full due collection queue with a Pending Invoices sheet for Excel comparison.",
+    ar: "تنزيل قائمة التحصيل المستحق كاملة مع ورقة Pending Invoices للمقارنة مع Excel.",
+  },
+  msgDownloadFailed: { en: "Unable to download due collection queue.", ar: "تعذر تنزيل قائمة التحصيل المستحق." },
 };
 
 const OUTCOME_KEYS = {
@@ -286,6 +322,32 @@ const OUTCOME_KEYS = {
   PARTIAL: "partial",
   NOT_PAID: "notPaid",
   PROMISED: "promised",
+};
+
+const PROBABILITY_FILTER_OPTIONS = [
+  { value: "high", textKey: "probHigh" },
+  { value: "medium", textKey: "probMedium" },
+  { value: "low", textKey: "probLow" },
+  { value: "na", textKey: "probNA" },
+];
+
+const EMPTY_CREDIT_COLUMN_FILTERS = {
+  code: "",
+  customer: "",
+  salesman: [],
+  cityArea: "",
+  dueAmount: "",
+  cash: "",
+  bucket30: "",
+  bucket31to60: "",
+  bucket61to90: "",
+  bucket91to120: "",
+  bucket120plus: "",
+  maxOverdue: "",
+  dueInvoices: "",
+  probability: [],
+  lastOutcome: [],
+  lastUpdate: "",
 };
 
 const RECEIPT_MODE_KEYS = {
@@ -400,7 +462,11 @@ async function buildVisitReportText(row, t) {
     }
 
     if (visits.length > 1) {
-      reportParts.push(`${t("visitReportNumber")} ${index + 1}`, report);
+      const visitDate = formatDateOnly(visit?.saved_at);
+      const visitHeading = visitDate
+        ? `${t("visitReportNumber")} ${index + 1} - ${visitDate}`
+        : `${t("visitReportNumber")} ${index + 1}`;
+      reportParts.push(visitHeading, report);
     } else {
       reportParts.push(report);
     }
@@ -545,6 +611,86 @@ function filterQueueRows(rows, customerFilter, selectedSalesmen) {
     matchesCollectionCustomerQuery(row, customerFilter)
     && rowMatchesSalesmanSelection(row, selectedSalesmanSet)
   ));
+}
+
+function includesTextFilter(value, filter) {
+  const query = String(filter || "").trim().toLowerCase();
+  if (!query) return true;
+  return String(value ?? "").toLowerCase().includes(query);
+}
+
+function matchesNumericFilter(value, filter) {
+  const query = String(filter || "").trim();
+  if (!query) return true;
+
+  const numericValue = Number(value || 0);
+  const gteMatch = query.match(/^>=?\s*(-?\d+(?:\.\d+)?)$/);
+  if (gteMatch) {
+    const threshold = Number(gteMatch[1]);
+    return query.startsWith(">=") ? numericValue >= threshold : numericValue > threshold;
+  }
+
+  const lteMatch = query.match(/^<=?\s*(-?\d+(?:\.\d+)?)$/);
+  if (lteMatch) {
+    const threshold = Number(lteMatch[1]);
+    return query.startsWith("<=") ? numericValue <= threshold : numericValue < threshold;
+  }
+
+  const normalizedQuery = query.replace(/,/g, "");
+  const asNumber = Number(normalizedQuery);
+  if (!Number.isNaN(asNumber) && normalizedQuery === String(asNumber)) {
+    return numericValue === asNumber;
+  }
+
+  const formatted = Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return formatted.toLowerCase().includes(query.toLowerCase())
+    || String(numericValue).includes(normalizedQuery);
+}
+
+function matchesMultiSelectFilter(selectedValues, actualValue) {
+  if (!Array.isArray(selectedValues) || selectedValues.length === 0) return true;
+  return selectedValues.includes(String(actualValue || "").trim());
+}
+
+function resolveRowDueAmount(row) {
+  const isNotDue = row?.queue_kind === "not_due";
+  return Number(isNotDue ? row?.total_not_due_amount : row?.total_due_amount) || 0;
+}
+
+function resolveRowDueInvoiceCount(row) {
+  const isNotDue = row?.queue_kind === "not_due";
+  return Number(isNotDue ? row?.not_due_invoice_count : row?.due_invoice_count) || 0;
+}
+
+function resolveRowProbabilityKey(row) {
+  if (row?.queue_kind === "not_due") return "na";
+  const normalized = String(row?.probability_label || "").trim().toLowerCase();
+  if (normalized === "high" || normalized === "medium" || normalized === "low") return normalized;
+  return "na";
+}
+
+function resolveRowOutcomeKey(row) {
+  return String(row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status || "").trim().toUpperCase();
+}
+
+function rowMatchesCreditColumnFilters(row, filters, t) {
+  if (!includesTextFilter(row?.customer_code, filters.code)) return false;
+  if (!includesTextFilter(row?.customer_name || row?.customer_code, filters.customer)) return false;
+  if (!matchesMultiSelectFilter(filters.salesman, normalizeSalesmanKey(getSalesmanLabel(row)))) return false;
+  if (!includesTextFilter(`${row?.city || "-"} / ${row?.area || "-"}`, filters.cityArea)) return false;
+  if (!matchesNumericFilter(resolveRowDueAmount(row), filters.dueAmount)) return false;
+  if (!matchesNumericFilter(row?.outstanding_cash, filters.cash)) return false;
+  if (!matchesNumericFilter(row?.outstanding_0_30, filters.bucket30)) return false;
+  if (!matchesNumericFilter(row?.outstanding_30_60, filters.bucket31to60)) return false;
+  if (!matchesNumericFilter(row?.outstanding_61_90, filters.bucket61to90)) return false;
+  if (!matchesNumericFilter(row?.outstanding_91_120, filters.bucket91to120)) return false;
+  if (!matchesNumericFilter(row?.outstanding_above_120, filters.bucket120plus)) return false;
+  if (!matchesNumericFilter(row?.max_overdue_days, filters.maxOverdue)) return false;
+  if (!matchesNumericFilter(resolveRowDueInvoiceCount(row), filters.dueInvoices)) return false;
+  if (!matchesMultiSelectFilter(filters.probability, resolveRowProbabilityKey(row))) return false;
+  if (!matchesMultiSelectFilter(filters.lastOutcome, resolveRowOutcomeKey(row))) return false;
+  if (!includesTextFilter(formatLastUpdateText(row, t), filters.lastUpdate)) return false;
+  return true;
 }
 
 function formatMoney(value) {
@@ -736,9 +882,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [visitReportRow, setVisitReportRow] = useState(null);
   const [visitReportText, setVisitReportText] = useState("");
   const [visitReportLoading, setVisitReportLoading] = useState(false);
+  const [locationPrompt, setLocationPrompt] = useState(null);
   const [todayVisitCount, setTodayVisitCount] = useState(0);
   const [expandedRevisitDates, setExpandedRevisitDates] = useState(() => new Set());
+  const [creditColumnFilters, setCreditColumnFilters] = useState(EMPTY_CREDIT_COLUMN_FILTERS);
+  const [exportingDueQueue, setExportingDueQueue] = useState(false);
   const isMobileLayout = useMobileLayout();
+  const locationPromptResolverRef = useRef(null);
   const recognitionRef = useRef(null);
   const loadSeqRef = useRef(0);
   const queuesRef = useRef({ dueCustomers: [], notDueCustomers: [], legalCustomers: [] });
@@ -1160,17 +1310,28 @@ export default function PaymentCollectionsView({ view = "due" }) {
   }
 
   const tableRows = useMemo(() => {
+    const applyColumnFilters = (rows) => (
+      rows.filter((row) => rowMatchesCreditColumnFilters(row, creditColumnFilters, t))
+    );
+
     if (view !== "due") {
-      return visibleRows.map((row) => ({ type: "customer", row }));
+      return applyColumnFilters(visibleRows).map((row) => ({ type: "customer", row }));
     }
 
-    const items = visibleRows.map((row) => ({ type: "customer", row }));
-    if (visibleNotDueRows.length > 0) {
+    const filteredDue = applyColumnFilters(visibleRows);
+    const filteredNotDue = applyColumnFilters(visibleNotDueRows);
+    const items = filteredDue.map((row) => ({ type: "customer", row }));
+    if (filteredNotDue.length > 0) {
       items.push({ type: "separator" });
-      visibleNotDueRows.forEach((row) => items.push({ type: "customer", row }));
+      filteredNotDue.forEach((row) => items.push({ type: "customer", row }));
     }
     return items;
-  }, [visibleRows, visibleNotDueRows, view]);
+  }, [creditColumnFilters, t, visibleNotDueRows, visibleRows, view]);
+
+  const creditQueueCount = useMemo(
+    () => tableRows.filter((item) => item.type === "customer").length,
+    [tableRows],
+  );
 
   const cashQueuePriorityByKey = useMemo(() => {
     const priorities = new Map();
@@ -1286,6 +1447,44 @@ export default function PaymentCollectionsView({ view = "due" }) {
     );
   }
 
+  async function exportDueCollectionQueue() {
+    setExportingDueQueue(true);
+    setError("");
+
+    try {
+      const XLSX = await import("xlsx");
+      const { summaryRows, invoiceRows, cashRows } = buildDueCollectionQueueExport({
+        dueCustomers,
+        notDueCustomers,
+        queueToday,
+        priorityByCode: dueQueuePriorityByCode,
+        keepRow: (row) => !isCashOnlyQueueCustomer(row, queueToday),
+      });
+
+      const workbook = { Sheets: {}, SheetNames: [] };
+
+      workbook.Sheets.Customers = XLSX.utils.json_to_sheet(summaryRows);
+      workbook.SheetNames.push("Customers");
+
+      if (invoiceRows.length > 0) {
+        workbook.Sheets["Pending Invoices"] = XLSX.utils.json_to_sheet(invoiceRows);
+        workbook.SheetNames.push("Pending Invoices");
+      }
+
+      if (cashRows.length > 0) {
+        workbook.Sheets["Cash Due"] = XLSX.utils.json_to_sheet(cashRows);
+        workbook.SheetNames.push("Cash Due");
+      }
+
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      XLSX.writeFile(workbook, `due-collection-queue-${stamp}.xlsx`);
+    } catch {
+      setError(t("msgDownloadFailed"));
+    } finally {
+      setExportingDueQueue(false);
+    }
+  }
+
   async function openVisitReport(row) {
     if (!row?.latest_collection?.saved_at) return;
 
@@ -1298,6 +1497,42 @@ export default function PaymentCollectionsView({ view = "due" }) {
     } finally {
       setVisitReportLoading(false);
     }
+  }
+
+  function promptCustomerLocationChoice(promptDetails) {
+    return new Promise((resolve) => {
+      locationPromptResolverRef.current = resolve;
+      setLocationPrompt(promptDetails);
+    });
+  }
+
+  function finishLocationPrompt(choice) {
+    setLocationPrompt(null);
+    const resolve = locationPromptResolverRef.current;
+    locationPromptResolverRef.current = null;
+    resolve?.(choice);
+  }
+
+  async function resolveLocationUpdateBeforeAction({
+    customerCode,
+    customerName,
+    entryLocation,
+    accessToken,
+  }) {
+    const promptDetails = await evaluateCustomerLocationUpdatePrompt({
+      language,
+      customerCode,
+      customerName,
+      entryLocation,
+      accessToken,
+    });
+    if (!promptDetails) return CUSTOMER_LOCATION_UPDATE_SKIP;
+
+    const choice = await promptCustomerLocationChoice(promptDetails);
+    if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE) {
+      await applyCustomerLocationUpdateFromPrompt(promptDetails);
+    }
+    return choice;
   }
 
   async function saveVisit(row, options = {}) {
@@ -1361,6 +1596,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (effectiveEnglishRemark !== form.remarkEnglish) {
         setForm((current) => ({ ...current, remarkEnglish: effectiveEnglishRemark }));
+      }
+
+      const locationChoice = gps
+        ? await resolveLocationUpdateBeforeAction({
+          customerCode: row.customer_code,
+          customerName: row.customer_name,
+          entryLocation: gps,
+          accessToken: session.access_token,
+        })
+        : CUSTOMER_LOCATION_UPDATE_SKIP;
+      if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
+        return;
       }
 
       const customerCodeKey = String(row.customer_code || "").trim().toUpperCase();
@@ -1440,15 +1687,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
       await refreshPendingSyncCount();
 
       if (!saveResult.queued) {
-        if (gps) {
-          void promptCustomerLocationUpdateAfterVisit({
-            language,
-            customerCode: row.customer_code,
-            customerName: row.customer_name,
-            entryLocation: gps,
-            accessToken: session.access_token,
-          });
-        }
         await loadQueue(rowKey(row));
       } else {
         const { scope } = await fetchSalesScopeCached();
@@ -1611,8 +1849,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
       return;
     }
 
+    if (action === "remove") {
+      const confirmed = window.confirm(
+        `${t("confirmRemoveLegal")}\n${row.customer_name || ""} (${row.customer_code || ""})`,
+      );
+      if (!confirmed) return;
+    }
+
     setLegalBusyCode(row.customer_code);
-    setError("");
     setError("");
 
     try {
@@ -1625,8 +1869,23 @@ export default function PaymentCollectionsView({ view = "due" }) {
         customerName: row.customer_name,
         accessToken: session.access_token,
         role: access.role,
+        skipCustomerLocationUpdate: true,
       });
+      const locationChoice = gps
+        ? await resolveLocationUpdateBeforeAction({
+          customerCode: row.customer_code,
+          customerName: row.customer_name,
+          entryLocation: gps,
+          accessToken: session.access_token,
+        })
+        : CUSTOMER_LOCATION_UPDATE_SKIP;
+      if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
+        return;
+      }
       const platform = await resolveGpsCapturePlatform();
+      const legalNote = String(
+        (activeRowKey === rowKey(row) ? form.legalNote : "") || row.legal_transfer?.note || "",
+      ).trim();
 
       const response = await fetch("/api/payment-collections", {
         method: "PATCH",
@@ -1637,7 +1896,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         body: JSON.stringify({
           customerCode: row.customer_code,
           customerName: row.customer_name,
-          note: form.legalNote,
+          note: legalNote,
           action,
           latitude: gps?.latitude ?? null,
           longitude: gps?.longitude ?? null,
@@ -1657,9 +1916,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
           : `${row.customer_name} ${t("msgLegalTransferred")}`,
         variant: "success",
       });
-      await loadQueue(rowKey(row));
-      if (action !== "remove" && view !== "legal") {
+      if (action === "remove") {
+        const removedKey = rowKey(row);
         setActiveRowKey("");
+        setLegalCustomers((current) => current.filter((item) => rowKey(item) !== removedKey));
+        await invalidateCollectionQueuesForUser(session.user.id);
+        await loadQueue("");
+      } else {
+        await invalidateCollectionQueuesForUser(session.user.id);
+        await loadQueue(rowKey(row));
+        if (view !== "legal") {
+          setActiveRowKey("");
+        }
       }
     } catch (err) {
       showPopup({ message: localizeApiMessage(err.message || t("msgLegalUpdateFailed")), variant: "error" });
@@ -1899,8 +2167,24 @@ export default function PaymentCollectionsView({ view = "due" }) {
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>{view === "legal" ? t("legalQueue") : t("dueQueue")}</h2>
-              <span>{visibleRows.length}</span>
+              <div className="moduleInlineStack moduleActionStack">
+                {view === "due" ? (
+                  <button
+                    type="button"
+                    className="moduleInlineButton moduleActionButton"
+                    onClick={exportDueCollectionQueue}
+                    disabled={exportingDueQueue || loading || (dueCustomers.length === 0 && notDueCustomers.length === 0)}
+                    title={t("downloadDueQueueHint")}
+                  >
+                    {exportingDueQueue ? t("downloadingDueQueue") : t("downloadDueQueue")}
+                  </button>
+                ) : null}
+                <span>{creditQueueCount}</span>
+              </div>
             </div>
+            {view === "due" ? (
+              <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("downloadDueQueueHint")}</div>
+            ) : null}
 
             <div className="moduleCollectorFilterGrid" style={{ marginBottom: "10px" }}>
               <input
@@ -2021,7 +2305,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
             {view === "due" ? (
               <div className="moduleSectionHeader" style={{ marginTop: "4px" }}>
                 <h3 style={{ margin: 0, fontSize: "1rem" }}>{t("creditQueueTitle")}</h3>
-                <span>{visibleRows.length}</span>
+                <span>{creditQueueCount}</span>
               </div>
             ) : null}
             {view === "due" ? (
@@ -2050,6 +2334,186 @@ export default function PaymentCollectionsView({ view = "due" }) {
                     <th>{t("lastUpdate")}</th>
                     <th>{t("actions")}</th>
                   </tr>
+                  <tr className="moduleCollectorFilterRow">
+                    <th>
+                      <input
+                        className="moduleInput moduleCollectorColumnFilter"
+                        type="text"
+                        value={creditColumnFilters.code}
+                        placeholder={t("filterCode")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          code: event.target.value,
+                        }))}
+                      />
+                    </th>
+                    <th>
+                      <input
+                        className="moduleInput moduleCollectorColumnFilter"
+                        type="text"
+                        value={creditColumnFilters.customer}
+                        placeholder={t("filterCustomer")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          customer: event.target.value,
+                        }))}
+                      />
+                    </th>
+                    <th>
+                      <select
+                        className="moduleInput moduleCollectorColumnFilter moduleCollectorColumnFilterSelect"
+                        multiple
+                        value={creditColumnFilters.salesman}
+                        aria-label={t("filterSalesman")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          salesman: [...event.target.selectedOptions].map((option) => option.value),
+                        }))}
+                      >
+                        {salesmanOptions.map((option) => (
+                          <option key={option.key} value={option.key}>{option.label}</option>
+                        ))}
+                      </select>
+                    </th>
+                    <th>
+                      <input
+                        className="moduleInput moduleCollectorColumnFilter"
+                        type="text"
+                        value={creditColumnFilters.cityArea}
+                        placeholder={t("filterCityArea")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          cityArea: event.target.value,
+                        }))}
+                      />
+                    </th>
+                    <th>
+                      <input
+                        className="moduleInput moduleCollectorColumnFilter"
+                        type="text"
+                        value={creditColumnFilters.dueAmount}
+                        placeholder={t("filterAmount")}
+                        title={t("numericFilterHint")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          dueAmount: event.target.value,
+                        }))}
+                      />
+                    </th>
+                    <th>
+                      <input
+                        className="moduleInput moduleCollectorColumnFilter"
+                        type="text"
+                        value={creditColumnFilters.cash}
+                        placeholder={t("filterNumeric")}
+                        title={t("numericFilterHint")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          cash: event.target.value,
+                        }))}
+                      />
+                    </th>
+                    {[
+                      ["bucket30", creditColumnFilters.bucket30],
+                      ["bucket31to60", creditColumnFilters.bucket31to60],
+                      ["bucket61to90", creditColumnFilters.bucket61to90],
+                      ["bucket91to120", creditColumnFilters.bucket91to120],
+                      ["bucket120plus", creditColumnFilters.bucket120plus],
+                    ].map(([key, value]) => (
+                      <th key={key}>
+                        <input
+                          className="moduleInput moduleCollectorColumnFilter"
+                          type="text"
+                          value={value}
+                          placeholder={t("filterNumeric")}
+                          title={t("numericFilterHint")}
+                          onChange={(event) => setCreditColumnFilters((current) => ({
+                            ...current,
+                            [key]: event.target.value,
+                          }))}
+                        />
+                      </th>
+                    ))}
+                    <th>
+                      <input
+                        className="moduleInput moduleCollectorColumnFilter"
+                        type="text"
+                        value={creditColumnFilters.maxOverdue}
+                        placeholder={t("filterOverdue")}
+                        title={t("numericFilterHint")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          maxOverdue: event.target.value,
+                        }))}
+                      />
+                    </th>
+                    <th>
+                      <input
+                        className="moduleInput moduleCollectorColumnFilter"
+                        type="text"
+                        value={creditColumnFilters.dueInvoices}
+                        placeholder={t("filterInvoices")}
+                        title={t("numericFilterHint")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          dueInvoices: event.target.value,
+                        }))}
+                      />
+                    </th>
+                    <th>
+                      <select
+                        className="moduleInput moduleCollectorColumnFilter moduleCollectorColumnFilterSelect"
+                        multiple
+                        value={creditColumnFilters.probability}
+                        aria-label={t("filterProbability")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          probability: [...event.target.selectedOptions].map((option) => option.value),
+                        }))}
+                      >
+                        {PROBABILITY_FILTER_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{t(option.textKey)}</option>
+                        ))}
+                      </select>
+                    </th>
+                    <th>
+                      <select
+                        className="moduleInput moduleCollectorColumnFilter moduleCollectorColumnFilterSelect"
+                        multiple
+                        value={creditColumnFilters.lastOutcome}
+                        aria-label={t("filterOutcome")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          lastOutcome: [...event.target.selectedOptions].map((option) => option.value),
+                        }))}
+                      >
+                        {Object.entries(OUTCOME_KEYS).map(([value, textKey]) => (
+                          <option key={value} value={value}>{t(textKey)}</option>
+                        ))}
+                      </select>
+                    </th>
+                    <th>
+                      <input
+                        className="moduleInput moduleCollectorColumnFilter"
+                        type="text"
+                        value={creditColumnFilters.lastUpdate}
+                        placeholder={t("filterLastUpdate")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          lastUpdate: event.target.value,
+                        }))}
+                      />
+                    </th>
+                    <th>
+                      <button
+                        type="button"
+                        className="moduleInlineButton moduleCollectorColumnFilterClear"
+                        onClick={() => setCreditColumnFilters(EMPTY_CREDIT_COLUMN_FILTERS)}
+                      >
+                        {t("clearColumnFilters")}
+                      </button>
+                    </th>
+                  </tr>
                 </thead>
                 <tbody>
                   {tableRows.map((item, tableIndex) => {
@@ -2076,6 +2540,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                           <td data-label={t("customerCode")}>{formatCustomerCodeWithPriority(row.customer_code, queuePriority)}</td>
                           <td data-label={t("customer")} className="moduleCollectorCellPrimary">
                             {row.customer_name || row.customer_code}
+                            {isNotDue ? (
+                              <div className="moduleHint">{t("notYetDueBadge")}</div>
+                            ) : null}
                             {view !== "legal" && row.legal_transfer?.is_transferred ? (
                               <div className="moduleHint">{t("legalSearchMatch")}</div>
                             ) : null}
@@ -2123,12 +2590,34 @@ export default function PaymentCollectionsView({ view = "due" }) {
                               <Link href={`/management/customer-audit?customer_code=${encodeURIComponent(row.customer_code || "")}`} className="moduleInlineButton moduleActionButton">
                                 {t("customerDetails")}
                               </Link>
+                              {view === "legal" ? (
+                                <button
+                                  type="button"
+                                  className="moduleInlineButton moduleActionButton"
+                                  onClick={() => toggleLegal(row, "remove")}
+                                  disabled={legalBusyCode === row.customer_code}
+                                >
+                                  {legalBusyCode === row.customer_code ? t("removingLegal") : t("removeLegal")}
+                                </button>
+                              ) : null}
                             </div>
                           </td>
                         </tr>
                         {isOpen ? (
                           <tr id={`collector-detail-${key}`} className="moduleCollectorDetailRow">
                             <td colSpan={17}>
+                              {view === "legal" ? (
+                                <div className="moduleInlineStack moduleActionStack" style={{ marginBottom: "12px" }}>
+                                  <button
+                                    type="button"
+                                    className="modulePrimaryButton"
+                                    onClick={() => toggleLegal(row, "remove")}
+                                    disabled={legalBusyCode === row.customer_code}
+                                  >
+                                    {legalBusyCode === row.customer_code ? t("removingLegal") : t("removeLegal")}
+                                  </button>
+                                </div>
+                              ) : null}
                               <div className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "10px" }}>
                                 <table className="moduleTable">
                                   <thead>
@@ -2313,7 +2802,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     {savingCustomerCode === row.customer_code ? t("saving") : t("saveVisit")}
                                   </button>
                                   {view === "legal" || row.legal_transfer?.is_transferred ? (
-                                    <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => toggleLegal(row, "remove")} disabled={legalBusyCode === row.customer_code}>{t("removeLegal")}</button>
+                                    <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => toggleLegal(row, "remove")} disabled={legalBusyCode === row.customer_code}>{legalBusyCode === row.customer_code ? t("removingLegal") : t("removeLegal")}</button>
                                   ) : (
                                     <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => saveVisit(row, { transferToLegal: true })} disabled={savingCustomerCode === row.customer_code || legalBusyCode === row.customer_code}>{t("transferLegal")}</button>
                                   )}
@@ -2395,9 +2884,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
             {!loading && visibleRows.length === 0 && visibleNotDueRows.length === 0 && (
               <div className="moduleHint">{view === "legal" ? t("noLegal") : t("noDue")}</div>
             )}
-            {!loading && view === "due" && visibleRows.length === 0 && visibleNotDueRows.length > 0 && (
-              <div className="moduleHint">{t("noDue")}</div>
-            )}
           </section>
 
           {loading && <div className="moduleLoading">{t("loading")}</div>}
@@ -2449,6 +2935,38 @@ export default function PaymentCollectionsView({ view = "due" }) {
                 </button>
               </div>
               {copyStatus ? <div className="moduleHint">{copyStatus}</div> : null}
+            </div>
+          </div>
+        ) : null}
+
+        {locationPrompt ? (
+          <div className="moduleModalOverlay" dir={dir}>
+            <div className="moduleModal" role="dialog" aria-modal="true">
+              <h2>{t("locationUpdateTitle")}</h2>
+              <p>{locationPrompt.message}</p>
+              <div className="moduleOrderActions">
+                <button
+                  type="button"
+                  className="modulePrimaryButton"
+                  onClick={() => finishLocationPrompt(CUSTOMER_LOCATION_UPDATE_UPDATE)}
+                >
+                  {t("locationUpdateAndSave")}
+                </button>
+                <button
+                  type="button"
+                  className="moduleSecondaryButton"
+                  onClick={() => finishLocationPrompt(CUSTOMER_LOCATION_UPDATE_SKIP)}
+                >
+                  {t("locationSaveWithoutUpdate")}
+                </button>
+                <button
+                  type="button"
+                  className="moduleInlineButton"
+                  onClick={() => finishLocationPrompt(CUSTOMER_LOCATION_UPDATE_CANCEL)}
+                >
+                  {t("cancel")}
+                </button>
+              </div>
             </div>
           </div>
         ) : null}

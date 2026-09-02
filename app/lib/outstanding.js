@@ -204,7 +204,7 @@ export function resolveCustomerAccountCode(value) {
   const raw = normalizeCode(value);
   if (!raw) return "";
 
-  const numericPrefix = raw.match(/^(\d{3,6}[A-Z]?)[-\s]/);
+  const numericPrefix = raw.match(/^(\d{3,6}[A-Z]?)[-\s_]/);
   if (numericPrefix) return numericPrefix[1];
 
   const extracted = normalizeCode(extractLeadingCustomerCodeAndName(raw).customer_code);
@@ -272,7 +272,7 @@ export function extractLeadingCustomerCodeAndName(value) {
     return { customer_code: "", customer_name: "" };
   }
 
-  const match = text.match(/^([A-Z0-9-]{3,20})\s+(.+)$/i);
+  const match = text.match(/^([A-Z0-9-]{3,20})[\s_\-]+(.+)$/i);
   if (!match || !leadingTokenLooksLikeCustomerCode(match[1])) {
     return { customer_code: "", customer_name: text };
   }

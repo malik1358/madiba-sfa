@@ -4670,6 +4670,33 @@ table.auditMatrix td.auditTrendSame {
   background: #edf4f5;
 }
 
+.moduleCollectorTableWrap > .moduleCollectorTable > thead > tr.moduleCollectorFilterRow > th {
+  position: static;
+  top: auto;
+  z-index: 5;
+  padding-top: 4px;
+  padding-bottom: 8px;
+  vertical-align: top;
+}
+
+.moduleCollectorColumnFilter {
+  width: 100%;
+  min-width: 72px;
+  padding: 4px 6px;
+  font-size: 0.75rem;
+}
+
+.moduleCollectorColumnFilterSelect {
+  min-height: 30px;
+  max-height: 72px;
+}
+
+.moduleCollectorColumnFilterClear {
+  width: 100%;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 @media (max-width: 900px) {
   /* Too many columns for a phone, so each row becomes a labelled card. */
   .moduleCollectorTableWrap {

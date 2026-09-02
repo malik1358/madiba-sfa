@@ -273,6 +273,13 @@ export async function invalidateVisibleCustomersCache(scope) {
   ]);
 }
 
+export async function invalidateCollectionQueuesForUser(userId) {
+  const { removeCacheEntry } = await import("./localDataStore.js");
+  const scopeEntry = await readCacheEntry(collectionScopeCacheKey(userId));
+  if (!scopeEntry?.value) return;
+  await removeCacheEntry(collectionQueuesCacheKey(scopeEntry.value));
+}
+
 export async function readCollectionQueuesForUser(userId) {
   const scopeEntry = await readCacheEntry(collectionScopeCacheKey(userId));
   if (!scopeEntry?.value) return null;

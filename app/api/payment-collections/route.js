@@ -3,7 +3,7 @@ import { buildCollectionQueues, customerMatchesCollectionScope, filterCollection
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
-import { resolveMutualGroupProfiles, buildSalesmanScopeMatchers, normalizeSalesmanCode, isSoyebProfile } from "../../lib/mutualSalesmanGroups.js";
+import { resolveMutualGroupProfiles, expandMutualGroupScopeIdentities, buildSalesmanScopeMatchers, normalizeSalesmanCode, isSoyebProfile } from "../../lib/mutualSalesmanGroups.js";
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import {
   OUTSTANDING_DATASET_KEY,
@@ -437,9 +437,7 @@ export async function getSalesScope(admin, userId) {
         .select("id,salesman_code,salesman_name");
 
       const mutualProfiles = resolveMutualGroupProfiles(teamProfiles || [], profile);
-      const mutualCodes = mutualProfiles
-        .map((entry) => normalizeSalesmanCode(entry.salesman_code))
-        .filter(Boolean);
+      const mutualCodes = expandMutualGroupScopeIdentities(teamProfiles || [], profile);
       visibleSalesmanCodes = [...new Set([...visibleSalesmanCodes, ...mutualCodes])];
 
       const scopeCodeSet = new Set(visibleSalesmanCodes.map((code) => normalizeSalesmanCode(code)).filter(Boolean));

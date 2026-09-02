@@ -6,8 +6,9 @@ import {
 import { normalizeCustomerNameKey, resolveCustomerMasterExportFields } from "./customerCode.js";
 import { normalizeCode } from "./outstanding.js";
 import { extractMissingProspectsColumn, normalizeProspectSalesmanCode } from "./prospects.js";
+import { applyCustomerSalesmanScopeFilter } from "./customerSalesmanAssignment.js";
 
-const CUSTOMER_LOOKUP_FIELDS = "customer_code,customer_name,current_salesman_code,latitude,longitude,city,area";
+const CUSTOMER_LOOKUP_FIELDS = "customer_code,customer_name,current_salesman_code,previous_salesman_code,latitude,longitude,city,area";
 
 const PROSPECT_MATCH_STOP_WORDS = new Set([
   "FOR", "THE", "AND", "EST", "CO", "OF", "AL", "EL", "IN", "AT", "TO",
@@ -159,14 +160,20 @@ async function loadCustomersWithoutGps(admin, scope, prospect, options = {}) {
   const prospectName = String(prospect?.company_name || prospect?.shop_name || prospect?.customer_name || "").trim();
   const tokens = buildProspectNameSearchTokens(prospectName);
   const salesmanCode = normalizeProspectSalesmanCode(prospect?.salesman_code);
+  const scopedCodes = [...new Set(
+    (scope?.visibleSalesmanCodes || [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  )];
+  if (salesmanCode) scopedCodes.push(salesmanCode);
 
   let query = admin
     .from("customers")
     .select(CUSTOMER_LOOKUP_FIELDS)
     .or("latitude.is.null,longitude.is.null,latitude.eq.0,longitude.eq.0");
 
-  if (!scope?.hasAllAccess && salesmanCode) {
-    query = query.eq("current_salesman_code", salesmanCode);
+  if (!scope?.hasAllAccess && scopedCodes.length > 0) {
+    query = applyCustomerSalesmanScopeFilter(query, scopedCodes);
   }
 
   if (useNameFilter && tokens.length > 0) {

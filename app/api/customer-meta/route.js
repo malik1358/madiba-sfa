@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { buildSalesmanScopeMatchers } from "../../lib/mutualSalesmanGroups.js";
+import { buildSalesmanScopeMatchers, expandMutualGroupScopeIdentities, mergeMutualGroupProfiles } from "../../lib/mutualSalesmanGroups.js";
 import {
   customerSalesmanAssignmentMatchesScope,
   resolvePeersUnderSameHeadUserIds,
@@ -28,10 +28,6 @@ function normalizeLooseToken(value) {
   return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
 }
 
-function normalizeName(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
-}
-
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -44,19 +40,6 @@ function isProductPromoterRole(role) {
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
   return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
-}
-
-const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
-
-function resolveMutualGroupCodes(allProfiles, currentProfile) {
-  const currentName = normalizeName(currentProfile?.salesman_name);
-  const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => group.includes(currentName));
-  if (!matchedGroup) return [];
-
-  return allProfiles
-    .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
-    .map((profile) => normalizeCode(profile.salesman_code))
-    .filter(Boolean);
 }
 
 function profileCodeCandidates(profile) {
@@ -163,7 +146,8 @@ async function resolveScope(admin, token) {
     visibleProfiles = [currentProfile, ...visibleProfiles];
   }
 
-  const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
+  visibleProfiles = mergeMutualGroupProfiles(visibleProfiles, allProfiles, currentProfile);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile);
   const identitySearchPattern = normalizeCode(extractEmailLocalPart(currentAuthUser?.email)).replace(/[._-]+/g, "%");
   const scopeMatchers = buildSalesmanScopeMatchers(visibleProfiles);
 

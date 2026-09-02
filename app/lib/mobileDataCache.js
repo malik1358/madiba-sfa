@@ -23,11 +23,11 @@ export const CACHE_TTL = {
 };
 
 function scopeCacheKey(userId) {
-  return `scope:v1:${String(userId || "").trim()}`;
+  return `scope:v2:${String(userId || "").trim()}`;
 }
 
 function customersCacheKey(scope, enriched = false) {
-  const prefix = enriched ? "customers:visible:enriched:v7" : "customers:visible:basic:v4";
+  const prefix = enriched ? "customers:visible:enriched:v8" : "customers:visible:basic:v5";
   return `${prefix}:${buildScopeHash(scope)}`;
 }
 

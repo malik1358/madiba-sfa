@@ -50,8 +50,16 @@ function nameTokens(value) {
 }
 
 function matchesMutualGroup(profile, group) {
-  const keys = profileGroupKeys(profile);
+  const keys = [
+    ...profileGroupKeys(profile),
+    ...nameTokens(profile?.salesman_name),
+    ...nameTokens(profile?.salesman_code),
+  ];
   return keys.some((key) => group.includes(key));
+}
+
+export function salesmanScopeIdentities(profile) {
+  return [...new Set(profileGroupKeys(profile))];
 }
 
 export function resolveMutualGroupProfiles(allProfiles, currentProfile) {
@@ -61,11 +69,31 @@ export function resolveMutualGroupProfiles(allProfiles, currentProfile) {
   return (allProfiles || []).filter((profile) => matchesMutualGroup(profile, matchedGroup));
 }
 
+export function mergeMutualGroupProfiles(members, allProfiles, currentProfile) {
+  const merged = [...(members || [])];
+  const seenIds = new Set(merged.map((row) => row?.id).filter(Boolean));
+
+  resolveMutualGroupProfiles(allProfiles, currentProfile).forEach((profile) => {
+    if (profile?.id && seenIds.has(profile.id)) return;
+    if (profile?.id) seenIds.add(profile.id);
+    merged.push(profile);
+  });
+
+  return merged;
+}
+
 export function resolveMutualGroupCodes(allProfiles, currentProfile) {
   return [...new Set(
     resolveMutualGroupProfiles(allProfiles, currentProfile)
       .map((profile) => normalizeSalesmanCode(profile.salesman_code))
       .filter(Boolean),
+  )];
+}
+
+export function expandMutualGroupScopeIdentities(allProfiles, currentProfile) {
+  return [...new Set(
+    resolveMutualGroupProfiles(allProfiles, currentProfile)
+      .flatMap((profile) => salesmanScopeIdentities(profile)),
   )];
 }
 

@@ -8,6 +8,7 @@ import {
 } from "../../lib/orderInvoiceComparison.js";
 import { attachProspectLinkToMeta, backfillProspectInvoiceLinks } from "../../lib/prospectInvoiceLink.js";
 import { isProspectCustomerCode } from "../../lib/customerCode.js";
+import { expandMutualGroupScopeIdentities } from "../../lib/mutualSalesmanGroups.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -15,7 +16,6 @@ export const maxDuration = 60;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 const STATUS_PENDING_CREDIT = "Pending for credit approval";
 const STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
 const STATUS_REJECTED = "Rejected by management";
@@ -26,24 +26,9 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
-function normalizeName(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
-}
-
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").trim().toLowerCase();
   return normalized === "invoice_maker" || normalized === "invoice-maker";
-}
-
-function resolveMutualGroupCodes(allProfiles, currentProfile) {
-  const currentName = normalizeName(currentProfile?.salesman_name);
-  const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => group.includes(currentName));
-  if (!matchedGroup) return [];
-
-  return allProfiles
-    .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
-    .map((profile) => normalizeCode(profile.salesman_code))
-    .filter(Boolean);
 }
 
 function metaKey(orderId) {
@@ -124,7 +109,7 @@ async function resolveScope(admin, token) {
     return entry.id === profile.id || subordinateIds.has(entry.id);
   });
 
-  const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, profile);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, profile);
 
   return {
     userId: user.id,

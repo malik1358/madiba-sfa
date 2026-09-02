@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { isSoyebProfile } from "../../lib/mutualSalesmanGroups.js";
+import { isSoyebProfile, expandMutualGroupScopeIdentities } from "../../lib/mutualSalesmanGroups.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -12,26 +12,9 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
-function normalizeName(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
-}
-
 function isInvoiceMakerRole(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "invoice-maker" || normalized === "invoice_maker";
-}
-
-const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
-
-function resolveMutualGroupCodes(allProfiles, currentProfile) {
-  const currentName = normalizeName(currentProfile?.salesman_name);
-  const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => group.includes(currentName));
-  if (!matchedGroup) return [];
-
-  return allProfiles
-    .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
-    .map((profile) => normalizeCode(profile.salesman_code))
-    .filter(Boolean);
 }
 
 function latestKey(orderId) {
@@ -102,7 +85,7 @@ async function resolveScope(admin, token) {
     return entry.id === profile.id || subordinateIds.has(entry.id);
   });
 
-  const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, profile);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, profile);
 
   return {
     userId: user.id,

@@ -4,7 +4,12 @@ import {
   resolvePeersUnderSameHeadUserIds,
   resolveSubordinateUserIds,
 } from "../../../lib/salesHierarchy.js";
-import { isSoyebProfile } from "../../../lib/mutualSalesmanGroups.js";
+import {
+  expandMutualGroupScopeIdentities,
+  isSoyebProfile,
+  mergeMutualGroupProfiles,
+  salesmanScopeIdentities,
+} from "../../../lib/mutualSalesmanGroups.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -26,10 +31,6 @@ function normalizeLooseToken(value) {
   return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
 }
 
-function normalizeName(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
-}
-
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -44,21 +45,8 @@ function isSalesTeamRole(role) {
   return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker", "product-promoter", "product_promoter"].includes(normalized);
 }
 
-const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
-
-function resolveMutualGroupCodes(allProfiles, currentProfile) {
-  const currentName = normalizeName(currentProfile?.salesman_name);
-  const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => group.includes(currentName));
-  if (!matchedGroup) return [];
-
-  return allProfiles
-    .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
-    .map((profile) => normalizeCode(profile.salesman_code))
-    .filter(Boolean);
-}
-
 function profileCodeCandidates(profile) {
-  return [normalizeCode(profile?.salesman_code), normalizeCode(profile?.salesman_name)].filter(Boolean);
+  return salesmanScopeIdentities(profile);
 }
 
 function authCodeCandidates(authUser) {
@@ -162,6 +150,9 @@ export async function resolveSalesScopeForUserId(admin, userId) {
     }
   }
 
+  members = mergeMutualGroupProfiles(members, allProfiles, currentProfile);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile);
+
   const visibleMembers = members.map((profile) => {
     const authUser = authMap.get(profile.id);
     return {
@@ -172,8 +163,6 @@ export async function resolveSalesScopeForUserId(admin, userId) {
       email: authUser?.email || "",
     };
   });
-
-  const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
 
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),

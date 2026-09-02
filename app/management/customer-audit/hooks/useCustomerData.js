@@ -93,7 +93,11 @@ export function useCustomerData({ setError, setMessage }) {
         setItemMasterStatus(itemsResult.data.status || 'Not loaded');
 
         const salesmanCodes = [
-          ...new Set((scope.visibleMembers || []).map((member) => member.salesman_code).filter(Boolean)),
+          ...new Set([
+            ...(scope.visibleSalesmanCodes || []),
+            ...(scope.mutualSalesmanCodes || []),
+            ...(scope.visibleMembers || []).map((member) => member.salesman_code),
+          ].filter(Boolean)),
         ].sort();
 
         setSalesmen(salesmanCodes);

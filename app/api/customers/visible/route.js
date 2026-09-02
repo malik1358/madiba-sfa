@@ -16,8 +16,10 @@ import { mergeSalesSnapshots } from "../../../lib/salesHistory";
 import { monthKeyFromDate, summarizeMonthlySales } from "../../../management/my-day/visitPriority";
 import {
   buildSalesmanScopeMatchers,
-  resolveMutualGroupCodes,
-  resolveMutualGroupProfiles,
+  expandMutualGroupScopeIdentities,
+  mergeMutualGroupProfiles,
+  salesmanScopeIdentities,
+  salesmanValueMatchesScope,
 } from "../../../lib/mutualSalesmanGroups.js";
 import {
   resolvePeersUnderSameHeadUserIds,
@@ -73,7 +75,7 @@ function isSalesTeamRole(role) {
 }
 
 function profileCodeCandidates(profile) {
-  return [normalizeCode(profile?.salesman_code), normalizeCode(profile?.salesman_name)].filter(Boolean);
+  return salesmanScopeIdentities(profile);
 }
 
 function authCodeCandidates(authUser) {
@@ -194,10 +196,9 @@ async function resolveScopeForUser(admin, user) {
     }
   }
 
-  const mutualProfiles = resolveMutualGroupProfiles(allProfiles, currentProfile);
-  const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
-  const scopeProfiles = [...members, ...mutualProfiles.filter((profile) => !members.some((member) => member.id === profile.id))];
-  const scopeMatchers = buildSalesmanScopeMatchers(scopeProfiles);
+  const membersWithTeam = mergeMutualGroupProfiles(members, allProfiles, currentProfile);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile);
+  const scopeMatchers = buildSalesmanScopeMatchers(membersWithTeam);
   const outstandingSalesmanIdentities = [
     ...scopeMatchers.codes,
     ...scopeMatchers.comparableNames,
@@ -205,7 +206,7 @@ async function resolveScopeForUser(admin, user) {
   ];
 
   const visibleSalesmanCodes = [...new Set([
-    ...members.flatMap((member) => profileCodeCandidates(member)),
+    ...membersWithTeam.flatMap((member) => profileCodeCandidates(member)),
     ...authCodeCandidates(currentAuthUser),
     ...fuzzyMatchedProfileCodes(scopedProfiles, currentAuthUser),
     ...mutualGroupCodes,
@@ -347,6 +348,10 @@ async function fetchVisibleCustomers(admin, scope) {
 
       // Always include customers currently assigned to the visible scope, including transfers.
       if (normalizedScopeCodes.has(rowSalesmanCode) || normalizedScopeCodes.has(previousSalesmanCode)) return true;
+      if (
+        salesmanValueMatchesScope(row.current_salesman_code, scope.scopeMatchers)
+        || salesmanValueMatchesScope(row.previous_salesman_code, scope.scopeMatchers)
+      ) return true;
 
       if (customerMatchesOutstandingCodeSet(row.customer_code, outstandingOwnedCustomerCodes)) {
         return true;

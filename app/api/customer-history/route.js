@@ -7,7 +7,7 @@ import {
   resolveOutstandingCustomerOwnership,
 } from "../../lib/outstanding";
 import { mergeSalesSnapshots } from "../../lib/salesHistory";
-import { buildSalesmanScopeMatchers } from "../../lib/mutualSalesmanGroups.js";
+import { buildSalesmanScopeMatchers, expandMutualGroupScopeIdentities, mergeMutualGroupProfiles } from "../../lib/mutualSalesmanGroups.js";
 import {
   customerSalesmanAssignmentMatchesScope,
   resolvePeersUnderSameHeadUserIds,
@@ -25,7 +25,6 @@ const HISTORY_MONTHS = 6;
 const HISTORY_LIMIT = 30000;
 const PEER_LIMIT = 30000;
 const CACHE_VERSION = 9;
-const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -79,17 +78,6 @@ function identitySearchPattern(value) {
 function isSalesTeamRole(role) {
   const normalized = normalizeRole(role);
   return ["salesman", "manager", "admin", "invoice_maker", "invoice-maker"].includes(normalized);
-}
-
-function resolveMutualGroupCodes(allProfiles, currentProfile) {
-  const currentName = normalizeName(currentProfile?.salesman_name);
-  const matchedGroup = MUTUAL_SALESMAN_GROUPS.find((group) => group.includes(currentName));
-  if (!matchedGroup) return [];
-
-  return allProfiles
-    .filter((profile) => matchedGroup.includes(normalizeName(profile.salesman_name)))
-    .map((profile) => normalizeCode(profile.salesman_code))
-    .filter(Boolean);
 }
 
 function profileCodeCandidates(profile) {
@@ -288,7 +276,8 @@ async function resolveScope(admin, token) {
     }
   }
 
-  const mutualGroupCodes = resolveMutualGroupCodes(allProfiles, currentProfile);
+  members = mergeMutualGroupProfiles(members, allProfiles, currentProfile);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile);
   const scopeMatchers = buildSalesmanScopeMatchers(members);
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),

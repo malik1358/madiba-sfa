@@ -181,6 +181,14 @@ export default function CustomerMasterPage() {
   usePopupMessages({ error, message: importSummary });
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const nextSearch = normalizeCustomerMasterSearch(params.get("search"));
+    if (!nextSearch) return;
+    setSearch(nextSearch);
+    setDebouncedSearch(nextSearch);
+  }, []);
+
+  useEffect(() => {
     if (!accessDenied) return;
     showPopup({ message: t("accessDenied"), variant: "error" });
   }, [accessDenied, showPopup, t]);

@@ -216,6 +216,7 @@ export default function ManagementPage() {
       "userActivity",
       "customerAudit",
       "customerMaster",
+      "outstandingNoGps",
       "newOrder",
       "visitWithoutOrder",
       "salesmanHierarchy",

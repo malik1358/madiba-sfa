@@ -39,6 +39,8 @@ import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { copyTextToClipboard, openWhatsappDirect } from "../../lib/whatsappShare";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
+import { buildNearestCustomerActions } from "../../lib/dashboardNearestCustomers";
+import { getScheduleTodayKey, isScheduleDateInWindow } from "../../lib/scheduleDateWindow";
 
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 
@@ -72,8 +74,12 @@ const PAGE_TEXT = {
   routeSummary: { en: "Route Summary", ar: "ملخص المسار" },
   visitSchedule: { en: "Visit Schedule", ar: "جدول الزيارات" },
   plannedVisitsCount: { en: "scheduled visits", ar: "زيارات مجدولة" },
+  scheduleWindowHint: {
+    en: "Showing past visits, today, and tomorrow. Tap a date to open it.",
+    ar: "يتم عرض الزيارات السابقة واليوم وغدًا. اضغط على التاريخ لفتحه.",
+  },
   createOrder: { en: "Create Order", ar: "إنشاء طلب" },
-  noPlannedVisits: { en: "No planned visits for now.", ar: "لا توجد زيارات مخططة حالياً." },
+  noPlannedVisits: { en: "No planned visits for past dates, today, or tomorrow.", ar: "لا توجد زيارات مجدولة للأيام السابقة أو اليوم أو غدًا." },
   calendarDate: { en: "Date", ar: "التاريخ" },
   calendarTime: { en: "Time", ar: "الوقت" },
   unscheduledVisits: { en: "Unscheduled visits", ar: "زيارات بدون موعد" },
@@ -113,6 +119,8 @@ const PAGE_TEXT = {
   inactiveSince: { en: "Inactive Since", ar: "غير نشط منذ" },
   noCustomers: { en: "No customers available for route status.", ar: "لا يوجد عملاء متاحون لحالة المسار." },
   visitWithoutOrder: { en: "Visit Without Order", ar: "زيارة بدون طلب" },
+  nearestNewOrder: { en: "New order", ar: "طلب جديد" },
+  nearestCollection: { en: "Collection", ar: "تحصيل" },
   visitWithoutOrderSubtitle: {
     en: "Record customer visits and follow-ups without creating an order",
     ar: "تسجيل زيارات العملاء والمتابعات بدون إنشاء طلب",
@@ -241,6 +249,47 @@ async function loadVisibleCustomers(accessToken, scope, options = {}) {
     ...options,
   });
   return result.data;
+}
+
+function getStickyOffsetPx() {
+  if (typeof window === "undefined") return 150;
+  const parsed = Number.parseFloat(
+    getComputedStyle(document.body).getPropertyValue("--sticky-table-top"),
+  );
+  return Number.isFinite(parsed) ? parsed : 150;
+}
+
+function scrollVisitReportIntoView() {
+  if (typeof window === "undefined") return false;
+  const el = document.getElementById("visit-report-panel");
+  if (!el) return false;
+  const top = window.scrollY + el.getBoundingClientRect().top - getStickyOffsetPx() - 8;
+  window.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+  return true;
+}
+
+function findVisitRowByCode(rows, code) {
+  const upper = String(code || "").trim().toUpperCase();
+  if (!upper) return null;
+  return (rows || []).find(
+    (entry) => String(entry?.customer_code || "").trim().toUpperCase() === upper,
+  ) || null;
+}
+
+function visitRowFromSearchParams(code) {
+  if (typeof window === "undefined") {
+    return code ? { customer_code: code } : null;
+  }
+  const params = new URLSearchParams(window.location.search);
+  const paramCode = String(params.get("customer_code") || "").trim();
+  if (!paramCode || paramCode.toUpperCase() !== String(code || "").trim().toUpperCase()) {
+    return code ? { customer_code: code } : null;
+  }
+  return {
+    customer_code: paramCode,
+    customer_name: String(params.get("customer_name") || "").trim(),
+    salesman_code: String(params.get("salesman_code") || "").trim(),
+  };
 }
 
 export default function MyDayPage({ mode = "default" } = {}) {
@@ -986,8 +1035,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
     }
   }
 
-  async function openVisitReport(customer) {
-    const nextCode = activeVisitCustomerCode === customer.customer_code ? "" : customer.customer_code;
+  async function openVisitReport(customer, { forceOpen = false } = {}) {
+    const nextCode = !forceOpen && activeVisitCustomerCode === customer.customer_code ? "" : customer.customer_code;
     setActiveVisitCustomerCode(nextCode);
 
     if (!nextCode) {
@@ -1549,18 +1598,10 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
   function openNearestCustomer(customer) {
     const code = String(customer?.customer_code || "").trim();
-    const row = (visitStatusRows || []).find(
-      (entry) => String(entry.customer_code || "").trim().toUpperCase() === code.toUpperCase(),
-    ) || customer;
+    const row = findVisitRowByCode(visitStatusRows, code) || customer;
     setSelectedVisitStatusSalesmen([]);
     setVisitStatusSearch(code || String(customer?.customer_name || "").trim());
-    openVisitReport(row);
-    window.setTimeout(() => {
-      document.getElementById(`visit-customer-${row.customer_code || code}`)?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    }, 250);
+    openVisitReport(row, { forceOpen: true });
   }
 
   const prefilledVisitOpenedRef = useRef(false);
@@ -1569,16 +1610,15 @@ export default function MyDayPage({ mode = "default" } = {}) {
     if (!visitOnlyMode || loading || !workdayUnlocked || prefilledVisitOpenedRef.current) return;
     if (typeof window === "undefined") return;
 
-    const code = String(new URLSearchParams(window.location.search).get("customer_code") || "").trim();
+    const params = new URLSearchParams(window.location.search);
+    const code = String(params.get("customer_code") || "").trim();
     if (!code) return;
 
-    const row = (visitStatusRows || []).find(
-      (entry) => String(entry.customer_code || "").trim().toUpperCase() === code.toUpperCase(),
-    );
+    const row = findVisitRowByCode(visitStatusRows, code);
     if (!row) {
       if (refreshing) return;
-      setVisitStatusSearch(code);
       prefilledVisitOpenedRef.current = true;
+      openNearestCustomer(visitRowFromSearchParams(code));
       return;
     }
 
@@ -1616,6 +1656,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   const visitCalendar = useMemo(() => {
     const dayMap = new Map();
     const unscheduled = [];
+    const todayKey = getScheduleTodayKey();
 
     plannedVisitRows.forEach((row) => {
       const time = getSortTimestamp(row.next_visit_at);
@@ -1624,7 +1665,12 @@ export default function MyDayPage({ mode = "default" } = {}) {
         return;
       }
 
-      const dateKey = row.schedule_date || new Date(time).toISOString().slice(0, 10);
+      const dateKey = row.schedule_date
+        || (/^\d{4}-\d{2}-\d{2}/.test(String(row.next_visit_at || ""))
+          ? String(row.next_visit_at).slice(0, 10)
+          : new Date(time).toISOString().slice(0, 10));
+      if (!isScheduleDateInWindow(dateKey, todayKey)) return;
+
       const current = dayMap.get(dateKey) || [];
       current.push(row);
       dayMap.set(dateKey, current);
@@ -1646,7 +1692,106 @@ export default function MyDayPage({ mode = "default" } = {}) {
     return { days, unscheduled };
   }, [plannedVisitRows]);
 
+  const activeVisitRow = useMemo(() => {
+    const code = String(activeVisitCustomerCode || "").trim();
+    if (!code) return null;
+    return findVisitRowByCode(visitStatusRows, code)
+      || findVisitRowByCode(prospectScheduleRows, code)
+      || visitRowFromSearchParams(code);
+  }, [activeVisitCustomerCode, visitStatusRows, prospectScheduleRows]);
+
+  useEffect(() => {
+    if (!visitOnlyMode || !activeVisitCustomerCode) return undefined;
+    if (typeof window === "undefined") return undefined;
+
+    let cancelled = false;
+    const delays = [0, 80, 250, 600, 1200];
+    const timers = delays.map((delay) => window.setTimeout(() => {
+      if (!cancelled) scrollVisitReportIntoView();
+    }, delay));
+
+    return () => {
+      cancelled = true;
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [visitOnlyMode, activeVisitCustomerCode]);
+
   const isAdministrator = String(profile?.role || "").toLowerCase() === "admin";
+
+  function renderVisitReportForm(row, { showClose = false } = {}) {
+    if (!row) return null;
+    return (
+      <div id="visit-report-panel" className="moduleVisitPanel">
+        <div className="moduleSectionHeader">
+          <h2>{t("visitReport")}</h2>
+          <div className="moduleInlineStack">
+            <span>{row.customer_name || row.customer_code}</span>
+            {showClose ? (
+              <button type="button" className="moduleInlineButton" onClick={() => openVisitReport(row)}>
+                {t("closeReport")}
+              </button>
+            ) : null}
+          </div>
+        </div>
+        <div className="moduleFormGrid">
+          <label>
+            {t("visitOutcome")}
+            <select className="moduleInput" value={visitForm.outcome} onChange={(event) => setVisitForm((current) => ({ ...current, outcome: event.target.value }))}>
+              <option value="PAYMENT_FOLLOWUP">{t("paymentFollowup")}</option>
+              <option value="COME_BACK_LATER">{t("comeBackLater")}</option>
+              <option value="PURCHASE_MANAGER_NOT_AVAILABLE">{t("purchaseManagerUnavailable")}</option>
+              <option value="STOCKS_AVAILABLE">{t("stocksAvailable")}</option>
+              <option value="ORDER_TAKEN">{t("orderTaken")}</option>
+            </select>
+          </label>
+          <label>
+            {t("nextVisit")} *
+            <input
+              className="moduleInput"
+              type="date"
+              required
+              value={visitForm.nextVisitAt}
+              onChange={(event) => setVisitForm((current) => ({ ...current, nextVisitAt: event.target.value }))}
+            />
+          </label>
+          <label className="moduleFieldFull">
+            {t("visitNotes")}
+            <textarea className="moduleTextArea" rows={3} value={visitForm.note} onChange={(event) => setVisitForm((current) => ({ ...current, note: event.target.value }))} />
+            {dictationSupported && (
+              <button type="button" className="moduleInlineButton" aria-pressed={dictationActive} onClick={toggleVisitNoteDictation}>
+                {dictationActive ? t("stopDictation") : t("startDictation")}
+              </button>
+            )}
+          </label>
+          <div className="moduleFieldFull">
+            <div className="moduleSectionHeader">
+              <h2>{t("boughtItems")}</h2>
+            </div>
+            {visitItemsLoading && <div className="moduleLoading">{t("loadingItems")}</div>}
+            {!visitItemsLoading && visitForm.stockChecks.length > 0 && (
+              <ul className="moduleList">
+                {visitForm.stockChecks.map((stockCheck, index) => (
+                  <li key={`${stockCheck.itemName}-${index}`}>
+                    <div className="moduleStockRow">
+                      <strong>{stockCheck.itemName}</strong>
+                      <button type="button" className={`moduleChipButton ${stockCheck.status === "AVAILABLE" ? "active" : ""}`} onClick={() => setStockStatus(String(stockCheck.itemCode || stockCheck.itemName).trim().toUpperCase(), "AVAILABLE")}>{t("available")}</button>
+                      <button type="button" className={`moduleChipButton ${stockCheck.status === "NOT_AVAILABLE" ? "active" : ""}`} onClick={() => setStockStatus(String(stockCheck.itemCode || stockCheck.itemName).trim().toUpperCase(), "NOT_AVAILABLE")}>{t("notAvailable")}</button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!visitItemsLoading && visitForm.stockChecks.length === 0 && <div className="moduleHint">{t("noBoughtItems")}</div>}
+          </div>
+          <div className="moduleFieldFull">
+            <button type="button" className="modulePrimaryButton" onClick={() => saveVisitReport(row)} disabled={visitSaving}>
+              {visitSaving ? t("saving") : t("saveVisitReport")}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -1765,6 +1910,11 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
         {workdayUnlocked ? (
         <>
+        {visitOnlyMode && activeVisitRow ? (
+          <section className="moduleSection">
+            {renderVisitReportForm(activeVisitRow, { showClose: true })}
+          </section>
+        ) : null}
         <div className="moduleMetricGrid">
           <section className="moduleMetricCard"><span>{t("visitsToday")}</span><strong>{summary.visitsToday}</strong></section>
           <section className="moduleMetricCard"><span>{t("followUps")}</span><strong>{summary.followUps}</strong></section>
@@ -1789,24 +1939,35 @@ export default function MyDayPage({ mode = "default" } = {}) {
         <section id="visit-schedule" className="moduleSection">
           <div className="moduleSectionHeader">
             <h2>{t("visitSchedule")}</h2>
-            <span>{plannedVisitRows.length} {t("plannedVisitsCount")}</span>
+            <span>{visitCalendar.days.reduce((count, day) => count + day.rows.length, 0)} {t("plannedVisitsCount")}</span>
           </div>
+          <div className="moduleHint">{t("scheduleWindowHint")}</div>
           {visitOnlyMode ? (
             <NearestCustomerSuggestions
               suggestions={nearestCustomerSuggestions}
               loading={nearestCustomersLoading}
               locationUnavailable={nearestCustomersUnavailable}
-              onSelect={openNearestCustomer}
               onRefresh={refreshNearestCustomers}
-              actionLabel={t("visitWithoutOrder")}
+              actions={(customer) =>
+                buildNearestCustomerActions(
+                  customer,
+                  access,
+                  {
+                    visit: t("visitWithoutOrder"),
+                    order: t("nearestNewOrder"),
+                    collection: t("nearestCollection"),
+                  },
+                  { visit: openNearestCustomer },
+                )
+              }
             />
           ) : null}
           {visitCalendar.days.map((day) => (
-            <div key={day.dateKey} style={{ marginTop: "10px" }}>
-              <div className="moduleSectionHeader">
+            <details key={day.dateKey} className="moduleScheduleDay">
+              <summary className="moduleScheduleDaySummary">
                 <h2>{day.label}</h2>
                 <span>{day.rows.length} {t("plannedVisitsCount")}</span>
-              </div>
+              </summary>
               <div className="moduleTableWrap moduleScheduleTableWrap">
                 <table className="moduleTable moduleScheduleTable">
                   <thead>
@@ -1852,19 +2013,19 @@ export default function MyDayPage({ mode = "default" } = {}) {
                   </tbody>
                 </table>
               </div>
-            </div>
+            </details>
           ))}
 
-          {visitCalendar.days.length === 0 && plannedVisitRows.length === 0 && (
+          {visitCalendar.days.length === 0 && visitCalendar.unscheduled.length === 0 && (
             <div className="moduleHint">{t("noPlannedVisits")}</div>
           )}
 
           {visitCalendar.unscheduled.length > 0 && (
-            <div style={{ marginTop: "10px" }}>
-              <div className="moduleSectionHeader">
+            <details className="moduleScheduleDay">
+              <summary className="moduleScheduleDaySummary">
                 <h2>{t("unscheduledVisits")}</h2>
                 <span>{visitCalendar.unscheduled.length}</span>
-              </div>
+              </summary>
               <div className="moduleTableWrap moduleScheduleTableWrap">
                 <table className="moduleTable moduleScheduleTable">
                   <thead>
@@ -1897,7 +2058,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                   </tbody>
                 </table>
               </div>
-            </div>
+            </details>
           )}
         </section>
 
@@ -2015,71 +2176,10 @@ export default function MyDayPage({ mode = "default" } = {}) {
                       </div>
                     </td>
                   </tr>
-                  {activeVisitCustomerCode === row.customer_code && (
+                  {!visitOnlyMode && activeVisitCustomerCode === row.customer_code && (
                     <tr>
                       <td colSpan={14}>
-                        <div className="moduleVisitPanel">
-                          <div className="moduleSectionHeader">
-                            <h2>{t("visitReport")}</h2>
-                            <span>{row.customer_name || row.customer_code}</span>
-                          </div>
-                          <div className="moduleFormGrid">
-                            <label>
-                              {t("visitOutcome")}
-                              <select className="moduleInput" value={visitForm.outcome} onChange={(event) => setVisitForm((current) => ({ ...current, outcome: event.target.value }))}>
-                                <option value="PAYMENT_FOLLOWUP">{t("paymentFollowup")}</option>
-                                <option value="COME_BACK_LATER">{t("comeBackLater")}</option>
-                                <option value="PURCHASE_MANAGER_NOT_AVAILABLE">{t("purchaseManagerUnavailable")}</option>
-                                <option value="STOCKS_AVAILABLE">{t("stocksAvailable")}</option>
-                                <option value="ORDER_TAKEN">{t("orderTaken")}</option>
-                              </select>
-                            </label>
-                            <label>
-                              {t("nextVisit")} *
-                              <input
-                                className="moduleInput"
-                                type="date"
-                                required
-                                value={visitForm.nextVisitAt}
-                                onChange={(event) => setVisitForm((current) => ({ ...current, nextVisitAt: event.target.value }))}
-                              />
-                            </label>
-                            <label className="moduleFieldFull">
-                              {t("visitNotes")}
-                              <textarea className="moduleTextArea" rows={3} value={visitForm.note} onChange={(event) => setVisitForm((current) => ({ ...current, note: event.target.value }))} />
-                              {dictationSupported && (
-                                <button type="button" className="moduleInlineButton" aria-pressed={dictationActive} onClick={toggleVisitNoteDictation}>
-                                  {dictationActive ? t("stopDictation") : t("startDictation")}
-                                </button>
-                              )}
-                            </label>
-                            <div className="moduleFieldFull">
-                              <div className="moduleSectionHeader">
-                                <h2>{t("boughtItems")}</h2>
-                              </div>
-                              {visitItemsLoading && <div className="moduleLoading">{t("loadingItems")}</div>}
-                              {!visitItemsLoading && visitForm.stockChecks.length > 0 && (
-                                <ul className="moduleList">
-                                  {visitForm.stockChecks.map((stockCheck, index) => (
-                                    <li key={`${stockCheck.itemName}-${index}`}>
-                                      <div className="moduleStockRow">
-                                        <strong>{stockCheck.itemName}</strong>
-                                        <button type="button" className={`moduleChipButton ${stockCheck.status === "AVAILABLE" ? "active" : ""}`} onClick={() => setStockStatus(String(stockCheck.itemCode || stockCheck.itemName).trim().toUpperCase(), "AVAILABLE")}>{t("available")}</button>
-                                        <button type="button" className={`moduleChipButton ${stockCheck.status === "NOT_AVAILABLE" ? "active" : ""}`} onClick={() => setStockStatus(String(stockCheck.itemCode || stockCheck.itemName).trim().toUpperCase(), "NOT_AVAILABLE")}>{t("notAvailable")}</button>
-                                      </div>
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                              {!visitItemsLoading && visitForm.stockChecks.length === 0 && <div className="moduleHint">{t("noBoughtItems")}</div>}
-                            </div>
-                            <div className="moduleFieldFull">
-                              <button type="button" className="modulePrimaryButton" onClick={() => saveVisitReport(row)} disabled={visitSaving}>
-                                {visitSaving ? t("saving") : t("saveVisitReport")}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+                        {renderVisitReportForm(row)}
                       </td>
                     </tr>
                   )}

@@ -55,6 +55,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
+import { getScheduleTodayKey, isScheduleDateInWindow } from "../../lib/scheduleDateWindow";
 
 const TEXT = {
   title: { en: "Payment Collections", ar: "التحصيلات" },
@@ -96,8 +97,8 @@ const TEXT = {
   notYetDueBadge: { en: "Not yet due — collect if needed", ar: "غير مستحق بعد — يمكن التحصيل عند الحاجة" },
   scheduledRevisitsTitle: { en: "Scheduled Revisits", ar: "زيارات التحصيل المجدولة" },
   scheduledRevisitsHint: {
-    en: "Customers with a collection revisit date saved from the last visit, including overdue dates not yet visited. Nearest dates appear first.",
-    ar: "عملاء لديهم موعد زيارة تحصيل من آخر زيارة، بما في ذلك المواعيد المتأخرة التي لم تُزار بعد. أقرب المواعيد تظهر أولاً.",
+    en: "Customers with a collection revisit date saved from the last visit, including overdue dates not yet visited. Only past, today, and tomorrow are listed. Tap a date to open it.",
+    ar: "عملاء لديهم موعد زيارة تحصيل من آخر زيارة، بما في ذلك المواعيد المتأخرة التي لم تُزار بعد. يتم عرض الماضي واليوم وغدًا فقط. اضغط على التاريخ لفتحه.",
   },
   scheduledRevisitsMobileHint: {
     en: "Tap a date to show or hide customers for that day.",
@@ -1279,10 +1280,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   const scheduledRevisitGroups = useMemo(() => {
     const groups = new Map();
+    const todayKey = getScheduleTodayKey();
 
     scheduledRevisitRows.forEach((row) => {
       const dateKey = toDateInputValue(row?.latest_collection?.next_visit_at);
-      if (!dateKey) return;
+      if (!isScheduleDateInWindow(dateKey, todayKey)) return;
 
       if (!groups.has(dateKey)) {
         groups.set(dateKey, []);
@@ -2000,12 +2002,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
             <section className="moduleSection" style={{ marginBottom: "12px" }}>
               <div className="moduleSectionHeader">
                 <h2>{t("scheduledRevisitsTitle")}</h2>
-                <span>{scheduledRevisitRows.length}</span>
+                <span>{scheduledRevisitGroups.reduce((count, group) => count + group.rows.length, 0)}</span>
               </div>
               <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("scheduledRevisitsHint")}</div>
-              {isMobileLayout ? (
-                <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("scheduledRevisitsMobileHint")}</div>
-              ) : null}
+              <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("scheduledRevisitsMobileHint")}</div>
               {scheduledRevisitSourceRows.length > 0 ? (
                 <div style={{ marginBottom: "10px" }}>
                   <div className="moduleCollectorCheckboxList" role="group" aria-label={t("scheduledByFilter")}>
@@ -2047,7 +2047,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                   ) : null}
                 </div>
               ) : null}
-              {scheduledRevisitRows.length === 0 ? (
+              {scheduledRevisitGroups.length === 0 ? (
                 <div className="moduleHint">
                   {scheduledRevisitSourceRows.length > 0 && selectedSchedulers.length > 0
                     ? t("noScheduledRevisitsForFilter")
@@ -2071,22 +2071,22 @@ export default function PaymentCollectionsView({ view = "due" }) {
                     </thead>
                     <tbody>
                       {scheduledRevisitGroups.map((group) => {
-                        const isExpanded = !isMobileLayout || expandedRevisitDates.has(group.dateKey);
+                        const isExpanded = expandedRevisitDates.has(group.dateKey);
                         const isOverdueGroup = group.dateKey < queueToday;
                         return (
                         <Fragment key={`revisit-group-${group.dateKey}`}>
                           <tr
-                            className={`moduleCollectorSectionRow${isMobileLayout ? " moduleCollectorSectionRow--mobileToggle" : ""}`}
-                            onClick={isMobileLayout ? () => toggleRevisitDateGroup(group.dateKey) : undefined}
-                            onKeyDown={isMobileLayout ? (event) => {
+                            className="moduleCollectorSectionRow moduleCollectorSectionRow--mobileToggle"
+                            onClick={() => toggleRevisitDateGroup(group.dateKey)}
+                            onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
                                 toggleRevisitDateGroup(group.dateKey);
                               }
-                            } : undefined}
-                            tabIndex={isMobileLayout ? 0 : undefined}
-                            role={isMobileLayout ? "button" : undefined}
-                            aria-expanded={isMobileLayout ? isExpanded : undefined}
+                            }}
+                            tabIndex={0}
+                            role="button"
+                            aria-expanded={isExpanded}
                           >
                             <td colSpan={9}>
                               <div className="moduleCollectorSectionRowContent">
@@ -2099,11 +2099,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                 <span className="moduleHint" style={{ marginInlineStart: "8px" }}>
                                   {group.rows.length}
                                 </span>
-                                {isMobileLayout ? (
-                                  <span className="moduleCollectorSectionRowToggleIcon" aria-hidden="true">
-                                    {isExpanded ? "▾" : "▸"}
-                                  </span>
-                                ) : null}
+                                <span className="moduleCollectorSectionRowToggleIcon" aria-hidden="true">
+                                  {isExpanded ? "▾" : "▸"}
+                                </span>
                               </div>
                             </td>
                           </tr>
@@ -2114,11 +2112,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
                               || cashQueuePriorityByKey.get(key)
                               || 0;
                             const isOpen = activeRowKey === key;
-                            if (isMobileLayout && !isExpanded) return null;
+                            if (!isExpanded) return null;
                             return (
                               <tr
                                 key={`revisit-${key}`}
-                                className={`moduleCollectorRevisitDetailRow${isMobileLayout && !isExpanded ? " is-collapsed" : ""}`}
+                                className="moduleCollectorRevisitDetailRow"
                               >
                                 <td data-label={t("priorityNumber")}>{queuePriority > 0 ? queuePriority : "-"}</td>
                                 <td data-label={t("customerCode")}>{row.customer_code}</td>

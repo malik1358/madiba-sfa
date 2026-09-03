@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildNearestCustomerActionLinks } from "../app/lib/dashboardNearestCustomers.js";
+import {
+  buildNearestCustomerActionLinks,
+  buildNearestCustomerActions,
+} from "../app/lib/dashboardNearestCustomers.js";
 
 const customer = {
   customer_code: "C100",
@@ -8,14 +11,16 @@ const customer = {
   current_salesman_code: "S12",
 };
 
+const fullAccess = {
+  modules: {
+    visitWithoutOrder: true,
+    newOrder: true,
+    myCollections: true,
+  },
+};
+
 test("salesman sees visit, new order, and my-collections links", () => {
-  const actions = buildNearestCustomerActionLinks(customer, {
-    modules: {
-      visitWithoutOrder: true,
-      newOrder: true,
-      myCollections: true,
-    },
-  });
+  const actions = buildNearestCustomerActionLinks(customer, fullAccess);
 
   assert.deepEqual(actions.map((action) => action.key), ["visit", "order", "collection"]);
   assert.equal(actions[0].href, "/management/visit-without-order?customer_code=C100&customer_name=Al+Madina&salesman_code=S12");
@@ -41,4 +46,19 @@ test("skips modules the user cannot access", () => {
 
 test("returns no actions without a customer code", () => {
   assert.deepEqual(buildNearestCustomerActionLinks({ customer_name: "Al Madina" }, { modules: { newOrder: true } }), []);
+});
+
+test("replaces visit link with onClick when a visit handler is provided", () => {
+  const selected = [];
+  const actions = buildNearestCustomerActions(customer, fullAccess, {}, {
+    visit: (row) => selected.push(row.customer_code),
+  });
+
+  assert.equal(actions[0].href, undefined);
+  assert.equal(typeof actions[0].onClick, "function");
+  assert.equal(actions[1].href, "/management/new-order?customer_code=C100&customer_name=Al+Madina&salesman_code=S12");
+  assert.equal(actions[2].href, "/management/my-collections?customer=C100");
+
+  actions[0].onClick();
+  assert.deepEqual(selected, ["C100"]);
 });

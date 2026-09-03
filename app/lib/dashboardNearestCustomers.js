@@ -53,3 +53,14 @@ export function buildNearestCustomerActionLinks(customer, access, labels = {}) {
 
   return actions;
 }
+
+export function buildNearestCustomerActions(customer, access, labels = {}, handlers = {}) {
+  return buildNearestCustomerActionLinks(customer, access, labels).map((action) => {
+    if (typeof handlers[action.key] !== "function") return action;
+    return {
+      key: action.key,
+      label: action.label,
+      onClick: () => handlers[action.key](customer),
+    };
+  });
+}

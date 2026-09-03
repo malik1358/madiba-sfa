@@ -3498,6 +3498,10 @@ table.auditMatrix td.auditTrendSame {
   font-weight: 700;
 }
 
+.moduleVisitPanel {
+  scroll-margin-top: calc(var(--sticky-table-top) + 8px);
+}
+
 .moduleError,
 .moduleWarning,
 .moduleSuccess,
@@ -3857,6 +3861,7 @@ table.auditMatrix td.auditTrendSame {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 1 1 90px;
   min-height: 36px;
   padding: 0 10px;
   border: 1px solid #bfd2d8;
@@ -3867,6 +3872,7 @@ table.auditMatrix td.auditTrendSame {
   font-weight: 700;
   text-decoration: none;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .moduleNearestCustomersActionLink:hover,
@@ -4387,6 +4393,66 @@ table.auditMatrix td.auditTrendSame {
   font-size: 14px;
   font-weight: 800;
   line-height: 1;
+}
+
+.moduleCollectorSectionRow--mobileToggle td {
+  cursor: pointer;
+  user-select: none;
+}
+
+.moduleCollectorSectionRow--mobileToggle .moduleHint {
+  margin-top: 0;
+}
+
+.moduleScheduleDay {
+  margin-top: 10px;
+  border: 1px solid #d1dde0;
+  border-radius: 10px;
+  background: #f9fbfc;
+}
+
+.moduleScheduleDaySummary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.moduleScheduleDaySummary::-webkit-details-marker {
+  display: none;
+}
+
+.moduleScheduleDaySummary::after {
+  content: "▸";
+  color: #0b5364;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.moduleScheduleDay[open] > .moduleScheduleDaySummary::after {
+  content: "▾";
+}
+
+.moduleScheduleDaySummary h2 {
+  margin: 0;
+  color: #073f4c;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.moduleScheduleDaySummary span {
+  color: #6c838a;
+  font-size: 12px;
+  font-weight: 700;
+  margin-inline-start: auto;
+}
+
+.moduleScheduleDay .moduleTableWrap {
+  margin: 0 10px 10px;
 }
 
 .moduleCollectorTableWrap {
@@ -5286,19 +5352,6 @@ table.auditMatrix td.auditTrendSame {
 
   .moduleReviewMeta {
     grid-template-columns: 1fr;
-  }
-
-  .moduleCollectorSectionRow--mobileToggle td {
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .moduleCollectorSectionRow--mobileToggle .moduleHint {
-    margin-top: 0;
-  }
-
-  .moduleCollectorRevisitDetailRow.is-collapsed {
-    display: none !important;
   }
 }
 

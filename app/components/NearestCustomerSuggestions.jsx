@@ -69,15 +69,30 @@ export default function NearestCustomerSuggestions({
                 <span className="moduleNearestCustomersDistance">{formatDistanceKm(customer.distanceKm)}</span>
                 {hasActions ? (
                   <div className="moduleNearestCustomersActions">
-                    {actionItems.map((action) => (
-                      <Link
-                        key={`${customer.customer_code}-${action.key}`}
-                        href={action.href}
-                        className="moduleNearestCustomersActionLink"
-                      >
-                        {action.label}
-                      </Link>
-                    ))}
+                    {actionItems.map((action) => {
+                      const key = `${customer.customer_code}-${action.key}`;
+                      if (action.href) {
+                        return (
+                          <Link
+                            key={key}
+                            href={action.href}
+                            className="moduleNearestCustomersActionLink"
+                          >
+                            {action.label}
+                          </Link>
+                        );
+                      }
+                      return (
+                        <button
+                          type="button"
+                          key={key}
+                          className="moduleNearestCustomersActionLink"
+                          onClick={() => action.onClick?.(customer)}
+                        >
+                          {action.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 ) : actionLabel ? (
                   <span className="moduleNearestCustomersAction">{actionLabel}</span>

@@ -50,7 +50,7 @@ import {
   mergeLegalMatchesIntoDueRows,
 } from "../../lib/collectionQueueSearch";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
-import { shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp } from "../../lib/whatsappShare";
+import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
 import { getSupabaseClient } from "../../lib/supabase";
 import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
@@ -154,14 +154,13 @@ const TEXT = {
   },
   copySummary: { en: "Copy Summary", ar: "نسخ الملخص" },
   shareWhatsapp: { en: "Share on WhatsApp", ar: "مشاركة على واتساب" },
-  shareWhatsappWithReceipt: { en: "Share receipt & summary on WhatsApp", ar: "مشاركة الإيصال والملخص على واتساب" },
   whatsappShareHint: {
     en: "Visit saved. Share this summary on WhatsApp now — works offline too.",
     ar: "تم حفظ الزيارة. شارك هذا الملخص على واتساب الآن — يعمل بدون اتصال أيضاً.",
   },
-  whatsappShareReceiptHint: {
-    en: "Receipt attached — you can share the photo/PDF together with the summary.",
-    ar: "تم إرفاق الإيصال — يمكنك مشاركة الصورة/‏PDF مع الملخص.",
+  whatsappShareAttachmentsHint: {
+    en: "Visit saved. Share the uploaded photos/files together with this summary on WhatsApp.",
+    ar: "تم حفظ الزيارة. شارك الصور/الملفات المرفوعة مع هذا الملخص على واتساب.",
   },
   copied: { en: "Copied", ar: "تم النسخ" },
   paymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
@@ -258,8 +257,8 @@ const TEXT = {
   msgCopyFailed: { en: "Could not copy WhatsApp message automatically.", ar: "تعذر نسخ رسالة واتساب تلقائياً." },
   msgWhatsappShareFailed: { en: "Could not open WhatsApp. Use Copy Summary and paste manually.", ar: "تعذر فتح واتساب. استخدم نسخ الملخص واللصق يدوياً." },
   msgWhatsappReceiptFallback: {
-    en: "WhatsApp opened with the summary. Attach the receipt manually if it was not included.",
-    ar: "تم فتح واتساب مع الملخص. أرفق الإيصال يدوياً إذا لم يُضمَّن.",
+    en: "WhatsApp opened with the summary. Attach the photos/files manually if they were not included.",
+    ar: "تم فتح واتساب مع الملخص. أرفق الصور/الملفات يدوياً إذا لم تُضمَّن.",
   },
   salesmanFilterHint: { en: "Tap to select one or more salesmen", ar: "اضغط لاختيار مندوب واحد أو أكثر" },
   allSalesmen: { en: "All salesmen", ar: "كل المندوبين" },
@@ -876,7 +875,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [schedulerScope, setSchedulerScope] = useState(null);
   const [activeRowKey, setActiveRowKey] = useState("");
   const [summaryForWhatsApp, setSummaryForWhatsApp] = useState("");
-  const [receiptFileForWhatsapp, setReceiptFileForWhatsapp] = useState(null);
+  const [whatsappShareFiles, setWhatsappShareFiles] = useState([]);
   const [copyStatus, setCopyStatus] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
   const [isDictating, setIsDictating] = useState(false);
@@ -999,7 +998,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   useEffect(() => {
     setSummaryForWhatsApp("");
     setCopyStatus("");
-    setReceiptFileForWhatsapp(null);
+    setWhatsappShareFiles([]);
   }, [activeRowKey]);
 
   useEffect(() => {
@@ -1654,14 +1653,23 @@ export default function PaymentCollectionsView({ view = "due" }) {
         formData.append("gpsAccuracyMeters", String(gps.accuracy));
       }
 
+      const shareFiles = [];
       if (form.paymentCopy) {
-        formData.append("paymentCopy", await prepareUploadFile(form.paymentCopy));
+        const paymentFile = toWhatsappShareFile(
+          await prepareUploadFile(form.paymentCopy),
+          "payment-copy.jpg",
+        );
+        formData.append("paymentCopy", paymentFile);
+        if (paymentFile) shareFiles.push(paymentFile);
       }
 
-      let receiptFileForShare = null;
       if (form.receiptCopy) {
-        receiptFileForShare = await prepareUploadFile(form.receiptCopy);
-        formData.append("receiptCopy", receiptFileForShare);
+        const receiptFile = toWhatsappShareFile(
+          await prepareUploadFile(form.receiptCopy),
+          "receipt-copy.jpg",
+        );
+        formData.append("receiptCopy", receiptFile);
+        if (receiptFile) shareFiles.push(receiptFile);
       }
 
       const saveResult = await postFormDataResilient({
@@ -1684,7 +1692,19 @@ export default function PaymentCollectionsView({ view = "due" }) {
         : payload?.whatsapp?.error
           ? `${t("msgVisitSaved")} ${t("msgWhatsappNotSent")}: ${payload.whatsapp.error}`
           : t("msgVisitSaved");
-      showPopup({ message: popupMessage, variant: "success" });
+
+      const isNative = await isNativeMobilePlatform();
+      await presentWhatsappSummaryAfterSave(summaryText, {
+        files: shareFiles,
+      });
+      showPopup({
+        message: popupMessage,
+        variant: "success",
+        whatsappText: summaryText,
+        whatsappFiles: shareFiles,
+        autoShareWhatsapp: isNative || Boolean(saveResult.queued),
+      });
+
       setTodayVisitCount(visitNumberForDay);
       await refreshPendingSyncCount();
 
@@ -1703,12 +1723,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
         }, session.user.id, scope);
         void processOfflineQueue(async () => session.access_token);
       }
-
-      await presentWhatsappSummaryAfterSave(summaryText, {
-        autoOpenWhatsapp: Boolean(saveResult.queued),
-        receiptFile: receiptFileForShare,
-      });
-      setReceiptFileForWhatsapp(receiptFileForShare);
     } catch (err) {
       showPopup({ message: localizeApiMessage(err.message || t("msgSaveFailed")), variant: "error" });
     } finally {
@@ -1782,17 +1796,22 @@ export default function PaymentCollectionsView({ view = "due" }) {
     }, 120);
   }
 
-  async function shareSummaryWithReceiptOnWhatsapp(summaryText = summaryForWhatsApp, receiptFile = receiptFileForWhatsapp) {
+  async function shareSummaryOnWhatsapp(summaryText = summaryForWhatsApp, files = whatsappShareFiles) {
     const text = String(summaryText || "").trim();
-    const file = receiptFile instanceof Blob ? receiptFile : null;
-    if (!text || !file) {
-      return shareSummaryOnWhatsapp(summaryText);
-    }
+    const shareFiles = (Array.isArray(files) ? files : [])
+      .map((file, index) => toWhatsappShareFile(file, `attachment-${index + 1}.jpg`))
+      .filter(Boolean);
+    if (!text && shareFiles.length === 0) return;
 
-    const result = await shareTextAndFilesOnWhatsapp(text, [file], {
-      title: t("summary"),
-      dialogTitle: t("shareWhatsappWithReceipt"),
-    });
+    const result = shareFiles.length > 0
+      ? await shareTextAndFilesOnWhatsapp(text, shareFiles, {
+        title: t("summary"),
+        dialogTitle: t("shareWhatsapp"),
+      })
+      : await shareTextOnWhatsapp(text, {
+        title: t("summary"),
+        dialogTitle: t("shareWhatsapp"),
+      });
 
     if (result.success) {
       if (result.fallback) {
@@ -1805,42 +1824,16 @@ export default function PaymentCollectionsView({ view = "due" }) {
     showPopup({ message: t("msgWhatsappShareFailed"), variant: "warning" });
   }
 
-  async function shareSummaryOnWhatsapp(summaryText = summaryForWhatsApp) {
-    const text = String(summaryText || "").trim();
-    if (!text) return;
-
-    const result = await shareTextOnWhatsapp(text, {
-      title: t("summary"),
-      dialogTitle: t("shareWhatsapp"),
-    });
-
-    if (result.success) return;
-    if (result.reason === "cancelled") return;
-
-    showPopup({ message: t("msgWhatsappShareFailed"), variant: "warning" });
-  }
-
   async function presentWhatsappSummaryAfterSave(summaryText, options = {}) {
+    const files = Array.isArray(options.files) ? options.files.filter((file) => file instanceof Blob) : [];
     setSummaryForWhatsApp(summaryText);
-    if (options.receiptFile instanceof Blob) {
-      setReceiptFileForWhatsapp(options.receiptFile);
-    }
+    setWhatsappShareFiles(files);
     scrollToWhatsappSummary();
 
     const copied = await copyTextToClipboard(summaryText);
     if (copied) {
       setCopyStatus(t("copied"));
       setTimeout(() => setCopyStatus(""), 1200);
-    }
-
-    if (options.autoOpenWhatsapp) {
-      window.setTimeout(() => {
-        if (options.receiptFile instanceof Blob) {
-          void shareSummaryWithReceiptOnWhatsapp(summaryText, options.receiptFile);
-        } else {
-          void shareSummaryOnWhatsapp(summaryText);
-        }
-      }, 450);
     }
   }
 
@@ -2816,7 +2809,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   {summaryForWhatsApp ? (
                                     <>
                                       <div className="moduleHint" style={{ marginTop: "6px", color: "#166534" }}>
-                                        {receiptFileForWhatsapp ? t("whatsappShareReceiptHint") : t("whatsappShareHint")}
+                                        {whatsappShareFiles.length > 0 ? t("whatsappShareAttachmentsHint") : t("whatsappShareHint")}
                                       </div>
                                       <textarea className="moduleTextArea" rows={8} value={summaryForWhatsApp} readOnly />
                                     </>
@@ -2826,18 +2819,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                 </label>
                                 {summaryForWhatsApp ? (
                                   <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
-                                    {receiptFileForWhatsapp ? (
-                                      <button
-                                        type="button"
-                                        className="modulePrimaryButton"
-                                        onClick={() => shareSummaryWithReceiptOnWhatsapp()}
-                                      >
-                                        {t("shareWhatsappWithReceipt")}
-                                      </button>
-                                    ) : null}
                                     <button
                                       type="button"
-                                      className={receiptFileForWhatsapp ? "moduleInlineButton moduleActionButton" : "modulePrimaryButton"}
+                                      className="modulePrimaryButton"
                                       onClick={() => shareSummaryOnWhatsapp()}
                                     >
                                       {t("shareWhatsapp")}

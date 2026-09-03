@@ -92,6 +92,13 @@ test("business dashboard is limited to admin and manager", () => {
   assert.equal(buildModuleAccess({ role: "collector" }).canAccess("businessDashboard"), false);
 });
 
+test("outstanding without GPS is limited to admin and manager", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("outstandingNoGps"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("outstandingNoGps"), true);
+  assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("outstandingNoGps"), false);
+  assert.equal(localizedModuleLabel("outstandingNoGps", "en"), "Outstanding Without GPS");
+});
+
 test("admin shortcut buttons stay the same set on every page", () => {
   const access = buildModuleAccess({ role: "admin" });
   assert.deepEqual(pinnedModuleKeysForAccess(access), [

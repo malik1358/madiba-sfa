@@ -7,6 +7,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import DaySummaryBox from "../../components/DaySummaryBox";
+import DayRouteMap from "../../components/DayRouteMap";
 import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import {
@@ -74,6 +75,11 @@ const TEXT = {
   platform: { en: "Platform", ar: "المنصة" },
   daySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
   userDaySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
+  dayRoute: { en: "Day route", ar: "مسار اليوم" },
+  openRouteMap: { en: "Open route in Google Maps", ar: "فتح المسار في خرائط جوجل" },
+  idleGpsLegend: { en: "Idle GPS ping", ar: "نبضة GPS خاملة" },
+  unloggedIdleLegend: { en: "Unlogged idle", ar: "توقف غير مسجل" },
+  loggedStopLegend: { en: "Logged stop", ar: "محطة مسجلة" },
   emailUsers: { en: "Users to email", ar: "المستخدمون للإرسال" },
   selectAllUsers: { en: "Select all users", ar: "تحديد كل المستخدمين" },
   sendEmail: { en: "Send report email", ar: "إرسال تقرير بالبريد" },
@@ -522,6 +528,16 @@ export default function DailyVisitReportPage() {
                       title={t("userDaySummaryTitle")}
                     />
                   ) : null}
+
+                  <DayRouteMap
+                    points={entryUser.routePoints || []}
+                    idleGaps={entryUser.idleGaps || entryUser.daySummary?.idleGaps || []}
+                    title={t("dayRoute")}
+                    openLabel={t("openRouteMap")}
+                    idleLegend={t("idleGpsLegend")}
+                    unloggedLegend={t("unloggedIdleLegend")}
+                    stopLegend={t("loggedStopLegend")}
+                  />
 
                   <ExportableTable filename={`daily-visit-report-${entryUser.userName || entryUser.userId}`} sheetName="Daily Visits" className="moduleTableWrap">
                     <table className="moduleTable">

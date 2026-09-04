@@ -135,6 +135,32 @@ test("findUnloggedIdleGaps flags 30+ minute gaps without lunch", () => {
   assert.equal(gaps[0].minutes, 74);
 });
 
+test("findUnloggedIdleGaps does not treat a window as idle when visit or order activity is logged", () => {
+  const date = { year: 2026, month: 9, day: 1 };
+  const withoutActivity = findUnloggedIdleGaps({
+    visits: [
+      { saved_at: ksaIso(date, 8, 56) },
+      { saved_at: ksaIso(date, 12, 43) },
+    ],
+  });
+  const withActivity = findUnloggedIdleGaps({
+    visits: [
+      { saved_at: ksaIso(date, 8, 56) },
+      { saved_at: ksaIso(date, 12, 43) },
+    ],
+    activities: [
+      { saved_at: ksaIso(date, 9, 20) },
+      { saved_at: ksaIso(date, 10, 5) },
+      { saved_at: ksaIso(date, 11, 10) },
+      { saved_at: ksaIso(date, 12, 0) },
+    ],
+  });
+
+  assert.equal(withoutActivity.length, 1);
+  assert.equal(withoutActivity[0].minutes, 227);
+  assert.equal(withActivity.some((gap) => gap.minutes === 227), false);
+});
+
 test("findUnloggedIdleGaps does not flag logged lunch windows", () => {
   const date = { year: 2026, month: 8, day: 30 };
   const visits = [
@@ -234,6 +260,27 @@ test("buildCollectionDaySummary sorts idle with visits and uses last visit inste
   const logoutIndex = summary.lines.findIndex((line) => line.includes("Logout at 8:23 pm"));
   assert.ok(idleIndex > 0 && visitIndex > idleIndex);
   assert.ok(logoutIndex > visitIndex);
+});
+
+test("buildCollectionDaySummary includes posted order count and value", () => {
+  const date = { year: 2026, month: 9, day: 1 };
+  const summary = buildCollectionDaySummary(
+    [],
+    new Map(),
+    {
+      loginAt: ksaIso(date, 8, 56),
+      lunchOutAt: ksaIso(date, 12, 43),
+      lunchInAt: ksaIso(date, 16, 5),
+      logoutAt: ksaIso(date, 20, 20),
+      orderStats: { orderCount: 4, orderValue: 12500.5 },
+    },
+  );
+
+  const joined = summary.lines.join("\n");
+  assert.match(joined, /No collection visits recorded/);
+  assert.match(joined, /Posted 4 order\(s\) totalling 12,500\.5 SAR/);
+  assert.equal(summary.stats.orderCount, 4);
+  assert.equal(summary.stats.orderValue, 12500.5);
 });
 
 test("formatNarrativeTime uses KSA clock", () => {

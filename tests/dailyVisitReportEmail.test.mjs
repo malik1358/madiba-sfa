@@ -79,6 +79,7 @@ test("buildUserVisitReportEmail includes the user name and timeline", () => {
   assert.match(message.text, /Shop A \(C1\)/);
   assert.match(message.html, /Visit report/);
   assert.match(message.html, /Daily visit summary/);
+  assert.match(message.html, /Day route/);
 });
 
 test("isEmailConfigured requires from plus SMTP or Resend", () => {

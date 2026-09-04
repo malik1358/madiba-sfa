@@ -9,6 +9,7 @@ import {
 } from "../../../lib/collectionDaySummary.js";
 import {
   extractWorkdayTimesFromTimelineRows,
+  loadLoggedActivityTimesByUser,
   loadWorkdayEventsByUser,
   WORKDAY_EVENT_LABELS,
 } from "../../../lib/collectionDaySummaryServer.js";
@@ -737,6 +738,7 @@ export async function GET(request) {
       collectorId,
     ].filter(Boolean))];
     const workdayEventsByUser = await loadWorkdayEventsByUser(admin, timelineUserIds, startIso, endIso, date);
+    const loggedActivitiesByUser = await loadLoggedActivityTimesByUser(admin, timelineUserIds, startIso, endIso, date);
 
     async function buildCollectorEntry(createdBy, rows) {
       const collectorProfile = profileMap.get(createdBy) || {};
@@ -745,12 +747,16 @@ export async function GET(request) {
       const userRoleLabel = formatCollectionUserRoleLabel(collectorProfile.role);
       const { maps: priorityMaps, queueScope } = await resolvePriorityMapsForUser(createdBy, collectorProfile);
       const workdayRows = workdayEventsByUser.get(createdBy) || [];
-      const workdayTimes = normalizeWorkdayEvents(
-        extractWorkdayTimesFromTimelineRows(workdayRows),
-        rows,
-      ) || {};
+      const workdayTimes = {
+        ...(normalizeWorkdayEvents(
+          extractWorkdayTimesFromTimelineRows(workdayRows),
+          rows,
+        ) || {}),
+        activities: loggedActivitiesByUser.get(createdBy) || [],
+      };
       const idleGaps = findUnloggedIdleGaps({
         visits: rows,
+        activities: loggedActivitiesByUser.get(createdBy) || [],
         loginAt: workdayTimes.loginAt,
         logoutAt: workdayTimes.logoutAt,
         lunchOutAt: workdayTimes.lunchOutAt,

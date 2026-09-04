@@ -17,6 +17,13 @@ export const WORKDAY_ENTRY_TYPES = [
   "END_OF_DAY",
 ];
 
+export const LOGGED_WORK_ACTIVITY_TYPES = [
+  "VISIT_REPORT",
+  "ORDER_DRAFT",
+  "ORDER_EDITED",
+  "ORDER_SUBMITTED",
+];
+
 export const WORKDAY_EVENT_LABELS = {
   MORNING_ATTENDANCE: "Login",
   END_OF_DAY: "Logout",
@@ -34,6 +41,12 @@ function isMissingTableError(error) {
   return error?.code === "42P01"
     || message.includes("could not find the table")
     || (message.includes("relation") && message.includes("does not exist"));
+}
+
+function isMissingColumnError(error) {
+  const message = String(error?.message || error?.details || "").toLowerCase();
+  return error?.code === "42703"
+    || (message.includes("column") && message.includes("does not exist"));
 }
 
 function parseActivityNote(note) {
@@ -131,6 +144,40 @@ async function loadWorkdayEventsForUser(admin, userId, startIso, endIso, reportD
   return grouped.get(userId) || [];
 }
 
+export async function loadLoggedActivityTimesByUser(admin, userIds, startIso, endIso, reportDate) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
+
+  const widenedStart = new Date(startIso);
+  widenedStart.setUTCDate(widenedStart.getUTCDate() - 1);
+  const widenedEnd = new Date(endIso);
+  widenedEnd.setUTCDate(widenedEnd.getUTCDate() + 1);
+
+  const { data, error } = await admin
+    .from("daily_activity_logs")
+    .select("id,user_id,entry_type,note,created_at")
+    .in("entry_type", LOGGED_WORK_ACTIVITY_TYPES)
+    .in("user_id", ids)
+    .gte("created_at", widenedStart.toISOString())
+    .lte("created_at", widenedEnd.toISOString())
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    if (isMissingTableError(error)) return new Map();
+    throw error;
+  }
+
+  const grouped = new Map();
+  filterLogsByKsaEventDate(data || [], reportDate).forEach((row) => {
+    const parsed = parseActivityNote(row.note) || {};
+    const savedAt = parsed.captured_at || parsed.capturedAt || row.created_at;
+    if (!grouped.has(row.user_id)) grouped.set(row.user_id, []);
+    grouped.get(row.user_id).push({ savedAt, saved_at: savedAt, entryType: row.entry_type });
+  });
+
+  return grouped;
+}
+
 async function loadCustomerLocationMap(admin, customerCodes) {
   if (!customerCodes.length) return new Map();
 
@@ -156,7 +203,43 @@ async function loadCustomerLocationMap(admin, customerCodes) {
   return new Map((data || []).map((row) => [normalizeCode(row.customer_code), row]));
 }
 
-export async function loadCollectionDaySummaryForUser(admin, userId, date = getKsaDateString()) {
+async function loadSubmittedOrderStats(admin, userId, startIso, endIso) {
+  if (!userId) return { orderCount: 0, orderValue: 0 };
+
+  let query = admin
+    .from("sales_orders")
+    .select("id,total_value,status,submitted_at,created_at")
+    .eq("created_by", userId)
+    .eq("status", "SUBMITTED")
+    .gte("submitted_at", startIso)
+    .lte("submitted_at", endIso);
+
+  let { data, error } = await query;
+  if (error && isMissingColumnError(error)) {
+    ({ data, error } = await admin
+      .from("sales_orders")
+      .select("id,total_value,status,created_at")
+      .eq("created_by", userId)
+      .eq("status", "SUBMITTED")
+      .gte("created_at", startIso)
+      .lte("created_at", endIso));
+  }
+
+  if (error) {
+    if (isMissingTableError(error) || isMissingColumnError(error)) {
+      return { orderCount: 0, orderValue: 0 };
+    }
+    throw error;
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  return {
+    orderCount: rows.length,
+    orderValue: rows.reduce((sum, row) => sum + Number(row?.total_value || 0), 0),
+  };
+}
+
+export async function loadCollectionDaySummaryForUser(admin, userId, date = getKsaDateString(), { activities } = {}) {
   const { startIso, endIso } = ksaDayBounds(date);
 
   const { data: visits, error } = await admin
@@ -180,6 +263,7 @@ export async function loadCollectionDaySummaryForUser(admin, userId, date = getK
           items: emptyEn.items,
           itemsAr: emptyAr.items,
           stats: emptyEn.stats,
+          idleGaps: emptyEn.idleGaps,
         },
         summaryTextEn: emptyEn.lines.join("\n"),
         summaryTextAr: emptyAr.lines.join("\n"),
@@ -190,11 +274,19 @@ export async function loadCollectionDaySummaryForUser(admin, userId, date = getK
 
   const visitRows = Array.isArray(visits) ? visits : [];
   const customerCodes = [...new Set(visitRows.map((row) => normalizeCode(row.customer_code)).filter(Boolean))];
-  const [customerLocationByCode, workdayRows] = await Promise.all([
+  const [customerLocationByCode, workdayRows, loggedActivities, orderStats] = await Promise.all([
     loadCustomerLocationMap(admin, customerCodes),
     loadWorkdayEventsForUser(admin, userId, startIso, endIso, date),
+    activities
+      ? Promise.resolve(null)
+      : loadLoggedActivityTimesByUser(admin, [userId], startIso, endIso, date),
+    loadSubmittedOrderStats(admin, userId, startIso, endIso),
   ]);
-  const workdayEvents = extractWorkdayTimesFromTimelineRows(workdayRows);
+  const workdayEvents = {
+    ...extractWorkdayTimesFromTimelineRows(workdayRows),
+    activities: activities || loggedActivities?.get(userId) || [],
+    orderStats,
+  };
 
   const daySummaryEn = buildCollectionDaySummary(
     visitRows,
@@ -218,6 +310,7 @@ export async function loadCollectionDaySummaryForUser(admin, userId, date = getK
       items: daySummaryEn.items,
       itemsAr: daySummaryAr.items,
       stats: daySummaryEn.stats,
+      idleGaps: daySummaryEn.idleGaps,
     },
     summaryTextEn: daySummaryEn.lines.join("\n"),
     summaryTextAr: daySummaryAr.lines.join("\n"),

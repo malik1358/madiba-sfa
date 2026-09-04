@@ -221,7 +221,10 @@ export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
   withCollectionMultiple: " مع تحصيل من {count} عملاء بإجمالي {amount} ريال",
   collectedAmount: " وتم تحصيل {amount} ريال",
   totalFooter: "إجمالي {visits} زيارة، {collections} تحصيل ناجح، {amount} ريال.",
+  totalFooterWithOrders: "إجمالي {visits} زيارة، {collections} تحصيل ناجح، {amount} ريال، {orders} طلب بإجمالي {orderAmount} ريال.",
   noVisits: "لا توجد زيارات تحصيل مسجلة في هذا اليوم.",
+  ordersPosted: "تم تسجيل {count} طلب بإجمالي {amount} ريال.",
+  noOrdersPosted: "لا توجد طلبات مسجلة في هذا اليوم.",
   aggregateHeader: "{count} مستخدم نشط: {visits} زيارة، {collections} تحصيل ناجح، {amount} ريال.",
 };
 
@@ -249,7 +252,10 @@ export const COLLECTION_DAY_SUMMARY_LABELS = {
   withCollectionMultiple: " with collection from {count} customers totalling {amount} SAR",
   collectedAmount: " and collected {amount} SAR",
   totalFooter: "Total {visits} visit(s), {collections} successful collection(s), {amount} SAR collected.",
+  totalFooterWithOrders: "Total {visits} visit(s), {collections} successful collection(s), {amount} SAR collected, {orders} order(s) totalling {orderAmount} SAR.",
   noVisits: "No collection visits recorded for this day.",
+  ordersPosted: "Posted {count} order(s) totalling {amount} SAR.",
+  noOrdersPosted: "No orders posted for this day.",
   aggregateHeader: "{count} active user(s): {visits} visit(s), {collections} successful collection(s), {amount} SAR collected.",
 };
 
@@ -340,6 +346,7 @@ function splitIntervalMinusLunch(start, end, lunchOutTs, lunchInTs) {
 
 export function findUnloggedIdleGaps({
   visits = [],
+  activities = [],
   loginAt = null,
   logoutAt = null,
   lunchOutAt = null,
@@ -353,6 +360,10 @@ export function findUnloggedIdleGaps({
 
   addPoint(loginAt, "login");
   (visits || []).forEach((visit) => addPoint(visit?.saved_at || visit?.savedAt, "visit"));
+  (activities || []).forEach((item) => addPoint(
+    item?.saved_at || item?.savedAt || item,
+    "activity",
+  ));
   addPoint(lunchOutAt, "lunch_out");
   addPoint(lunchInAt, "lunch_in");
   addPoint(logoutAt, "logout");
@@ -490,6 +501,7 @@ function collectWorkdayItems(workdayEvents, visits, labels) {
 
   findUnloggedIdleGaps({
     visits,
+    activities: events.activities,
     loginAt,
     logoutAt,
     lunchOutAt,
@@ -513,13 +525,36 @@ function itemsToLines(items) {
   return (items || []).map((item) => item.text);
 }
 
+function resolveOrderStats(lunchEvents) {
+  const count = Number(lunchEvents?.orderStats?.orderCount || 0);
+  const value = Number(lunchEvents?.orderStats?.orderValue || 0);
+  return {
+    orderCount: Number.isFinite(count) && count > 0 ? count : 0,
+    orderValue: Number.isFinite(value) && value > 0 ? value : 0,
+  };
+}
+
+function describeOrders(orderStats, labels) {
+  if (!orderStats.orderCount) {
+    return labels.noOrdersPosted || "No orders posted for this day.";
+  }
+  return fill(labels.ordersPosted || "Posted {count} order(s) totalling {amount} SAR.", {
+    count: orderStats.orderCount,
+    amount: formatMoney(orderStats.orderValue),
+  });
+}
+
 export function buildCollectionDaySummary(visits, customerLocationByCode = {}, lunchEvents = null, labels = COLLECTION_DAY_SUMMARY_LABELS) {
   const sorted = [...(visits || [])].sort((left, right) => visitTimestamp(left) - visitTimestamp(right));
-  const stats = computeStats(sorted);
+  const stats = {
+    ...computeStats(sorted),
+    ...resolveOrderStats(lunchEvents),
+  };
   const workday = collectWorkdayItems(lunchEvents, sorted, labels);
   const idleGaps = lunchEvents
     ? findUnloggedIdleGaps({
       visits: sorted,
+      activities: workday.events?.activities,
       loginAt: workday.events?.loginAt,
       logoutAt: workday.events?.logoutAt,
       lunchOutAt: workday.events?.lunchOutAt,
@@ -538,12 +573,23 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
         : fill(labels.visitedCustomers, { count: stats.uniqueCustomers }),
     )
     : makeSummaryItem("header", labels.noVisits);
+  const orderStatsProvided = Boolean(lunchEvents && lunchEvents.orderStats);
+  const orderItem = orderStatsProvided
+    ? makeSummaryItem("orders", describeOrders(stats, labels))
+    : null;
   const footerItem = sorted.length
-    ? makeSummaryItem("footer", fill(labels.totalFooter, {
-      visits: stats.totalVisits,
-      collections: stats.successfulCollections,
-      amount: formatMoney(stats.totalCollected),
-    }))
+    ? makeSummaryItem("footer", fill(
+      orderStatsProvided && labels.totalFooterWithOrders
+        ? labels.totalFooterWithOrders
+        : labels.totalFooter,
+      {
+        visits: stats.totalVisits,
+        collections: stats.successfulCollections,
+        amount: formatMoney(stats.totalCollected),
+        orders: stats.orderCount,
+        orderAmount: formatMoney(stats.orderValue),
+      },
+    ))
     : null;
 
   const timelineItems = [...workday.timelineItems];
@@ -559,6 +605,7 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
 
   const items = [
     headerItem,
+    ...(orderItem ? [orderItem] : []),
     ...workday.statusItems,
     ...sortTimelineItems(timelineItems),
     ...(footerItem ? [footerItem] : []),

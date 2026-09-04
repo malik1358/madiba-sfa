@@ -13,7 +13,9 @@ import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession"
 import {
   formatAchievementPercent,
   formatPerformanceKpiValue,
+  PERFORMANCE_KPI_KEYS,
   performanceUpdatedStatusLabel,
+  TEAM_PERFORMANCE_VIEW,
 } from "../../lib/performanceKpis";
 import { getKsaDateString } from "../../lib/workdayActivity";
 
@@ -26,6 +28,10 @@ const TEXT = {
   target: { en: "Target", ar: "الهدف" },
   achievement: { en: "Achievement", ar: "الإنجاز" },
   updateTargets: { en: "Update KPI targets", ar: "تحديث أهداف الأداء" },
+  view: { en: "View", ar: "العرض" },
+  team: { en: "Team (consolidated)", ar: "الفريق (مجمع)" },
+  teamMembers: { en: "Team members", ar: "أعضاء الفريق" },
+  salesman: { en: "Salesman", ar: "المندوب" },
   noSalesman: {
     en: "Your profile needs a salesman code before personal KPIs can be calculated.",
     ar: "يلزم رمز مندوب في ملفك لحساب مؤشرات الأداء الشخصية.",
@@ -55,13 +61,21 @@ function statusClass(statusKey) {
   return "moduleKpiStatus--neutral";
 }
 
+function kpiByKey(snapshot, key) {
+  return (snapshot?.kpis || []).find((item) => item.key === key);
+}
+
 export default function MyPerformancePage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [canManageTargets, setCanManageTargets] = useState(false);
+  const [canViewTeam, setCanViewTeam] = useState(false);
+  const [selectedCode, setSelectedCode] = useState("");
+  const [members, setMembers] = useState([]);
   const [snapshot, setSnapshot] = useState(null);
+  const [memberSnapshots, setMemberSnapshots] = useState([]);
 
   usePopupMessages({ error });
 
@@ -82,16 +96,24 @@ export default function MyPerformancePage() {
           throw new Error("Please login again.");
         }
 
+        const params = new URLSearchParams({ date: getKsaDateString() });
+        if (selectedCode) params.set("salesmanCode", selectedCode);
+
         const { response, payload } = await fetchJsonWithTimeout(
-          `/api/performance?date=${encodeURIComponent(getKsaDateString())}`,
+          `/api/performance?${params.toString()}`,
           { headers: { Authorization: `Bearer ${session.access_token}` } },
+          60000,
         );
         if (!response.ok || !payload.success) {
           throw new Error(payload.error || "Unable to load performance metrics.");
         }
 
         setCanManageTargets(Boolean(payload.canManageTargets));
+        setCanViewTeam(Boolean(payload.canViewTeam));
+        setMembers(payload.members || []);
         setSnapshot(payload.snapshot || null);
+        setMemberSnapshots(payload.memberSnapshots || []);
+        if (!selectedCode && payload.selectedCode) setSelectedCode(payload.selectedCode);
       } catch (err) {
         setError(err.message || "Unable to load performance metrics.");
       } finally {
@@ -100,7 +122,7 @@ export default function MyPerformancePage() {
     }
 
     load();
-  }, []);
+  }, [selectedCode]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -112,7 +134,7 @@ export default function MyPerformancePage() {
     );
   }
 
-  if (loading) {
+  if (loading && !snapshot) {
     return (
       <main className="modulePage" dir={dir}>
         <div className="moduleShell">
@@ -124,6 +146,7 @@ export default function MyPerformancePage() {
 
   const kpis = snapshot?.kpis || [];
   const updatedLabel = snapshot ? performanceUpdatedStatusLabel(snapshot) : "";
+  const showTeamTable = canViewTeam && memberSnapshots.length > 0;
 
   return (
     <MorningAttendanceGate>
@@ -151,6 +174,24 @@ export default function MyPerformancePage() {
           </div>
         ) : null}
 
+        {canViewTeam ? (
+          <label className="moduleField" style={{ maxWidth: 360, marginBottom: 14 }}>
+            {t("view")}
+            <select
+              className="moduleInput"
+              value={selectedCode || TEAM_PERFORMANCE_VIEW}
+              onChange={(event) => setSelectedCode(event.target.value)}
+            >
+              <option value={TEAM_PERFORMANCE_VIEW}>{t("team")}</option>
+              {members.map((member) => (
+                <option key={member.salesmanCode} value={member.salesmanCode}>
+                  {member.salesmanName} ({member.salesmanCode})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
         {updatedLabel ? (
           <p className="moduleKpiUpdatedStatus">{updatedLabel}</p>
         ) : null}
@@ -158,6 +199,8 @@ export default function MyPerformancePage() {
         {!snapshot?.salesmanCode ? (
           <p className="moduleSubtitle">{t("noSalesman")}</p>
         ) : null}
+
+        {loading ? <div className="moduleLoading">{t("loading")}</div> : null}
 
         <div className="moduleMetricGrid moduleKpiGrid">
           {kpis.map((kpi) => {
@@ -178,6 +221,51 @@ export default function MyPerformancePage() {
             );
           })}
         </div>
+
+        {showTeamTable ? (
+          <section className="moduleSection" style={{ marginTop: 20 }}>
+            <h2 className="moduleSubtitle" style={{ marginBottom: 10 }}>{t("teamMembers")}</h2>
+            <div className="moduleTableWrap">
+              <table className="moduleTable">
+                <thead>
+                  <tr>
+                    <th>{t("salesman")}</th>
+                    {PERFORMANCE_KPI_KEYS.map((key) => (
+                      <th key={key}>{KPI_LABELS[key]?.[language] || key}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {memberSnapshots.map((member) => (
+                    <tr
+                      key={member.salesmanCode}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => setSelectedCode(member.salesmanCode)}
+                    >
+                      <td>
+                        <strong>{member.salesmanName || member.salesmanCode}</strong>
+                        <div className="moduleKpiMeta">{member.salesmanCode}</div>
+                      </td>
+                      {PERFORMANCE_KPI_KEYS.map((key) => {
+                        const kpi = kpiByKey(member, key);
+                        return (
+                          <td key={key}>
+                            <div>{formatAchievementPercent(kpi?.achievement)}</div>
+                            <div className="moduleKpiMeta">
+                              {formatPerformanceKpiValue(key, kpi?.actual)}
+                              {" / "}
+                              {kpi?.target > 0 ? formatPerformanceKpiValue(key, kpi.target) : "—"}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
       </div>
     </main>
     </MorningAttendanceGate>

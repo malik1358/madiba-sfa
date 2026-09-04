@@ -38,6 +38,7 @@
     "firebase-admin": "^13.10.0",
     "jspdf": "^4.2.1",
     "next": "^15.2.4",
+    "nodemailer": "^7.0.13",
     "pdf-parse": "^1.1.1",
     "pdfjs-dist": "^6.2.108",
     "react": "^19.0.0",

@@ -1,0 +1,60 @@
+name: Daily Visit Report Email
+
+on:
+  schedule:
+    # 21:10 UTC = 00:10 KSA — previous KSA day's report, after auto-close at 00:05.
+    - cron: "10 21 * * *"
+  workflow_dispatch:
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger daily visit report email endpoint
+        env:
+          DAILY_VISIT_REPORT_EMAIL_URL: ${{ secrets.DAILY_VISIT_REPORT_EMAIL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          DEFAULT_DAILY_VISIT_REPORT_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/daily-visit-report-email'
+          DAILY_VISIT_REPORT_EMAIL_URL_TRIMMED="$(printf '%s' "$DAILY_VISIT_REPORT_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE="$DAILY_VISIT_REPORT_EMAIL_URL_TRIMMED"
+
+          if [[ -z "$DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE" ]]; then
+            echo "DAILY_VISIT_REPORT_EMAIL_URL secret is missing; falling back to default endpoint."
+            DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE="$DEFAULT_DAILY_VISIT_REPORT_EMAIL_URL"
+          elif [[ ! "$DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE" =~ /api/cron/daily-visit-report-email([/?].*)?$ ]]; then
+            echo "DAILY_VISIT_REPORT_EMAIL_URL secret does not point to /api/cron/daily-visit-report-email; falling back to default endpoint."
+            DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE="$DEFAULT_DAILY_VISIT_REPORT_EMAIL_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          post_report() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data '{}'
+          }
+
+          status_code="$(post_report "$DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE" != "$DEFAULT_DAILY_VISIT_REPORT_EMAIL_URL" ]]; then
+            echo "Primary DAILY_VISIT_REPORT_EMAIL_URL failed with HTTP $status_code; retrying default endpoint."
+            DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE="$DEFAULT_DAILY_VISIT_REPORT_EMAIL_URL"
+            status_code="$(post_report "$DAILY_VISIT_REPORT_EMAIL_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Daily visit report email failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Daily visit report email succeeded with HTTP $status_code"
+          cat response.json

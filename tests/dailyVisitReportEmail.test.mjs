@@ -144,3 +144,46 @@ test("runDailyVisitReportEmailCycle skips when email is not configured", async (
   assert.equal(result.skipped, true);
   assert.equal(result.reason, "email_not_configured");
 });
+
+test("runDailyVisitReportEmailCycle can send only selected users", async () => {
+  const sent = [];
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-09-02",
+    userIds: ["u2"],
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+      DAILY_VISIT_REPORT_TO: "manager@madiba.com",
+    },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadReport: async () => ({
+      date: "2026-09-02",
+      thresholdKm: 0.5,
+      users: [
+        {
+          userId: "u1",
+          userName: "Sales One",
+          email: "one@madiba.com",
+          visitCount: 1,
+          farFromCustomerCount: 0,
+          totalRouteDistanceKm: 3,
+          entries: [],
+          daySummary: { lines: ["One visit."] },
+        },
+      ],
+    }),
+    loadProfiles: async () => ([
+      { id: "u1", role: "salesman", email: "one@madiba.com", salesman_name: "Sales One", is_active: true },
+      { id: "u2", role: "salesman", email: "two@madiba.com", salesman_name: "Sales Two", is_active: true },
+    ]),
+    loadSummary: async () => ({ daySummary: { lines: ["No visits today."] } }),
+  });
+
+  assert.equal(result.sentCount, 1);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].subject, /Sales Two/);
+  assert.equal(sent.some((message) => message.subject.includes("Sales One")), false);
+});

@@ -19,6 +19,11 @@ export function parseReportDateParam(value, now = new Date()) {
   return date;
 }
 
+export function normalizeVisitReportEmailUserIds(value) {
+  const raw = Array.isArray(value) ? value : value ? [value] : [];
+  return [...new Set(raw.map((id) => String(id || "").trim()).filter(Boolean))];
+}
+
 function envFlagEnabled(value, defaultValue = true) {
   const raw = String(value ?? "").trim().toLowerCase();
   if (!raw) return defaultValue;
@@ -48,6 +53,7 @@ function stubUserReport(profile) {
 
 export async function runDailyVisitReportEmailCycle(admin, {
   date,
+  userIds,
   now = new Date(),
   env = process.env,
   send = sendEmail,
@@ -57,6 +63,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   loadKpis = loadPerformanceSnapshotsForSalesmen,
 } = {}) {
   const reportDate = parseReportDateParam(date, now);
+  const requestedUserIds = normalizeVisitReportEmailUserIds(userIds);
   if (!isEmailConfigured(getMailerConfig(env))) {
     return {
       date: reportDate,
@@ -77,29 +84,47 @@ export async function runDailyVisitReportEmailCycle(admin, {
   ]);
 
   const reportByUserId = new Map((report.users || []).map((user) => [user.userId, user]));
-  const recipients = [];
+  const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  let recipients = [];
   const seen = new Set();
 
-  profiles.forEach((profile) => {
-    if (!shouldEmailVisitReportForRole(profile.role) && !reportByUserId.has(profile.id)) {
-      return;
-    }
-    if (seen.has(profile.id)) return;
-    seen.add(profile.id);
-    recipients.push({
-      profile,
-      user: reportByUserId.get(profile.id) || stubUserReport(profile),
+  if (requestedUserIds.length) {
+    requestedUserIds.forEach((userId) => {
+      if (seen.has(userId)) return;
+      seen.add(userId);
+      const reportUser = reportByUserId.get(userId);
+      const profile = profileById.get(userId) || {
+        id: userId,
+        email: reportUser?.email,
+        salesman_name: reportUser?.userName,
+      };
+      recipients.push({
+        profile,
+        user: reportUser || stubUserReport(profile),
+      });
     });
-  });
+  } else {
+    profiles.forEach((profile) => {
+      if (!shouldEmailVisitReportForRole(profile.role) && !reportByUserId.has(profile.id)) {
+        return;
+      }
+      if (seen.has(profile.id)) return;
+      seen.add(profile.id);
+      recipients.push({
+        profile,
+        user: reportByUserId.get(profile.id) || stubUserReport(profile),
+      });
+    });
 
-  report.users.forEach((user) => {
-    if (seen.has(user.userId)) return;
-    seen.add(user.userId);
-    recipients.push({
-      profile: { id: user.userId, email: user.email, salesman_name: user.userName },
-      user,
+    report.users.forEach((user) => {
+      if (seen.has(user.userId)) return;
+      seen.add(user.userId);
+      recipients.push({
+        profile: { id: user.userId, email: user.email, salesman_name: user.userName },
+        user,
+      });
     });
-  });
+  }
 
   recipients.sort((left, right) => String(left.user.userName || "").localeCompare(String(right.user.userName || "")));
 

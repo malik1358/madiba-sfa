@@ -1,4 +1,13 @@
 import { PRICE_CACHE_KEY as DEFAULT_PRICE_CACHE_KEY } from "./priceApiConfig.js";
+import {
+  DEFAULT_PRICING_REGION,
+  PRICING_REGIONS,
+  REGION_PRICE_COLUMNS,
+  SCHEME_COLUMNS,
+  emptyRegionPriceMaps,
+  parseDiscountRate,
+  withRegionFallbacks,
+} from "./regionalPricing.js";
 
 const PRICE_CODE_ALIASES = {
   A005425: ["A004555", "A000057"],
@@ -65,6 +74,72 @@ function applyPriceCodeAliases(priceMap) {
   });
 
   return next;
+}
+
+function applyDiscountCodeAliases(discountMap) {
+  return applyPriceCodeAliases(discountMap);
+}
+
+function findRegionWholesaleIndex(rows, region, fallbackColumn, maxRows = 5) {
+  const regionToken = String(region || "").trim().toLowerCase();
+  const otherTokens = PRICING_REGIONS.filter((entry) => entry !== regionToken);
+  const fallbackIndex = sheetColumnIndex(fallbackColumn);
+
+  if (!Array.isArray(rows) || rows.length === 0) return fallbackIndex;
+
+  const limit = Math.min(maxRows, rows.length);
+  let bestIndex = -1;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (!Array.isArray(row)) continue;
+
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+      const header = normalizeHeaderCell(row[columnIndex]);
+      if (!header) continue;
+      const isWholesale = header.includes("wholesale");
+      if (!isWholesale && !header.includes("price")) continue;
+      if (otherTokens.some((token) => header.includes(token))) continue;
+      if (regionToken && !header.includes(regionToken) && regionToken !== DEFAULT_PRICING_REGION) continue;
+      if (regionToken === DEFAULT_PRICING_REGION && otherTokens.some((token) => header.includes(token))) continue;
+
+      const hasRegion = regionToken && header.includes(regionToken);
+      const score = (hasRegion ? 2000 : 0) + (isWholesale ? 1500 : 400) + (row.length - columnIndex);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = columnIndex;
+      }
+    }
+  }
+
+  if (bestIndex >= 0) return bestIndex;
+  return hasDataAtIndex(rows, fallbackIndex) ? fallbackIndex : bestIndex;
+}
+
+function findSchemeIndex(rows, aliases, fallbackColumn, maxRows = 5) {
+  const headerIndex = findHeaderIndex(rows, aliases, maxRows);
+  if (headerIndex >= 0) return headerIndex;
+  const fallbackIndex = sheetColumnIndex(fallbackColumn);
+  return hasDataAtIndex(rows, fallbackIndex) ? fallbackIndex : -1;
+}
+
+function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems) {
+  const aliasedRegions = {};
+  PRICING_REGIONS.forEach((region) => {
+    aliasedRegions[region] = applyPriceCodeAliases(regionPriceMaps?.[region] || {});
+  });
+
+  const resolvedRegions = withRegionFallbacks(aliasedRegions, applyPriceCodeAliases(priceMap));
+  const resolvedPriceMap = resolvedRegions.riyadh;
+
+  return {
+    priceMap: resolvedPriceMap,
+    regionPriceMaps: resolvedRegions,
+    cashDiscountMap: applyDiscountCodeAliases(cashDiscountMap),
+    valueDiscountMap: applyDiscountCodeAliases(valueDiscountMap),
+    sheetItems,
+  };
 }
 
 function normalizeHeaderCell(value) {
@@ -169,6 +244,9 @@ function hasDataAtIndex(rows, index, maxRows = 50) {
 
 export function parsePricePayload(payload) {
   const priceMap = {};
+  const regionPriceMaps = emptyRegionPriceMaps();
+  const cashDiscountMap = {};
+  const valueDiscountMap = {};
   const sheetItems = [];
   const seen = new Set();
 
@@ -192,21 +270,54 @@ export function parsePricePayload(payload) {
     });
   }
 
-  function addRate(rawCode, rawRate) {
+  function addMappedRate(targetMap, rawCode, rawRate) {
     const code = normalizeCode(rawCode);
     if (!code) return;
     if (isExcludedItemCode(code)) return;
 
     const nextRate = toNumber(rawRate);
-    const hasCurrent = Object.prototype.hasOwnProperty.call(priceMap, code);
-    const currentRate = hasCurrent ? toNumber(priceMap[code]) : 0;
+    const hasCurrent = Object.prototype.hasOwnProperty.call(targetMap, code);
+    const currentRate = hasCurrent ? toNumber(targetMap[code]) : 0;
 
     // Keep a usable rate once discovered; do not downgrade it to zero.
     if (currentRate > 0 && nextRate <= 0) return;
 
     if (nextRate > 0 || !hasCurrent) {
-      priceMap[code] = nextRate;
+      targetMap[code] = nextRate;
     }
+  }
+
+  function addRate(rawCode, rawRate, region = DEFAULT_PRICING_REGION) {
+    const resolvedRegion = PRICING_REGIONS.includes(region) ? region : DEFAULT_PRICING_REGION;
+    addMappedRate(regionPriceMaps[resolvedRegion], rawCode, rawRate);
+    if (resolvedRegion === DEFAULT_PRICING_REGION) {
+      addMappedRate(priceMap, rawCode, rawRate);
+    }
+  }
+
+  function addDiscount(targetMap, rawCode, rawDiscount) {
+    const code = normalizeCode(rawCode);
+    if (!code) return;
+    if (isExcludedItemCode(code)) return;
+
+    const nextRate = parseDiscountRate(rawDiscount);
+    if (nextRate > 0) {
+      targetMap[code] = nextRate;
+    }
+  }
+
+  function ingestRegionMaps(source) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) return;
+    PRICING_REGIONS.forEach((region) => {
+      const regionMap = source[region];
+      if (!regionMap || typeof regionMap !== "object" || Array.isArray(regionMap)) return;
+      Object.entries(regionMap).forEach(([code, rate]) => addRate(code, rate, region));
+    });
+  }
+
+  function ingestDiscountMap(targetMap, source) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) return;
+    Object.entries(source).forEach(([code, rate]) => addDiscount(targetMap, code, rate));
   }
 
   function readAny(source, keys) {
@@ -248,6 +359,8 @@ export function parsePricePayload(payload) {
           "product group",
         ]);
         const headerRateIndex = findHeaderIndex(value, [
+          "wholesale price without vat riyadh",
+          "wholesale price riyadh",
           "wholesale price",
           "wholesale price riyal",
           "wholesale price rial",
@@ -265,11 +378,22 @@ export function parsePricePayload(payload) {
         const nameIndex = sheetColumnIndex("C");
         const categoryIndex = sheetColumnIndex("CO");
         const rateIndex = sheetColumnIndex("D");
+        const riyadhIndex = findRegionWholesaleIndex(value, "riyadh", REGION_PRICE_COLUMNS.riyadh);
+        const dammamIndex = findRegionWholesaleIndex(value, "dammam", REGION_PRICE_COLUMNS.dammam);
+        const jeddahIndex = findRegionWholesaleIndex(value, "jeddah", REGION_PRICE_COLUMNS.jeddah);
+        const cashDiscountIndex = findSchemeIndex(value, ["cash discount"], SCHEME_COLUMNS.cashDiscount);
+        const valueDiscountIndex = findSchemeIndex(value, [
+          "sales value > 5000 sar",
+          "sales value > 5000",
+          "value discount",
+        ], SCHEME_COLUMNS.valueDiscount);
 
         const itemCodeIndex = headerCodeIndex >= 0 ? headerCodeIndex : (hasDataAtIndex(value, codeIndex) ? codeIndex : -1);
         const itemNameIndex = headerNameIndex >= 0 ? headerNameIndex : (hasDataAtIndex(value, nameIndex) ? nameIndex : -1);
         const resolvedCategoryIndex = headerCategoryIndex >= 0 ? headerCategoryIndex : (hasDataAtIndex(value, categoryIndex) ? categoryIndex : -1);
-        const resolvedRateIndex = headerRateIndex >= 0 ? headerRateIndex : (hasDataAtIndex(value, rateIndex) ? rateIndex : -1);
+        const resolvedRateIndex = riyadhIndex >= 0
+          ? riyadhIndex
+          : (headerRateIndex >= 0 ? headerRateIndex : (hasDataAtIndex(value, rateIndex) ? rateIndex : -1));
 
         value.forEach((row) => {
           if (!Array.isArray(row)) return;
@@ -303,9 +427,16 @@ export function parsePricePayload(payload) {
           const rawCategory = normalizeText(categoryCandidate);
 
           const rawRate = sheetCell(row, resolvedRateIndex) || row.find((cell) => Number.isFinite(Number(String(cell).replace(/,/g, "")))) || "";
+          const riyadhRate = riyadhIndex >= 0 ? sheetCell(row, riyadhIndex) : rawRate;
+          const dammamRate = dammamIndex >= 0 ? sheetCell(row, dammamIndex) : "";
+          const jeddahRate = jeddahIndex >= 0 ? sheetCell(row, jeddahIndex) : "";
 
           upsertSheetItem(code, rawName || code, rawCategory || "Unclassified");
-          addRate(code, rawRate);
+          addRate(code, riyadhRate || rawRate, "riyadh");
+          addRate(code, dammamRate, "dammam");
+          addRate(code, jeddahRate, "jeddah");
+          if (cashDiscountIndex >= 0) addDiscount(cashDiscountMap, code, sheetCell(row, cashDiscountIndex));
+          if (valueDiscountIndex >= 0) addDiscount(valueDiscountMap, code, sheetCell(row, valueDiscountIndex));
         });
         return;
       }
@@ -330,7 +461,22 @@ export function parsePricePayload(payload) {
 
     Object.entries(value).forEach(([key, entry]) => {
       if (["priceMap", "prices"].includes(key) && entry && typeof entry === "object" && !Array.isArray(entry)) {
-        Object.entries(entry).forEach(([code, rate]) => addRate(code, rate));
+        Object.entries(entry).forEach(([code, rate]) => addRate(code, rate, "riyadh"));
+        return;
+      }
+
+      if (["regionPriceMaps", "priceMaps", "pricesByRegion"].includes(key)) {
+        ingestRegionMaps(entry);
+        return;
+      }
+
+      if (["cashDiscountMap", "cashDiscounts"].includes(key)) {
+        ingestDiscountMap(cashDiscountMap, entry);
+        return;
+      }
+
+      if (["valueDiscountMap", "valueDiscounts"].includes(key)) {
+        ingestDiscountMap(valueDiscountMap, entry);
         return;
       }
 
@@ -347,7 +493,7 @@ export function parsePricePayload(payload) {
 
   if (Array.isArray(payload)) {
     walk(payload);
-    return { priceMap: applyPriceCodeAliases(priceMap), sheetItems };
+    return normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems);
   }
 
   if (payload && typeof payload === "object") {
@@ -355,12 +501,12 @@ export function parsePricePayload(payload) {
 
     Object.entries(payload).forEach(([key, value]) => {
       if (typeof value !== "object" || value === null) {
-        addRate(key, value);
+        addRate(key, value, "riyadh");
       }
     });
   }
 
-  return { priceMap: applyPriceCodeAliases(priceMap), sheetItems };
+  return normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems);
 }
 
 function readCached(cacheKey) {
@@ -371,10 +517,13 @@ function readCached(cacheKey) {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
     if (!parsed.priceMap || typeof parsed.priceMap !== "object") return null;
-    return {
-      priceMap: parsed.priceMap,
-      sheetItems: Array.isArray(parsed.sheetItems) ? parsed.sheetItems : [],
-    };
+    return normalizeCatalogResult(
+      parsed.priceMap,
+      parsed.regionPriceMaps,
+      parsed.cashDiscountMap,
+      parsed.valueDiscountMap,
+      Array.isArray(parsed.sheetItems) ? parsed.sheetItems : [],
+    );
   } catch {
     return null;
   }
@@ -414,10 +563,13 @@ export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KE
         throw new Error("Price API returned invalid JSON");
       }
       const parsed = data && typeof data === "object" && data.priceMap && typeof data.priceMap === "object"
-        ? {
-            priceMap: applyPriceCodeAliases(data.priceMap),
-            sheetItems: Array.isArray(data.sheetItems) ? data.sheetItems : [],
-          }
+        ? normalizeCatalogResult(
+            data.priceMap,
+            data.regionPriceMaps,
+            data.cashDiscountMap,
+            data.valueDiscountMap,
+            Array.isArray(data.sheetItems) ? data.sheetItems : [],
+          )
         : parsePricePayload(data || {});
 
       if (Object.keys(parsed.priceMap).length === 0) {

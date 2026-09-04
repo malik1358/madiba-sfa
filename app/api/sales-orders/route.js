@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import { GPS_REQUIRED_ERROR, buildGpsActivityNote, hasGpsCoordinates, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
+import { loadCachedPricingCatalog, priceOrderLines, resolveCatalogForOrder } from "../../lib/orderPricing.js";
+import { normalizePaymentType, normalizePricingRegion } from "../../lib/regionalPricing.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -131,6 +133,14 @@ async function readHistory(admin, orderId) {
   return history;
 }
 
+async function writeOrderPricingMeta(admin, orderId, meta) {
+  const { error } = await admin.from("system_settings").upsert({
+    setting_key: `order_pricing_meta:${orderId}`,
+    setting_value: JSON.stringify(meta),
+  }, { onConflict: "setting_key" });
+  if (error) throw error;
+}
+
 async function appendOrderHistory(admin, {
   orderId,
   customerCode,
@@ -140,6 +150,8 @@ async function appendOrderHistory(admin, {
   nextStatus,
   changes,
   changedAt,
+  paymentType,
+  pricingRegion,
 }) {
   const entry = {
     orderId,
@@ -147,6 +159,8 @@ async function appendOrderHistory(admin, {
     action,
     previousStatus,
     nextStatus,
+    paymentType: normalizePaymentType(paymentType),
+    pricingRegion: normalizePricingRegion(pricingRegion),
     changes: Array.isArray(changes) ? changes : [],
     changedAt,
     changedBy: userId,
@@ -305,6 +319,8 @@ export async function POST(request) {
     const customerCode = String(body?.customerCode || "").trim();
     const customerName = String(body?.customerName || "").trim();
     const salesmanCode = String(body?.salesmanCode || "").trim();
+    const requestedPaymentType = normalizePaymentType(body?.paymentType);
+    const requestedPricingRegion = normalizePricingRegion(body?.pricingRegion);
     const lines = Array.isArray(body?.lines) ? body.lines : [];
     const location = body?.location || null;
     const capturedAt = String(body?.capturedAt || new Date().toISOString());
@@ -327,6 +343,7 @@ export async function POST(request) {
     });
 
     const user = await getAuthUser(admin, authHeader.replace("Bearer ", ""));
+    const userMetadata = user.user_metadata || user.app_metadata || {};
 
     const { data: profile, error: profileError } = await admin
       .from("profiles")
@@ -341,14 +358,30 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: GPS_REQUIRED_ERROR }, { status: 400 });
     }
 
+    const catalog = await loadCachedPricingCatalog(admin);
+    const pricedCatalog = resolveCatalogForOrder(catalog, {
+      currentUserRegion: requestedPricingRegion || userMetadata.pricing_region,
+      customerSalesmanCode: salesmanCode,
+      pricingRegionBySalesmanCode: salesmanCode
+        ? { [String(salesmanCode).trim().toUpperCase()]: requestedPricingRegion || userMetadata.pricing_region }
+        : {},
+      paymentType: requestedPaymentType,
+    });
+    const pricedLines = priceOrderLines(lines, pricedCatalog);
+
     const { orderId, changeSet, nowIso } = await persistDraftOrder(admin, {
       userId: user.id,
       orderId: requestedOrderId,
       customerCode,
       customerName,
       salesmanCode,
-      lines,
+      lines: pricedLines,
       capturedAt,
+    });
+
+    await writeOrderPricingMeta(admin, orderId, {
+      paymentType: requestedPaymentType,
+      pricingRegion: pricedCatalog.region,
     });
 
     const isNewOrder = !requestedOrderId;
@@ -363,6 +396,8 @@ export async function POST(request) {
       nextStatus: loadedOrderStatus || "DRAFT",
       changes: changeSet,
       changedAt: nowIso,
+      paymentType: requestedPaymentType,
+      pricingRegion: pricedCatalog.region,
     });
 
     if (requireGps && hasGpsCoordinates(location)) {
@@ -403,6 +438,8 @@ export async function POST(request) {
         nextStatus: "SUBMITTED",
         changes: [],
         changedAt: nowIso,
+        paymentType: requestedPaymentType,
+        pricingRegion: pricedCatalog.region,
       });
 
       if (requireGps && hasGpsCoordinates(location)) {

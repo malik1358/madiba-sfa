@@ -5,11 +5,13 @@ import {
   achievementPercent,
   buildPerformanceSnapshot,
   classifyBuyingCustomers,
+  consolidatePerformanceSnapshots,
   formatPerformanceKpiLine,
   isOfficeSuppliesSale,
   kpiStatus,
   performanceUpdatedStatusLabel,
   splitSalesActuals,
+  TEAM_PERFORMANCE_VIEW,
 } from "../app/lib/performanceKpis.js";
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
 
@@ -63,6 +65,30 @@ test("updated status explains when admin last saved targets", () => {
   assert.match(performanceUpdatedStatusLabel(snapshot), /Admin User/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /Sales of office supplies:/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /40\.0%/);
+});
+
+test("consolidates member KPIs into a team snapshot", () => {
+  const team = consolidatePerformanceSnapshots([
+    buildPerformanceSnapshot({
+      reportDate: "2026-09-04",
+      salesmanCode: "SM001",
+      actuals: { officeSupplies: 40, otherSales: 10, collection: 5, newCustomers: 1, repeatCustomers: 2 },
+      targets: { officeSupplies: 100, otherSales: 20, collection: 10, newCustomers: 2, repeatCustomers: 4 },
+    }),
+    buildPerformanceSnapshot({
+      reportDate: "2026-09-04",
+      salesmanCode: "SM002",
+      actuals: { officeSupplies: 60, otherSales: 30, collection: 15, newCustomers: 1, repeatCustomers: 3 },
+      targets: { officeSupplies: 100, otherSales: 80, collection: 30, newCustomers: 2, repeatCustomers: 6 },
+    }),
+  ], { reportDate: "2026-09-04", salesmanName: "Ahmed — team" });
+
+  assert.equal(team.salesmanCode, TEAM_PERFORMANCE_VIEW);
+  assert.equal(team.isTeam, true);
+  assert.equal(team.memberCount, 2);
+  assert.equal(team.actuals.officeSupplies, 100);
+  assert.equal(team.targets.otherSales, 100);
+  assert.equal(team.kpis[0].achievement, 50);
 });
 
 test("daily visit email includes monthly KPI status", () => {

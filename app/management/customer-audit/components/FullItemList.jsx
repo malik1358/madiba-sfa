@@ -2,6 +2,7 @@
 
 import { Fragment, useDeferredValue, useMemo, useState } from "react";
 import { getPrice, isDoNotUseItem, normalizeCode } from "../lib/helpers";
+import ExportableTable from "../../../components/ExportableTable";
 
 function normalizedText(value) {
   return String(value || "").trim().toLowerCase();
@@ -128,7 +129,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
         </select>
       </div>
 
-      <div className="auditTableScroll" style={{ marginTop: "10px" }}>
+      <ExportableTable filename="customer-full-item-list" sheetName="Items" className="auditTableScroll" style={{ marginTop: "10px" }}>
         <table className="moduleTable moduleOrderTable auditFullItemListTable">
           <thead>
             <tr>
@@ -174,7 +175,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
             )}
           </tbody>
         </table>
-      </div>
+      </ExportableTable>
     </section>
   );
 }

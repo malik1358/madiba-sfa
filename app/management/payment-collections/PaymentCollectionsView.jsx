@@ -8,6 +8,7 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import ExportableTable from "../../components/ExportableTable";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -2047,7 +2048,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                     : t("noScheduledRevisits")}
                 </div>
               ) : (
-                <div className="moduleTableWrap">
+                <ExportableTable filename="scheduled-revisits" sheetName="Scheduled" className="moduleTableWrap">
                   <table className="moduleTable moduleCollectorInvoiceTable">
                     <thead>
                       <tr>
@@ -2149,7 +2150,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                       })}
                     </tbody>
                   </table>
-                </div>
+                </ExportableTable>
               )}
             </section>
             </>
@@ -2235,7 +2236,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                 {cashQueueSourceRows.length === 0 ? (
                   <div className="moduleHint">{t("noCashQueue")}</div>
                 ) : (
-                  <div className="moduleTableWrap moduleCollectorTableWrap">
+                  <ExportableTable filename="cash-collection-queue" sheetName="Cash Queue" className="moduleTableWrap moduleCollectorTableWrap">
                     <table className="moduleTable moduleCollectorTable">
                       <thead>
                         <tr>
@@ -2288,7 +2289,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                         })}
                       </tbody>
                     </table>
-                  </div>
+                  </ExportableTable>
                 )}
               </div>
             ) : null}
@@ -2303,7 +2304,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
               <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("creditQueueHint")}</div>
             ) : null}
 
-            <div className="moduleTableWrap moduleCollectorTableWrap">
+            <ExportableTable filename="collection-queue" sheetName="Collection Queue" className="moduleTableWrap moduleCollectorTableWrap">
               <table className="moduleTable moduleCollectorTable">
                 <thead>
                   <tr>
@@ -2609,7 +2610,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   </button>
                                 </div>
                               ) : null}
-                              <div className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "10px" }}>
+                              <ExportableTable filename="collection-aging" sheetName="Aging" className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "10px" }}>
                                 <table className="moduleTable">
                                   <thead>
                                     <tr>
@@ -2644,8 +2645,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     </tr>
                                   </tbody>
                                 </table>
-                              </div>
-                              <div className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "12px" }}>
+                              </ExportableTable>
+                              <ExportableTable filename="collection-invoices" sheetName="Invoices" className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "12px" }}>
                                 <table className="moduleTable moduleCollectorInvoiceTable">
                                   <thead>
                                     <tr>
@@ -2671,7 +2672,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     ))}
                                   </tbody>
                                 </table>
-                              </div>
+                              </ExportableTable>
 
                               <div className="moduleSection" style={{ marginTop: "8px" }}>
                                 <div className="moduleSectionHeader">
@@ -2861,7 +2862,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                   })}
                 </tbody>
               </table>
-            </div>
+            </ExportableTable>
 
             {!loading && visibleRows.length === 0 && visibleNotDueRows.length === 0 && (
               <div className="moduleHint">{view === "legal" ? t("noLegal") : t("noDue")}</div>

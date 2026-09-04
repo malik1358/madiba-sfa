@@ -18,6 +18,7 @@ import { insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { resolveAuthSession } from "../../lib/authSession";
+import ExportableTable from "../../components/ExportableTable";
 import { extractMissingProspectsColumn, normalizeProspectSalesmanCode } from "../../lib/prospects";
 
 const TEXT = {
@@ -1074,7 +1075,7 @@ export default function NewCustomerPage() {
               placeholder="Shop, mobile, status, order #..."
             />
           </label>
-          <div className="moduleTableWrap">
+          <ExportableTable filename="new-customers" sheetName="Prospects" className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
@@ -1183,7 +1184,7 @@ export default function NewCustomerPage() {
                 )}
               </tbody>
             </table>
-          </div>
+          </ExportableTable>
         </section>
 
         {linkProspect ? (

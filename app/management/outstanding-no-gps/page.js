@@ -12,6 +12,7 @@ import { resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
+import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
@@ -296,7 +297,7 @@ export default function OutstandingNoGpsPage() {
                 <div className="moduleHint" style={{ marginBottom: "8px" }}>
                   {t("showing")} {customers.length} · {t("totalOutstanding")}: {formatOutstanding(pageTotalOutstanding)}
                 </div>
-                <div className="moduleTableWrap moduleCustomerMasterTableWrap">
+                <ExportableTable filename="outstanding-no-gps" sheetName="Outstanding No GPS" className="moduleTableWrap moduleCustomerMasterTableWrap">
                   <table className="moduleTable moduleCustomerMasterTable">
                     <thead>
                       <tr>
@@ -336,7 +337,7 @@ export default function OutstandingNoGpsPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </ExportableTable>
 
                 <div className="moduleFilterRow" style={{ marginTop: "12px" }}>
                   <button

@@ -1,5 +1,11 @@
 import { formatDurationMinutes, buildGoogleMapsPointUrl } from "./geo.js";
 import { parseEmailList, isLikelyEmail } from "./mailer.js";
+import {
+  formatAchievementPercent,
+  formatPerformanceKpiLine,
+  formatPerformanceKpiValue,
+  performanceUpdatedStatusLabel,
+} from "./performanceKpis.js";
 import { KSA_TIMEZONE } from "./workdayActivity.js";
 
 export function escapeHtml(value) {
@@ -72,6 +78,38 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   const subject = `Daily Visit Report — ${userName} — ${date}`;
   const lines = Array.isArray(user?.daySummary?.lines) ? user.daySummary.lines : [];
   const entries = Array.isArray(user?.entries) ? user.entries : [];
+  const performance = user?.performance || null;
+  const kpis = Array.isArray(performance?.kpis) ? performance.kpis : [];
+
+  const kpiText = kpis.length
+    ? [
+      "Monthly KPI status:",
+      ...kpis.map((kpi) => `- ${formatPerformanceKpiLine(kpi)}`),
+      performanceUpdatedStatusLabel(performance),
+      "",
+    ]
+    : [];
+
+  const kpiHtml = kpis.length
+    ? `<h2 style="font-size: 16px;">Monthly KPI status</h2>
+      <p style="color:#52616b; font-size: 13px;">${escapeHtml(performanceUpdatedStatusLabel(performance))}</p>
+      <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%; margin: 0 0 16px;">
+        <thead style="background: #f4f7fb;">
+          <tr>
+            <th>KPI</th><th>Actual</th><th>Target</th><th>Achievement</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${kpis.map((kpi) => `<tr>
+            <td>${escapeHtml(kpi.label)}</td>
+            <td>${escapeHtml(formatPerformanceKpiValue(kpi.key, kpi.actual))}</td>
+            <td>${escapeHtml(kpi.target > 0 ? formatPerformanceKpiValue(kpi.key, kpi.target) : "—")}</td>
+            <td>${escapeHtml(formatAchievementPercent(kpi.achievement))}</td>
+            <td>${escapeHtml(kpi.status?.label || "No target")}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`
+    : "";
 
   const summaryText = [
     `Daily visit report for ${userName}`,
@@ -80,6 +118,7 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
     `Far from customer: ${user?.farFromCustomerCount || 0}`,
     `Route total: ${formatKm(user?.totalRouteDistanceKm)}`,
     "",
+    ...kpiText,
     ...(lines.length ? ["Summary:", ...lines, ""] : []),
     ...entries.map((entry) => {
       const waiting = entry.waitingMinutesFromPrevious == null
@@ -137,6 +176,7 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
     · Route total: <strong>${escapeHtml(formatKm(user?.totalRouteDistanceKm))}</strong>
   </p>
   <p style="color:#52616b; font-size: 13px;">Entries more than ${escapeHtml(String(thresholdKm))} km from the saved customer location are marked far from customer.</p>
+  ${kpiHtml}
   <h2 style="font-size: 16px;">Daily visit summary</h2>
   ${summaryHtml}
   <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%;">

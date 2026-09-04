@@ -4602,6 +4602,80 @@ th:has(.moduleTableColumnFilterInput) {
   color: #116843;
 }
 
+.moduleKpiGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .moduleKpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.moduleKpiCard {
+  position: relative;
+}
+
+.moduleKpiMeta {
+  margin: 0;
+  color: #5b7178;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.moduleKpiUpdatedStatus {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #eef6f4;
+  color: #0f4c5c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.moduleKpiStatus {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.moduleKpiStatus--achieved,
+.moduleKpiCard.moduleKpiStatus--achieved {
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.moduleKpiStatus--onTrack,
+.moduleKpiCard.moduleKpiStatus--onTrack {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.moduleKpiStatus--behind,
+.moduleKpiCard.moduleKpiStatus--behind {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.moduleKpiStatus--neutral,
+.moduleKpiCard.moduleKpiStatus--neutral {
+  background: #f3f6f7;
+  color: #52616b;
+}
+
+.moduleKpiCard.moduleKpiStatus--achieved,
+.moduleKpiCard.moduleKpiStatus--onTrack,
+.moduleKpiCard.moduleKpiStatus--behind,
+.moduleKpiCard.moduleKpiStatus--neutral {
+  border-color: transparent;
+}
+
 .moduleBusinessAlertList {
   display: grid;
   gap: 12px;

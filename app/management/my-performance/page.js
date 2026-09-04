@@ -1,30 +1,57 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
-import { fetchSalesScope } from "../../lib/salesScope";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
-import { applyCustomerSalesmanScopeFilter } from "../../lib/customerSalesmanAssignment";
+import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
+import {
+  formatAchievementPercent,
+  formatPerformanceKpiValue,
+  performanceUpdatedStatusLabel,
+} from "../../lib/performanceKpis";
+import { getKsaDateString } from "../../lib/workdayActivity";
 
 const TEXT = {
   title: { en: "My Performance", ar: "أدائي" },
-  subtitle: { en: "Sales KPI snapshot", ar: "ملخص مؤشرات الأداء" },
+  subtitle: { en: "Monthly sales, collection, and customer KPIs", ar: "مؤشرات المبيعات والتحصيل والعملاء الشهرية" },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading KPI dashboard...", ar: "جاري تحميل مؤشرات الأداء..." },
+  actual: { en: "Actual", ar: "الفعلي" },
+  target: { en: "Target", ar: "الهدف" },
+  achievement: { en: "Achievement", ar: "الإنجاز" },
+  updateTargets: { en: "Update KPI targets", ar: "تحديث أهداف الأداء" },
+  noSalesman: {
+    en: "Your profile needs a salesman code before personal KPIs can be calculated.",
+    ar: "يلزم رمز مندوب في ملفك لحساب مؤشرات الأداء الشخصية.",
+  },
+  login: { en: "Go to login", ar: "تسجيل الدخول" },
 };
 
-function currency(value) {
-  return Number(value || 0).toLocaleString("en-SA", { maximumFractionDigits: 0 });
-}
+const STATUS_LABELS = {
+  achieved: { en: "Achieved", ar: "محقق" },
+  on_track: { en: "On track", ar: "على المسار" },
+  behind: { en: "Behind", ar: "متأخر" },
+  no_target: { en: "No target", ar: "بدون هدف" },
+};
 
-function percent(value) {
-  return `${Number(value || 0).toFixed(1)}%`;
+const KPI_LABELS = {
+  sales: { en: "Sales", ar: "المبيعات" },
+  collection: { en: "Collection", ar: "التحصيل" },
+  newCustomers: { en: "New customers", ar: "عملاء جدد" },
+  repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
+};
+
+function statusClass(statusKey) {
+  if (statusKey === "achieved") return "moduleKpiStatus--achieved";
+  if (statusKey === "on_track") return "moduleKpiStatus--onTrack";
+  if (statusKey === "behind") return "moduleKpiStatus--behind";
+  return "moduleKpiStatus--neutral";
 }
 
 export default function MyPerformancePage() {
@@ -32,18 +59,8 @@ export default function MyPerformancePage() {
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [metrics, setMetrics] = useState({
-    salesToday: 0,
-    salesMonth: 0,
-    visitsToday: 0,
-    productiveVisits: 0,
-    strikeRate: 0,
-    collection: 0,
-    newCustomers: 0,
-    orders: 0,
-    averageOrderValue: 0,
-    achievement: 0,
-  });
+  const [canManageTargets, setCanManageTargets] = useState(false);
+  const [snapshot, setSnapshot] = useState(null);
 
   usePopupMessages({ error });
 
@@ -59,133 +76,21 @@ export default function MyPerformancePage() {
       setError("");
 
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session?.user) {
+        const session = await resolveAuthSession(supabase);
+        if (!session?.access_token) {
           throw new Error("Please login again.");
         }
 
-        const scope = await fetchSalesScope();
-
-        const { data: profile, error: profileError } = await supabase
-          .from("profiles")
-          .select("id,salesman_code")
-          .eq("id", session.user.id)
-          .single();
-
-        if (profileError) throw profileError;
-
-        const today = new Date();
-        const todayISO = today.toISOString().slice(0, 10);
-        const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
-          .toISOString()
-          .slice(0, 10);
-
-        const salesmanCode = profile.salesman_code;
-
-        let salesTodayQuery = supabase
-          .from("active_sales")
-          .select("sales_amount,customer_code,salesman_code")
-          .eq("transaction_date", todayISO);
-
-        let salesMonthQuery = supabase
-          .from("active_sales")
-          .select("sales_amount,salesman_code")
-          .gte("transaction_date", monthStart)
-          .lte("transaction_date", todayISO);
-
-        let monthRowsQuery = supabase
-          .from("active_sales")
-          .select("customer_code,sales_amount,salesman_code")
-          .eq("transaction_date", todayISO);
-
-        let ordersQuery = supabase
-          .from("sales_orders")
-          .select("id,status,submitted_at,created_by,salesman_code")
-          .gte("created_at", `${monthStart}T00:00:00`);
-
-        let customersQuery = supabase
-          .from("customers")
-          .select("customer_code,current_salesman_code")
-          .gte("latest_transaction_date", monthStart)
-          .lte("latest_transaction_date", todayISO);
-
-        if (scope.hasAllAccess) {
-          // no-op
-        } else {
-          salesTodayQuery = salesTodayQuery.in("salesman_code", scope.visibleSalesmanCodes);
-          salesMonthQuery = salesMonthQuery.in("salesman_code", scope.visibleSalesmanCodes);
-          monthRowsQuery = monthRowsQuery.in("salesman_code", scope.visibleSalesmanCodes);
-          customersQuery = applyCustomerSalesmanScopeFilter(customersQuery, scope.visibleSalesmanCodes);
-        }
-
-        const [salesTodayRes, salesMonthRes, monthRowsRes, ordersRes, customersRes] = await Promise.all([
-          salesTodayQuery,
-          salesMonthQuery,
-          monthRowsQuery,
-          ordersQuery,
-          customersQuery,
-        ]);
-
-        if (salesTodayRes.error) throw salesTodayRes.error;
-        if (salesMonthRes.error) throw salesMonthRes.error;
-        if (monthRowsRes.error) throw monthRowsRes.error;
-        if (ordersRes.error) throw ordersRes.error;
-        if (customersRes.error) throw customersRes.error;
-
-        const salesToday = (salesTodayRes.data || []).reduce((sum, row) => sum + Number(row.sales_amount || 0), 0);
-        const salesMonth = (salesMonthRes.data || []).reduce((sum, row) => sum + Number(row.sales_amount || 0), 0);
-
-        const visitsTodaySet = new Set((monthRowsRes.data || []).map((row) => row.customer_code).filter(Boolean));
-        const productiveSet = new Set(
-          (monthRowsRes.data || [])
-            .filter((row) => Number(row.sales_amount || 0) > 0)
-            .map((row) => row.customer_code)
-            .filter(Boolean)
+        const { response, payload } = await fetchJsonWithTimeout(
+          `/api/performance?date=${encodeURIComponent(getKsaDateString())}`,
+          { headers: { Authorization: `Bearer ${session.access_token}` } },
         );
-
-        const visitsToday = visitsTodaySet.size;
-        const productiveVisits = productiveSet.size;
-        const strikeRate = visitsToday ? (productiveVisits / visitsToday) * 100 : 0;
-
-        const visibleOrders = (ordersRes.data || []).filter((row) => {
-          if (scope.hasAllAccess) return true;
-          return scope.visibleUserIds.includes(row.created_by) || scope.visibleSalesmanCodes.includes(String(row.salesman_code || "").trim().toUpperCase());
-        });
-
-        const submittedOrders = visibleOrders.filter((row) => row.status === "SUBMITTED");
-        const submittedOrderIds = submittedOrders.map((row) => row.id).filter(Boolean);
-        let collection = 0;
-
-        if (submittedOrderIds.length > 0) {
-          const { data: orderItems, error: orderItemsError } = await supabase
-            .from("sales_order_items")
-            .select("order_id,line_value")
-            .in("order_id", submittedOrderIds);
-
-          if (orderItemsError) throw orderItemsError;
-
-          collection = (orderItems || []).reduce((sum, row) => sum + Number(row.line_value || 0), 0);
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load performance metrics.");
         }
 
-        const orders = submittedOrders.length;
-        const averageOrderValue = orders ? collection / orders : 0;
-        const achievement = 0;
-
-        setMetrics({
-          salesToday,
-          salesMonth,
-          visitsToday,
-          productiveVisits,
-          strikeRate,
-          collection,
-          newCustomers: (customersRes.data || []).length,
-          orders,
-          averageOrderValue,
-          achievement,
-        });
+        setCanManageTargets(Boolean(payload.canManageTargets));
+        setSnapshot(payload.snapshot || null);
       } catch (err) {
         setError(err.message || "Unable to load performance metrics.");
       } finally {
@@ -195,22 +100,6 @@ export default function MyPerformancePage() {
 
     load();
   }, []);
-
-  const cards = useMemo(
-    () => [
-      { label: "Sales Today", value: currency(metrics.salesToday) },
-      { label: "Sales This Month", value: currency(metrics.salesMonth) },
-      { label: "Visits Today", value: metrics.visitsToday },
-      { label: "Productive Visits", value: metrics.productiveVisits },
-      { label: "Strike Rate", value: percent(metrics.strikeRate) },
-      { label: "Collection", value: currency(metrics.collection) },
-      { label: "New Customers", value: metrics.newCustomers },
-      { label: "Orders", value: metrics.orders },
-      { label: "Average Order Value", value: currency(metrics.averageOrderValue) },
-      { label: "Achievement", value: percent(metrics.achievement) },
-    ],
-    [metrics]
-  );
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
@@ -232,6 +121,9 @@ export default function MyPerformancePage() {
     );
   }
 
+  const kpis = snapshot?.kpis || [];
+  const updatedLabel = snapshot ? performanceUpdatedStatusLabel(snapshot) : "";
+
   return (
     <MorningAttendanceGate>
     <main className="modulePage" dir={dir}>
@@ -242,22 +134,48 @@ export default function MyPerformancePage() {
             <h1>{t("title")}</h1>
             <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+          <div className="moduleHeaderMeta">
+            <AppLanguageSwitch language={language} setLanguage={setLanguage} />
+            <MostVisitedPages />
+            {canManageTargets ? (
+              <Link href="/management/kpi-targets" className="moduleInlineButton">{t("updateTargets")}</Link>
+            ) : null}
+            <Link href="/" className="moduleBackLink">{t("dashboard")}</Link>
+          </div>
         </div>
 
         {error && error.includes("login") ? (
           <div className="moduleActionRow" style={{ marginBottom: "12px" }}>
-            <Link href="/" className="moduleInlineButton">Go to login</Link>
+            <Link href="/" className="moduleInlineButton">{t("login")}</Link>
           </div>
         ) : null}
 
-        <div className="moduleMetricGrid">
-          {cards.map((card) => (
-            <section key={card.label} className="moduleMetricCard">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-            </section>
-          ))}
+        {updatedLabel ? (
+          <p className="moduleKpiUpdatedStatus">{updatedLabel}</p>
+        ) : null}
+
+        {!snapshot?.salesmanCode ? (
+          <p className="moduleSubtitle">{t("noSalesman")}</p>
+        ) : null}
+
+        <div className="moduleMetricGrid moduleKpiGrid">
+          {kpis.map((kpi) => {
+            const statusKey = kpi.status?.key || "no_target";
+            return (
+              <section key={kpi.key} className={`moduleMetricCard moduleKpiCard ${statusClass(statusKey)}`}>
+                <span>{KPI_LABELS[kpi.key]?.[language] || kpi.label}</span>
+                <strong>{formatAchievementPercent(kpi.achievement)}</strong>
+                <p className="moduleKpiMeta">
+                  {t("actual")}: {formatPerformanceKpiValue(kpi.key, kpi.actual)}
+                  {" · "}
+                  {t("target")}: {kpi.target > 0 ? formatPerformanceKpiValue(kpi.key, kpi.target) : "—"}
+                </p>
+                <em className={`moduleKpiStatus ${statusClass(statusKey)}`}>
+                  {STATUS_LABELS[statusKey]?.[language] || kpi.status?.label}
+                </em>
+              </section>
+            );
+          })}
         </div>
       </div>
     </main>

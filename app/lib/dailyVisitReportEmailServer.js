@@ -6,6 +6,7 @@ import {
 } from "./dailyVisitReportServer.js";
 import { formatCollectorDisplayName } from "./geo.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
+import { loadPerformanceSnapshotsForSalesmen } from "./performanceKpisServer.js";
 import { getMailerConfig, isEmailConfigured, parseEmailList, sendEmail } from "./mailer.js";
 import { getPreviousKsaDateString } from "./workdayActivity.js";
 
@@ -53,6 +54,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   loadReport = buildDailyVisitReport,
   loadProfiles = loadProfilesForVisitReportEmails,
   loadSummary = loadCollectionDaySummaryForUser,
+  loadKpis = loadPerformanceSnapshotsForSalesmen,
 } = {}) {
   const reportDate = parseReportDateParam(date, now);
   if (!isEmailConfigured(getMailerConfig(env))) {
@@ -101,10 +103,34 @@ export async function runDailyVisitReportEmailCycle(admin, {
 
   recipients.sort((left, right) => String(left.user.userName || "").localeCompare(String(right.user.userName || "")));
 
+  const kpiSalesmen = recipients
+    .map(({ profile, user }) => ({
+      userId: user.userId,
+      salesmanCode: profile.salesman_code,
+      salesmanName: user.userName || profile.salesman_name,
+    }))
+    .filter((row) => row.salesmanCode);
+
+  let kpiByUserId = new Map();
+  if (kpiSalesmen.length) {
+    try {
+      const snapshots = await loadKpis(admin, {
+        salesmen: kpiSalesmen,
+        reportDate,
+      });
+      kpiByUserId = new Map(kpiSalesmen.map((row, index) => [row.userId, snapshots[index]]));
+    } catch {
+      kpiByUserId = new Map();
+    }
+  }
+
   const results = [];
 
   for (const { profile, user } of recipients) {
-    let userReport = user;
+    let userReport = {
+      ...user,
+      performance: user.performance || kpiByUserId.get(user.userId) || null,
+    };
     if (!userReport.daySummary) {
       const summaryPayload = await loadSummary(admin, userReport.userId, reportDate);
       userReport = { ...userReport, daySummary: summaryPayload.daySummary };

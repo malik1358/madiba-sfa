@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  customerHasExcludedOutstandingNoGpsSalesman,
+  customerIsTransferredToLegal,
   customerMatchesSalesmanFilter,
   dateOnly,
   enrichOutstandingNoGpsRow,
   formatSalesmanDisplay,
   laterVisitAt,
   outstandingNoGpsExportRows,
+  shouldIncludeOutstandingNoGpsCustomer,
   sortOutstandingNoGpsRows,
 } from "../app/lib/outstandingNoGps.js";
 
@@ -77,6 +80,37 @@ test("sortOutstandingNoGpsRows orders by outstanding then salesman filter matche
     current_salesman_code: "S02",
     salesman_name: "Junaid",
   }, "S01"), false);
+});
+
+test("outstanding no GPS report drops Zia, Asrar Ahmed, and legal transfers", () => {
+  assert.equal(customerHasExcludedOutstandingNoGpsSalesman({
+    salesman_name: "ASRAR AHMED",
+  }), true);
+  assert.equal(customerHasExcludedOutstandingNoGpsSalesman({
+    outstanding_salesman: "Zia",
+  }), true);
+  assert.equal(customerHasExcludedOutstandingNoGpsSalesman({
+    salesman_name: "Parvez",
+  }), false);
+
+  const legalTransfers = [
+    { customer_code: "9001C", is_transferred: true },
+    { customer_code: "9002C", is_transferred: false },
+  ];
+  assert.equal(customerIsTransferredToLegal({ customer_code: "9001C" }, legalTransfers), true);
+  assert.equal(customerIsTransferredToLegal({ customer_code: "9002C" }, legalTransfers), false);
+  assert.equal(shouldIncludeOutstandingNoGpsCustomer({
+    customer_code: "1062C",
+    salesman_name: "Parvez",
+  }, { legalTransfers }), true);
+  assert.equal(shouldIncludeOutstandingNoGpsCustomer({
+    customer_code: "9001C",
+    salesman_name: "Parvez",
+  }, { legalTransfers }), false);
+  assert.equal(shouldIncludeOutstandingNoGpsCustomer({
+    customer_code: "1062C",
+    salesman_name: "Zia",
+  }, { legalTransfers }), false);
 });
 
 test("outstandingNoGpsExportRows writes report columns", () => {

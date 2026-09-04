@@ -11,6 +11,10 @@ import {
   latestOutstandingInvoiceDate,
   pickOutstandingSalesmanName,
 } from "./outstanding.js";
+import {
+  findLegalTransferForCustomer,
+  isExcludedCollectionQueueSalesman,
+} from "./paymentCollections.js";
 
 const VISIT_REPORT_LATEST_PREFIX = "visit_report_latest:";
 
@@ -59,6 +63,30 @@ export function formatSalesmanDisplay(code, name) {
 
 export function normalizeSalesmanFilter(value) {
   return String(value || "").trim().toUpperCase();
+}
+
+export function customerHasExcludedOutstandingNoGpsSalesman(row) {
+  return [
+    row?.salesman_name,
+    row?.outstanding_salesman,
+    row?.salesman_display,
+    row?.current_salesman_code,
+    row?.salesman_code,
+  ].some((value) => isExcludedCollectionQueueSalesman(value));
+}
+
+export function customerIsTransferredToLegal(row, transfers) {
+  const codes = [
+    row?.customer_code,
+  ].filter(Boolean);
+
+  return codes.some((code) => Boolean(findLegalTransferForCustomer(transfers, code)?.is_transferred));
+}
+
+export function shouldIncludeOutstandingNoGpsCustomer(row, { legalTransfers = [] } = {}) {
+  if (customerHasExcludedOutstandingNoGpsSalesman(row)) return false;
+  if (customerIsTransferredToLegal(row, legalTransfers)) return false;
+  return true;
 }
 
 export function customerMatchesSalesmanFilter(row, salesmanFilter) {
@@ -227,6 +255,16 @@ async function loadSalesmanNameByCode(admin) {
   return map;
 }
 
+async function loadLegalTransfers(admin) {
+  const { data, error } = await admin
+    .from("legal_transfers")
+    .select("customer_code,is_transferred");
+
+  if (error && isMissingRelationError(error)) return [];
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+}
+
 async function loadLastVisitByCustomer(admin, customerCodes) {
   const latest = new Map();
   const codes = [...new Set(
@@ -296,12 +334,13 @@ export async function fetchOutstandingNoGpsCustomers(admin, {
 
   const outstandingDataset = await readOutstandingDataset(admin);
   const invoices = hydrateOutstandingInvoices(outstandingDataset);
-  const [salesmanNameByCode, lastVisitByCustomer] = await Promise.all([
+  const [salesmanNameByCode, lastVisitByCustomer, legalTransfers] = await Promise.all([
     loadSalesmanNameByCode(admin),
     loadLastVisitByCustomer(
       admin,
       customers.map((row) => row.customer_code),
     ),
+    loadLegalTransfers(admin),
   ]);
 
   const enriched = customers.map((row) => enrichOutstandingNoGpsRow(row, {
@@ -309,7 +348,7 @@ export async function fetchOutstandingNoGpsCustomers(admin, {
     invoices,
     salesmanNameByCode,
     lastVisitByCustomer,
-  }));
+  })).filter((row) => shouldIncludeOutstandingNoGpsCustomer(row, { legalTransfers }));
 
   return sortOutstandingNoGpsRows(enriched, sort);
 }

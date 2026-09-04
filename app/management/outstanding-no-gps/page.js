@@ -16,8 +16,8 @@ import { useAppPopup } from "../../components/AppPopupProvider";
 const TEXT = {
   title: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
   subtitle: {
-    en: "Customers with an outstanding balance and no saved GPS location.",
-    ar: "العملاء الذين لديهم رصيد مستحق وبدون موقع GPS محفوظ.",
+    en: "Customers with an outstanding balance and no saved GPS on the customer master. Zia, Asrar Ahmed, and legal transfers are excluded.",
+    ar: "العملاء الذين لديهم رصيد مستحق وبدون موقع GPS في سجل العميل. زيا وأسرار أحمد والمحولون للقانوني مستثنون.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading customers...", ar: "جاري تحميل العملاء..." },
@@ -49,8 +49,8 @@ const TEXT = {
   showing: { en: "Showing", ar: "عرض" },
   totalOutstanding: { en: "Total outstanding", ar: "إجمالي المستحقات" },
   hint: {
-    en: "Save GPS from Customer Master so visit distance checks can run for these accounts.",
-    ar: "احفظ موقع GPS من سجل العملاء حتى يمكن فحص مسافة الزيارة لهذه الحسابات.",
+    en: "Last visit does not copy GPS onto the customer. A visit or collection can be saved (sometimes without location if GPS was blocked or the role does not require it) while the customer master still has no coordinates. Save GPS here from Customer Master.",
+    ar: "آخر زيارة لا تنسخ GPS إلى سجل العميل. يمكن حفظ زيارة أو تحصيل (وأحياناً بدون موقع إذا مُنع GPS أو الدور لا يطلبه) بينما يبقى سجل العميل بدون إحداثيات. احفظ GPS من سجل العملاء.",
   },
 };
 

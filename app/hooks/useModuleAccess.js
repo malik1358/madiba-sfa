@@ -10,26 +10,19 @@ export function useModuleAccess() {
 
   useEffect(() => {
     let cancelled = false;
+    const supabase = getSupabaseClient();
 
-    async function loadAccess() {
-      const supabase = getSupabaseClient();
-      if (!supabase) {
-        if (!cancelled) {
-          setAccess(buildModuleAccess({}));
-          setLoading(false);
-        }
-        return;
-      }
+    if (!supabase) {
+      setAccess(buildModuleAccess({}));
+      setLoading(false);
+      return undefined;
+    }
 
+    async function loadAccess(session) {
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
         if (!session?.user) {
           if (!cancelled) {
             setAccess(buildModuleAccess({}));
-            setLoading(false);
           }
           return;
         }
@@ -56,7 +49,20 @@ export function useModuleAccess() {
       }
     }
 
-    loadAccess();
+    supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled) loadAccess(data?.session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!cancelled) loadAccess(session);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   return { access, loading };

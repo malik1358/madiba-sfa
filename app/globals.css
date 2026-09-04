@@ -156,10 +156,19 @@ body {
   z-index: 9998;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   padding: 8px 12px;
   background: #edf4f5;
   border-bottom: 1px solid #c8d8db;
+}
+
+.appMainNavPinned {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
 }
 
 .environmentBanner + .globalAppStatus + .appMainNav {
@@ -236,6 +245,27 @@ body {
   color: #0b6173;
 }
 
+.appMainNavPinnedLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid #073f4c;
+  border-radius: 8px;
+  background: #073f4c;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.appMainNavPinnedLink:hover,
+.appMainNavPinnedLink:focus-visible,
+.appMainNavPinnedLink--active {
+  background: #0b6173;
+  border-color: #0b6173;
+}
+
 @media (max-width: 640px) {
   .workdayTimesBar {
     top: 56px;
@@ -260,6 +290,11 @@ body {
     top: 56px;
     flex-wrap: wrap;
     overflow: visible;
+  }
+
+  .appMainNavPinned {
+    width: 100%;
+    margin-inline-start: 0;
   }
 
   .appMainNavGroup--open {

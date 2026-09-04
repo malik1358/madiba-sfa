@@ -3,7 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listAccessibleNavGroups, localizedModuleLabel, localizedNavGroupLabel, pathMatchesModuleHref } from "../lib/moduleAccess";
+import {
+  MODULES,
+  listAccessibleNavGroups,
+  localizedModuleLabel,
+  localizedNavGroupLabel,
+  pathMatchesModuleHref,
+  pinnedModuleKeysForAccess,
+} from "../lib/moduleAccess";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import { useModuleAccess } from "../hooks/useModuleAccess";
 import { getSupabaseClient } from "../lib/supabase";
@@ -65,8 +72,25 @@ export default function AppMainNav() {
     () => (signedIn && !loading ? listAccessibleNavGroups(access) : []),
     [access, loading, signedIn],
   );
+  const pinnedItems = useMemo(
+    () => {
+      if (!signedIn || loading) return [];
+      return pinnedModuleKeysForAccess(access)
+        .map((moduleKey) => {
+          const href = MODULES[moduleKey]?.href;
+          if (!href) return null;
+          return {
+            moduleKey,
+            href,
+            label: localizedModuleLabel(moduleKey, language),
+          };
+        })
+        .filter(Boolean);
+    },
+    [access, language, loading, signedIn],
+  );
 
-  if (!signedIn || groups.length === 0) {
+  if (!signedIn || (groups.length === 0 && pinnedItems.length === 0)) {
     return null;
   }
 
@@ -110,6 +134,19 @@ export default function AppMainNav() {
           </div>
         );
       })}
+      {pinnedItems.length > 0 ? (
+        <div className="appMainNavPinned">
+          {pinnedItems.map((item) => (
+            <Link
+              key={item.moduleKey}
+              href={item.href}
+              className={`appMainNavPinnedLink${pathMatchesModuleHref(pathname, item.href) ? " appMainNavPinnedLink--active" : ""}`}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
+      ) : null}
     </nav>
   );
 }

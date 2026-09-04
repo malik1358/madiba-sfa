@@ -934,6 +934,21 @@ export default function MyDayPage({ mode = "default" } = {}) {
     });
   }
 
+  async function promptCustomerGpsIfFar(customer, location, accessToken) {
+    if (!location || !accessToken || !customer?.customer_code) return;
+    try {
+      await maybePromptCustomerLocationUpdate({
+        customerCode: customer.customer_code,
+        customerName: customer.customer_name,
+        entryLocation: location,
+        accessToken,
+        language,
+      });
+    } catch (locationError) {
+      console.warn("Customer location update skipped", locationError);
+    }
+  }
+
   async function addLog(entryType) {
     if (!logsEnabled) {
       setError("Daily activity logs are disabled until the daily_activity_logs table is available.");
@@ -1185,19 +1200,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
-      if (location) {
-        try {
-          await maybePromptCustomerLocationUpdate({
-            customerCode: customer.customer_code,
-            customerName: customer.customer_name,
-            entryLocation: location,
-            accessToken: session.access_token,
-            language,
-          });
-        } catch (locationError) {
-          console.warn("Customer location update skipped", locationError);
-        }
-      }
+      await promptCustomerGpsIfFar(customer, location, session.access_token);
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
       let saveResult = null;
@@ -1318,6 +1321,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
+      await promptCustomerGpsIfFar(customer, location, session.access_token);
       const platform = await resolveGpsCapturePlatform();
 
       const response = await fetch("/api/visit-reports", {
@@ -1385,6 +1389,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
+      await promptCustomerGpsIfFar(customer, location, session.access_token);
       const platform = await resolveGpsCapturePlatform();
 
       const response = await fetch("/api/visit-reports", {

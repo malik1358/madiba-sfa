@@ -232,7 +232,6 @@ export function useOrder({
         customerCode: selectedCustomer.customer_code,
         customerName: selectedCustomer.customer_name,
         accessToken: session.access_token,
-        skipCustomerLocationUpdate: true,
         role: userRole,
       });
       const capturedAt = new Date().toISOString();
@@ -321,7 +320,6 @@ export function useOrder({
         customerCode: selectedCustomer?.customer_code,
         customerName: selectedCustomer?.customer_name,
         accessToken: session.access_token,
-        skipCustomerLocationUpdate: true,
         role: userRole,
       });
       const capturedAt = new Date().toISOString();

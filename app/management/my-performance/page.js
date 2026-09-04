@@ -18,6 +18,7 @@ import {
   TEAM_PERFORMANCE_VIEW,
 } from "../../lib/performanceKpis";
 import { getKsaDateString } from "../../lib/workdayActivity";
+import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "My Performance", ar: "أدائي" },
@@ -225,7 +226,7 @@ export default function MyPerformancePage() {
         {showTeamTable ? (
           <section className="moduleSection" style={{ marginTop: 20 }}>
             <h2 className="moduleSubtitle" style={{ marginBottom: 10 }}>{t("teamMembers")}</h2>
-            <div className="moduleTableWrap">
+            <ExportableTable filename="team-kpi-performance" sheetName="Team KPIs" className="moduleTableWrap">
               <table className="moduleTable">
                 <thead>
                   <tr>
@@ -263,7 +264,7 @@ export default function MyPerformancePage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ExportableTable>
           </section>
         ) : null}
       </div>

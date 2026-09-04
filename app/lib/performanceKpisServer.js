@@ -5,6 +5,7 @@ import {
   classifyBuyingCustomers,
   emptyPerformanceActuals,
   emptyPerformanceTargets,
+  isMissingSchemaColumn,
   normalizePerformanceTargets,
   normalizeSalesmanCode,
   splitSalesActuals,
@@ -12,13 +13,14 @@ import {
 } from "./performanceKpis.js";
 import { ksaDayBounds } from "./workdayActivity.js";
 
-const TARGET_SELECT_FULL = "id,salesman_code,target_month,sales_target,office_supplies_sales_target,other_sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at,updated_by";
-const TARGET_SELECT_WITH_COLLECTION = "id,salesman_code,target_month,sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at,updated_by";
-const TARGET_SELECT_FALLBACK = "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at";
+const TARGET_SELECTS = [
+  "id,salesman_code,target_month,sales_target,office_supplies_sales_target,other_sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at,updated_by",
+  "id,salesman_code,target_month,sales_target,office_supplies_sales_target,other_sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
+  "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at",
+];
 
 function isMissingColumnError(error) {
-  const message = String(error?.message || error?.details || "").toLowerCase();
-  return error?.code === "42703" || (message.includes("column") && message.includes("does not exist"));
+  return isMissingSchemaColumn(error);
 }
 
 function isMissingTableError(error) {
@@ -165,31 +167,20 @@ export async function loadKpiTargetsBySalesman(admin, { salesmanCodes, reportDat
   if (!codes.length) return empty;
 
   const targetMonth = monthWindow(reportDate).from;
-  let result = await admin
-    .from("kpi_targets")
-    .select(TARGET_SELECT_FULL)
-    .eq("target_month", targetMonth)
-    .in("salesman_code", codes);
+  let result = { data: [], error: null };
 
-  if (result.error && isMissingColumnError(result.error)) {
+  for (const select of TARGET_SELECTS) {
     result = await admin
       .from("kpi_targets")
-      .select(TARGET_SELECT_WITH_COLLECTION)
+      .select(select)
       .eq("target_month", targetMonth)
       .in("salesman_code", codes);
+
+    if (!result.error) break;
+    if (isMissingTableError(result.error)) return empty;
+    if (!isMissingColumnError(result.error)) throw result.error;
   }
 
-  if (result.error && isMissingColumnError(result.error)) {
-    result = await admin
-      .from("kpi_targets")
-      .select(TARGET_SELECT_FALLBACK)
-      .eq("target_month", targetMonth)
-      .in("salesman_code", codes);
-  }
-
-  if (result.error && isMissingTableError(result.error)) {
-    return empty;
-  }
   if (result.error) throw result.error;
 
   const updaterIds = [...new Set(

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess } from "../../../lib/moduleAccess.js";
-import { monthStartDate, normalizePerformanceTargets, normalizeSalesmanCode } from "../../../lib/performanceKpis.js";
+import { isMissingSchemaColumn, monthStartDate, normalizePerformanceTargets, normalizeSalesmanCode } from "../../../lib/performanceKpis.js";
 import { loadPerformanceSnapshotsForSalesmen } from "../../../lib/performanceKpisServer.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
@@ -22,8 +22,7 @@ function parseReportDate(value) {
 }
 
 function isMissingColumnError(error) {
-  const message = String(error?.message || error?.details || "").toLowerCase();
-  return error?.code === "42703" || (message.includes("column") && message.includes("does not exist"));
+  return isMissingSchemaColumn(error);
 }
 
 async function requireManager(admin, request) {
@@ -151,17 +150,19 @@ export async function PUT(request) {
       };
     });
 
-    let result = await admin
-      .from("kpi_targets")
-      .upsert(rows, { onConflict: "salesman_code,target_month" });
+    const payloads = [
+      rows,
+      rows.map(({ collection_target, updated_by, ...rest }) => rest),
+      rows.map(({ office_supplies_sales_target, other_sales_target, collection_target, updated_by, ...rest }) => rest),
+    ];
 
-    if (result.error && isMissingColumnError(result.error)) {
+    let result = { error: new Error("Unable to save KPI targets.") };
+    for (const payload of payloads) {
       result = await admin
         .from("kpi_targets")
-        .upsert(
-          rows.map(({ office_supplies_sales_target, other_sales_target, collection_target, updated_by, ...rest }) => rest),
-          { onConflict: "salesman_code,target_month" },
-        );
+        .upsert(payload, { onConflict: "salesman_code,target_month" });
+      if (!result.error) break;
+      if (!isMissingColumnError(result.error)) throw result.error;
     }
 
     if (result.error) throw result.error;

@@ -21,6 +21,7 @@ import {
   summarizeRouteDistanceKm,
 } from "./geo.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
+import { buildDayRoutePoints } from "./dayRouteMap.js";
 import { filterLogsByKsaEventDate, ksaDayBounds } from "./workdayActivity.js";
 
 const ACTIVITY_ENTRY_TYPES = [
@@ -55,6 +56,23 @@ const TRANSACTION_LABELS = {
   LUNCH_BREAK_IN: "Lunch in",
   GPS_PING: "Idle GPS ping",
 };
+
+const ENTRY_COUNT_EXCLUDED_TYPES = new Set(["GPS_PING", "VISIT_REPORT"]);
+
+export function countsTowardDailyVisitEntryStats(entry) {
+  const type = String(entry?.transactionType || entry?.transaction_type || "").trim().toUpperCase();
+  return !ENTRY_COUNT_EXCLUDED_TYPES.has(type);
+}
+
+export function countDailyVisitEntries(entries) {
+  return (entries || []).filter(countsTowardDailyVisitEntryStats).length;
+}
+
+export function countFarFromCustomerEntries(entries) {
+  return (entries || []).filter((entry) => (
+    countsTowardDailyVisitEntryStats(entry) && Boolean(entry?.isFarFromCustomer)
+  )).length;
+}
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -298,6 +316,8 @@ function emptyUserReport(userId, profile) {
     farFromCustomerCount: 0,
     totalRouteDistanceKm: 0,
     entries: [],
+    idleGaps: [],
+    routePoints: [],
     daySummary: null,
   };
 }
@@ -362,8 +382,8 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
       userId: entryUserId,
       userName: formatCollectorDisplayName(profile),
       email: String(profile.email || "").trim(),
-      visitCount: enrichedEntries.length,
-      farFromCustomerCount: enrichedEntries.filter((entry) => entry.isFarFromCustomer).length,
+      visitCount: countDailyVisitEntries(enrichedEntries),
+      farFromCustomerCount: countFarFromCustomerEntries(enrichedEntries),
       totalRouteDistanceKm: summarizeRouteDistanceKm(rows),
       entries: enrichedEntries,
     };
@@ -390,16 +410,25 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
 
   const summaryEntries = await Promise.all(
     summaryUserIds.map(async (entryUserId) => {
-      const summaryPayload = await loadCollectionDaySummaryForUser(admin, entryUserId, date);
+      const activities = (grouped.get(entryUserId) || [])
+        .filter((row) => String(row.transaction_type || "").toUpperCase() !== "GPS_PING")
+        .map((row) => ({ saved_at: row.saved_at }));
+      const summaryPayload = await loadCollectionDaySummaryForUser(admin, entryUserId, date, { activities });
       return [entryUserId, summaryPayload.daySummary];
     }),
   );
   const summaryByUserId = new Map(summaryEntries);
 
-  const usersWithSummary = users.map((entryUser) => ({
-    ...entryUser,
-    daySummary: summaryByUserId.get(entryUser.userId) || null,
-  }));
+  const usersWithSummary = users.map((entryUser) => {
+    const daySummary = summaryByUserId.get(entryUser.userId) || null;
+    const idleGaps = daySummary?.idleGaps || [];
+    return {
+      ...entryUser,
+      daySummary,
+      idleGaps,
+      routePoints: buildDayRoutePoints(entryUser.entries, idleGaps),
+    };
+  });
 
   if (userIdFilter && !usersWithSummary.some((entryUser) => entryUser.userId === userIdFilter)) {
     usersWithSummary.push({
@@ -414,9 +443,9 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
   return {
     date,
     thresholdKm: CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM,
-    visitCount: flatEntries.length,
+    visitCount: countDailyVisitEntries(flatEntries),
     userCount: usersWithSummary.length,
-    farFromCustomerCount: flatEntries.filter((entry) => entry.isFarFromCustomer).length,
+    farFromCustomerCount: countFarFromCustomerEntries(flatEntries),
     totalRouteDistanceKm: usersWithSummary.reduce((sum, entryUser) => sum + Number(entryUser.totalRouteDistanceKm || 0), 0),
     daySummary: usersWithSummary.length === 1 ? usersWithSummary[0].daySummary : null,
     availableUsers,

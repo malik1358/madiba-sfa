@@ -1,5 +1,6 @@
 import { formatDurationMinutes, buildGoogleMapsPointUrl } from "./geo.js";
 import { parseEmailList, isLikelyEmail } from "./mailer.js";
+import { buildDayRoutePoints, buildDayRouteSvg, buildGoogleRouteUrl, formatIdleGapLabel } from "./dayRouteMap.js";
 import {
   formatAchievementPercent,
   formatPerformanceKpiLine,
@@ -111,12 +112,20 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
       </table>`
     : "";
 
+  const idleGaps = Array.isArray(user?.idleGaps) ? user.idleGaps : (user?.daySummary?.idleGaps || []);
+  const routePoints = Array.isArray(user?.routePoints) && user.routePoints.length
+    ? user.routePoints
+    : buildDayRoutePoints(entries, idleGaps);
+  const routeSvg = buildDayRouteSvg(routePoints);
+  const routeUrl = buildGoogleRouteUrl(routePoints);
+
   const summaryText = [
     `Daily visit report for ${userName}`,
     `Date: ${date} (KSA)`,
     `Entries: ${user?.visitCount || 0}`,
     `Far from customer: ${user?.farFromCustomerCount || 0}`,
     `Route total: ${formatKm(user?.totalRouteDistanceKm)}`,
+    ...(routeUrl ? [`Route map: ${routeUrl}`] : []),
     "",
     ...kpiText,
     ...(lines.length ? ["Summary:", ...lines, ""] : []),
@@ -139,6 +148,16 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   const summaryHtml = lines.length
     ? `<ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
     : "<p>No visit summary lines for this day.</p>";
+
+  const routeHtml = routeSvg
+    ? `<h2 style="font-size: 16px;">Day route</h2>
+      <p style="font-size: 12px; color: #52616b;">
+        Blue = logged stop · Orange = idle GPS ping · Red = unlogged idle
+        ${routeUrl ? ` · <a href="${escapeHtml(routeUrl)}">Open route in Google Maps</a>` : ""}
+      </p>
+      <div style="margin: 0 0 16px;">${routeSvg}</div>
+      ${idleGaps.length ? `<p style="color:#dc2626; font-size: 13px;">${idleGaps.map((gap) => escapeHtml(formatIdleGapLabel(gap))).join("<br/>")}</p>` : ""}`
+    : "";
 
   const rowsHtml = entries.length
     ? entries.map((entry) => {
@@ -177,6 +196,7 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   </p>
   <p style="color:#52616b; font-size: 13px;">Entries more than ${escapeHtml(String(thresholdKm))} km from the saved customer location are marked far from customer.</p>
   ${kpiHtml}
+  ${routeHtml}
   <h2 style="font-size: 16px;">Daily visit summary</h2>
   ${summaryHtml}
   <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%;">

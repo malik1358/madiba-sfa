@@ -47,6 +47,8 @@ function stubUserReport(profile) {
     farFromCustomerCount: 0,
     totalRouteDistanceKm: 0,
     entries: [],
+    idleGaps: [],
+    routePoints: [],
     daySummary: null,
   };
 }

@@ -74,6 +74,19 @@ const TEXT = {
   platform: { en: "Platform", ar: "المنصة" },
   daySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
   userDaySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
+  emailUsers: { en: "Users to email", ar: "المستخدمون للإرسال" },
+  selectAllUsers: { en: "Select all users", ar: "تحديد كل المستخدمين" },
+  sendEmail: { en: "Send report email", ar: "إرسال تقرير بالبريد" },
+  sendingEmail: { en: "Sending email...", ar: "جاري إرسال البريد..." },
+  emailNoUsers: { en: "Select at least one user to email.", ar: "حدد مستخدماً واحداً على الأقل لإرسال البريد." },
+  emailConfirm: {
+    en: "Send the daily visit report email for {count} selected user(s) on {date}?",
+    ar: "إرسال تقرير الزيارات اليومي بالبريد لـ {count} مستخدم في {date}؟",
+  },
+  emailSent: {
+    en: "Sent {sent} of {total} report emails for {date}.",
+    ar: "تم إرسال {sent} من {total} تقارير لـ {date}.",
+  },
 };
 
 function formatNumber(value, digits = 2) {
@@ -96,8 +109,11 @@ export default function DailyVisitReportPage() {
   const [userId, setUserId] = useState("");
   const [report, setReport] = useState(null);
   const [urlParamsApplied, setUrlParamsApplied] = useState(false);
+  const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [message, setMessage] = useState("");
 
-  usePopupMessages({ error });
+  usePopupMessages({ error, message });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -119,6 +135,27 @@ export default function DailyVisitReportPage() {
     () => (Array.isArray(report?.availableUsers) ? report.availableUsers : []),
     [report],
   );
+
+  const emailUserOptions = useMemo(() => {
+    const byId = new Map();
+    userOptions.forEach((user) => {
+      if (user?.userId) byId.set(user.userId, user);
+    });
+    (report?.users || []).forEach((user) => {
+      if (user?.userId && !byId.has(user.userId)) {
+        byId.set(user.userId, { userId: user.userId, userName: user.userName });
+      }
+    });
+    return [...byId.values()].sort((left, right) => String(left.userName || "").localeCompare(String(right.userName || "")));
+  }, [report, userOptions]);
+
+  const allEmailUsersSelected = emailUserOptions.length > 0
+    && emailUserOptions.every((user) => selectedUserIds.includes(user.userId));
+
+  useEffect(() => {
+    setSelectedUserIds(userId ? [userId] : []);
+    setMessage("");
+  }, [reportDate, userId]);
 
   const geocodeCache = useReverseGeocodeCache(report);
 
@@ -213,6 +250,92 @@ export default function DailyVisitReportPage() {
     };
   }, [reportDate, userId, urlParamsApplied]);
 
+  function toggleEmailUser(nextUserId) {
+    setSelectedUserIds((current) => (
+      current.includes(nextUserId)
+        ? current.filter((id) => id !== nextUserId)
+        : [...current, nextUserId]
+    ));
+  }
+
+  function toggleAllEmailUsers() {
+    if (allEmailUsersSelected) {
+      setSelectedUserIds([]);
+      return;
+    }
+    setSelectedUserIds(emailUserOptions.map((user) => user.userId));
+  }
+
+  async function sendSelectedUserEmails() {
+    if (emailBusy) return;
+
+    const userIdsToSend = [...new Set(selectedUserIds.filter(Boolean))];
+    if (!userIdsToSend.length) {
+      setError(t("emailNoUsers"));
+      return;
+    }
+
+    const confirmed = window.confirm(
+      t("emailConfirm").replace("{count}", String(userIdsToSend.length)).replace("{date}", reportDate),
+    );
+    if (!confirmed) return;
+
+    setEmailBusy(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const supabase = getSupabaseClient();
+      const session = await resolveAuthSession(supabase, 12000);
+      if (!session?.access_token) {
+        throw new Error("Please login again.");
+      }
+
+      const { response, payload } = await fetchJsonWithTimeout(
+        "/api/daily-visit-report/email",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ date: reportDate, userIds: userIdsToSend }),
+        },
+        120000,
+      );
+
+      if (!response.ok || !payload.success) {
+        const failedNames = (payload.results || [])
+          .filter((row) => row.status === "failed")
+          .map((row) => row.userName || row.userId)
+          .filter(Boolean);
+        const extra = failedNames.length ? ` ${failedNames.join(", ")}` : "";
+        throw new Error(`${payload.error || "Unable to send daily visit report email."}${extra}`);
+      }
+
+      const sentCount = Number(payload.sentCount || 0);
+      const skippedCount = Number(payload.skippedCount || 0);
+      const total = sentCount + skippedCount + Number(payload.failedCount || 0);
+      let nextMessage = t("emailSent")
+        .replace("{sent}", String(sentCount))
+        .replace("{total}", String(total || userIdsToSend.length))
+        .replace("{date}", payload.date || reportDate);
+      if (skippedCount) {
+        nextMessage += ` ${skippedCount} skipped.`;
+      }
+      setMessage(nextMessage);
+    } catch (err) {
+      const nextError = String(err.message || "");
+      if (nextError === "SESSION_TIMEOUT") {
+        setError("Session check timed out. Please refresh the page or login again.");
+      } else {
+        setError(nextError || "Unable to send daily visit report email.");
+      }
+    } finally {
+      setEmailBusy(false);
+    }
+  }
+
   if (!supabaseClient) {
     return (
       <SupabaseUnavailable
@@ -274,6 +397,50 @@ export default function DailyVisitReportPage() {
                 </select>
               </label>
             </div>
+
+            {report?.canSendVisitReportEmail ? (
+              <div style={{ marginTop: "12px" }}>
+                <div className="moduleField">{t("emailUsers")}</div>
+                <div className="moduleCollectorCheckboxList" role="group" aria-label={t("emailUsers")}>
+                  {emailUserOptions.length === 0 ? (
+                    <div className="moduleHint">{t("noEntries")}</div>
+                  ) : (
+                    <>
+                      <label className="moduleCollectorCheckbox moduleCollectorCheckboxSelectAll">
+                        <input
+                          type="checkbox"
+                          checked={allEmailUsersSelected}
+                          onChange={toggleAllEmailUsers}
+                          disabled={emailBusy}
+                        />
+                        <span>{t("selectAllUsers")}</span>
+                      </label>
+                      {emailUserOptions.map((user) => (
+                        <label key={user.userId} className="moduleCollectorCheckbox">
+                          <input
+                            type="checkbox"
+                            checked={selectedUserIds.includes(user.userId)}
+                            onChange={() => toggleEmailUser(user.userId)}
+                            disabled={emailBusy}
+                          />
+                          <span>{user.userName}</span>
+                        </label>
+                      ))}
+                    </>
+                  )}
+                </div>
+                <div className="moduleActionRow" style={{ marginTop: "10px" }}>
+                  <button
+                    type="button"
+                    className="modulePrimaryButton"
+                    onClick={sendSelectedUserEmails}
+                    disabled={emailBusy || !emailUserOptions.length}
+                  >
+                    {emailBusy ? t("sendingEmail") : t("sendEmail")}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           {error && error.includes("login") ? (
@@ -323,7 +490,20 @@ export default function DailyVisitReportPage() {
                 return (
                 <section key={entryUser.userId} className="moduleSection">
                   <div className="moduleSectionHeader">
-                    <h2>{entryUser.userName}</h2>
+                    <h2>
+                      {report?.canSendVisitReportEmail ? (
+                        <label className="moduleCollectorCheckbox" style={{ display: "inline-flex", marginInlineEnd: "10px" }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedUserIds.includes(entryUser.userId)}
+                            onChange={() => toggleEmailUser(entryUser.userId)}
+                            disabled={emailBusy}
+                            aria-label={entryUser.userName}
+                          />
+                        </label>
+                      ) : null}
+                      {entryUser.userName}
+                    </h2>
                     <span>
                       {entryUser.visitCount} {t("entries")}
                       {" · "}

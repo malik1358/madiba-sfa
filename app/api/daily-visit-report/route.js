@@ -41,6 +41,11 @@ function canViewAllUsers(profile) {
   return role === "admin" || role === "manager" || role === "collector";
 }
 
+function canSendVisitReportEmail(profile) {
+  const role = String(profile?.role || "").toLowerCase();
+  return role === "admin" || role === "manager";
+}
+
 function parseReportDate(value) {
   const date = String(value || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -80,6 +85,7 @@ export async function GET(request) {
 
     return Response.json({
       success: true,
+      canSendVisitReportEmail: canSendVisitReportEmail(profile),
       ...report,
     });
   } catch (error) {

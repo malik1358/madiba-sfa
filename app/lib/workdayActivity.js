@@ -138,6 +138,12 @@ export function isWithinActiveWorkSession({
   return false;
 }
 
+export function getPreviousKsaDateString(now = new Date()) {
+  const today = getKsaDateString(now);
+  const { startIso } = ksaDayBounds(today);
+  return getKsaDateString(new Date(Date.parse(startIso) - 1));
+}
+
 export function ksaDayBounds(dateString) {
   const match = String(dateString || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) {

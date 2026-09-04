@@ -6,8 +6,10 @@ import {
   buildPerformanceSnapshot,
   classifyBuyingCustomers,
   formatPerformanceKpiLine,
+  isOfficeSuppliesSale,
   kpiStatus,
   performanceUpdatedStatusLabel,
+  splitSalesActuals,
 } from "../app/lib/performanceKpis.js";
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
 
@@ -31,20 +33,35 @@ test("KPI status uses monthly pace and 100% achievement", () => {
   assert.equal(kpiStatus({ actual: 10, target: 0, reportDate: "2026-09-06" }).key, "no_target");
 });
 
+test("splits office supplies sales from other sales", () => {
+  assert.equal(isOfficeSuppliesSale({ category: "Office" }), true);
+  assert.equal(isOfficeSuppliesSale({ category: "Stationery" }), true);
+  assert.equal(isOfficeSuppliesSale({ category: "Electronics" }), false);
+  assert.deepEqual(
+    splitSalesActuals([
+      { category: "Office Supplies", sales_amount: 80 },
+      { category: "Fridge", sales_amount: 20 },
+      { item_name: "A4 paper", category: "Stationery", sales_amount: 10 },
+    ]),
+    { officeSupplies: 90, otherSales: 20 },
+  );
+});
+
 test("updated status explains when admin last saved targets", () => {
   const snapshot = buildPerformanceSnapshot({
     reportDate: "2026-09-04",
     salesmanCode: "SM001",
-    actuals: { sales: 40, collection: 10, newCustomers: 1, repeatCustomers: 2 },
-    targets: { sales: 100, collection: 50, newCustomers: 2, repeatCustomers: 4 },
+    actuals: { officeSupplies: 40, otherSales: 15, collection: 10, newCustomers: 1, repeatCustomers: 2 },
+    targets: { officeSupplies: 100, otherSales: 50, collection: 50, newCustomers: 2, repeatCustomers: 4 },
     updatedAt: "2026-09-01T08:00:00.000Z",
     updatedByName: "Admin User",
   });
 
-  assert.equal(snapshot.kpis.length, 4);
-  assert.equal(snapshot.kpis[0].label, "Sales");
+  assert.equal(snapshot.kpis.length, 5);
+  assert.equal(snapshot.kpis[0].label, "Sales of office supplies");
+  assert.equal(snapshot.kpis[1].label, "Others");
   assert.match(performanceUpdatedStatusLabel(snapshot), /Admin User/);
-  assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /Sales:/);
+  assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /Sales of office supplies:/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /40\.0%/);
 });
 
@@ -52,8 +69,8 @@ test("daily visit email includes monthly KPI status", () => {
   const snapshot = buildPerformanceSnapshot({
     reportDate: "2026-09-02",
     salesmanCode: "SM001",
-    actuals: { sales: 25000, collection: 8000, newCustomers: 1, repeatCustomers: 3 },
-    targets: { sales: 50000, collection: 10000, newCustomers: 2, repeatCustomers: 6 },
+    actuals: { officeSupplies: 25000, otherSales: 5000, collection: 8000, newCustomers: 1, repeatCustomers: 3 },
+    targets: { officeSupplies: 50000, otherSales: 10000, collection: 10000, newCustomers: 2, repeatCustomers: 6 },
     updatedAt: "2026-09-01T08:00:00.000Z",
     updatedByName: "Boss",
   });
@@ -71,7 +88,8 @@ test("daily visit email includes monthly KPI status", () => {
   });
 
   assert.match(message.text, /Monthly KPI status/);
-  assert.match(message.text, /Sales:/);
+  assert.match(message.text, /Sales of office supplies:/);
+  assert.match(message.text, /Others:/);
   assert.match(message.text, /Collection:/);
   assert.match(message.text, /New customers:/);
   assert.match(message.text, /Repeat customers:/);

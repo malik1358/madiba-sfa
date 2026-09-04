@@ -1,13 +1,48 @@
 import { currentMonthDateRange } from "./salesInvoices.js";
 
-export const PERFORMANCE_KPI_KEYS = ["sales", "collection", "newCustomers", "repeatCustomers"];
+export const PERFORMANCE_KPI_KEYS = [
+  "officeSupplies",
+  "otherSales",
+  "collection",
+  "newCustomers",
+  "repeatCustomers",
+];
 
 export const PERFORMANCE_KPI_LABELS = {
-  sales: "Sales",
+  officeSupplies: "Sales of office supplies",
+  otherSales: "Others",
   collection: "Collection",
   newCustomers: "New customers",
   repeatCustomers: "Repeat customers",
 };
+
+const MONEY_KPI_KEYS = new Set(["officeSupplies", "otherSales", "collection", "sales"]);
+
+export function isOfficeSuppliesSale(row = {}) {
+  const text = [row.category, row.item_name, row.item_category, row.group]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+  if (!text) return false;
+  const compact = text.replace(/[^a-z0-9\u0600-\u06ff]+/g, "");
+  return (
+    /\boffice\b/.test(text)
+    || /stationer/.test(text)
+    || /officesuppl/.test(compact)
+    || text.includes("قرطاس")
+    || text.includes("مكتبي")
+  );
+}
+
+export function splitSalesActuals(rows = []) {
+  return (rows || []).reduce((totals, row) => {
+    const amount = Number(row?.sales_amount || 0);
+    if (!(amount > 0)) return totals;
+    if (isOfficeSuppliesSale(row)) totals.officeSupplies += amount;
+    else totals.otherSales += amount;
+    return totals;
+  }, { officeSupplies: 0, otherSales: 0 });
+}
 
 export function normalizeSalesmanCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -49,7 +84,8 @@ export function kpiStatus({ actual, target, reportDate }) {
 
 export function emptyPerformanceActuals() {
   return {
-    sales: 0,
+    officeSupplies: 0,
+    otherSales: 0,
     collection: 0,
     newCustomers: 0,
     repeatCustomers: 0,
@@ -58,7 +94,8 @@ export function emptyPerformanceActuals() {
 
 export function emptyPerformanceTargets() {
   return {
-    sales: 0,
+    officeSupplies: 0,
+    otherSales: 0,
     collection: 0,
     newCustomers: 0,
     repeatCustomers: 0,
@@ -66,8 +103,22 @@ export function emptyPerformanceTargets() {
 }
 
 export function normalizePerformanceTargets(row = {}) {
+  const officeSupplies = Number(
+    row.officeSupplies
+    ?? row.office_supplies_sales_target
+    ?? row.office_supplies_target
+    ?? 0,
+  ) || 0;
+  const otherSales = Number(
+    row.otherSales
+    ?? row.other_sales_target
+    ?? 0,
+  ) || 0;
+  const legacySales = Number(row.sales ?? row.sales_target ?? 0) || 0;
+
   return {
-    sales: Number(row.sales ?? row.sales_target ?? 0) || 0,
+    officeSupplies: officeSupplies || (otherSales ? 0 : legacySales),
+    otherSales,
     collection: Number(row.collection ?? row.collection_target ?? 0) || 0,
     newCustomers: Number(
       row.newCustomers ?? row.new_customers_target ?? row.new_buying_customers_target ?? 0,
@@ -169,7 +220,7 @@ export function buildPerformanceSnapshot({
 
 export function formatPerformanceKpiValue(key, value) {
   const number = Number(value || 0);
-  if (key === "sales" || key === "collection") {
+  if (MONEY_KPI_KEYS.has(key)) {
     return number.toLocaleString("en-SA", { maximumFractionDigits: 0 });
   }
   return String(Math.round(number));

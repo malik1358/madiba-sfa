@@ -140,7 +140,9 @@ export async function PUT(request) {
       return {
         salesman_code: salesmanCode,
         target_month: targetMonth,
-        sales_target: targets.sales,
+        sales_target: targets.officeSupplies + targets.otherSales,
+        office_supplies_sales_target: targets.officeSupplies,
+        other_sales_target: targets.otherSales,
         collection_target: targets.collection,
         new_buying_customers_target: Math.round(targets.newCustomers),
         existing_customers_buying_target: Math.round(targets.repeatCustomers),
@@ -157,7 +159,7 @@ export async function PUT(request) {
       result = await admin
         .from("kpi_targets")
         .upsert(
-          rows.map(({ collection_target, updated_by, ...rest }) => rest),
+          rows.map(({ office_supplies_sales_target, other_sales_target, collection_target, updated_by, ...rest }) => rest),
           { onConflict: "salesman_code,target_month" },
         );
     }

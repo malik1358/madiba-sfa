@@ -19,7 +19,7 @@ import { getKsaDateString } from "../../lib/workdayActivity";
 
 const TEXT = {
   title: { en: "My Performance", ar: "أدائي" },
-  subtitle: { en: "Monthly sales, collection, and customer KPIs", ar: "مؤشرات المبيعات والتحصيل والعملاء الشهرية" },
+  subtitle: { en: "Office supplies, other sales, collection, and customer KPIs", ar: "مستلزمات المكتب والمبيعات الأخرى والتحصيل والعملاء" },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading KPI dashboard...", ar: "جاري تحميل مؤشرات الأداء..." },
   actual: { en: "Actual", ar: "الفعلي" },
@@ -41,7 +41,8 @@ const STATUS_LABELS = {
 };
 
 const KPI_LABELS = {
-  sales: { en: "Sales", ar: "المبيعات" },
+  officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
+  otherSales: { en: "Others", ar: "أخرى" },
   collection: { en: "Collection", ar: "التحصيل" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },

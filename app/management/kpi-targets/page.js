@@ -16,8 +16,8 @@ import { getKsaDateString } from "../../lib/workdayActivity";
 const TEXT = {
   title: { en: "KPI Targets", ar: "أهداف الأداء" },
   subtitle: {
-    en: "Set monthly Sales, Collection, New customers, and Repeat customers targets. Users see achievement % and status immediately.",
-    ar: "حدد أهداف المبيعات والتحصيل والعملاء الجدد والمتكررين. يرى المستخدم نسبة الإنجاز والحالة فوراً.",
+    en: "Set monthly Office supplies, Others, Collection, New customers, and Repeat customers targets. Users see achievement % and status immediately.",
+    ar: "حدد أهداف مستلزمات المكتب وغيرها والتحصيل والعملاء الجدد والمتكررين. يرى المستخدم نسبة الإنجاز والحالة فوراً.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   performance: { en: "My Performance", ar: "أدائي" },
@@ -26,7 +26,8 @@ const TEXT = {
   save: { en: "Save targets", ar: "حفظ الأهداف" },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
   salesman: { en: "Salesman", ar: "المندوب" },
-  sales: { en: "Sales", ar: "المبيعات" },
+  officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
+  otherSales: { en: "Others", ar: "أخرى" },
   collection: { en: "Collection", ar: "التحصيل" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
@@ -44,7 +45,8 @@ function emptyDraft(snapshot) {
   return {
     salesmanCode: snapshot.salesmanCode,
     salesmanName: snapshot.salesmanName,
-    sales: String(snapshot.targets?.sales ?? 0),
+    officeSupplies: String(snapshot.targets?.officeSupplies ?? 0),
+    otherSales: String(snapshot.targets?.otherSales ?? 0),
     collection: String(snapshot.targets?.collection ?? 0),
     newCustomers: String(snapshot.targets?.newCustomers ?? 0),
     repeatCustomers: String(snapshot.targets?.repeatCustomers ?? 0),
@@ -120,7 +122,8 @@ export default function KpiTargetsPage() {
             month,
             rows: rows.map((row) => ({
               salesmanCode: row.salesmanCode,
-              sales_target: Number(row.sales || 0),
+              office_supplies_sales_target: Number(row.officeSupplies || 0),
+              other_sales_target: Number(row.otherSales || 0),
               collection_target: Number(row.collection || 0),
               new_customers_target: Number(row.newCustomers || 0),
               repeat_customers_target: Number(row.repeatCustomers || 0),
@@ -143,7 +146,7 @@ export default function KpiTargetsPage() {
 
   const supabaseClient = getSupabaseClient();
   const columns = useMemo(
-    () => ["sales", "collection", "newCustomers", "repeatCustomers"],
+    () => ["officeSupplies", "otherSales", "collection", "newCustomers", "repeatCustomers"],
     [],
   );
 

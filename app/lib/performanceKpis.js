@@ -179,6 +179,45 @@ export function buildPerformanceKpi(key, { actual = 0, target = 0, reportDate } 
   };
 }
 
+export const TEAM_PERFORMANCE_VIEW = "TEAM";
+
+export function consolidatePerformanceSnapshots(snapshots = [], {
+  reportDate,
+  salesmanName = "Team",
+} = {}) {
+  const rows = (snapshots || []).filter(Boolean);
+  const actuals = emptyPerformanceActuals();
+  const targets = emptyPerformanceTargets();
+  let latestUpdatedAt = null;
+  let latestUpdatedByName = "";
+
+  rows.forEach((row) => {
+    PERFORMANCE_KPI_KEYS.forEach((key) => {
+      actuals[key] += Number(row?.actuals?.[key] || 0);
+      targets[key] += Number(row?.targets?.[key] || 0);
+    });
+    const updatedAt = row?.updatedAt || null;
+    if (updatedAt && (!latestUpdatedAt || String(updatedAt) > String(latestUpdatedAt))) {
+      latestUpdatedAt = updatedAt;
+      latestUpdatedByName = row.updatedByName || "";
+    }
+  });
+
+  return {
+    ...buildPerformanceSnapshot({
+      reportDate: reportDate || rows[0]?.reportDate,
+      salesmanCode: TEAM_PERFORMANCE_VIEW,
+      salesmanName,
+      actuals,
+      targets,
+      updatedAt: latestUpdatedAt,
+      updatedByName: latestUpdatedByName,
+    }),
+    isTeam: true,
+    memberCount: rows.length,
+  };
+}
+
 export function buildPerformanceSnapshot({
   reportDate,
   salesmanCode = "",

@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import ExportExcelButton from "./ExportExcelButton";
 import TableColumnFilters from "./TableColumnFilters";
 import { rowsFromHtmlTable } from "../lib/excelExport";
+import { syncStackedHeaderSticky } from "../lib/tableColumnFilter";
 
 export default function ExportableTable({
   filename,
@@ -16,6 +17,29 @@ export default function ExportableTable({
   children,
 }) {
   const tableHostRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const host = tableHostRef.current;
+    if (!host) return undefined;
+
+    const sync = () => {
+      syncStackedHeaderSticky(host.querySelector("table"));
+    };
+
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(host, { childList: true, subtree: true });
+    const firstRow = host.querySelector("table thead tr");
+    const resizeObserver = firstRow && typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(sync)
+      : null;
+    if (firstRow) resizeObserver?.observe(firstRow);
+
+    return () => {
+      observer.disconnect();
+      resizeObserver?.disconnect();
+    };
+  }, [children]);
 
   return (
     <div className="moduleExportableTable">

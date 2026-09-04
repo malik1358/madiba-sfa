@@ -1,5 +1,15 @@
 import { currentMonthDateRange } from "./salesInvoices.js";
 
+export function isMissingSchemaColumn(error) {
+  const message = String(error?.message || error?.details || error?.hint || "").toLowerCase();
+  const code = String(error?.code || "").toUpperCase();
+  return code === "42703"
+    || code === "PGRST204"
+    || (message.includes("column") && message.includes("does not exist"))
+    || (message.includes("could not find") && message.includes("column"))
+    || message.includes("schema cache");
+}
+
 export const PERFORMANCE_KPI_KEYS = [
   "officeSupplies",
   "otherSales",

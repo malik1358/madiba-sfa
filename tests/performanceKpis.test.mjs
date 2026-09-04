@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   achievementPercent,
   buildPerformanceSnapshot,
+  isMissingSchemaColumn,
   classifyBuyingCustomers,
   consolidatePerformanceSnapshots,
   formatPerformanceKpiLine,
@@ -14,6 +15,14 @@ import {
   TEAM_PERFORMANCE_VIEW,
 } from "../app/lib/performanceKpis.js";
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
+
+test("detects PostgREST schema-cache missing column errors", () => {
+  assert.equal(isMissingSchemaColumn({
+    code: "PGRST204",
+    message: "Could not find the 'collection_target' column of 'kpi_targets' in the schema cache",
+  }), true);
+  assert.equal(isMissingSchemaColumn({ message: "Unable to load KPI targets." }), false);
+});
 
 test("achievement percent is actual over target", () => {
   assert.equal(achievementPercent(50, 100), 50);

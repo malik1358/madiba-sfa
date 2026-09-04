@@ -150,6 +150,22 @@ function setRowFilteredOut(row, hidden) {
   row.classList.toggle("moduleTableRowFilteredOut", hidden);
 }
 
+export function syncStackedHeaderSticky(table) {
+  if (!table) return false;
+  const firstRow = table.querySelector(":scope > thead > tr");
+  const secondRow = table.querySelector(":scope > thead > tr:nth-child(2)");
+  if (!firstRow || !secondRow) {
+    table.classList.remove("moduleStackedHeaderTable");
+    table.style.removeProperty("--module-stacked-header-row1");
+    return false;
+  }
+
+  table.classList.add("moduleStackedHeaderTable");
+  const height = Math.max(1, Math.ceil(firstRow.getBoundingClientRect().height));
+  table.style.setProperty("--module-stacked-header-row1", `${height}px`);
+  return true;
+}
+
 export function applyColumnFiltersToTable(table, filterTexts) {
   if (!table) return 0;
   const groups = groupTableBodyRows(table);

@@ -12,6 +12,7 @@ import { formatAchievementPercent, formatPerformanceKpiValue } from "../../lib/p
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { getKsaDateString } from "../../lib/workdayActivity";
+import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "KPI Targets", ar: "أهداف الأداء" },
@@ -195,19 +196,23 @@ export default function KpiTargetsPage() {
           {loading ? (
             <div className="moduleLoading">{t("loading")}</div>
           ) : (
-            <div className="moduleTableWrap">
-              <table className="moduleTable">
+            <ExportableTable filename={`kpi-targets-${month}`} sheetName="KPI Targets" className="moduleTableWrap">
+              <table className="moduleTable moduleStackedHeaderTable">
                 <thead>
                   <tr>
-                    <th>{t("salesman")}</th>
+                    <th rowSpan={2}>{t("salesman")}</th>
                     {columns.map((key) => (
                       <th key={key} colSpan={3}>{t(key)}</th>
                     ))}
                   </tr>
                   <tr>
-                    <th />
                     {columns.map((key) => (
-                      <FragmentHeader key={key} actual={t("actual")} achievement={t("achievement")} />
+                      <FragmentHeader
+                        key={key}
+                        group={t(key)}
+                        actual={t("actual")}
+                        achievement={t("achievement")}
+                      />
                     ))}
                   </tr>
                 </thead>
@@ -239,7 +244,7 @@ export default function KpiTargetsPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ExportableTable>
           )}
         </div>
       </main>
@@ -247,12 +252,12 @@ export default function KpiTargetsPage() {
   );
 }
 
-function FragmentHeader({ actual, achievement }) {
+function FragmentHeader({ group, actual, achievement }) {
   return (
     <>
-      <th>{actual}</th>
-      <th>Target</th>
-      <th>{achievement}</th>
+      <th data-column-filter-label={`${group} ${actual}`}>{actual}</th>
+      <th data-column-filter-label={`${group} Target`}>Target</th>
+      <th data-column-filter-label={`${group} ${achievement}`}>{achievement}</th>
     </>
   );
 }

@@ -4,6 +4,7 @@ import {
   columnFiltersAreActive,
   rowTextsMatchColumnFilters,
   shouldShowTableRowGroup,
+  syncStackedHeaderSticky,
   textMatchesColumnFilter,
 } from "../app/lib/tableColumnFilter.js";
 
@@ -20,6 +21,10 @@ test("row texts honor each column filter independently", () => {
   assert.equal(rowTextsMatchColumnFilters(row, ["c-1", "madina", "zia", ""]), false);
   assert.equal(rowTextsMatchColumnFilters(row, ["", "", "", ""]), true);
   assert.equal(columnFiltersAreActive(["", "  "]), false);
+});
+
+test("stacked header sticky helper ignores tables without two header rows", () => {
+  assert.equal(syncStackedHeaderSticky(null), false);
 });
 
 test("placeholder detail rows hide only while a column filter is active", () => {

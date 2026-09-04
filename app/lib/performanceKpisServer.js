@@ -7,11 +7,12 @@ import {
   emptyPerformanceTargets,
   normalizePerformanceTargets,
   normalizeSalesmanCode,
+  splitSalesActuals,
   sumCollectionAmount,
-  sumSalesAmount,
 } from "./performanceKpis.js";
 import { ksaDayBounds } from "./workdayActivity.js";
 
+const TARGET_SELECT_FULL = "id,salesman_code,target_month,sales_target,office_supplies_sales_target,other_sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at,updated_by";
 const TARGET_SELECT_WITH_COLLECTION = "id,salesman_code,target_month,sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at,updated_by";
 const TARGET_SELECT_FALLBACK = "id,salesman_code,target_month,sales_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at";
 
@@ -67,18 +68,34 @@ export function monthWindow(reportDate) {
 
 export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
   const code = normalizeSalesmanCode(salesmanCode);
-  if (!code) return { sales: 0, monthCustomerCodes: [], priorCustomerCodes: [] };
+  if (!code) {
+    return { officeSupplies: 0, otherSales: 0, monthCustomerCodes: [], priorCustomerCodes: [] };
+  }
 
   const { from, to } = monthWindow(reportDate);
-  const monthRows = await fetchPagedRows(
-    admin,
-    "active_sales",
-    "customer_code,sales_amount",
-    (query) => query
-      .eq("salesman_code", code)
-      .gte("transaction_date", from)
-      .lte("transaction_date", to),
-  );
+  let monthRows;
+  try {
+    monthRows = await fetchPagedRows(
+      admin,
+      "active_sales",
+      "customer_code,sales_amount,category,item_name",
+      (query) => query
+        .eq("salesman_code", code)
+        .gte("transaction_date", from)
+        .lte("transaction_date", to),
+    );
+  } catch (error) {
+    if (!isMissingColumnError(error)) throw error;
+    monthRows = await fetchPagedRows(
+      admin,
+      "active_sales",
+      "customer_code,sales_amount",
+      (query) => query
+        .eq("salesman_code", code)
+        .gte("transaction_date", from)
+        .lte("transaction_date", to),
+    );
+  }
 
   const monthCustomerCodes = buyingCustomerCodesFromSales(monthRows);
   const uniqueMonthCodes = [...new Set(monthCustomerCodes)];
@@ -100,8 +117,10 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
     });
   }
 
+  const split = splitSalesActuals(monthRows);
   return {
-    sales: sumSalesAmount(monthRows),
+    officeSupplies: split.officeSupplies,
+    otherSales: split.otherSales,
     monthCustomerCodes,
     priorCustomerCodes,
   };
@@ -148,9 +167,17 @@ export async function loadKpiTargetsBySalesman(admin, { salesmanCodes, reportDat
   const targetMonth = monthWindow(reportDate).from;
   let result = await admin
     .from("kpi_targets")
-    .select(TARGET_SELECT_WITH_COLLECTION)
+    .select(TARGET_SELECT_FULL)
     .eq("target_month", targetMonth)
     .in("salesman_code", codes);
+
+  if (result.error && isMissingColumnError(result.error)) {
+    result = await admin
+      .from("kpi_targets")
+      .select(TARGET_SELECT_WITH_COLLECTION)
+      .eq("target_month", targetMonth)
+      .in("salesman_code", codes);
+  }
 
   if (result.error && isMissingColumnError(result.error)) {
     result = await admin
@@ -209,7 +236,8 @@ export async function loadPerformanceSnapshot(admin, {
   );
   const actuals = {
     ...emptyPerformanceActuals(),
-    sales: salesActuals.sales,
+    officeSupplies: salesActuals.officeSupplies,
+    otherSales: salesActuals.otherSales,
     collection,
     newCustomers: classified.newCustomers,
     repeatCustomers: classified.repeatCustomers,

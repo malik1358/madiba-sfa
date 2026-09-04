@@ -10,6 +10,7 @@ import {
   mergeMutualGroupProfiles,
   salesmanScopeIdentities,
 } from "../../../lib/mutualSalesmanGroups.js";
+import { normalizePricingRegion } from "../../../lib/regionalPricing.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -155,13 +156,25 @@ export async function resolveSalesScopeForUserId(admin, userId) {
 
   const visibleMembers = members.map((profile) => {
     const authUser = authMap.get(profile.id);
+    const memberMetadata = authUser?.user_metadata || authUser?.app_metadata || {};
     return {
       id: profile.id,
       role: profile.role || "",
       salesman_code: profile.salesman_code || "",
       salesman_name: profile.salesman_name || "",
       email: authUser?.email || "",
+      pricing_region: normalizePricingRegion(memberMetadata.pricing_region),
     };
+  });
+
+  const pricingRegionBySalesmanCode = {};
+  allProfiles.forEach((profile) => {
+    const authUser = authMap.get(profile.id);
+    const memberMetadata = authUser?.user_metadata || authUser?.app_metadata || {};
+    const code = normalizeCode(profile.salesman_code);
+    if (code) {
+      pricingRegionBySalesmanCode[code] = normalizePricingRegion(memberMetadata.pricing_region);
+    }
   });
 
   const visibleSalesmanCodes = [...new Set([
@@ -187,6 +200,8 @@ export async function resolveSalesScopeForUserId(admin, userId) {
     visibleUserIds,
     visibleMembers,
     hasSubordinates: visibleMembers.some((member) => member.id !== currentProfile.id),
+    pricingRegion: normalizePricingRegion(currentMetadata.pricing_region),
+    pricingRegionBySalesmanCode,
   };
 }
 

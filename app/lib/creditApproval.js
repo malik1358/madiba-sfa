@@ -28,7 +28,16 @@ export function evaluateCreditApproval({
   orderValue = 0,
   creditApplication = null,
   todayIso = new Date().toISOString().slice(0, 10),
+  paymentType = "credit",
 } = {}) {
+  if (String(paymentType || "").trim().toLowerCase() === "cash") {
+    return {
+      required: false,
+      reasons: [],
+      remark: "Cash order — credit approval not required.",
+    };
+  }
+
   const totalOutstanding = toNumber(outstanding?.total_outstanding);
   const order = toNumber(orderValue);
   const overdueOver60 = isOutstandingOverSixtyDays(outstanding);

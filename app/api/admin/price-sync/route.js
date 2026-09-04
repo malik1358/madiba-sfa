@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { parsePricePayload } from "../../../lib/pricePayload.js";
 import { PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
+import { withRegionFallbacks } from "../../../lib/regionalPricing.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -431,6 +432,8 @@ async function runSync(sourcePayload = null) {
     throw new Error(`Snapshot write failed: ${snapshotError.message}`);
   }
 
+  const regionPriceMaps = withRegionFallbacks(parsed.regionPriceMaps, parsed.priceMap);
+
   const { error: cacheError } = await admin.from("price_catalog_cache").upsert(
     {
       cache_key: "default",
@@ -444,6 +447,25 @@ async function runSync(sourcePayload = null) {
 
   if (cacheError) {
     throw new Error(`Cache write failed: ${cacheError.message}`);
+  }
+
+  const { error: rulesError } = await admin.from("price_catalog_cache").upsert(
+    {
+      cache_key: "pricing_rules",
+      price_map: {
+        regionPriceMaps,
+        cashDiscountMap: parsed.cashDiscountMap || {},
+        valueDiscountMap: parsed.valueDiscountMap || {},
+      },
+      sheet_items: [],
+      source_synced_at: nowIso,
+      updated_at: nowIso,
+    },
+    { onConflict: "cache_key" }
+  );
+
+  if (rulesError) {
+    throw new Error(`Pricing rules cache write failed: ${rulesError.message}`);
   }
 
   return {

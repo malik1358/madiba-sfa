@@ -28,11 +28,18 @@ export async function GET() {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { data, error } = await admin
-      .from("price_catalog_cache")
-      .select("cache_key,price_map,sheet_items,source_synced_at,updated_at")
-      .eq("cache_key", "default")
-      .single();
+    const [{ data, error }, { data: rulesRow }] = await Promise.all([
+      admin
+        .from("price_catalog_cache")
+        .select("cache_key,price_map,sheet_items,source_synced_at,updated_at")
+        .eq("cache_key", "default")
+        .single(),
+      admin
+        .from("price_catalog_cache")
+        .select("price_map")
+        .eq("cache_key", "pricing_rules")
+        .maybeSingle(),
+    ]);
 
     if (error || !data?.price_map) {
       return NextResponse.json(
@@ -45,6 +52,7 @@ export async function GET() {
     }
 
     const ageHours = getAgeHours(data.source_synced_at || data.updated_at);
+    const rules = rulesRow?.price_map && typeof rulesRow.price_map === "object" ? rulesRow.price_map : {};
 
     return NextResponse.json({
       success: true,
@@ -52,6 +60,9 @@ export async function GET() {
       isStale: ageHours > STALE_HOURS,
       syncedAt: data.source_synced_at || data.updated_at,
       priceMap: data.price_map || {},
+      regionPriceMaps: rules.regionPriceMaps || {},
+      cashDiscountMap: rules.cashDiscountMap || {},
+      valueDiscountMap: rules.valueDiscountMap || {},
       sheetItems: Array.isArray(data.sheet_items) ? data.sheet_items : [],
     });
   } catch (error) {

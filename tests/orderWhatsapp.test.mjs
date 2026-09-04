@@ -13,6 +13,8 @@ test("buildOrderWhatsappSummary includes order totals and pdf note", () => {
     itemCount: 3,
     totalQuantity: 12,
     grandTotal: 1000,
+    paymentType: "cash",
+    pricingRegion: "dammam",
   }, "en");
 
   assert.match(summary, /Sales order/);
@@ -21,4 +23,6 @@ test("buildOrderWhatsappSummary includes order totals and pdf note", () => {
   assert.match(summary, /VAT 15%: 150/);
   assert.match(summary, /Total incl. VAT: 1,150/);
   assert.match(summary, /PDF attached\./);
+  assert.match(summary, /Payment: CASH/);
+  assert.match(summary, /Region: dammam/);
 });

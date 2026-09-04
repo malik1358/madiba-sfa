@@ -11,6 +11,13 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
+import {
+  buildEffectivePriceList,
+  normalizePaymentType,
+  pricingRegionLabel,
+  regionPriceMapFor,
+  resolveOrderPricingRegion,
+} from "../../lib/regionalPricing";
 import { addPdfBuildFooter } from "../../lib/buildInfo";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import ExportableTable from "../../components/ExportableTable";
@@ -517,6 +524,10 @@ export default function NewOrderPage() {
   const [transactions, setTransactions] = useState([]);
   const [peerTransactions, setPeerTransactions] = useState([]);
   const [priceList, setPriceList] = useState({});
+  const [regionPriceMaps, setRegionPriceMaps] = useState({});
+  const [cashDiscountMap, setCashDiscountMap] = useState({});
+  const [valueDiscountMap, setValueDiscountMap] = useState({});
+  const [paymentType, setPaymentType] = useState("credit");
   const [previousDrafts, setPreviousDrafts] = useState([]);
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -653,6 +664,20 @@ export default function NewOrderPage() {
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.customer_code === selectedCustomerCode) || null,
     [customers, selectedCustomerCode]
+  );
+
+  const pricingRegion = useMemo(
+    () => resolveOrderPricingRegion({
+      currentUserRegion: accessScope?.pricingRegion,
+      customerSalesmanCode: selectedCustomer?.current_salesman_code,
+      pricingRegionBySalesmanCode: accessScope?.pricingRegionBySalesmanCode || {},
+    }),
+    [accessScope, selectedCustomer]
+  );
+
+  const regionPriceList = useMemo(
+    () => regionPriceMapFor(regionPriceMaps, pricingRegion, priceList),
+    [priceList, pricingRegion, regionPriceMaps]
   );
 
   const analytics = useAnalytics(transactions);
@@ -800,7 +825,12 @@ export default function NewOrderPage() {
     quickOrderAllItems,
     catalogItems: mergedItemsMaster,
     selectedCustomer,
-    priceList,
+    priceList: regionPriceList,
+    paymentType,
+    setPaymentType,
+    cashDiscountMap,
+    valueDiscountMap,
+    pricingRegion,
     setError,
     setMessage,
     accessScope,
@@ -808,9 +838,20 @@ export default function NewOrderPage() {
     language,
   });
 
+  const displayPriceList = useMemo(
+    () => buildEffectivePriceList({
+      wholesaleMap: regionPriceList,
+      cashDiscountMap,
+      valueDiscountMap,
+      paymentType,
+      quantities: orderQuantities || {},
+    }),
+    [cashDiscountMap, orderQuantities, paymentType, regionPriceList, valueDiscountMap]
+  );
+
   const orderGrandTotal = useMemo(
-    () => calculateGrandTotal(orderItems, priceList),
-    [orderItems, priceList]
+    () => calculateGrandTotal(orderItems, displayPriceList),
+    [displayPriceList, orderItems]
   );
 
   const creditApproval = useMemo(
@@ -818,8 +859,9 @@ export default function NewOrderPage() {
       outstanding: outstandingInfo.customer || {},
       orderValue: orderGrandTotal,
       creditApplication: customerDocumentCompliance?.creditApplication || { present: false },
+      paymentType,
     }),
-    [customerDocumentCompliance, orderGrandTotal, outstandingInfo.customer]
+    [customerDocumentCompliance, orderGrandTotal, outstandingInfo.customer, paymentType]
   );
 
   const buildOrderSnapshot = useCallback(
@@ -829,7 +871,7 @@ export default function NewOrderPage() {
       const savedAtIso = new Date().toISOString();
       const lines = orderItems.map((item) => {
         const quantity = Number(item.order_quantity || 0);
-        const rate = Number(getPrice(priceList, item.item_code) || 0);
+        const rate = Number(getPrice(displayPriceList, item.item_code) || 0);
 
         return {
           item_code: item.item_code,
@@ -848,9 +890,11 @@ export default function NewOrderPage() {
         customerCode: selectedCustomer.customer_code,
         customerName: selectedCustomer.customer_name,
         salesmanCode: selectedCustomer.current_salesman_code,
+        paymentType: normalizePaymentType(paymentType),
+        pricingRegion,
         itemCount: orderSummary.itemCount,
         totalQuantity: orderSummary.totalQuantity,
-        grandTotal: calculateGrandTotal(orderItems, priceList),
+        grandTotal: calculateGrandTotal(orderItems, displayPriceList),
         lines,
         history: orderHistory,
         creditApprovalRemark: creditApproval.remark,
@@ -868,7 +912,9 @@ export default function NewOrderPage() {
       orderSummary.totalQuantity,
       outstandingInfo,
       creditApproval.remark,
-      priceList,
+      displayPriceList,
+      paymentType,
+      pricingRegion,
       selectedCustomer,
       visibleOutstandingBuckets,
     ]
@@ -949,7 +995,11 @@ export default function NewOrderPage() {
         doc.setFontSize(10);
         doc.text(`Order ID: ${snapshot.orderId}`, marginX + 12, marginTop + 64);
 
-        doc.text(`Status: ${snapshot.statusLabel}`, marginX + 12, marginTop + 78);
+        doc.text(
+          `Status: ${snapshot.statusLabel} | ${String(snapshot.paymentType || "credit").toUpperCase()} | ${pricingRegionLabel(snapshot.pricingRegion)}`,
+          marginX + 12,
+          marginTop + 78
+        );
 
         const rightColX = marginX + contentWidth - 210;
         doc.text(`Date: ${new Date(snapshot.savedAtIso).toLocaleString("en-GB")}`, rightColX, marginTop + 64);
@@ -1551,6 +1601,9 @@ export default function NewOrderPage() {
       try {
         const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
         setPriceList(parsed.priceMap || {});
+        setRegionPriceMaps(parsed.regionPriceMaps || {});
+        setCashDiscountMap(parsed.cashDiscountMap || {});
+        setValueDiscountMap(parsed.valueDiscountMap || {});
         setPriceSheetItems(parsed.sheetItems || []);
       } catch {
         // Keep previously loaded prices if fresh and cached sources are unavailable.
@@ -1831,6 +1884,27 @@ export default function NewOrderPage() {
             </select>
           </div>
 
+          {selectedCustomer && (
+            <div className="moduleFilterRow" style={{ marginTop: "12px" }}>
+              <label>
+                Payment Type
+                <select
+                  className="moduleInput"
+                  value={paymentType}
+                  onChange={(event) => setPaymentType(normalizePaymentType(event.target.value))}
+                >
+                  <option value="credit">Credit</option>
+                  <option value="cash">Cash</option>
+                </select>
+              </label>
+              <div className="moduleHint" style={{ alignSelf: "end", paddingBottom: "8px" }}>
+                {pricingRegionLabel(pricingRegion)} prices
+                {paymentType === "cash" ? " • cash discount applied when published" : ""}
+                {" • value discount applies when a SKU exceeds 5,000 SAR"}
+              </div>
+            </div>
+          )}
+
           {!selectedCustomer && (
             <div className="moduleHint">Select a customer to start building an order.</div>
           )}
@@ -1857,7 +1931,7 @@ export default function NewOrderPage() {
                   decreaseOrderQty={decreaseQty}
                   increaseOrderQty={increaseQty}
                   changeOrderQty={updateQty}
-                  priceList={priceList}
+                  priceList={displayPriceList}
                 />
                 <QuickOrder
                   quickOrderSuggestions={quickOrderSuggestions}
@@ -1865,7 +1939,7 @@ export default function NewOrderPage() {
                   decreaseOrderQty={decreaseQty}
                   increaseOrderQty={increaseQty}
                   changeOrderQty={updateQty}
-                  priceList={priceList}
+                  priceList={displayPriceList}
                 />
                 <TransactionHistory
                   transactions={transactions}
@@ -1980,7 +2054,7 @@ export default function NewOrderPage() {
                           {isExpanded &&
                             group.items.map((item) => {
                               const qty = Number(orderQuantities[item.item_code] || 0);
-                              const price = getPrice(priceList, item.item_code);
+                              const price = getPrice(displayPriceList, item.item_code);
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
@@ -2082,6 +2156,14 @@ export default function NewOrderPage() {
                   <div>
                     <span>Total</span>
                     <strong>{formatMoney(lastSavedOrder.grandTotal)}</strong>
+                  </div>
+                  <div>
+                    <span>Payment</span>
+                    <strong>{String(lastSavedOrder.paymentType || "credit").toUpperCase()}</strong>
+                  </div>
+                  <div>
+                    <span>Region</span>
+                    <strong>{pricingRegionLabel(lastSavedOrder.pricingRegion)}</strong>
                   </div>
                 </div>
 

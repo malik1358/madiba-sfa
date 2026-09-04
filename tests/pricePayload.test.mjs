@@ -65,8 +65,37 @@ test('parsePricePayload reads nested priceMap objects from source payload', () =
   assert.equal(priceMap.A000057, 71.74);
 });
 
+test('parsePricePayload reads regional wholesale prices and scheme discounts', () => {
+  const header = [];
+  const data = [];
+  header[1] = 'Product Code';
+  header[2] = 'Item Name';
+  header[79] = 'Wholesale Price Without VAT (Riyadh)';
+  header[83] = 'Wholesale Price Without VAT (Dammam)';
+  header[87] = 'Jeddah - Wholesale Price Without VAT';
+  header[89] = 'Sales Value > 5000 SAR';
+  header[90] = 'Cash Discount';
+
+  data[1] = 'A006061';
+  data[2] = 'PHOTOCOPY PAPER A3 80GSM';
+  data[79] = '114.33 SAR';
+  data[83] = '115.33 SAR';
+  data[87] = '122.33 SAR';
+  data[89] = '3.00%';
+  data[90] = '2.00%';
+
+  const parsed = parsePricePayload([header, data]);
+
+  assert.equal(parsed.priceMap.A006061, 114.33);
+  assert.equal(parsed.regionPriceMaps.riyadh.A006061, 114.33);
+  assert.equal(parsed.regionPriceMaps.dammam.A006061, 115.33);
+  assert.equal(parsed.regionPriceMaps.jeddah.A006061, 122.33);
+  assert.equal(parsed.cashDiscountMap.A006061, 0.02);
+  assert.equal(parsed.valueDiscountMap.A006061, 0.03);
+});
+
 test('loadPricePayload clears stale browser cache before loading fresh prices', async () => {
-  const cacheKey = 'madiba.pricePayload.v2';
+  const cacheKey = 'madiba.pricePayload.v3';
   const storage = new Map();
   let cleared = false;
 

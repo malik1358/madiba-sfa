@@ -17,6 +17,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import ExportableTable from "../../components/ExportableTable";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess";
 import { detectTable } from "../../lib/schemaGuards";
@@ -1973,7 +1974,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                 <h2>{day.label}</h2>
                 <span>{day.rows.length} {t("plannedVisitsCount")}</span>
               </summary>
-              <div className="moduleTableWrap moduleScheduleTableWrap">
+              <ExportableTable filename={`my-day-planned-${day.dateKey}`} sheetName="Planned Visits" className="moduleTableWrap moduleScheduleTableWrap">
                 <table className="moduleTable moduleScheduleTable">
                   <thead>
                     <tr>
@@ -2017,7 +2018,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
             </details>
           ))}
 
@@ -2031,7 +2032,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                 <h2>{t("unscheduledVisits")}</h2>
                 <span>{visitCalendar.unscheduled.length}</span>
               </summary>
-              <div className="moduleTableWrap moduleScheduleTableWrap">
+              <ExportableTable filename="my-day-unscheduled" sheetName="Unscheduled" className="moduleTableWrap moduleScheduleTableWrap">
                 <table className="moduleTable moduleScheduleTable">
                   <thead>
                     <tr>
@@ -2062,7 +2063,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
             </details>
           )}
         </section>
@@ -2118,7 +2119,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
               <h2>{group.title}</h2>
               <span>{group.rows.length} {t("customersCount")}</span>
             </div>
-            <div className="moduleTableWrap">
+            <ExportableTable filename={`my-day-${group.key}`} sheetName={group.title} className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
@@ -2192,7 +2193,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                 ))}
               </tbody>
             </table>
-            </div>
+            </ExportableTable>
           </div>
           ))}
 
@@ -2202,7 +2203,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
               <h2>{t("inactiveCustomers")}</h2>
               <span>{filteredInactiveCustomers.length} {t("customersCount")}</span>
             </div>
-            <div className="moduleTableWrap">
+            <ExportableTable filename="my-day-inactive-customers" sheetName="Inactive Customers" className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
@@ -2242,7 +2243,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                 ))}
               </tbody>
             </table>
-            </div>
+            </ExportableTable>
           </div>
           ) : null}
         </section>

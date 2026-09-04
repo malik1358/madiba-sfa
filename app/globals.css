@@ -3957,6 +3957,47 @@ table.auditMatrix td.auditTrendSame {
   resize: vertical;
 }
 
+.moduleExportableTableBar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.moduleTableColumnFilterStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+  color: #0b6173;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.moduleTableColumnFilterInput {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  border: 1px solid #b7c9cd;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #073f4c;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+th:has(.moduleTableColumnFilterInput) {
+  vertical-align: top;
+}
+
 .moduleTableWrap {
   overflow: visible;
   -webkit-overflow-scrolling: touch;
@@ -3990,6 +4031,7 @@ table.auditMatrix td.auditTrendSame {
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
+  vertical-align: top;
 }
 
 .moduleTable td {

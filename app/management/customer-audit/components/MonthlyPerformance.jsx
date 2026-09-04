@@ -1,10 +1,11 @@
 import { monthName, numberFormat, trendClass } from '../lib/format';
+import ExportableTable from '../../../components/ExportableTable';
 
 export default function MonthlyPerformance({ analytics }) {
   return (
     <section className="auditSection">
       <h3>Monthly Performance</h3>
-      <div className="auditTableScroll">
+      <ExportableTable filename="customer-monthly-performance" sheetName="Monthly" className="auditTableScroll">
         <table className="auditMatrix auditPerformanceMatrix">
           <thead>
             <tr className="auditYearRow">
@@ -49,7 +50,7 @@ export default function MonthlyPerformance({ analytics }) {
             </tr>
           </tbody>
         </table>
-      </div>
+      </ExportableTable>
     </section>
   );
 }

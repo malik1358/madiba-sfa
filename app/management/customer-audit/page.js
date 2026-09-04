@@ -17,6 +17,7 @@ import Link from "next/link";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -391,7 +392,7 @@ function CustomerAuditPageContent() {
 
           {!outstandingLoading && outstandingInfo.customer && (
             <>
-              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+              <ExportableTable filename="customer-outstanding-buckets" sheetName="Outstanding" className="moduleTableWrap" style={{ marginTop: "10px" }}>
                 <table className="moduleTable">
                   <thead>
                     <tr>
@@ -414,9 +415,9 @@ function CustomerAuditPageContent() {
                     </tr>
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
 
-              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+              <ExportableTable filename="customer-outstanding-invoices" sheetName="Invoices" className="moduleTableWrap" style={{ marginTop: "10px" }}>
                 <table className="moduleTable">
                   <thead>
                     <tr>
@@ -452,7 +453,7 @@ function CustomerAuditPageContent() {
                     )}
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
             </>
           )}
 

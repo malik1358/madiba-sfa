@@ -9,6 +9,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "Salesman Hierarchy", ar: "هيكل مندوبي المبيعات" },
@@ -445,7 +446,7 @@ export default function SalesmanHierarchyPage() {
           </div>
           <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("inactiveHint")}</div>
 
-          <div className="moduleTableWrap">
+          <ExportableTable filename="salesman-hierarchy" sheetName="Hierarchy" className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
@@ -550,7 +551,7 @@ export default function SalesmanHierarchyPage() {
                 )}
               </tbody>
             </table>
-          </div>
+          </ExportableTable>
         </section>
 
         <section className="moduleSection">

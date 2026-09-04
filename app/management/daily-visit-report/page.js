@@ -7,6 +7,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import DaySummaryBox from "../../components/DaySummaryBox";
+import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import {
   DEFAULT_TRANSIT_SPEED_KMH,
@@ -342,7 +343,7 @@ export default function DailyVisitReportPage() {
                     />
                   ) : null}
 
-                  <div className="moduleTableWrap">
+                  <ExportableTable filename={`daily-visit-report-${entryUser.userName || entryUser.userId}`} sheetName="Daily Visits" className="moduleTableWrap">
                     <table className="moduleTable">
                       <thead>
                         <tr>
@@ -437,7 +438,7 @@ export default function DailyVisitReportPage() {
                         )}
                       </tbody>
                     </table>
-                  </div>
+                  </ExportableTable>
                 </section>
                 );
               })}

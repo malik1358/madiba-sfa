@@ -1,4 +1,5 @@
 import { qtyFormat } from '../lib/format';
+import ExportableTable from '../../../components/ExportableTable';
 
 export default function QuickOrder({ quickOrderSuggestions, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
   const quickOrderAllItems = [
@@ -42,7 +43,7 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
                     : 'No suggestion'}
                 </div>
               ) : (
-                <div className="auditQuickOrderTableWrap">
+                <ExportableTable filename={`quick-order-${group.key}`} sheetName="Quick Order" className="auditQuickOrderTableWrap">
                   <table className="auditQuickOrderTable">
                     <thead>
                       <tr>
@@ -99,7 +100,7 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
                       })}
                     </tbody>
                   </table>
-                </div>
+                </ExportableTable>
               )}
             </div>
           ))}

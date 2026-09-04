@@ -13,6 +13,7 @@ import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
 import { addPdfBuildFooter } from "../../lib/buildInfo";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import ExportableTable from "../../components/ExportableTable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
 import { qtyFormat } from "../customer-audit/lib/format";
@@ -1708,7 +1709,7 @@ export default function NewOrderPage() {
 
           {selectedCustomer && !outstandingLoading && outstandingInfo.customer && (
             <>
-              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+              <ExportableTable filename="order-outstanding-buckets" sheetName="Outstanding" className="moduleTableWrap" style={{ marginTop: "10px" }}>
                 <table className="moduleTable">
                   <thead>
                     <tr>
@@ -1731,9 +1732,9 @@ export default function NewOrderPage() {
                     </tr>
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
 
-              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+              <ExportableTable filename="order-outstanding-invoices" sheetName="Invoices" className="moduleTableWrap" style={{ marginTop: "10px" }}>
                 <table className="moduleTable">
                   <thead>
                     <tr>
@@ -1769,7 +1770,7 @@ export default function NewOrderPage() {
                     )}
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
             </>
           )}
 
@@ -1879,7 +1880,7 @@ export default function NewOrderPage() {
                       <h2>Order Change History</h2>
                       <span>{orderHistory.length} event(s)</span>
                     </div>
-                    <div className="moduleTableWrap">
+                    <ExportableTable filename="order-change-history" sheetName="History" className="moduleTableWrap">
                       <table className="moduleTable">
                         <thead>
                           <tr>
@@ -1902,7 +1903,7 @@ export default function NewOrderPage() {
                           ))}
                         </tbody>
                       </table>
-                    </div>
+                    </ExportableTable>
                   </section>
                 )}
               </>
@@ -1945,7 +1946,7 @@ export default function NewOrderPage() {
                 </select>
               </div>
 
-              <div className="moduleTableWrap">
+              <ExportableTable filename="new-order-items" sheetName="Order Items" className="moduleTableWrap">
                 <table className="moduleTable moduleOrderTable">
                   <thead>
                     <tr>
@@ -2028,7 +2029,7 @@ export default function NewOrderPage() {
                     )}
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
             </section>
 
             <section className="moduleSection">
@@ -2097,7 +2098,7 @@ export default function NewOrderPage() {
                   </div>
                 ) : null}
 
-                <div className="moduleTableWrap">
+                <ExportableTable filename="saved-order-lines" sheetName="Saved Order" className="moduleTableWrap">
                   <table className="moduleTable">
                     <thead>
                       <tr>
@@ -2120,7 +2121,7 @@ export default function NewOrderPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </ExportableTable>
 
                 <div className="moduleReviewActions">
                   <button
@@ -2152,7 +2153,7 @@ export default function NewOrderPage() {
           <div className="moduleSectionHeader">
             <h2>Previous Drafts</h2>
           </div>
-          <div className="moduleTableWrap">
+          <ExportableTable filename="previous-drafts" sheetName="Drafts" className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
@@ -2193,7 +2194,7 @@ export default function NewOrderPage() {
                 )}
               </tbody>
             </table>
-          </div>
+          </ExportableTable>
         </section>
       </div>
     </main>

@@ -19,6 +19,7 @@ import {
   getOpenLunchBreakOutTimestamp,
   isInactivityPromptSnoozed,
   getPreviousKsaDateString,
+  isKsaOrderDay,
   ksaMidnightEndIso,
   readInactivityPromptSnoozeUntil,
   shouldCaptureIdleGpsPing,
@@ -41,6 +42,13 @@ test("ksaMidnightEndIso stores 11:59 PM KSA", () => {
 test("getPreviousKsaDateString returns the KSA calendar day that just ended", () => {
   assert.equal(getPreviousKsaDateString(new Date("2026-09-03T21:10:00.000Z")), "2026-09-03");
   assert.equal(getPreviousKsaDateString(new Date("2026-09-03T20:50:00.000Z")), "2026-09-02");
+});
+
+test("KSA holiday is Friday only", () => {
+  assert.equal(isKsaOrderDay("2026-09-03"), true);
+  assert.equal(isKsaOrderDay("2026-09-04"), false);
+  assert.equal(isKsaOrderDay("2026-09-05"), true);
+  assert.equal(isKsaOrderDay("2026-09-06"), true);
 });
 
 test("filterLogsByKsaEventDate keeps only events on the report day", () => {

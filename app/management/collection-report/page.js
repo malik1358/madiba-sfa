@@ -8,6 +8,7 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import DaySummaryBox from "../../components/DaySummaryBox";
 import ExportableTable from "../../components/ExportableTable";
+import { UNLOGGED_IDLE_THRESHOLD_MINUTES } from "../../lib/collectionDaySummary";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import {
   DEFAULT_TRANSIT_SPEED_KMH,
@@ -127,8 +128,8 @@ const TEXT = {
   unloggedIdle: { en: "Unlogged idle", ar: "توقف غير مسجل" },
   workdayStatusTitle: { en: "Login, lunch, and logout", ar: "الدخول والغداء والخروج" },
   idleGapsTitle: {
-    en: "Unlogged idle (30+ min with no activity and lunch not marked)",
-    ar: "توقف غير مسجل (30 دقيقة فأكثر بدون نشاط ولم تُسجل استراحة الغداء)",
+    en: `Unlogged idle (over ${UNLOGGED_IDLE_THRESHOLD_MINUTES} min with no activity and lunch not marked)`,
+    ar: `توقف غير مسجل (أكثر من ${UNLOGGED_IDLE_THRESHOLD_MINUTES} دقيقة بدون نشاط ولم تُسجل استراحة الغداء)`,
   },
   daySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
   collectorDaySummaryTitle: { en: "Route summary", ar: "ملخص المسار" },

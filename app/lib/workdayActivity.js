@@ -144,6 +144,38 @@ export function getPreviousKsaDateString(now = new Date()) {
   return getKsaDateString(new Date(Date.parse(startIso) - 1));
 }
 
+const KSA_WEEKDAY_INDEX = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+export function getKsaWeekdayIndex(date = new Date()) {
+  const label = new Intl.DateTimeFormat("en-US", {
+    timeZone: KSA_TIMEZONE,
+    weekday: "short",
+  }).format(date);
+  return KSA_WEEKDAY_INDEX[label] ?? 0;
+}
+
+export function getKsaWeekdayIndexForDateString(dateString) {
+  const { startIso } = ksaDayBounds(dateString);
+  return getKsaWeekdayIndex(new Date(Date.parse(startIso) + 12 * 60 * 60 * 1000));
+}
+
+export function isKsaOrderDay(dateString) {
+  return getKsaWeekdayIndexForDateString(dateString) !== 5;
+}
+
+export function addKsaCalendarDays(dateString, days) {
+  const { startIso } = ksaDayBounds(dateString);
+  return getKsaDateString(new Date(Date.parse(startIso) + Number(days || 0) * 24 * 60 * 60 * 1000));
+}
+
 export function ksaDayBounds(dateString) {
   const match = String(dateString || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) {

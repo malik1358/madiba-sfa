@@ -20,6 +20,7 @@ import {
   parseGpsFromActivityNote,
   summarizeRouteDistanceKm,
 } from "./geo.js";
+import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
 import { buildDayRoutePoints } from "./dayRouteMap.js";
 import { filterLogsByKsaEventDate, ksaDayBounds } from "./workdayActivity.js";
@@ -58,6 +59,45 @@ const TRANSACTION_LABELS = {
 };
 
 const ENTRY_COUNT_EXCLUDED_TYPES = new Set(["GPS_PING", "VISIT_REPORT"]);
+
+const FIELD_CUSTOMER_TYPES = new Set([
+  "COLLECTION_VISIT",
+  "VISIT_REPORT",
+  "ORDER_DRAFT",
+  "ORDER_EDITED",
+  "ORDER_SUBMITTED",
+]);
+
+export function buildFieldVisitStats(entries = []) {
+  const byCode = new Map();
+  (entries || []).forEach((entry) => {
+    const type = String(entry?.transactionType || entry?.transaction_type || "").trim().toUpperCase();
+    if (!FIELD_CUSTOMER_TYPES.has(type)) return;
+    const code = normalizeCode(entry?.customerCode || entry?.customer_code);
+    if (!code) return;
+    const existing = byCode.get(code) || {
+      customerCode: code,
+      customerName: "",
+      amountCollected: 0,
+    };
+    const name = String(entry?.customerName || entry?.customer_name || "").trim();
+    if (name) existing.customerName = existing.customerName || name;
+    if (type === "COLLECTION_VISIT") {
+      const amount = Number(entry?.amountReceived ?? entry?.amount_received ?? 0);
+      if (Number.isFinite(amount) && amount > 0) existing.amountCollected += amount;
+    }
+    byCode.set(code, existing);
+  });
+
+  const customers = [...byCode.values()].sort((left, right) => (
+    left.customerName.localeCompare(right.customerName) || left.customerCode.localeCompare(right.customerCode)
+  ));
+
+  return {
+    uniqueCustomers: customers.length,
+    customers,
+  };
+}
 
 export function countsTowardDailyVisitEntryStats(entry) {
   const type = String(entry?.transactionType || entry?.transaction_type || "").trim().toUpperCase();
@@ -311,7 +351,8 @@ function emptyUserReport(userId, profile) {
   return {
     userId,
     userName: formatCollectorDisplayName(profile || {}),
-    email: String(profile?.email || "").trim(),
+    email: String(profile?.report_email || profile?.email || "").trim(),
+    reportEmail: String(profile?.report_email || "").trim(),
     visitCount: 0,
     farFromCustomerCount: 0,
     totalRouteDistanceKm: 0,
@@ -320,6 +361,22 @@ function emptyUserReport(userId, profile) {
     routePoints: [],
     daySummary: null,
   };
+}
+
+async function loadProfilesById(admin, userIds, { includeActive = false } = {}) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return [];
+
+  const extra = includeActive ? ",is_active" : "";
+  const full = `id,salesman_code,salesman_name,role,email,report_email${extra}`;
+  const fallback = `id,salesman_code,salesman_name,role,email${extra}`;
+
+  let result = await admin.from("profiles").select(full).in("id", ids);
+  if (result.error && isMissingSchemaColumn(result.error)) {
+    result = await admin.from("profiles").select(fallback).in("id", ids);
+  }
+  if (result.error) throw result.error;
+  return result.data || [];
 }
 
 export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } = {}) {
@@ -353,16 +410,13 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
   const userIds = [...new Set(rawEntries.map((entry) => entry.user_id).filter(Boolean))];
   const customerCodes = [...new Set(rawEntries.map((entry) => normalizeCode(entry.customer_code)).filter(Boolean))];
 
-  const [{ data: profiles, error: profilesError }, { data: customers, error: customersError }] = await Promise.all([
-    userIds.length
-      ? admin.from("profiles").select("id,salesman_code,salesman_name,role,email").in("id", userIds)
-      : Promise.resolve({ data: [], error: null }),
+  const [profiles, customersResult] = await Promise.all([
+    userIds.length ? loadProfilesById(admin, userIds) : Promise.resolve([]),
     customerCodes.length
       ? admin.from("customers").select("customer_code,customer_name,latitude,longitude,area").in("customer_code", customerCodes)
       : Promise.resolve({ data: [], error: null }),
   ]);
-
-  if (profilesError) throw profilesError;
+  const { data: customers, error: customersError } = customersResult;
   if (customersError && !isMissingTableError(customersError)) throw customersError;
 
   const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
@@ -382,6 +436,7 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
       userId: entryUserId,
       userName: formatCollectorDisplayName(profile),
       email: String(profile.email || "").trim(),
+      reportEmail: String(profile.report_email || "").trim(),
       visitCount: countDailyVisitEntries(enrichedEntries),
       farFromCustomerCount: countFarFromCustomerEntries(enrichedEntries),
       totalRouteDistanceKm: summarizeRouteDistanceKm(rows),
@@ -394,14 +449,16 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
     ...allActivityResult.entries.map((entry) => entry.user_id),
     ...(userIdFilter ? [userIdFilter] : []),
   ].filter(Boolean))];
-  const { data: dayProfiles } = allDayUserIds.length
-    ? await admin.from("profiles").select("id,salesman_code,salesman_name,role,email").in("id", allDayUserIds)
-    : { data: [] };
+  const dayProfiles = allDayUserIds.length
+    ? await loadProfilesById(admin, allDayUserIds)
+    : [];
 
   const dayProfileMap = new Map((dayProfiles || []).map((row) => [row.id, row]));
   const availableUsers = (dayProfiles || []).map((row) => ({
     userId: row.id,
     userName: formatCollectorDisplayName(row),
+    reportEmail: String(row.report_email || "").trim(),
+    email: String(row.email || "").trim(),
   })).sort((left, right) => left.userName.localeCompare(right.userName));
 
   const summaryUserIds = userIdFilter
@@ -410,10 +467,14 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
 
   const summaryEntries = await Promise.all(
     summaryUserIds.map(async (entryUserId) => {
+      const reportUser = users.find((entryUser) => entryUser.userId === entryUserId);
       const activities = (grouped.get(entryUserId) || [])
         .filter((row) => String(row.transaction_type || "").toUpperCase() !== "GPS_PING")
         .map((row) => ({ saved_at: row.saved_at }));
-      const summaryPayload = await loadCollectionDaySummaryForUser(admin, entryUserId, date, { activities });
+      const summaryPayload = await loadCollectionDaySummaryForUser(admin, entryUserId, date, {
+        activities,
+        fieldVisitStats: buildFieldVisitStats(reportUser?.entries || []),
+      });
       return [entryUserId, summaryPayload.daySummary];
     }),
   );
@@ -460,10 +521,12 @@ export function shouldEmailVisitReportForRole(role) {
 }
 
 export async function loadProfilesForVisitReportEmails(admin) {
-  const { data, error } = await admin
-    .from("profiles")
-    .select("id,role,salesman_code,salesman_name,email,is_active");
-
-  if (error) throw error;
-  return (data || []).filter((row) => row.is_active !== false);
+  const extra = "id,role,salesman_code,salesman_name,email,report_email,is_active";
+  const fallback = "id,role,salesman_code,salesman_name,email,is_active";
+  let result = await admin.from("profiles").select(extra);
+  if (result.error && isMissingSchemaColumn(result.error)) {
+    result = await admin.from("profiles").select(fallback);
+  }
+  if (result.error) throw result.error;
+  return (result.data || []).filter((row) => row.is_active !== false);
 }

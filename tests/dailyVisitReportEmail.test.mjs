@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 
 import {
   buildUserVisitReportEmail,
+  resolveUserReportEmail,
   resolveVisitReportRecipients,
 } from "../app/lib/dailyVisitReportEmail.js";
-import { runDailyVisitReportEmailCycle } from "../app/lib/dailyVisitReportEmailServer.js";
-import { getMailerConfig, isEmailConfigured, parseEmailList } from "../app/lib/mailer.js";
+import { runDailyVisitReportEmailCycle, resolveDailyVisitReportEmailSchedule } from "../app/lib/dailyVisitReportEmailServer.js";
+import { getMailerConfig, isDeliverableEmail, isEmailConfigured, parseEmailList } from "../app/lib/mailer.js";
 
 test("parseEmailList splits mixed separators and ignores invalid values", () => {
   assert.deepEqual(
@@ -27,6 +28,24 @@ test("resolveVisitReportRecipients sends each user separately and copies manager
       userEmail: "salesman@madiba.com",
       managerEmails: ["boss@madiba.com", "salesman@madiba.com"],
     },
+  );
+});
+
+test("login usernames at .local are not treated as report inboxes", () => {
+  assert.equal(isDeliverableEmail("ahmed@madiba-sfa.local"), false);
+  assert.equal(isDeliverableEmail("ahmed@company.com"), true);
+  assert.equal(resolveUserReportEmail({
+    reportEmail: "ahmed@company.com",
+    email: "ahmed@madiba-sfa.local",
+  }), "ahmed@company.com");
+  assert.deepEqual(
+    resolveVisitReportRecipients({
+      userEmail: "ahmed@madiba-sfa.local",
+      reportEmail: "ahmed@company.com",
+      managerEmails: "boss@madiba.com",
+      sendToUser: true,
+    }).to,
+    ["ahmed@company.com", "boss@madiba.com"],
   );
 });
 
@@ -58,6 +77,7 @@ test("buildUserVisitReportEmail includes the user name and timeline", () => {
           customerName: "Shop A",
           customerCode: "C1",
           transactionLabel: "Visit report",
+          transactionType: "VISIT_REPORT",
           hasEntryGps: true,
           hasCustomerLocation: true,
           distanceFromCustomerKm: 0.2,
@@ -80,6 +100,9 @@ test("buildUserVisitReportEmail includes the user name and timeline", () => {
   assert.match(message.html, /Visit report/);
   assert.match(message.html, /Daily visit summary/);
   assert.match(message.html, /Day route/);
+  assert.match(message.html, /Bigger red circle/);
+  assert.match(message.html, /background:#dbeafe/);
+  assert.match(message.html, /Visit report/);
 });
 
 test("isEmailConfigured requires from plus SMTP or Resend", () => {
@@ -118,7 +141,7 @@ test("runDailyVisitReportEmailCycle sends one email per field user", async () =>
       ],
     }),
     loadProfiles: async () => ([
-      { id: "u1", role: "salesman", email: "one@madiba.com", salesman_name: "Sales One", is_active: true },
+      { id: "u1", role: "salesman", email: "one@madiba-sfa.local", report_email: "one@company.com", salesman_name: "Sales One", is_active: true },
       { id: "u2", role: "salesman", email: "two@madiba.com", salesman_name: "Sales Two", is_active: true },
       { id: "mgr", role: "manager", email: "manager@madiba.com", salesman_name: "Boss", is_active: true },
     ]),
@@ -130,7 +153,34 @@ test("runDailyVisitReportEmailCycle sends one email per field user", async () =>
   assert.equal(sent[0].subject.includes("Sales One") || sent[1].subject.includes("Sales One"), true);
   assert.equal(sent.some((message) => message.subject.includes("Sales Two")), true);
   assert.equal(sent.some((message) => message.subject.includes("Boss")), false);
-  assert.deepEqual(sent.find((message) => message.subject.includes("Sales One")).to, ["one@madiba.com", "manager@madiba.com"]);
+  assert.deepEqual(sent.find((message) => message.subject.includes("Sales One")).to, ["one@company.com", "manager@madiba.com"]);
+});
+
+test("resolveDailyVisitReportEmailSchedule sends Thursday at Friday midnight and Saturday on Sunday", () => {
+  const fridayStartKsa = new Date("2026-09-03T21:10:00.000Z");
+  const fridayStart = resolveDailyVisitReportEmailSchedule("", fridayStartKsa);
+  assert.equal(fridayStart.skipped, true);
+  assert.equal(fridayStart.reason, "friday_holiday");
+  assert.equal(fridayStart.date, "2026-09-03");
+
+  const fridayMidnightKsa = new Date("2026-09-04T21:10:00.000Z");
+  const fridayMidnight = resolveDailyVisitReportEmailSchedule("", fridayMidnightKsa);
+  assert.equal(fridayMidnight.skipped, false);
+  assert.equal(fridayMidnight.date, "2026-09-03");
+
+  const mondayMidnightKsa = new Date("2026-09-06T21:10:00.000Z");
+  const mondaySchedule = resolveDailyVisitReportEmailSchedule("", mondayMidnightKsa);
+  assert.equal(mondaySchedule.skipped, false);
+  assert.equal(mondaySchedule.date, "2026-09-06");
+
+  const sundayMidnightKsa = new Date("2026-09-05T21:10:00.000Z");
+  const sundaySchedule = resolveDailyVisitReportEmailSchedule("", sundayMidnightKsa);
+  assert.equal(sundaySchedule.skipped, false);
+  assert.equal(sundaySchedule.date, "2026-09-05");
+
+  const manual = resolveDailyVisitReportEmailSchedule("2026-09-03", fridayStartKsa);
+  assert.equal(manual.skipped, false);
+  assert.equal(manual.date, "2026-09-03");
 });
 
 test("runDailyVisitReportEmailCycle skips when email is not configured", async () => {

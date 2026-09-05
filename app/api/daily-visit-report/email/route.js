@@ -61,15 +61,17 @@ export async function POST(request) {
     if (access.error) return access.error;
 
     const body = await request.json().catch(() => ({}));
-    const userIds = normalizeVisitReportEmailUserIds(body?.userIds || body?.userId);
-    if (!userIds.length) {
+    const midnight = body?.midnight === true || body?.mode === "midnight";
+    const allUsers = midnight || body?.allUsers === true || body?.scope === "all";
+    const userIds = allUsers ? [] : normalizeVisitReportEmailUserIds(body?.userIds || body?.userId);
+    if (!allUsers && !userIds.length) {
       return NextResponse.json(
         { success: false, error: "Select at least one user to email." },
         { status: 400 },
       );
     }
 
-    if (!String(body?.date || "").trim()) {
+    if (!midnight && !String(body?.date || "").trim()) {
       return NextResponse.json(
         { success: false, error: "Report date is required." },
         { status: 400 },
@@ -77,21 +79,36 @@ export async function POST(request) {
     }
 
     let date = "";
-    try {
-      date = parseReportDateParam(body.date);
-    } catch (error) {
-      return NextResponse.json(
-        { success: false, error: error.message || "Invalid report date. Use YYYY-MM-DD." },
-        { status: 400 },
-      );
+    if (!midnight) {
+      try {
+        date = parseReportDateParam(body.date);
+      } catch (error) {
+        return NextResponse.json(
+          { success: false, error: error.message || "Invalid report date. Use YYYY-MM-DD." },
+          { status: 400 },
+        );
+      }
     }
 
-    const result = await runDailyVisitReportEmailCycle(admin, { date, userIds });
+    const result = await runDailyVisitReportEmailCycle(admin, {
+      date,
+      userIds,
+      reportEmails: body?.reportEmails,
+    });
     if (result.skipped) {
-      return NextResponse.json(
-        { success: false, error: "Email is not configured on the server.", ...result },
-        { status: 503 },
-      );
+      if (result.reason === "email_not_configured") {
+        return NextResponse.json(
+          { success: false, error: "Email is not configured on the server.", ...result },
+          { status: 503 },
+        );
+      }
+      return NextResponse.json({
+        success: true,
+        message: result.reason === "friday_holiday"
+          ? "Friday is a holiday. Thursday's report is sent at Friday midnight."
+          : "No midnight visit report is due for this day.",
+        ...result,
+      });
     }
 
     const failedCount = Number(result.failedCount || 0);

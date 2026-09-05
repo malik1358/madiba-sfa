@@ -5,6 +5,7 @@ import {
   countDailyVisitEntries,
   countFarFromCustomerEntries,
   countsTowardDailyVisitEntryStats,
+  buildFieldVisitStats,
 } from "../app/lib/dailyVisitReportServer.js";
 
 test("daily visit entry stats skip idle GPS pings and visit reports", () => {
@@ -21,4 +22,19 @@ test("daily visit entry stats skip idle GPS pings and visit reports", () => {
   assert.equal(countsTowardDailyVisitEntryStats(entries[2]), false);
   assert.equal(countDailyVisitEntries(entries), 4);
   assert.equal(countFarFromCustomerEntries(entries), 1);
+});
+
+test("buildFieldVisitStats counts unique customers and collection amounts", () => {
+  const stats = buildFieldVisitStats([
+    { transactionType: "ORDER_DRAFT", customerCode: "1084C", customerName: "Bandar" },
+    { transactionType: "ORDER_SUBMITTED", customerCode: "1084C", customerName: "Bandar" },
+    { transactionType: "COLLECTION_VISIT", customerCode: "1497", customerName: "Enjaz", amountReceived: 575.75 },
+    { transactionType: "VISIT_REPORT", customerCode: "1127C", customerName: "Food Village" },
+    { transactionType: "GPS_PING" },
+    { transactionType: "MORNING_ATTENDANCE" },
+  ]);
+
+  assert.equal(stats.uniqueCustomers, 3);
+  assert.equal(stats.customers.find((row) => row.customerCode === "1497").amountCollected, 575.75);
+  assert.equal(stats.customers.find((row) => row.customerCode === "1084C").amountCollected, 0);
 });

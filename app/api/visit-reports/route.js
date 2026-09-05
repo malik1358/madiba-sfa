@@ -263,7 +263,11 @@ export async function POST(request) {
     return NextResponse.json({ success: true, customerCode, value });
   } catch (error) {
     const message = error.message || "Unable to save visit report.";
-    const status = /access|session|customer not found/i.test(message) ? 403 : 500;
+    const status = /access|session|customer not found/i.test(message)
+      ? 403
+      : /next visit date/i.test(message)
+        ? 400
+        : 500;
     return NextResponse.json({ success: false, error: message }, { status });
   }
 }

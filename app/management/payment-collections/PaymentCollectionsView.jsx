@@ -2746,7 +2746,21 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                       type="date"
                                       min={getTodayDateKey()}
                                       value={form.nextVisitAt}
-                                      onChange={(event) => setForm((current) => ({ ...current, nextVisitAt: event.target.value }))}
+                                      onChange={(event) => {
+                                        const value = event.target.value;
+                                        try {
+                                          if (value) validateNextVisitDate(value);
+                                          setForm((current) => ({ ...current, nextVisitAt: value }));
+                                        } catch (validationError) {
+                                          setForm((current) => ({ ...current, nextVisitAt: "" }));
+                                          showPopup({
+                                            message: String(validationError?.message || "").includes("past")
+                                              ? t("msgNextVisitPast")
+                                              : t("msgNextVisitRequired"),
+                                            variant: "error",
+                                          });
+                                        }
+                                      }}
                                     />
                                   </label>
                                   <label className="moduleFieldFull">

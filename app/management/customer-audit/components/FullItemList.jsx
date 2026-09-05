@@ -2,6 +2,7 @@
 
 import { Fragment, useDeferredValue, useMemo, useState } from "react";
 import { getPrice, isDoNotUseItem, normalizeCode } from "../lib/helpers";
+import { formatDiscountPercent, lookupDiscountRate } from "../../../lib/regionalPricing";
 import ExportableTable from "../../../components/ExportableTable";
 
 function normalizedText(value) {
@@ -79,7 +80,7 @@ function buildCatalog(itemCatalog, priceSheetItems, priceList) {
     .sort((left, right) => String(left.item_name || left.item_code).localeCompare(String(right.item_name || right.item_code)));
 }
 
-export default function FullItemList({ itemCatalog, priceSheetItems, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
+export default function FullItemList({ itemCatalog, priceSheetItems, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {} }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [expandedCategories, setExpandedCategories] = useState({});
@@ -136,6 +137,8 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
               <th>Category</th>
               <th>Item</th>
               <th>Price</th>
+              <th>Cash Discount</th>
+              <th>Value Discount</th>
               <th>Qty</th>
               <th>Total</th>
             </tr>
@@ -146,7 +149,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
               return (
                 <Fragment key={group.category}>
                   <tr className="moduleCategoryRow">
-                    <td colSpan={5}>
+                    <td colSpan={7}>
                       <button type="button" className="moduleCategoryToggle" onClick={() => setExpandedCategories((current) => ({ ...current, [group.category]: !current[group.category] }))} aria-expanded={isExpanded}>
                         <span className="moduleCategorySymbol">{isExpanded ? "−" : "+"}</span><strong>{group.category}</strong><small>{group.items.length} items</small>
                       </button>
@@ -162,6 +165,8 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
                         <td>{group.category}</td>
                         <td><strong>{nameIsCode ? code : item.item_name}</strong>{!nameIsCode && <div className="moduleCode">{code}</div>}</td>
                         <td>{price ? Number(price).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "NOT FOUND"}</td>
+                        <td>{formatDiscountPercent(lookupDiscountRate(cashDiscountMap, code))}</td>
+                        <td>{formatDiscountPercent(lookupDiscountRate(valueDiscountMap, code))}</td>
                         <td><div className="moduleQtyControl"><button type="button" onClick={() => decreaseOrderQty(code)}>−</button><input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} /><button type="button" onClick={() => increaseOrderQty(code)}>+</button></div></td>
                         <td>{(price * orderQty).toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
                       </tr>
@@ -171,7 +176,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
               );
             })}
             {groups.length === 0 && (
-              <tr><td colSpan={5}>No catalog items match this search.</td></tr>
+              <tr><td colSpan={7}>No catalog items match this search.</td></tr>
             )}
           </tbody>
         </table>

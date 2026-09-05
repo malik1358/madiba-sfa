@@ -13,6 +13,9 @@ import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
 import {
   buildEffectivePriceList,
+  formatDiscountPercent,
+  getPricedOrderLine,
+  lookupDiscountRate,
   normalizePaymentType,
   pricingRegionLabel,
   regionPriceMapFor,
@@ -871,15 +874,29 @@ export default function NewOrderPage() {
       const savedAtIso = new Date().toISOString();
       const lines = orderItems.map((item) => {
         const quantity = Number(item.order_quantity || 0);
-        const rate = Number(getPrice(displayPriceList, item.item_code) || 0);
+        const wholesaleRate = Number(getPrice(regionPriceList, item.item_code) || 0);
+        const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
+        const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+        const priced = getPricedOrderLine({
+          wholesaleRate,
+          quantity,
+          paymentType,
+          cashDiscountRate: cashDiscount,
+          valueDiscountRate: valueDiscount,
+        });
 
         return {
           item_code: item.item_code,
           item_name: item.item_name,
           category: item.category || "Unclassified",
           quantity,
-          rate,
-          lineTotal: quantity * rate,
+          wholesaleRate,
+          cashDiscount,
+          valueDiscount,
+          cashApplied: priced.applied.cash,
+          valueApplied: priced.applied.value,
+          rate: priced.rate,
+          lineTotal: priced.lineValue,
         };
       });
 
@@ -913,6 +930,9 @@ export default function NewOrderPage() {
       outstandingInfo,
       creditApproval.remark,
       displayPriceList,
+      cashDiscountMap,
+      valueDiscountMap,
+      regionPriceList,
       paymentType,
       pricingRegion,
       selectedCustomer,
@@ -941,11 +961,13 @@ export default function NewOrderPage() {
         const totalWithVat = subtotal + vatAmount;
 
         const columns = [
-          { key: "item_code", label: "Item Code", width: 78, align: "left" },
-          { key: "item_name", label: "Item Name", width: 215, align: "left" },
-          { key: "quantity", label: "Qty", width: 50, align: "right" },
-          { key: "rate", label: "Rate (Excl. VAT)", width: 82, align: "right" },
-          { key: "lineTotal", label: "Line Total", width: 90, align: "right" },
+          { key: "item_code", label: "Item Code", width: 62, align: "left" },
+          { key: "item_name", label: "Item Name", width: 148, align: "left" },
+          { key: "quantity", label: "Qty", width: 36, align: "right" },
+          { key: "rate", label: "Rate", width: 54, align: "right" },
+          { key: "cashDiscount", label: "Cash Disc", width: 54, align: "right" },
+          { key: "valueDiscount", label: "Value Disc", width: 58, align: "right" },
+          { key: "lineTotal", label: "Line Total", width: 103, align: "right" },
         ];
 
         const orderSummaryColumns = [
@@ -969,7 +991,7 @@ export default function NewOrderPage() {
           doc.setFillColor(239, 244, 245);
           doc.rect(tableStartX, startY, contentWidth, 24, "F");
           doc.setFont(undefined, "bold");
-          doc.setFontSize(10);
+          doc.setFontSize(8);
 
           columns.forEach((column) => {
             doc.rect(colX, startY, column.width, 24);
@@ -1035,7 +1057,7 @@ export default function NewOrderPage() {
         });
 
         let y = drawTableHeader(marginTop + 226);
-        doc.setFontSize(10);
+        doc.setFontSize(9);
 
         snapshot.lines.forEach((line) => {
           const rowValues = {
@@ -1043,6 +1065,8 @@ export default function NewOrderPage() {
             item_name: String(line.item_name || "-"),
             quantity: String(line.quantity),
             rate: formatMoney(line.rate),
+            cashDiscount: formatDiscountPercent(line.cashDiscount),
+            valueDiscount: formatDiscountPercent(line.valueDiscount),
             lineTotal: formatMoney(line.lineTotal),
           };
 
@@ -1265,7 +1289,8 @@ export default function NewOrderPage() {
 
         doc.setFontSize(9);
         ensureSpace(20);
-        doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 28);
+        doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 36);
+        doc.text("Cash Disc is the sheet cash scheme. Value Disc applies when the SKU value exceeds 5,000 SAR.", marginX, pageHeight - 24);
         addPdfBuildFooter(doc);
 
         const fileName = buildOrderPdfFileName({
@@ -2027,6 +2052,8 @@ export default function NewOrderPage() {
                       <th>Category</th>
                       <th>Item</th>
                       <th>Price</th>
+                      <th>Cash Discount</th>
+                      <th>Value Discount</th>
                       <th>Qty</th>
                       <th>Total</th>
                     </tr>
@@ -2038,7 +2065,7 @@ export default function NewOrderPage() {
                       return (
                         <Fragment key={`group-${group.category}`}>
                           <tr className="moduleCategoryRow">
-                            <td colSpan={5}>
+                            <td colSpan={7}>
                               <button
                                 type="button"
                                 className="moduleCategoryToggle"
@@ -2055,6 +2082,8 @@ export default function NewOrderPage() {
                             group.items.map((item) => {
                               const qty = Number(orderQuantities[item.item_code] || 0);
                               const price = getPrice(displayPriceList, item.item_code);
+                              const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
+                              const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
@@ -2076,6 +2105,8 @@ export default function NewOrderPage() {
                                     )}
                                   </td>
                                   <td>{price ? formatMoney(price) : "NOT FOUND"}</td>
+                                  <td>{formatDiscountPercent(cashDiscount)}</td>
+                                  <td>{formatDiscountPercent(valueDiscount)}</td>
                                   <td>
                                     <div className="moduleQtyControl">
                                       <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
@@ -2098,7 +2129,7 @@ export default function NewOrderPage() {
                     })}
                     {groupedItems.length === 0 && (
                       <tr>
-                        <td colSpan={5}>No items found for this filter.</td>
+                        <td colSpan={7}>No items found for this filter.</td>
                       </tr>
                     )}
                   </tbody>
@@ -2188,6 +2219,8 @@ export default function NewOrderPage() {
                         <th>Item Name</th>
                         <th>Qty</th>
                         <th>Rate</th>
+                        <th>Cash Discount</th>
+                        <th>Value Discount</th>
                         <th>Line Total</th>
                       </tr>
                     </thead>
@@ -2198,6 +2231,8 @@ export default function NewOrderPage() {
                           <td>{line.item_name}</td>
                           <td>{line.quantity}</td>
                           <td>{formatMoney(line.rate)}</td>
+                          <td>{formatDiscountPercent(line.cashDiscount)}</td>
+                          <td>{formatDiscountPercent(line.valueDiscount)}</td>
                           <td>{formatMoney(line.lineTotal)}</td>
                         </tr>
                       ))}

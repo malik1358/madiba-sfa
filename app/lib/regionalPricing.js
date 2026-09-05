@@ -42,6 +42,18 @@ function toFiniteNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+export function formatDiscountPercent(rate) {
+  const value = Number(rate || 0);
+  if (!(value > 0)) return "—";
+  return `${Number((value * 100).toFixed(2))}%`;
+}
+
+export function lookupDiscountRate(discountMap, itemCode) {
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code) return 0;
+  return Number(discountMap?.[code] || 0);
+}
+
 export function parseDiscountRate(value) {
   const text = String(value ?? "").trim();
   if (!text || /#/.test(text)) return 0;

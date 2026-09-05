@@ -13,7 +13,7 @@ import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "Salesman Hierarchy", ar: "هيكل مندوبي المبيعات" },
-  subtitle: { en: "Assign salesmen under a head salesman, set pricing region, and manage default testing passwords", ar: "تعيين المندوبين تحت رئيس مندوبين وتحديد منطقة التسعير وإدارة كلمات المرور الافتراضية" },
+  subtitle: { en: "Assign salesmen under a head salesman, set report email and pricing region, and manage default testing passwords", ar: "تعيين المندوبين تحت رئيس مندوبين وتحديد بريد التقرير ومنطقة التسعير وإدارة كلمات المرور الافتراضية" },
   management: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading salesman hierarchy...", ar: "جاري تحميل هيكل المندوبين..." },
   statusActive: { en: "Active", ar: "نشط" },
@@ -91,10 +91,12 @@ export default function SalesmanHierarchyPage() {
   const [headOptions, setHeadOptions] = useState([]);
   const [headSelections, setHeadSelections] = useState({});
   const [roleSelections, setRoleSelections] = useState({});
+  const [reportEmailSelections, setReportEmailSelections] = useState({});
   const [newSalesman, setNewSalesman] = useState({
     salesmanName: "",
     salesmanCode: "",
     email: "",
+    reportEmail: "",
     role: "salesman",
     headSalesmanCode: "",
     pricingRegion: "riyadh",
@@ -144,6 +146,9 @@ export default function SalesmanHierarchyPage() {
       );
       setRegionSelections(
         Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.pricing_region || "riyadh"]))
+      );
+      setReportEmailSelections(
+        Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.report_email || ""]))
       );
     } catch (err) {
       setError(err.message || "Unable to load salesman hierarchy.");
@@ -229,6 +234,17 @@ export default function SalesmanHierarchyPage() {
       });
       messages.push(result.message || "Head salesman saved.");
 
+      const nextReportEmail = String(reportEmailSelections[salesman.id] || "").trim();
+      if (nextReportEmail !== String(salesman.report_email || "").trim()) {
+        const emailResult = await postAction({
+          mode: "set-report-email",
+          salesmanId: salesman.id,
+          reportEmail: nextReportEmail,
+        });
+        messages.push(emailResult.message || "Report email saved.");
+      }
+      messages.push(result.message || "Head salesman saved.");
+
       setMessage(messages.join(" "));
       await loadHierarchy(false);
     } catch (err) {
@@ -269,6 +285,7 @@ export default function SalesmanHierarchyPage() {
         salesmanName: newSalesman.salesmanName,
         salesmanCode: normalizeCode(newSalesman.salesmanCode),
         email: String(newSalesman.email || "").trim().toLowerCase(),
+        reportEmail: String(newSalesman.reportEmail || "").trim().toLowerCase(),
         role: String(newSalesman.role || "salesman"),
         headSalesmanCode: normalizeCode(newSalesman.headSalesmanCode || ""),
         pricingRegion: newSalesman.pricingRegion || "riyadh",
@@ -279,7 +296,7 @@ export default function SalesmanHierarchyPage() {
       setMessage(
         `${result.message || "User created."} Role: ${createdRole.toUpperCase()} | Username: ${created.login_name || displayLoginName(created.email) || "-"} | Password: ${created.password || "-"}`
       );
-      setNewSalesman({ salesmanName: "", salesmanCode: "", email: "", role: "salesman", headSalesmanCode: "", pricingRegion: "riyadh" });
+      setNewSalesman({ salesmanName: "", salesmanCode: "", email: "", reportEmail: "", role: "salesman", headSalesmanCode: "", pricingRegion: "riyadh" });
       await loadHierarchy(false);
     } catch (err) {
       setError(err.message || "Unable to create salesman.");
@@ -406,6 +423,17 @@ export default function SalesmanHierarchyPage() {
             </label>
 
             <label>
+              Report email
+              <input
+                className="moduleInput"
+                type="email"
+                value={newSalesman.reportEmail || ""}
+                onChange={(event) => setNewSalesman((current) => ({ ...current, reportEmail: event.target.value }))}
+                placeholder="ahmed@company.com"
+              />
+            </label>
+
+            <label>
               User Role
               <select
                 className="moduleInput"
@@ -475,6 +503,7 @@ export default function SalesmanHierarchyPage() {
                   <th>Role</th>
                   <th>Region</th>
                   <th>Username</th>
+                  <th>Report email</th>
                   <th>Current Head</th>
                   <th>Assign Head</th>
                   <th>Default Password</th>
@@ -523,6 +552,18 @@ export default function SalesmanHierarchyPage() {
                         </select>
                       </td>
                       <td>{loginName || "No username"}</td>
+                      <td>
+                        <input
+                          className="moduleInput"
+                          type="email"
+                          value={reportEmailSelections[salesman.id] ?? salesman.report_email ?? ""}
+                          onChange={(event) => setReportEmailSelections((current) => ({
+                            ...current,
+                            [salesman.id]: event.target.value,
+                          }))}
+                          placeholder="name@company.com"
+                        />
+                      </td>
                       <td>{currentHead ? `${currentHead.salesman_name || currentHead.salesman_code} (${currentHead.salesman_code})` : "-"}</td>
                       <td>
                         <select
@@ -578,7 +619,7 @@ export default function SalesmanHierarchyPage() {
 
                 {salesmen.length === 0 && (
                   <tr>
-                    <td colSpan={9}>No users found.</td>
+                    <td colSpan={10}>No users found.</td>
                   </tr>
                 )}
               </tbody>

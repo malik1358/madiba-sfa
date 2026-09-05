@@ -20,6 +20,7 @@ import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { resolveAuthSession } from "../../lib/authSession";
 import ExportableTable from "../../components/ExportableTable";
 import { extractMissingProspectsColumn, normalizeProspectSalesmanCode } from "../../lib/prospects";
+import { getTodayDateKey, validateNextVisitDate } from "../../lib/nextVisitDate";
 
 const TEXT = {
   title: { en: "New Customer", ar: "عميل جديد" },
@@ -577,6 +578,12 @@ export default function NewCustomerPage() {
       setError("Next Visit Date is required.");
       return;
     }
+    try {
+      validateNextVisitDate(followUpDate, { required: true });
+    } catch (validationError) {
+      setError(String(validationError?.message || "Next Visit Date is invalid."));
+      return;
+    }
 
     const supabase = getSupabaseClient();
     if (!supabase) {
@@ -892,7 +899,7 @@ export default function NewCustomerPage() {
                     <input
                       className="moduleInput"
                       type="date"
-                      min={new Date().toISOString().slice(0, 10)}
+                      min={getTodayDateKey()}
                       value={followUpDate}
                       onChange={(event) => setFollowUpDate(event.target.value)}
                     />

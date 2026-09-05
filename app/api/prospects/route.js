@@ -8,6 +8,7 @@ import {
   normalizeProspectSalesmanCode,
 } from "../../lib/prospects.js";
 import { linkProspectToCustomer, findProspectLinkCustomerSuggestions } from "../../lib/prospectCustomerLink.js";
+import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -196,10 +197,7 @@ export async function PATCH(request) {
       });
     }
 
-    const followUpDate = String(body.follow_up_date || "").trim();
-    if (!followUpDate) {
-      return NextResponse.json({ success: false, error: "Next visit date is required." }, { status: 400 });
-    }
+    const followUpDate = validateNextVisitDate(body.follow_up_date, { required: true });
 
     const { data, error: updateError } = await admin
       .from("prospects")

@@ -42,6 +42,11 @@ import NearestCustomerSuggestions from "../../components/NearestCustomerSuggesti
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import { buildNearestCustomerActions } from "../../lib/dashboardNearestCustomers";
 import { getScheduleTodayKey, isScheduleDateInWindow } from "../../lib/scheduleDateWindow";
+import {
+  getTodayDateKey,
+  nextVisitDateInputValue,
+  validateNextVisitDate,
+} from "../../lib/nextVisitDate";
 
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 
@@ -131,6 +136,7 @@ const PAGE_TEXT = {
   visitOutcome: { en: "Visit Outcome", ar: "نتيجة الزيارة" },
   nextVisit: { en: "Next Visit Schedule", ar: "موعد الزيارة القادمة" },
   nextVisitRequired: { en: "Next visit date is required.", ar: "تاريخ الزيارة القادمة مطلوب." },
+  nextVisitPast: { en: "Next visit date cannot be in the past.", ar: "لا يمكن أن يكون تاريخ الزيارة القادمة في الماضي." },
   visitNotes: { en: "Visit Notes", ar: "ملاحظات الزيارة" },
   startDictation: { en: "Start Dictation", ar: "بدء الإملاء" },
   stopDictation: { en: "Stop Dictation", ar: "إيقاف الإملاء" },
@@ -1069,7 +1075,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     setVisitItemsLoading(true);
     setVisitForm({
       outcome: "PAYMENT_FOLLOWUP",
-      nextVisitAt: toDateInputValue(customer?.next_visit_at),
+      nextVisitAt: nextVisitDateInputValue(customer?.next_visit_at),
       note: "",
       stockChecks: [],
     });
@@ -1184,6 +1190,12 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
     if (!String(visitForm.nextVisitAt || "").trim()) {
       setError(t("nextVisitRequired"));
+      return;
+    }
+    try {
+      validateNextVisitDate(visitForm.nextVisitAt, { required: true });
+    } catch (validationError) {
+      setError(String(validationError?.message || "").includes("past") ? t("nextVisitPast") : t("nextVisitRequired"));
       return;
     }
 
@@ -1756,6 +1768,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
               className="moduleInput"
               type="date"
               required
+              min={getTodayDateKey()}
               value={visitForm.nextVisitAt}
               onChange={(event) => setVisitForm((current) => ({ ...current, nextVisitAt: event.target.value }))}
             />

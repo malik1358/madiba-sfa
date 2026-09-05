@@ -57,6 +57,11 @@ import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
 import { getScheduleTodayKey, isScheduleDateInWindow } from "../../lib/scheduleDateWindow";
+import {
+  getTodayDateKey,
+  nextVisitDateInputValue,
+  validateNextVisitDate,
+} from "../../lib/nextVisitDate";
 
 const TEXT = {
   title: { en: "Payment Collections", ar: "التحصيلات" },
@@ -205,6 +210,7 @@ const TEXT = {
   msgModeRequired: { en: "Mode of receipt is required for funds received outcome.", ar: "طريقة الاستلام مطلوبة عند اختيار تم استلام مبلغ." },
   msgReceiptRequired: { en: "Receipt copy is compulsory when funds are received.", ar: "صورة الإيصال إلزامية عند استلام مبلغ." },
   msgNextVisitRequired: { en: "Next visit date is required when full overdue is not received.", ar: "تاريخ الزيارة القادمة مطلوب عند عدم استلام كامل المبلغ المستحق." },
+  msgNextVisitPast: { en: "Next visit date cannot be in the past.", ar: "لا يمكن أن يكون تاريخ الزيارة القادمة في الماضي." },
   msgSaveFailed: { en: "Unable to save collection visit.", ar: "تعذر حفظ زيارة التحصيل." },
   msgRequestTimeout: {
     en: "Request timed out. Please check your connection and try again.",
@@ -844,7 +850,7 @@ function buildInitialForm(row) {
     visitOutcome: mapInitialOutcome(row),
     amountReceived: row?.latest_collection?.amount_received ? String(row.latest_collection.amount_received) : "",
     receiptMode: row?.latest_collection?.receipt_mode || "",
-    nextVisitAt: toDateInputValue(row?.latest_collection?.next_visit_at),
+    nextVisitAt: nextVisitDateInputValue(row?.latest_collection?.next_visit_at),
     remarkArabic: row?.latest_collection?.remark_arabic || "",
     remarkEnglish: row?.latest_collection?.remark_english || "",
     legalNote: row?.legal_transfer?.note || "",
@@ -936,6 +942,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (text.includes("Mode of receipt is required")) return t("msgModeRequired");
     if (text.includes("Receipt copy is compulsory")) return t("msgReceiptRequired");
     if (text.includes("Next visit date is required") || text.includes("Next visit is required")) return t("msgNextVisitRequired");
+    if (text.includes("Next visit date cannot be in the past")) return t("msgNextVisitPast");
     if (text.includes("GPS is required") || text === GPS_REQUIRED_ERROR) return t("msgGpsRequired");
     if (text.includes("Unable to save collection visit")) return t("msgSaveFailed");
     if (text.includes("timed out") || text.toLowerCase().includes("abort")) return t("msgRequestTimeout");
@@ -1574,6 +1581,16 @@ export default function PaymentCollectionsView({ view = "due" }) {
         && paymentStatus !== "PAID";
       if (requiresNextVisit && !form.nextVisitAt) {
         throw new Error(t("msgNextVisitRequired"));
+      }
+      if (form.nextVisitAt) {
+        try {
+          validateNextVisitDate(form.nextVisitAt, { required: requiresNextVisit });
+        } catch (validationError) {
+          if (String(validationError?.message || "").includes("past")) {
+            throw new Error(t("msgNextVisitPast"));
+          }
+          throw new Error(t("msgNextVisitRequired"));
+        }
       }
 
       const outcomeReason = ["RESPONSIBLE_NOT_AVAILABLE", "WRONG_CREDIT_DAYS", "NO_DUE_AS_PER_CUSTOMER", "TRANSFER_TO_LEGAL"].includes(selectedOutcome)
@@ -2724,7 +2741,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   </label>
                                   <label>
                                     {t("nextVisit")}
-                                    <input className="moduleInput" type="date" value={form.nextVisitAt} onChange={(event) => setForm((current) => ({ ...current, nextVisitAt: event.target.value }))} />
+                                    <input
+                                      className="moduleInput"
+                                      type="date"
+                                      min={getTodayDateKey()}
+                                      value={form.nextVisitAt}
+                                      onChange={(event) => setForm((current) => ({ ...current, nextVisitAt: event.target.value }))}
+                                    />
                                   </label>
                                   <label className="moduleFieldFull">
                                     {t("remarkArabic")}

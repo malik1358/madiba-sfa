@@ -4,6 +4,7 @@ import { ensureCustomerVisibleToScope, withSalesScopeMatchers } from "../../lib/
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
+import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 
 export const runtime = "nodejs";
@@ -202,10 +203,7 @@ export async function POST(request) {
 
     await ensureCustomerVisible(admin, customerCode, scope);
 
-    const nextVisitAt = String(body?.nextVisitAt || "").trim();
-    if (!nextVisitAt) {
-      return NextResponse.json({ success: false, error: "Next visit date is required." }, { status: 400 });
-    }
+    const nextVisitAt = validateNextVisitDate(body?.nextVisitAt, { required: true });
 
     const value = {
       customer_code: customerCode,

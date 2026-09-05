@@ -1,4 +1,4 @@
-import { buildUserVisitReportEmail, resolveVisitReportRecipients } from "./dailyVisitReportEmail.js";
+import { buildUserVisitReportEmail, resolveUserReportEmail, resolveVisitReportRecipients } from "./dailyVisitReportEmail.js";
 import {
   buildDailyVisitReport,
   loadProfilesForVisitReportEmails,
@@ -8,7 +8,14 @@ import { formatCollectorDisplayName } from "./geo.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
 import { loadPerformanceSnapshotsForSalesmen } from "./performanceKpisServer.js";
 import { getMailerConfig, isEmailConfigured, parseEmailList, sendEmail } from "./mailer.js";
-import { getPreviousKsaDateString } from "./workdayActivity.js";
+import { isMissingSchemaColumn } from "./performanceKpis.js";
+import {
+  addKsaCalendarDays,
+  getKsaWeekdayIndex,
+  getKsaWeekdayIndexForDateString,
+  getPreviousKsaDateString,
+  isKsaOrderDay,
+} from "./workdayActivity.js";
 
 export function parseReportDateParam(value, now = new Date()) {
   const date = String(value || "").trim();
@@ -17,6 +24,32 @@ export function parseReportDateParam(value, now = new Date()) {
     throw new Error("Invalid report date. Use YYYY-MM-DD.");
   }
   return date;
+}
+
+export function resolveDailyVisitReportEmailSchedule(date, now = new Date()) {
+  const explicit = String(date || "").trim();
+  if (explicit) {
+    return { date: parseReportDateParam(explicit, now), skipped: false, reason: "" };
+  }
+
+  const previousDate = getPreviousKsaDateString(now);
+  const previousWeekday = getKsaWeekdayIndexForDateString(previousDate);
+
+  // Friday is the KSA holiday. Thursday's report goes out at Friday midnight
+  // (Saturday 00:10 KSA), not at the start of Friday.
+  if (previousWeekday === 5) {
+    return { date: addKsaCalendarDays(previousDate, -1), skipped: false, reason: "" };
+  }
+
+  if (getKsaWeekdayIndex(now) === 5) {
+    return { date: previousDate, skipped: true, reason: "friday_holiday" };
+  }
+
+  if (!isKsaOrderDay(previousDate)) {
+    return { date: previousDate, skipped: true, reason: "not_order_day" };
+  }
+
+  return { date: previousDate, skipped: false, reason: "" };
 }
 
 export function normalizeVisitReportEmailUserIds(value) {
@@ -43,6 +76,7 @@ function stubUserReport(profile) {
     userId: profile.id,
     userName: reportDisplayName(profile),
     email: String(profile.email || "").trim(),
+    reportEmail: String(profile.report_email || "").trim(),
     visitCount: 0,
     farFromCustomerCount: 0,
     totalRouteDistanceKm: 0,
@@ -53,9 +87,34 @@ function stubUserReport(profile) {
   };
 }
 
+export function parseReportEmailOverrides(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const next = {};
+  Object.entries(source).forEach(([userId, email]) => {
+    const id = String(userId || "").trim();
+    const normalized = resolveUserReportEmail({ reportEmail: email });
+    if (!id || !normalized) return;
+    next[id] = normalized;
+  });
+  return next;
+}
+
+async function persistReportEmails(admin, reportEmails) {
+  if (typeof admin?.from !== "function") return;
+  const entries = Object.entries(reportEmails || {});
+  for (const [userId, email] of entries) {
+    const result = await admin
+      .from("profiles")
+      .update({ report_email: email || null })
+      .eq("id", userId);
+    if (result.error && !isMissingSchemaColumn(result.error)) throw result.error;
+  }
+}
+
 export async function runDailyVisitReportEmailCycle(admin, {
   date,
   userIds,
+  reportEmails,
   now = new Date(),
   env = process.env,
   send = sendEmail,
@@ -64,8 +123,23 @@ export async function runDailyVisitReportEmailCycle(admin, {
   loadSummary = loadCollectionDaySummaryForUser,
   loadKpis = loadPerformanceSnapshotsForSalesmen,
 } = {}) {
-  const reportDate = parseReportDateParam(date, now);
+  const schedule = resolveDailyVisitReportEmailSchedule(date, now);
+  const reportDate = schedule.date;
   const requestedUserIds = normalizeVisitReportEmailUserIds(userIds);
+  const reportEmailOverrides = parseReportEmailOverrides(reportEmails);
+  if (Object.keys(reportEmailOverrides).length) {
+    await persistReportEmails(admin, reportEmailOverrides);
+  }
+  if (schedule.skipped) {
+    return {
+      date: reportDate,
+      skipped: true,
+      reason: schedule.reason,
+      sentCount: 0,
+      skippedCount: 0,
+      results: [],
+    };
+  }
   if (!isEmailConfigured(getMailerConfig(env))) {
     return {
       date: reportDate,
@@ -164,6 +238,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
     }
 
     const { to } = resolveVisitReportRecipients({
+      reportEmail: reportEmailOverrides[user.userId] || profile.report_email,
       userEmail: profile.email || userReport.email,
       managerEmails,
       sendToUser,

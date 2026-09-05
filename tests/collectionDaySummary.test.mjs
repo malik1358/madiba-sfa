@@ -6,6 +6,7 @@ import {
   findUnloggedIdleGaps,
   formatNarrativeTime,
   isSuccessfulCollection,
+  sumOrderLineValue,
 } from "../app/lib/collectionDaySummary.js";
 
 function ksaIso(date, hour, minute = 0) {
@@ -17,6 +18,14 @@ test("isSuccessfulCollection accepts FUNDS_RECEIVED or positive amount", () => {
   assert.equal(isSuccessfulCollection({ visit_outcome: "FUNDS_RECEIVED", amount_received: 0 }), true);
   assert.equal(isSuccessfulCollection({ visit_outcome: "NOT_PAID", amount_received: 100 }), true);
   assert.equal(isSuccessfulCollection({ visit_outcome: "NOT_PAID", amount_received: 0 }), false);
+});
+
+test("sumOrderLineValue uses line totals like pending orders", () => {
+  assert.equal(sumOrderLineValue([
+    { line_value: 3400 },
+    { line_value: 2286.6 },
+  ]), 5686.6);
+  assert.equal(sumOrderLineValue([{ quantity: 2, rate: 10, line_value: 0 }]), 20);
 });
 
 test("buildCollectionDaySummary matches SM001-style day narrative", () => {
@@ -123,7 +132,7 @@ test("buildCollectionDaySummary says login lunch and logout are not logged", () 
   assert.match(joined, /Lunch in not logged/);
 });
 
-test("findUnloggedIdleGaps flags 30+ minute gaps without lunch", () => {
+test("findUnloggedIdleGaps flags gaps over 50 minutes without lunch", () => {
   const date = { year: 2026, month: 8, day: 30 };
   const visits = [
     { customer_code: "C1", saved_at: ksaIso(date, 11, 31) },
@@ -133,6 +142,33 @@ test("findUnloggedIdleGaps flags 30+ minute gaps without lunch", () => {
   const gaps = findUnloggedIdleGaps({ visits });
   assert.equal(gaps.length, 1);
   assert.equal(gaps[0].minutes, 74);
+});
+
+test("findUnloggedIdleGaps ignores gaps of 50 minutes or less", () => {
+  const date = { year: 2026, month: 9, day: 1 };
+  const fifty = findUnloggedIdleGaps({
+    visits: [
+      { saved_at: ksaIso(date, 10, 4) },
+      { saved_at: ksaIso(date, 10, 34) },
+    ],
+  });
+  const fiftyExact = findUnloggedIdleGaps({
+    visits: [
+      { saved_at: ksaIso(date, 10, 0) },
+      { saved_at: ksaIso(date, 10, 50) },
+    ],
+  });
+  const fiftyOne = findUnloggedIdleGaps({
+    visits: [
+      { saved_at: ksaIso(date, 10, 0) },
+      { saved_at: ksaIso(date, 10, 51) },
+    ],
+  });
+
+  assert.equal(fifty.length, 0);
+  assert.equal(fiftyExact.length, 0);
+  assert.equal(fiftyOne.length, 1);
+  assert.equal(fiftyOne[0].minutes, 51);
 });
 
 test("findUnloggedIdleGaps does not treat a window as idle when visit or order activity is logged", () => {
@@ -260,6 +296,57 @@ test("buildCollectionDaySummary sorts idle with visits and uses last visit inste
   const logoutIndex = summary.lines.findIndex((line) => line.includes("Logout at 8:23 pm"));
   assert.ok(idleIndex > 0 && visitIndex > idleIndex);
   assert.ok(logoutIndex > visitIndex);
+});
+
+test("buildCollectionDaySummary uses field unique customers and collection by customer", () => {
+  const date = { year: 2026, month: 9, day: 1 };
+  const summary = buildCollectionDaySummary(
+    [{
+      customer_code: "1497",
+      saved_at: ksaIso(date, 12, 19),
+      visit_outcome: "FUNDS_RECEIVED",
+      amount_received: 575.75,
+    }],
+    new Map([["1497", { city: "Riyadh" }]]),
+    {
+      fieldVisitStats: {
+        uniqueCustomers: 5,
+        customers: [
+          { customerCode: "1084C", customerName: "Bandar Est", amountCollected: 0 },
+          { customerCode: "1497", customerName: "Enjaz Gateway", amountCollected: 575.75 },
+        ],
+      },
+    },
+  );
+
+  const joined = summary.lines.join("\n");
+  assert.match(joined, /Visited 5 unique customer\(s\)/);
+  assert.match(joined, /Enjaz Gateway \(1497\): 575\.75 SAR collected/);
+  assert.match(joined, /Bandar Est \(1084C\): no collection/);
+  assert.equal(summary.stats.uniqueCustomers, 5);
+});
+
+test("resolveEffectiveLogoutAt uses last activity when auto-closed", () => {
+  const date = { year: 2026, month: 9, day: 1 };
+  const summary = buildCollectionDaySummary(
+    [{
+      customer_code: "C1",
+      saved_at: ksaIso(date, 11, 19),
+      visit_outcome: "FUNDS_RECEIVED",
+      amount_received: 100,
+    }],
+    new Map([["C1", { city: "Riyadh" }]]),
+    {
+      loginAt: ksaIso(date, 9, 51),
+      logoutAt: ksaIso(date, 23, 59),
+      logoutAutoClosed: true,
+      activities: [{ saved_at: ksaIso(date, 19, 25) }],
+    },
+  );
+
+  const joined = summary.lines.join("\n");
+  assert.match(joined, /Logout at 7:25 pm/);
+  assert.doesNotMatch(joined, /Logout at 11:19 am/);
 });
 
 test("buildCollectionDaySummary includes posted order count and value", () => {

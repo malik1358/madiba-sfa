@@ -10,7 +10,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
-import { loadPricePayload } from "../../lib/pricePayload";
+import { isExcludedCategory, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
 import {
   buildEffectivePriceList,
   formatDiscountPercent,
@@ -587,7 +587,7 @@ export default function NewOrderPage() {
         ...item,
         item_code: code,
         item_name: String(historyFallback.item_name || item.item_name || code).trim(),
-        category: String(item.category || historyFallback.category || "Unclassified").trim() || "Unclassified",
+        category: pickCatalogCategory(historyFallback.category, item.category) || "Unclassified",
         source: "ITEM_MASTER",
       });
     });
@@ -606,9 +606,7 @@ export default function NewOrderPage() {
         const nextName = hasCurrentItemName(historyName, code)
           ? historyName
           : (hasCurrentItemName(sheetName, code) ? sheetName : code);
-        const nextCategory = hasMeaningfulValue(sheetCategory)
-          ? sheetCategory
-          : (hasMeaningfulValue(historyCategory) ? historyCategory : MISSING_CATEGORY);
+        const nextCategory = pickCatalogCategory(sheetCategory, historyCategory) || MISSING_CATEGORY;
 
         itemMap.set(code, {
           item_code: code,
@@ -631,9 +629,7 @@ export default function NewOrderPage() {
         : (hasCurrentItemName(sheetName, code)
           ? sheetName
           : (hasCurrentItemName(existingName, code) ? existingName : code));
-      const nextCategory = hasMeaningfulValue(sheetCategory)
-        ? sheetCategory
-        : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));
+      const nextCategory = pickCatalogCategory(sheetCategory, historyFallback.category, existingCategory) || "Unclassified";
 
       itemMap.set(code, {
         ...existing,
@@ -656,13 +652,13 @@ export default function NewOrderPage() {
       itemMap.set(code, {
         item_code: code,
         item_name: fallbackName || code,
-        category: hasMeaningfulValue(fallbackCategory) ? fallbackCategory : MISSING_CATEGORY,
+        category: pickCatalogCategory(fallbackCategory) || MISSING_CATEGORY,
         source: "PRICE_MAP_ONLY",
       });
     });
 
     return Array.from(itemMap.values())
-      .filter((item) => !isDoNotUseItem(item.item_name))
+      .filter((item) => !isDoNotUseItem(item.item_name) && !isExcludedCategory(item.category))
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 

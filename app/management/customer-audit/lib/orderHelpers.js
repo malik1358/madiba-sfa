@@ -1,10 +1,5 @@
 import { isDoNotUseItem, normalizeCode } from './helpers';
-
-function hasMeaningfulValue(value) {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  return !['UNCLASSIFIED', 'TO_MAP', 'TBD', 'TODO', 'N/A', 'NA', '-'].includes(text.toUpperCase());
-}
+import { isExcludedCategory, pickCatalogCategory } from '../../../lib/pricePayload.js';
 
 function hasCurrentItemName(value, itemCode) {
   const text = String(value || '').trim();
@@ -21,7 +16,7 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
       ...item,
       item_code: code,
       item_name: String(item.item_name || code).trim(),
-      category: String(item.category || 'Unclassified').trim() || 'Unclassified',
+      category: pickCatalogCategory(item.category) || 'Unclassified',
     });
   });
 
@@ -38,9 +33,7 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
       item_name: hasCurrentItemName(sheetName, code)
         ? sheetName
         : (hasCurrentItemName(existing?.item_name, code) ? existing.item_name : code),
-      category: hasMeaningfulValue(sheetCategory)
-        ? sheetCategory
-        : (hasMeaningfulValue(existing?.category) ? existing.category : 'Missing Category'),
+      category: pickCatalogCategory(sheetCategory, existing?.category) || 'Missing Category',
     });
   });
 
@@ -55,7 +48,7 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
   });
 
   return Array.from(itemMap.values())
-    .filter((item) => !isDoNotUseItem(item.item_name))
+    .filter((item) => !isDoNotUseItem(item.item_name) && !isExcludedCategory(item.category))
     .sort((left, right) => String(left.item_name || left.item_code).localeCompare(String(right.item_name || right.item_code)));
 }
 

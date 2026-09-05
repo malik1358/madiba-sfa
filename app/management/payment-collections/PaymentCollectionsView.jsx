@@ -500,8 +500,10 @@ async function resolveEnglishRemarkForSave(arabicRemark, englishRemark) {
 async function resolveEnglishRemark(arabicRemark, englishRemark) {
   const arabic = String(arabicRemark || "").trim();
   const english = String(englishRemark || "").trim();
-  if (!arabic || (english && english !== arabic)) return english;
+  if (!arabic) return english;
 
+  // Always translate from Arabic so a stale English remark from an earlier
+  // visit note cannot override the current Arabic text.
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
@@ -520,7 +522,7 @@ async function resolveEnglishRemark(arabicRemark, englishRemark) {
     // Fall back to stored remark below.
   }
 
-  return english || arabic;
+  return (english && english !== arabic) ? english : arabic;
 }
 
 async function fetchTodayCollectionVisitCount(supabase, userId) {
@@ -1421,6 +1423,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     const text = String(form.remarkArabic || "").trim();
     if (!activeRow || !text) return;
 
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       setIsTranslating(true);
       try {
@@ -1428,23 +1431,31 @@ export default function PaymentCollectionsView({ view = "due" }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text, from: "ar", to: "en" }),
+          signal: controller.signal,
         });
         const payload = await response.json().catch(() => ({}));
         if (response.ok && payload.success && payload.translatedText) {
+          const translated = String(payload.translatedText).trim();
           setForm((current) => {
-            const currentEnglish = String(current.remarkEnglish || "").trim();
-            const currentArabic = String(current.remarkArabic || "").trim();
-            if (currentEnglish && currentEnglish !== currentArabic) return current;
-            return { ...current, remarkEnglish: String(payload.translatedText) };
+            // Only apply if Arabic is still the text we translated (race-safe).
+            // Always overwrite English when Arabic changed — do not keep a
+            // previous English remark that no longer matches.
+            if (String(current.remarkArabic || "").trim() !== text) return current;
+            if (String(current.remarkEnglish || "").trim() === translated) return current;
+            return { ...current, remarkEnglish: translated };
           });
         }
-      } catch {
+      } catch (error) {
+        if (error?.name === "AbortError") return;
       } finally {
-        setIsTranslating(false);
+        if (!controller.signal.aborted) setIsTranslating(false);
       }
     }, 700);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [form.remarkArabic, activeRow]);
 
   if (!supabaseClient) {

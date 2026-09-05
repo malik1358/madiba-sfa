@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildCollectionVisitSummary,
   isPriorityCollectionVisit,
+  patchCollectionVisitSummaryEnglishRemark,
   patchCollectionVisitSummaryVisitNumber,
 } from "../app/lib/collectionVisitSummary.js";
 
@@ -64,4 +65,31 @@ Outstanding:
   const patched = patchCollectionVisitSummaryVisitNumber(stored, 11);
   assert.match(patched, /^Visit number today: 11\.$/m);
   assert.doesNotMatch(patched, /^Visit number today: 1\.$/m);
+});
+
+test("patchCollectionVisitSummaryEnglishRemark replaces stale English remarks", () => {
+  const stored = `Customer: 1204C  News Gate Trading Company
+Queue priority: 61.
+Payment probability: High.
+Code: 1204C
+Salesman: Junaid
+Outcome: Asked to come later
+Remark (Arabic): السبب وهو استاذ يوسف صاحب الشركة عنده حالة وفاة حالياً والمكتب الاداري مقفل الحين وسوف يتم الدوام مرة اخرى يوم الاربعاء ان شاء الله.
+Remark (English): Will transfer today.
+Next visit: 09/09/2026.
+Visit number today: 1.
+Outstanding:
+0-30: 0
+31-60: 10,028.85
+61-90: 2,850.28
+91-120: 0
+>120: 0`;
+
+  const corrected = "The reason is Mr. Youssef, the owner of the company, currently has a death case and the administrative office is closed now, and it will be open again on Wednesday, God willing.";
+  const patched = patchCollectionVisitSummaryEnglishRemark(stored, corrected);
+
+  assert.match(patched, new RegExp(`^Remark \\(English\\): ${corrected.replace(/\.+$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.$`, "m"));
+  assert.doesNotMatch(patched, /Remark \(English\): Will transfer today\./);
+  assert.doesNotMatch(patched, /\.\.$/m);
+  assert.match(patched, /Remark \(Arabic\): السبب وهو استاذ يوسف/);
 });

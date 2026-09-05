@@ -2,16 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  clearTranslationCache,
   needsEnglishTranslation,
   parseGoogleTranslatePayload,
   parseMyMemoryPayload,
 } from "../app/lib/translateText.js";
 
-test("needsEnglishTranslation detects missing or duplicate english remarks", () => {
+test("needsEnglishTranslation always refreshes when Arabic remark is present", () => {
   assert.equal(needsEnglishTranslation("", "Hello"), false);
   assert.equal(needsEnglishTranslation("مرحبا", ""), true);
   assert.equal(needsEnglishTranslation("مرحبا", "مرحبا"), true);
-  assert.equal(needsEnglishTranslation("مرحبا", "Hello"), false);
+  // Stale English from a previous Arabic remark must still be refreshed.
+  assert.equal(needsEnglishTranslation("مرحبا", "Will transfer today."), true);
+  assert.equal(needsEnglishTranslation("حالة وفاة", "Hello"), true);
 });
 
 test("parseGoogleTranslatePayload joins translated segments", () => {
@@ -36,4 +39,9 @@ test("parseMyMemoryPayload ignores quota warning responses", () => {
     }),
     "He was contacted via mobile.",
   );
+});
+
+test("clearTranslationCache is available for tests", () => {
+  clearTranslationCache();
+  assert.equal(typeof clearTranslationCache, "function");
 });

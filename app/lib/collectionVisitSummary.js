@@ -165,6 +165,46 @@ export function patchCollectionVisitSummaryVisitNumber(
   return `${text}\n${insertLine}`;
 }
 
+export function patchCollectionVisitSummaryEnglishRemark(
+  summary,
+  englishRemark,
+  labels = COLLECTION_VISIT_SUMMARY_LABELS,
+) {
+  const text = String(summary || "");
+  const english = String(englishRemark || "").trim().replace(/\.+$/, "");
+  if (!text || !english) return text;
+
+  const labelVariants = [
+    labels.remarkEnglish,
+    "Remark (English)",
+    "الملاحظة بالانجليزية",
+  ].filter(Boolean);
+
+  const replacementLine = `${labels.remarkEnglish}: ${english}.`;
+
+  for (const label of labelVariants) {
+    const pattern = new RegExp(`^${escapeRegExp(label)}:\\s*.+$`, "m");
+    if (pattern.test(text)) {
+      return text.replace(pattern, replacementLine);
+    }
+  }
+
+  const arabicLabelVariants = [
+    labels.remarkArabic,
+    "Remark (Arabic)",
+    "ملاحظة بالعربية",
+  ].filter(Boolean);
+
+  for (const label of arabicLabelVariants) {
+    const pattern = new RegExp(`^(${escapeRegExp(label)}:\\s*.+)$`, "m");
+    if (pattern.test(text)) {
+      return text.replace(pattern, `$1\n${replacementLine}`);
+    }
+  }
+
+  return text;
+}
+
 export function buildStoredCollectionVisitSummary(row, visit, options = {}, labels = COLLECTION_VISIT_SUMMARY_LABELS) {
   if (!visit) return "";
 

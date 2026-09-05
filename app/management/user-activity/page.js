@@ -13,6 +13,7 @@ import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from
 import { formatKsaDateTime, formatWorkingHours, getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "User Activity", ar: "نشاط المستخدمين" },
@@ -296,7 +297,7 @@ export default function UserActivityPage() {
               )}
 
               <section className="moduleSection">
-                <div className="moduleTableWrap">
+                <ExportableTable filename="user-activity" sheetName="User Activity" className="moduleTableWrap">
                   <table className="moduleTable moduleUserActivityTable">
                     <thead>
                       <tr>
@@ -362,7 +363,7 @@ export default function UserActivityPage() {
                       )}
                     </tbody>
                   </table>
-                </div>
+                </ExportableTable>
               </section>
             </>
           )}

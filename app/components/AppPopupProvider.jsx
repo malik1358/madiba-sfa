@@ -17,8 +17,15 @@ const VARIANT_LABELS = {
   info: { en: "MADIBA SFA", ar: "MADIBA SFA" },
 };
 
-function normalizeWhatsappFile(file) {
-  return file instanceof Blob ? file : null;
+function normalizeWhatsappFiles(payload = {}) {
+  const files = [];
+  if (Array.isArray(payload.whatsappFiles)) {
+    files.push(...payload.whatsappFiles);
+  }
+  if (payload.whatsappFile instanceof Blob) {
+    files.push(payload.whatsappFile);
+  }
+  return files.filter((file) => file instanceof Blob);
 }
 
 export function AppPopupProvider({ children }) {
@@ -39,23 +46,23 @@ export function AppPopupProvider({ children }) {
       message,
       variant: payload.variant || "info",
       whatsappText: String(payload.whatsappText || "").trim(),
-      whatsappFile: normalizeWhatsappFile(payload.whatsappFile),
+      whatsappFiles: normalizeWhatsappFiles(payload),
       autoShareWhatsapp: Boolean(payload.autoShareWhatsapp),
     });
   }, [language]);
 
   const shareWhatsappPayload = useCallback(async (payload, options = {}) => {
     const text = String(payload?.whatsappText || "").trim();
-    const file = normalizeWhatsappFile(payload?.whatsappFile);
-    if (!text && !file) return { success: false, reason: "empty" };
+    const files = Array.isArray(payload?.whatsappFiles) ? payload.whatsappFiles.filter((file) => file instanceof Blob) : [];
+    if (!text && files.length === 0) return { success: false, reason: "empty" };
 
     const title = language === "ar" ? "ملخص للمشاركة" : "Share summary";
-    const dialogTitle = file
-      ? (language === "ar" ? "مشاركة PDF والملخص على واتساب" : "Share PDF and summary on WhatsApp")
+    const dialogTitle = files.length > 0
+      ? (language === "ar" ? "مشاركة المرفقات والملخص على واتساب" : "Share attachments and summary on WhatsApp")
       : (language === "ar" ? "مشاركة على واتساب" : "Share on WhatsApp");
 
-    if (file) {
-      return shareTextAndFilesOnWhatsapp(text, [file], {
+    if (files.length > 0) {
+      return shareTextAndFilesOnWhatsapp(text, files, {
         title,
         dialogTitle,
         ...options,
@@ -70,7 +77,7 @@ export function AppPopupProvider({ children }) {
   }, [language]);
 
   useEffect(() => {
-    if (!popup?.whatsappText && !popup?.whatsappFile) return undefined;
+    if (!popup?.whatsappText && !(popup?.whatsappFiles || []).length) return undefined;
 
     if (popup.whatsappText) {
       void copyTextToClipboard(popup.whatsappText);
@@ -97,8 +104,8 @@ export function AppPopupProvider({ children }) {
           return {
             ...current,
             message: language === "ar"
-              ? "تم فتح واتساب بالملخص. أرفق ملف PDF يدوياً إذا لم يُرفق تلقائياً."
-              : "WhatsApp opened with the summary. Attach the PDF manually if it was not included.",
+              ? "تم فتح واتساب بالملخص. أرفق الصور أو الملفات يدوياً إذا لم تُضمَّن."
+              : "WhatsApp opened with the summary. Attach the photos/files manually if they were not included.",
             variant: "warning",
           };
         });
@@ -122,15 +129,22 @@ export function AppPopupProvider({ children }) {
 
   const value = useMemo(() => ({ showPopup, closePopup }), [showPopup, closePopup]);
 
-  const whatsappHint = popup?.whatsappFile
-    ? (language === "ar"
-      ? "تم نسخ الملخص. شارك PDF والملخص على واتساب الآن."
-      : "Summary copied. Share the PDF and summary on WhatsApp now.")
+  const hasWhatsappFiles = (popup?.whatsappFiles || []).length > 0;
+  const firstFileType = String(popup?.whatsappFiles?.[0]?.type || popup?.whatsappFiles?.[0]?.name || "").toLowerCase();
+  const isSinglePdf = hasWhatsappFiles && popup?.whatsappFiles?.length === 1 && firstFileType.includes("pdf");
+  const whatsappHint = hasWhatsappFiles
+    ? (isSinglePdf
+      ? (language === "ar"
+        ? "تم نسخ الملخص. شارك PDF والملخص على واتساب الآن."
+        : "Summary copied. Share the PDF and summary on WhatsApp now.")
+      : (language === "ar"
+        ? "تم نسخ الملخص. شارك المرفقات والملخص على واتساب الآن."
+        : "Summary copied. Share the attachments and summary on WhatsApp now."))
     : (language === "ar"
       ? "تم نسخ الملخص. شاركه على واتساب الآن."
       : "Summary copied. Share it on WhatsApp now.");
 
-  const whatsappButtonLabel = popup?.whatsappFile
+  const whatsappButtonLabel = isSinglePdf
     ? (language === "ar" ? "مشاركة PDF على واتساب" : "Share PDF on WhatsApp")
     : (language === "ar" ? "مشاركة على واتساب" : "Share on WhatsApp");
 
@@ -149,7 +163,7 @@ export function AppPopupProvider({ children }) {
           >
             <h2 id="app-popup-title">{popup.title}</h2>
             <p id="app-popup-message">{popup.message}</p>
-            {popup.whatsappText || popup.whatsappFile ? (
+            {popup.whatsappText || hasWhatsappFiles ? (
               <>
                 <p className="appPopupWhatsappHint">{whatsappHint}</p>
                 {popup.whatsappText ? (

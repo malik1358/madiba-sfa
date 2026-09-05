@@ -1,0 +1,60 @@
+name: Daily Salesman Resume Email
+
+on:
+  schedule:
+    # 21:15 UTC = 00:15 KSA — previous KSA day's salesman resume table.
+    - cron: "15 21 * * *"
+  workflow_dispatch:
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger daily salesman resume email endpoint
+        env:
+          DAILY_SALESMAN_RESUME_EMAIL_URL: ${{ secrets.DAILY_SALESMAN_RESUME_EMAIL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          DEFAULT_DAILY_SALESMAN_RESUME_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/daily-salesman-resume-email'
+          DAILY_SALESMAN_RESUME_EMAIL_URL_TRIMMED="$(printf '%s' "$DAILY_SALESMAN_RESUME_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          DAILY_SALESMAN_RESUME_EMAIL_URL_EFFECTIVE="$DAILY_SALESMAN_RESUME_EMAIL_URL_TRIMMED"
+
+          if [[ -z "$DAILY_SALESMAN_RESUME_EMAIL_URL_EFFECTIVE" ]]; then
+            echo "DAILY_SALESMAN_RESUME_EMAIL_URL secret is missing; falling back to default endpoint."
+            DAILY_SALESMAN_RESUME_EMAIL_URL_EFFECTIVE="$DEFAULT_DAILY_SALESMAN_RESUME_EMAIL_URL"
+          elif [[ ! "$DAILY_SALESMAN_RESUME_EMAIL_URL_EFFECTIVE" =~ /api/cron/daily-salesman-resume-email([/?].*)?$ ]]; then
+            echo "DAILY_SALESMAN_RESUME_EMAIL_URL secret does not point to /api/cron/daily-salesman-resume-email; falling back to default endpoint."
+            DAILY_SALESMAN_RESUME_EMAIL_URL_EFFECTIVE="$DEFAULT_DAILY_SALESMAN_RESUME_EMAIL_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          post_report() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data '{}'
+          }
+
+          status_code="$(post_report "$DAILY_SALESMAN_RESUME_EMAIL_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$DAILY_SALESMAN_RESUME_EMAIL_URL_EFFECTIVE" != "$DEFAULT_DAILY_SALESMAN_RESUME_EMAIL_URL" ]]; then
+            echo "Primary DAILY_SALESMAN_RESUME_EMAIL_URL failed with HTTP $status_code; retrying default endpoint."
+            DAILY_SALESMAN_RESUME_EMAIL_URL_EFFECTIVE="$DEFAULT_DAILY_SALESMAN_RESUME_EMAIL_URL"
+            status_code="$(post_report "$DAILY_SALESMAN_RESUME_EMAIL_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Daily salesman resume email failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Daily salesman resume email succeeded with HTTP $status_code"
+          cat response.json

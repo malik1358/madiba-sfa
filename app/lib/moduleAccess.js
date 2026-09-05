@@ -16,7 +16,9 @@ export const MODULES = {
   userActivity: { href: "/management/user-activity", label: "User Activity" },
   businessDashboard: { href: "/management/business-dashboard", label: "Business Dashboard" },
   customerMaster: { href: "/management/customer-master", label: "Customer Master" },
+  outstandingNoGps: { href: "/management/outstanding-no-gps", label: "Outstanding Without GPS" },
   salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
+  kpiTargets: { href: "/management/kpi-targets", label: "KPI Targets" },
   gpsMap: { href: "/management/gps-map", label: "GPS Map" },
   upload: { href: "/management/upload", label: "Imports" },
 };
@@ -36,7 +38,7 @@ export const NAV_GROUPS = [
   {
     key: "admin",
     label: "Admin",
-    modules: ["businessDashboard", "customerMaster", "userActivity", "salesmanHierarchy", "gpsMap", "upload"],
+    modules: ["businessDashboard", "customerMaster", "outstandingNoGps", "userActivity", "salesmanHierarchy", "kpiTargets", "gpsMap", "upload"],
   },
 ];
 
@@ -106,7 +108,9 @@ export function buildModuleAccess(context = {}) {
       userActivity: isAdmin || isManager || isCollector,
       businessDashboard: isAdmin || isManager,
       customerMaster: isAdmin || isManager,
+      outstandingNoGps: isAdmin || isManager,
       salesmanHierarchy: isAdmin || isManager || isInvoiceMaker,
+      kpiTargets: isAdmin || isManager,
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
       upload: isAdmin || isManager || isInvoiceMaker,
     },
@@ -165,7 +169,9 @@ export const MODULE_LABELS = {
   userActivity: { en: "User Activity", ar: "نشاط المستخدمين" },
   businessDashboard: { en: "Business Dashboard", ar: "لوحة الأعمال" },
   customerMaster: { en: "Customer Master", ar: "سجل العملاء" },
+  outstandingNoGps: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
   salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },
+  kpiTargets: { en: "KPI Targets", ar: "أهداف الأداء" },
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },
   upload: { en: "Imports", ar: "الاستيراد" },
 };

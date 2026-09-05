@@ -9,10 +9,11 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "Salesman Hierarchy", ar: "هيكل مندوبي المبيعات" },
-  subtitle: { en: "Assign salesmen under a head salesman and manage default testing passwords", ar: "تعيين المندوبين تحت رئيس مندوبين وإدارة كلمات المرور الافتراضية" },
+  subtitle: { en: "Assign salesmen under a head salesman, set pricing region, and manage default testing passwords", ar: "تعيين المندوبين تحت رئيس مندوبين وتحديد منطقة التسعير وإدارة كلمات المرور الافتراضية" },
   management: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading salesman hierarchy...", ar: "جاري تحميل هيكل المندوبين..." },
   statusActive: { en: "Active", ar: "نشط" },
@@ -96,7 +97,9 @@ export default function SalesmanHierarchyPage() {
     email: "",
     role: "salesman",
     headSalesmanCode: "",
+    pricingRegion: "riyadh",
   });
+  const [regionSelections, setRegionSelections] = useState({});
 
   async function loadHierarchy(showLoader = false) {
     const supabase = getSupabaseClient();
@@ -138,6 +141,9 @@ export default function SalesmanHierarchyPage() {
       );
       setRoleSelections(
         Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, normalizeRoleValue(salesman.role)]))
+      );
+      setRegionSelections(
+        Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.pricing_region || "riyadh"]))
       );
     } catch (err) {
       setError(err.message || "Unable to load salesman hierarchy.");
@@ -219,6 +225,7 @@ export default function SalesmanHierarchyPage() {
         mode: "assign-head",
         salesmanId: salesman.id,
         headSalesmanCode: headSelections[salesman.id] || "",
+        pricingRegion: regionSelections[salesman.id] || "riyadh",
       });
       messages.push(result.message || "Head salesman saved.");
 
@@ -264,6 +271,7 @@ export default function SalesmanHierarchyPage() {
         email: String(newSalesman.email || "").trim().toLowerCase(),
         role: String(newSalesman.role || "salesman"),
         headSalesmanCode: normalizeCode(newSalesman.headSalesmanCode || ""),
+        pricingRegion: newSalesman.pricingRegion || "riyadh",
       });
 
       const created = result.created || {};
@@ -271,7 +279,7 @@ export default function SalesmanHierarchyPage() {
       setMessage(
         `${result.message || "User created."} Role: ${createdRole.toUpperCase()} | Username: ${created.login_name || displayLoginName(created.email) || "-"} | Password: ${created.password || "-"}`
       );
-      setNewSalesman({ salesmanName: "", salesmanCode: "", email: "", role: "salesman", headSalesmanCode: "" });
+      setNewSalesman({ salesmanName: "", salesmanCode: "", email: "", role: "salesman", headSalesmanCode: "", pricingRegion: "riyadh" });
       await loadHierarchy(false);
     } catch (err) {
       setError(err.message || "Unable to create salesman.");
@@ -412,6 +420,19 @@ export default function SalesmanHierarchyPage() {
             </label>
 
             <label>
+              Pricing Region
+              <select
+                className="moduleInput"
+                value={newSalesman.pricingRegion}
+                onChange={(event) => setNewSalesman((current) => ({ ...current, pricingRegion: event.target.value }))}
+              >
+                <option value="riyadh">Riyadh</option>
+                <option value="dammam">Dammam</option>
+                <option value="jeddah">Jeddah</option>
+              </select>
+            </label>
+
+            <label>
               Assign Head Salesman
               <select
                 className="moduleInput"
@@ -445,13 +466,14 @@ export default function SalesmanHierarchyPage() {
           </div>
           <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("inactiveHint")}</div>
 
-          <div className="moduleTableWrap">
+          <ExportableTable filename="salesman-hierarchy" sheetName="Hierarchy" className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
                   <th>Salesman</th>
                   <th>Status</th>
                   <th>Role</th>
+                  <th>Region</th>
                   <th>Username</th>
                   <th>Current Head</th>
                   <th>Assign Head</th>
@@ -487,6 +509,17 @@ export default function SalesmanHierarchyPage() {
                               {option.label}
                             </option>
                           ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          className="moduleInput"
+                          value={regionSelections[salesman.id] || salesman.pricing_region || "riyadh"}
+                          onChange={(event) => setRegionSelections((current) => ({ ...current, [salesman.id]: event.target.value }))}
+                        >
+                          <option value="riyadh">Riyadh</option>
+                          <option value="dammam">Dammam</option>
+                          <option value="jeddah">Jeddah</option>
                         </select>
                       </td>
                       <td>{loginName || "No username"}</td>
@@ -545,12 +578,12 @@ export default function SalesmanHierarchyPage() {
 
                 {salesmen.length === 0 && (
                   <tr>
-                    <td colSpan={8}>No users found.</td>
+                    <td colSpan={9}>No users found.</td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
+          </ExportableTable>
         </section>
 
         <section className="moduleSection">

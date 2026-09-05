@@ -6,6 +6,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
+import ExportableTable from "../../components/ExportableTable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { addPdfBuildFooter } from "../../lib/buildInfo";
@@ -948,7 +949,7 @@ export default function PendingOrdersPage() {
               <span>{filteredOrders.length} shown / {summary.total} order(s)</span>
             </div>
 
-            <div className="moduleTableWrap">
+            <ExportableTable filename="pending-orders" sheetName="Pending Orders" className="moduleTableWrap">
               <table className="moduleTable">
                 <thead>
                   <tr>
@@ -1040,7 +1041,7 @@ export default function PendingOrdersPage() {
                                   <span>{loadingLines ? "Loading..." : `${orderLines.length} line(s)`}</span>
                                 </div>
 
-                                <div className="moduleTableWrap">
+                                <ExportableTable filename={`pending-order-lines-${order.id}`} sheetName="Order Lines" className="moduleTableWrap">
                                   <table className="moduleTable">
                                     <thead>
                                       <tr>
@@ -1070,7 +1071,7 @@ export default function PendingOrdersPage() {
                                       )}
                                     </tbody>
                                   </table>
-                                </div>
+                                </ExportableTable>
 
                                 {creditApprovalByOrder?.[order.id]?.remark ? (
                                   <div
@@ -1186,7 +1187,7 @@ export default function PendingOrdersPage() {
                                       <h2>Change History</h2>
                                       <span>{orderHistory.length} event(s)</span>
                                     </div>
-                                    <div className="moduleTableWrap">
+                                    <ExportableTable filename={`pending-order-history-${order.id}`} sheetName="History" className="moduleTableWrap">
                                       <table className="moduleTable">
                                         <thead>
                                           <tr>
@@ -1211,7 +1212,7 @@ export default function PendingOrdersPage() {
                                           ))}
                                         </tbody>
                                       </table>
-                                    </div>
+                                    </ExportableTable>
                                   </div>
                                 )}
                               </div>
@@ -1229,7 +1230,7 @@ export default function PendingOrdersPage() {
                   )}
                 </tbody>
               </table>
-            </div>
+            </ExportableTable>
           </section>
         </div>
       </main>

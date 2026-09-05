@@ -7,6 +7,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import DaySummaryBox from "../../components/DaySummaryBox";
+import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import {
   DEFAULT_TRANSIT_SPEED_KMH,
@@ -548,7 +549,7 @@ export default function CollectionReportPage() {
                     />
                   ) : null}
 
-                  <div className="moduleTableWrap">
+                  <ExportableTable filename={`collection-report-${collector.collectorName || collector.collectorId}`} sheetName="Collection Route" className="moduleTableWrap">
                     <table className="moduleTable">
                       <thead>
                         <tr>
@@ -686,7 +687,7 @@ export default function CollectionReportPage() {
                         )}
                       </tbody>
                     </table>
-                  </div>
+                  </ExportableTable>
                 </section>
                 );
               })}

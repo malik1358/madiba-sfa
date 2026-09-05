@@ -17,6 +17,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import ExportableTable from "../../components/ExportableTable";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess";
 import { detectTable } from "../../lib/schemaGuards";
@@ -41,6 +42,11 @@ import NearestCustomerSuggestions from "../../components/NearestCustomerSuggesti
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import { buildNearestCustomerActions } from "../../lib/dashboardNearestCustomers";
 import { getScheduleTodayKey, isScheduleDateInWindow } from "../../lib/scheduleDateWindow";
+import {
+  getTodayDateKey,
+  nextVisitDateInputValue,
+  validateNextVisitDate,
+} from "../../lib/nextVisitDate";
 
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 
@@ -130,6 +136,7 @@ const PAGE_TEXT = {
   visitOutcome: { en: "Visit Outcome", ar: "نتيجة الزيارة" },
   nextVisit: { en: "Next Visit Schedule", ar: "موعد الزيارة القادمة" },
   nextVisitRequired: { en: "Next visit date is required.", ar: "تاريخ الزيارة القادمة مطلوب." },
+  nextVisitPast: { en: "Next visit date cannot be in the past.", ar: "لا يمكن أن يكون تاريخ الزيارة القادمة في الماضي." },
   visitNotes: { en: "Visit Notes", ar: "ملاحظات الزيارة" },
   startDictation: { en: "Start Dictation", ar: "بدء الإملاء" },
   stopDictation: { en: "Stop Dictation", ar: "إيقاف الإملاء" },
@@ -934,6 +941,21 @@ export default function MyDayPage({ mode = "default" } = {}) {
     });
   }
 
+  async function promptCustomerGpsIfFar(customer, location, accessToken) {
+    if (!location || !accessToken || !customer?.customer_code) return;
+    try {
+      await maybePromptCustomerLocationUpdate({
+        customerCode: customer.customer_code,
+        customerName: customer.customer_name,
+        entryLocation: location,
+        accessToken,
+        language,
+      });
+    } catch (locationError) {
+      console.warn("Customer location update skipped", locationError);
+    }
+  }
+
   async function addLog(entryType) {
     if (!logsEnabled) {
       setError("Daily activity logs are disabled until the daily_activity_logs table is available.");
@@ -1053,7 +1075,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     setVisitItemsLoading(true);
     setVisitForm({
       outcome: "PAYMENT_FOLLOWUP",
-      nextVisitAt: toDateInputValue(customer?.next_visit_at),
+      nextVisitAt: nextVisitDateInputValue(customer?.next_visit_at),
       note: "",
       stockChecks: [],
     });
@@ -1170,6 +1192,12 @@ export default function MyDayPage({ mode = "default" } = {}) {
       setError(t("nextVisitRequired"));
       return;
     }
+    try {
+      validateNextVisitDate(visitForm.nextVisitAt, { required: true });
+    } catch (validationError) {
+      setError(String(validationError?.message || "").includes("past") ? t("nextVisitPast") : t("nextVisitRequired"));
+      return;
+    }
 
     setVisitSaving(true);
     setError("");
@@ -1185,22 +1213,42 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
-      if (location) {
-        try {
-          await maybePromptCustomerLocationUpdate({
-            customerCode: customer.customer_code,
-            customerName: customer.customer_name,
-            entryLocation: location,
-            accessToken: session.access_token,
-            language,
-          });
-        } catch (locationError) {
-          console.warn("Customer location update skipped", locationError);
-        }
-      }
+      await promptCustomerGpsIfFar(customer, location, session.access_token);
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
       let saveResult = null;
+
+      // Always go through /api/visit-reports so past next-visit dates are blocked
+      // for Visit Without Order even when activity-log mode is enabled.
+      saveResult = await postJsonResilient({
+        url: "/api/visit-reports",
+        jsonBody: {
+          customerCode: customer.customer_code,
+          customerName: customer.customer_name,
+          outcome: visitForm.outcome,
+          nextVisitAt: visitForm.nextVisitAt || null,
+          note: visitForm.note || null,
+          stockChecks: visitForm.stockChecks,
+          capturedAt,
+          location,
+          platform,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        metadata: {
+          type: "visit_report",
+          customerCode: customer.customer_code,
+        },
+      });
+
+      if (!saveResult.success) {
+        const apiError = String(saveResult?.error || saveResult?.message || "");
+        if (apiError.toLowerCase().includes("past")) {
+          throw new Error(t("nextVisitPast"));
+        }
+        throw new Error(apiError || "Unable to save visit report.");
+      }
 
       if (logsEnabled) {
         const payload = {
@@ -1228,32 +1276,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
           customerName: customer.customer_name,
           outcome: visitForm.outcome,
         });
-      } else {
-        saveResult = await postJsonResilient({
-          url: "/api/visit-reports",
-          jsonBody: {
-            customerCode: customer.customer_code,
-            customerName: customer.customer_name,
-            outcome: visitForm.outcome,
-            nextVisitAt: visitForm.nextVisitAt || null,
-            note: visitForm.note || null,
-            stockChecks: visitForm.stockChecks,
-            capturedAt,
-            location,
-            platform,
-          },
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          metadata: {
-            type: "visit_report",
-            customerCode: customer.customer_code,
-          },
-        });
-
-        if (!saveResult.success) {
-          throw new Error("Unable to save visit report.");
-        }
       }
 
       const summaryText = buildFieldVisitWhatsappSummary({
@@ -1288,7 +1310,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
       openWhatsappDirect(summaryText);
     } catch (err) {
-      setError(err.message || "Unable to save visit report.");
+      const message = String(err?.message || "Unable to save visit report.");
+      setError(message.toLowerCase().includes("past") ? t("nextVisitPast") : message);
     } finally {
       setVisitSaving(false);
     }
@@ -1318,6 +1341,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
+      await promptCustomerGpsIfFar(customer, location, session.access_token);
       const platform = await resolveGpsCapturePlatform();
 
       const response = await fetch("/api/visit-reports", {
@@ -1385,6 +1409,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
+      await promptCustomerGpsIfFar(customer, location, session.access_token);
       const platform = await resolveGpsCapturePlatform();
 
       const response = await fetch("/api/visit-reports", {
@@ -1750,8 +1775,19 @@ export default function MyDayPage({ mode = "default" } = {}) {
               className="moduleInput"
               type="date"
               required
+              min={getTodayDateKey()}
               value={visitForm.nextVisitAt}
-              onChange={(event) => setVisitForm((current) => ({ ...current, nextVisitAt: event.target.value }))}
+              onChange={(event) => {
+                const value = event.target.value;
+                try {
+                  if (value) validateNextVisitDate(value);
+                  setError("");
+                  setVisitForm((current) => ({ ...current, nextVisitAt: value }));
+                } catch (validationError) {
+                  setVisitForm((current) => ({ ...current, nextVisitAt: "" }));
+                  setError(String(validationError?.message || "").includes("past") ? t("nextVisitPast") : t("nextVisitRequired"));
+                }
+              }}
             />
           </label>
           <label className="moduleFieldFull">
@@ -1968,7 +2004,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                 <h2>{day.label}</h2>
                 <span>{day.rows.length} {t("plannedVisitsCount")}</span>
               </summary>
-              <div className="moduleTableWrap moduleScheduleTableWrap">
+              <ExportableTable filename={`my-day-planned-${day.dateKey}`} sheetName="Planned Visits" className="moduleTableWrap moduleScheduleTableWrap">
                 <table className="moduleTable moduleScheduleTable">
                   <thead>
                     <tr>
@@ -2012,7 +2048,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
             </details>
           ))}
 
@@ -2026,7 +2062,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                 <h2>{t("unscheduledVisits")}</h2>
                 <span>{visitCalendar.unscheduled.length}</span>
               </summary>
-              <div className="moduleTableWrap moduleScheduleTableWrap">
+              <ExportableTable filename="my-day-unscheduled" sheetName="Unscheduled" className="moduleTableWrap moduleScheduleTableWrap">
                 <table className="moduleTable moduleScheduleTable">
                   <thead>
                     <tr>
@@ -2057,7 +2093,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
             </details>
           )}
         </section>
@@ -2113,7 +2149,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
               <h2>{group.title}</h2>
               <span>{group.rows.length} {t("customersCount")}</span>
             </div>
-            <div className="moduleTableWrap">
+            <ExportableTable filename={`my-day-${group.key}`} sheetName={group.title} className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
@@ -2187,7 +2223,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                 ))}
               </tbody>
             </table>
-            </div>
+            </ExportableTable>
           </div>
           ))}
 
@@ -2197,7 +2233,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
               <h2>{t("inactiveCustomers")}</h2>
               <span>{filteredInactiveCustomers.length} {t("customersCount")}</span>
             </div>
-            <div className="moduleTableWrap">
+            <ExportableTable filename="my-day-inactive-customers" sheetName="Inactive Customers" className="moduleTableWrap">
             <table className="moduleTable">
               <thead>
                 <tr>
@@ -2237,7 +2273,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                 ))}
               </tbody>
             </table>
-            </div>
+            </ExportableTable>
           </div>
           ) : null}
         </section>

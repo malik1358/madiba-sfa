@@ -7,6 +7,8 @@ import { postJsonResilient } from '../../../lib/offlineApi';
 import { resolveGpsCapturePlatform } from '../../../lib/geo';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
+import { normalizePaymentType } from '../../../lib/regionalPricing';
+import { priceOrderLines } from '../../../lib/orderPricing';
 
 function isPendingOrderId(orderId) {
   return String(orderId || '').startsWith('pending:');
@@ -21,30 +23,45 @@ function buildOrderPayload({
   selectedCustomer,
   orderItems,
   priceList,
+  paymentType,
+  cashDiscountMap,
+  valueDiscountMap,
+  pricingRegion,
   draftOrderId,
   loadedOrderStatus,
   location,
   capturedAt,
   platform,
 }) {
+  const pricedLines = priceOrderLines(
+    orderItems.map((item) => ({
+      item_code: item.item_code,
+      item_name: item.item_name,
+      category: item.category,
+      quantity: Number(item.order_quantity),
+      rate: Number(getPrice(priceList, item.item_code) || 0),
+    })),
+    {
+      regionPriceMap: priceList,
+      cashDiscountMap,
+      valueDiscountMap,
+      paymentType,
+    },
+  );
+
   return {
     action,
     orderId: draftOrderId && !isPendingOrderId(draftOrderId) ? Number(draftOrderId) : null,
     customerCode: selectedCustomer.customer_code,
     customerName: selectedCustomer.customer_name,
     salesmanCode: selectedCustomer.current_salesman_code,
+    paymentType: normalizePaymentType(paymentType),
+    pricingRegion,
     loadedOrderStatus: loadedOrderStatus || 'DRAFT',
     capturedAt,
     location,
     platform,
-    lines: orderItems.map((item) => ({
-      item_code: item.item_code,
-      item_name: item.item_name,
-      category: item.category,
-      quantity: Number(item.order_quantity),
-      rate: Number(getPrice(priceList, item.item_code) || 0),
-      line_value: Number(getPrice(priceList, item.item_code) || 0) * Number(item.order_quantity),
-    })),
+    lines: pricedLines,
   };
 }
 
@@ -60,6 +77,11 @@ export function useOrder({
   editOrderId = '',
   language = 'en',
   userRole = '',
+  paymentType = 'credit',
+  setPaymentType = null,
+  cashDiscountMap = {},
+  valueDiscountMap = {},
+  pricingRegion = 'riyadh',
 }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
   const [orderQuantities, setOrderQuantities] = useState({});
@@ -181,7 +203,12 @@ export function useOrder({
         if (!historyResponse.ok || !historyPayload.success) {
           setOrderHistory([]);
         } else {
-          setOrderHistory(Array.isArray(historyPayload.history) ? historyPayload.history : []);
+          const history = Array.isArray(historyPayload.history) ? historyPayload.history : [];
+          setOrderHistory(history);
+          const latestPaymentType = [...history].reverse().find((entry) => entry?.paymentType)?.paymentType;
+          if (latestPaymentType && typeof setPaymentType === "function") {
+            setPaymentType(normalizePaymentType(latestPaymentType));
+          }
         }
       } catch (err) {
         setError(err.message || 'Unable to restore draft order.');
@@ -232,7 +259,6 @@ export function useOrder({
         customerCode: selectedCustomer.customer_code,
         customerName: selectedCustomer.customer_name,
         accessToken: session.access_token,
-        skipCustomerLocationUpdate: true,
         role: userRole,
       });
       const capturedAt = new Date().toISOString();
@@ -246,6 +272,10 @@ export function useOrder({
           selectedCustomer,
           orderItems,
           priceList,
+          paymentType,
+          cashDiscountMap,
+          valueDiscountMap,
+          pricingRegion,
           draftOrderId,
           loadedOrderStatus,
           location,
@@ -291,7 +321,7 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [draftOrderId, language, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole]);
+  }, [cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
     if (orderItems.length === 0) {
@@ -321,7 +351,6 @@ export function useOrder({
         customerCode: selectedCustomer?.customer_code,
         customerName: selectedCustomer?.customer_name,
         accessToken: session.access_token,
-        skipCustomerLocationUpdate: true,
         role: userRole,
       });
       const capturedAt = new Date().toISOString();
@@ -335,6 +364,10 @@ export function useOrder({
           selectedCustomer,
           orderItems,
           priceList,
+          paymentType,
+          cashDiscountMap,
+          valueDiscountMap,
+          pricingRegion,
           draftOrderId,
           loadedOrderStatus,
           location,
@@ -383,7 +416,7 @@ export function useOrder({
     } finally {
       setSubmittingOrder(false);
     }
-  }, [draftOrderId, language, loadedOrderStatus, orderItems, priceList, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole]);
+  }, [cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

@@ -1,4 +1,5 @@
 import { numberFormat, qtyFormat, shortDate } from '../lib/format';
+import ExportableTable from '../../../components/ExportableTable';
 
 export default function TransactionHistory({ transactions, analytics }) {
   return (
@@ -11,7 +12,7 @@ export default function TransactionHistory({ transactions, analytics }) {
         <span className="auditTransactionCount">{analytics.transactionCount} transactions</span>
       </div>
 
-      <div className="auditTableScroll">
+      <ExportableTable filename="customer-transaction-history" sheetName="Transactions" className="auditTableScroll">
         <table className="auditTransactionTable">
           <thead>
             <tr>
@@ -43,7 +44,7 @@ export default function TransactionHistory({ transactions, analytics }) {
             )}
           </tbody>
         </table>
-      </div>
+      </ExportableTable>
     </section>
   );
 }

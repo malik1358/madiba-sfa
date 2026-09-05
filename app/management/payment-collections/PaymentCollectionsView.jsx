@@ -8,6 +8,7 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import ExportableTable from "../../components/ExportableTable";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -50,12 +51,17 @@ import {
   mergeLegalMatchesIntoDueRows,
 } from "../../lib/collectionQueueSearch";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
-import { shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp } from "../../lib/whatsappShare";
+import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
 import { getSupabaseClient } from "../../lib/supabase";
 import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
 import { getScheduleTodayKey, isScheduleDateInWindow } from "../../lib/scheduleDateWindow";
+import {
+  getTodayDateKey,
+  nextVisitDateInputValue,
+  validateNextVisitDate,
+} from "../../lib/nextVisitDate";
 
 const TEXT = {
   title: { en: "Payment Collections", ar: "التحصيلات" },
@@ -154,14 +160,13 @@ const TEXT = {
   },
   copySummary: { en: "Copy Summary", ar: "نسخ الملخص" },
   shareWhatsapp: { en: "Share on WhatsApp", ar: "مشاركة على واتساب" },
-  shareWhatsappWithReceipt: { en: "Share receipt & summary on WhatsApp", ar: "مشاركة الإيصال والملخص على واتساب" },
   whatsappShareHint: {
     en: "Visit saved. Share this summary on WhatsApp now — works offline too.",
     ar: "تم حفظ الزيارة. شارك هذا الملخص على واتساب الآن — يعمل بدون اتصال أيضاً.",
   },
-  whatsappShareReceiptHint: {
-    en: "Receipt attached — you can share the photo/PDF together with the summary.",
-    ar: "تم إرفاق الإيصال — يمكنك مشاركة الصورة/‏PDF مع الملخص.",
+  whatsappShareAttachmentsHint: {
+    en: "Visit saved. Share the uploaded photos/files together with this summary on WhatsApp.",
+    ar: "تم حفظ الزيارة. شارك الصور/الملفات المرفوعة مع هذا الملخص على واتساب.",
   },
   copied: { en: "Copied", ar: "تم النسخ" },
   paymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
@@ -205,6 +210,7 @@ const TEXT = {
   msgModeRequired: { en: "Mode of receipt is required for funds received outcome.", ar: "طريقة الاستلام مطلوبة عند اختيار تم استلام مبلغ." },
   msgReceiptRequired: { en: "Receipt copy is compulsory when funds are received.", ar: "صورة الإيصال إلزامية عند استلام مبلغ." },
   msgNextVisitRequired: { en: "Next visit date is required when full overdue is not received.", ar: "تاريخ الزيارة القادمة مطلوب عند عدم استلام كامل المبلغ المستحق." },
+  msgNextVisitPast: { en: "Next visit date cannot be in the past.", ar: "لا يمكن أن يكون تاريخ الزيارة القادمة في الماضي." },
   msgSaveFailed: { en: "Unable to save collection visit.", ar: "تعذر حفظ زيارة التحصيل." },
   msgRequestTimeout: {
     en: "Request timed out. Please check your connection and try again.",
@@ -258,8 +264,8 @@ const TEXT = {
   msgCopyFailed: { en: "Could not copy WhatsApp message automatically.", ar: "تعذر نسخ رسالة واتساب تلقائياً." },
   msgWhatsappShareFailed: { en: "Could not open WhatsApp. Use Copy Summary and paste manually.", ar: "تعذر فتح واتساب. استخدم نسخ الملخص واللصق يدوياً." },
   msgWhatsappReceiptFallback: {
-    en: "WhatsApp opened with the summary. Attach the receipt manually if it was not included.",
-    ar: "تم فتح واتساب مع الملخص. أرفق الإيصال يدوياً إذا لم يُضمَّن.",
+    en: "WhatsApp opened with the summary. Attach the photos/files manually if they were not included.",
+    ar: "تم فتح واتساب مع الملخص. أرفق الصور/الملفات يدوياً إذا لم تُضمَّن.",
   },
   salesmanFilterHint: { en: "Tap to select one or more salesmen", ar: "اضغط لاختيار مندوب واحد أو أكثر" },
   allSalesmen: { en: "All salesmen", ar: "كل المندوبين" },
@@ -494,8 +500,10 @@ async function resolveEnglishRemarkForSave(arabicRemark, englishRemark) {
 async function resolveEnglishRemark(arabicRemark, englishRemark) {
   const arabic = String(arabicRemark || "").trim();
   const english = String(englishRemark || "").trim();
-  if (!arabic || (english && english !== arabic)) return english;
+  if (!arabic) return english;
 
+  // Always translate from Arabic so a stale English remark from an earlier
+  // visit note cannot override the current Arabic text.
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
@@ -514,7 +522,7 @@ async function resolveEnglishRemark(arabicRemark, englishRemark) {
     // Fall back to stored remark below.
   }
 
-  return english || arabic;
+  return (english && english !== arabic) ? english : arabic;
 }
 
 async function fetchTodayCollectionVisitCount(supabase, userId) {
@@ -844,7 +852,7 @@ function buildInitialForm(row) {
     visitOutcome: mapInitialOutcome(row),
     amountReceived: row?.latest_collection?.amount_received ? String(row.latest_collection.amount_received) : "",
     receiptMode: row?.latest_collection?.receipt_mode || "",
-    nextVisitAt: toDateInputValue(row?.latest_collection?.next_visit_at),
+    nextVisitAt: nextVisitDateInputValue(row?.latest_collection?.next_visit_at),
     remarkArabic: row?.latest_collection?.remark_arabic || "",
     remarkEnglish: row?.latest_collection?.remark_english || "",
     legalNote: row?.legal_transfer?.note || "",
@@ -876,7 +884,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [schedulerScope, setSchedulerScope] = useState(null);
   const [activeRowKey, setActiveRowKey] = useState("");
   const [summaryForWhatsApp, setSummaryForWhatsApp] = useState("");
-  const [receiptFileForWhatsapp, setReceiptFileForWhatsapp] = useState(null);
+  const [whatsappShareFiles, setWhatsappShareFiles] = useState([]);
   const [copyStatus, setCopyStatus] = useState("");
   const [isTranslating, setIsTranslating] = useState(false);
   const [isDictating, setIsDictating] = useState(false);
@@ -936,6 +944,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (text.includes("Mode of receipt is required")) return t("msgModeRequired");
     if (text.includes("Receipt copy is compulsory")) return t("msgReceiptRequired");
     if (text.includes("Next visit date is required") || text.includes("Next visit is required")) return t("msgNextVisitRequired");
+    if (text.includes("Next visit date cannot be in the past")) return t("msgNextVisitPast");
     if (text.includes("GPS is required") || text === GPS_REQUIRED_ERROR) return t("msgGpsRequired");
     if (text.includes("Unable to save collection visit")) return t("msgSaveFailed");
     if (text.includes("timed out") || text.toLowerCase().includes("abort")) return t("msgRequestTimeout");
@@ -999,7 +1008,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   useEffect(() => {
     setSummaryForWhatsApp("");
     setCopyStatus("");
-    setReceiptFileForWhatsapp(null);
+    setWhatsappShareFiles([]);
   }, [activeRowKey]);
 
   useEffect(() => {
@@ -1414,6 +1423,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     const text = String(form.remarkArabic || "").trim();
     if (!activeRow || !text) return;
 
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       setIsTranslating(true);
       try {
@@ -1421,23 +1431,31 @@ export default function PaymentCollectionsView({ view = "due" }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text, from: "ar", to: "en" }),
+          signal: controller.signal,
         });
         const payload = await response.json().catch(() => ({}));
         if (response.ok && payload.success && payload.translatedText) {
+          const translated = String(payload.translatedText).trim();
           setForm((current) => {
-            const currentEnglish = String(current.remarkEnglish || "").trim();
-            const currentArabic = String(current.remarkArabic || "").trim();
-            if (currentEnglish && currentEnglish !== currentArabic) return current;
-            return { ...current, remarkEnglish: String(payload.translatedText) };
+            // Only apply if Arabic is still the text we translated (race-safe).
+            // Always overwrite English when Arabic changed — do not keep a
+            // previous English remark that no longer matches.
+            if (String(current.remarkArabic || "").trim() !== text) return current;
+            if (String(current.remarkEnglish || "").trim() === translated) return current;
+            return { ...current, remarkEnglish: translated };
           });
         }
-      } catch {
+      } catch (error) {
+        if (error?.name === "AbortError") return;
       } finally {
-        setIsTranslating(false);
+        if (!controller.signal.aborted) setIsTranslating(false);
       }
     }, 700);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [form.remarkArabic, activeRow]);
 
   if (!supabaseClient) {
@@ -1575,6 +1593,16 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (requiresNextVisit && !form.nextVisitAt) {
         throw new Error(t("msgNextVisitRequired"));
       }
+      if (form.nextVisitAt) {
+        try {
+          validateNextVisitDate(form.nextVisitAt, { required: requiresNextVisit });
+        } catch (validationError) {
+          if (String(validationError?.message || "").includes("past")) {
+            throw new Error(t("msgNextVisitPast"));
+          }
+          throw new Error(t("msgNextVisitRequired"));
+        }
+      }
 
       const outcomeReason = ["RESPONSIBLE_NOT_AVAILABLE", "WRONG_CREDIT_DAYS", "NO_DUE_AS_PER_CUSTOMER", "TRANSFER_TO_LEGAL"].includes(selectedOutcome)
         ? formatOutcomeLabel(selectedOutcome, t)
@@ -1654,14 +1682,23 @@ export default function PaymentCollectionsView({ view = "due" }) {
         formData.append("gpsAccuracyMeters", String(gps.accuracy));
       }
 
+      const shareFiles = [];
       if (form.paymentCopy) {
-        formData.append("paymentCopy", await prepareUploadFile(form.paymentCopy));
+        const paymentFile = toWhatsappShareFile(
+          await prepareUploadFile(form.paymentCopy),
+          "payment-copy.jpg",
+        );
+        formData.append("paymentCopy", paymentFile);
+        if (paymentFile) shareFiles.push(paymentFile);
       }
 
-      let receiptFileForShare = null;
       if (form.receiptCopy) {
-        receiptFileForShare = await prepareUploadFile(form.receiptCopy);
-        formData.append("receiptCopy", receiptFileForShare);
+        const receiptFile = toWhatsappShareFile(
+          await prepareUploadFile(form.receiptCopy),
+          "receipt-copy.jpg",
+        );
+        formData.append("receiptCopy", receiptFile);
+        if (receiptFile) shareFiles.push(receiptFile);
       }
 
       const saveResult = await postFormDataResilient({
@@ -1684,7 +1721,19 @@ export default function PaymentCollectionsView({ view = "due" }) {
         : payload?.whatsapp?.error
           ? `${t("msgVisitSaved")} ${t("msgWhatsappNotSent")}: ${payload.whatsapp.error}`
           : t("msgVisitSaved");
-      showPopup({ message: popupMessage, variant: "success" });
+
+      const isNative = await isNativeMobilePlatform();
+      await presentWhatsappSummaryAfterSave(summaryText, {
+        files: shareFiles,
+      });
+      showPopup({
+        message: popupMessage,
+        variant: "success",
+        whatsappText: summaryText,
+        whatsappFiles: shareFiles,
+        autoShareWhatsapp: isNative || Boolean(saveResult.queued),
+      });
+
       setTodayVisitCount(visitNumberForDay);
       await refreshPendingSyncCount();
 
@@ -1703,12 +1752,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
         }, session.user.id, scope);
         void processOfflineQueue(async () => session.access_token);
       }
-
-      await presentWhatsappSummaryAfterSave(summaryText, {
-        autoOpenWhatsapp: Boolean(saveResult.queued),
-        receiptFile: receiptFileForShare,
-      });
-      setReceiptFileForWhatsapp(receiptFileForShare);
     } catch (err) {
       showPopup({ message: localizeApiMessage(err.message || t("msgSaveFailed")), variant: "error" });
     } finally {
@@ -1782,17 +1825,22 @@ export default function PaymentCollectionsView({ view = "due" }) {
     }, 120);
   }
 
-  async function shareSummaryWithReceiptOnWhatsapp(summaryText = summaryForWhatsApp, receiptFile = receiptFileForWhatsapp) {
+  async function shareSummaryOnWhatsapp(summaryText = summaryForWhatsApp, files = whatsappShareFiles) {
     const text = String(summaryText || "").trim();
-    const file = receiptFile instanceof Blob ? receiptFile : null;
-    if (!text || !file) {
-      return shareSummaryOnWhatsapp(summaryText);
-    }
+    const shareFiles = (Array.isArray(files) ? files : [])
+      .map((file, index) => toWhatsappShareFile(file, `attachment-${index + 1}.jpg`))
+      .filter(Boolean);
+    if (!text && shareFiles.length === 0) return;
 
-    const result = await shareTextAndFilesOnWhatsapp(text, [file], {
-      title: t("summary"),
-      dialogTitle: t("shareWhatsappWithReceipt"),
-    });
+    const result = shareFiles.length > 0
+      ? await shareTextAndFilesOnWhatsapp(text, shareFiles, {
+        title: t("summary"),
+        dialogTitle: t("shareWhatsapp"),
+      })
+      : await shareTextOnWhatsapp(text, {
+        title: t("summary"),
+        dialogTitle: t("shareWhatsapp"),
+      });
 
     if (result.success) {
       if (result.fallback) {
@@ -1805,42 +1853,16 @@ export default function PaymentCollectionsView({ view = "due" }) {
     showPopup({ message: t("msgWhatsappShareFailed"), variant: "warning" });
   }
 
-  async function shareSummaryOnWhatsapp(summaryText = summaryForWhatsApp) {
-    const text = String(summaryText || "").trim();
-    if (!text) return;
-
-    const result = await shareTextOnWhatsapp(text, {
-      title: t("summary"),
-      dialogTitle: t("shareWhatsapp"),
-    });
-
-    if (result.success) return;
-    if (result.reason === "cancelled") return;
-
-    showPopup({ message: t("msgWhatsappShareFailed"), variant: "warning" });
-  }
-
   async function presentWhatsappSummaryAfterSave(summaryText, options = {}) {
+    const files = Array.isArray(options.files) ? options.files.filter((file) => file instanceof Blob) : [];
     setSummaryForWhatsApp(summaryText);
-    if (options.receiptFile instanceof Blob) {
-      setReceiptFileForWhatsapp(options.receiptFile);
-    }
+    setWhatsappShareFiles(files);
     scrollToWhatsappSummary();
 
     const copied = await copyTextToClipboard(summaryText);
     if (copied) {
       setCopyStatus(t("copied"));
       setTimeout(() => setCopyStatus(""), 1200);
-    }
-
-    if (options.autoOpenWhatsapp) {
-      window.setTimeout(() => {
-        if (options.receiptFile instanceof Blob) {
-          void shareSummaryWithReceiptOnWhatsapp(summaryText, options.receiptFile);
-        } else {
-          void shareSummaryOnWhatsapp(summaryText);
-        }
-      }, 450);
     }
   }
 
@@ -2054,7 +2076,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                     : t("noScheduledRevisits")}
                 </div>
               ) : (
-                <div className="moduleTableWrap">
+                <ExportableTable filename="scheduled-revisits" sheetName="Scheduled" className="moduleTableWrap">
                   <table className="moduleTable moduleCollectorInvoiceTable">
                     <thead>
                       <tr>
@@ -2156,7 +2178,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                       })}
                     </tbody>
                   </table>
-                </div>
+                </ExportableTable>
               )}
             </section>
             </>
@@ -2242,7 +2264,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                 {cashQueueSourceRows.length === 0 ? (
                   <div className="moduleHint">{t("noCashQueue")}</div>
                 ) : (
-                  <div className="moduleTableWrap moduleCollectorTableWrap">
+                  <ExportableTable filename="cash-collection-queue" sheetName="Cash Queue" className="moduleTableWrap moduleCollectorTableWrap">
                     <table className="moduleTable moduleCollectorTable">
                       <thead>
                         <tr>
@@ -2295,7 +2317,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                         })}
                       </tbody>
                     </table>
-                  </div>
+                  </ExportableTable>
                 )}
               </div>
             ) : null}
@@ -2310,7 +2332,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
               <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("creditQueueHint")}</div>
             ) : null}
 
-            <div className="moduleTableWrap moduleCollectorTableWrap">
+            <ExportableTable filename="collection-queue" sheetName="Collection Queue" className="moduleTableWrap moduleCollectorTableWrap">
               <table className="moduleTable moduleCollectorTable">
                 <thead>
                   <tr>
@@ -2616,7 +2638,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   </button>
                                 </div>
                               ) : null}
-                              <div className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "10px" }}>
+                              <ExportableTable filename="collection-aging" sheetName="Aging" className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "10px" }}>
                                 <table className="moduleTable">
                                   <thead>
                                     <tr>
@@ -2651,8 +2673,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     </tr>
                                   </tbody>
                                 </table>
-                              </div>
-                              <div className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "12px" }}>
+                              </ExportableTable>
+                              <ExportableTable filename="collection-invoices" sheetName="Invoices" className="moduleTableWrap moduleCollectorSubTableWrap" style={{ marginBottom: "12px" }}>
                                 <table className="moduleTable moduleCollectorInvoiceTable">
                                   <thead>
                                     <tr>
@@ -2678,7 +2700,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     ))}
                                   </tbody>
                                 </table>
-                              </div>
+                              </ExportableTable>
 
                               <div className="moduleSection" style={{ marginTop: "8px" }}>
                                 <div className="moduleSectionHeader">
@@ -2730,7 +2752,27 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   </label>
                                   <label>
                                     {t("nextVisit")}
-                                    <input className="moduleInput" type="date" value={form.nextVisitAt} onChange={(event) => setForm((current) => ({ ...current, nextVisitAt: event.target.value }))} />
+                                    <input
+                                      className="moduleInput"
+                                      type="date"
+                                      min={getTodayDateKey()}
+                                      value={form.nextVisitAt}
+                                      onChange={(event) => {
+                                        const value = event.target.value;
+                                        try {
+                                          if (value) validateNextVisitDate(value);
+                                          setForm((current) => ({ ...current, nextVisitAt: value }));
+                                        } catch (validationError) {
+                                          setForm((current) => ({ ...current, nextVisitAt: "" }));
+                                          showPopup({
+                                            message: String(validationError?.message || "").includes("past")
+                                              ? t("msgNextVisitPast")
+                                              : t("msgNextVisitRequired"),
+                                            variant: "error",
+                                          });
+                                        }
+                                      }}
+                                    />
                                   </label>
                                   <label className="moduleFieldFull">
                                     {t("remarkArabic")}
@@ -2816,7 +2858,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   {summaryForWhatsApp ? (
                                     <>
                                       <div className="moduleHint" style={{ marginTop: "6px", color: "#166534" }}>
-                                        {receiptFileForWhatsapp ? t("whatsappShareReceiptHint") : t("whatsappShareHint")}
+                                        {whatsappShareFiles.length > 0 ? t("whatsappShareAttachmentsHint") : t("whatsappShareHint")}
                                       </div>
                                       <textarea className="moduleTextArea" rows={8} value={summaryForWhatsApp} readOnly />
                                     </>
@@ -2826,18 +2868,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                 </label>
                                 {summaryForWhatsApp ? (
                                   <div className="moduleInlineStack moduleActionStack" style={{ marginTop: "8px" }}>
-                                    {receiptFileForWhatsapp ? (
-                                      <button
-                                        type="button"
-                                        className="modulePrimaryButton"
-                                        onClick={() => shareSummaryWithReceiptOnWhatsapp()}
-                                      >
-                                        {t("shareWhatsappWithReceipt")}
-                                      </button>
-                                    ) : null}
                                     <button
                                       type="button"
-                                      className={receiptFileForWhatsapp ? "moduleInlineButton moduleActionButton" : "modulePrimaryButton"}
+                                      className="modulePrimaryButton"
                                       onClick={() => shareSummaryOnWhatsapp()}
                                     >
                                       {t("shareWhatsapp")}
@@ -2877,7 +2910,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                   })}
                 </tbody>
               </table>
-            </div>
+            </ExportableTable>
 
             {!loading && visibleRows.length === 0 && visibleNotDueRows.length === 0 && (
               <div className="moduleHint">{view === "legal" ? t("noLegal") : t("noDue")}</div>

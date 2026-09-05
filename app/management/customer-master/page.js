@@ -16,6 +16,7 @@ import { fetchSalesScope } from "../../lib/salesScope";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
 import CustomerDocumentsPanel from "./CustomerDocumentsPanel";
+import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "Customer Master", ar: "سجل العملاء" },
@@ -179,6 +180,14 @@ export default function CustomerMasterPage() {
   const [transferring, setTransferring] = useState(false);
 
   usePopupMessages({ error, message: importSummary });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const nextSearch = normalizeCustomerMasterSearch(params.get("search"));
+    if (!nextSearch) return;
+    setSearch(nextSearch);
+    setDebouncedSearch(nextSearch);
+  }, []);
 
   useEffect(() => {
     if (!accessDenied) return;
@@ -685,7 +694,7 @@ export default function CustomerMasterPage() {
                 ) : historyRows.length === 0 ? (
                   <div className="moduleHint">{t("noGpsHistory")}</div>
                 ) : (
-                  <div className="moduleTableWrap">
+                  <ExportableTable filename="customer-gps-history" sheetName="GPS History" className="moduleTableWrap">
                     <table className="moduleTable">
                       <thead>
                         <tr>
@@ -714,12 +723,12 @@ export default function CustomerMasterPage() {
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                  </ExportableTable>
                 )}
               </section>
             ) : null}
 
-            <div className="moduleTableWrap moduleCustomerMasterTableWrap">
+            <ExportableTable filename="customer-master" sheetName="Customers" className="moduleTableWrap moduleCustomerMasterTableWrap">
               <table className="moduleTable moduleCustomerMasterTable">
                 <thead>
                   <tr>
@@ -838,7 +847,7 @@ export default function CustomerMasterPage() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </ExportableTable>
 
             {!loading && rows.length === 0 ? <div className="moduleHint">{t("noRows")}</div> : null}
             {loading ? <div className="moduleLoading">{t("loading")}</div> : null}

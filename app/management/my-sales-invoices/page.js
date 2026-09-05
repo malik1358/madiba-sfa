@@ -12,6 +12,7 @@ import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from
 import { currentMonthDateRange } from "../../lib/salesInvoices";
 import { getSupabaseClient } from "../../lib/supabase";
 import { getKsaDateString } from "../../lib/workdayActivity";
+import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "My Sales Invoices", ar: "فواتير المبيعات" },
@@ -278,7 +279,7 @@ export default function MySalesInvoicesPage() {
             ) : visibleInvoices.length === 0 ? (
               <div className="moduleHint">{t("noInvoices")}</div>
             ) : (
-              <div className="moduleTableWrap">
+              <ExportableTable filename="my-sales-invoices" sheetName="Sales Invoices" className="moduleTableWrap">
                 <table className="moduleTable">
                   <thead>
                     <tr>
@@ -334,7 +335,7 @@ export default function MySalesInvoicesPage() {
                           {isOpen ? (
                             <tr className="moduleCollectorDetailRow">
                               <td colSpan={columnCount}>
-                                <div className="moduleTableWrap">
+                                <ExportableTable filename={`sales-invoice-items-${invoice.voucher_number || invoice.key}`} sheetName="Invoice Items" className="moduleTableWrap">
                                   <table className="moduleTable">
                                     <thead>
                                       <tr>
@@ -359,7 +360,7 @@ export default function MySalesInvoicesPage() {
                                       ))}
                                     </tbody>
                                   </table>
-                                </div>
+                                </ExportableTable>
                               </td>
                             </tr>
                           ) : null}
@@ -368,7 +369,7 @@ export default function MySalesInvoicesPage() {
                     })}
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
             )}
           </section>
         </div>

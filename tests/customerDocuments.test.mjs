@@ -165,6 +165,16 @@ test("approval required when exposure exceeds 10000 without a valid credit appli
   assert.match(ok.remark, /not required/i);
 });
 
+test("cash orders skip credit approval", () => {
+  const result = evaluateCreditApproval({
+    outstanding: { total_outstanding: 500, buckets: { "61-90": 500 } },
+    orderValue: 100,
+    paymentType: "cash",
+  });
+  assert.equal(result.required, false);
+  assert.match(result.remark, /cash order/i);
+});
+
 test("PDF remark helper wraps credit control text", async () => {
   const { wrapCreditControlRemark, formatCreditApprovalPdfRemark } = await import("../app/lib/creditApproval.js");
   const evaluation = evaluateCreditApproval({

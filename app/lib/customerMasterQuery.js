@@ -200,9 +200,10 @@ function parseOutstandingDataset(rawValue) {
     }
     return {
       rows: Array.isArray(parsed.rows) ? parsed.rows : [],
+      invoices: Array.isArray(parsed.invoices) ? parsed.invoices : [],
     };
   } catch {
-    return { rows: [] };
+    return { rows: [], invoices: [] };
   }
 }
 

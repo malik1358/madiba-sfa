@@ -55,8 +55,24 @@ function isMobileUserAgent() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
 }
 
+export function toWhatsappShareFile(file, fallbackName = "attachment.jpg") {
+  if (!(file instanceof Blob)) return null;
+  if (typeof File !== "undefined" && file instanceof File && String(file.name || "").trim()) {
+    return file;
+  }
+
+  const type = String(file.type || "image/jpeg").trim() || "image/jpeg";
+  const ext = type.includes("pdf") ? "pdf" : type.includes("png") ? "png" : "jpg";
+  const rawName = String(file.name || fallbackName || `attachment.${ext}`).trim() || `attachment.${ext}`;
+  const name = rawName.replace(/[^\w.-]+/g, "_");
+  if (typeof File === "undefined") return file;
+  return new File([file], name, { type, lastModified: Date.now() });
+}
+
 function normalizeShareFiles(files = []) {
-  return (files || []).filter((file) => file instanceof Blob);
+  return (files || [])
+    .map((file, index) => toWhatsappShareFile(file, `attachment-${index + 1}.jpg`))
+    .filter(Boolean);
 }
 
 async function blobToBase64(blob) {
@@ -210,7 +226,18 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
 
   const dialogTitle = String(options.dialogTitle || "Share receipt and summary on WhatsApp").trim();
   const title = String(options.title || "Collection visit").trim();
-  const phoneNumber = String(options.phoneNumber || process.env.NEXT_PUBLIC_COLLECTION_WHATSAPP_NUMBER || "").trim();
+
+  if (await isNativeMobilePlatform()) {
+    try {
+      await shareFilesViaCapacitor(shareFiles, message, dialogTitle);
+      return { success: true, method: "capacitor-share-files" };
+    } catch (error) {
+      const cancelled = String(error?.message || error || "").toLowerCase().includes("cancel");
+      if (cancelled) {
+        return { success: false, reason: "cancelled" };
+      }
+    }
+  }
 
   if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
     try {
@@ -222,21 +249,9 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
         payload.files = shareFiles;
       }
       await navigator.share(payload);
-      return { success: true, method: "web-share-files" };
+      return { success: true, method: payload.files ? "web-share-files" : "web-share" };
     } catch (error) {
       if (error?.name === "AbortError") {
-        return { success: false, reason: "cancelled" };
-      }
-    }
-  }
-
-  if (await isNativeMobilePlatform()) {
-    try {
-      await shareFilesViaCapacitor(shareFiles, message, dialogTitle);
-      return { success: true, method: "capacitor-share-files" };
-    } catch (error) {
-      const cancelled = String(error?.message || error || "").toLowerCase().includes("cancel");
-      if (cancelled) {
         return { success: false, reason: "cancelled" };
       }
     }

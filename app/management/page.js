@@ -11,6 +11,7 @@ import MostVisitedPages from "../components/MostVisitedPages";
 import { usePopupMessages } from "../hooks/usePopupMessages";
 import { useAppPopup } from "../components/AppPopupProvider";
 import { buildModuleAccess, listAccessibleModules, localizedModuleLabel } from "../lib/moduleAccess";
+import ExportableTable from "../components/ExportableTable";
 
 const TEXT = {
   title: { en: "Management", ar: "الإدارة" },
@@ -216,9 +217,11 @@ export default function ManagementPage() {
       "userActivity",
       "customerAudit",
       "customerMaster",
+      "outstandingNoGps",
       "newOrder",
       "visitWithoutOrder",
       "salesmanHierarchy",
+      "kpiTargets",
       "gpsMap",
       "pendingOrders",
       "newCustomer",
@@ -330,7 +333,7 @@ export default function ManagementPage() {
               <div className="moduleSectionHeader">
                 <h2>{t("recentOrders")}</h2>
               </div>
-              <div className="moduleTableWrap">
+              <ExportableTable filename="recent-orders" sheetName="Recent Orders" className="moduleTableWrap">
                 <table className="moduleTable">
                   <thead>
                     <tr>
@@ -358,7 +361,7 @@ export default function ManagementPage() {
                     )}
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
             </section>
           </>
         ) : null}

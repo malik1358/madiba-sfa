@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 import { monthName, numberFormat, qtyFormat, trendClass } from '../lib/format';
 import { isDoNotUseItem } from '../lib/helpers';
+import ExportableTable from '../../../components/ExportableTable';
 
 export default function CategoryPerformance({ analytics, itemCatalog = [], expandedCategories, toggleCategory, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
   const catalogByCode = new Map(
@@ -13,7 +14,7 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
         <span>Category Performance by Month</span>
         <small>Tap a category to view items and place an order.</small>
       </div>
-      <div className="auditTableScroll">
+      <ExportableTable filename="customer-category-performance" sheetName="Categories" className="auditTableScroll">
         <table className="auditMatrix auditCategoryMatrixV3">
           <thead>
             <tr className="auditYearRow">
@@ -90,7 +91,7 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
                           {category.items.length === 0 ? (
                             <div className="auditEmpty">No items found in this category.</div>
                           ) : (
-                            <div className="auditItemTableScroll">
+                            <ExportableTable filename={`customer-category-items-${category.category}`} sheetName="Items" className="auditItemTableScroll">
                               <table className="auditItemMatrix">
                                 <thead>
                                   <tr className="auditItemYearRow">
@@ -172,7 +173,7 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
                                   })}
                                 </tbody>
                               </table>
-                            </div>
+                            </ExportableTable>
                           )}
                         </div>
                       </td>
@@ -183,7 +184,7 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
             })}
           </tbody>
         </table>
-      </div>
+      </ExportableTable>
     </section>
   );
 }

@@ -7,6 +7,7 @@ import {
   findLegalTransferForCustomer,
   redactCollectionVisitScheduleForViewer,
 } from "../../lib/paymentCollections.js";
+import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
@@ -30,7 +31,10 @@ import {
 } from "../../lib/outstanding.js";
 import { needsEnglishTranslation, translateText } from "../../lib/translateText.js";
 import { formatCollectionUserDisplayName } from "../../lib/geo.js";
-import { patchCollectionVisitSummaryVisitNumber } from "../../lib/collectionVisitSummary.js";
+import {
+  patchCollectionVisitSummaryEnglishRemark,
+  patchCollectionVisitSummaryVisitNumber,
+} from "../../lib/collectionVisitSummary.js";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -882,16 +886,27 @@ export async function POST(request) {
     const nextVisitAt = String(formData.get("nextVisitAt") || "").trim();
     const remarkArabic = String(formData.get("remarkArabic") || "").trim();
     let remarkEnglish = String(formData.get("remarkEnglish") || "").trim();
+    // Always re-translate from Arabic when present so English cannot stay stale
+    // after the Arabic remark was updated (needsEnglishTranslation now always
+    // returns true for non-empty Arabic).
     if (needsEnglishTranslation(remarkArabic, remarkEnglish)) {
+      const previousEnglish = remarkEnglish;
       try {
-        remarkEnglish = await Promise.race([
+        const translated = await Promise.race([
           translateText(remarkArabic, { from: "ar", to: "en" }),
           new Promise((resolve) => {
-            setTimeout(() => resolve(remarkArabic), 8000);
+            setTimeout(() => resolve(""), 8000);
           }),
-        ]) || remarkArabic;
+        ]);
+        if (translated) {
+          remarkEnglish = translated;
+        } else if (!remarkEnglish || remarkEnglish === remarkArabic) {
+          remarkEnglish = remarkArabic;
+        } else {
+          remarkEnglish = previousEnglish;
+        }
       } catch {
-        remarkEnglish = remarkArabic;
+        if (!remarkEnglish) remarkEnglish = remarkArabic;
       }
     }
     const nonPaymentReason = String(formData.get("nonPaymentReason") || "").trim();
@@ -934,9 +949,8 @@ export async function POST(request) {
     if (visitOutcome === "FUNDS_RECEIVED" && !receiptMode) {
       throw new Error("Mode of receipt is required for funds received outcome");
     }
-    if (paymentStatus !== "PAID" && visitOutcome !== "TRANSFER_TO_LEGAL" && !nextVisitAt) {
-      throw new Error("Next visit date is required when full payment was not received.");
-    }
+    const requiresNextVisit = paymentStatus !== "PAID" && visitOutcome !== "TRANSFER_TO_LEGAL";
+    const validatedNextVisitAt = validateNextVisitDate(nextVisitAt, { required: requiresNextVisit });
 
     // Verify user has access to this customer
     if (!scope.hasAllAccess) {
@@ -994,9 +1008,15 @@ export async function POST(request) {
     // Insert new collection visit
     const existingVisitCount = await countCollectionVisitsForUserDay(admin, user.id);
     const authoritativeVisitNumber = Math.max(visitNumberForDay, existingVisitCount + 1);
-    const finalSummaryText = summaryText && authoritativeVisitNumber !== visitNumberForDay
-      ? patchCollectionVisitSummaryVisitNumber(summaryText, authoritativeVisitNumber)
+    let finalSummaryText = summaryText
+      ? patchCollectionVisitSummaryEnglishRemark(summaryText, remarkEnglish)
       : summaryText;
+    if (finalSummaryText && authoritativeVisitNumber !== visitNumberForDay) {
+      finalSummaryText = patchCollectionVisitSummaryVisitNumber(
+        finalSummaryText,
+        authoritativeVisitNumber,
+      );
+    }
 
     const visitInsertBase = {
       customer_code: customerCode,
@@ -1004,7 +1024,7 @@ export async function POST(request) {
       payment_status: paymentStatus,
       amount_received: amountReceived,
       receipt_mode: receiptMode,
-      next_visit_at: nextVisitAt || null,
+      next_visit_at: validatedNextVisitAt,
       remark_arabic: remarkArabic,
       remark_english: remarkEnglish,
       non_payment_reason: nonPaymentReason,

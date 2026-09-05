@@ -17,11 +17,19 @@ import Link from "next/link";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
+import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { loadPricePayload } from "../../lib/pricePayload";
+import {
+  buildEffectivePriceList,
+  normalizePaymentType,
+  pricingRegionLabel,
+  regionPriceMapFor,
+  resolveOrderPricingRegion,
+} from "../../lib/regionalPricing";
 import { resolveOverdueDaysFromDueDate, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { fetchOutstandingCached } from "../../lib/mobileDataCache";
 
@@ -69,6 +77,10 @@ function CustomerAuditPageContent() {
 
   usePopupMessages({ message, error });
   const [priceList, setPriceList] = useState({});
+  const [regionPriceMaps, setRegionPriceMaps] = useState({});
+  const [cashDiscountMap, setCashDiscountMap] = useState({});
+  const [valueDiscountMap, setValueDiscountMap] = useState({});
+  const [paymentType, setPaymentType] = useState("credit");
   const [priceSheetItems, setPriceSheetItems] = useState([]);
   const [requestedCustomerCode, setRequestedCustomerCode] = useState("");
   const [outstandingLoading, setOutstandingLoading] = useState(false);
@@ -106,9 +118,23 @@ function CustomerAuditPageContent() {
   const { access } = useModuleAccess();
   const analytics = useAnalytics(transactions);
   const quickOrderSuggestions = useQuickOrder({ analytics, transactions, peerTransactions, itemMaster });
+  const pricingRegion = useMemo(
+    () => resolveOrderPricingRegion({
+      currentUserRegion: accessScope?.pricingRegion,
+      customerSalesmanCode: selectedCustomer?.current_salesman_code,
+      pricingRegionBySalesmanCode: accessScope?.pricingRegionBySalesmanCode || {},
+    }),
+    [accessScope, selectedCustomer]
+  );
+
+  const regionPriceList = useMemo(
+    () => regionPriceMapFor(regionPriceMaps, pricingRegion, priceList),
+    [priceList, pricingRegion, regionPriceMaps]
+  );
+
   const orderCatalog = useMemo(
-    () => buildOrderCatalog(itemMaster, priceSheetItems, priceList),
-    [itemMaster, priceList, priceSheetItems],
+    () => buildOrderCatalog(itemMaster, priceSheetItems, regionPriceList),
+    [itemMaster, regionPriceList, priceSheetItems],
   );
   const {
     orderItems,
@@ -134,13 +160,29 @@ function CustomerAuditPageContent() {
     ],
     catalogItems: orderCatalog,
     selectedCustomer,
-    priceList,
+    priceList: regionPriceList,
+    paymentType,
+    setPaymentType,
+    cashDiscountMap,
+    valueDiscountMap,
+    pricingRegion,
     setError,
     setMessage,
     accessScope,
     language,
     userRole: access.role,
   });
+
+  const displayPriceList = useMemo(
+    () => buildEffectivePriceList({
+      wholesaleMap: regionPriceList,
+      cashDiscountMap,
+      valueDiscountMap,
+      paymentType,
+      quantities: orderQuantities || {},
+    }),
+    [cashDiscountMap, orderQuantities, paymentType, regionPriceList, valueDiscountMap]
+  );
 
   useEffect(() => {
     async function loadOutstanding() {
@@ -211,6 +253,9 @@ function CustomerAuditPageContent() {
       try {
         const parsed = await loadPricePayload(PRICE_CACHE_API, PRICE_CACHE_KEY);
         setPriceList(parsed.priceMap || {});
+        setRegionPriceMaps(parsed.regionPriceMaps || {});
+        setCashDiscountMap(parsed.cashDiscountMap || {});
+        setValueDiscountMap(parsed.valueDiscountMap || {});
         setPriceSheetItems(parsed.sheetItems || []);
       } catch {
         // Keep previous prices if fresh fetch fails.
@@ -391,7 +436,7 @@ function CustomerAuditPageContent() {
 
           {!outstandingLoading && outstandingInfo.customer && (
             <>
-              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+              <ExportableTable filename="customer-outstanding-buckets" sheetName="Outstanding" className="moduleTableWrap" style={{ marginTop: "10px" }}>
                 <table className="moduleTable">
                   <thead>
                     <tr>
@@ -414,9 +459,9 @@ function CustomerAuditPageContent() {
                     </tr>
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
 
-              <div className="moduleTableWrap" style={{ marginTop: "10px" }}>
+              <ExportableTable filename="customer-outstanding-invoices" sheetName="Invoices" className="moduleTableWrap" style={{ marginTop: "10px" }}>
                 <table className="moduleTable">
                   <thead>
                     <tr>
@@ -452,7 +497,7 @@ function CustomerAuditPageContent() {
                     )}
                   </tbody>
                 </table>
-              </div>
+              </ExportableTable>
             </>
           )}
 
@@ -470,7 +515,20 @@ function CustomerAuditPageContent() {
             <button type="button" className="auditTransactionToggle" onClick={() => window.print()}>Print / Save PDF</button>
           </div>
           <div className="auditEmpty" style={{ marginTop: "8px" }}>
-            Loaded {Object.keys(priceList).length} prices • Item master {itemMasterStatus}
+            Loaded {Object.keys(regionPriceList).length} {pricingRegionLabel(pricingRegion)} prices • Item master {itemMasterStatus}
+          </div>
+          <div className="moduleFilterRow" style={{ marginTop: "10px" }}>
+            <label>
+              Payment Type
+              <select
+                className="moduleInput"
+                value={paymentType}
+                onChange={(event) => setPaymentType(normalizePaymentType(event.target.value))}
+              >
+                <option value="credit">Credit</option>
+                <option value="cash">Cash</option>
+              </select>
+            </label>
           </div>
         </section>
 
@@ -485,7 +543,7 @@ function CustomerAuditPageContent() {
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}
           changeOrderQty={updateQty}
-          priceList={priceList}
+          priceList={displayPriceList}
         />
 
         <QuickOrder
@@ -494,7 +552,7 @@ function CustomerAuditPageContent() {
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}
           changeOrderQty={updateQty}
-          priceList={priceList}
+          priceList={displayPriceList}
         />
 
         <FullItemList
@@ -504,7 +562,9 @@ function CustomerAuditPageContent() {
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}
           changeOrderQty={updateQty}
-          priceList={priceList}
+          priceList={displayPriceList}
+          cashDiscountMap={cashDiscountMap}
+          valueDiscountMap={valueDiscountMap}
         />
 
         <OrderBar
@@ -514,7 +574,7 @@ function CustomerAuditPageContent() {
           submittingOrder={submittingOrder}
           saveDraft={saveDraft}
           setShowOrderReview={setShowOrderReview}
-          priceList={priceList}
+          priceList={displayPriceList}
           draftOrderId={draftOrderId}
         />
 
@@ -522,7 +582,7 @@ function CustomerAuditPageContent() {
           showOrderReview={showOrderReview}
           orderItems={orderItems}
           orderSummary={orderSummary}
-          priceList={priceList}
+          priceList={displayPriceList}
           savingOrder={savingOrder}
           submittingOrder={submittingOrder}
           saveDraft={saveDraft}

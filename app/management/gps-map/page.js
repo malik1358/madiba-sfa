@@ -10,6 +10,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { formatGpsCapturePlatformLabel, inferGpsCapturePlatformFromNote } from "../../lib/geo";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "GPS Map", ar: "خريطة GPS" },
@@ -882,7 +883,7 @@ export default function GpsMapPage() {
               </div>
             )}
 
-            <div className="moduleTableWrap" style={{ marginTop: "12px" }}>
+            <ExportableTable filename="gps-map-streets" sheetName="Streets" className="moduleTableWrap" style={{ marginTop: "12px" }}>
               <table className="moduleTable">
                 <thead>
                   <tr>
@@ -937,14 +938,14 @@ export default function GpsMapPage() {
                   )}
                 </tbody>
               </table>
-            </div>
+            </ExportableTable>
           </section>
 
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>Customer-wise Latest Visit Points</h2>
             </div>
-            <div className="moduleTableWrap">
+            <ExportableTable filename="gps-map-customers" sheetName="Customers" className="moduleTableWrap">
               <table className="moduleTable">
                 <thead>
                   <tr>
@@ -983,7 +984,7 @@ export default function GpsMapPage() {
                   )}
                 </tbody>
               </table>
-            </div>
+            </ExportableTable>
           </section>
 
           <section className="moduleSection">
@@ -991,7 +992,7 @@ export default function GpsMapPage() {
               <h2>Last Seen by User</h2>
               <span>Latest record per salesman or collector for current filters</span>
             </div>
-            <div className="moduleTableWrap">
+            <ExportableTable filename="gps-map-users" sheetName="Users" className="moduleTableWrap">
               <table className="moduleTable">
                 <thead>
                   <tr>
@@ -1021,7 +1022,7 @@ export default function GpsMapPage() {
                   )}
                 </tbody>
               </table>
-            </div>
+            </ExportableTable>
           </section>
 
           <section className="moduleSection">
@@ -1029,7 +1030,7 @@ export default function GpsMapPage() {
               <h2>Raw GPS Capture Log</h2>
               <span>Filterable backend capture records</span>
             </div>
-            <div className="moduleTableWrap">
+            <ExportableTable filename="gps-map-raw" sheetName="Raw GPS" className="moduleTableWrap">
               <table className="moduleTable">
                 <thead>
                   <tr>
@@ -1080,7 +1081,7 @@ export default function GpsMapPage() {
                   )}
                 </tbody>
               </table>
-            </div>
+            </ExportableTable>
           </section>
         </div>
       </main>

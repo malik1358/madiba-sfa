@@ -42,6 +42,8 @@ import { useAppPopup } from "../../components/AppPopupProvider";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
+import { appendMonthlyPerformanceToPdf } from "../../lib/orderPdfMonthlyPerformance";
+import { buildAnalytics } from "../customer-audit/lib/analytics";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 
@@ -1287,6 +1289,34 @@ export default function NewOrderPage() {
           ensureSpace,
         });
 
+        let monthlyAnalytics = analytics;
+        if (!monthlyAnalytics?.monthlySummary?.length && snapshot.customerCode) {
+          try {
+            const supabase = getSupabaseClient();
+            const accessToken = supabase ? await waitForAccessToken(supabase) : "";
+            if (accessToken) {
+              const historyResponse = await fetch(
+                `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(snapshot.customerCode)}`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+              );
+              const historyPayload = await historyResponse.json().catch(() => ({}));
+              if (historyResponse.ok && historyPayload.success) {
+                monthlyAnalytics = buildAnalytics(Array.isArray(historyPayload.transactions) ? historyPayload.transactions : []);
+              }
+            }
+          } catch {
+            monthlyAnalytics = analytics;
+          }
+        }
+
+        cursorY = appendMonthlyPerformanceToPdf(doc, {
+          analytics: monthlyAnalytics,
+          x: marginX,
+          y: () => cursorY,
+          maxWidth: contentWidth,
+          ensureSpace,
+        });
+
         doc.setFontSize(9);
         ensureSpace(20);
         doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 36);
@@ -1326,7 +1356,7 @@ export default function NewOrderPage() {
         setDownloadingPdf(false);
       }
     },
-    [language, setError]
+    [analytics, language, setError]
   );
 
   const presentOrderWhatsappShare = useCallback(async (snapshot, { savedMessage, queued = false } = {}) => {

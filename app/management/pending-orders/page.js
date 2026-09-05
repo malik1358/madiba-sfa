@@ -22,6 +22,8 @@ import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../li
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
+import { appendMonthlyPerformanceToPdf } from "../../lib/orderPdfMonthlyPerformance";
+import { buildAnalytics } from "../customer-audit/lib/analytics";
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 
 const TEXT = {
@@ -738,6 +740,27 @@ export default function PendingOrdersPage() {
         maxWidth: 515,
         ensureSpace,
       });
+
+      try {
+        const token = await getAuthToken();
+        const historyResponse = await fetch(
+          `/api/customer-history?customerCode=${encodeURIComponent(activeOrder.customer_code || "")}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const historyPayload = await historyResponse.json().catch(() => ({}));
+        if (historyResponse.ok && historyPayload.success) {
+          const monthlyAnalytics = buildAnalytics(Array.isArray(historyPayload.transactions) ? historyPayload.transactions : []);
+          cursorY = appendMonthlyPerformanceToPdf(doc, {
+            analytics: monthlyAnalytics,
+            x: 40,
+            y: () => cursorY,
+            maxWidth: 515,
+            ensureSpace,
+          });
+        }
+      } catch {
+        // Keep the order PDF even if customer history is unavailable.
+      }
 
       addPdfBuildFooter(doc);
 

@@ -88,7 +88,8 @@ Outstanding:
   const corrected = "The reason is Mr. Youssef, the owner of the company, currently has a death case and the administrative office is closed now, and it will be open again on Wednesday, God willing.";
   const patched = patchCollectionVisitSummaryEnglishRemark(stored, corrected);
 
-  assert.match(patched, new RegExp(`^Remark \\(English\\): ${corrected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.$`, "m"));
+  assert.match(patched, new RegExp(`^Remark \\(English\\): ${corrected.replace(/\.+$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.$`, "m"));
   assert.doesNotMatch(patched, /Remark \(English\): Will transfer today\./);
+  assert.doesNotMatch(patched, /\.\.$/m);
   assert.match(patched, /Remark \(Arabic\): السبب وهو استاذ يوسف/);
 });

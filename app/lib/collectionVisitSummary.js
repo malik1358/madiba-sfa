@@ -171,7 +171,7 @@ export function patchCollectionVisitSummaryEnglishRemark(
   labels = COLLECTION_VISIT_SUMMARY_LABELS,
 ) {
   const text = String(summary || "");
-  const english = String(englishRemark || "").trim();
+  const english = String(englishRemark || "").trim().replace(/\.+$/, "");
   if (!text || !english) return text;
 
   const labelVariants = [

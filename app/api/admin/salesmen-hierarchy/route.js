@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomInt } from "crypto";
 import { DEFAULT_PRICING_REGION, normalizePricingRegion } from "../../../lib/regionalPricing.js";
+import { isMissingSchemaColumn } from "../../../lib/performanceKpis.js";
+import { normalizeDeliverableEmail } from "../../../lib/mailer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -352,14 +354,22 @@ async function requireManagementAccess(admin, request) {
 }
 
 async function loadSalesmen(admin) {
-  const [profilesRes, usersRes] = await Promise.all([
-    admin
+  const roleFilter = ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"];
+  let profilesRes = await admin
+    .from("profiles")
+    .select("id,salesman_code,salesman_name,role,is_active,report_email")
+    .in("role", roleFilter)
+    .order("salesman_name");
+
+  if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
+    profilesRes = await admin
       .from("profiles")
       .select("id,salesman_code,salesman_name,role,is_active")
-      .in("role", ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"])
-      .order("salesman_name"),
-    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-  ]);
+      .in("role", roleFilter)
+      .order("salesman_name");
+  }
+
+  const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
 
   if (profilesRes.error) throw profilesRes.error;
   if (usersRes.error) throw usersRes.error;
@@ -378,6 +388,7 @@ async function loadSalesmen(admin) {
       role: profile.role || "",
       is_active: profile.is_active !== false,
       email: authUser?.email || "",
+      report_email: String(profile.report_email || "").trim(),
       login_name: displayLoginName(authUser?.email || ""),
       head_salesman_code: metadata.head_salesman_code || "",
       head_salesman_name: metadata.head_salesman_name || "",
@@ -542,11 +553,13 @@ export async function POST(request) {
         return NextResponse.json({ success: false, error: "Created user id is missing." }, { status: 500 });
       }
 
+      const reportEmail = normalizeDeliverableEmail(body?.reportEmail);
       const { error: profileInsertError } = await admin.from("profiles").upsert({
         id: userId,
         role: selectedRole,
         salesman_code: salesmanCode,
         salesman_name: salesmanName,
+        ...(reportEmail ? { report_email: reportEmail } : {}),
       });
 
       if (profileInsertError) {
@@ -641,6 +654,50 @@ export async function POST(request) {
         message: isActive
           ? `${target.salesman_name || target.salesman_code || salesmanId} is active again and will appear in User Activity.`
           : `${target.salesman_name || target.salesman_code || salesmanId} is inactive and hidden from User Activity.`,
+      });
+    }
+
+    if (mode === "set-report-email") {
+      const salesmanId = String(body?.salesmanId || "").trim();
+      const reportEmail = normalizeDeliverableEmail(body?.reportEmail);
+
+      if (!salesmanId) {
+        return NextResponse.json({ success: false, error: "Missing salesman id." }, { status: 400 });
+      }
+
+      if (String(body?.reportEmail || "").trim() && !reportEmail) {
+        return NextResponse.json({ success: false, error: "Enter a real email address, not a login username." }, { status: 400 });
+      }
+
+      const { data: target, error: targetError } = await admin
+        .from("profiles")
+        .select("id,salesman_code,salesman_name")
+        .eq("id", salesmanId)
+        .single();
+
+      if (targetError) throw targetError;
+
+      const { error: updateError } = await admin
+        .from("profiles")
+        .update({ report_email: reportEmail || null })
+        .eq("id", salesmanId);
+
+      if (updateError) {
+        if (isMissingSchemaColumn(updateError)) {
+          return NextResponse.json({
+            success: false,
+            error: "Run sql/setup_profile_report_email.sql in Supabase to store report emails.",
+          }, { status: 400 });
+        }
+        throw updateError;
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: reportEmail
+          ? `Daily visit reports for ${target.salesman_name || target.salesman_code || salesmanId} will go to ${reportEmail}.`
+          : `Cleared the report email for ${target.salesman_name || target.salesman_code || salesmanId}.`,
+        reportEmail,
       });
     }
 

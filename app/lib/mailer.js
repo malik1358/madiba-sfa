@@ -9,6 +9,18 @@ export function isLikelyEmail(value) {
   return parseEmailList(value).length === 1;
 }
 
+export function isDeliverableEmail(value) {
+  const email = parseEmailList(value)[0] || "";
+  if (!email) return false;
+  const host = email.split("@")[1] || "";
+  return Boolean(host) && !host.endsWith(".local") && host !== "localhost";
+}
+
+export function normalizeDeliverableEmail(value) {
+  const email = parseEmailList(value)[0] || "";
+  return isDeliverableEmail(email) ? email : "";
+}
+
 export function getMailerConfig(env = process.env) {
   const host = String(env.SMTP_HOST || "").trim();
   const port = Number(env.SMTP_PORT || 587);

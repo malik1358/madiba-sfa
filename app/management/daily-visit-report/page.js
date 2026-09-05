@@ -23,9 +23,10 @@ import {
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
 import { useReverseGeocodeCache } from "../../hooks/useReverseGeocodeCache";
-import { getKsaDateString } from "../../lib/workdayActivity";
+import { addKsaCalendarDays, getKsaDateString, getKsaWeekdayIndexForDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { visitReportRowClassName, VISIT_REPORT_ROW_LEGEND } from "../../lib/visitReportRowColors";
 
 const TEXT = {
   title: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومي" },
@@ -76,28 +77,68 @@ const TEXT = {
   daySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
   userDaySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
   dayRoute: { en: "Day route", ar: "مسار اليوم" },
-  openRouteMap: { en: "Open route in Google Maps", ar: "فتح المسار في خرائط جوجل" },
+  openRouteMap: { en: "Driving route (no names)", ar: "مسار القيادة (بدون أسماء)" },
+  mapsHint: {
+    en: "Google Maps driving route has no customer names. Open a stop below to drop a labeled pin on that street. Look at the neighborhood around the pin — that is the GPS place.",
+    ar: "مسار القيادة في خرائط جوجل لا يعرض أسماء العملاء. افتح محطة أدناه لإسقاط دبوس باسم الشارع. انظر إلى الحي حول الدبوس — هذا مكان الـ GPS.",
+  },
+  longestIdleTitle: { en: "Longest idle", ar: "أطول توقف" },
+  openThisPlace: { en: "Open this place", ar: "فتح هذا المكان" },
+  openLongestIdle: { en: "Open longest idle in Google Maps", ar: "فتح أطول توقف في خرائط جوجل" },
+  routeStops: { en: "Named stops and idle places", ar: "المحطات المسماة وأماكن التوقف" },
+  idleBubblesTitle: { en: "Unlogged idle circles", ar: "دوائر التوقف غير المسجل" },
+  idleBubblesHint: {
+    en: "Bigger red circle = longer time with no visit, order, collection, or lunch logged.",
+    ar: "الدائرة الحمراء الأكبر = وقت أطول بدون زيارة أو طلب أو تحصيل أو غداء.",
+  },
   idleGpsLegend: { en: "Idle GPS ping", ar: "نبضة GPS خاملة" },
   unloggedIdleLegend: { en: "Unlogged idle", ar: "توقف غير مسجل" },
   loggedStopLegend: { en: "Logged stop", ar: "محطة مسجلة" },
   emailUsers: { en: "Users to email", ar: "المستخدمون للإرسال" },
+  reportEmail: { en: "Report email", ar: "بريد التقرير" },
+  reportEmailHint: {
+    en: "Visit report mail is sent to this address. Login usernames are not used.",
+    ar: "يُرسل بريد تقرير الزيارة إلى هذا العنوان. لا يُستخدم اسم الدخول.",
+  },
   selectAllUsers: { en: "Select all users", ar: "تحديد كل المستخدمين" },
-  sendEmail: { en: "Send report email", ar: "إرسال تقرير بالبريد" },
+  sendEmail: { en: "Send selected", ar: "إرسال المحددين" },
+  sendAllDate: { en: "Send this date to all", ar: "إرسال هذا التاريخ للجميع" },
+  sendThursday: { en: "Send Thursday report", ar: "إرسال تقرير الخميس" },
+  sendSaturday: { en: "Send Saturday report", ar: "إرسال تقرير السبت" },
+  sendMidnight: { en: "Run midnight send now", ar: "تشغيل إرسال منتصف الليل الآن" },
   sendingEmail: { en: "Sending email...", ar: "جاري إرسال البريد..." },
   emailNoUsers: { en: "Select at least one user to email.", ar: "حدد مستخدماً واحداً على الأقل لإرسال البريد." },
   emailConfirm: {
     en: "Send the daily visit report email for {count} selected user(s) on {date}?",
     ar: "إرسال تقرير الزيارات اليومي بالبريد لـ {count} مستخدم في {date}؟",
   },
+  emailConfirmAll: {
+    en: "Send the daily visit report email to all users for {date}?",
+    ar: "إرسال تقرير الزيارات اليومي لجميع المستخدمين لتاريخ {date}؟",
+  },
+  emailConfirmMidnight: {
+    en: "Run the midnight visit-report send now? Thursday goes out Friday midnight, Saturday goes out Sunday 00:10.",
+    ar: "تشغيل إرسال تقرير الزيارات لمنتصف الليل الآن؟ يُرسل الخميس منتصف ليل الجمعة والسبت الأحد 00:10.",
+  },
   emailSent: {
     en: "Sent {sent} of {total} report emails for {date}.",
     ar: "تم إرسال {sent} من {total} تقارير لـ {date}.",
   },
+  tableLegend: { en: "Row colors", ar: "ألوان الصفوف" },
 };
 
 function formatNumber(value, digits = 2) {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number.toFixed(digits) : "-";
+}
+
+function mostRecentKsaDateOnWeekday(weekday) {
+  let date = getKsaDateString();
+  for (let index = 0; index < 7; index += 1) {
+    if (getKsaWeekdayIndexForDateString(date) === weekday) return date;
+    date = addKsaCalendarDays(date, -1);
+  }
+  return date;
 }
 
 function formatTime(value) {
@@ -116,6 +157,7 @@ export default function DailyVisitReportPage() {
   const [report, setReport] = useState(null);
   const [urlParamsApplied, setUrlParamsApplied] = useState(false);
   const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [reportEmails, setReportEmails] = useState({});
   const [emailBusy, setEmailBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -148,8 +190,13 @@ export default function DailyVisitReportPage() {
       if (user?.userId) byId.set(user.userId, user);
     });
     (report?.users || []).forEach((user) => {
-      if (user?.userId && !byId.has(user.userId)) {
-        byId.set(user.userId, { userId: user.userId, userName: user.userName });
+      if (user?.userId) {
+        byId.set(user.userId, {
+          userId: user.userId,
+          userName: user.userName,
+          reportEmail: user.reportEmail || byId.get(user.userId)?.reportEmail || "",
+          email: user.email || byId.get(user.userId)?.email || "",
+        });
       }
     });
     return [...byId.values()].sort((left, right) => String(left.userName || "").localeCompare(String(right.userName || "")));
@@ -162,6 +209,14 @@ export default function DailyVisitReportPage() {
     setSelectedUserIds(userId ? [userId] : []);
     setMessage("");
   }, [reportDate, userId]);
+
+  useEffect(() => {
+    const next = {};
+    emailUserOptions.forEach((user) => {
+      next[user.userId] = user.reportEmail || user.email || "";
+    });
+    setReportEmails(next);
+  }, [emailUserOptions]);
 
   const geocodeCache = useReverseGeocodeCache(report);
 
@@ -272,19 +327,22 @@ export default function DailyVisitReportPage() {
     setSelectedUserIds(emailUserOptions.map((user) => user.userId));
   }
 
-  async function sendSelectedUserEmails() {
+  async function sendVisitReportEmails({
+    date = reportDate,
+    userIds = [],
+    allUsers = false,
+    midnight = false,
+    confirmText,
+  } = {}) {
     if (emailBusy) return;
 
-    const userIdsToSend = [...new Set(selectedUserIds.filter(Boolean))];
-    if (!userIdsToSend.length) {
+    const userIdsToSend = [...new Set((userIds || []).filter(Boolean))];
+    if (!allUsers && !midnight && !userIdsToSend.length) {
       setError(t("emailNoUsers"));
       return;
     }
 
-    const confirmed = window.confirm(
-      t("emailConfirm").replace("{count}", String(userIdsToSend.length)).replace("{date}", reportDate),
-    );
-    if (!confirmed) return;
+    if (!window.confirm(confirmText)) return;
 
     setEmailBusy(true);
     setError("");
@@ -305,7 +363,16 @@ export default function DailyVisitReportPage() {
             Authorization: `Bearer ${session.access_token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ date: reportDate, userIds: userIdsToSend }),
+          body: JSON.stringify({
+            date: midnight ? undefined : date,
+            allUsers,
+            midnight,
+            userIds: allUsers || midnight ? undefined : userIdsToSend,
+            reportEmails: Object.fromEntries(
+              (allUsers || midnight ? emailUserOptions.map((user) => user.userId) : userIdsToSend)
+                .map((id) => [id, String(reportEmails[id] || "").trim()]),
+            ),
+          }),
         },
         120000,
       );
@@ -319,13 +386,18 @@ export default function DailyVisitReportPage() {
         throw new Error(`${payload.error || "Unable to send daily visit report email."}${extra}`);
       }
 
+      if (payload.skipped) {
+        setMessage(payload.message || `Skipped ${payload.date || date}: ${payload.reason || "not due"}.`);
+        return;
+      }
+
       const sentCount = Number(payload.sentCount || 0);
       const skippedCount = Number(payload.skippedCount || 0);
       const total = sentCount + skippedCount + Number(payload.failedCount || 0);
       let nextMessage = t("emailSent")
         .replace("{sent}", String(sentCount))
-        .replace("{total}", String(total || userIdsToSend.length))
-        .replace("{date}", payload.date || reportDate);
+        .replace("{total}", String(total || userIdsToSend.length || sentCount))
+        .replace("{date}", payload.date || date);
       if (skippedCount) {
         nextMessage += ` ${skippedCount} skipped.`;
       }
@@ -340,6 +412,16 @@ export default function DailyVisitReportPage() {
     } finally {
       setEmailBusy(false);
     }
+  }
+
+  function sendSelectedUserEmails() {
+    return sendVisitReportEmails({
+      date: reportDate,
+      userIds: selectedUserIds,
+      confirmText: t("emailConfirm")
+        .replace("{count}", String(selectedUserIds.length))
+        .replace("{date}", reportDate),
+    });
   }
 
   if (!supabaseClient) {
@@ -407,6 +489,7 @@ export default function DailyVisitReportPage() {
             {report?.canSendVisitReportEmail ? (
               <div style={{ marginTop: "12px" }}>
                 <div className="moduleField">{t("emailUsers")}</div>
+                <div className="moduleHint" style={{ marginBottom: "8px" }}>{t("reportEmailHint")}</div>
                 <div className="moduleCollectorCheckboxList" role="group" aria-label={t("emailUsers")}>
                   {emailUserOptions.length === 0 ? (
                     <div className="moduleHint">{t("noEntries")}</div>
@@ -422,20 +505,36 @@ export default function DailyVisitReportPage() {
                         <span>{t("selectAllUsers")}</span>
                       </label>
                       {emailUserOptions.map((user) => (
-                        <label key={user.userId} className="moduleCollectorCheckbox">
+                        <label key={user.userId} className="moduleCollectorCheckbox" style={{ alignItems: "flex-start" }}>
                           <input
                             type="checkbox"
                             checked={selectedUserIds.includes(user.userId)}
                             onChange={() => toggleEmailUser(user.userId)}
                             disabled={emailBusy}
                           />
-                          <span>{user.userName}</span>
+                          <span>
+                            <strong>{user.userName}</strong>
+                            <input
+                              className="moduleInput"
+                              type="email"
+                              value={reportEmails[user.userId] || ""}
+                              placeholder={t("reportEmail")}
+                              aria-label={`${t("reportEmail")} ${user.userName}`}
+                              disabled={emailBusy}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                setReportEmails((current) => ({ ...current, [user.userId]: value }));
+                              }}
+                              style={{ marginTop: "6px", minWidth: "220px" }}
+                            />
+                          </span>
                         </label>
                       ))}
                     </>
                   )}
                 </div>
-                <div className="moduleActionRow" style={{ marginTop: "10px" }}>
+                <div className="moduleActionRow" style={{ marginTop: "10px", flexWrap: "wrap", gap: "8px" }}>
                   <button
                     type="button"
                     className="modulePrimaryButton"
@@ -443,6 +542,59 @@ export default function DailyVisitReportPage() {
                     disabled={emailBusy || !emailUserOptions.length}
                   >
                     {emailBusy ? t("sendingEmail") : t("sendEmail")}
+                  </button>
+                  <button
+                    type="button"
+                    className="moduleInlineButton"
+                    onClick={() => sendVisitReportEmails({
+                      date: reportDate,
+                      allUsers: true,
+                      confirmText: t("emailConfirmAll").replace("{date}", reportDate),
+                    })}
+                    disabled={emailBusy}
+                  >
+                    {t("sendAllDate")}
+                  </button>
+                  <button
+                    type="button"
+                    className="moduleInlineButton"
+                    onClick={() => {
+                      const date = mostRecentKsaDateOnWeekday(4);
+                      return sendVisitReportEmails({
+                        date,
+                        allUsers: true,
+                        confirmText: t("emailConfirmAll").replace("{date}", date),
+                      });
+                    }}
+                    disabled={emailBusy}
+                  >
+                    {t("sendThursday")}
+                  </button>
+                  <button
+                    type="button"
+                    className="moduleInlineButton"
+                    onClick={() => {
+                      const date = mostRecentKsaDateOnWeekday(6);
+                      return sendVisitReportEmails({
+                        date,
+                        allUsers: true,
+                        confirmText: t("emailConfirmAll").replace("{date}", date),
+                      });
+                    }}
+                    disabled={emailBusy}
+                  >
+                    {t("sendSaturday")}
+                  </button>
+                  <button
+                    type="button"
+                    className="moduleInlineButton"
+                    onClick={() => sendVisitReportEmails({
+                      midnight: true,
+                      confirmText: t("emailConfirmMidnight"),
+                    })}
+                    disabled={emailBusy}
+                  >
+                    {t("sendMidnight")}
                   </button>
                 </div>
               </div>
@@ -537,8 +689,22 @@ export default function DailyVisitReportPage() {
                     idleLegend={t("idleGpsLegend")}
                     unloggedLegend={t("unloggedIdleLegend")}
                     stopLegend={t("loggedStopLegend")}
+                    mapsHint={t("mapsHint")}
+                    longestIdleTitle={t("longestIdleTitle")}
+                    openPlaceLabel={t("openThisPlace")}
+                    openLongestIdleLabel={t("openLongestIdle")}
+                    stopsTitle={t("routeStops")}
+                    idleBubblesTitle={t("idleBubblesTitle")}
+                    idleBubblesHint={t("idleBubblesHint")}
                   />
 
+                  <div className="visitReportLegend" aria-label={t("tableLegend")}>
+                    {VISIT_REPORT_ROW_LEGEND.map((item) => (
+                      <span key={item.tone} className={`visitReportLegendItem visitReportRow-${item.tone}`}>
+                        {item.label}
+                      </span>
+                    ))}
+                  </div>
                   <ExportableTable filename={`daily-visit-report-${entryUser.userName || entryUser.userId}`} sheetName="Daily Visits" className="moduleTableWrap">
                     <table className="moduleTable">
                       <thead>
@@ -560,7 +726,7 @@ export default function DailyVisitReportPage() {
                       </thead>
                       <tbody>
                         {(entryUser.entries || []).map((entry, entryIndex, entries) => (
-                          <tr key={entry.id}>
+                          <tr key={entry.id} className={visitReportRowClassName(entry, entryUser.idleGaps)}>
                             <td>{entry.visitSequence}</td>
                             <td>{formatTime(entry.savedAt)}</td>
                             <td>{entry.userName || entryUser.userName}</td>
@@ -576,6 +742,11 @@ export default function DailyVisitReportPage() {
                             </td>
                             <td>
                               {entry.transactionLabel}
+                              {Number(entry.amountReceived) > 0 ? (
+                                <div className="moduleCode">
+                                  {Number(entry.amountReceived).toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR
+                                </div>
+                              ) : null}
                               {entry.logoutAutoClosed ? (
                                 <div className="moduleCode">{t("autoClosed")}</div>
                               ) : null}

@@ -16,8 +16,10 @@ import {
 import {
   buildStoredCollectionVisitSummary,
   isPriorityCollectionVisit,
+  patchCollectionVisitSummaryEnglishRemark,
   patchCollectionVisitSummaryVisitNumber,
 } from "../../../lib/collectionVisitSummary.js";
+import { translateText } from "../../../lib/translateText.js";
 import {
   buildCollectionQueuePriorityMaps,
   buildScopedCollectionQueuePriorityMaps,
@@ -217,7 +219,20 @@ async function loadOutstandingContextByCustomer(admin, customerCodes, reportDate
   return contextByCustomer;
 }
 
-function buildVisitReportFields(visit, customerContext, visitNumberForDay, priorityMeta = {}) {
+async function resolveVisitEnglishRemark(remarkArabic, remarkEnglish) {
+  const arabic = String(remarkArabic || "").trim();
+  const english = String(remarkEnglish || "").trim();
+  if (!arabic) return english;
+  try {
+    const translated = await translateText(arabic, { from: "ar", to: "en" });
+    if (translated) return translated;
+  } catch {
+    // Fall back to stored English below.
+  }
+  return (english && english !== arabic) ? english : arabic;
+}
+
+async function buildVisitReportFields(visit, customerContext, visitNumberForDay, priorityMeta = {}) {
   const queuePriority = Number(priorityMeta.queuePriority || visit.queue_priority || 0);
   const probabilityLabel = String(priorityMeta.probabilityLabel || visit.probability_label || "").trim();
   const probabilityScore = Number(priorityMeta.probabilityScore || visit.probability_score || 0);
@@ -239,18 +254,26 @@ function buildVisitReportFields(visit, customerContext, visitNumberForDay, prior
     probability_label: probabilityLabel,
   };
 
-  const whatsappSummary = storedSummary
-    ? patchCollectionVisitSummaryVisitNumber(storedSummary, effectiveVisitNumber)
-    : buildStoredCollectionVisitSummary(customerRow, {
-      ...visit,
-      visit_number_for_day: effectiveVisitNumber,
-      queue_priority: queuePriority,
-      probability_label: probabilityLabel,
-    }, {
+  const resolvedEnglish = await resolveVisitEnglishRemark(
+    visit.remark_arabic,
+    visit.remark_english,
+  );
+  const visitWithEnglish = {
+    ...visit,
+    remark_english: resolvedEnglish,
+    visit_number_for_day: effectiveVisitNumber,
+    queue_priority: queuePriority,
+    probability_label: probabilityLabel,
+  };
+
+  let whatsappSummary = storedSummary
+    ? patchCollectionVisitSummaryEnglishRemark(storedSummary, resolvedEnglish)
+    : buildStoredCollectionVisitSummary(customerRow, visitWithEnglish, {
       visitNumberForDay: effectiveVisitNumber,
       queuePriority,
       probabilityLabel,
     });
+  whatsappSummary = patchCollectionVisitSummaryVisitNumber(whatsappSummary, effectiveVisitNumber);
 
   return {
     whatsappSummary,
@@ -373,7 +396,7 @@ function buildIdleTimelineRows(idleGaps) {
   }));
 }
 
-function buildCollectorTimelineRows({
+async function buildCollectorTimelineRows({
   visitRows,
   workdayRows,
   idleRows,
@@ -393,6 +416,12 @@ function buildCollectorTimelineRows({
 
   let visitCounter = 0;
   const enrichedTimeline = enrichVisitsWithDistances(timelineRows);
+  const visitNumberByIndex = new Map();
+  enrichedTimeline.forEach((row, index) => {
+    if (row.rowType === "lunch" || row.rowType === "attendance" || row.rowType === "idle") return;
+    visitCounter += 1;
+    visitNumberByIndex.set(index, visitCounter);
+  });
   const timelineForWaiting = enrichedTimeline.map((row) => ({
     savedAt: row.saved_at,
     saved_at: row.saved_at,
@@ -401,7 +430,7 @@ function buildCollectorTimelineRows({
     longitude: row.longitude,
   }));
 
-  return enrichedTimeline.map((row, index) => {
+  return Promise.all(enrichedTimeline.map(async (row, index) => {
     const previous = index > 0 ? enrichedTimeline[index - 1] : null;
     const speedFromPreviousKmH = previous
       ? computeSpeedKmh(row.distanceFromPreviousKm, previous.saved_at, row.saved_at)
@@ -445,22 +474,22 @@ function buildCollectorTimelineRows({
       };
     }
 
-    visitCounter += 1;
+    const visitNumberForDay = visitNumberByIndex.get(index);
     const customerCode = normalizeCode(row.customer_code);
     const customer = customerDetailsMap.get(customerCode) || {};
     const record = priorityMaps.recordByCode.get(customerCode);
     const priorityMeta = resolveVisitPriorityMeta(row, priorityMaps, {
       reportDate: date,
-      visitNumberForDay: visitCounter,
+      visitNumberForDay,
     });
     priorityMeta.isScheduledRevisit = record
       ? isScheduledRevisitQueueCustomer(record, `${date}T12:00:00`)
       : false;
 
-    const reportFields = buildVisitReportFields(
+    const reportFields = await buildVisitReportFields(
       row,
       outstandingByCustomer.get(customerCode),
-      visitCounter,
+      visitNumberForDay,
       priorityMeta,
     );
 
@@ -502,7 +531,7 @@ function buildCollectorTimelineRows({
       dueQueueSize: reportFields.dueQueueSize,
       isScheduledRevisit: reportFields.isScheduledRevisit,
     };
-  });
+  }));
 }
 
 function applyNearestActivityGpsFallback(visit, activityGpsByUser) {
@@ -778,7 +807,7 @@ export async function GET(request) {
         return { ...row, saved_at: workdayTimes.logoutAt };
       });
 
-      const enrichedVisits = buildCollectorTimelineRows({
+      const enrichedVisits = await buildCollectorTimelineRows({
         visitRows: rows,
         workdayRows: timelineWorkdayRows,
         idleRows: buildIdleTimelineRows(idleGaps),

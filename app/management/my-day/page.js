@@ -1218,6 +1218,38 @@ export default function MyDayPage({ mode = "default" } = {}) {
       const platform = await resolveGpsCapturePlatform();
       let saveResult = null;
 
+      // Always go through /api/visit-reports so past next-visit dates are blocked
+      // for Visit Without Order even when activity-log mode is enabled.
+      saveResult = await postJsonResilient({
+        url: "/api/visit-reports",
+        jsonBody: {
+          customerCode: customer.customer_code,
+          customerName: customer.customer_name,
+          outcome: visitForm.outcome,
+          nextVisitAt: visitForm.nextVisitAt || null,
+          note: visitForm.note || null,
+          stockChecks: visitForm.stockChecks,
+          capturedAt,
+          location,
+          platform,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        metadata: {
+          type: "visit_report",
+          customerCode: customer.customer_code,
+        },
+      });
+
+      if (!saveResult.success) {
+        const apiError = String(saveResult?.error || saveResult?.message || "");
+        if (apiError.toLowerCase().includes("past")) {
+          throw new Error(t("nextVisitPast"));
+        }
+        throw new Error(apiError || "Unable to save visit report.");
+      }
+
       if (logsEnabled) {
         const payload = {
           user_id: session.user.id,
@@ -1244,32 +1276,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
           customerName: customer.customer_name,
           outcome: visitForm.outcome,
         });
-      } else {
-        saveResult = await postJsonResilient({
-          url: "/api/visit-reports",
-          jsonBody: {
-            customerCode: customer.customer_code,
-            customerName: customer.customer_name,
-            outcome: visitForm.outcome,
-            nextVisitAt: visitForm.nextVisitAt || null,
-            note: visitForm.note || null,
-            stockChecks: visitForm.stockChecks,
-            capturedAt,
-            location,
-            platform,
-          },
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          metadata: {
-            type: "visit_report",
-            customerCode: customer.customer_code,
-          },
-        });
-
-        if (!saveResult.success) {
-          throw new Error("Unable to save visit report.");
-        }
       }
 
       const summaryText = buildFieldVisitWhatsappSummary({
@@ -1304,7 +1310,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
       openWhatsappDirect(summaryText);
     } catch (err) {
-      setError(err.message || "Unable to save visit report.");
+      const message = String(err?.message || "Unable to save visit report.");
+      setError(message.toLowerCase().includes("past") ? t("nextVisitPast") : message);
     } finally {
       setVisitSaving(false);
     }
@@ -1770,7 +1777,17 @@ export default function MyDayPage({ mode = "default" } = {}) {
               required
               min={getTodayDateKey()}
               value={visitForm.nextVisitAt}
-              onChange={(event) => setVisitForm((current) => ({ ...current, nextVisitAt: event.target.value }))}
+              onChange={(event) => {
+                const value = event.target.value;
+                try {
+                  if (value) validateNextVisitDate(value);
+                  setError("");
+                  setVisitForm((current) => ({ ...current, nextVisitAt: value }));
+                } catch (validationError) {
+                  setVisitForm((current) => ({ ...current, nextVisitAt: "" }));
+                  setError(String(validationError?.message || "").includes("past") ? t("nextVisitPast") : t("nextVisitRequired"));
+                }
+              }}
             />
           </label>
           <label className="moduleFieldFull">

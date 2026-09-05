@@ -1,9 +1,41 @@
+const TRANSLATION_CACHE_LIMIT = 200;
+const translationCache = new Map();
+
 export function needsEnglishTranslation(arabicText, englishText) {
   const arabic = String(arabicText || "").trim();
-  const english = String(englishText || "").trim();
   if (!arabic) return false;
-  if (!english) return true;
-  return english === arabic;
+  // Arabic is the source of truth. Always refresh English so it cannot drift
+  // from an older remark (e.g. "Will transfer today" left over after Arabic changed).
+  void englishText;
+  return true;
+}
+
+function cacheKey(from, to, source) {
+  return `${from}|${to}|${source}`;
+}
+
+function readTranslationCache(from, to, source) {
+  const key = cacheKey(from, to, source);
+  if (!translationCache.has(key)) return "";
+  const value = translationCache.get(key);
+  // Refresh insertion order for a simple LRU behaviour.
+  translationCache.delete(key);
+  translationCache.set(key, value);
+  return value;
+}
+
+function writeTranslationCache(from, to, source, translated) {
+  const key = cacheKey(from, to, source);
+  if (translationCache.has(key)) translationCache.delete(key);
+  translationCache.set(key, translated);
+  while (translationCache.size > TRANSLATION_CACHE_LIMIT) {
+    const oldestKey = translationCache.keys().next().value;
+    translationCache.delete(oldestKey);
+  }
+}
+
+export function clearTranslationCache() {
+  translationCache.clear();
 }
 
 function parseGoogleTranslatePayload(payload) {
@@ -54,11 +86,20 @@ export async function translateText(text, { from = "ar", to = "en" } = {}) {
   if (!source) return "";
   if (from === to) return source;
 
+  const cached = readTranslationCache(from, to, source);
+  if (cached) return cached;
+
   const googleTranslated = await translateWithGoogle(source, from, to);
-  if (googleTranslated) return googleTranslated;
+  if (googleTranslated) {
+    writeTranslationCache(from, to, source, googleTranslated);
+    return googleTranslated;
+  }
 
   const myMemoryTranslated = await translateWithMyMemory(source, from, to);
-  if (myMemoryTranslated) return myMemoryTranslated;
+  if (myMemoryTranslated) {
+    writeTranslationCache(from, to, source, myMemoryTranslated);
+    return myMemoryTranslated;
+  }
 
   return "";
 }

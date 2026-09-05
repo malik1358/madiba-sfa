@@ -7,6 +7,7 @@ import {
   findLegalTransferForCustomer,
   redactCollectionVisitScheduleForViewer,
 } from "../../lib/paymentCollections.js";
+import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
@@ -934,9 +935,8 @@ export async function POST(request) {
     if (visitOutcome === "FUNDS_RECEIVED" && !receiptMode) {
       throw new Error("Mode of receipt is required for funds received outcome");
     }
-    if (paymentStatus !== "PAID" && visitOutcome !== "TRANSFER_TO_LEGAL" && !nextVisitAt) {
-      throw new Error("Next visit date is required when full payment was not received.");
-    }
+    const requiresNextVisit = paymentStatus !== "PAID" && visitOutcome !== "TRANSFER_TO_LEGAL";
+    const validatedNextVisitAt = validateNextVisitDate(nextVisitAt, { required: requiresNextVisit });
 
     // Verify user has access to this customer
     if (!scope.hasAllAccess) {
@@ -1004,7 +1004,7 @@ export async function POST(request) {
       payment_status: paymentStatus,
       amount_received: amountReceived,
       receipt_mode: receiptMode,
-      next_visit_at: nextVisitAt || null,
+      next_visit_at: validatedNextVisitAt,
       remark_arabic: remarkArabic,
       remark_english: remarkEnglish,
       non_payment_reason: nonPaymentReason,

@@ -121,7 +121,9 @@ function findSchemeIndex(rows, aliases, fallbackColumn, maxRows = 5) {
   const headerIndex = findHeaderIndex(rows, aliases, maxRows);
   if (headerIndex >= 0) return headerIndex;
   const fallbackIndex = sheetColumnIndex(fallbackColumn);
-  return hasDataAtIndex(rows, fallbackIndex) ? fallbackIndex : -1;
+  if (fallbackIndex < 0) return -1;
+  const wideEnough = (rows || []).some((row) => Array.isArray(row) && row.length > fallbackIndex);
+  return (wideEnough || hasDataAtIndex(rows, fallbackIndex)) ? fallbackIndex : -1;
 }
 
 function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems) {
@@ -381,12 +383,17 @@ export function parsePricePayload(payload) {
         const riyadhIndex = findRegionWholesaleIndex(value, "riyadh", REGION_PRICE_COLUMNS.riyadh);
         const dammamIndex = findRegionWholesaleIndex(value, "dammam", REGION_PRICE_COLUMNS.dammam);
         const jeddahIndex = findRegionWholesaleIndex(value, "jeddah", REGION_PRICE_COLUMNS.jeddah);
-        const cashDiscountIndex = findSchemeIndex(value, ["cash discount"], SCHEME_COLUMNS.cashDiscount);
+        const cashDiscountIndex = findSchemeIndex(value, [
+          "cash discount",
+          "cash disc",
+        ], SCHEME_COLUMNS.cashDiscount, 8);
         const valueDiscountIndex = findSchemeIndex(value, [
           "sales value > 5000 sar",
           "sales value > 5000",
+          "sales value 5000",
           "value discount",
-        ], SCHEME_COLUMNS.valueDiscount);
+          "scheme value",
+        ], SCHEME_COLUMNS.valueDiscount, 8);
 
         const itemCodeIndex = headerCodeIndex >= 0 ? headerCodeIndex : (hasDataAtIndex(value, codeIndex) ? codeIndex : -1);
         const itemNameIndex = headerNameIndex >= 0 ? headerNameIndex : (hasDataAtIndex(value, nameIndex) ? nameIndex : -1);

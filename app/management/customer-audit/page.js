@@ -563,6 +563,8 @@ function CustomerAuditPageContent() {
           increaseOrderQty={increaseQty}
           changeOrderQty={updateQty}
           priceList={displayPriceList}
+          cashDiscountMap={cashDiscountMap}
+          valueDiscountMap={valueDiscountMap}
         />
 
         <OrderBar

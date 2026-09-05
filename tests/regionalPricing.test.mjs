@@ -3,10 +3,18 @@ import assert from "node:assert/strict";
 
 import {
   buildEffectivePriceList,
+  formatDiscountPercent,
   getPricedOrderLine,
+  lookupDiscountRate,
   parseDiscountRate,
   resolveOrderPricingRegion,
 } from "../app/lib/regionalPricing.js";
+
+test("formatDiscountPercent and lookupDiscountRate show item scheme rates", () => {
+  assert.equal(formatDiscountPercent(0.02), "2%");
+  assert.equal(formatDiscountPercent(0), "—");
+  assert.equal(lookupDiscountRate({ A003927: 0.02 }, "a003927"), 0.02);
+});
 
 test("parseDiscountRate reads percent and decimal scheme values", () => {
   assert.equal(parseDiscountRate("2.00%"), 0.02);

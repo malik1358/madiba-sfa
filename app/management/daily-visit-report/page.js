@@ -26,6 +26,7 @@ import { useReverseGeocodeCache } from "../../hooks/useReverseGeocodeCache";
 import { addKsaCalendarDays, getKsaDateString, getKsaWeekdayIndexForDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { visitReportRowClassName, VISIT_REPORT_ROW_LEGEND } from "../../lib/visitReportRowColors";
 
 const TEXT = {
   title: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومي" },
@@ -76,17 +77,30 @@ const TEXT = {
   daySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
   userDaySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
   dayRoute: { en: "Day route", ar: "مسار اليوم" },
-  openRouteMap: { en: "Open route in Google Maps", ar: "فتح المسار في خرائط جوجل" },
+  openRouteMap: { en: "Driving route (no names)", ar: "مسار القيادة (بدون أسماء)" },
+  mapsHint: {
+    en: "Google Maps driving route has no customer names. Open a stop below to drop a labeled pin on that street. Look at the neighborhood around the pin — that is the GPS place.",
+    ar: "مسار القيادة في خرائط جوجل لا يعرض أسماء العملاء. افتح محطة أدناه لإسقاط دبوس باسم الشارع. انظر إلى الحي حول الدبوس — هذا مكان الـ GPS.",
+  },
+  longestIdleTitle: { en: "Longest idle", ar: "أطول توقف" },
+  openThisPlace: { en: "Open this place", ar: "فتح هذا المكان" },
+  openLongestIdle: { en: "Open longest idle in Google Maps", ar: "فتح أطول توقف في خرائط جوجل" },
+  routeStops: { en: "Named stops and idle places", ar: "المحطات المسماة وأماكن التوقف" },
+  idleBubblesTitle: { en: "Unlogged idle circles", ar: "دوائر التوقف غير المسجل" },
+  idleBubblesHint: {
+    en: "Bigger red circle = longer time with no visit, order, collection, or lunch logged.",
+    ar: "الدائرة الحمراء الأكبر = وقت أطول بدون زيارة أو طلب أو تحصيل أو غداء.",
+  },
   idleGpsLegend: { en: "Idle GPS ping", ar: "نبضة GPS خاملة" },
   unloggedIdleLegend: { en: "Unlogged idle", ar: "توقف غير مسجل" },
   loggedStopLegend: { en: "Logged stop", ar: "محطة مسجلة" },
   emailUsers: { en: "Users to email", ar: "المستخدمون للإرسال" },
-  selectAllUsers: { en: "Select all users", ar: "تحديد كل المستخدمين" },
   reportEmail: { en: "Report email", ar: "بريد التقرير" },
   reportEmailHint: {
     en: "Visit report mail is sent to this address. Login usernames are not used.",
     ar: "يُرسل بريد تقرير الزيارة إلى هذا العنوان. لا يُستخدم اسم الدخول.",
   },
+  selectAllUsers: { en: "Select all users", ar: "تحديد كل المستخدمين" },
   sendEmail: { en: "Send selected", ar: "إرسال المحددين" },
   sendAllDate: { en: "Send this date to all", ar: "إرسال هذا التاريخ للجميع" },
   sendThursday: { en: "Send Thursday report", ar: "إرسال تقرير الخميس" },
@@ -110,6 +124,7 @@ const TEXT = {
     en: "Sent {sent} of {total} report emails for {date}.",
     ar: "تم إرسال {sent} من {total} تقارير لـ {date}.",
   },
+  tableLegend: { en: "Row colors", ar: "ألوان الصفوف" },
 };
 
 function formatNumber(value, digits = 2) {
@@ -674,8 +689,22 @@ export default function DailyVisitReportPage() {
                     idleLegend={t("idleGpsLegend")}
                     unloggedLegend={t("unloggedIdleLegend")}
                     stopLegend={t("loggedStopLegend")}
+                    mapsHint={t("mapsHint")}
+                    longestIdleTitle={t("longestIdleTitle")}
+                    openPlaceLabel={t("openThisPlace")}
+                    openLongestIdleLabel={t("openLongestIdle")}
+                    stopsTitle={t("routeStops")}
+                    idleBubblesTitle={t("idleBubblesTitle")}
+                    idleBubblesHint={t("idleBubblesHint")}
                   />
 
+                  <div className="visitReportLegend" aria-label={t("tableLegend")}>
+                    {VISIT_REPORT_ROW_LEGEND.map((item) => (
+                      <span key={item.tone} className={`visitReportLegendItem visitReportRow-${item.tone}`}>
+                        {item.label}
+                      </span>
+                    ))}
+                  </div>
                   <ExportableTable filename={`daily-visit-report-${entryUser.userName || entryUser.userId}`} sheetName="Daily Visits" className="moduleTableWrap">
                     <table className="moduleTable">
                       <thead>
@@ -697,7 +726,7 @@ export default function DailyVisitReportPage() {
                       </thead>
                       <tbody>
                         {(entryUser.entries || []).map((entry, entryIndex, entries) => (
-                          <tr key={entry.id}>
+                          <tr key={entry.id} className={visitReportRowClassName(entry, entryUser.idleGaps)}>
                             <td>{entry.visitSequence}</td>
                             <td>{formatTime(entry.savedAt)}</td>
                             <td>{entry.userName || entryUser.userName}</td>
@@ -713,6 +742,11 @@ export default function DailyVisitReportPage() {
                             </td>
                             <td>
                               {entry.transactionLabel}
+                              {Number(entry.amountReceived) > 0 ? (
+                                <div className="moduleCode">
+                                  {Number(entry.amountReceived).toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR
+                                </div>
+                              ) : null}
                               {entry.logoutAutoClosed ? (
                                 <div className="moduleCode">{t("autoClosed")}</div>
                               ) : null}

@@ -21,6 +21,45 @@ function isMissingTableError(error) {
     || (message.includes("relation") && message.includes("does not exist"));
 }
 
+export function isJwtClockSkewError(error) {
+  const message = String(error?.message || error?.details || error || "").toLowerCase();
+  return message.includes("jwt issued at future")
+    || message.includes("issued at future");
+}
+
+export function formatSupabaseError(error) {
+  if (!error) return "Unknown Supabase error";
+  if (typeof error === "string") return error;
+  const message = String(error.message || "Supabase request failed").trim();
+  const details = [error.code, error.details, error.hint]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+  return details.length ? `${message} (${details.join(" | ")})` : message;
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function withJwtClockSkewRetry(work, {
+  attempts = 3,
+  delayMs = 1000,
+} = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await work(attempt);
+    } catch (error) {
+      lastError = error;
+      if (!isJwtClockSkewError(error) || attempt >= attempts) {
+        throw error instanceof Error ? error : new Error(formatSupabaseError(error));
+      }
+      await sleep(delayMs * attempt);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(formatSupabaseError(lastError));
+}
+
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase().replace(/_/g, "-");
 }
@@ -69,7 +108,7 @@ async function fetchPagedRows(admin, table, select, applyFilters) {
     const { data, error } = await query;
     if (error) {
       if (isMissingTableError(error)) return [];
-      throw error;
+      throw new Error(formatSupabaseError(error));
     }
     rows.push(...(data || []));
     if (!data || data.length < pageSize) break;
@@ -80,14 +119,17 @@ async function fetchPagedRows(admin, table, select, applyFilters) {
 }
 
 export async function loadSalesmanResumeProfiles(admin) {
+  // Match visit-report profile loading: avoid server-side is_active filter so
+  // schema drift does not break the cron, then filter in JS.
   const { data, error } = await admin
     .from("profiles")
-    .select("id,role,salesman_code,salesman_name,email,is_active")
-    .eq("is_active", true);
+    .select("id,role,salesman_code,salesman_name,email,is_active");
 
-  if (error) throw error;
+  if (error) throw new Error(formatSupabaseError(error));
 
-  return (data || []).filter((row) => SALESMAN_ROLES.has(normalizeRole(row.role)));
+  return (data || [])
+    .filter((row) => row.is_active !== false)
+    .filter((row) => SALESMAN_ROLES.has(normalizeRole(row.role)));
 }
 
 async function loadVisitCountsByUser(admin, reportDate) {

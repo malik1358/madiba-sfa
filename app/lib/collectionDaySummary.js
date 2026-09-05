@@ -29,6 +29,17 @@ function formatMoney(value) {
   });
 }
 
+export function sumOrderLineValue(lines = []) {
+  return (lines || []).reduce((sum, line) => {
+    const lineValue = Number(line?.line_value || 0);
+    if (Number.isFinite(lineValue) && lineValue > 0) return sum + lineValue;
+    const quantity = Number(line?.quantity || 0);
+    const rate = Number(line?.rate || 0);
+    const fallback = quantity * rate;
+    return sum + (Number.isFinite(fallback) ? fallback : 0);
+  }, 0);
+}
+
 export function isSuccessfulCollection(visit) {
   const outcome = String(visit?.visit_outcome || visit?.visitOutcome || "").trim().toUpperCase();
   const amount = Number(visit?.amount_received ?? visit?.amountReceived ?? 0);
@@ -195,7 +206,7 @@ function isReturnToCity(segmentIndex, segments) {
   return segments.slice(0, segmentIndex - 1).some((segment) => segment.cityKey === cityKey);
 }
 
-export const UNLOGGED_IDLE_THRESHOLD_MINUTES = 30;
+export const UNLOGGED_IDLE_THRESHOLD_MINUTES = 50;
 
 export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
   visitedCustomers: "تمت زيارة {count} عميل.",
@@ -226,6 +237,9 @@ export const COLLECTION_DAY_SUMMARY_LABELS_AR = {
   ordersPosted: "تم تسجيل {count} طلب بإجمالي {amount} ريال.",
   noOrdersPosted: "لا توجد طلبات مسجلة في هذا اليوم.",
   aggregateHeader: "{count} مستخدم نشط: {visits} زيارة، {collections} تحصيل ناجح، {amount} ريال.",
+  visitedUniqueCustomers: "تمت زيارة {count} عميل مختلف.",
+  collectionByCustomer: "{customer}: تم تحصيل {amount} ريال.",
+  collectionByCustomerNone: "{customer}: لا تحصيل.",
 };
 
 export const COLLECTION_DAY_SUMMARY_LABELS = {
@@ -257,6 +271,9 @@ export const COLLECTION_DAY_SUMMARY_LABELS = {
   ordersPosted: "Posted {count} order(s) totalling {amount} SAR.",
   noOrdersPosted: "No orders posted for this day.",
   aggregateHeader: "{count} active user(s): {visits} visit(s), {collections} successful collection(s), {amount} SAR collected.",
+  visitedUniqueCustomers: "Visited {count} unique customer(s).",
+  collectionByCustomer: "{customer}: {amount} SAR collected.",
+  collectionByCustomerNone: "{customer}: no collection.",
 };
 
 function fill(template, values) {
@@ -377,12 +394,12 @@ export function findUnloggedIdleGaps({
   for (let index = 0; index < points.length - 1; index += 1) {
     const from = points[index];
     const to = points[index + 1];
-    if (to.ts - from.ts < thresholdMs) continue;
+    if (to.ts - from.ts <= thresholdMs) continue;
     if (from.type === "lunch_out" && to.type === "lunch_in") continue;
 
     splitIntervalMinusLunch(from.ts, to.ts, lunchOutTs, lunchInTs).forEach((part) => {
       const durationMs = part.end - part.start;
-      if (durationMs < thresholdMs) return;
+      if (durationMs <= thresholdMs) return;
       gaps.push({
         fromAt: new Date(part.start).toISOString(),
         toAt: new Date(part.end).toISOString(),
@@ -409,8 +426,9 @@ export function resolveEffectiveLogoutAt({
   logoutAt = null,
   logoutAutoClosed = false,
   visits = [],
+  activities = [],
 } = {}) {
-  const lastVisitTs = lastVisitTimestamp(visits);
+  const lastVisitTs = Math.max(lastVisitTimestamp(visits), lastVisitTimestamp(activities));
   const treatAsLastVisit = Boolean(logoutAutoClosed) || isMidnightAutoLogout(logoutAt);
   if (treatAsLastVisit && lastVisitTs) return new Date(lastVisitTs).toISOString();
   return logoutAt || null;
@@ -424,6 +442,7 @@ export function normalizeWorkdayEvents(workdayEvents, visits = []) {
       logoutAt: workdayEvents.logoutAt,
       logoutAutoClosed: workdayEvents.logoutAutoClosed,
       visits,
+      activities: workdayEvents.activities,
     }),
   };
 }
@@ -544,11 +563,42 @@ function describeOrders(orderStats, labels) {
   });
 }
 
+function resolveFieldVisitStats(lunchEvents) {
+  const stats = lunchEvents?.fieldVisitStats;
+  if (!stats || typeof stats !== "object") return null;
+  const customers = Array.isArray(stats.customers) ? stats.customers : [];
+  const uniqueCustomers = Number(stats.uniqueCustomers || 0) || customers.length;
+  if (!uniqueCustomers && !customers.length) return null;
+  return { uniqueCustomers, customers };
+}
+
+function customerDisplayName(customer) {
+  const name = String(customer?.customerName || "").trim();
+  const code = String(customer?.customerCode || "").trim();
+  if (name && code) return `${name} (${code})`;
+  return name || code || "Customer";
+}
+
+function describeCustomerCollection(customer, labels) {
+  const amount = Number(customer?.amountCollected || 0);
+  if (Number.isFinite(amount) && amount > 0) {
+    return fill(labels.collectionByCustomer || "{customer}: {amount} SAR collected.", {
+      customer: customerDisplayName(customer),
+      amount: formatMoney(amount),
+    });
+  }
+  return fill(labels.collectionByCustomerNone || "{customer}: no collection.", {
+    customer: customerDisplayName(customer),
+  });
+}
+
 export function buildCollectionDaySummary(visits, customerLocationByCode = {}, lunchEvents = null, labels = COLLECTION_DAY_SUMMARY_LABELS) {
   const sorted = [...(visits || [])].sort((left, right) => visitTimestamp(left) - visitTimestamp(right));
+  const fieldVisitStats = resolveFieldVisitStats(lunchEvents);
   const stats = {
     ...computeStats(sorted),
     ...resolveOrderStats(lunchEvents),
+    ...(fieldVisitStats ? { uniqueCustomers: fieldVisitStats.uniqueCustomers } : {}),
   };
   const workday = collectWorkdayItems(lunchEvents, sorted, labels);
   const idleGaps = lunchEvents
@@ -562,22 +612,31 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
     })
     : [];
 
-  const headerItem = sorted.length
+  const hasFieldDay = Boolean(sorted.length || fieldVisitStats?.uniqueCustomers);
+  const headerItem = hasFieldDay
     ? makeSummaryItem(
       "header",
-      stats.uniqueGpsLocations
-        ? fill(labels.visitedCustomersWithGps, {
+      fieldVisitStats
+        ? fill(labels.visitedUniqueCustomers || labels.visitedCustomers, {
           count: stats.uniqueCustomers,
-          locations: stats.uniqueGpsLocations,
         })
-        : fill(labels.visitedCustomers, { count: stats.uniqueCustomers }),
+        : stats.uniqueGpsLocations
+          ? fill(labels.visitedCustomersWithGps, {
+            count: stats.uniqueCustomers,
+            locations: stats.uniqueGpsLocations,
+          })
+          : fill(labels.visitedCustomers, { count: stats.uniqueCustomers }),
     )
     : makeSummaryItem("header", labels.noVisits);
+  const collectionCustomerItems = (fieldVisitStats?.customers || []).map((customer) => makeSummaryItem(
+    Number(customer.amountCollected) > 0 ? "visit_collected" : "visit",
+    describeCustomerCollection(customer, labels),
+  ));
   const orderStatsProvided = Boolean(lunchEvents && lunchEvents.orderStats);
   const orderItem = orderStatsProvided
     ? makeSummaryItem("orders", describeOrders(stats, labels))
     : null;
-  const footerItem = sorted.length
+  const footerItem = hasFieldDay
     ? makeSummaryItem("footer", fill(
       orderStatsProvided && labels.totalFooterWithOrders
         ? labels.totalFooterWithOrders
@@ -605,6 +664,7 @@ export function buildCollectionDaySummary(visits, customerLocationByCode = {}, l
 
   const items = [
     headerItem,
+    ...collectionCustomerItems,
     ...(orderItem ? [orderItem] : []),
     ...workday.statusItems,
     ...sortTimelineItems(timelineItems),

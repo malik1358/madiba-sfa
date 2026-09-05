@@ -19,6 +19,12 @@ body {
     color: #555555;
     font-size: 8pt;
   }
+
+  .visitReportRow td,
+  .visitReportLegendItem {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }
 
 * {
@@ -3703,6 +3709,72 @@ table.auditMatrix td.auditTrendSame {
   background: #fdeeee;
 }
 
+.visitReportLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.visitReportLegendItem {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid #d5dee3;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #12263f;
+}
+
+.visitReportRow td {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.visitReportRow-login td,
+.visitReportLegendItem.visitReportRow-login {
+  background: #dcfce7;
+}
+
+.visitReportRow-logout td,
+.visitReportLegendItem.visitReportRow-logout {
+  background: #e0e7ff;
+}
+
+.visitReportRow-lunch td,
+.visitReportLegendItem.visitReportRow-lunch {
+  background: #ffedd5;
+}
+
+.visitReportRow-visit td,
+.visitReportLegendItem.visitReportRow-visit {
+  background: #dbeafe;
+}
+
+.visitReportRow-order td,
+.visitReportLegendItem.visitReportRow-order {
+  background: #f3e8ff;
+}
+
+.visitReportRow-collection td,
+.visitReportLegendItem.visitReportRow-collection {
+  background: #ccfbf1;
+}
+
+.visitReportRow-idle td,
+.visitReportLegendItem.visitReportRow-idle {
+  background: #fef9c3;
+}
+
+.visitReportRow-unlogged-idle td,
+.visitReportLegendItem.visitReportRow-unlogged-idle {
+  background: #fecaca;
+}
+
+.visitReportRow-far td {
+  box-shadow: inset 4px 0 0 #b91c1c;
+}
+
 .moduleMetricGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -4033,6 +4105,7 @@ th:has(.moduleTableColumnFilterInput) {
   text-transform: uppercase;
   vertical-align: top;
 }
+
 
 .moduleTable td {
   color: #073f4c;
@@ -5820,4 +5893,101 @@ th:has(.moduleTableColumnFilterInput) {
   color: #dc2626;
   font-size: 13px;
   font-weight: 700;
+}
+
+.dayRouteMapActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dayRouteMapHint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #52616b;
+}
+
+.dayRouteMapLongestIdle {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #9b1c1c;
+}
+
+.dayRouteMapStops {
+  margin: 10px 0 0;
+}
+
+.dayRouteMapStops h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.dayRouteMapStops ul {
+  margin: 0;
+  padding-inline-start: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dayRouteMapStops a {
+  font-weight: 700;
+}
+
+.dayRouteMapLegendBubble {
+  width: 16px !important;
+  height: 16px !important;
+  border-radius: 50%;
+  background: rgba(220, 38, 38, 0.2) !important;
+  border: 2px solid #dc2626;
+  box-sizing: border-box;
+}
+
+.dayRouteIdleBubbles {
+  margin: 12px 0 0;
+}
+
+.dayRouteIdleBubbles h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.dayRouteIdleBubbleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.dayRouteIdleBubble {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  min-height: 56px;
+  padding: 6px;
+  border-radius: 50%;
+  background: rgba(220, 38, 38, 0.16);
+  border: 2px solid #dc2626;
+  color: #7f1d1d;
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.dayRouteIdleBubble strong {
+  font-size: 12px;
+  line-height: 1.1;
+}
+
+.dayRouteIdleBubble span {
+  display: block;
+  max-width: 72px;
+  margin-top: 2px;
+  font-size: 9px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

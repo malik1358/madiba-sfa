@@ -10,7 +10,9 @@ import {
 } from "../app/lib/dailySalesmanResume.js";
 import {
   buildSalesmanResumeRows,
+  isJwtClockSkewError,
   runDailySalesmanResumeEmailCycle,
+  withJwtClockSkewRetry,
 } from "../app/lib/dailySalesmanResumeServer.js";
 
 test("resolveDailySalesmanResumeRecipients defaults to malik@pinasz.com", () => {
@@ -150,4 +152,21 @@ test("runDailySalesmanResumeEmailCycle skips when email is not configured", asyn
 
   assert.equal(result.skipped, true);
   assert.equal(result.reason, "email_not_configured");
+});
+
+test("isJwtClockSkewError detects Supabase future iat failures", () => {
+  assert.equal(isJwtClockSkewError({ message: "JWT issued at future" }), true);
+  assert.equal(isJwtClockSkewError(new Error("column does not exist")), false);
+});
+
+test("withJwtClockSkewRetry retries JWT clock skew then succeeds", async () => {
+  let attempts = 0;
+  const value = await withJwtClockSkewRetry(async () => {
+    attempts += 1;
+    if (attempts < 2) throw { message: "JWT issued at future" };
+    return "ok";
+  }, { delayMs: 1 });
+
+  assert.equal(value, "ok");
+  assert.equal(attempts, 2);
 });

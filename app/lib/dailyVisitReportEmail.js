@@ -1,6 +1,16 @@
 import { formatDurationMinutes, buildGoogleMapsPointUrl } from "./geo.js";
 import { parseEmailList, normalizeDeliverableEmail } from "./mailer.js";
-import { buildDayRoutePoints, buildDayRouteSvg, buildGoogleRouteUrl, formatIdleGapLabel } from "./dayRouteMap.js";
+import {
+  buildDayRoutePoints,
+  buildDayRouteSvg,
+  buildGoogleRouteUrl,
+  buildNamedRouteStops,
+  longestIdlePlace,
+} from "./dayRouteMap.js";
+import {
+  visitReportRowBackground,
+  VISIT_REPORT_ROW_LEGEND,
+} from "./visitReportRowColors.js";
 import {
   formatAchievementPercent,
   formatPerformanceKpiLine,
@@ -70,6 +80,10 @@ function distanceFromCustomerLabel(entry) {
 
 function transactionLabel(entry) {
   const parts = [entry?.transactionLabel || entry?.transactionType || "-"];
+  const amount = Number(entry?.amountReceived || 0);
+  if (String(entry?.transactionType || "").toUpperCase() === "COLLECTION_VISIT" && amount > 0) {
+    parts.push(`${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR`);
+  }
   if (entry?.logoutAutoClosed) parts.push("Auto-closed");
   if (entry?.isFarFromCustomer) parts.push("Far");
   return parts.join(" · ");
@@ -124,8 +138,10 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   const routePoints = Array.isArray(user?.routePoints) && user.routePoints.length
     ? user.routePoints
     : buildDayRoutePoints(entries, idleGaps);
-  const routeSvg = buildDayRouteSvg(routePoints);
+  const routeSvg = buildDayRouteSvg(routePoints, { idleGaps });
   const routeUrl = buildGoogleRouteUrl(routePoints);
+  const longestIdle = longestIdlePlace(routePoints, idleGaps);
+  const namedStops = buildNamedRouteStops(routePoints, idleGaps);
 
   const summaryText = [
     `Daily visit report for ${userName}`,
@@ -133,7 +149,8 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
     `Entries: ${user?.visitCount || 0}`,
     `Far from customer: ${user?.farFromCustomerCount || 0}`,
     `Route total: ${formatKm(user?.totalRouteDistanceKm)}`,
-    ...(routeUrl ? [`Route map: ${routeUrl}`] : []),
+    ...(routeUrl ? [`Driving route (no names): ${routeUrl}`] : []),
+    ...(longestIdle?.mapsUrl ? [`Longest idle: ${longestIdle.label} ${longestIdle.mapsUrl}`] : []),
     "",
     ...kpiText,
     ...(lines.length ? ["Summary:", ...lines, ""] : []),
@@ -160,11 +177,14 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   const routeHtml = routeSvg
     ? `<h2 style="font-size: 16px;">Day route</h2>
       <p style="font-size: 12px; color: #52616b;">
+        Bigger red circle = longer time with no activity logged. Open a stop below to drop a labeled pin on that street.
         Blue = logged stop · Orange = idle GPS ping · Red = unlogged idle
-        ${routeUrl ? ` · <a href="${escapeHtml(routeUrl)}">Open route in Google Maps</a>` : ""}
+        ${longestIdle?.mapsUrl ? ` · <a href="${escapeHtml(longestIdle.mapsUrl)}">Open longest idle</a>` : ""}
+        ${routeUrl ? ` · <a href="${escapeHtml(routeUrl)}">Driving route (no names)</a>` : ""}
       </p>
       <div style="margin: 0 0 16px;">${routeSvg}</div>
-      ${idleGaps.length ? `<p style="color:#dc2626; font-size: 13px;">${idleGaps.map((gap) => escapeHtml(formatIdleGapLabel(gap))).join("<br/>")}</p>` : ""}`
+      ${longestIdle ? `<p style="color:#dc2626; font-size: 13px;"><strong>Longest idle:</strong> ${escapeHtml(longestIdle.label)}${longestIdle.mapsUrl ? ` · <a href="${escapeHtml(longestIdle.mapsUrl)}">Open this place</a>` : ""}</p>` : ""}
+      ${namedStops.length ? `<ul style="font-size: 12px; padding-inline-start: 18px;">${namedStops.map((stop) => `<li>${escapeHtml(stop.label)}${stop.mapsUrl ? ` · <a href="${escapeHtml(stop.mapsUrl)}">Open this place</a>` : ""}</li>`).join("")}</ul>` : ""}`
     : "";
 
   const rowsHtml = entries.length
@@ -175,7 +195,8 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
       const mapUrl = entry.hasEntryGps
         ? buildGoogleMapsPointUrl(entry.entryLatitude, entry.entryLongitude)
         : "";
-      return `<tr>
+      const background = visitReportRowBackground(entry, idleGaps);
+      return `<tr${background ? ` style="background:${background};"` : ""}>
         <td>${escapeHtml(entry.visitSequence || "-")}</td>
         <td>${escapeHtml(formatReportTime(entry.savedAt))}</td>
         <td>${escapeHtml(customerLabel(entry))}</td>
@@ -192,6 +213,12 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
     }).join("")
     : `<tr><td colspan="12">No visits or orders found for this date.</td></tr>`;
 
+  const legendHtml = `<p style="font-size: 12px; color: #52616b; margin: 0 0 10px;">
+    ${VISIT_REPORT_ROW_LEGEND.map((item) => (
+      `<span style="display:inline-block;margin:0 10px 6px 0;padding:2px 8px;background:${item.background};border:1px solid #d5dee3;border-radius:999px;">${escapeHtml(item.label)}</span>`
+    )).join("")}
+  </p>`;
+
   const html = `<!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; color: #12263f; line-height: 1.4;">
@@ -207,6 +234,7 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   ${routeHtml}
   <h2 style="font-size: 16px;">Daily visit summary</h2>
   ${summaryHtml}
+  ${legendHtml}
   <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%;">
     <thead style="background: #f4f7fb;">
       <tr>

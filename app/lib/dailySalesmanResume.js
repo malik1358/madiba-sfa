@@ -4,13 +4,17 @@ import { parseEmailList, isLikelyEmail } from "./mailer.js";
 import { formatWorkingHours } from "./workdayActivity.js";
 
 export const DEFAULT_DAILY_SALESMAN_RESUME_TO = "malik@pinasz.com";
+export const DEFAULT_DAILY_SALESMAN_RESUME_EXTRA_TO = [
+  "soyeb@noorshukran.com",
+  "fazlur.rahiman@noorshukran.com",
+];
 
 export function resolveDailySalesmanResumeRecipients(env = process.env) {
   const configured = parseEmailList(env.DAILY_SALESMAN_RESUME_TO);
-  if (configured.length) return configured;
-  return isLikelyEmail(DEFAULT_DAILY_SALESMAN_RESUME_TO)
-    ? [DEFAULT_DAILY_SALESMAN_RESUME_TO]
-    : [];
+  const defaults = [DEFAULT_DAILY_SALESMAN_RESUME_TO, ...DEFAULT_DAILY_SALESMAN_RESUME_EXTRA_TO]
+    .flatMap((value) => parseEmailList(value))
+    .filter((email) => isLikelyEmail(email));
+  return [...new Set([...defaults, ...configured])];
 }
 
 export function emptySalesmanResumeRow({
@@ -26,6 +30,8 @@ export function emptySalesmanResumeRow({
     role: String(role || "").trim(),
     orders: 0,
     orderValue: 0,
+    invoiceCount: 0,
+    invoiceAmount: 0,
     collections: 0,
     collectionValue: 0,
     visits: 0,
@@ -54,6 +60,8 @@ export function summarizeSalesmanResumeRows(rows = []) {
     (totals, row) => {
       totals.orders += Number(row?.orders || 0);
       totals.orderValue += Number(row?.orderValue || 0);
+      totals.invoiceCount += Number(row?.invoiceCount || 0);
+      totals.invoiceAmount += Number(row?.invoiceAmount || 0);
       totals.collections += Number(row?.collections || 0);
       totals.collectionValue += Number(row?.collectionValue || 0);
       totals.visits += Number(row?.visits || 0);
@@ -64,6 +72,8 @@ export function summarizeSalesmanResumeRows(rows = []) {
     {
       orders: 0,
       orderValue: 0,
+      invoiceCount: 0,
+      invoiceAmount: 0,
       collections: 0,
       collectionValue: 0,
       visits: 0,
@@ -77,12 +87,16 @@ export function sortSalesmanResumeRows(rows = []) {
   return [...(rows || [])].sort((left, right) => {
     const leftActivity = Number(left.orders || 0)
       + Number(left.orderValue || 0)
+      + Number(left.invoiceCount || 0)
+      + Number(left.invoiceAmount || 0)
       + Number(left.collections || 0)
       + Number(left.collectionValue || 0)
       + Number(left.visits || 0)
       + Number(left.skuSoldCount || 0);
     const rightActivity = Number(right.orders || 0)
       + Number(right.orderValue || 0)
+      + Number(right.invoiceCount || 0)
+      + Number(right.invoiceAmount || 0)
       + Number(right.collections || 0)
       + Number(right.collectionValue || 0)
       + Number(right.visits || 0)
@@ -98,6 +112,18 @@ function formatCount(value) {
   return Number.isInteger(number)
     ? String(number)
     : number.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
+export function uniqueSkuCountFromOrderLines(lines = []) {
+  const codes = new Set();
+  (lines || []).forEach((line) => {
+    const code = String(line?.item_code || line?.itemCode || "").trim().toUpperCase();
+    if (!code) return;
+    const quantity = Number(line?.quantity);
+    if (Number.isFinite(quantity) && quantity <= 0) return;
+    codes.add(code);
+  });
+  return codes.size;
 }
 
 export function formatResumeMoney(value) {
@@ -124,6 +150,8 @@ function resumeRowCells(row) {
     salesman: salesmanResumeDisplayName(row),
     orders: formatCount(row.orders),
     orderValue: formatResumeMoney(row.orderValue),
+    invoiceCount: formatCount(row.invoiceCount),
+    invoiceAmount: formatResumeMoney(row.invoiceAmount),
     collections: formatCount(row.collections),
     collectionValue: formatResumeMoney(row.collectionValue),
     visits: formatCount(row.visits),
@@ -147,13 +175,15 @@ export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
   const textLines = [
     `Daily salesman resume for ${date} (KSA)`,
     "",
-    "Salesman | Orders | Order value | Collections | Collection value | Visits | SKU sold | Login | Lunch out | Lunch in | Logout | Working hours",
+    "Salesman | Orders | Order value | Invoices | Invoice amount | Collections | Collection value | Visits | SKU sold | Login | Lunch out | Lunch in | Logout | Working hours",
     ...sorted.map((row) => {
       const cells = resumeRowCells(row);
       return [
         cells.salesman,
         cells.orders,
         cells.orderValue,
+        cells.invoiceCount,
+        cells.invoiceAmount,
         cells.collections,
         cells.collectionValue,
         cells.visits,
@@ -170,6 +200,8 @@ export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
       "Total",
       formatCount(totals.orders),
       formatResumeMoney(totals.orderValue),
+      formatCount(totals.invoiceCount),
+      formatResumeMoney(totals.invoiceAmount),
       formatCount(totals.collections),
       formatResumeMoney(totals.collectionValue),
       formatCount(totals.visits),
@@ -191,6 +223,8 @@ export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
         <td style="border:1px solid #c5d4de;">${escapeHtml(cells.salesman)}</td>
         <td style="text-align:right;border:1px solid #c5d4de;">${escapeHtml(cells.orders)}</td>
         <td style="text-align:right;border:1px solid #c5d4de;background:#e8f7ee;font-weight:600;">${escapeHtml(cells.orderValue)}</td>
+        <td style="text-align:right;border:1px solid #c5d4de;">${escapeHtml(cells.invoiceCount)}</td>
+        <td style="text-align:right;border:1px solid #c5d4de;background:#f3e8ff;font-weight:600;">${escapeHtml(cells.invoiceAmount)}</td>
         <td style="text-align:right;border:1px solid #c5d4de;">${escapeHtml(cells.collections)}</td>
         <td style="text-align:right;border:1px solid #c5d4de;background:#fff4d6;font-weight:600;">${escapeHtml(cells.collectionValue)}</td>
         <td style="text-align:right;border:1px solid #c5d4de;">${escapeHtml(cells.visits)}</td>
@@ -202,7 +236,7 @@ export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
         <td style="border:1px solid #c5d4de;background:#e7f0ff;font-weight:600;">${escapeHtml(cells.workingHours)}</td>
       </tr>`;
     }).join("")
-    : `<tr><td colspan="12" style="padding:10px;">No salesman activity found for this date.</td></tr>`;
+    : `<tr><td colspan="14" style="padding:10px;">No salesman activity found for this date.</td></tr>`;
 
   const html = `<!DOCTYPE html>
 <html>
@@ -216,6 +250,8 @@ export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
         <th align="left" style="padding:8px;border:1px solid #0c3d67;">Salesman</th>
         <th align="right" style="padding:8px;border:1px solid #0c3d67;">Orders</th>
         <th align="right" style="padding:8px;border:1px solid #0c3d67;background:#14724a;">Order value</th>
+        <th align="right" style="padding:8px;border:1px solid #0c3d67;">Invoices</th>
+        <th align="right" style="padding:8px;border:1px solid #0c3d67;background:#6d28d9;">Invoice amount</th>
         <th align="right" style="padding:8px;border:1px solid #0c3d67;">Collections</th>
         <th align="right" style="padding:8px;border:1px solid #0c3d67;background:#b7791f;">Collection value</th>
         <th align="right" style="padding:8px;border:1px solid #0c3d67;">Visits</th>
@@ -233,6 +269,8 @@ export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
         <td style="padding:8px;border:1px solid #0c3d67;">Total</td>
         <td style="text-align:right;padding:8px;border:1px solid #0c3d67;">${escapeHtml(formatCount(totals.orders))}</td>
         <td style="text-align:right;padding:8px;border:1px solid #0c3d67;background:#14724a;">${escapeHtml(formatResumeMoney(totals.orderValue))}</td>
+        <td style="text-align:right;padding:8px;border:1px solid #0c3d67;">${escapeHtml(formatCount(totals.invoiceCount))}</td>
+        <td style="text-align:right;padding:8px;border:1px solid #0c3d67;background:#6d28d9;">${escapeHtml(formatResumeMoney(totals.invoiceAmount))}</td>
         <td style="text-align:right;padding:8px;border:1px solid #0c3d67;">${escapeHtml(formatCount(totals.collections))}</td>
         <td style="text-align:right;padding:8px;border:1px solid #0c3d67;background:#b7791f;">${escapeHtml(formatResumeMoney(totals.collectionValue))}</td>
         <td style="text-align:right;padding:8px;border:1px solid #0c3d67;">${escapeHtml(formatCount(totals.visits))}</td>

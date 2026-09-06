@@ -15,15 +15,20 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
     region: isAr ? "المنطقة" : "Region",
     items: isAr ? "عدد الأصناف" : "Items",
     totalQty: isAr ? "إجمالي الكمية" : "Total qty",
-    subtotal: isAr ? "المجموع قبل الضريبة" : "Subtotal",
+    cashDiscount: isAr ? "خصم نقدي" : "Cash discount",
+    valueDiscount: isAr ? "خصم القيمة" : "Value discount",
+    subtotal: isAr ? "المبلغ بدون ضريبة" : "Amount without VAT",
     vat: isAr ? "ضريبة 15%" : "VAT 15%",
-    totalInclVat: isAr ? "الإجمالي شامل الضريبة" : "Total incl. VAT",
+    totalInclVat: isAr ? "المبلغ بعد الضريبة" : "Amount after VAT",
     pdfAttached: isAr ? "ملف PDF مرفق." : "PDF attached.",
   };
 
-  const subtotal = Number(snapshot.grandTotal || 0);
-  const vatAmount = subtotal * 0.15;
-  const totalWithVat = subtotal + vatAmount;
+  const totals = snapshot.totals || {};
+  const subtotal = Number(totals.amountExclVat || snapshot.grandTotal || 0);
+  const vatAmount = Number(totals.vatAmount || subtotal * 0.15);
+  const totalWithVat = Number(totals.amountInclVat || subtotal + vatAmount);
+  const cashDiscount = Number(totals.cashDiscountTotal || 0);
+  const valueDiscount = Number(totals.valueDiscountTotal || 0);
 
   return [
     labels.title,
@@ -36,6 +41,8 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
     `${labels.region}: ${snapshot.pricingRegion || "riyadh"}`,
     `${labels.items}: ${snapshot.itemCount || 0}`,
     `${labels.totalQty}: ${Number(snapshot.totalQuantity || 0)}`,
+    `${labels.cashDiscount}: ${formatMoney(cashDiscount)}`,
+    `${labels.valueDiscount}: ${formatMoney(valueDiscount)}`,
     `${labels.subtotal}: ${formatMoney(subtotal)}`,
     `${labels.vat}: ${formatMoney(vatAmount)}`,
     `${labels.totalInclVat}: ${formatMoney(totalWithVat)}`,

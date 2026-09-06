@@ -12,10 +12,12 @@ import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { isBuildingMaterialItem, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
 import {
   buildEffectivePriceList,
-  formatAppliedDiscount,
+  formatDiscountDetail,
   formatDiscountPercent,
+  formatMoneyAmount,
   getPricedOrderLine,
   lookupDiscountRate,
+  summarizePricedLines,
   normalizePaymentType,
   pricingRegionLabel,
   regionPriceMapFor,
@@ -27,7 +29,6 @@ import ExportableTable from "../../components/ExportableTable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
 import { qtyFormat } from "../customer-audit/lib/format";
-import { calculateGrandTotal } from "../customer-audit/lib/orderHelpers";
 import { useAnalytics } from "../customer-audit/hooks/useAnalytics";
 import { useQuickOrder } from "../customer-audit/hooks/useQuickOrder";
 import CustomerHeader from "../customer-audit/components/CustomerHeader";
@@ -65,6 +66,48 @@ function formatMoney(value) {
 
 function formatReceivableMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function OrderTotalsPanel({ totals, actions, remark }) {
+  const cashLabel = totals.cashDiscountTotal > 0
+    ? formatMoneyAmount(totals.cashDiscountTotal)
+    : "None";
+  const valueLabel = totals.valueDiscountTotal > 0
+    ? formatMoneyAmount(totals.valueDiscountTotal)
+    : "None";
+
+  return (
+    <>
+      <div className="moduleOrderTotals">
+        <div>
+          <span>Before discount</span>
+          <strong>{formatMoneyAmount(totals.wholesaleTotal)}</strong>
+        </div>
+        <div>
+          <span>Cash discount</span>
+          <strong>{cashLabel}</strong>
+        </div>
+        <div>
+          <span>Value discount (SKU ≥ 5,000)</span>
+          <strong>{valueLabel}</strong>
+        </div>
+        <div className="moduleOrderTotalsExcl">
+          <span>Amount without VAT</span>
+          <strong>{formatMoneyAmount(totals.amountExclVat)}</strong>
+        </div>
+        <div>
+          <span>VAT 15%</span>
+          <strong>{formatMoneyAmount(totals.vatAmount)}</strong>
+        </div>
+        <div className="moduleOrderTotalsIncl">
+          <span>Amount after VAT</span>
+          <strong>{formatMoneyAmount(totals.amountInclVat)}</strong>
+        </div>
+      </div>
+      {actions}
+      {remark}
+    </>
+  );
 }
 
 function PaymentTypeControl({ paymentType, onChange, pricingRegion }) {
@@ -893,10 +936,40 @@ export default function NewOrderPage() {
     [cashDiscountMap, orderQuantities, paymentType, regionPriceList, valueDiscountMap]
   );
 
-  const orderGrandTotal = useMemo(
-    () => calculateGrandTotal(orderItems, displayPriceList),
-    [displayPriceList, orderItems]
+  const pricedOrderLines = useMemo(
+    () => (orderItems || []).map((item) => {
+      const quantity = Number(item.order_quantity || 0);
+      const wholesaleRate = Number(getPrice(regionPriceList, item.item_code) || 0);
+      const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
+      const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+      const priced = getPricedOrderLine({
+        wholesaleRate,
+        quantity,
+        paymentType,
+        cashDiscountRate: cashDiscount,
+        valueDiscountRate: valueDiscount,
+      });
+      return {
+        ...priced,
+        item_code: item.item_code,
+        item_name: item.item_name,
+        category: item.category || "Unclassified",
+        cashDiscount,
+        valueDiscount,
+        cashApplied: priced.applied.cash,
+        valueApplied: priced.applied.value,
+        lineTotal: priced.lineValue,
+      };
+    }),
+    [cashDiscountMap, orderItems, paymentType, regionPriceList, valueDiscountMap]
   );
+
+  const orderTotals = useMemo(
+    () => summarizePricedLines(pricedOrderLines),
+    [pricedOrderLines]
+  );
+
+  const orderGrandTotal = orderTotals.amountExclVat;
 
   const creditApproval = useMemo(
     () => evaluateCreditApproval({
@@ -913,33 +986,8 @@ export default function NewOrderPage() {
       if (!selectedCustomer || orderItems.length === 0) return null;
 
       const savedAtIso = new Date().toISOString();
-      const lines = orderItems.map((item) => {
-        const quantity = Number(item.order_quantity || 0);
-        const wholesaleRate = Number(getPrice(regionPriceList, item.item_code) || 0);
-        const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
-        const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
-        const priced = getPricedOrderLine({
-          wholesaleRate,
-          quantity,
-          paymentType,
-          cashDiscountRate: cashDiscount,
-          valueDiscountRate: valueDiscount,
-        });
-
-        return {
-          item_code: item.item_code,
-          item_name: item.item_name,
-          category: item.category || "Unclassified",
-          quantity,
-          wholesaleRate,
-          cashDiscount,
-          valueDiscount,
-          cashApplied: priced.applied.cash,
-          valueApplied: priced.applied.value,
-          rate: priced.rate,
-          lineTotal: priced.lineValue,
-        };
-      });
+      const lines = pricedOrderLines;
+      const totals = summarizePricedLines(lines);
 
       return {
         orderId,
@@ -952,7 +1000,8 @@ export default function NewOrderPage() {
         pricingRegion,
         itemCount: orderSummary.itemCount,
         totalQuantity: orderSummary.totalQuantity,
-        grandTotal: calculateGrandTotal(orderItems, displayPriceList),
+        grandTotal: totals.amountExclVat,
+        totals,
         lines,
         history: orderHistory,
         creditApprovalRemark: creditApproval.remark,
@@ -970,10 +1019,7 @@ export default function NewOrderPage() {
       orderSummary.totalQuantity,
       outstandingInfo,
       creditApproval.remark,
-      displayPriceList,
-      cashDiscountMap,
-      valueDiscountMap,
-      regionPriceList,
+      pricedOrderLines,
       paymentType,
       pricingRegion,
       selectedCustomer,
@@ -996,27 +1042,29 @@ export default function NewOrderPage() {
         const marginTop = 38;
         const contentWidth = pageWidth - marginX * 2;
         const tableStartX = marginX;
-        const vatRate = 0.15;
-        const subtotal = Number(snapshot.grandTotal || 0);
-        const vatAmount = subtotal * vatRate;
-        const totalWithVat = subtotal + vatAmount;
+        const pdfTotals = snapshot.totals || summarizePricedLines(snapshot.lines || []);
+        const subtotal = Number(pdfTotals.amountExclVat || snapshot.grandTotal || 0);
+        const vatAmount = Number(pdfTotals.vatAmount || subtotal * 0.15);
+        const totalWithVat = Number(pdfTotals.amountInclVat || subtotal + vatAmount);
 
         const columns = [
-          { key: "item_code", label: "Item Code", width: 62, align: "left" },
-          { key: "item_name", label: "Item Name", width: 148, align: "left" },
-          { key: "quantity", label: "Qty", width: 36, align: "right" },
-          { key: "rate", label: "Rate", width: 54, align: "right" },
-          { key: "cashDiscount", label: "Cash Disc", width: 54, align: "right" },
-          { key: "valueDiscount", label: "Value Disc", width: 58, align: "right" },
-          { key: "lineTotal", label: "Line Total", width: 103, align: "right" },
+          { key: "item_code", label: "Code", width: 48, align: "left" },
+          { key: "item_name", label: "Item", width: 96, align: "left" },
+          { key: "quantity", label: "Qty", width: 28, align: "right" },
+          { key: "rate", label: "Rate", width: 42, align: "right" },
+          { key: "cashDiscount", label: "Cash Disc", width: 62, align: "right" },
+          { key: "valueDiscount", label: "Value Disc", width: 62, align: "right" },
+          { key: "exclVat", label: "Excl. VAT", width: 58, align: "right" },
+          { key: "vat", label: "VAT 15%", width: 50, align: "right" },
+          { key: "inclVat", label: "Incl. VAT", width: 69, align: "right" },
         ];
 
         const orderSummaryColumns = [
           { label: "Items", value: String(snapshot.itemCount), align: "left" },
           { label: "Total Qty", value: qtyFormat(snapshot.totalQuantity), align: "left" },
-          { label: "Subtotal", value: formatMoney(subtotal), align: "left" },
-          { label: "VAT 15%", value: formatMoney(vatAmount), align: "left" },
-          { label: "Total Incl. VAT", value: formatMoney(totalWithVat), align: "left" },
+          { label: "Without VAT", value: formatMoneyAmount(subtotal), align: "left" },
+          { label: "VAT 15%", value: formatMoneyAmount(vatAmount), align: "left" },
+          { label: "After VAT", value: formatMoneyAmount(totalWithVat), align: "left" },
         ];
 
         function drawCellText(text, x, y, width, align = "left") {
@@ -1105,10 +1153,12 @@ export default function NewOrderPage() {
             item_code: String(line.item_code || "-"),
             item_name: String(line.item_name || "-"),
             quantity: String(line.quantity),
-            rate: formatMoney(line.rate),
-            cashDiscount: formatAppliedDiscount(line.cashDiscount, line.cashApplied),
-            valueDiscount: formatAppliedDiscount(line.valueDiscount, line.valueApplied),
-            lineTotal: formatMoney(line.lineTotal),
+            rate: formatMoneyAmount(line.wholesaleRate || line.rate),
+            cashDiscount: formatDiscountDetail(line.cashDiscount, line.cashApplied, line.cashDiscountAmount),
+            valueDiscount: formatDiscountDetail(line.valueDiscount, line.valueApplied, line.valueDiscountAmount),
+            exclVat: formatMoneyAmount(line.lineValue || line.lineTotal),
+            vat: formatMoneyAmount(line.vatAmount),
+            inclVat: formatMoneyAmount(line.lineTotalInclVat),
           };
 
           const itemNameCol = columns.find((column) => column.key === "item_name");
@@ -1139,8 +1189,8 @@ export default function NewOrderPage() {
           y += rowHeight;
         });
 
-        const summaryBoxWidth = 220;
-        const summaryBoxHeight = 68;
+        const summaryBoxWidth = 260;
+        const summaryBoxHeight = 128;
         const summaryX = pageWidth - marginX - summaryBoxWidth;
         const bottomMargin = 52;
         let cursorY = y + 16;
@@ -1232,14 +1282,24 @@ export default function NewOrderPage() {
 
         doc.roundedRect(summaryX, summaryY, summaryBoxWidth, summaryBoxHeight, 4, 4);
         doc.setFont(undefined, "normal");
-        doc.text("Subtotal (Excl. VAT)", summaryX + 10, summaryY + 18);
-        doc.text(formatMoney(subtotal), summaryX + summaryBoxWidth - 10, summaryY + 18, { align: "right" });
-        doc.text("VAT @ 15%", summaryX + 10, summaryY + 34);
-        doc.text(formatMoney(vatAmount), summaryX + summaryBoxWidth - 10, summaryY + 34, { align: "right" });
+        doc.setFontSize(9);
+        const summaryRows = [
+          ["Before discount", formatMoneyAmount(pdfTotals.wholesaleTotal)],
+          ["Cash discount", pdfTotals.cashDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.cashDiscountTotal) : "None"],
+          ["Value discount", pdfTotals.valueDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.valueDiscountTotal) : "None"],
+          ["Amount without VAT", formatMoneyAmount(subtotal)],
+          ["VAT 15%", formatMoneyAmount(vatAmount)],
+        ];
+        summaryRows.forEach((row, index) => {
+          doc.text(row[0], summaryX + 10, summaryY + 16 + index * 16);
+          doc.text(row[1], summaryX + summaryBoxWidth - 10, summaryY + 16 + index * 16, { align: "right" });
+        });
         doc.setFont(undefined, "bold");
-        doc.text("Total (Incl. VAT)", summaryX + 10, summaryY + 54);
-        doc.text(formatMoney(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 54, { align: "right" });
+        doc.setFontSize(11);
+        doc.text("Amount after VAT", summaryX + 10, summaryY + 114);
+        doc.text(formatMoneyAmount(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 114, { align: "right" });
         doc.setFont(undefined, "normal");
+        doc.setFontSize(10);
 
         cursorY = Math.max(cursorY, summaryY + summaryBoxHeight) + 24;
 
@@ -1651,7 +1711,7 @@ export default function NewOrderPage() {
           throw new Error("Please login again.");
         }
 
-        const scope = await fetchSalesScope();
+        const scope = await fetchSalesScope({ forceRefresh: true });
         setAccessScope(scope);
 
         const [loadedCustomers, itemsRes] = await Promise.all([
@@ -2165,8 +2225,8 @@ export default function NewOrderPage() {
                                       <div className="moduleCode">Net {formatMoney(priced.rate)}</div>
                                     ) : null}
                                   </td>
-                                  <td>{formatAppliedDiscount(cashDiscount, priced.applied.cash)}</td>
-                                  <td>{formatAppliedDiscount(valueDiscount, priced.applied.value)}</td>
+                                  <td>{formatDiscountDetail(cashDiscount, priced.applied.cash, priced.cashDiscountAmount)}</td>
+                                  <td>{formatDiscountDetail(valueDiscount, priced.applied.value, priced.valueDiscountAmount)}</td>
                                   <td>
                                     <div className="moduleQtyControl">
                                       <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
@@ -2197,6 +2257,45 @@ export default function NewOrderPage() {
               </ExportableTable>
             </section>
 
+            <section className="moduleSection">
+              <PaymentTypeControl
+                paymentType={paymentType}
+                onChange={setPaymentType}
+                pricingRegion={pricingRegion}
+              />
+              <OrderTotalsPanel
+                totals={orderTotals}
+                actions={(
+                  <div className="moduleOrderBar">
+                    <div>
+                      <span>Current Order after VAT</span>
+                      <strong>{formatMoneyAmount(orderTotals.amountInclVat)}</strong>
+                    </div>
+                    <div className="moduleOrderActions">
+                      <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>
+                        {savingOrder ? "Saving..." : draftOrderId ? "Update Draft" : "Save Draft"}
+                      </button>
+                      <button type="button" onClick={handleSubmitOrder} disabled={savingOrder || submittingOrder || downloadingPdf}>
+                        {submittingOrder ? "Submitting..." : "Submit Order"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                remark={(
+                  <div
+                    className="moduleHint"
+                    style={{
+                      marginTop: "10px",
+                      fontWeight: 700,
+                      color: creditApproval.required ? "#9b1c1c" : undefined,
+                    }}
+                  >
+                    {creditApproval.remark}
+                  </div>
+                )}
+              />
+            </section>
+
             {!loadingCustomerHistory && analytics && (
               <TransactionHistory
                 transactions={transactions}
@@ -2205,38 +2304,6 @@ export default function NewOrderPage() {
                 analytics={analytics}
               />
             )}
-
-            <section className="moduleSection">
-              <PaymentTypeControl
-                paymentType={paymentType}
-                onChange={setPaymentType}
-                pricingRegion={pricingRegion}
-              />
-              <div className="moduleOrderBar">
-                <div>
-                  <span>Current Order</span>
-                  <strong>{formatMoney(orderGrandTotal)}</strong>
-                </div>
-                <div className="moduleOrderActions">
-                  <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>
-                    {savingOrder ? "Saving..." : draftOrderId ? "Update Draft" : "Save Draft"}
-                  </button>
-                  <button type="button" onClick={handleSubmitOrder} disabled={savingOrder || submittingOrder || downloadingPdf}>
-                    {submittingOrder ? "Submitting..." : "Submit Order"}
-                  </button>
-                </div>
-              </div>
-              <div
-                className="moduleHint"
-                style={{
-                  marginTop: "10px",
-                  fontWeight: 700,
-                  color: creditApproval.required ? "#9b1c1c" : undefined,
-                }}
-              >
-                {creditApproval.remark}
-              </div>
-            </section>
 
             {lastSavedOrder && (
               <section className="moduleSection moduleReviewSection">
@@ -2259,8 +2326,12 @@ export default function NewOrderPage() {
                     <strong>{new Date(lastSavedOrder.savedAtIso).toLocaleString("en-GB")}</strong>
                   </div>
                   <div>
-                    <span>Total</span>
-                    <strong>{formatMoney(lastSavedOrder.grandTotal)}</strong>
+                    <span>Amount without VAT</span>
+                    <strong>{formatMoneyAmount(lastSavedOrder.totals?.amountExclVat ?? lastSavedOrder.grandTotal)}</strong>
+                  </div>
+                  <div>
+                    <span>Amount after VAT</span>
+                    <strong>{formatMoneyAmount(lastSavedOrder.totals?.amountInclVat ?? lastSavedOrder.grandTotal * 1.15)}</strong>
                   </div>
                   <div>
                     <span>Payment</span>
@@ -2271,6 +2342,8 @@ export default function NewOrderPage() {
                     <strong>{pricingRegionLabel(lastSavedOrder.pricingRegion)}</strong>
                   </div>
                 </div>
+
+                {lastSavedOrder.totals ? <OrderTotalsPanel totals={lastSavedOrder.totals} /> : null}
 
                 {lastSavedOrder.creditApprovalRemark ? (
                   <div
@@ -2295,7 +2368,9 @@ export default function NewOrderPage() {
                         <th>Rate</th>
                         <th>Cash Discount</th>
                         <th>Value Discount</th>
-                        <th>Line Total</th>
+                        <th>Without VAT</th>
+                        <th>VAT 15%</th>
+                        <th>After VAT</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2305,9 +2380,11 @@ export default function NewOrderPage() {
                           <td>{line.item_name}</td>
                           <td>{line.quantity}</td>
                           <td>{formatMoney(line.rate)}</td>
-                          <td>{formatAppliedDiscount(line.cashDiscount, line.cashApplied)}</td>
-                          <td>{formatAppliedDiscount(line.valueDiscount, line.valueApplied)}</td>
-                          <td>{formatMoney(line.lineTotal)}</td>
+                          <td>{formatDiscountDetail(line.cashDiscount, line.cashApplied, line.cashDiscountAmount)}</td>
+                          <td>{formatDiscountDetail(line.valueDiscount, line.valueApplied, line.valueDiscountAmount)}</td>
+                          <td>{formatMoneyAmount(line.lineValue || line.lineTotal)}</td>
+                          <td>{formatMoneyAmount(line.vatAmount)}</td>
+                          <td>{formatMoneyAmount(line.lineTotalInclVat)}</td>
                         </tr>
                       ))}
                     </tbody>

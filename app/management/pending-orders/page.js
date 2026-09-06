@@ -17,7 +17,7 @@ import {
   waitForPendingOrdersHydration,
   writePendingOrdersInvoiceMeta,
 } from "../../lib/mobileDataCache";
-import { buildOutstandingPdfBucketRows, sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
+import { buildOutstandingPdfBucketRows, sortBucketLabels, syncOutstandingCustomerFromInvoices, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -611,26 +611,32 @@ export default function PendingOrdersPage() {
       const summaryX = pageWidth - 40 - summaryBoxWidth;
 
       let outstandingInfo = outstandingInfoByOrder?.[activeOrder.id] || null;
-      if (!outstandingInfo?.customer && activeOrder.customer_code) {
+      if (activeOrder.customer_code) {
         try {
           const token = await getAuthToken();
           const outstandingResponse = await fetch(
             `${OUTSTANDING_API}?customerCode=${encodeURIComponent(activeOrder.customer_code || "")}&customerName=${encodeURIComponent(activeOrder.customer_name || "")}`,
-            { headers: { Authorization: `Bearer ${token}` } }
+            { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
           );
           const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
           if (outstandingResponse.ok && outstandingPayload.success) {
             outstandingInfo = {
               uploadedAt: String(outstandingPayload.uploadedAt || ""),
-              bucketLabels: sortBucketLabels(outstandingPayload.bucketLabels || []),
-              customer: outstandingPayload.customer || null,
+              bucketLabels: sortBucketLabels(outstandingPayload.bucketLabels || outstandingInfo?.bucketLabels || []),
+              customer: outstandingPayload.customer || outstandingInfo?.customer || null,
+              customerInvoices: Array.isArray(outstandingPayload.customerInvoices)
+                ? outstandingPayload.customerInvoices
+                : [],
             };
           }
         } catch {
           // Keep generating the order PDF even if outstanding cannot be refreshed.
         }
       }
-      const outstandingCustomer = outstandingInfo?.customer;
+      const outstandingCustomer = syncOutstandingCustomerFromInvoices(
+        outstandingInfo?.customer,
+        outstandingInfo?.customerInvoices,
+      );
       const outstandingBuckets = sortBucketLabels(outstandingInfo?.bucketLabels || []);
       const bucketRows = buildOutstandingPdfBucketRows(outstandingCustomer, outstandingBuckets).map((row) => ({
         label: row.label,
@@ -782,12 +788,13 @@ export default function PendingOrdersPage() {
       const fileName = buildOrderPdfFileName({
         orderId: activeOrder.id,
         customerCode: activeOrder.customer_code,
-        savedAtIso: activeOrder.updated_at || activeOrder.created_at,
+        savedAtIso: new Date().toISOString(),
       });
       await saveOrShareOrderPdf(doc, fileName, {
         title: `Order #${activeOrder.id}`,
         text: `Sales order for ${activeOrder.customer_name || activeOrder.customer_code || "customer"}`,
         dialogTitle: "Save or share order PDF",
+        forceDownload: true,
       });
     } catch (error) {
       if (error?.name === "AbortError" || String(error?.message || "").toLowerCase().includes("cancel")) {
@@ -1202,7 +1209,7 @@ export default function PendingOrdersPage() {
                                     onClick={regenerateOrderPdf}
                                     disabled={downloadingPdf || loadingLines || orderLines.length === 0}
                                   >
-                                    {downloadingPdf ? "Preparing PDF..." : "Save / Share PDF"}
+                                    {downloadingPdf ? "Preparing PDF..." : "Regenerate / Download PDF"}
                                   </button>
                                   <button type="button" className="moduleInlineButton" onClick={exportQueueToExcel} disabled={orders.length === 0}>
                                     Export Excel

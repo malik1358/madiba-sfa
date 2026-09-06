@@ -13,6 +13,7 @@ import {
   prioritizeOutstandingSheets,
   selectPreferredOutstandingParses,
   resolveOutstandingBucketLabels,
+  syncOutstandingCustomerFromInvoices,
 } from "../../lib/outstanding";
 import { scheduleMobileFieldSnapshotRebuild } from "../../lib/server/mobileFieldSnapshot.js";
 
@@ -113,7 +114,7 @@ export async function GET(request) {
     const customerCode = String(url.searchParams.get("customerCode") || "").trim();
     const customerName = String(url.searchParams.get("customerName") || "").trim();
 
-    const customer = (customerCode || customerName)
+    const matchedCustomer = (customerCode || customerName)
       ? findOutstandingForCustomer(dataset, customerCode, customerName)
       : null;
     const hasInvoiceRowsInDataset = Array.isArray(dataset.invoices) && dataset.invoices.length > 0;
@@ -127,6 +128,7 @@ export async function GET(request) {
           return String(a?.ref_no || "").localeCompare(String(b?.ref_no || ""));
         })
       : [];
+    const customer = syncOutstandingCustomerFromInvoices(matchedCustomer, customerInvoices);
 
     return NextResponse.json({
       success: true,

@@ -507,6 +507,36 @@ export function buildCollectionOutstandingBucketsFromInvoices(invoices, todayIso
   return outstanding;
 }
 
+export function collectionFieldsToOutstandingBuckets(fields) {
+  return {
+    "0-30": toNumber(fields?.outstanding_0_30),
+    "31-60": toNumber(fields?.outstanding_30_60),
+    "61-90": toNumber(fields?.outstanding_61_90),
+    "91-120": toNumber(fields?.outstanding_91_120),
+    ">120": toNumber(fields?.outstanding_above_120),
+  };
+}
+
+export function syncOutstandingCustomerFromInvoices(customer, invoices, todayIso = new Date().toISOString()) {
+  const usableInvoices = (invoices || []).filter((invoice) => toNumber(invoice?.pending_amount) > 0);
+  if (usableInvoices.length === 0) return customer || null;
+
+  const buckets = collectionFieldsToOutstandingBuckets(
+    buildCollectionOutstandingBucketsFromInvoices(usableInvoices, todayIso),
+  );
+  const totalOutstanding = Object.values(buckets).reduce((sum, value) => sum + toNumber(value), 0);
+  const first = usableInvoices[0] || {};
+
+  return {
+    ...(customer || {}),
+    customer_code: customer?.customer_code || first.customer_code || "",
+    customer_name: customer?.customer_name || first.customer_name || "",
+    buckets,
+    open_invoices: usableInvoices.length,
+    total_outstanding: totalOutstanding,
+  };
+}
+
 export function resolveCollectionOutstandingBuckets({
   rowBuckets,
   invoices,

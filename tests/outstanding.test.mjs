@@ -31,6 +31,7 @@ import {
   resolveInvoiceDays,
   resolveOutstandingInvoiceCustomerCode,
   resolveOutstandingBucketLabels,
+  syncOutstandingCustomerFromInvoices,
   resolveOverdueDaysFromDueDate,
   sanitizeStoredOverdueDays,
   buildOutstandingPdfBucketRows,
@@ -571,6 +572,26 @@ test("order PDF outstanding rows stay visible when stored labels are missing", (
     "Total outstanding",
   ]);
   assert.equal(rows.at(-1).amount, 1600);
+});
+
+test("sync outstanding customer from invoices when the aggregate row is missing", () => {
+  const customer = syncOutstandingCustomerFromInvoices(null, [
+    {
+      customer_code: "1564",
+      customer_name: "Windows of Thought and Creativity Foundation",
+      pending_amount: 2500,
+      invoice_day: 40,
+    },
+  ], "2026-09-06T00:00:00.000Z");
+
+  assert.equal(customer.customer_code, "1564");
+  assert.equal(customer.open_invoices, 1);
+  assert.equal(customer.buckets["31-60"], 2500);
+  assert.equal(customer.total_outstanding, 2500);
+  assert.equal(
+    buildOutstandingPdfBucketRows(customer, []).find((row) => row.kind === "total")?.amount,
+    2500
+  );
 });
 
 test("visible outstanding buckets keep empty gaps through the oldest balance", () => {

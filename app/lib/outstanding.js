@@ -542,15 +542,15 @@ export function resolveCollectionOutstandingBuckets({
   invoices,
   todayIso = new Date().toISOString(),
 }) {
-  const hasRowBuckets = Object.values(rowBuckets || {}).some((value) => toNumber(value) > 0);
-  if (hasRowBuckets) {
-    return {
-      outstanding_cash: 0,
-      ...mapOutstandingBucketsToCollectionFields(rowBuckets),
-    };
+  const usableInvoices = (invoices || []).filter((invoice) => toNumber(invoice?.pending_amount) > 0);
+  if (usableInvoices.length > 0) {
+    return buildCollectionOutstandingBucketsFromInvoices(usableInvoices, todayIso);
   }
 
-  return buildCollectionOutstandingBucketsFromInvoices(invoices, todayIso);
+  return {
+    outstanding_cash: 0,
+    ...mapOutstandingBucketsToCollectionFields(rowBuckets),
+  };
 }
 
 export function resolveOverdueDaysFromDueDate(invoice, todayIso = new Date().toISOString()) {
@@ -985,8 +985,14 @@ export function selectPreferredOutstandingParses(parsedBySheetName) {
   const pendingBills = entries.filter((entry) => (
     normalizeOutstandingHeader(entry.sheetName).includes("pending bills")
   ));
-  const chosen = pendingBills.length ? pendingBills : entries;
-  return chosen.map((entry) => entry.parsed);
+  if (pendingBills.length) return pendingBills.map((entry) => entry.parsed);
+
+  const billsReceivable = entries.filter((entry) => (
+    normalizeOutstandingHeader(entry.sheetName).includes("bills receivable")
+  ));
+  if (billsReceivable.length) return billsReceivable.map((entry) => entry.parsed);
+
+  return entries.map((entry) => entry.parsed);
 }
 
 export function combineOutstandingHeaderRows(rows, rowIndex) {

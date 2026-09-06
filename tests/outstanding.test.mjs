@@ -827,23 +827,77 @@ test("buildCollectionOutstandingBucketsFromInvoices prefers invoice day over ove
   });
 });
 
-test("resolveCollectionOutstandingBuckets prefers uploaded row buckets", () => {
-  const fromRows = resolveCollectionOutstandingBuckets({
+test("resolveCollectionOutstandingBuckets prefers invoice-day buckets over lumped row totals", () => {
+  const fromInvoices = resolveCollectionOutstandingBuckets({
     rowBuckets: {
       "0-30": 0,
-      "31-60": 1160,
-      "61-90": 2244,
-      "91-120": 2906,
+      "31-60": 12878.85,
+      "61-90": 0,
+      "91-120": 0,
+      ">120": 0,
     },
     invoices: [
-      { pending_amount: 1159.89, invoice_day: 35, overdue_days: 5 },
-      { pending_amount: 2243.94, invoice_day: 65, overdue_days: 35 },
-      { pending_amount: 2906, invoice_day: 117, overdue_days: 89 },
+      { pending_amount: 2850, invoice_day: 64, overdue_days: 34 },
+      { pending_amount: 2949, invoice_day: 37, overdue_days: 7 },
+      { pending_amount: 7079, invoice_day: 32, overdue_days: 2 },
     ],
   });
 
-  assert.equal(fromRows.outstanding_30_60, 1160);
-  assert.equal(fromRows.outstanding_61_90, 2244);
-  assert.equal(fromRows.outstanding_91_120, 2906);
-  assert.equal(fromRows.outstanding_0_30, 0);
+  assert.equal(fromInvoices.outstanding_0_30, 0);
+  assert.equal(fromInvoices.outstanding_30_60, 10028);
+  assert.equal(fromInvoices.outstanding_61_90, 2850);
+  assert.equal(fromInvoices.outstanding_91_120, 0);
+});
+
+test("News Gate 5-Sep outstanding keeps both remaining invoices in 31-60", () => {
+  const invoices = [
+    { pending_amount: 5799.45, invoice_day: 39, overdue_days: 9, ref_no: "NFD/1233" },
+    { pending_amount: 7079.4, invoice_day: 34, overdue_days: 4, ref_no: "RNFD/161" },
+  ];
+  const buckets = resolveCollectionOutstandingBuckets({
+    rowBuckets: { "31-60": 12878.85 },
+    invoices,
+  });
+  const customer = syncOutstandingCustomerFromInvoices({
+    customer_code: "1204C",
+    buckets: { "31-60": 10029, "61-90": 2850 },
+    open_invoices: 3,
+    total_outstanding: 12879,
+  }, invoices);
+
+  assert.equal(Number(buckets.outstanding_30_60.toFixed(2)), 12878.85);
+  assert.equal(buckets.outstanding_61_90, 0);
+  assert.equal(Number(customer.buckets["31-60"].toFixed(2)), 12878.85);
+  assert.equal(customer.buckets["61-90"], 0);
+  assert.equal(customer.open_invoices, 2);
+  assert.equal(Number(customer.total_outstanding.toFixed(2)), 12878.85);
+});
+
+test("Bills Receivable parse is preferred over Customer wise totals", () => {
+  const billsReceivable = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Pending", "Due", "Overdue", "Invoice Days"],
+    ["28-Jul-26", "NFD/1233", "1204C  News Gate Trading Company", 5799.45, "27-Aug-26", 9, 39],
+    ["02-Aug-26", "RNFD/161", "1204C  News Gate Trading Company", 7079.4, "01-Sep-26", 4, 34],
+  ], 0);
+  const customerWise = {
+    rows: [{
+      customer_code: "1204C",
+      customer_name: "News Gate Trading Company",
+      buckets: { "31-60": 12878.85 },
+      open_invoices: 1,
+      total_outstanding: 12878.85,
+    }],
+    bucketLabels: ["31-60"],
+    invoices: [],
+  };
+
+  const chosen = selectPreferredOutstandingParses([
+    { sheetName: "Customer wise", parsed: customerWise },
+    { sheetName: "Bills Receivable", parsed: billsReceivable },
+  ]);
+
+  assert.equal(chosen.length, 1);
+  assert.equal(chosen[0].invoices.length, 2);
+  assert.equal(Number(chosen[0].rows[0].buckets["31-60"].toFixed(2)), 12878.85);
+  assert.equal(chosen[0].rows[0].buckets["61-90"], 0);
 });

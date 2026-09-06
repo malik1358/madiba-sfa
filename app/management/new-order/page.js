@@ -36,7 +36,7 @@ import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance"
 import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
-import { buildOutstandingPdfBucketRows, resolveOutstandingBucketLabels, sortBucketLabels, syncOutstandingCustomerFromInvoices, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { buildOutstandingPdfBucketRows, DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, sortBucketLabels, syncOutstandingCustomerFromInvoices, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
@@ -851,13 +851,14 @@ export default function NewOrderPage() {
       .sort((a, b) => a.category.localeCompare(b.category));
   }, [filteredItems]);
 
-  const visibleOutstandingBuckets = useMemo(
-    () => visibleOutstandingBucketLabels(
-      resolveOutstandingBucketLabels(outstandingInfo.bucketLabels, outstandingInfo.customer?.buckets),
+  const visibleOutstandingBuckets = useMemo(() => {
+    const resolved = resolveOutstandingBucketLabels(
+      outstandingInfo.bucketLabels,
       outstandingInfo.customer?.buckets
-    ),
-    [outstandingInfo.bucketLabels, outstandingInfo.customer]
-  );
+    );
+    const baseLabels = resolved.length ? resolved : DEFAULT_OUTSTANDING_BUCKET_LABELS;
+    return visibleOutstandingBucketLabels(baseLabels, outstandingInfo.customer?.buckets);
+  }, [outstandingInfo.bucketLabels, outstandingInfo.customer]);
 
   const canUploadOutstanding = useMemo(() => {
     const role = String(accessScope?.role || "").toLowerCase();
@@ -1231,7 +1232,6 @@ export default function NewOrderPage() {
 
         function formatOutstandingValue(value, digits = 0, withCurrency = true) {
           const number = parseOutstandingNumber(value);
-          if (number === 0) return "";
           if (withCurrency) return formatReceivableMoney(number);
           return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
         }
@@ -1908,7 +1908,7 @@ export default function NewOrderPage() {
 
           {selectedCustomer && outstandingLoading && <div className="moduleLoading">Loading outstanding details...</div>}
 
-          {selectedCustomer && !outstandingLoading && outstandingInfo.customer && (
+          {selectedCustomer && !outstandingLoading && (
             <>
               <ExportableTable filename="order-outstanding-buckets" sheetName="Outstanding" className="moduleTableWrap" style={{ marginTop: "10px" }}>
                 <table className="moduleTable">
@@ -1976,7 +1976,7 @@ export default function NewOrderPage() {
           )}
 
           {selectedCustomer && !outstandingLoading && !outstandingInfo.customer && (
-            <div className="moduleHint">No outstanding row found for this customer in latest upload.</div>
+            <div className="moduleHint">No outstanding row found for this customer in latest upload. Showing zeros.</div>
           )}
         </section>
 

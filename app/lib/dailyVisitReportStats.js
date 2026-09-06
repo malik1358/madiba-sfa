@@ -29,11 +29,16 @@ export function isOnSiteCustomerVisit(entry) {
 
 export function assignOnSiteVisitNumbers(entries = []) {
   let visitNumber = 0;
+  let lastVisitCode = "";
   return (entries || []).map((entry) => {
     if (!isOnSiteCustomerVisit(entry)) {
       return { ...entry, onSiteVisitNumber: null };
     }
-    visitNumber += 1;
+    const code = normalizeCode(entry?.customerCode || entry?.customer_code);
+    if (!code || code !== lastVisitCode) {
+      visitNumber += 1;
+      lastVisitCode = code;
+    }
     return { ...entry, onSiteVisitNumber: visitNumber };
   });
 }

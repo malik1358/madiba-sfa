@@ -111,7 +111,8 @@ test("buildUserVisitReportEmail includes the user name and timeline", () => {
   assert.match(message.subject, /2026-09-02/);
   assert.match(message.text, /Shop A \(C1\)/);
   assert.match(message.html, /Visit report/);
-  assert.match(message.html, /Daily visit summary/);
+  assert.doesNotMatch(message.html, /Daily visit summary/);
+  assert.doesNotMatch(message.html, /Visited 1 customer/);
   assert.match(message.html, /Day route/);
   assert.match(message.html, /Visit without order/);
   assert.match(message.html, /Visit #/);

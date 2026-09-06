@@ -216,6 +216,24 @@ test("findUnloggedIdleGaps does not flag logged lunch windows", () => {
   );
 });
 
+test("findUnloggedIdleGaps stops at logout even if GPS or activity continues", () => {
+  const date = { year: 2026, month: 9, day: 5 };
+  const gaps = findUnloggedIdleGaps({
+    loginAt: ksaIso(date, 9, 20),
+    logoutAt: ksaIso(date, 21, 3),
+    visits: [
+      { saved_at: ksaIso(date, 19, 41) },
+    ],
+    activities: [
+      { saved_at: ksaIso(date, 21, 3) },
+      { saved_at: ksaIso(date, 22, 14) },
+    ],
+  });
+
+  assert.equal(gaps.some((gap) => gap.minutes === 71), false);
+  assert.equal(gaps.some((gap) => gap.minutes === 82), true);
+});
+
 test("findUnloggedIdleGaps ignores an open lunch-out until the next activity", () => {
   const date = { year: 2026, month: 8, day: 30 };
   const gaps = findUnloggedIdleGaps({

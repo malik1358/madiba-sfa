@@ -108,7 +108,6 @@ function customerLabel(entry) {
 export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}) {
   const userName = String(user?.userName || "User").trim() || "User";
   const subject = `Daily Visit Report — ${userName} — ${date}`;
-  const lines = Array.isArray(user?.daySummary?.lines) ? user.daySummary.lines : [];
   const entries = Array.isArray(user?.entries) ? user.entries : [];
   const performance = user?.performance || null;
   const kpis = Array.isArray(performance?.kpis) ? performance.kpis : [];
@@ -167,7 +166,6 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
     ...locationNotes,
     "",
     ...kpiText,
-    ...(lines.length ? ["Summary:", ...lines, ""] : []),
     ...entries.map((entry) => {
       const waiting = entry.waitingMinutesFromPrevious == null
         ? "-"
@@ -183,10 +181,6 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
       ].join(" | ");
     }),
   ].join("\n");
-
-  const summaryHtml = lines.length
-    ? `<ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
-    : "<p>No visit summary lines for this day.</p>";
 
   const splitHtml = `<table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; margin: 0 0 16px;">
     <thead style="background: #f4f7fb;">
@@ -260,8 +254,6 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   ${coachingHtml}
   ${kpiHtml}
   ${routeHtml}
-  <h2 style="font-size: 16px;">Daily visit summary</h2>
-  ${summaryHtml}
   ${legendHtml}
   <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%;">
     <thead style="background: #f4f7fb;">

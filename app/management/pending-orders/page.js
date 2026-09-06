@@ -17,7 +17,7 @@ import {
   waitForPendingOrdersHydration,
   writePendingOrdersInvoiceMeta,
 } from "../../lib/mobileDataCache";
-import { sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
+import { buildOutstandingPdfBucketRows, sortBucketLabels, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
 import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -610,19 +610,34 @@ export default function PendingOrdersPage() {
       const summaryBoxHeight = 70;
       const summaryX = pageWidth - 40 - summaryBoxWidth;
 
-      const outstandingInfo = outstandingInfoByOrder?.[activeOrder.id] || null;
+      let outstandingInfo = outstandingInfoByOrder?.[activeOrder.id] || null;
+      if (!outstandingInfo?.customer && activeOrder.customer_code) {
+        try {
+          const token = await getAuthToken();
+          const outstandingResponse = await fetch(
+            `${OUTSTANDING_API}?customerCode=${encodeURIComponent(activeOrder.customer_code || "")}&customerName=${encodeURIComponent(activeOrder.customer_name || "")}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
+          if (outstandingResponse.ok && outstandingPayload.success) {
+            outstandingInfo = {
+              uploadedAt: String(outstandingPayload.uploadedAt || ""),
+              bucketLabels: sortBucketLabels(outstandingPayload.bucketLabels || []),
+              customer: outstandingPayload.customer || null,
+            };
+          }
+        } catch {
+          // Keep generating the order PDF even if outstanding cannot be refreshed.
+        }
+      }
       const outstandingCustomer = outstandingInfo?.customer;
       const outstandingBuckets = sortBucketLabels(outstandingInfo?.bucketLabels || []);
-      const bucketRows = outstandingCustomer && outstandingBuckets.length > 0
-        ? [
-            ...outstandingBuckets.map((label) => ({
-              label: `${label} days`,
-              value: formatReceivableMoney(parseOutstandingNumber(outstandingCustomer?.buckets?.[label])),
-            })),
-            { label: "Open invoices", value: String(parseOutstandingNumber(outstandingCustomer?.open_invoices)) },
-            { label: "Total outstanding", value: formatReceivableMoney(parseOutstandingNumber(outstandingCustomer?.total_outstanding)) },
-          ]
-        : [];
+      const bucketRows = buildOutstandingPdfBucketRows(outstandingCustomer, outstandingBuckets).map((row) => ({
+        label: row.label,
+        value: row.kind === "count"
+          ? String(parseOutstandingNumber(row.amount))
+          : formatReceivableMoney(parseOutstandingNumber(row.amount)),
+      }));
       const outstandingBlockHeight = bucketRows.length > 0
         ? 14 + 10 + bucketRows.length * 18
         : 0;

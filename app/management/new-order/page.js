@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -13,6 +12,7 @@ import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { isBuildingMaterialItem, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
 import {
   buildEffectivePriceList,
+  formatAppliedDiscount,
   formatDiscountPercent,
   getPricedOrderLine,
   lookupDiscountRate,
@@ -65,6 +65,29 @@ function formatMoney(value) {
 
 function formatReceivableMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function PaymentTypeControl({ paymentType, onChange, pricingRegion }) {
+  return (
+    <div className="moduleFilterRow" style={{ marginTop: "12px" }}>
+      <label>
+        Payment Type
+        <select
+          className="moduleInput"
+          value={paymentType}
+          onChange={(event) => onChange(normalizePaymentType(event.target.value))}
+        >
+          <option value="credit">Credit</option>
+          <option value="cash">Cash</option>
+        </select>
+      </label>
+      <div className="moduleHint" style={{ alignSelf: "end", paddingBottom: "8px" }}>
+        {pricingRegionLabel(pricingRegion)} prices
+        {paymentType === "cash" ? " • cash discount applied when published" : ""}
+        {" • value discount applies when a SKU exceeds 5,000 SAR"}
+      </div>
+    </div>
+  );
 }
 
 async function waitForAccessToken(supabase, attempts = 8, delayMs = 250) {
@@ -506,7 +529,6 @@ function parsePricePayload(payload) {
 }
 
 export default function NewOrderPage() {
-  const router = useRouter();
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
@@ -534,7 +556,6 @@ export default function NewOrderPage() {
   const [cashDiscountMap, setCashDiscountMap] = useState({});
   const [valueDiscountMap, setValueDiscountMap] = useState({});
   const [paymentType, setPaymentType] = useState("credit");
-  const [previousDrafts, setPreviousDrafts] = useState([]);
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [outstandingUploadFile, setOutstandingUploadFile] = useState(null);
@@ -1085,8 +1106,8 @@ export default function NewOrderPage() {
             item_name: String(line.item_name || "-"),
             quantity: String(line.quantity),
             rate: formatMoney(line.rate),
-            cashDiscount: formatDiscountPercent(line.cashDiscount),
-            valueDiscount: formatDiscountPercent(line.valueDiscount),
+            cashDiscount: formatAppliedDiscount(line.cashDiscount, line.cashApplied),
+            valueDiscount: formatAppliedDiscount(line.valueDiscount, line.valueApplied),
             lineTotal: formatMoney(line.lineTotal),
           };
 
@@ -1428,20 +1449,6 @@ export default function NewOrderPage() {
     const snapshot = buildOrderSnapshot(orderId, "Draft Saved");
     if (!snapshot) return;
 
-    setPreviousDrafts((current) => {
-      const next = current.filter((draft) => draft.id !== orderId);
-      return [
-        {
-          id: orderId,
-          customer_code: snapshot.customerCode,
-          customer_name: snapshot.customerName,
-          updated_at: snapshot.savedAtIso,
-          status: "DRAFT",
-        },
-        ...next,
-      ].slice(0, 25);
-    });
-
     const queued = String(orderId).startsWith("pending:");
     const savedMessage = queued
       ? (language === "ar"
@@ -1647,27 +1654,15 @@ export default function NewOrderPage() {
         const scope = await fetchSalesScope();
         setAccessScope(scope);
 
-        let draftsQuery = supabase
-          .from("sales_orders")
-          .select("id,customer_code,customer_name,updated_at,status")
-          .eq("status", "DRAFT")
-          .order("updated_at", { ascending: false });
-
-        if (!scope.hasAllAccess) {
-          draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
-        }
-
-        const [loadedCustomers, itemsRes, draftsRes] = await Promise.all([
+        const [loadedCustomers, itemsRes] = await Promise.all([
           fetchVisibleCustomers(accessToken),
           supabase
             .from("items_master")
             .select("item_code,item_name,category")
             .order("item_name"),
-          draftsQuery,
         ]);
 
         if (itemsRes.error) throw itemsRes.error;
-        if (draftsRes.error) throw draftsRes.error;
 
         const visibleCustomers = (loadedCustomers || []).filter((customer) => !isExcludedNewOrderCustomer(customer));
         const allowPrefilled = Boolean(prefilledCustomer)
@@ -1678,7 +1673,6 @@ export default function NewOrderPage() {
 
         setCustomers(mergedCustomers);
         setItemsMaster((itemsRes.data || []).filter((item) => !isBuildingMaterialItem(item)));
-        setPreviousDrafts((draftsRes.data || []).filter((draft) => !isExcludedNewOrderCustomer(draft)));
 
         fetchItemCategoryLookup(supabase, scope)
           .then((categories) => setHistoryCategoryLookup(categories || new Map()))
@@ -1978,26 +1972,11 @@ export default function NewOrderPage() {
             </select>
           </div>
 
-          {selectedCustomer && (
-            <div className="moduleFilterRow" style={{ marginTop: "12px" }}>
-              <label>
-                Payment Type
-                <select
-                  className="moduleInput"
-                  value={paymentType}
-                  onChange={(event) => setPaymentType(normalizePaymentType(event.target.value))}
-                >
-                  <option value="credit">Credit</option>
-                  <option value="cash">Cash</option>
-                </select>
-              </label>
-              <div className="moduleHint" style={{ alignSelf: "end", paddingBottom: "8px" }}>
-                {pricingRegionLabel(pricingRegion)} prices
-                {paymentType === "cash" ? " • cash discount applied when published" : ""}
-                {" • value discount applies when a SKU exceeds 5,000 SAR"}
-              </div>
-            </div>
-          )}
+          <PaymentTypeControl
+            paymentType={paymentType}
+            onChange={setPaymentType}
+            pricingRegion={pricingRegion}
+          />
 
           {!selectedCustomer && (
             <div className="moduleHint">Select a customer to start building an order.</div>
@@ -2025,7 +2004,10 @@ export default function NewOrderPage() {
                   decreaseOrderQty={decreaseQty}
                   increaseOrderQty={increaseQty}
                   changeOrderQty={updateQty}
-                  priceList={displayPriceList}
+                  priceList={regionPriceList}
+                  cashDiscountMap={cashDiscountMap}
+                  valueDiscountMap={valueDiscountMap}
+                  paymentType={paymentType}
                 />
                 <QuickOrder
                   quickOrderSuggestions={quickOrderSuggestions}
@@ -2033,13 +2015,10 @@ export default function NewOrderPage() {
                   decreaseOrderQty={decreaseQty}
                   increaseOrderQty={increaseQty}
                   changeOrderQty={updateQty}
-                  priceList={displayPriceList}
-                />
-                <TransactionHistory
-                  transactions={transactions}
-                  showTransactions={showTransactions}
-                  setShowTransactions={setShowTransactions}
-                  analytics={analytics}
+                  priceList={regionPriceList}
+                  cashDiscountMap={cashDiscountMap}
+                  valueDiscountMap={valueDiscountMap}
+                  paymentType={paymentType}
                 />
 
                 {Array.isArray(orderHistory) && orderHistory.length > 0 && (
@@ -2150,9 +2129,16 @@ export default function NewOrderPage() {
                           {isExpanded &&
                             group.items.map((item) => {
                               const qty = Number(orderQuantities[item.item_code] || 0);
-                              const price = getPrice(displayPriceList, item.item_code);
+                              const wholesale = getPrice(regionPriceList, item.item_code);
                               const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
                               const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+                              const priced = getPricedOrderLine({
+                                wholesaleRate: wholesale,
+                                quantity: qty,
+                                paymentType,
+                                cashDiscountRate: cashDiscount,
+                                valueDiscountRate: valueDiscount,
+                              });
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
@@ -2173,9 +2159,14 @@ export default function NewOrderPage() {
                                       </div>
                                     )}
                                   </td>
-                                  <td>{price ? formatMoney(price) : "NOT FOUND"}</td>
-                                  <td>{formatDiscountPercent(cashDiscount)}</td>
-                                  <td>{formatDiscountPercent(valueDiscount)}</td>
+                                  <td>
+                                    {wholesale ? formatMoney(wholesale) : "NOT FOUND"}
+                                    {wholesale && qty > 0 && priced.rate !== wholesale ? (
+                                      <div className="moduleCode">Net {formatMoney(priced.rate)}</div>
+                                    ) : null}
+                                  </td>
+                                  <td>{formatAppliedDiscount(cashDiscount, priced.applied.cash)}</td>
+                                  <td>{formatAppliedDiscount(valueDiscount, priced.applied.value)}</td>
                                   <td>
                                     <div className="moduleQtyControl">
                                       <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
@@ -2189,7 +2180,7 @@ export default function NewOrderPage() {
                                       <button type="button" onClick={() => increaseQty(item.item_code)}>+</button>
                                     </div>
                                   </td>
-                                  <td>{formatMoney(price * qty)}</td>
+                                  <td>{formatMoney(priced.lineValue)}</td>
                                 </tr>
                               );
                             })}
@@ -2206,7 +2197,21 @@ export default function NewOrderPage() {
               </ExportableTable>
             </section>
 
+            {!loadingCustomerHistory && analytics && (
+              <TransactionHistory
+                transactions={transactions}
+                showTransactions={showTransactions}
+                setShowTransactions={setShowTransactions}
+                analytics={analytics}
+              />
+            )}
+
             <section className="moduleSection">
+              <PaymentTypeControl
+                paymentType={paymentType}
+                onChange={setPaymentType}
+                pricingRegion={pricingRegion}
+              />
               <div className="moduleOrderBar">
                 <div>
                   <span>Current Order</span>
@@ -2300,8 +2305,8 @@ export default function NewOrderPage() {
                           <td>{line.item_name}</td>
                           <td>{line.quantity}</td>
                           <td>{formatMoney(line.rate)}</td>
-                          <td>{formatDiscountPercent(line.cashDiscount)}</td>
-                          <td>{formatDiscountPercent(line.valueDiscount)}</td>
+                          <td>{formatAppliedDiscount(line.cashDiscount, line.cashApplied)}</td>
+                          <td>{formatAppliedDiscount(line.valueDiscount, line.valueApplied)}</td>
                           <td>{formatMoney(line.lineTotal)}</td>
                         </tr>
                       ))}
@@ -2335,53 +2340,6 @@ export default function NewOrderPage() {
           </>
         )}
 
-        <section className="moduleSection">
-          <div className="moduleSectionHeader">
-            <h2>Previous Drafts</h2>
-          </div>
-          <ExportableTable filename="previous-drafts" sheetName="Drafts" className="moduleTableWrap">
-            <table className="moduleTable">
-              <thead>
-                <tr>
-                  <th>Draft ID</th>
-                  <th>Customer</th>
-                  <th>Updated</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {previousDrafts.map((draft) => (
-                  <tr key={draft.id}>
-                    <td>{draft.id}</td>
-                    <td>{draft.customer_name || draft.customer_code}</td>
-                    <td>{draft.updated_at ? new Date(draft.updated_at).toLocaleString("en-GB") : "-"}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="moduleInlineButton"
-                        onClick={() => {
-                          const params = new URLSearchParams();
-                          if (draft.id) params.set("order_id", String(draft.id));
-                          if (draft.customer_code) params.set("customer_code", String(draft.customer_code));
-                          if (draft.customer_name) params.set("customer_name", String(draft.customer_name));
-                          if (draft.salesman_code) params.set("salesman_code", String(draft.salesman_code));
-                          router.push(`/management/new-order?${params.toString()}`);
-                        }}
-                      >
-                        Open Draft
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {previousDrafts.length === 0 && (
-                  <tr>
-                    <td colSpan={4}>No draft orders found.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </ExportableTable>
-        </section>
       </div>
     </main>
     </MorningAttendanceGate>

@@ -48,10 +48,24 @@ export function formatDiscountPercent(rate) {
   return `${Number((value * 100).toFixed(2))}%`;
 }
 
+export function formatAppliedDiscount(rate, applied) {
+  const label = formatDiscountPercent(rate);
+  if (label === "—") return "—";
+  return applied ? `${label} applied` : label;
+}
+
 export function lookupDiscountRate(discountMap, itemCode) {
   const code = String(itemCode || "").trim().toUpperCase();
   if (!code) return 0;
-  return Number(discountMap?.[code] || 0);
+  return Number(discountMap?.[code] ?? discountMap?.[itemCode] ?? 0);
+}
+
+export function lookupQuantity(quantities, itemCode) {
+  const code = String(itemCode || "").trim().toUpperCase();
+  if (!code) return 0;
+  if (quantities?.[code] != null) return Number(quantities[code] || 0);
+  const match = Object.entries(quantities || {}).find(([key]) => String(key || "").trim().toUpperCase() === code);
+  return match ? Number(match[1] || 0) : 0;
 }
 
 export function parseDiscountRate(value) {
@@ -85,7 +99,7 @@ export function getPricedOrderLine({
   let rate = wholesale;
   const applied = { cash: false, value: false };
 
-  if (lineBeforeDiscount > valueThreshold && valueRate > 0) {
+  if (lineBeforeDiscount >= valueThreshold && valueRate > 0) {
     rate *= (1 - valueRate);
     applied.value = true;
   }
@@ -120,10 +134,10 @@ export function buildEffectivePriceList({
 
     const priced = getPricedOrderLine({
       wholesaleRate,
-      quantity: quantities?.[code] ?? quantities?.[rawCode] ?? 0,
+      quantity: lookupQuantity(quantities, code) || lookupQuantity(quantities, rawCode),
       paymentType,
-      cashDiscountRate: cashDiscountMap?.[code] ?? cashDiscountMap?.[rawCode] ?? 0,
-      valueDiscountRate: valueDiscountMap?.[code] ?? valueDiscountMap?.[rawCode] ?? 0,
+      cashDiscountRate: lookupDiscountRate(cashDiscountMap, code) || lookupDiscountRate(cashDiscountMap, rawCode),
+      valueDiscountRate: lookupDiscountRate(valueDiscountMap, code) || lookupDiscountRate(valueDiscountMap, rawCode),
     });
 
     next[code] = priced.rate;

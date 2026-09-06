@@ -30,8 +30,10 @@ import {
   resolveInvoiceAgingDays,
   resolveInvoiceDays,
   resolveOutstandingInvoiceCustomerCode,
+  resolveOutstandingBucketLabels,
   resolveOverdueDaysFromDueDate,
   sanitizeStoredOverdueDays,
+  buildOutstandingPdfBucketRows,
   summarizeOutstandingBuckets,
   summarizeOutstandingBucketsForVisitStatus,
   visibleOutstandingBucketLabels,
@@ -535,6 +537,40 @@ test("mergeParsedOutstandingSheets keeps invoice detail rows from secondary shee
   assert.equal(merged.rows.length, 2);
   assert.equal(findOutstandingForCustomer(merged, "1235", "Rokn Al-Muhareb Trading Company")?.total_outstanding, 4073);
   assert.equal(merged.invoices.filter((invoice) => invoice.customer_code === "1235").length, 2);
+});
+
+test("resolve outstanding bucket labels falls back to customer bucket keys", () => {
+  assert.deepEqual(
+    resolveOutstandingBucketLabels([], { "31-60": 0, "0-30": 1200, ">120": 50 }),
+    ["0-30", "31-60", ">120"]
+  );
+  assert.deepEqual(
+    resolveOutstandingBucketLabels(
+      [],
+      [{ buckets: { "0-30": 10 } }, { buckets: { "61-90": 20, "0-30": 5 } }]
+    ),
+    ["0-30", "61-90"]
+  );
+});
+
+test("order PDF outstanding rows stay visible when stored labels are missing", () => {
+  const rows = buildOutstandingPdfBucketRows(
+    {
+      buckets: { "0-30": 1200, "31-60": 0, "61-90": 400 },
+      open_invoices: 3,
+      total_outstanding: 1600,
+    },
+    []
+  );
+
+  assert.deepEqual(rows.map((row) => row.label), [
+    "0-30 days",
+    "31-60 days",
+    "61-90 days",
+    "Open invoices",
+    "Total outstanding",
+  ]);
+  assert.equal(rows.at(-1).amount, 1600);
 });
 
 test("visible outstanding buckets keep empty gaps through the oldest balance", () => {

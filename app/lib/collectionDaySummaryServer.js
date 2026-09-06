@@ -2,6 +2,7 @@ import {
   buildCollectionDaySummary,
   COLLECTION_DAY_SUMMARY_LABELS,
   COLLECTION_DAY_SUMMARY_LABELS_AR,
+  sumOrderLineValue,
 } from "./collectionDaySummary.js";
 import {
   extractAreaFromActivityNote,
@@ -208,7 +209,7 @@ async function loadSubmittedOrderStats(admin, userId, startIso, endIso) {
 
   let query = admin
     .from("sales_orders")
-    .select("id,total_value,status,submitted_at,created_at")
+    .select("id,status,submitted_at,created_at")
     .eq("created_by", userId)
     .eq("status", "SUBMITTED")
     .gte("submitted_at", startIso)
@@ -218,7 +219,7 @@ async function loadSubmittedOrderStats(admin, userId, startIso, endIso) {
   if (error && isMissingColumnError(error)) {
     ({ data, error } = await admin
       .from("sales_orders")
-      .select("id,total_value,status,created_at")
+      .select("id,status,created_at")
       .eq("created_by", userId)
       .eq("status", "SUBMITTED")
       .gte("created_at", startIso)
@@ -233,13 +234,28 @@ async function loadSubmittedOrderStats(admin, userId, startIso, endIso) {
   }
 
   const rows = Array.isArray(data) ? data : [];
+  const orderIds = [...new Set(rows.map((row) => Number(row?.id)).filter(Boolean))];
+  if (!orderIds.length) return { orderCount: 0, orderValue: 0 };
+
+  const { data: lines, error: lineError } = await admin
+    .from("sales_order_items")
+    .select("order_id,line_value,quantity,rate")
+    .in("order_id", orderIds);
+
+  if (lineError) {
+    if (isMissingTableError(lineError) || isMissingColumnError(lineError)) {
+      return { orderCount: orderIds.length, orderValue: 0 };
+    }
+    throw lineError;
+  }
+
   return {
-    orderCount: rows.length,
-    orderValue: rows.reduce((sum, row) => sum + Number(row?.total_value || 0), 0),
+    orderCount: orderIds.length,
+    orderValue: sumOrderLineValue(lines),
   };
 }
 
-export async function loadCollectionDaySummaryForUser(admin, userId, date = getKsaDateString(), { activities } = {}) {
+export async function loadCollectionDaySummaryForUser(admin, userId, date = getKsaDateString(), { activities, fieldVisitStats } = {}) {
   const { startIso, endIso } = ksaDayBounds(date);
 
   const { data: visits, error } = await admin
@@ -286,6 +302,7 @@ export async function loadCollectionDaySummaryForUser(admin, userId, date = getK
     ...extractWorkdayTimesFromTimelineRows(workdayRows),
     activities: activities || loggedActivities?.get(userId) || [],
     orderStats,
+    fieldVisitStats,
   };
 
   const daySummaryEn = buildCollectionDaySummary(

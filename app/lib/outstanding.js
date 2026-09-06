@@ -1122,6 +1122,36 @@ export function sortBucketLabels(labels) {
     });
 }
 
+export function resolveOutstandingBucketLabels(labels, bucketsOrRows) {
+  const fromLabels = sortBucketLabels(labels);
+  if (fromLabels.length) return fromLabels;
+  if (Array.isArray(bucketsOrRows)) {
+    return sortBucketLabels([
+      ...new Set((bucketsOrRows || []).flatMap((row) => Object.keys(row?.buckets || {}))),
+    ]);
+  }
+  return sortBucketLabels(Object.keys(bucketsOrRows || {}));
+}
+
+export function buildOutstandingPdfBucketRows(customer, labels = []) {
+  if (!customer) return [];
+
+  const displayLabels = visibleOutstandingBucketLabels(
+    resolveOutstandingBucketLabels(labels, customer.buckets),
+    customer.buckets
+  );
+
+  return [
+    ...displayLabels.map((label) => ({
+      label: `${label} days`,
+      amount: toNumber(customer.buckets?.[label]),
+      kind: "bucket",
+    })),
+    { label: "Open invoices", amount: toNumber(customer.open_invoices), kind: "count" },
+    { label: "Total outstanding", amount: toNumber(customer.total_outstanding), kind: "total" },
+  ];
+}
+
 export function visibleOutstandingBucketLabels(labels, buckets) {
   const sortedLabels = sortBucketLabels(labels);
   let lastNonZeroIndex = -1;

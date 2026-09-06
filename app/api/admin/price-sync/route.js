@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { parsePricePayload } from "../../../lib/pricePayload.js";
-import { PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
+import { parseCsvToRows, parsePricePayload } from "../../../lib/pricePayload.js";
+import { PRICE_SHEET_GID, PRICE_SHEET_ID, PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
 import { withRegionFallbacks } from "../../../lib/regionalPricing.js";
 
 export const runtime = "nodejs";
@@ -306,6 +306,42 @@ async function readRequestBody(request) {
   }
 }
 
+async function fetchCostingSheetPayload() {
+  const sheetId = String(PRICE_SHEET_ID || "").trim();
+  const sheetGid = String(PRICE_SHEET_GID || "").trim();
+  if (!sheetId) return null;
+
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${sheetGid || "0"}`;
+  const response = await fetch(exportUrl, { cache: "no-store", redirect: "follow" });
+  if (!response.ok) return null;
+
+  const text = await response.text();
+  if (!text || /<!DOCTYPE html|<html/i.test(text.slice(0, 200))) return null;
+
+  const rows = parseCsvToRows(text);
+  return rows.length > 1 ? rows : null;
+}
+
+function mergeParsedCatalog(base, extra) {
+  if (!extra) return base;
+
+  return {
+    ...base,
+    priceMap: { ...(base.priceMap || {}), ...(extra.priceMap || {}) },
+    regionPriceMaps: {
+      riyadh: { ...(base.regionPriceMaps?.riyadh || {}), ...(extra.regionPriceMaps?.riyadh || {}) },
+      dammam: { ...(base.regionPriceMaps?.dammam || {}), ...(extra.regionPriceMaps?.dammam || {}) },
+      jeddah: { ...(base.regionPriceMaps?.jeddah || {}), ...(extra.regionPriceMaps?.jeddah || {}) },
+    },
+    cashDiscountMap: { ...(base.cashDiscountMap || {}), ...(extra.cashDiscountMap || {}) },
+    valueDiscountMap: { ...(base.valueDiscountMap || {}), ...(extra.valueDiscountMap || {}) },
+    sheetItems: [
+      ...(Array.isArray(extra.sheetItems) ? extra.sheetItems : []),
+      ...(Array.isArray(base.sheetItems) ? base.sheetItems : []),
+    ],
+  };
+}
+
 async function runSync(sourcePayload = null) {
   if (!supabaseUrl || !serviceKey) {
     throw new Error("Server configuration is incomplete.");
@@ -333,7 +369,21 @@ async function runSync(sourcePayload = null) {
     }
   }
 
-  const parsed = parsePricePayload(payload || {});
+  let parsed = parsePricePayload(payload || {});
+
+  const missingSchemes = Object.keys(parsed.cashDiscountMap || {}).length === 0
+    && Object.keys(parsed.valueDiscountMap || {}).length === 0;
+
+  if (missingSchemes) {
+    try {
+      const sheetRows = await fetchCostingSheetPayload();
+      if (sheetRows) {
+        parsed = mergeParsedCatalog(parsed, parsePricePayload(sheetRows));
+      }
+    } catch {
+      // Keep the script payload when the costing sheet export is unavailable.
+    }
+  }
 
   if (!parsed.priceMap || Object.keys(parsed.priceMap).length === 0) {
     throw new Error("Price source returned no prices.");

@@ -1,3 +1,8 @@
+import { sumOrderLineValue } from "./collectionDaySummary.js";
+import {
+  extractWorkdayTimesFromTimelineRows,
+  loadWorkdayEventsByUser,
+} from "./collectionDaySummaryServer.js";
 import {
   buildDailySalesmanResumeEmail,
   emptySalesmanResumeRow,
@@ -7,6 +12,7 @@ import {
 import { formatCollectorDisplayName } from "./geo.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
 import {
+  calculateWorkingHoursMinutes,
   filterLogsByKsaEventDate,
   getPreviousKsaDateString,
   ksaDayBounds,
@@ -21,8 +27,55 @@ function isMissingTableError(error) {
     || (message.includes("relation") && message.includes("does not exist"));
 }
 
+export function isJwtClockSkewError(error) {
+  const message = String(error?.message || error?.details || error || "").toLowerCase();
+  return message.includes("jwt issued at future")
+    || message.includes("issued at future");
+}
+
+export function formatSupabaseError(error) {
+  if (!error) return "Unknown Supabase error";
+  if (typeof error === "string") return error;
+  const message = String(error.message || "Supabase request failed").trim();
+  const details = [error.code, error.details, error.hint]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+  return details.length ? `${message} (${details.join(" | ")})` : message;
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function withJwtClockSkewRetry(work, {
+  attempts = 3,
+  delayMs = 1000,
+} = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await work(attempt);
+    } catch (error) {
+      lastError = error;
+      if (!isJwtClockSkewError(error) || attempt >= attempts) {
+        throw error instanceof Error ? error : new Error(formatSupabaseError(error));
+      }
+      await sleep(delayMs * attempt);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(formatSupabaseError(lastError));
+}
+
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase().replace(/_/g, "-");
+}
+
+function chunkList(items, size) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 export function parseResumeDateParam(value, now = new Date()) {
@@ -69,7 +122,7 @@ async function fetchPagedRows(admin, table, select, applyFilters) {
     const { data, error } = await query;
     if (error) {
       if (isMissingTableError(error)) return [];
-      throw error;
+      throw new Error(formatSupabaseError(error));
     }
     rows.push(...(data || []));
     if (!data || data.length < pageSize) break;
@@ -80,14 +133,17 @@ async function fetchPagedRows(admin, table, select, applyFilters) {
 }
 
 export async function loadSalesmanResumeProfiles(admin) {
+  // Match visit-report profile loading: avoid server-side is_active filter so
+  // schema drift does not break the cron, then filter in JS.
   const { data, error } = await admin
     .from("profiles")
-    .select("id,role,salesman_code,salesman_name,email,is_active")
-    .eq("is_active", true);
+    .select("id,role,salesman_code,salesman_name,email,is_active");
 
-  if (error) throw error;
+  if (error) throw new Error(formatSupabaseError(error));
 
-  return (data || []).filter((row) => SALESMAN_ROLES.has(normalizeRole(row.role)));
+  return (data || [])
+    .filter((row) => row.is_active !== false)
+    .filter((row) => SALESMAN_ROLES.has(normalizeRole(row.role)));
 }
 
 async function loadVisitCountsByUser(admin, reportDate) {
@@ -168,7 +224,7 @@ async function loadOrderMetricsByUser(admin, reportDate) {
   for (const row of dayOrders) {
     const userId = String(row.created_by || "").trim();
     if (!userId) continue;
-    const current = metrics.get(userId) || { orders: 0, skuSoldCount: 0 };
+    const current = metrics.get(userId) || { orders: 0, orderValue: 0, skuSoldCount: 0 };
     current.orders += 1;
     const quantity = Number(row.total_quantity);
     const items = Number(row.total_items);
@@ -180,7 +236,57 @@ async function loadOrderMetricsByUser(admin, reportDate) {
     metrics.set(userId, current);
   }
 
+  const orderIds = dayOrders.map((row) => Number(row.id)).filter(Boolean);
+  const valueByOrderId = new Map();
+  for (const chunk of chunkList(orderIds, 200)) {
+    const lines = await fetchPagedRows(
+      admin,
+      "sales_order_items",
+      "order_id,line_value,quantity,rate",
+      (query) => query.in("order_id", chunk),
+    );
+    const grouped = new Map();
+    for (const line of lines) {
+      const orderId = Number(line.order_id);
+      if (!orderId) continue;
+      if (!grouped.has(orderId)) grouped.set(orderId, []);
+      grouped.get(orderId).push(line);
+    }
+    grouped.forEach((orderLines, orderId) => {
+      valueByOrderId.set(orderId, sumOrderLineValue(orderLines));
+    });
+  }
+
+  for (const row of dayOrders) {
+    const userId = String(row.created_by || "").trim();
+    if (!userId) continue;
+    const current = metrics.get(userId);
+    if (!current) continue;
+    current.orderValue += Number(valueByOrderId.get(Number(row.id)) || 0);
+  }
+
   return metrics;
+}
+
+async function loadWorkdaysByUser(admin, userIds, reportDate) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  const { startIso, endIso } = ksaDayBounds(reportDate);
+  const eventsByUser = new Map();
+
+  for (const chunk of chunkList(ids, 100)) {
+    const part = await loadWorkdayEventsByUser(admin, chunk, startIso, endIso, reportDate);
+    part.forEach((rows, userId) => eventsByUser.set(userId, rows));
+  }
+
+  const workdays = new Map();
+  ids.forEach((userId) => {
+    const times = extractWorkdayTimesFromTimelineRows(eventsByUser.get(userId) || []);
+    workdays.set(userId, {
+      ...times,
+      workingMinutes: calculateWorkingHoursMinutes(times),
+    });
+  });
+  return workdays;
 }
 
 export function buildSalesmanResumeRows({
@@ -188,6 +294,7 @@ export function buildSalesmanResumeRows({
   visitCounts = new Map(),
   collectionCounts = new Map(),
   orderMetrics = new Map(),
+  workdays = new Map(),
 } = {}) {
   const byUserId = new Map();
 
@@ -209,11 +316,23 @@ export function buildSalesmanResumeRows({
     const row = ensureRow(byUserId, { id: userId });
     if (!row) continue;
     row.orders = Number(metrics?.orders || 0);
+    row.orderValue = Number(metrics?.orderValue || 0);
     row.skuSoldCount = Number(metrics?.skuSoldCount || 0);
+  }
+
+  for (const [userId, workday] of workdays.entries()) {
+    const row = ensureRow(byUserId, { id: userId });
+    if (!row || !workday) continue;
+    row.loginAt = workday.loginAt || "";
+    row.lunchOutAt = workday.lunchOutAt || "";
+    row.lunchInAt = workday.lunchInAt || "";
+    row.logoutAt = workday.logoutAt || "";
+    row.workingMinutes = workday.workingMinutes ?? calculateWorkingHoursMinutes(workday);
   }
 
   return sortSalesmanResumeRows([...byUserId.values()].filter((row) => (
     Number(row.orders || 0)
+    + Number(row.orderValue || 0)
     + Number(row.collections || 0)
     + Number(row.visits || 0)
     + Number(row.skuSoldCount || 0) > 0
@@ -230,11 +349,22 @@ export async function buildDailySalesmanResume(admin, { date, now = new Date() }
     loadOrderMetricsByUser(admin, reportDate),
   ]);
 
+  const userIds = [
+    ...new Set([
+      ...profiles.map((profile) => profile.id),
+      ...visitCounts.keys(),
+      ...collectionCounts.keys(),
+      ...orderMetrics.keys(),
+    ].filter(Boolean)),
+  ];
+  const workdays = await loadWorkdaysByUser(admin, userIds, reportDate);
+
   const rows = buildSalesmanResumeRows({
     profiles,
     visitCounts,
     collectionCounts,
     orderMetrics,
+    workdays,
   });
 
   return {

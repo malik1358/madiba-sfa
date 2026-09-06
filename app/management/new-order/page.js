@@ -10,7 +10,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
-import { loadPricePayload } from "../../lib/pricePayload";
+import { isExcludedCategory, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
 import {
   buildEffectivePriceList,
   formatDiscountPercent,
@@ -35,13 +35,15 @@ import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance"
 import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
-import { sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { buildOutstandingPdfBucketRows, resolveOutstandingBucketLabels, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
+import { appendMonthlyPerformanceToPdf } from "../../lib/orderPdfMonthlyPerformance";
+import { buildAnalytics } from "../customer-audit/lib/analytics";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 
@@ -585,7 +587,7 @@ export default function NewOrderPage() {
         ...item,
         item_code: code,
         item_name: String(historyFallback.item_name || item.item_name || code).trim(),
-        category: String(item.category || historyFallback.category || "Unclassified").trim() || "Unclassified",
+        category: pickCatalogCategory(historyFallback.category, item.category) || "Unclassified",
         source: "ITEM_MASTER",
       });
     });
@@ -604,9 +606,7 @@ export default function NewOrderPage() {
         const nextName = hasCurrentItemName(historyName, code)
           ? historyName
           : (hasCurrentItemName(sheetName, code) ? sheetName : code);
-        const nextCategory = hasMeaningfulValue(sheetCategory)
-          ? sheetCategory
-          : (hasMeaningfulValue(historyCategory) ? historyCategory : MISSING_CATEGORY);
+        const nextCategory = pickCatalogCategory(sheetCategory, historyCategory) || MISSING_CATEGORY;
 
         itemMap.set(code, {
           item_code: code,
@@ -629,9 +629,7 @@ export default function NewOrderPage() {
         : (hasCurrentItemName(sheetName, code)
           ? sheetName
           : (hasCurrentItemName(existingName, code) ? existingName : code));
-      const nextCategory = hasMeaningfulValue(sheetCategory)
-        ? sheetCategory
-        : (hasMeaningfulValue(existingCategory) ? existingCategory : (historyFallback.category || "Unclassified"));
+      const nextCategory = pickCatalogCategory(sheetCategory, historyFallback.category, existingCategory) || "Unclassified";
 
       itemMap.set(code, {
         ...existing,
@@ -654,13 +652,13 @@ export default function NewOrderPage() {
       itemMap.set(code, {
         item_code: code,
         item_name: fallbackName || code,
-        category: hasMeaningfulValue(fallbackCategory) ? fallbackCategory : MISSING_CATEGORY,
+        category: pickCatalogCategory(fallbackCategory) || MISSING_CATEGORY,
         source: "PRICE_MAP_ONLY",
       });
     });
 
     return Array.from(itemMap.values())
-      .filter((item) => !isDoNotUseItem(item.item_name))
+      .filter((item) => !isDoNotUseItem(item.item_name) && !isExcludedCategory(item.category))
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 
@@ -769,7 +767,7 @@ export default function NewOrderPage() {
 
   const visibleOutstandingBuckets = useMemo(
     () => visibleOutstandingBucketLabels(
-      outstandingInfo.bucketLabels,
+      resolveOutstandingBucketLabels(outstandingInfo.bucketLabels, outstandingInfo.customer?.buckets),
       outstandingInfo.customer?.buckets
     ),
     [outstandingInfo.bucketLabels, outstandingInfo.customer]
@@ -1111,9 +1109,30 @@ export default function NewOrderPage() {
           }
         }
 
-        const outstandingCustomer = snapshot.outstanding?.customer || null;
-        const outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
-        const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
+        let outstandingCustomer = snapshot.outstanding?.customer || null;
+        let outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
+        let outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
+
+        if (!outstandingCustomer && snapshot.customerCode) {
+          try {
+            const supabase = getSupabaseClient();
+            const accessToken = supabase ? await waitForAccessToken(supabase) : "";
+            if (accessToken) {
+              const outstandingResponse = await fetch(
+                `${OUTSTANDING_API}?customerCode=${encodeURIComponent(snapshot.customerCode || "")}&customerName=${encodeURIComponent(snapshot.customerName || "")}`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+              );
+              const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
+              if (outstandingResponse.ok && outstandingPayload.success) {
+                outstandingCustomer = outstandingPayload.customer || null;
+                outstandingBuckets = sortBucketLabels(outstandingPayload.bucketLabels || []);
+                outstandingInvoices = Array.isArray(outstandingPayload.customerInvoices) ? outstandingPayload.customerInvoices : [];
+              }
+            }
+          } catch {
+            // Keep generating the order PDF even if outstanding cannot be refreshed.
+          }
+        }
 
         function formatOutstandingValue(value, digits = 0, withCurrency = true) {
           const number = parseOutstandingNumber(value);
@@ -1122,16 +1141,10 @@ export default function NewOrderPage() {
           return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
         }
 
-        const bucketRows = outstandingCustomer && outstandingBuckets.length > 0
-          ? [
-              ...outstandingBuckets.map((label) => ({
-                label: `${label} days`,
-                value: formatOutstandingValue(outstandingCustomer?.buckets?.[label], 0, true),
-              })),
-              { label: "Open invoices", value: formatOutstandingValue(outstandingCustomer?.open_invoices, 0, false) },
-              { label: "Total outstanding", value: formatOutstandingValue(outstandingCustomer?.total_outstanding, 0, true) },
-            ]
-          : [];
+        const bucketRows = buildOutstandingPdfBucketRows(outstandingCustomer, outstandingBuckets).map((row) => ({
+          label: row.label,
+          value: formatOutstandingValue(row.amount, 0, row.kind !== "count"),
+        }));
         const outstandingBlockHeight = bucketRows.length > 0
           ? 14 + 10 + bucketRows.length * 18
           : 0;
@@ -1287,6 +1300,34 @@ export default function NewOrderPage() {
           ensureSpace,
         });
 
+        let monthlyAnalytics = analytics;
+        if (!monthlyAnalytics?.monthlySummary?.length && snapshot.customerCode) {
+          try {
+            const supabase = getSupabaseClient();
+            const accessToken = supabase ? await waitForAccessToken(supabase) : "";
+            if (accessToken) {
+              const historyResponse = await fetch(
+                `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(snapshot.customerCode)}`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+              );
+              const historyPayload = await historyResponse.json().catch(() => ({}));
+              if (historyResponse.ok && historyPayload.success) {
+                monthlyAnalytics = buildAnalytics(Array.isArray(historyPayload.transactions) ? historyPayload.transactions : []);
+              }
+            }
+          } catch {
+            monthlyAnalytics = analytics;
+          }
+        }
+
+        cursorY = appendMonthlyPerformanceToPdf(doc, {
+          analytics: monthlyAnalytics,
+          x: marginX,
+          y: () => cursorY,
+          maxWidth: contentWidth,
+          ensureSpace,
+        });
+
         doc.setFontSize(9);
         ensureSpace(20);
         doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 36);
@@ -1326,7 +1367,7 @@ export default function NewOrderPage() {
         setDownloadingPdf(false);
       }
     },
-    [language, setError]
+    [analytics, language, setError]
   );
 
   const presentOrderWhatsappShare = useCallback(async (snapshot, { savedMessage, queued = false } = {}) => {

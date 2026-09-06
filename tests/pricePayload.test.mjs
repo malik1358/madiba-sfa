@@ -1,7 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { loadPricePayload, parsePricePayload } from '../app/lib/pricePayload.js';
+import { isExcludedCategory, loadPricePayload, parsePricePayload, pickCatalogCategory } from '../app/lib/pricePayload.js';
+
+test('isExcludedCategory hides building material from order catalogs', () => {
+  assert.equal(isExcludedCategory('Building Material'), true);
+  assert.equal(isExcludedCategory('Building Materials'), true);
+  assert.equal(isExcludedCategory('Body Care'), false);
+});
+
+test('pickCatalogCategory prefers live sales or sheet over stale Cosmetics', () => {
+  assert.equal(pickCatalogCategory('Cosmetics', 'Body Care'), 'Body Care');
+  assert.equal(pickCatalogCategory('Sundry', 'Cosmetics'), 'Sundry');
+  assert.equal(pickCatalogCategory('Cosmetics', 'Unclassified'), '');
+});
 
 test('parsePricePayload reads wholesale price headers from pricing sheets', () => {
   const payload = [
@@ -92,6 +104,37 @@ test('parsePricePayload reads regional wholesale prices and scheme discounts', (
   assert.equal(parsed.regionPriceMaps.jeddah.A006061, 122.33);
   assert.equal(parsed.cashDiscountMap.A006061, 0.02);
   assert.equal(parsed.valueDiscountMap.A006061, 0.03);
+});
+
+test('parsePricePayload prefers current Product Category and reads A004409 schemes', () => {
+  const header = [];
+  const data = [];
+  header[1] = 'Product Code';
+  header[2] = 'Item Name';
+  header[79] = 'Wholesale Price Without VAT (Riyad)';
+  header[83] = 'Wholesale Price Without VAT (Dammam)';
+  header[87] = 'Jeddah - Wholesale Price Without VAT';
+  header[89] = 'Sales Value > 5000 SAR';
+  header[90] = 'Cash Discount';
+  header[92] = 'Prev-Product Category';
+  header[93] = 'Product Category';
+
+  data[1] = 'A004409';
+  data[2] = 'MADIBA RAZOR TWIN BLADE, BLUE';
+  data[79] = '244.00 SAR';
+  data[83] = '244.00 SAR';
+  data[87] = '261.08 SAR';
+  data[89] = '5.00%';
+  data[90] = '5.00%';
+  data[92] = 'China Sundry';
+  data[93] = 'Sundry';
+
+  const parsed = parsePricePayload([header, data]);
+  const item = parsed.sheetItems.find((entry) => entry.item_code === 'A004409');
+
+  assert.equal(parsed.cashDiscountMap.A004409, 0.05);
+  assert.equal(parsed.valueDiscountMap.A004409, 0.05);
+  assert.equal(item?.category, 'Sundry');
 });
 
 test('loadPricePayload clears stale browser cache before loading fresh prices', async () => {

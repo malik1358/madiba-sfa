@@ -37,9 +37,25 @@ function isExcludedItemCode(value) {
   return normalizeCode(value).startsWith("LP");
 }
 
-function isExcludedCategory(value) {
+export function isExcludedCategory(value) {
   const compact = normalizeText(value).toLowerCase().replace(/[^a-z]/g, "");
   return ["buildingmaterial", "buildingmaterials", "buidingmaterial", "buidingmaterials"].includes(compact);
+}
+
+export function isStaleCatalogCategory(value) {
+  const compact = normalizeText(value).toLowerCase().replace(/[^a-z]/g, "");
+  return compact === "cosmetics" || compact === "cosmetic";
+}
+
+export function pickCatalogCategory(...candidates) {
+  for (const value of candidates) {
+    const text = normalizeText(value);
+    if (!text) continue;
+    if (["UNCLASSIFIED", "TO_MAP", "TBD", "TODO", "N/A", "NA", "-"].includes(text.toUpperCase())) continue;
+    if (isExcludedCategory(text) || isStaleCatalogCategory(text)) continue;
+    return text;
+  }
+  return "";
 }
 
 function toNumber(value) {
@@ -104,7 +120,8 @@ function findRegionWholesaleIndex(rows, region, fallbackColumn, maxRows = 5) {
       if (regionToken && !header.includes(regionToken) && regionToken !== DEFAULT_PRICING_REGION) continue;
       if (regionToken === DEFAULT_PRICING_REGION && otherTokens.some((token) => header.includes(token))) continue;
 
-      const hasRegion = regionToken && header.includes(regionToken);
+      const regionAliases = regionToken === "riyadh" ? ["riyadh", "riyad"] : [regionToken];
+      const hasRegion = regionAliases.some((token) => token && header.includes(token));
       const score = (hasRegion ? 2000 : 0) + (isWholesale ? 1500 : 400) + (row.length - columnIndex);
       if (score > bestScore) {
         bestScore = score;
@@ -115,6 +132,81 @@ function findRegionWholesaleIndex(rows, region, fallbackColumn, maxRows = 5) {
 
   if (bestIndex >= 0) return bestIndex;
   return hasDataAtIndex(rows, fallbackIndex) ? fallbackIndex : bestIndex;
+}
+
+function findProductCategoryIndex(rows, maxRows = 8) {
+  const fallbackIndex = sheetColumnIndex("CP");
+  if (!Array.isArray(rows) || rows.length === 0) return fallbackIndex;
+
+  const limit = Math.min(maxRows, rows.length);
+  let bestIndex = -1;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (!Array.isArray(row)) continue;
+
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+      const header = normalizeHeaderCell(row[columnIndex]);
+      if (!header.includes("categor")) continue;
+      if (header.includes("prev")) continue;
+
+      const exactProduct = header === "product category";
+      const score = (exactProduct ? 3000 : header.includes("product category") ? 2000 : 800)
+        + (row.length - columnIndex);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = columnIndex;
+      }
+    }
+  }
+
+  if (bestIndex >= 0) return bestIndex;
+  const wideEnough = rows.some((row) => Array.isArray(row) && row.length > fallbackIndex);
+  return wideEnough ? fallbackIndex : -1;
+}
+
+export function parseCsvToRows(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+  const source = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (source[i + 1] === '"') {
+          cell += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += char;
+      }
+    } else if (char === '"') {
+      inQuotes = true;
+    } else if (char === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (char === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+
+  if (cell !== "" || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  return rows.filter((entry) => entry.some((value) => String(value || "").trim() !== ""));
 }
 
 function findSchemeIndex(rows, aliases, fallbackColumn, maxRows = 5) {
@@ -217,9 +309,14 @@ function isRowLike(value) {
     "name",
     "category",
     "CO",
+    "CP",
+    "CB",
+    "CM",
+    "CL",
     "rate",
     "price",
     "C",
+    "B",
   ].some((key) => Object.prototype.hasOwnProperty.call(value, key));
 }
 
@@ -354,12 +451,7 @@ export function parsePricePayload(payload) {
           "product",
           "product name",
         ]);
-        const headerCategoryIndex = findHeaderIndex(value, [
-          "category",
-          "item category",
-          "group",
-          "product group",
-        ]);
+        const headerCategoryIndex = findProductCategoryIndex(value, 8);
         const headerRateIndex = findHeaderIndex(value, [
           "wholesale price without vat riyadh",
           "wholesale price riyadh",
@@ -378,7 +470,7 @@ export function parsePricePayload(payload) {
 
         const codeIndex = sheetColumnIndex("B");
         const nameIndex = sheetColumnIndex("C");
-        const categoryIndex = sheetColumnIndex("CO");
+        const categoryIndex = sheetColumnIndex("CP");
         const rateIndex = sheetColumnIndex("D");
         const riyadhIndex = findRegionWholesaleIndex(value, "riyadh", REGION_PRICE_COLUMNS.riyadh);
         const dammamIndex = findRegionWholesaleIndex(value, "dammam", REGION_PRICE_COLUMNS.dammam);
@@ -397,7 +489,9 @@ export function parsePricePayload(payload) {
 
         const itemCodeIndex = headerCodeIndex >= 0 ? headerCodeIndex : (hasDataAtIndex(value, codeIndex) ? codeIndex : -1);
         const itemNameIndex = headerNameIndex >= 0 ? headerNameIndex : (hasDataAtIndex(value, nameIndex) ? nameIndex : -1);
-        const resolvedCategoryIndex = headerCategoryIndex >= 0 ? headerCategoryIndex : (hasDataAtIndex(value, categoryIndex) ? categoryIndex : -1);
+        const resolvedCategoryIndex = headerCategoryIndex >= 0
+          ? headerCategoryIndex
+          : (hasDataAtIndex(value, categoryIndex) ? categoryIndex : -1);
         const resolvedRateIndex = riyadhIndex >= 0
           ? riyadhIndex
           : (headerRateIndex >= 0 ? headerRateIndex : (hasDataAtIndex(value, rateIndex) ? rateIndex : -1));
@@ -457,11 +551,17 @@ export function parsePricePayload(payload) {
     if (isRowLike(value)) {
       const code = readAny(value, ["item_code", "itemCode", "code", "B", "Item Code", "ITEM CODE", "sku", "SKU"]);
       const name = readAny(value, ["item_name", "itemName", "name", "C", "Item Name", "ITEM NAME", "description", "Description"]);
-      const category = readAny(value, ["category", "item_category", "CO", "Category", "ITEM CATEGORY", "Item Category", "group", "Group", "item_group", "Item Group"]);
-      const rate = readAny(value, ["rate", "price", "RATE", "Price", "D", "Selling Rate"]);
+      const category = readAny(value, ["product_category", "productCategory", "CP", "Product Category", "category", "item_category", "CO", "Category", "ITEM CATEGORY", "Item Category", "group", "Group", "item_group", "Item Group"]);
+      const rate = readAny(value, ["rate", "price", "RATE", "Price", "CB", "CF", "D", "Selling Rate"]);
+      const cashDiscount = readAny(value, ["cashDiscount", "cash_discount", "CM", "Cash Discount"]);
+      const valueDiscount = readAny(value, ["valueDiscount", "value_discount", "CL", "Sales Value > 5000 SAR"]);
 
       if (code) {
-        addRate(code, rate);
+        addRate(code, rate, "riyadh");
+        addRate(code, readAny(value, ["dammam", "CF"]), "dammam");
+        addRate(code, readAny(value, ["jeddah", "CJ"]), "jeddah");
+        addDiscount(cashDiscountMap, code, cashDiscount);
+        addDiscount(valueDiscountMap, code, valueDiscount);
         upsertSheetItem(code, name, category);
       }
     }

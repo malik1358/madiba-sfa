@@ -12,7 +12,7 @@ import {
   mergeParsedOutstandingSheets,
   prioritizeOutstandingSheets,
   selectPreferredOutstandingParses,
-  sortBucketLabels,
+  resolveOutstandingBucketLabels,
 } from "../../lib/outstanding";
 import { scheduleMobileFieldSnapshotRebuild } from "../../lib/server/mobileFieldSnapshot.js";
 
@@ -81,11 +81,12 @@ async function readDataset(admin) {
     };
   }
 
+  const rows = Array.isArray(parsed.rows) ? parsed.rows.map(buildOutstandingRow) : [];
   return {
     uploadedAt: String(parsed.uploadedAt || ""),
     fileName: String(parsed.fileName || ""),
-    bucketLabels: sortBucketLabels(parsed.bucketLabels || []),
-    rows: Array.isArray(parsed.rows) ? parsed.rows.map(buildOutstandingRow) : [],
+    bucketLabels: resolveOutstandingBucketLabels(parsed.bucketLabels || [], rows),
+    rows,
     invoices: Array.isArray(parsed.invoices) ? parsed.invoices : [],
   };
 }

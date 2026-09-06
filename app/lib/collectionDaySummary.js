@@ -388,12 +388,16 @@ export function findUnloggedIdleGaps({
 
   const lunchOutTs = parseEventTs(lunchOutAt);
   const lunchInTs = parseEventTs(lunchInAt);
+  const logoutTs = parseEventTs(logoutAt);
+  const workdayPoints = logoutTs
+    ? points.filter((point) => point.ts <= logoutTs)
+    : points;
   const thresholdMs = UNLOGGED_IDLE_THRESHOLD_MINUTES * 60 * 1000;
   const gaps = [];
 
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const from = points[index];
-    const to = points[index + 1];
+  for (let index = 0; index < workdayPoints.length - 1; index += 1) {
+    const from = workdayPoints[index];
+    const to = workdayPoints[index + 1];
     if (to.ts - from.ts <= thresholdMs) continue;
     if (from.type === "lunch_out" && to.type === "lunch_in") continue;
 

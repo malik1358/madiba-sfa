@@ -22,6 +22,24 @@ test("on-site visit numbers skip far entries", () => {
   assert.equal(numbered[3].onSiteVisitNumber, 2);
 });
 
+test("same customer order and collections share one visit number", () => {
+  const numbered = assignOnSiteVisitNumbers([
+    { transactionType: "ORDER_SUBMITTED", customerCode: "1108C", isFarFromCustomer: false },
+    { transactionType: "COLLECTION_VISIT", customerCode: "1108C", isFarFromCustomer: false },
+    { transactionType: "COLLECTION_VISIT", customerCode: "1108C", isFarFromCustomer: false },
+    { transactionType: "COLLECTION_VISIT", customerCode: "1002", isFarFromCustomer: false },
+    { transactionType: "COLLECTION_VISIT", customerCode: "1073", isFarFromCustomer: true },
+    { transactionType: "COLLECTION_VISIT", customerCode: "1108C", isFarFromCustomer: false },
+  ]);
+
+  assert.equal(numbered[0].onSiteVisitNumber, 1);
+  assert.equal(numbered[1].onSiteVisitNumber, 1);
+  assert.equal(numbered[2].onSiteVisitNumber, 1);
+  assert.equal(numbered[3].onSiteVisitNumber, 2);
+  assert.equal(numbered[4].onSiteVisitNumber, null);
+  assert.equal(numbered[5].onSiteVisitNumber, 3);
+});
+
 test("day split counts visit without order separately from collections", () => {
   const split = buildVisitDaySplit([
     { transactionType: "VISIT_REPORT", customerCode: "V1" },

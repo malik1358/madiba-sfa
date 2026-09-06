@@ -2,6 +2,7 @@ export const PRICING_REGIONS = ["riyadh", "dammam", "jeddah"];
 export const DEFAULT_PRICING_REGION = "riyadh";
 export const DEFAULT_PAYMENT_TYPE = "credit";
 export const VALUE_DISCOUNT_THRESHOLD_SAR = 5000;
+export const VAT_RATE = 0.15;
 
 export const REGION_PRICE_COLUMNS = {
   riyadh: "CB",
@@ -52,6 +53,17 @@ export function formatAppliedDiscount(rate, applied) {
   const label = formatDiscountPercent(rate);
   if (label === "—") return "—";
   return applied ? `${label} applied` : label;
+}
+
+export function formatMoneyAmount(value) {
+  return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+export function formatDiscountDetail(rate, applied, amount) {
+  const label = formatDiscountPercent(rate);
+  if (label === "—") return "—";
+  if (!applied) return label;
+  return `${label} applied · ${formatMoneyAmount(amount)}`;
 }
 
 export function lookupDiscountRate(discountMap, itemCode) {
@@ -110,13 +122,51 @@ export function getPricedOrderLine({
   }
 
   const safeQty = Number.isFinite(qty) ? Math.max(qty, 0) : 0;
+  const wholesaleLineValue = safeQty * wholesale;
+  const lineValue = safeQty * rate;
+  const valueDiscountAmount = applied.value ? wholesaleLineValue * valueRate : 0;
+  const cashDiscountAmount = applied.cash ? (wholesaleLineValue - valueDiscountAmount) * cashRate : 0;
+  const vatAmount = lineValue * VAT_RATE;
+
   return {
     wholesaleRate: wholesale,
     rate,
     quantity: safeQty,
-    lineValue: safeQty * rate,
+    wholesaleLineValue,
+    valueDiscountAmount,
+    cashDiscountAmount,
+    lineValue,
+    vatAmount,
+    lineTotalInclVat: lineValue + vatAmount,
     applied,
   };
+}
+
+export function summarizePricedLines(lines = []) {
+  const empty = {
+    wholesaleTotal: 0,
+    cashDiscountTotal: 0,
+    valueDiscountTotal: 0,
+    amountExclVat: 0,
+    vatAmount: 0,
+    amountInclVat: 0,
+  };
+
+  return (Array.isArray(lines) ? lines : []).reduce((totals, line) => {
+    const wholesaleTotal = totals.wholesaleTotal + Number(line.wholesaleLineValue || 0);
+    const cashDiscountTotal = totals.cashDiscountTotal + Number(line.cashDiscountAmount || 0);
+    const valueDiscountTotal = totals.valueDiscountTotal + Number(line.valueDiscountAmount || 0);
+    const amountExclVat = totals.amountExclVat + Number(line.lineValue || line.lineTotal || 0);
+    const vatAmount = amountExclVat * VAT_RATE;
+    return {
+      wholesaleTotal,
+      cashDiscountTotal,
+      valueDiscountTotal,
+      amountExclVat,
+      vatAmount,
+      amountInclVat: amountExclVat + vatAmount,
+    };
+  }, empty);
 }
 
 export function buildEffectivePriceList({
@@ -156,7 +206,7 @@ export function resolveOrderPricingRegion({
     ? pricingRegionBySalesmanCode[salesmanCode]
     : "";
 
-  return normalizePricingRegion(salesmanRegion || currentUserRegion);
+  return normalizePricingRegion(currentUserRegion || salesmanRegion);
 }
 
 export function emptyRegionPriceMaps() {

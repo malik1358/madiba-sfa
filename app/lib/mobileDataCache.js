@@ -172,6 +172,11 @@ async function fetchOutstandingNetwork(accessToken, customerCode, customerName) 
   };
 }
 
+export async function invalidateSalesScopeCache(userId) {
+  const { removeCacheEntry } = await import("./localDataStore.js");
+  await removeCacheEntry(scopeCacheKey(userId));
+}
+
 export async function fetchSalesScopeCached(options = {}) {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error("Supabase is not configured.");
@@ -179,6 +184,10 @@ export async function fetchSalesScopeCached(options = {}) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token || !session?.user?.id) {
     throw new Error("Please login again.");
+  }
+
+  if (options.forceRefresh) {
+    await invalidateSalesScopeCache(session.user.id);
   }
 
   const result = await fetchWithLocalCache(

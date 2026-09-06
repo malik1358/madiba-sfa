@@ -1,6 +1,6 @@
 import { fetchSalesScopeCached } from "./mobileDataCache";
 
-export async function fetchSalesScope() {
-  const { scope } = await fetchSalesScopeCached();
+export async function fetchSalesScope(options = {}) {
+  const { scope } = await fetchSalesScopeCached(options);
   return scope;
 }

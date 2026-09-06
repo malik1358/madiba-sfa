@@ -8,6 +8,7 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
+import { invalidateSalesScopeCache } from "../../lib/mobileDataCache";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import ExportableTable from "../../components/ExportableTable";
 
@@ -246,6 +247,11 @@ export default function SalesmanHierarchyPage() {
       messages.push(result.message || "Head salesman saved.");
 
       setMessage(messages.join(" "));
+      const supabase = getSupabaseClient();
+      const { data: { session } } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
+      if (session?.user?.id) {
+        await invalidateSalesScopeCache(session.user.id);
+      }
       await loadHierarchy(false);
     } catch (err) {
       setError(err.message || "Unable to save assignment.");

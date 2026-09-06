@@ -1,29 +1,7 @@
-import { resolveReportingChainFromAuth } from "./salesHierarchy.js";
 import { isFcmConfigured, sendPushToUser } from "./fcm.js";
+import { resolveReportingChain } from "./salesHierarchy.js";
 
-export async function resolveReportingChain(admin, actorUserId) {
-  const [profilesRes, usersRes] = await Promise.all([
-    admin
-      .from("profiles")
-      .select("id,salesman_code,salesman_name,role")
-      .order("salesman_name"),
-    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-  ]);
-
-  if (profilesRes.error) throw profilesRes.error;
-  if (usersRes.error) throw usersRes.error;
-
-  return resolveReportingChainFromAuth({
-    actorUserId,
-    profiles: profilesRes.data || [],
-    authUsers: usersRes.data?.users || [],
-  }).map((head) => ({
-    id: head.id,
-    salesman_code: head.salesman_code || "",
-    salesman_name: head.salesman_name || "",
-    role: head.role || "",
-  }));
-}
+export { resolveReportingChain };
 
 async function hasDuplicateReference(admin, referenceKey) {
   if (!referenceKey) return false;

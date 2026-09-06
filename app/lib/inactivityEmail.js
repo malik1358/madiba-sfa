@@ -1,0 +1,109 @@
+import { escapeHtml, formatReportTime, resolveUserReportEmail } from "./dailyVisitReportEmail.js";
+import { parseEmailList } from "./mailer.js";
+import { formatIdleDuration } from "./collectionDaySummary.js";
+import { INACTIVITY_EMAIL_MS } from "./workdayActivity.js";
+
+export const INACTIVITY_EMAIL_TYPE = "inactivity_email";
+export const LATE_LOGIN_EMAIL_TYPE = "late_login_email";
+export const INACTIVITY_EMAIL_MINUTES = Math.round(INACTIVITY_EMAIL_MS / 60000);
+
+export function inactivityEmailDisplayName({ salesmanName = "", salesmanCode = "" } = {}) {
+  const name = String(salesmanName || "").trim() || "Field user";
+  const code = String(salesmanCode || "").trim();
+  return code ? `${name} (${code})` : name;
+}
+
+export function resolveInactivityEmailRecipients({
+  userEmail,
+  reportEmail,
+  chainEmails,
+} = {}) {
+  const user = resolveUserReportEmail({ reportEmail, email: userEmail });
+  const chain = parseEmailList(
+    Array.isArray(chainEmails) ? chainEmails.join(",") : chainEmails,
+  );
+  const to = [];
+
+  if (user) to.push(user);
+  chain.forEach((address) => {
+    if (!to.includes(address)) to.push(address);
+  });
+
+  return { to, userEmail: user || "", chainEmails: chain };
+}
+
+export function inactivityEmailReferenceKey({ userId, reportDate, idleSinceTs } = {}) {
+  return `inactivity_email:${String(userId || "").trim()}:${String(reportDate || "").trim()}:${Number(idleSinceTs) || 0}`;
+}
+
+export function lateLoginEmailReferenceKey({ userId, reportDate, slot } = {}) {
+  return `late_login_email:${String(userId || "").trim()}:${String(reportDate || "").trim()}:${Number(slot) || 0}`;
+}
+
+export function buildInactivityAlertEmail({
+  date,
+  userName,
+  idleMinutes,
+  lastActivityAt,
+  loginAt,
+} = {}) {
+  const who = inactivityEmailDisplayName({ salesmanName: userName });
+  const minutes = Math.max(
+    INACTIVITY_EMAIL_MINUTES,
+    Math.round(Number(idleMinutes) || INACTIVITY_EMAIL_MINUTES),
+  );
+  const idleLabel = formatIdleDuration(minutes);
+  const lastActivity = formatReportTime(lastActivityAt);
+  const loginTime = formatReportTime(loginAt);
+  const subject = `No activity for ${idleLabel} — ${who} — ${date}`;
+
+  const text = [
+    `${who} has no visit, order, or collection logged for ${idleLabel}.`,
+    `Date (KSA): ${date}`,
+    `Login: ${loginTime}`,
+    `Last logged activity: ${lastActivity}`,
+    "This alert is sent once per idle stretch after login and before logout, and is skipped during lunch break.",
+  ].join("\n");
+
+  const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
+  <h2 style="margin: 0 0 12px;">No activity logged</h2>
+  <p style="margin: 0 0 16px;"><strong>${escapeHtml(who)}</strong> has no visit, order, or collection logged for <strong>${escapeHtml(idleLabel)}</strong>.</p>
+  <table style="border-collapse: collapse; font-size: 14px;">
+    <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Date (KSA)</td><td>${escapeHtml(date || "-")}</td></tr>
+    <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Login</td><td>${escapeHtml(loginTime)}</td></tr>
+    <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Last logged activity</td><td>${escapeHtml(lastActivity)}</td></tr>
+  </table>
+  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">One email is sent to the user and bosses in the reporting hierarchy. Lunch break is excluded. The alert is not repeated for the same idle stretch.</p>
+</div>`;
+
+  return { subject, text, html };
+}
+
+export function buildLateLoginReminderEmail({
+  date,
+  userName,
+  reminderTime,
+} = {}) {
+  const who = inactivityEmailDisplayName({ salesmanName: userName });
+  const checkedAt = formatReportTime(reminderTime);
+  const subject = `Not logged in by 11:00 — ${who} — ${date}`;
+
+  const text = [
+    `${who} has not logged morning attendance by 11:00 KSA.`,
+    `Date (KSA): ${date}`,
+    `Checked at: ${checkedAt}`,
+    "This reminder is sent every 30 minutes until the user logs in, to the user and bosses in the reporting hierarchy.",
+  ].join("\n");
+
+  const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
+  <h2 style="margin: 0 0 12px;">Not logged in by 11:00</h2>
+  <p style="margin: 0 0 16px;"><strong>${escapeHtml(who)}</strong> has not logged morning attendance by <strong>11:00 KSA</strong>.</p>
+  <table style="border-collapse: collapse; font-size: 14px;">
+    <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Date (KSA)</td><td>${escapeHtml(date || "-")}</td></tr>
+    <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Checked at</td><td>${escapeHtml(checkedAt)}</td></tr>
+  </table>
+  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">A reminder is sent every 30 minutes until login, to the user and bosses in the reporting hierarchy.</p>
+</div>`;
+
+  return { subject, text, html };
+}

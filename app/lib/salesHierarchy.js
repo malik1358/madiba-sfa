@@ -4,6 +4,7 @@ import {
   normalizeSalesmanName,
   salesmanValueMatchesScope,
 } from "./mutualSalesmanGroups.js";
+import { isMissingSchemaColumn } from "./performanceKpis.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -93,6 +94,32 @@ export function resolvePeersUnderSameHeadUserIds(authUsers, headProfile) {
   });
 
   return peerIds;
+}
+
+export async function resolveReportingChain(admin, actorUserId) {
+  const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (usersRes.error) throw usersRes.error;
+
+  const full = "id,salesman_code,salesman_name,role,email,report_email";
+  const fallback = "id,salesman_code,salesman_name,role";
+  let profilesRes = await admin.from("profiles").select(full).order("salesman_name");
+  if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
+    profilesRes = await admin.from("profiles").select(fallback).order("salesman_name");
+  }
+  if (profilesRes.error) throw profilesRes.error;
+
+  return resolveReportingChainFromAuth({
+    actorUserId,
+    profiles: profilesRes.data || [],
+    authUsers: usersRes.data?.users || [],
+  }).map((head) => ({
+    id: head.id,
+    salesman_code: head.salesman_code || "",
+    salesman_name: head.salesman_name || "",
+    role: head.role || "",
+    email: head.email || "",
+    report_email: head.report_email || "",
+  }));
 }
 
 export function customerSalesmanAssignmentMatchesScope(customerSalesmanCode, scope) {

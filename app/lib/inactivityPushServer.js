@@ -1,5 +1,5 @@
-import { shouldRequireTransactionGps } from "./moduleAccess.js";
 import { getFcmConfigurationStatus, sendPushToUser } from "./fcm.js";
+import { loadActiveFieldUsers, loadUserActivity } from "./workdayActivityLoaders.js";
 import {
   getKsaDateString,
   getInactivityAlertMessage,
@@ -12,12 +12,10 @@ import {
   INACTIVITY_ALERT_REPEAT_MS,
 } from "./workdayActivity.js";
 
+export { loadActiveFieldUsers, loadUserActivity };
+
 export const INACTIVITY_PUSH_TYPE = "inactivity";
 export const LUNCH_BREAK_REMINDER_PUSH_TYPE = "lunch_break_reminder";
-
-function normalizeRole(value) {
-  return String(value || "").trim().toLowerCase();
-}
 
 async function loadRecentPushSentAt(admin, userId, notificationType) {
   const cutoff = new Date(Date.now() - INACTIVITY_ALERT_REPEAT_MS).toISOString();
@@ -67,94 +65,6 @@ async function hasSentPushReference(admin, referenceKey) {
 
   if (error) throw error;
   return Number(count || 0) > 0;
-}
-
-async function loadActiveFieldUsers(admin, reportDate) {
-  const { startIso, endIso } = ksaDayBounds(reportDate);
-
-  const [{ data: morningRows, error: morningError }, { data: endRows, error: endError }] = await Promise.all([
-    admin
-      .from("daily_activity_logs")
-      .select("user_id,note,created_at")
-      .eq("entry_type", "MORNING_ATTENDANCE")
-      .gte("created_at", startIso)
-      .lte("created_at", endIso),
-    admin
-      .from("daily_activity_logs")
-      .select("user_id")
-      .eq("entry_type", "END_OF_DAY")
-      .gte("created_at", startIso)
-      .lte("created_at", endIso),
-  ]);
-
-  if (morningError) throw morningError;
-  if (endError) throw endError;
-
-  const endedUserIds = new Set((endRows || []).map((row) => row.user_id));
-  const loginByUserId = new Map();
-
-  (morningRows || []).forEach((row) => {
-    if (!row?.user_id || endedUserIds.has(row.user_id)) return;
-    if (loginByUserId.has(row.user_id)) return;
-    loginByUserId.set(row.user_id, row);
-  });
-
-  const userIds = [...loginByUserId.keys()];
-  if (userIds.length === 0) {
-    return [];
-  }
-
-  const { data: profiles, error: profileError } = await admin
-    .from("profiles")
-    .select("id,role,preferred_language")
-    .in("id", userIds);
-
-  if (profileError) throw profileError;
-
-  const profileByUserId = new Map((profiles || []).map((row) => [row.id, row]));
-
-  return userIds
-    .filter((userId) => shouldRequireTransactionGps(normalizeRole(profileByUserId.get(userId)?.role)))
-    .map((userId) => ({
-      userId,
-      loginLog: loginByUserId.get(userId),
-      preferredLanguage: profileByUserId.get(userId)?.preferred_language || "en",
-    }));
-}
-
-async function loadUserActivity(admin, userId, startIso, endIso) {
-  const [{ data: logs, error: logsError }, { data: collections, error: collectionsError }, { data: orders, error: ordersError }] =
-    await Promise.all([
-      admin
-        .from("daily_activity_logs")
-        .select("entry_type,note,created_at")
-        .eq("user_id", userId)
-        .gte("created_at", startIso)
-        .lte("created_at", endIso)
-        .order("created_at", { ascending: true }),
-      admin
-        .from("collection_visits")
-        .select("saved_at")
-        .eq("created_by", userId)
-        .gte("saved_at", startIso)
-        .lte("saved_at", endIso),
-      admin
-        .from("sales_orders")
-        .select("created_at,updated_at,submitted_at")
-        .eq("created_by", userId)
-        .gte("updated_at", startIso)
-        .lte("updated_at", endIso),
-    ]);
-
-  if (logsError) throw logsError;
-  if (collectionsError) throw collectionsError;
-  if (ordersError) throw ordersError;
-
-  return {
-    logs: logs || [],
-    collections: collections || [],
-    orders: orders || [],
-  };
 }
 
 export async function runInactivityPushCycle(admin, now = new Date()) {

@@ -1,5 +1,6 @@
 export const KSA_TIMEZONE = "Asia/Riyadh";
 export const INACTIVITY_MS = 45 * 60 * 1000;
+export const INACTIVITY_EMAIL_MS = 50 * 60 * 1000;
 export const INACTIVITY_ALERT_REPEAT_MS = 15 * 60 * 1000;
 export const LUNCH_BREAK_REMINDER_MS = 3 * 60 * 60 * 1000;
 
@@ -36,6 +37,8 @@ export const INACTIVITY_PROMPT_SNOOZE_STORAGE_KEY = "madiba_inactivity_prompt_sn
 export const BACKGROUND_GPS_IDLE_MS = 15 * 60 * 1000;
 export const WORKDAY_START_HOUR = 6;
 export const WORKDAY_END_HOUR = 22;
+export const LOGIN_REMINDER_HOUR = 11;
+export const LOGIN_REMINDER_REPEAT_MS = 30 * 60 * 1000;
 
 export const TRANSACTION_ENTRY_TYPES = new Set([
   "VISIT_REPORT",
@@ -169,6 +172,29 @@ export function getKsaWeekdayIndexForDateString(dateString) {
 
 export function isKsaOrderDay(dateString) {
   return getKsaWeekdayIndexForDateString(dateString) !== 5;
+}
+
+export function ksaClockTimestamp(dateString, hour = 0, minute = 0) {
+  const { startIso } = ksaDayBounds(dateString);
+  return Date.parse(startIso) + (Number(hour) * 60 + Number(minute || 0)) * 60 * 1000;
+}
+
+export function lateLoginReminderSlot(now = new Date()) {
+  const date = getKsaDateString(now);
+  const elapsed = now.getTime() - ksaClockTimestamp(date, LOGIN_REMINDER_HOUR);
+  if (elapsed < 0) return -1;
+  return Math.floor(elapsed / LOGIN_REMINDER_REPEAT_MS);
+}
+
+export function shouldSendLateLoginReminder({
+  loginAt,
+  now = new Date(),
+} = {}) {
+  if (loginAt) return false;
+  const date = getKsaDateString(now);
+  if (!isKsaOrderDay(date)) return false;
+  if (!isWithinKsaWorkingHours(now)) return false;
+  return lateLoginReminderSlot(now) >= 0;
 }
 
 export function addKsaCalendarDays(dateString, days) {
@@ -523,14 +549,32 @@ export async function autoCloseForgottenWorkdays(supabase, userId) {
   return closed;
 }
 
-export function shouldWarnInactivity({
+export function inactivityReferenceTimestamp({
+  loginAt,
+  userLogs = [],
+  collections = [],
+  orders = [],
+} = {}) {
+  const lastTransactionTs = lastTransactionTimestamp(userLogs, collections, orders);
+  const loginTs = Date.parse(String(loginAt || ""));
+  const { lunchInAt } = extractLunchTimes(userLogs);
+  const lunchInTs = parseEventTimestamp(lunchInAt);
+  return Math.max(
+    lastTransactionTs,
+    Number.isFinite(loginTs) ? loginTs : 0,
+    lunchInTs || 0,
+  );
+}
+
+export function shouldFlagInactivity({
   loginAt,
   logoutAt,
   userLogs = [],
   collections = [],
   orders = [],
   now = new Date(),
-}) {
+  thresholdMs = INACTIVITY_MS,
+} = {}) {
   if (!loginAt || logoutAt) return false;
   if (isOnLunchBreak(userLogs, now.getTime())) return false;
   if (!isWithinActiveWorkSession({
@@ -540,12 +584,29 @@ export function shouldWarnInactivity({
     now,
   })) return false;
 
-  const lastTransactionTs = lastTransactionTimestamp(userLogs, collections, orders);
-  const loginTs = Date.parse(String(loginAt || ""));
-  const referenceTs = Math.max(lastTransactionTs, Number.isFinite(loginTs) ? loginTs : 0);
+  const referenceTs = inactivityReferenceTimestamp({
+    loginAt,
+    userLogs,
+    collections,
+    orders,
+  });
   if (!referenceTs) return false;
 
-  return now.getTime() - referenceTs >= INACTIVITY_MS;
+  return now.getTime() - referenceTs >= thresholdMs;
+}
+
+export function shouldWarnInactivity(args = {}) {
+  return shouldFlagInactivity({
+    ...args,
+    thresholdMs: INACTIVITY_MS,
+  });
+}
+
+export function shouldEmailInactivity(args = {}) {
+  return shouldFlagInactivity({
+    ...args,
+    thresholdMs: INACTIVITY_EMAIL_MS,
+  });
 }
 
 export function readInactivityPromptSnoozeUntil(storage = null) {

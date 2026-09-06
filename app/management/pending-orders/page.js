@@ -9,7 +9,6 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import ExportableTable from "../../components/ExportableTable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
-import { addPdfBuildFooter } from "../../lib/buildInfo";
 import {
   fetchPendingOrdersCached,
   fetchSalesScopeCached,
@@ -17,13 +16,16 @@ import {
   waitForPendingOrdersHydration,
   writePendingOrdersInvoiceMeta,
 } from "../../lib/mobileDataCache";
-import { buildOutstandingPdfBucketRows, sortBucketLabels, syncOutstandingCustomerFromInvoices, toNumber as parseOutstandingNumber } from "../../lib/outstanding";
-import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
+import { sortBucketLabels } from "../../lib/outstanding";
+import { evaluateCreditApproval } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
-import { appendMonthlyPerformanceToPdf } from "../../lib/orderPdfMonthlyPerformance";
-import { buildAnalytics } from "../customer-audit/lib/analytics";
+import {
+  buildOrderPdfSnapshotFromSavedOrder,
+  createOrderPdfDocument,
+  enrichOrderPdfLiveData,
+} from "../../lib/orderPdfDocument";
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 
 const TEXT = {
@@ -64,10 +66,6 @@ function includesFilter(value, filter) {
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-}
-
-function formatReceivableMoney(value) {
-  return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
 function formatDateTime(value) {
@@ -507,283 +505,45 @@ export default function PendingOrdersPage() {
     setError("");
 
     try {
-      const { jsPDF } = await import("jspdf");
-      const doc = new jsPDF({ unit: "pt", format: "a4" });
-      const vatRate = 0.15;
-      const subtotal = orderLines.reduce((sum, line) => sum + Number(line.line_value || 0), 0);
-      const vatAmount = subtotal * vatRate;
-      const grandTotal = subtotal + vatAmount;
-
-      doc.setFont(undefined, "bold");
-      doc.setFontSize(18);
-      doc.text("MADIBA SFA", 40, 44);
-      doc.setFontSize(12);
-      doc.text("SALES ORDER", 40, 64);
-
-      doc.setFont(undefined, "normal");
-      doc.setFontSize(10);
-      doc.text(`Order ID: ${activeOrder.id}`, 40, 86);
-      doc.text(`Status: ${activeOrder.status || "-"}`, 40, 102);
-      doc.text(`Customer: ${activeOrder.customer_code || "-"} - ${activeOrder.customer_name || "-"}`, 40, 118);
-      doc.text(`Salesman: ${activeOrder.salesman_code || "-"}`, 40, 134);
-      doc.text(`Created: ${formatDateTime(activeOrder.created_at)}`, 40, 150);
-      doc.text(`Last Updated: ${formatDateTime(activeOrder.updated_at)}`, 40, 166);
-
-      doc.setFont(undefined, "bold");
-      doc.rect(40, 186, 515, 24);
-      doc.text("Item Code", 46, 202);
-      doc.text("Item Name", 124, 202);
-      doc.text("Qty", 346, 202);
-      doc.text("Rate", 396, 202);
-      doc.text("Line Total", 476, 202);
-      doc.setFont(undefined, "normal");
-
-      let y = 210;
-      orderLines.forEach((line) => {
-        const codeLines = doc.splitTextToSize(String(line.item_code || "-"), 72);
-        const nameLines = doc.splitTextToSize(String(line.item_name || "-"), 214);
-        const qtyLines = doc.splitTextToSize(String(Number(line.quantity || 0)), 42);
-        const rateLines = doc.splitTextToSize(formatMoney(line.rate), 72);
-        const totalLines = doc.splitTextToSize(formatMoney(line.line_value), 77);
-        const lineCount = Math.max(
-          codeLines.length,
-          nameLines.length,
-          qtyLines.length,
-          rateLines.length,
-          totalLines.length,
-          1
-        );
-        const rowHeight = Math.max(22, lineCount * 12 + 8);
-
-        if (y + rowHeight > 760) {
-          doc.addPage();
-          y = 40;
-          doc.setFont(undefined, "bold");
-          doc.rect(40, y, 515, 24);
-          doc.text("Item Code", 46, y + 16);
-          doc.text("Item Name", 124, y + 16);
-          doc.text("Qty", 346, y + 16);
-          doc.text("Rate", 396, y + 16);
-          doc.text("Line Total", 476, y + 16);
-          doc.setFont(undefined, "normal");
-          y += 24;
-        }
-
-        doc.rect(40, y, 80, rowHeight);
-        doc.rect(120, y, 220, rowHeight);
-        doc.rect(340, y, 50, rowHeight);
-        doc.rect(390, y, 80, rowHeight);
-        doc.rect(470, y, 85, rowHeight);
-
-        codeLines.forEach((codeLine, idx) => {
-          doc.text(codeLine, 46, y + 14 + idx * 12);
-        });
-        nameLines.forEach((nameLine, idx) => {
-          doc.text(nameLine, 124, y + 14 + idx * 12);
-        });
-        qtyLines.forEach((qtyLine, idx) => {
-          doc.text(qtyLine, 386, y + 14 + idx * 12, { align: "right" });
-        });
-        rateLines.forEach((rateLine, idx) => {
-          doc.text(rateLine, 464, y + 14 + idx * 12, { align: "right" });
-        });
-        totalLines.forEach((totalLine, idx) => {
-          doc.text(totalLine, 548, y + 14 + idx * 12, { align: "right" });
-        });
-
-        y += rowHeight;
+      const token = await getAuthToken();
+      const snapshot = buildOrderPdfSnapshotFromSavedOrder({
+        order: activeOrder,
+        lines: orderLines,
+        history: orderHistory,
+        outstanding: outstandingInfoByOrder?.[activeOrder.id] || null,
+        creditApprovalRemark: creditApprovalByOrder?.[activeOrder.id]?.remark || "",
       });
 
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const bottomMargin = 52;
-      let cursorY = y + 20;
-
-      function ensureSpace(requiredHeight) {
-        if (cursorY + requiredHeight > pageHeight - bottomMargin) {
-          doc.addPage();
-          cursorY = 40;
-        }
-      }
-
-      const summaryBoxWidth = 205;
-      const summaryBoxHeight = 70;
-      const summaryX = pageWidth - 40 - summaryBoxWidth;
-
-      let outstandingInfo = outstandingInfoByOrder?.[activeOrder.id] || null;
-      if (activeOrder.customer_code) {
-        try {
-          const token = await getAuthToken();
-          const outstandingResponse = await fetch(
-            `${OUTSTANDING_API}?customerCode=${encodeURIComponent(activeOrder.customer_code || "")}&customerName=${encodeURIComponent(activeOrder.customer_name || "")}`,
-            { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
-          );
-          const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
-          if (outstandingResponse.ok && outstandingPayload.success) {
-            outstandingInfo = {
-              uploadedAt: String(outstandingPayload.uploadedAt || ""),
-              bucketLabels: sortBucketLabels(outstandingPayload.bucketLabels || outstandingInfo?.bucketLabels || []),
-              customer: outstandingPayload.customer || outstandingInfo?.customer || null,
-              customerInvoices: Array.isArray(outstandingPayload.customerInvoices)
-                ? outstandingPayload.customerInvoices
-                : [],
-            };
-          }
-        } catch {
-          // Keep generating the order PDF even if outstanding cannot be refreshed.
-        }
-      }
-      const outstandingCustomer = syncOutstandingCustomerFromInvoices(
-        outstandingInfo?.customer,
-        outstandingInfo?.customerInvoices,
-      );
-      const outstandingBuckets = sortBucketLabels(outstandingInfo?.bucketLabels || []);
-      const bucketRows = buildOutstandingPdfBucketRows(outstandingCustomer, outstandingBuckets).map((row) => ({
-        label: row.label,
-        value: row.kind === "count"
-          ? String(parseOutstandingNumber(row.amount))
-          : formatReceivableMoney(parseOutstandingNumber(row.amount)),
-      }));
-      const outstandingBlockHeight = bucketRows.length > 0
-        ? 14 + 10 + bucketRows.length * 18
-        : 0;
-      const hasOutstandingBuckets = bucketRows.length > 0;
-      const combinedSectionHeight = hasOutstandingBuckets
-        ? outstandingBlockHeight + 12 + summaryBoxHeight
-        : summaryBoxHeight;
-
-      ensureSpace(combinedSectionHeight + 16);
-      const sectionY = cursorY;
-      let summaryY = sectionY;
-      let bucketBottomY = sectionY;
-
-      if (hasOutstandingBuckets) {
-        doc.setFont(undefined, "bold");
-        doc.text("Outstanding Buckets", 40, sectionY);
-        doc.setFont(undefined, "normal");
-
-        let rowY = sectionY + 14;
-        const leftX = 40;
-        const labelW = 220;
-        const valueW = 120;
-
-        bucketRows.forEach((row, index) => {
-          const rowH = 18;
-          doc.rect(leftX, rowY, labelW, rowH);
-          doc.rect(leftX + labelW, rowY, valueW, rowH);
-          doc.text(row.label, leftX + 6, rowY + 12);
-          if (index === bucketRows.length - 1) {
-            doc.setFont(undefined, "bold");
-          }
-          doc.text(row.value, leftX + labelW + valueW - 6, rowY + 12, { align: "right" });
-          if (index === bucketRows.length - 1) {
-            doc.setFont(undefined, "normal");
-          }
-          rowY += rowH;
-        });
-
-        bucketBottomY = rowY;
-        summaryY = rowY + 12;
-      }
-
-      doc.roundedRect(summaryX, summaryY, summaryBoxWidth, summaryBoxHeight, 4, 4);
-      doc.text("Subtotal (Excl. VAT)", summaryX + 10, summaryY + 18);
-      doc.text(formatMoney(subtotal), summaryX + summaryBoxWidth - 10, summaryY + 18, { align: "right" });
-      doc.text("VAT @ 15%", summaryX + 10, summaryY + 36);
-      doc.text(formatMoney(vatAmount), summaryX + summaryBoxWidth - 10, summaryY + 36, { align: "right" });
-      doc.setFont(undefined, "bold");
-      doc.text("Total (Incl. VAT)", summaryX + 10, summaryY + 54);
-      doc.text(formatMoney(grandTotal), summaryX + summaryBoxWidth - 10, summaryY + 54, { align: "right" });
-      doc.setFont(undefined, "normal");
-
-      cursorY = Math.max(bucketBottomY, summaryY + summaryBoxHeight) + 24;
-
-      if (orderHistory.length > 0) {
-        ensureSpace(24);
-        doc.setFont(undefined, "bold");
-        doc.text("Order Change History", 40, cursorY);
-        cursorY += 18;
-        doc.setFont(undefined, "normal");
-
-        orderHistory.slice(-8).forEach((entry) => {
-          const header = `${entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-GB") : "-"} • ${entry.action || "UPDATED"}`;
-          const wrappedHeader = doc.splitTextToSize(header, 515);
-          const changeBlocks = (Array.isArray(entry.changes) ? entry.changes : []).map((change) => (
-            doc.splitTextToSize(
-              `${change.item_code || "-"}: ${change.type || "UPDATED"} ${Number(change.before_quantity || 0)} -> ${Number(change.after_quantity || 0)} | ${formatMoney(change.before_rate || 0)} -> ${formatMoney(change.after_rate || 0)}`,
-              505
-            )
-          ));
-          const entryHeight = Math.max(12, wrappedHeader.length * 10)
-            + changeBlocks.reduce((sum, wrappedChange) => sum + Math.max(12, wrappedChange.length * 10), 0)
-            + 6;
-
-          ensureSpace(entryHeight);
-          wrappedHeader.forEach((line, index) => doc.text(line, 40, cursorY + index * 10));
-          cursorY += Math.max(12, wrappedHeader.length * 10);
-
-          changeBlocks.forEach((wrappedChange) => {
-            wrappedChange.forEach((line, index) => doc.text(line, 48, cursorY + index * 10));
-            cursorY += Math.max(12, wrappedChange.length * 10);
-          });
-
-          cursorY += 6;
-        });
-      }
+      const { snapshot: liveSnapshot, analytics } = await enrichOrderPdfLiveData(snapshot, {
+        accessToken: token,
+      });
 
       let creditEvaluation = creditApprovalByOrder?.[activeOrder.id] || null;
       try {
-        const token = await getAuthToken();
         const documentsResponse = await fetch(
           `/api/customer-documents?customerCode=${encodeURIComponent(activeOrder.customer_code || "")}`,
           { headers: { Authorization: `Bearer ${token}` } },
         );
         const documentsPayload = await documentsResponse.json().catch(() => ({}));
         creditEvaluation = evaluateCreditApproval({
-          outstanding: outstandingCustomer || {},
-          orderValue: subtotal,
+          outstanding: liveSnapshot.outstanding?.customer || {},
+          orderValue: liveSnapshot.totals?.amountExclVat || liveSnapshot.grandTotal || 0,
           creditApplication: documentsResponse.ok && documentsPayload.success
             ? documentsPayload.compliance?.creditApplication
             : { present: false },
         });
       } catch {
         creditEvaluation = creditEvaluation || evaluateCreditApproval({
-          outstanding: outstandingCustomer || {},
-          orderValue: subtotal,
+          outstanding: liveSnapshot.outstanding?.customer || {},
+          orderValue: liveSnapshot.totals?.amountExclVat || liveSnapshot.grandTotal || 0,
           creditApplication: { present: false },
         });
       }
 
-      cursorY = appendCreditControlRemarkToPdf(doc, {
-        remark: creditEvaluation.remark,
-        x: 40,
-        y: () => cursorY,
-        maxWidth: 515,
-        ensureSpace,
-      });
-
-      try {
-        const token = await getAuthToken();
-        const historyResponse = await fetch(
-          `/api/customer-history?customerCode=${encodeURIComponent(activeOrder.customer_code || "")}`,
-          { headers: { Authorization: `Bearer ${token}` } },
-        );
-        const historyPayload = await historyResponse.json().catch(() => ({}));
-        if (historyResponse.ok && historyPayload.success) {
-          const monthlyAnalytics = buildAnalytics(Array.isArray(historyPayload.transactions) ? historyPayload.transactions : []);
-          cursorY = appendMonthlyPerformanceToPdf(doc, {
-            analytics: monthlyAnalytics,
-            x: 40,
-            y: () => cursorY,
-            maxWidth: 515,
-            ensureSpace,
-          });
-        }
-      } catch {
-        // Keep the order PDF even if customer history is unavailable.
-      }
-
-      addPdfBuildFooter(doc);
+      const doc = await createOrderPdfDocument({
+        ...liveSnapshot,
+        creditApprovalRemark: creditEvaluation?.remark || liveSnapshot.creditApprovalRemark,
+      }, { analytics });
 
       const fileName = buildOrderPdfFileName({
         orderId: activeOrder.id,

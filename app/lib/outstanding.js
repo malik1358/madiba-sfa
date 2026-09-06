@@ -1169,22 +1169,35 @@ export function resolveOutstandingBucketLabels(labels, bucketsOrRows) {
   return sortBucketLabels(Object.keys(bucketsOrRows || {}));
 }
 
-export function buildOutstandingPdfBucketRows(customer, labels = []) {
-  if (!customer) return [];
+export const DEFAULT_OUTSTANDING_BUCKET_LABELS = ["0-30", "31-60", "61-90", "91-120", ">120"];
 
-  const displayLabels = visibleOutstandingBucketLabels(
-    resolveOutstandingBucketLabels(labels, customer.buckets),
-    customer.buckets
-  );
+export function emptyOutstandingCustomer(overrides = {}) {
+  return {
+    customer_code: "",
+    customer_name: "",
+    buckets: {},
+    open_invoices: 0,
+    total_outstanding: 0,
+    ...overrides,
+  };
+}
+
+export function buildOutstandingPdfBucketRows(customer, labels = []) {
+  // Always render a zero table when the customer has no outstanding row so PDFs
+  // and screens can confirm clearance instead of hiding the section.
+  const safeCustomer = customer || emptyOutstandingCustomer();
+  const resolvedLabels = resolveOutstandingBucketLabels(labels, safeCustomer.buckets);
+  const baseLabels = resolvedLabels.length ? resolvedLabels : DEFAULT_OUTSTANDING_BUCKET_LABELS;
+  const displayLabels = visibleOutstandingBucketLabels(baseLabels, safeCustomer.buckets);
 
   return [
     ...displayLabels.map((label) => ({
       label: `${label} days`,
-      amount: toNumber(customer.buckets?.[label]),
+      amount: toNumber(safeCustomer.buckets?.[label]),
       kind: "bucket",
     })),
-    { label: "Open invoices", amount: toNumber(customer.open_invoices), kind: "count" },
-    { label: "Total outstanding", amount: toNumber(customer.total_outstanding), kind: "total" },
+    { label: "Open invoices", amount: toNumber(safeCustomer.open_invoices), kind: "count" },
+    { label: "Total outstanding", amount: toNumber(safeCustomer.total_outstanding), kind: "total" },
   ];
 }
 
@@ -1196,7 +1209,10 @@ export function visibleOutstandingBucketLabels(labels, buckets) {
     if (toNumber(buckets?.[label]) !== 0) lastNonZeroIndex = index;
   });
 
-  return lastNonZeroIndex < 0 ? [] : sortedLabels.slice(0, lastNonZeroIndex + 1);
+  // All zeros: keep every label visible so clearance is explicit.
+  if (lastNonZeroIndex < 0) return sortedLabels;
+
+  return sortedLabels.slice(0, lastNonZeroIndex + 1);
 }
 
 export function summarizeOutstandingBuckets(buckets) {

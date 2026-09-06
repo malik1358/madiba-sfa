@@ -639,6 +639,44 @@ test("visible outstanding buckets keep empty gaps through the oldest balance", (
   );
 });
 
+test("visible outstanding buckets keep all labels when every amount is zero", () => {
+  assert.deepEqual(
+    visibleOutstandingBucketLabels(
+      ["0-30", "31-60", "61-90", "91-120", ">120"],
+      { "0-30": 0, "31-60": 0, "61-90": 0, "91-120": 0, ">120": 0 }
+    ),
+    ["0-30", "31-60", "61-90", "91-120", ">120"]
+  );
+});
+
+test("order PDF outstanding rows show zeros when customer has no outstanding", () => {
+  const rows = buildOutstandingPdfBucketRows(null, ["0-30", "31-60", "61-90", "91-120", ">120"]);
+
+  assert.deepEqual(rows.map((row) => row.label), [
+    "0-30 days",
+    "31-60 days",
+    "61-90 days",
+    "91-120 days",
+    ">120 days",
+    "Open invoices",
+    "Total outstanding",
+  ]);
+  assert.deepEqual(rows.map((row) => row.amount), [0, 0, 0, 0, 0, 0, 0]);
+});
+
+test("order PDF outstanding rows use default buckets when labels and customer are missing", () => {
+  const rows = buildOutstandingPdfBucketRows(null, []);
+  assert.deepEqual(rows.map((row) => row.label), [
+    "0-30 days",
+    "31-60 days",
+    "61-90 days",
+    "91-120 days",
+    ">120 days",
+    "Open invoices",
+    "Total outstanding",
+  ]);
+});
+
 test("outstanding buckets collapse into the three Visit Status age bands", () => {
   assert.deepEqual(
     summarizeOutstandingBuckets({

@@ -2,8 +2,9 @@ import { Fragment } from 'react';
 import { monthName, numberFormat, qtyFormat, trendClass } from '../lib/format';
 import { isDoNotUseItem } from '../lib/helpers';
 import ExportableTable from '../../../components/ExportableTable';
+import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from '../../../lib/regionalPricing';
 
-export default function CategoryPerformance({ analytics, itemCatalog = [], expandedCategories, toggleCategory, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
+export default function CategoryPerformance({ analytics, itemCatalog = [], expandedCategories, toggleCategory, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = 'credit' }) {
   const catalogByCode = new Map(
     itemCatalog.map((item) => [String(item.item_code || '').trim().toUpperCase(), item])
   );
@@ -102,6 +103,8 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
                                     ))}
                                     <th rowSpan="2" className="auditItemTotalHeader">Total</th>
                                     <th rowSpan="2" className="auditRateHeader">Rate</th>
+                                    <th rowSpan="2" className="auditRateHeader">Cash Disc</th>
+                                    <th rowSpan="2" className="auditRateHeader">Value Disc</th>
                                     <th rowSpan="2" className="auditOrderQtyHeader">Order Qty</th>
                                   </tr>
                                   <tr className="auditItemMonthRow">
@@ -113,6 +116,17 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
                                 <tbody>
                                   {category.items.map((item) => {
                                     const orderQty = Number(orderQuantities[item.item_code] || 0);
+                                    const itemCode = String(item.item_code || '').trim().toUpperCase();
+                                    const wholesale = Number(priceList[itemCode] || 0);
+                                    const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
+                                    const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+                                    const priced = getPricedOrderLine({
+                                      wholesaleRate: wholesale,
+                                      quantity: orderQty,
+                                      paymentType,
+                                      cashDiscountRate: cashDiscount,
+                                      valueDiscountRate: valueDiscount,
+                                    });
                                     const catalogItem = catalogByCode.get(String(item.item_code || '').trim().toUpperCase());
                                     const currentName = String(catalogItem?.item_name || '').trim();
                                     const hasCurrentReplacement = Boolean(currentName) && !isDoNotUseItem(currentName);
@@ -140,9 +154,14 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
                                           <td className="auditItemTotal">{numberFormat(item.total_value)}</td>
                                           <td rowSpan="2" className="auditRateCell">
                                             <span>
-                                                {priceList[String(item.item_code).trim().toUpperCase()] ? Number(priceList[String(item.item_code).trim().toUpperCase()]).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}
+                                                {wholesale ? Number(wholesale).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—'}
                                             </span>
+                                            {wholesale && orderQty > 0 && priced.rate !== wholesale ? (
+                                              <div className="auditItemABC">Net {Number(priced.rate).toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
+                                            ) : null}
                                           </td>
+                                          <td rowSpan="2" className="auditRateCell">{formatAppliedDiscount(cashDiscount, priced.applied.cash)}</td>
+                                          <td rowSpan="2" className="auditRateCell">{formatAppliedDiscount(valueDiscount, priced.applied.value)}</td>
                                           <td rowSpan="2" className={isNotOrderable ? "auditOrderQtyCell auditCategoryNoOrder" : "auditOrderQtyCell"}>
                                             {isNotOrderable ? (
                                               <span>Not orderable</span>

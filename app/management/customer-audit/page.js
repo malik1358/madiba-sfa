@@ -543,7 +543,10 @@ function CustomerAuditPageContent() {
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}
           changeOrderQty={updateQty}
-          priceList={displayPriceList}
+          priceList={regionPriceList}
+          cashDiscountMap={cashDiscountMap}
+          valueDiscountMap={valueDiscountMap}
+          paymentType={paymentType}
         />
 
         <QuickOrder
@@ -552,7 +555,10 @@ function CustomerAuditPageContent() {
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}
           changeOrderQty={updateQty}
-          priceList={displayPriceList}
+          priceList={regionPriceList}
+          cashDiscountMap={cashDiscountMap}
+          valueDiscountMap={valueDiscountMap}
+          paymentType={paymentType}
         />
 
         <FullItemList
@@ -562,9 +568,10 @@ function CustomerAuditPageContent() {
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}
           changeOrderQty={updateQty}
-          priceList={displayPriceList}
+          priceList={regionPriceList}
           cashDiscountMap={cashDiscountMap}
           valueDiscountMap={valueDiscountMap}
+          paymentType={paymentType}
         />
 
         <OrderBar

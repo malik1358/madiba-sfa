@@ -1,12 +1,62 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isExcludedCategory, loadPricePayload, parsePricePayload, pickCatalogCategory } from '../app/lib/pricePayload.js';
+import { isBuildingMaterialItem, isExcludedCategory, loadPricePayload, parsePricePayload, pickCatalogCategory } from '../app/lib/pricePayload.js';
 
 test('isExcludedCategory hides building material from order catalogs', () => {
   assert.equal(isExcludedCategory('Building Material'), true);
   assert.equal(isExcludedCategory('Building Materials'), true);
   assert.equal(isExcludedCategory('Body Care'), false);
+});
+
+test('isBuildingMaterialItem hides unclassified boards, ladders, and fans', () => {
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A003622',
+    item_name: 'A003622_GRADE-E2 5 MM X 1220MM X 2440MM',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A003623',
+    item_name: 'A003623_MDF 7.5 MM X 1220MM X 2440MM X',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: '16',
+    item_name: '16-Inch portable Ventilation Fan',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A',
+    item_name: 'A Type Ladder - 5.2 Mtr',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A005425',
+    item_name: 'PHOTOCOPY PAPER A4 80GSM',
+    category: 'Stationery',
+  }), false);
+});
+
+test('parsePricePayload drops building material rows from the order catalog', () => {
+  const { priceMap, sheetItems } = parsePricePayload([
+    {
+      item_code: 'A003623',
+      item_name: 'A003623_MDF 7.5 MM X 1220MM X 2440MM X',
+      category: 'Unclassified',
+      rate: 29,
+    },
+    {
+      item_code: 'A005425',
+      item_name: 'PHOTOCOPY PAPER A4 80GSM',
+      category: 'Stationery',
+      rate: 76,
+    },
+  ]);
+
+  assert.equal(priceMap.A003623, undefined);
+  assert.equal(priceMap.A005425, 76);
+  assert.equal(sheetItems.some((item) => item.item_code === 'A003623'), false);
+  assert.equal(sheetItems.some((item) => item.item_code === 'A005425'), true);
 });
 
 test('pickCatalogCategory prefers live sales or sheet over stale Cosmetics', () => {

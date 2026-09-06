@@ -1,5 +1,5 @@
-import { isDoNotUseItem, normalizeCode } from './helpers';
-import { isExcludedCategory, pickCatalogCategory } from '../../../lib/pricePayload.js';
+import { isDoNotUseItem, normalizeCode } from './helpers.js';
+import { isBuildingMaterialItem, pickCatalogCategory } from '../../../lib/pricePayload.js';
 
 function hasCurrentItemName(value, itemCode) {
   const text = String(value || '').trim();
@@ -8,16 +8,22 @@ function hasCurrentItemName(value, itemCode) {
 
 export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList = {}) {
   const itemMap = new Map();
+  const excludedCodes = new Set();
 
   (itemCatalog || []).forEach((item) => {
     const code = normalizeCode(item?.item_code);
     if (!code) return;
-    itemMap.set(code, {
+    const nextItem = {
       ...item,
       item_code: code,
       item_name: String(item.item_name || code).trim(),
       category: pickCatalogCategory(item.category) || 'Unclassified',
-    });
+    };
+    if (isBuildingMaterialItem(nextItem)) {
+      excludedCodes.add(code);
+      return;
+    }
+    itemMap.set(code, nextItem);
   });
 
   (priceSheetItems || []).forEach((sheetItem) => {
@@ -26,20 +32,25 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
     const existing = itemMap.get(code);
     const sheetName = String(sheetItem.item_name || '').trim();
     const sheetCategory = String(sheetItem.category || '').trim();
-
-    itemMap.set(code, {
+    const nextItem = {
       ...(existing || {}),
       item_code: code,
       item_name: hasCurrentItemName(sheetName, code)
         ? sheetName
         : (hasCurrentItemName(existing?.item_name, code) ? existing.item_name : code),
       category: pickCatalogCategory(sheetCategory, existing?.category) || 'Missing Category',
-    });
+    };
+    if (isBuildingMaterialItem(nextItem)) {
+      excludedCodes.add(code);
+      itemMap.delete(code);
+      return;
+    }
+    itemMap.set(code, nextItem);
   });
 
   Object.keys(priceList || {}).forEach((rawCode) => {
     const code = normalizeCode(rawCode);
-    if (!code || itemMap.has(code)) return;
+    if (!code || itemMap.has(code) || excludedCodes.has(code)) return;
     itemMap.set(code, {
       item_code: code,
       item_name: code,
@@ -48,7 +59,7 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
   });
 
   return Array.from(itemMap.values())
-    .filter((item) => !isDoNotUseItem(item.item_name) && !isExcludedCategory(item.category))
+    .filter((item) => !isDoNotUseItem(item.item_name) && !isBuildingMaterialItem(item))
     .sort((left, right) => String(left.item_name || left.item_code).localeCompare(String(right.item_name || right.item_code)));
 }
 

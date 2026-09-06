@@ -107,8 +107,8 @@ const TEXT = {
   emailUsers: { en: "Users to email", ar: "المستخدمون للإرسال" },
   reportEmail: { en: "Report email", ar: "بريد التقرير" },
   reportEmailHint: {
-    en: "Visit report mail is sent to this address. Login usernames are not used.",
-    ar: "يُرسل بريد تقرير الزيارة إلى هذا العنوان. لا يُستخدم اسم الدخول.",
+    en: "Visit report mail is sent to this address and to every head above the user. Login usernames are not used.",
+    ar: "يُرسل بريد تقرير الزيارة إلى هذا العنوان وإلى كل الرؤساء فوق المستخدم. لا يُستخدم اسم الدخول.",
   },
   selectAllUsers: { en: "Select all users", ar: "تحديد كل المستخدمين" },
   sendEmail: { en: "Send selected", ar: "إرسال المحددين" },

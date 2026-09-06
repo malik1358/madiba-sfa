@@ -59,10 +59,14 @@ export function resolveVisitReportRecipients({
   reportEmail,
   email,
   managerEmails,
+  chainEmails,
   sendToUser = true,
 } = {}) {
   const managers = parseEmailList(
     Array.isArray(managerEmails) ? managerEmails.join(",") : managerEmails,
+  );
+  const chain = parseEmailList(
+    Array.isArray(chainEmails) ? chainEmails.join(",") : chainEmails,
   );
   const user = sendToUser
     ? resolveUserReportEmail({ reportEmail, email: userEmail || email })
@@ -70,11 +74,11 @@ export function resolveVisitReportRecipients({
   const to = [];
 
   if (user) to.push(user);
-  managers.forEach((email) => {
-    if (!to.includes(email)) to.push(email);
+  [...chain, ...managers].forEach((address) => {
+    if (!to.includes(address)) to.push(address);
   });
 
-  return { to, userEmail: user || "", managerEmails: managers };
+  return { to, userEmail: user || "", managerEmails: managers, chainEmails: chain };
 }
 
 function distanceFromCustomerLabel(entry) {

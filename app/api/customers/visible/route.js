@@ -27,6 +27,7 @@ import {
 } from "../../../lib/salesHierarchy.js";
 import { dedupeCustomerMasterRows } from "../../../lib/customerMasterQuery.js";
 import { applyCustomerSalesmanScopeFilter } from "../../../lib/customerSalesmanAssignment.js";
+import { buildSalesMixByCustomer, excludeBuildingMaterialCustomers } from "../../../lib/buildingMaterialCustomerFilter.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -639,9 +640,61 @@ async function attachOutstandingValues(admin, customers) {
   });
 }
 
+async function loadItemLookup(admin) {
+  const lookup = new Map();
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await admin
+      .from("items_master")
+      .select("item_code,item_name,category")
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const code = normalizeCode(row.item_code);
+      if (!code) return;
+      lookup.set(code, {
+        item_name: row.item_name || "",
+        category: row.category || "",
+      });
+    });
+
+    if ((data || []).length < pageSize) break;
+    from += pageSize;
+  }
+
+  return lookup;
+}
+
+async function loadActiveSalesMixByCustomer(admin) {
+  const itemLookup = await loadItemLookup(admin);
+  const rows = [];
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await admin
+      .from("active_sales")
+      .select("customer_code,item_code,item_name,category")
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    rows.push(...(data || []));
+    if ((data || []).length < pageSize) break;
+    from += pageSize;
+  }
+
+  return buildSalesMixByCustomer(rows, itemLookup);
+}
+
 export async function buildVisibleCustomersForScope(admin, scope, options = {}) {
   const includeRecentSales = Boolean(options.includeRecentSales);
   const includeOutstanding = Boolean(options.includeOutstanding);
+  const excludeBuildingMaterial = Boolean(options.excludeBuildingMaterial);
   const warnings = [];
 
   try {
@@ -680,6 +733,16 @@ export async function buildVisibleCustomersForScope(admin, scope, options = {}) 
         highest_monthly_sales: Number(customer?.highest_monthly_sales || 0),
         operational_months: Number(customer?.operational_months || 0),
       }));
+    }
+  }
+
+  if (excludeBuildingMaterial) {
+    try {
+      const salesMixByCode = await loadActiveSalesMixByCustomer(admin);
+      responseCustomers = excludeBuildingMaterialCustomers(responseCustomers, salesMixByCode);
+    } catch {
+      warnings.push("building-material-filter-unavailable");
+      responseCustomers = excludeBuildingMaterialCustomers(responseCustomers);
     }
   }
 
@@ -725,6 +788,7 @@ export async function GET(request) {
     const searchParams = new URL(request.url).searchParams;
     const includeRecentSales = searchParams.get("includeRecentSales") === "1";
     const includeOutstanding = searchParams.get("includeOutstanding") === "1";
+    const excludeBuildingMaterial = searchParams.get("excludeBuildingMaterial") === "1";
 
     const {
       customers: responseCustomers,
@@ -733,6 +797,7 @@ export async function GET(request) {
     } = await buildVisibleCustomersForScope(admin, scope, {
       includeRecentSales,
       includeOutstanding,
+      excludeBuildingMaterial,
     });
 
     return NextResponse.json({

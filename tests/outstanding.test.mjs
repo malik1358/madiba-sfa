@@ -313,6 +313,41 @@ test("customerAccountCodesMatch treats numeric suffix variants as the same accou
   assert.equal(customerAccountCodesMatch("1173C", "1174C"), false);
 });
 
+test("findOutstandingForCustomer matches order 1564 to outstanding 1564C", () => {
+  const dataset = {
+    rows: [{
+      customer_code: "1564C",
+      customer_name: "1564C Windows of Thought and Creativity Foundation",
+      open_invoices: 2,
+      buckets: { "0-30": 800, "31-60": 1200 },
+      total_outstanding: 2000,
+    }],
+    invoices: [{
+      customer_code: "1564C",
+      customer_name: "1564C Windows of Thought and Creativity Foundation",
+      pending_amount: 2000,
+      invoice_day: 20,
+    }],
+  };
+
+  const customer = findOutstandingForCustomer(
+    dataset,
+    "1564",
+    "Windows of Thought and Creativity Foundation",
+  );
+  assert.equal(customer?.total_outstanding, 2000);
+  assert.equal(customer?.buckets["31-60"], 1200);
+  assert.equal(
+    isSameOutstandingCustomer(
+      "1564C",
+      "1564C Windows of Thought and Creativity Foundation",
+      "1564",
+      "Windows of Thought and Creativity Foundation",
+    ),
+    true,
+  );
+});
+
 test("findOutstandingHeaderRow accepts Open Balance and Aging invoice detail headers", () => {
   const rows = [
     ["Outstanding Report"],

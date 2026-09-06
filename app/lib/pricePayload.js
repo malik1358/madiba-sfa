@@ -33,7 +33,7 @@ function looksLikeItemName(value) {
   return text.length >= 3;
 }
 
-function isExcludedItemCode(value) {
+export function isExcludedItemCode(value) {
   return normalizeCode(value).startsWith("LP");
 }
 
@@ -42,8 +42,9 @@ export function isExcludedCategory(value) {
   return ["buildingmaterial", "buildingmaterials", "buidingmaterial", "buidingmaterials"].includes(compact);
 }
 
-const BUILDING_MATERIAL_NAME_PATTERN = /(?:^|[^a-z0-9])(?:mdf|grade[\s-]*e2|plywood|chipboard|particle\s*boards?|gypsum|plasterboards?|ventilation|ladders?|melamine|blockboards?|sandwich\s*panels?|rebar|concrete)(?:[^a-z0-9]|$)/i;
-const BUILDING_MATERIAL_SHEET_SIZE_PATTERN = /\b\d+(?:\.\d+)?\s*mm\s*[x×]\s*\d+(?:\.\d+)?\s*mm(?:\s*[x×]\s*\d+(?:\.\d+)?\s*mm)?\b/i;
+const BUILDING_MATERIAL_NAME_PATTERN = /(?:^|[^a-z0-9])(?:mdf|hdf|osb|hmr|grade[\s-]*e2|plywood|chipboard|particle\s*boards?|gypsum|plasterboards?|ventilation|ladders?|melamine|blockboards?|sandwich\s*panels?|rebar|concrete|steel\s*mesh|steel\s*bars?|angle\s*irons?|cement\s*boards?|mesh)(?:[^a-z0-9]|$)/i;
+const BUILDING_MATERIAL_SHEET_SIZE_PATTERN = /\b\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)\s*[x×]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)(?:\s*[x×]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in))?\b/i;
+const BUILDING_MATERIAL_FAN_PATTERN = /(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b).{0,24}\bfans?\b|\bfans?\b.{0,24}(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b|\bventilation\b)/i;
 
 export function isBuildingMaterialName(value) {
   const text = normalizeText(value);
@@ -54,16 +55,19 @@ export function isBuildingMaterialName(value) {
   if (/مواد\s*ال?بناء/.test(text)) return true;
   if (BUILDING_MATERIAL_NAME_PATTERN.test(text)) return true;
   if (/\bcement\b/i.test(text)) return true;
+  if (BUILDING_MATERIAL_FAN_PATTERN.test(text)) return true;
+  if (/\b1220\s*mm\b/i.test(text) && /\b2440\s*mm\b/i.test(text)) return true;
   return BUILDING_MATERIAL_SHEET_SIZE_PATTERN.test(text);
 }
 
 export function isBuildingMaterialItem(item) {
   if (item == null) return false;
   if (typeof item !== "object") {
-    return isExcludedCategory(item) || isBuildingMaterialName(item);
+    return isExcludedCategory(item) || isBuildingMaterialName(item) || isExcludedItemCode(item);
   }
 
   return isExcludedCategory(item.category)
+    || isExcludedItemCode(item.item_code || item.code)
     || isBuildingMaterialName(item.item_name)
     || isBuildingMaterialName(item.name);
 }
@@ -252,13 +256,39 @@ function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valu
 
   const resolvedRegions = withRegionFallbacks(aliasedRegions, applyPriceCodeAliases(priceMap));
   const resolvedPriceMap = resolvedRegions.riyadh;
+  const excludedCodes = new Set();
+  const keptSheetItems = [];
+
+  (Array.isArray(sheetItems) ? sheetItems : []).forEach((item) => {
+    const code = normalizeCode(item?.item_code);
+    if (isBuildingMaterialItem(item) || isExcludedItemCode(code)) {
+      if (code) excludedCodes.add(code);
+      return;
+    }
+    keptSheetItems.push(item);
+  });
+
+  function stripExcludedPrices(target) {
+    const next = { ...(target || {}) };
+    Object.keys(next).forEach((rawCode) => {
+      const code = normalizeCode(rawCode);
+      if (excludedCodes.has(code) || isExcludedItemCode(code)) {
+        delete next[rawCode];
+      }
+    });
+    return next;
+  }
 
   return {
-    priceMap: resolvedPriceMap,
-    regionPriceMaps: resolvedRegions,
-    cashDiscountMap: applyDiscountCodeAliases(cashDiscountMap),
-    valueDiscountMap: applyDiscountCodeAliases(valueDiscountMap),
-    sheetItems,
+    priceMap: stripExcludedPrices(resolvedPriceMap),
+    regionPriceMaps: {
+      riyadh: stripExcludedPrices(resolvedRegions.riyadh),
+      dammam: stripExcludedPrices(resolvedRegions.dammam),
+      jeddah: stripExcludedPrices(resolvedRegions.jeddah),
+    },
+    cashDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(cashDiscountMap)),
+    valueDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(valueDiscountMap)),
+    sheetItems: keptSheetItems,
   };
 }
 

@@ -1,6 +1,29 @@
 import { isBuildingMaterialItem } from "./pricePayload.js";
-import { customerCodeCandidates, resolveCustomerAccountCode } from "./outstanding.js";
+import { customerAccountCodesMatch, customerCodeCandidates, resolveCustomerAccountCode } from "./outstanding.js";
 import { isBuildingMaterialCustomer } from "../management/my-day/customerEligibility.js";
+
+const EXCLUDED_NEW_ORDER_CUSTOMER_CODES = ["1020C", "1020"];
+
+const FMCG_CATEGORIES = new Set([
+  "fragrance",
+  "fragrances",
+  "perfume",
+  "perfumes",
+  "stationery",
+  "sundry",
+  "sundries",
+  "bodycare",
+  "personalcare",
+  "cosmetics",
+  "cosmetic",
+  "electronics",
+  "electronic",
+  "food",
+  "foods",
+  "beverage",
+  "beverages",
+  "pos",
+]);
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -38,16 +61,26 @@ export function isBuildingMaterialSale(row = {}, item = {}) {
   }) || isBuildingMaterialItem(item);
 }
 
+function compactCategory(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
+function isFmcgSale(row = {}, item = {}) {
+  return FMCG_CATEGORIES.has(compactCategory(row.category || item.category));
+}
+
 function isUnknownSale(row = {}, item = {}) {
   const category = String(row.category || item.category || "").trim().toUpperCase();
-  const name = String(row.item_name || item.item_name || "").trim();
-  return !name && UNKNOWN_CATEGORIES.has(category);
+  return UNKNOWN_CATEGORIES.has(category) || !category;
 }
 
 export function accumulateSalesMix(mix, row, item = {}) {
   const next = mix || emptySalesMix();
   if (isBuildingMaterialSale(row, item)) {
     return { hasBuildingMaterial: true, hasOther: next.hasOther };
+  }
+  if (isFmcgSale(row, item)) {
+    return { hasBuildingMaterial: next.hasBuildingMaterial, hasOther: true };
   }
   if (isUnknownSale(row, item)) return next;
   return { hasBuildingMaterial: next.hasBuildingMaterial, hasOther: true };
@@ -72,7 +105,12 @@ export function buildSalesMixByCustomer(rows, itemLookup = new Map()) {
   return mixByCode;
 }
 
+export function isExcludedNewOrderCustomerCode(value) {
+  return EXCLUDED_NEW_ORDER_CUSTOMER_CODES.some((code) => customerAccountCodesMatch(code, value));
+}
+
 export function isExcludedNewOrderCustomer(customer, salesMixByCode = new Map()) {
+  if (isExcludedNewOrderCustomerCode(customer?.customer_code || customer)) return true;
   if (isBuildingMaterialCustomer(customer)) return true;
 
   const mix = customerMixKeys(customer?.customer_code).reduce((current, code) => {

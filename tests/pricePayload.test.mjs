@@ -35,6 +35,16 @@ test('isBuildingMaterialItem hides unclassified boards, ladders, and fans', () =
     item_name: 'PHOTOCOPY PAPER A4 80GSM',
     category: 'Stationery',
   }), false);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'LP00190',
+    item_name: 'Cement Board 1.22X2.44MtrX12MM',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'LP00268',
+    item_name: 'Steel Mesh 1X2MtrX3MM',
+    category: 'Unclassified',
+  }), true);
 });
 
 test('parsePricePayload drops building material rows from the order catalog', () => {

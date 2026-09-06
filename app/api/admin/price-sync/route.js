@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { parseCsvToRows, parsePricePayload } from "../../../lib/pricePayload.js";
+import { isBuildingMaterialItem, parseCsvToRows, parsePricePayload } from "../../../lib/pricePayload.js";
 import { PRICE_SHEET_GID, PRICE_SHEET_ID, PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
 import { withRegionFallbacks } from "../../../lib/regionalPricing.js";
 
@@ -23,11 +23,6 @@ function normalizeCode(value) {
 
 function normalizeText(value) {
   return String(value || "").trim();
-}
-
-function isExcludedCategory(value) {
-  const compact = normalizeText(value).toLowerCase().replace(/[^a-z]/g, "");
-  return ["buildingmaterial", "buildingmaterials", "buidingmaterial", "buidingmaterials"].includes(compact);
 }
 
 function toPositiveNumber(value) {
@@ -224,7 +219,7 @@ function buildEnrichedSheetItems(parsed, metadataByCode) {
     const code = normalizeCode(item?.item_code);
     if (!code) return;
 
-    if (isExcludedCategory(item?.category)) return;
+    if (isBuildingMaterialItem(item)) return;
 
     byCode.set(code, {
       item_code: code,
@@ -254,7 +249,7 @@ function buildEnrichedSheetItems(parsed, metadataByCode) {
       ? normalizeText(existing.category)
       : (hasMeaningfulCategory(meta.category) ? normalizeText(meta.category) : "Unclassified");
 
-    if (isExcludedCategory(nextCategory)) {
+    if (isBuildingMaterialItem({ item_code: code, item_name: nextName, category: nextCategory })) {
       byCode.delete(code);
       return;
     }
@@ -416,8 +411,12 @@ async function runSync(sourcePayload = null) {
     const code = normalizeCode(rawCode);
     if (!code) return;
 
-    const metadataCategory = normalizeText(metadataByCode.get(code)?.category);
-    if (isExcludedCategory(metadataCategory)) {
+    const metadata = metadataByCode.get(code) || {};
+    if (isBuildingMaterialItem({
+      item_code: code,
+      item_name: metadata.item_name,
+      category: metadata.category,
+    })) {
       delete parsed.priceMap[rawCode];
     }
   });
@@ -523,6 +522,8 @@ async function runSync(sourcePayload = null) {
     syncedAt: nowIso,
     priceCount,
     sheetItemCount: enrichedSheetItems.length,
+    cashDiscountCount: Object.keys(parsed.cashDiscountMap || {}).length,
+    valueDiscountCount: Object.keys(parsed.valueDiscountMap || {}).length,
     sourceUrlUsed: PRICE_SOURCE_URL,
     sourceGeneratedAt: normalizeText(payload?.generatedAt) || null,
     sourceMode: sourcePayload ? "provided_payload" : "fetched_from_source",

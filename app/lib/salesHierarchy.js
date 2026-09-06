@@ -47,6 +47,41 @@ export function resolveSubordinateUserIds(authUsers, leaderProfile) {
   return subordinateIds;
 }
 
+export function findHeadProfile(metadata, profiles = [], seenIds = new Set()) {
+  const candidates = (profiles || []).filter((profile) => (
+    profile?.id
+    && !seenIds.has(profile.id)
+    && headSalesmanMetadataMatchesLeader(metadata, profile)
+  ));
+  if (!candidates.length) return null;
+
+  const headCode = normalizeCode(metadata?.head_salesman_code);
+  return candidates.find((profile) => normalizeCode(profile.salesman_code) === headCode)
+    || candidates[0];
+}
+
+export function resolveReportingChainFromAuth({
+  actorUserId,
+  profiles = [],
+  authUsers = [],
+} = {}) {
+  const authById = new Map((authUsers || []).map((entry) => [entry.id, entry]));
+  const chain = [];
+  const seen = new Set([String(actorUserId || "").trim()].filter(Boolean));
+  let currentAuth = authById.get(actorUserId);
+
+  while (currentAuth) {
+    const metadata = currentAuth.user_metadata || currentAuth.app_metadata || {};
+    const head = findHeadProfile(metadata, profiles, seen);
+    if (!head) break;
+    seen.add(head.id);
+    chain.push(head);
+    currentAuth = authById.get(head.id);
+  }
+
+  return chain;
+}
+
 export function resolvePeersUnderSameHeadUserIds(authUsers, headProfile) {
   const peerIds = new Set();
 

@@ -6,7 +6,7 @@ import {
   resolveUserReportEmail,
   resolveVisitReportRecipients,
 } from "../app/lib/dailyVisitReportEmail.js";
-import { runDailyVisitReportEmailCycle, resolveDailyVisitReportEmailSchedule } from "../app/lib/dailyVisitReportEmailServer.js";
+import { runDailyVisitReportEmailCycle, resolveDailyVisitReportEmailSchedule, resolveVisitReportChainEmails } from "../app/lib/dailyVisitReportEmailServer.js";
 import { getMailerConfig, isDeliverableEmail, isEmailConfigured, parseEmailList } from "../app/lib/mailer.js";
 
 test("parseEmailList splits mixed separators and ignores invalid values", () => {
@@ -27,7 +27,20 @@ test("resolveVisitReportRecipients sends each user separately and copies manager
       to: ["salesman@madiba.com", "boss@madiba.com"],
       userEmail: "salesman@madiba.com",
       managerEmails: ["boss@madiba.com", "salesman@madiba.com"],
+      chainEmails: [],
     },
+  );
+});
+
+test("resolveVisitReportRecipients copies every head in the reporting chain", () => {
+  assert.deepEqual(
+    resolveVisitReportRecipients({
+      reportEmail: "belal@company.com",
+      managerEmails: "office@madiba.com",
+      chainEmails: ["ahmed.nabil@noorshukran.com", "soyeb@company.com", "ahmed.nabil@noorshukran.com"],
+      sendToUser: true,
+    }).to,
+    ["belal@company.com", "ahmed.nabil@noorshukran.com", "soyeb@company.com", "office@madiba.com"],
   );
 });
 
@@ -184,6 +197,60 @@ test("resolveDailyVisitReportEmailSchedule sends Thursday at Friday midnight and
   const manual = resolveDailyVisitReportEmailSchedule("2026-09-03", fridayStartKsa);
   assert.equal(manual.skipped, false);
   assert.equal(manual.date, "2026-09-03");
+});
+
+test("runDailyVisitReportEmailCycle CCs every boss above the salesman", async () => {
+  const sent = [];
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-09-02",
+    userIds: ["belal"],
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+    },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadReport: async () => ({
+      date: "2026-09-02",
+      thresholdKm: 0.5,
+      users: [{
+        userId: "belal",
+        userName: "Belal",
+        email: "belal@madiba-sfa.local",
+        visitCount: 1,
+        farFromCustomerCount: 0,
+        totalRouteDistanceKm: 2,
+        entries: [],
+        daySummary: { lines: ["One visit."] },
+      }],
+    }),
+    loadProfiles: async () => ([
+      { id: "belal", role: "salesman", salesman_code: "BELAL", salesman_name: "Belal", email: "belal@madiba-sfa.local", report_email: "", is_active: true },
+      { id: "nabil", role: "salesman", salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil", email: "nabil@madiba-sfa.local", report_email: "ahmed.nabil@noorshukran.com", is_active: true },
+      { id: "soyeb", role: "manager", salesman_code: "SOYEB", salesman_name: "Soyeb", email: "soyeb@madiba-sfa.local", report_email: "soyeb@company.com", is_active: true },
+    ]),
+    loadAuthUsers: async () => ([
+      { id: "belal", user_metadata: { head_salesman_code: "AHMED NABIL" } },
+      { id: "nabil", user_metadata: { head_salesman_code: "SOYEB" } },
+      { id: "soyeb", user_metadata: {} },
+    ]),
+    loadSummary: async () => ({ daySummary: { lines: ["One visit."] } }),
+  });
+
+  assert.equal(result.sentCount, 1);
+  assert.deepEqual(sent[0].to, ["ahmed.nabil@noorshukran.com", "soyeb@company.com"]);
+});
+
+test("resolveVisitReportChainEmails uses each head report inbox", () => {
+  assert.deepEqual(
+    resolveVisitReportChainEmails([
+      { report_email: "ahmed.nabil@noorshukran.com", email: "nabil@madiba-sfa.local" },
+      { report_email: "", email: "soyeb@company.com" },
+    ]),
+    ["ahmed.nabil@noorshukran.com", "soyeb@company.com"],
+  );
 });
 
 test("runDailyVisitReportEmailCycle skips when email is not configured", async () => {

@@ -1261,16 +1261,13 @@ export function findOutstandingForCustomer(dataset, customerCode, customerName) 
   const rows = Array.isArray(dataset?.rows) ? dataset.rows : [];
   const code = normalizeCode(customerCode);
   const name = normalizeName(customerName);
-  const codeNoZeros = code.replace(/^0+/, "");
   const cmpName = normalizeComparableName(customerName);
 
   if (code) {
-    const byCode = rows.find((row) => {
-      const rowCode = normalizeCode(row.customer_code);
-      if (!rowCode) return false;
-      if (rowCode === code) return true;
-      return rowCode.replace(/^0+/, "") === codeNoZeros;
-    });
+    const byCode = rows.find((row) => (
+      customerAccountCodesMatch(row.customer_code, code)
+      || customerAccountCodesMatch(row.customer_name, code)
+    ));
     if (byCode) return buildOutstandingRow(byCode);
   }
 
@@ -1296,13 +1293,11 @@ export function isSameOutstandingCustomer(rowCustomerCode, rowCustomerName, cust
 
   const targetCode = normalizeCode(customerCode);
   const targetName = normalizeName(customerName);
-  const targetCodeNoZeros = targetCode.replace(/^0+/, "");
   const targetCmpName = normalizeComparableName(customerName);
 
-  const rowCode = normalizeCode(rowCustomerCode);
-  if (targetCode && rowCode) {
-    if (rowCode === targetCode) return true;
-    if (rowCode.replace(/^0+/, "") === targetCodeNoZeros) return true;
+  if (targetCode) {
+    if (customerAccountCodesMatch(rowCustomerCode, targetCode)) return true;
+    if (customerAccountCodesMatch(rowCustomerName, targetCode)) return true;
   }
 
   const rowName = normalizeName(rowCustomerName);

@@ -23,6 +23,7 @@ import {
   ksaMidnightEndIso,
   readInactivityPromptSnoozeUntil,
   shouldCaptureIdleGpsPing,
+  shouldEmailInactivity,
   shouldWarnInactivity,
   snoozeInactivityPrompt,
   writeInactivityPromptSnoozeUntil,
@@ -255,6 +256,30 @@ test("deriveActivityStatus marks active users with recent transactions", () => {
   });
 
   assert.equal(status, "active");
+});
+
+test("shouldEmailInactivity is false until 50 minutes without activity", () => {
+  const loginAt = "2026-08-18T03:00:00.000Z";
+
+  assert.equal(
+    shouldEmailInactivity({
+      loginAt,
+      logoutAt: null,
+      userLogs: [],
+      now: new Date("2026-08-18T03:49:00.000Z"),
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldEmailInactivity({
+      loginAt,
+      logoutAt: null,
+      userLogs: [],
+      now: new Date("2026-08-18T03:50:00.000Z"),
+    }),
+    true,
+  );
 });
 
 test("shouldWarnInactivity ignores lunch break and ended workdays", () => {

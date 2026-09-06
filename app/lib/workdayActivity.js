@@ -1,5 +1,6 @@
 export const KSA_TIMEZONE = "Asia/Riyadh";
 export const INACTIVITY_MS = 45 * 60 * 1000;
+export const INACTIVITY_EMAIL_MS = 50 * 60 * 1000;
 export const INACTIVITY_ALERT_REPEAT_MS = 15 * 60 * 1000;
 export const LUNCH_BREAK_REMINDER_MS = 3 * 60 * 60 * 1000;
 
@@ -523,14 +524,32 @@ export async function autoCloseForgottenWorkdays(supabase, userId) {
   return closed;
 }
 
-export function shouldWarnInactivity({
+export function inactivityReferenceTimestamp({
+  loginAt,
+  userLogs = [],
+  collections = [],
+  orders = [],
+} = {}) {
+  const lastTransactionTs = lastTransactionTimestamp(userLogs, collections, orders);
+  const loginTs = Date.parse(String(loginAt || ""));
+  const { lunchInAt } = extractLunchTimes(userLogs);
+  const lunchInTs = parseEventTimestamp(lunchInAt);
+  return Math.max(
+    lastTransactionTs,
+    Number.isFinite(loginTs) ? loginTs : 0,
+    lunchInTs || 0,
+  );
+}
+
+export function shouldFlagInactivity({
   loginAt,
   logoutAt,
   userLogs = [],
   collections = [],
   orders = [],
   now = new Date(),
-}) {
+  thresholdMs = INACTIVITY_MS,
+} = {}) {
   if (!loginAt || logoutAt) return false;
   if (isOnLunchBreak(userLogs, now.getTime())) return false;
   if (!isWithinActiveWorkSession({
@@ -540,12 +559,29 @@ export function shouldWarnInactivity({
     now,
   })) return false;
 
-  const lastTransactionTs = lastTransactionTimestamp(userLogs, collections, orders);
-  const loginTs = Date.parse(String(loginAt || ""));
-  const referenceTs = Math.max(lastTransactionTs, Number.isFinite(loginTs) ? loginTs : 0);
+  const referenceTs = inactivityReferenceTimestamp({
+    loginAt,
+    userLogs,
+    collections,
+    orders,
+  });
   if (!referenceTs) return false;
 
-  return now.getTime() - referenceTs >= INACTIVITY_MS;
+  return now.getTime() - referenceTs >= thresholdMs;
+}
+
+export function shouldWarnInactivity(args = {}) {
+  return shouldFlagInactivity({
+    ...args,
+    thresholdMs: INACTIVITY_MS,
+  });
+}
+
+export function shouldEmailInactivity(args = {}) {
+  return shouldFlagInactivity({
+    ...args,
+    thresholdMs: INACTIVITY_EMAIL_MS,
+  });
 }
 
 export function readInactivityPromptSnoozeUntil(storage = null) {

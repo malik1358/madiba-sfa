@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
+import { runInactivityEmailCycle } from "../../../lib/inactivityEmailServer.js";
 import { runInactivityPushCycle } from "../../../lib/inactivityPushServer.js";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -23,19 +24,33 @@ async function handleRequest(request) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const result = await runInactivityPushCycle(admin);
-    return NextResponse.json({ success: true, ...result });
-  } catch (error) {
-    const message = error.message || "Inactivity push cycle failed.";
-    if (String(message).includes("FIREBASE_SERVICE_ACCOUNT_JSON")) {
-      return NextResponse.json({
-        success: true,
-        skipped: true,
-        reason: "fcm_misconfigured",
-        error: message,
-      });
+    const email = await runInactivityEmailCycle(admin);
+
+    let push;
+    try {
+      push = await runInactivityPushCycle(admin);
+    } catch (error) {
+      const message = error.message || "Inactivity push cycle failed.";
+      if (String(message).includes("FIREBASE_SERVICE_ACCOUNT_JSON")) {
+        push = {
+          ok: true,
+          skipped: true,
+          reason: "fcm_misconfigured",
+          error: message,
+        };
+      } else {
+        throw error;
+      }
     }
 
+    return NextResponse.json({
+      success: true,
+      ...push,
+      email,
+      push,
+    });
+  } catch (error) {
+    const message = error.message || "Inactivity push cycle failed.";
     return NextResponse.json(
       { success: false, error: message },
       { status: 500 },

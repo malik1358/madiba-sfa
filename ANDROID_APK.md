@@ -53,7 +53,7 @@ Push alerts to salesmen (even when the app is not open) require Firebase Cloud M
 7. Rebuild the APK (Actions → **Android APK** → **Run workflow**)
 8. Reinstall on phones — login registers the device token automatically
 
-After deploy, MADIBA automatically sends **45-minute inactivity push alerts**, repeating every **15 minutes** while still idle, during each user's active work session (login → lunch out, lunch in → logout) via `/api/cron/inactivity-push` (GitHub Actions workflow **Inactivity Push**). Alerts use each user's selected language (English or Arabic).
+After deploy, MADIBA automatically sends **45-minute inactivity push alerts**, repeating every **15 minutes** while still idle, during each user's active work session (login → lunch out, lunch in → logout) via `/api/cron/inactivity-push` (GitHub Actions workflow **Inactivity Push**). Alerts use each user's selected language (English or Arabic). The same cron also sends **one email** after **50 minutes** with no visit, order, or collection — to the user and every boss in **Salesman Hierarchy** — skipping lunch break and ended workdays.
 
 Every field transaction (visit, order, collection, prospect, attendance, etc.) also sends **push alerts up the reporting chain** — each boss in **Salesman Hierarchy** receives the alert, and if that boss also has a head, the alert continues to the top.
 

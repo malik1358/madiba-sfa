@@ -42,6 +42,32 @@ export function isExcludedCategory(value) {
   return ["buildingmaterial", "buildingmaterials", "buidingmaterial", "buidingmaterials"].includes(compact);
 }
 
+const BUILDING_MATERIAL_NAME_PATTERN = /(?:^|[^a-z0-9])(?:mdf|grade[\s-]*e2|plywood|chipboard|particle\s*boards?|gypsum|plasterboards?|ventilation|ladders?|melamine|blockboards?|sandwich\s*panels?|rebar|concrete)(?:[^a-z0-9]|$)/i;
+const BUILDING_MATERIAL_SHEET_SIZE_PATTERN = /\b\d+(?:\.\d+)?\s*mm\s*[x×]\s*\d+(?:\.\d+)?\s*mm(?:\s*[x×]\s*\d+(?:\.\d+)?\s*mm)?\b/i;
+
+export function isBuildingMaterialName(value) {
+  const text = normalizeText(value);
+  if (!text) return false;
+
+  const compact = text.toLowerCase().replace(/[^a-z]/g, "");
+  if (compact.includes("buildingmaterial") || compact.includes("buidingmaterial")) return true;
+  if (/مواد\s*ال?بناء/.test(text)) return true;
+  if (BUILDING_MATERIAL_NAME_PATTERN.test(text)) return true;
+  if (/\bcement\b/i.test(text)) return true;
+  return BUILDING_MATERIAL_SHEET_SIZE_PATTERN.test(text);
+}
+
+export function isBuildingMaterialItem(item) {
+  if (item == null) return false;
+  if (typeof item !== "object") {
+    return isExcludedCategory(item) || isBuildingMaterialName(item);
+  }
+
+  return isExcludedCategory(item.category)
+    || isBuildingMaterialName(item.item_name)
+    || isBuildingMaterialName(item.name);
+}
+
 export function isStaleCatalogCategory(value) {
   const compact = normalizeText(value).toLowerCase().replace(/[^a-z]/g, "");
   return compact === "cosmetics" || compact === "cosmetic";
@@ -356,7 +382,7 @@ export function parsePricePayload(payload) {
 
     const name = normalizeText(rawName);
     const category = normalizeText(rawCategory);
-    if (isExcludedCategory(category)) return;
+    if (isBuildingMaterialItem({ item_code: code, item_name: name, category })) return;
     const key = `${code}::${name}::${category}`;
     if (seen.has(key)) return;
 
@@ -532,7 +558,11 @@ export function parsePricePayload(payload) {
           const dammamRate = dammamIndex >= 0 ? sheetCell(row, dammamIndex) : "";
           const jeddahRate = jeddahIndex >= 0 ? sheetCell(row, jeddahIndex) : "";
 
-          upsertSheetItem(code, rawName || code, rawCategory || "Unclassified");
+          const itemName = rawName || code;
+          const itemCategory = rawCategory || "Unclassified";
+          if (isBuildingMaterialItem({ item_code: code, item_name: itemName, category: itemCategory })) return;
+
+          upsertSheetItem(code, itemName, itemCategory);
           addRate(code, riyadhRate || rawRate, "riyadh");
           addRate(code, dammamRate, "dammam");
           addRate(code, jeddahRate, "jeddah");
@@ -557,12 +587,14 @@ export function parsePricePayload(payload) {
       const valueDiscount = readAny(value, ["valueDiscount", "value_discount", "CL", "Sales Value > 5000 SAR"]);
 
       if (code) {
-        addRate(code, rate, "riyadh");
-        addRate(code, readAny(value, ["dammam", "CF"]), "dammam");
-        addRate(code, readAny(value, ["jeddah", "CJ"]), "jeddah");
-        addDiscount(cashDiscountMap, code, cashDiscount);
-        addDiscount(valueDiscountMap, code, valueDiscount);
-        upsertSheetItem(code, name, category);
+        if (!isBuildingMaterialItem({ item_code: code, item_name: name, category })) {
+          addRate(code, rate, "riyadh");
+          addRate(code, readAny(value, ["dammam", "CF"]), "dammam");
+          addRate(code, readAny(value, ["jeddah", "CJ"]), "jeddah");
+          addDiscount(cashDiscountMap, code, cashDiscount);
+          addDiscount(valueDiscountMap, code, valueDiscount);
+          upsertSheetItem(code, name, category);
+        }
       }
     }
 

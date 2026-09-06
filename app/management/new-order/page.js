@@ -10,7 +10,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
-import { isExcludedCategory, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
+import { isBuildingMaterialItem, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
 import {
   buildEffectivePriceList,
   formatDiscountPercent,
@@ -578,19 +578,26 @@ export default function NewOrderPage() {
 
   const mergedItemsMaster = useMemo(() => {
     const itemMap = new Map();
+    const excludedCodes = new Set();
 
     (itemsMaster || []).forEach((item) => {
       const code = normalizeCode(item.item_code);
       if (!code) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
-
-      itemMap.set(code, {
+      const nextItem = {
         ...item,
         item_code: code,
         item_name: String(historyFallback.item_name || item.item_name || code).trim(),
         category: pickCatalogCategory(historyFallback.category, item.category) || "Unclassified",
         source: "ITEM_MASTER",
-      });
+      };
+
+      if (isBuildingMaterialItem(nextItem)) {
+        excludedCodes.add(code);
+        return;
+      }
+
+      itemMap.set(code, nextItem);
     });
 
     (priceSheetItems || []).forEach((sheetItem) => {
@@ -608,13 +615,19 @@ export default function NewOrderPage() {
           ? historyName
           : (hasCurrentItemName(sheetName, code) ? sheetName : code);
         const nextCategory = pickCatalogCategory(sheetCategory, historyCategory) || MISSING_CATEGORY;
-
-        itemMap.set(code, {
+        const nextItem = {
           item_code: code,
           item_name: nextName,
           category: nextCategory,
           source: "PRICE_SHEET_ONLY",
-        });
+        };
+
+        if (isBuildingMaterialItem(nextItem)) {
+          excludedCodes.add(code);
+          return;
+        }
+
+        itemMap.set(code, nextItem);
         return;
       }
 
@@ -631,18 +644,25 @@ export default function NewOrderPage() {
           ? sheetName
           : (hasCurrentItemName(existingName, code) ? existingName : code));
       const nextCategory = pickCatalogCategory(sheetCategory, historyFallback.category, existingCategory) || "Unclassified";
-
-      itemMap.set(code, {
+      const nextItem = {
         ...existing,
         item_name: nextName,
         category: nextCategory,
         source: existing.source === "PRICE_SHEET_ONLY" || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : existing.source,
-      });
+      };
+
+      if (isBuildingMaterialItem(nextItem)) {
+        excludedCodes.add(code);
+        itemMap.delete(code);
+        return;
+      }
+
+      itemMap.set(code, nextItem);
     });
 
     Object.keys(priceList || {}).forEach((rawCode) => {
       const code = normalizeCode(rawCode);
-      if (!code || itemMap.has(code)) return;
+      if (!code || itemMap.has(code) || excludedCodes.has(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
 
       const fallbackName = hasCurrentItemName(historyFallback.item_name, code)
@@ -659,7 +679,7 @@ export default function NewOrderPage() {
     });
 
     return Array.from(itemMap.values())
-      .filter((item) => !isDoNotUseItem(item.item_name) && !isExcludedCategory(item.category))
+      .filter((item) => !isDoNotUseItem(item.item_name) && !isBuildingMaterialItem(item))
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 

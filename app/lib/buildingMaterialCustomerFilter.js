@@ -1,6 +1,6 @@
-import { isExcludedCategory } from "./pricePayload.js";
+import { isBuildingMaterialItem } from "./pricePayload.js";
 import { customerCodeCandidates, resolveCustomerAccountCode } from "./outstanding.js";
-import { isBuildingMaterialCustomer, isBuildingMaterialText } from "../management/my-day/customerEligibility.js";
+import { isBuildingMaterialCustomer } from "../management/my-day/customerEligibility.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -31,12 +31,11 @@ export function emptySalesMix() {
 }
 
 export function isBuildingMaterialSale(row = {}, item = {}) {
-  return isExcludedCategory(row.category)
-    || isExcludedCategory(item.category)
-    || isBuildingMaterialText(row.category)
-    || isBuildingMaterialText(item.category)
-    || isBuildingMaterialText(row.item_name)
-    || isBuildingMaterialText(item.item_name);
+  return isBuildingMaterialItem({
+    item_code: row.item_code || item.item_code,
+    item_name: row.item_name || item.item_name,
+    category: row.category || item.category,
+  }) || isBuildingMaterialItem(item);
 }
 
 function isUnknownSale(row = {}, item = {}) {

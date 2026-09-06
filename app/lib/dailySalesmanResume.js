@@ -1,5 +1,6 @@
-import { escapeHtml } from "./dailyVisitReportEmail.js";
+import { escapeHtml, formatReportTime } from "./dailyVisitReportEmail.js";
 import { parseEmailList, isLikelyEmail } from "./mailer.js";
+import { formatWorkingHours } from "./workdayActivity.js";
 
 export const DEFAULT_DAILY_SALESMAN_RESUME_TO = "malik@pinasz.com";
 
@@ -23,9 +24,15 @@ export function emptySalesmanResumeRow({
     salesmanCode: String(salesmanCode || "").trim(),
     role: String(role || "").trim(),
     orders: 0,
+    orderValue: 0,
     collections: 0,
     visits: 0,
     skuSoldCount: 0,
+    loginAt: "",
+    lunchOutAt: "",
+    lunchInAt: "",
+    logoutAt: "",
+    workingMinutes: null,
   };
 }
 
@@ -42,22 +49,33 @@ export function summarizeSalesmanResumeRows(rows = []) {
   return (rows || []).reduce(
     (totals, row) => {
       totals.orders += Number(row?.orders || 0);
+      totals.orderValue += Number(row?.orderValue || 0);
       totals.collections += Number(row?.collections || 0);
       totals.visits += Number(row?.visits || 0);
       totals.skuSoldCount += Number(row?.skuSoldCount || 0);
+      totals.workingMinutes += Number(row?.workingMinutes || 0);
       return totals;
     },
-    { orders: 0, collections: 0, visits: 0, skuSoldCount: 0 },
+    {
+      orders: 0,
+      orderValue: 0,
+      collections: 0,
+      visits: 0,
+      skuSoldCount: 0,
+      workingMinutes: 0,
+    },
   );
 }
 
 export function sortSalesmanResumeRows(rows = []) {
   return [...(rows || [])].sort((left, right) => {
     const leftActivity = Number(left.orders || 0)
+      + Number(left.orderValue || 0)
       + Number(left.collections || 0)
       + Number(left.visits || 0)
       + Number(left.skuSoldCount || 0);
     const rightActivity = Number(right.orders || 0)
+      + Number(right.orderValue || 0)
       + Number(right.collections || 0)
       + Number(right.visits || 0)
       + Number(right.skuSoldCount || 0);
@@ -74,6 +92,31 @@ function formatCount(value) {
     : number.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
+function formatMoney(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return "0 SAR";
+  return `${number.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })} SAR`;
+}
+
+function resumeRowCells(row) {
+  return {
+    salesman: salesmanResumeDisplayName(row),
+    orders: formatCount(row.orders),
+    orderValue: formatMoney(row.orderValue),
+    collections: formatCount(row.collections),
+    visits: formatCount(row.visits),
+    skuSoldCount: formatCount(row.skuSoldCount),
+    loginAt: formatReportTime(row.loginAt),
+    lunchOutAt: formatReportTime(row.lunchOutAt),
+    lunchInAt: formatReportTime(row.lunchInAt),
+    logoutAt: formatReportTime(row.logoutAt),
+    workingHours: formatWorkingHours(row.workingMinutes),
+  };
+}
+
 export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
   const sorted = sortSalesmanResumeRows(rows);
   const totals = summarizeSalesmanResumeRows(sorted);
@@ -82,33 +125,57 @@ export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
   const textLines = [
     `Daily salesman resume for ${date} (KSA)`,
     "",
-    "Salesman | Orders | Collections | Visits | SKU sold",
-    ...sorted.map((row) => [
-      salesmanResumeDisplayName(row),
-      formatCount(row.orders),
-      formatCount(row.collections),
-      formatCount(row.visits),
-      formatCount(row.skuSoldCount),
-    ].join(" | ")),
+    "Salesman | Orders | Order value | Collections | Visits | SKU sold | Login | Lunch out | Lunch in | Logout | Working hours",
+    ...sorted.map((row) => {
+      const cells = resumeRowCells(row);
+      return [
+        cells.salesman,
+        cells.orders,
+        cells.orderValue,
+        cells.collections,
+        cells.visits,
+        cells.skuSoldCount,
+        cells.loginAt,
+        cells.lunchOutAt,
+        cells.lunchInAt,
+        cells.logoutAt,
+        cells.workingHours,
+      ].join(" | ");
+    }),
     "",
     [
       "Total",
       formatCount(totals.orders),
+      formatMoney(totals.orderValue),
       formatCount(totals.collections),
       formatCount(totals.visits),
       formatCount(totals.skuSoldCount),
+      "-",
+      "-",
+      "-",
+      "-",
+      formatWorkingHours(totals.workingMinutes),
     ].join(" | "),
   ];
 
   const bodyRows = sorted.length
-    ? sorted.map((row) => `<tr>
-        <td>${escapeHtml(salesmanResumeDisplayName(row))}</td>
-        <td style="text-align:right;">${escapeHtml(formatCount(row.orders))}</td>
-        <td style="text-align:right;">${escapeHtml(formatCount(row.collections))}</td>
-        <td style="text-align:right;">${escapeHtml(formatCount(row.visits))}</td>
-        <td style="text-align:right;">${escapeHtml(formatCount(row.skuSoldCount))}</td>
-      </tr>`).join("")
-    : `<tr><td colspan="5">No salesman activity found for this date.</td></tr>`;
+    ? sorted.map((row) => {
+      const cells = resumeRowCells(row);
+      return `<tr>
+        <td>${escapeHtml(cells.salesman)}</td>
+        <td style="text-align:right;">${escapeHtml(cells.orders)}</td>
+        <td style="text-align:right;">${escapeHtml(cells.orderValue)}</td>
+        <td style="text-align:right;">${escapeHtml(cells.collections)}</td>
+        <td style="text-align:right;">${escapeHtml(cells.visits)}</td>
+        <td style="text-align:right;">${escapeHtml(cells.skuSoldCount)}</td>
+        <td>${escapeHtml(cells.loginAt)}</td>
+        <td>${escapeHtml(cells.lunchOutAt)}</td>
+        <td>${escapeHtml(cells.lunchInAt)}</td>
+        <td>${escapeHtml(cells.logoutAt)}</td>
+        <td>${escapeHtml(cells.workingHours)}</td>
+      </tr>`;
+    }).join("")
+    : `<tr><td colspan="11">No salesman activity found for this date.</td></tr>`;
 
   const html = `<!DOCTYPE html>
 <html>
@@ -120,9 +187,15 @@ export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
       <tr>
         <th align="left">Salesman</th>
         <th align="right">Orders</th>
+        <th align="right">Order value</th>
         <th align="right">Collections</th>
         <th align="right">Visits</th>
         <th align="right">SKU sold</th>
+        <th align="left">Login</th>
+        <th align="left">Lunch out</th>
+        <th align="left">Lunch in</th>
+        <th align="left">Logout</th>
+        <th align="left">Working hours</th>
       </tr>
     </thead>
     <tbody>
@@ -130,9 +203,15 @@ export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
       <tr style="font-weight: bold; background: #f8fafc;">
         <td>Total</td>
         <td style="text-align:right;">${escapeHtml(formatCount(totals.orders))}</td>
+        <td style="text-align:right;">${escapeHtml(formatMoney(totals.orderValue))}</td>
         <td style="text-align:right;">${escapeHtml(formatCount(totals.collections))}</td>
         <td style="text-align:right;">${escapeHtml(formatCount(totals.visits))}</td>
         <td style="text-align:right;">${escapeHtml(formatCount(totals.skuSoldCount))}</td>
+        <td>-</td>
+        <td>-</td>
+        <td>-</td>
+        <td>-</td>
+        <td>${escapeHtml(formatWorkingHours(totals.workingMinutes))}</td>
       </tr>
     </tbody>
   </table>

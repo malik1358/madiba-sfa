@@ -4,6 +4,7 @@ import {
   normalizeSalesmanName,
   salesmanValueMatchesScope,
 } from "./mutualSalesmanGroups.js";
+import { isMissingSchemaColumn } from "./performanceKpis.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -58,6 +59,53 @@ export function resolvePeersUnderSameHeadUserIds(authUsers, headProfile) {
   });
 
   return peerIds;
+}
+
+export async function resolveReportingChain(admin, actorUserId) {
+  const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (usersRes.error) throw usersRes.error;
+
+  const full = "id,salesman_code,salesman_name,role,email,report_email";
+  const fallback = "id,salesman_code,salesman_name,role";
+  let profilesRes = await admin.from("profiles").select(full).order("salesman_name");
+  if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
+    profilesRes = await admin.from("profiles").select(fallback).order("salesman_name");
+  }
+  if (profilesRes.error) throw profilesRes.error;
+
+  const profileByCode = new Map();
+  (profilesRes.data || []).forEach((profile) => {
+    const code = normalizeCode(profile.salesman_code);
+    if (code) profileByCode.set(code, profile);
+  });
+
+  const authById = new Map((usersRes.data?.users || []).map((entry) => [entry.id, entry]));
+  const chain = [];
+  const seen = new Set();
+
+  let currentAuth = authById.get(actorUserId);
+  while (currentAuth) {
+    const metadata = currentAuth.user_metadata || currentAuth.app_metadata || {};
+    const headCode = normalizeCode(metadata.head_salesman_code);
+    if (!headCode) break;
+
+    const headProfile = profileByCode.get(headCode);
+    if (!headProfile || seen.has(headProfile.id)) break;
+
+    seen.add(headProfile.id);
+    chain.push({
+      id: headProfile.id,
+      salesman_code: headProfile.salesman_code || "",
+      salesman_name: headProfile.salesman_name || "",
+      role: headProfile.role || "",
+      email: headProfile.email || "",
+      report_email: headProfile.report_email || "",
+    });
+
+    currentAuth = authById.get(headProfile.id);
+  }
+
+  return chain;
 }
 
 export function customerSalesmanAssignmentMatchesScope(customerSalesmanCode, scope) {

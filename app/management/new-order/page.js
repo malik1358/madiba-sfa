@@ -23,7 +23,6 @@ import {
   regionPriceMapFor,
   resolveOrderPricingRegion,
 } from "../../lib/regionalPricing";
-import { addPdfBuildFooter } from "../../lib/buildInfo";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import ExportableTable from "../../components/ExportableTable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
@@ -36,15 +35,14 @@ import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance"
 import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
-import { buildOutstandingPdfBucketRows, DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, sortBucketLabels, syncOutstandingCustomerFromInvoices, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
-import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
+import { DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { evaluateCreditApproval } from "../../lib/creditApproval";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
-import { appendMonthlyPerformanceToPdf } from "../../lib/orderPdfMonthlyPerformance";
-import { buildAnalytics } from "../customer-audit/lib/analytics";
+import { createOrderPdfDocument, enrichOrderPdfLiveData, formatHistoryChange } from "../../lib/orderPdfDocument";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 import { isExcludedNewOrderCustomer } from "../../lib/buildingMaterialCustomerFilter";
@@ -62,10 +60,6 @@ const TEXT = {
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-}
-
-function formatReceivableMoney(value) {
-  return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
 function OrderTotalsPanel({ totals, actions, remark }) {
@@ -149,27 +143,6 @@ async function waitForAccessToken(supabase, attempts = 8, delayMs = 250) {
   }
 
   return null;
-}
-
-function formatHistoryChange(change) {
-  if (!change) return "";
-
-  const baseLabel = `${change.item_code || "-"} ${change.item_name || ""}`.trim();
-  if (change.type === "ADDED") {
-    return `${baseLabel}: added ${change.after_quantity || 0} qty at ${formatMoney(change.after_rate || 0)}`;
-  }
-  if (change.type === "REMOVED") {
-    return `${baseLabel}: removed ${change.before_quantity || 0} qty`;
-  }
-
-  const parts = [];
-  if (Number(change.before_quantity || 0) !== Number(change.after_quantity || 0)) {
-    parts.push(`qty ${change.before_quantity || 0} -> ${change.after_quantity || 0}`);
-  }
-  if (Number(change.before_rate || 0) !== Number(change.after_rate || 0)) {
-    parts.push(`rate ${formatMoney(change.before_rate || 0)} -> ${formatMoney(change.after_rate || 0)}`);
-  }
-  return `${baseLabel}: ${parts.join(", ")}`;
 }
 
 function normalizeCode(value) {
@@ -1034,417 +1007,20 @@ export default function NewOrderPage() {
 
       setDownloadingPdf(true);
       try {
-        const { jsPDF } = await import("jspdf");
-        const doc = new jsPDF({ unit: "pt", format: "a4" });
-
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const marginX = 40;
-        const marginTop = 38;
-        const contentWidth = pageWidth - marginX * 2;
-        const tableStartX = marginX;
-        const pdfTotals = snapshot.totals || summarizePricedLines(snapshot.lines || []);
-        const subtotal = Number(pdfTotals.amountExclVat || snapshot.grandTotal || 0);
-        const vatAmount = Number(pdfTotals.vatAmount || subtotal * 0.15);
-        const totalWithVat = Number(pdfTotals.amountInclVat || subtotal + vatAmount);
-
-        const columns = [
-          { key: "item_code", label: "Code", width: 48, align: "left" },
-          { key: "item_name", label: "Item", width: 96, align: "left" },
-          { key: "quantity", label: "Qty", width: 28, align: "right" },
-          { key: "rate", label: "Rate", width: 42, align: "right" },
-          { key: "cashDiscount", label: "Cash Disc", width: 62, align: "right" },
-          { key: "valueDiscount", label: "Value Disc", width: 62, align: "right" },
-          { key: "exclVat", label: "Excl. VAT", width: 58, align: "right" },
-          { key: "vat", label: "VAT 15%", width: 50, align: "right" },
-          { key: "inclVat", label: "Incl. VAT", width: 69, align: "right" },
-        ];
-
-        const orderSummaryColumns = [
-          { label: "Items", value: String(snapshot.itemCount), align: "left" },
-          { label: "Total Qty", value: qtyFormat(snapshot.totalQuantity), align: "left" },
-          { label: "Without VAT", value: formatMoneyAmount(subtotal), align: "left" },
-          { label: "VAT 15%", value: formatMoneyAmount(vatAmount), align: "left" },
-          { label: "After VAT", value: formatMoneyAmount(totalWithVat), align: "left" },
-        ];
-
-        function drawCellText(text, x, y, width, align = "left") {
-          if (align === "right") {
-            doc.text(text, x + width - 6, y, { align: "right" });
-            return;
-          }
-          doc.text(text, x + 6, y);
-        }
-
-        function drawTableHeader(startY) {
-          let colX = tableStartX;
-          doc.setFillColor(239, 244, 245);
-          doc.rect(tableStartX, startY, contentWidth, 24, "F");
-          doc.setFont(undefined, "bold");
-          doc.setFontSize(8);
-
-          columns.forEach((column) => {
-            doc.rect(colX, startY, column.width, 24);
-            drawCellText(column.label, colX, startY + 15, column.width, column.align);
-            colX += column.width;
-          });
-
-          doc.setFont(undefined, "normal");
-          return startY + 24;
-        }
-
-        doc.setDrawColor(72, 110, 120);
-        doc.setLineWidth(1);
-        doc.roundedRect(marginX, marginTop, contentWidth, 92, 6, 6);
-
-        doc.setFontSize(18);
-        doc.setFont(undefined, "bold");
-        doc.text("MADIBA SFA", marginX + 12, marginTop + 24);
-        doc.setFontSize(12);
-        doc.text("SALES ORDER", marginX + 12, marginTop + 44);
-
-        doc.setFont(undefined, "normal");
-        doc.setFontSize(10);
-        doc.text(`Order ID: ${snapshot.orderId}`, marginX + 12, marginTop + 64);
-
-        doc.text(
-          `Status: ${snapshot.statusLabel} | ${String(snapshot.paymentType || "credit").toUpperCase()} | ${pricingRegionLabel(snapshot.pricingRegion)}`,
-          marginX + 12,
-          marginTop + 78
-        );
-
-        const rightColX = marginX + contentWidth - 210;
-        doc.text(`Date: ${new Date(snapshot.savedAtIso).toLocaleString("en-GB")}`, rightColX, marginTop + 64);
-        doc.text(`Salesman: ${snapshot.salesmanCode || "-"}`, rightColX, marginTop + 78);
-
-        doc.setLineWidth(0.8);
-        doc.roundedRect(marginX, marginTop + 104, contentWidth, 56, 5, 5);
-        doc.setFont(undefined, "bold");
-        doc.text("Customer", marginX + 12, marginTop + 124);
-        doc.setFont(undefined, "normal");
-        const customerText = `${snapshot.customerCode} - ${snapshot.customerName}`;
-        const customerLines = doc.splitTextToSize(customerText, contentWidth - 24);
-        const customerLine1 = Array.isArray(customerLines) ? customerLines[0] : customerText;
-        const customerLine2 = Array.isArray(customerLines) && customerLines.length > 1 ? customerLines[1] : "";
-        doc.text(customerLine1, marginX + 12, marginTop + 140);
-        if (customerLine2) {
-          doc.text(customerLine2, marginX + 12, marginTop + 152);
-        }
-
-        const orderSummaryY = marginTop + 172;
-        const orderSummaryHeight = 40;
-        const orderSummaryColWidth = contentWidth / orderSummaryColumns.length;
-        doc.roundedRect(marginX, orderSummaryY, contentWidth, orderSummaryHeight, 5, 5);
-        doc.setFont(undefined, "bold");
-        orderSummaryColumns.forEach((col, index) => {
-          const colX = marginX + index * orderSummaryColWidth;
-          doc.text(col.label, colX + 8, orderSummaryY + 16);
+        const supabase = getSupabaseClient();
+        const accessToken = supabase ? await waitForAccessToken(supabase) : "";
+        const { snapshot: liveSnapshot, analytics: monthlyAnalytics } = await enrichOrderPdfLiveData(snapshot, {
+          accessToken,
+          analyticsFallback: analytics,
         });
-        doc.setFont(undefined, "normal");
-        orderSummaryColumns.forEach((col, index) => {
-          const colX = marginX + index * orderSummaryColWidth;
-          doc.text(col.value, colX + 8, orderSummaryY + 32);
-        });
-
-        let y = drawTableHeader(marginTop + 226);
-        doc.setFontSize(9);
-
-        snapshot.lines.forEach((line) => {
-          const rowValues = {
-            item_code: String(line.item_code || "-"),
-            item_name: String(line.item_name || "-"),
-            quantity: String(line.quantity),
-            rate: formatMoneyAmount(line.wholesaleRate || line.rate),
-            cashDiscount: formatDiscountDetail(line.cashDiscount, line.cashApplied, line.cashDiscountAmount),
-            valueDiscount: formatDiscountDetail(line.valueDiscount, line.valueApplied, line.valueDiscountAmount),
-            exclVat: formatMoneyAmount(line.lineValue || line.lineTotal),
-            vat: formatMoneyAmount(line.vatAmount),
-            inclVat: formatMoneyAmount(line.lineTotalInclVat),
-          };
-
-          const itemNameCol = columns.find((column) => column.key === "item_name");
-          const wrappedName = doc.splitTextToSize(rowValues.item_name, (itemNameCol?.width || 200) - 12);
-          const wrappedLines = Array.isArray(wrappedName) ? wrappedName : [rowValues.item_name];
-          const rowHeight = Math.max(24, wrappedLines.length * 12 + 8);
-
-          if (y + rowHeight > pageHeight - 110) {
-            doc.addPage();
-            y = drawTableHeader(marginTop);
-          }
-
-          let colX = tableStartX;
-          columns.forEach((column) => {
-            doc.rect(colX, y, column.width, rowHeight);
-
-            if (column.key === "item_name") {
-              wrappedLines.forEach((nameLine, index) => {
-                drawCellText(nameLine, colX, y + 14 + index * 12, column.width, column.align);
-              });
-            } else {
-              drawCellText(rowValues[column.key], colX, y + 15, column.width, column.align);
-            }
-
-            colX += column.width;
-          });
-
-          y += rowHeight;
-        });
-
-        const summaryBoxWidth = 260;
-        const summaryBoxHeight = 128;
-        const summaryX = pageWidth - marginX - summaryBoxWidth;
-        const bottomMargin = 52;
-        let cursorY = y + 16;
-
-        function ensureSpace(requiredHeight) {
-          if (cursorY + requiredHeight > pageHeight - bottomMargin) {
-            doc.addPage();
-            cursorY = marginTop;
-          }
-        }
-
-        let outstandingCustomer = snapshot.outstanding?.customer || null;
-        let outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
-        let outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
-
-        if (snapshot.customerCode) {
-          try {
-            const supabase = getSupabaseClient();
-            const accessToken = supabase ? await waitForAccessToken(supabase) : "";
-            if (accessToken) {
-              const outstandingResponse = await fetch(
-                `${OUTSTANDING_API}?customerCode=${encodeURIComponent(snapshot.customerCode || "")}&customerName=${encodeURIComponent(snapshot.customerName || "")}`,
-                { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
-              );
-              const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
-              if (outstandingResponse.ok && outstandingPayload.success) {
-                outstandingCustomer = outstandingPayload.customer || outstandingCustomer;
-                outstandingBuckets = sortBucketLabels(outstandingPayload.bucketLabels || outstandingBuckets);
-                outstandingInvoices = Array.isArray(outstandingPayload.customerInvoices) ? outstandingPayload.customerInvoices : outstandingInvoices;
-              }
-            }
-          } catch {
-            // Keep generating the order PDF even if outstanding cannot be refreshed.
-          }
-        }
-
-        outstandingCustomer = syncOutstandingCustomerFromInvoices(outstandingCustomer, outstandingInvoices);
-
-        function formatOutstandingValue(value, digits = 0, withCurrency = true) {
-          const number = parseOutstandingNumber(value);
-          if (withCurrency) return formatReceivableMoney(number);
-          return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-        }
-
-        const bucketRows = buildOutstandingPdfBucketRows(outstandingCustomer, outstandingBuckets).map((row) => ({
-          label: row.label,
-          value: formatOutstandingValue(row.amount, 0, row.kind !== "count"),
-        }));
-        const outstandingBlockHeight = bucketRows.length > 0
-          ? 14 + 10 + bucketRows.length * 18
-          : 0;
-        const hasOutstandingBuckets = bucketRows.length > 0;
-        const combinedSectionHeight = hasOutstandingBuckets
-          ? outstandingBlockHeight + 12 + summaryBoxHeight
-          : summaryBoxHeight;
-
-        ensureSpace(combinedSectionHeight + 16);
-        const sectionY = cursorY;
-        let summaryY = sectionY;
-
-        if (hasOutstandingBuckets) {
-          doc.setFont(undefined, "bold");
-          doc.text("Outstanding Details", marginX, sectionY);
-          doc.setFont(undefined, "normal");
-
-          let bucketY = sectionY + 14;
-          const labelW = 220;
-          const valueW = 120;
-
-          bucketRows.forEach((row, index) => {
-            const rowH = 18;
-            doc.rect(marginX, bucketY, labelW, rowH);
-            doc.rect(marginX + labelW, bucketY, valueW, rowH);
-            doc.text(row.label, marginX + 6, bucketY + 12);
-            if (index === bucketRows.length - 1) {
-              doc.setFont(undefined, "bold");
-            }
-            doc.text(row.value, marginX + labelW + valueW - 6, bucketY + 12, { align: "right" });
-            if (index === bucketRows.length - 1) {
-              doc.setFont(undefined, "normal");
-            }
-            bucketY += rowH;
-          });
-
-          cursorY = bucketY;
-          summaryY = bucketY + 12;
-        }
-
-        doc.roundedRect(summaryX, summaryY, summaryBoxWidth, summaryBoxHeight, 4, 4);
-        doc.setFont(undefined, "normal");
-        doc.setFontSize(9);
-        const summaryRows = [
-          ["Before discount", formatMoneyAmount(pdfTotals.wholesaleTotal)],
-          ["Cash discount", pdfTotals.cashDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.cashDiscountTotal) : "None"],
-          ["Value discount", pdfTotals.valueDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.valueDiscountTotal) : "None"],
-          ["Amount without VAT", formatMoneyAmount(subtotal)],
-          ["VAT 15%", formatMoneyAmount(vatAmount)],
-        ];
-        summaryRows.forEach((row, index) => {
-          doc.text(row[0], summaryX + 10, summaryY + 16 + index * 16);
-          doc.text(row[1], summaryX + summaryBoxWidth - 10, summaryY + 16 + index * 16, { align: "right" });
-        });
-        doc.setFont(undefined, "bold");
-        doc.setFontSize(11);
-        doc.text("Amount after VAT", summaryX + 10, summaryY + 114);
-        doc.text(formatMoneyAmount(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 114, { align: "right" });
-        doc.setFont(undefined, "normal");
-        doc.setFontSize(10);
-
-        cursorY = Math.max(cursorY, summaryY + summaryBoxHeight) + 24;
-
-        if (outstandingCustomer && outstandingInvoices.length > 0) {
-          ensureSpace(30);
-          doc.setFont(undefined, "bold");
-          doc.text("Outstanding Invoice Rows", marginX, cursorY);
-          doc.setFont(undefined, "normal");
-
-          const invoiceCols = [
-            { label: "Date", width: 72 },
-            { label: "Ref. No.", width: 90 },
-            { label: "Pending Amount", width: 92 },
-            { label: "Due Date", width: 72 },
-            { label: "Overdue Days", width: 62 },
-            { label: "Invoice Day", width: 62 },
-            { label: "Salesman", width: 65 },
-          ];
-          const rowH = 18;
-          let rowY = cursorY + 8;
-
-          function drawInvoiceHeader(atY) {
-            let colX = marginX;
-            doc.setFont(undefined, "bold");
-            doc.setFontSize(9);
-            invoiceCols.forEach((col) => {
-              doc.rect(colX, atY, col.width, rowH);
-              doc.text(col.label, colX + 4, atY + 12);
-              colX += col.width;
-            });
-            doc.setFont(undefined, "normal");
-            return atY + rowH;
-          }
-
-          rowY = drawInvoiceHeader(rowY);
-
-          outstandingInvoices.slice(0, 12).forEach((invoice) => {
-            if (rowY > pageHeight - bottomMargin) {
-              doc.addPage();
-              rowY = drawInvoiceHeader(marginTop);
-            }
-
-            const values = [
-              String(invoice?.invoice_date || "-"),
-              String(invoice?.ref_no || "-"),
-              formatOutstandingValue(invoice?.pending_amount ?? invoice?.amount, 0, false),
-              String(invoice?.due_date || "-"),
-              formatOutstandingValue(invoice?.overdue_days, 0, false),
-              formatOutstandingValue(invoice?.invoice_day, 0, false),
-              String(invoice?.salesman || "-"),
-            ];
-
-            let valueX = marginX;
-            values.forEach((value, idx) => {
-              const width = invoiceCols[idx].width;
-              doc.rect(valueX, rowY, width, rowH);
-              const rightAligned = idx === 2 || idx === 4 || idx === 5;
-              if (rightAligned) doc.text(String(value), valueX + width - 4, rowY + 12, { align: "right" });
-              else doc.text(String(value), valueX + 4, rowY + 12);
-              valueX += width;
-            });
-
-            rowY += rowH;
-          });
-
-          doc.setFontSize(10);
-          cursorY = rowY + 16;
-        }
-
-        if (Array.isArray(snapshot.history) && snapshot.history.length > 0) {
-          ensureSpace(24);
-          doc.setFont(undefined, "bold");
-          doc.text("Change History", marginX, cursorY);
-          cursorY += 18;
-          doc.setFont(undefined, "normal");
-
-          snapshot.history.slice(-6).forEach((entry) => {
-            const when = entry.changedAt || entry.savedAt || entry.saved_at || entry.timestamp || "";
-            const label = `${when ? new Date(when).toLocaleString("en-GB") : "-"} • ${entry.action || "UPDATED"}`;
-            const lines = [label, ...(Array.isArray(entry.changes) ? entry.changes.map(formatHistoryChange) : [])].filter(Boolean);
-            const entryHeight = lines.reduce((sum, line) => {
-              const wrapped = doc.splitTextToSize(line, pageWidth - marginX * 2 - 16);
-              return sum + Math.max(12, wrapped.length * 10);
-            }, 4);
-
-            ensureSpace(entryHeight);
-            lines.forEach((line) => {
-              const wrapped = doc.splitTextToSize(line, pageWidth - marginX * 2 - 16);
-              wrapped.forEach((part, index) => {
-                doc.text(part, marginX + 8, cursorY + index * 10);
-              });
-              cursorY += Math.max(12, wrapped.length * 10);
-            });
-            cursorY += 4;
-          });
-        }
-
-        cursorY = appendCreditControlRemarkToPdf(doc, {
-          remark: snapshot.creditApprovalRemark,
-          x: marginX,
-          y: () => cursorY,
-          maxWidth: contentWidth,
-          ensureSpace,
-        });
-
-        let monthlyAnalytics = analytics;
-        if (!monthlyAnalytics?.monthlySummary?.length && snapshot.customerCode) {
-          try {
-            const supabase = getSupabaseClient();
-            const accessToken = supabase ? await waitForAccessToken(supabase) : "";
-            if (accessToken) {
-              const historyResponse = await fetch(
-                `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(snapshot.customerCode)}`,
-                { headers: { Authorization: `Bearer ${accessToken}` } }
-              );
-              const historyPayload = await historyResponse.json().catch(() => ({}));
-              if (historyResponse.ok && historyPayload.success) {
-                monthlyAnalytics = buildAnalytics(Array.isArray(historyPayload.transactions) ? historyPayload.transactions : []);
-              }
-            }
-          } catch {
-            monthlyAnalytics = analytics;
-          }
-        }
-
-        cursorY = appendMonthlyPerformanceToPdf(doc, {
-          analytics: monthlyAnalytics,
-          x: marginX,
-          y: () => cursorY,
-          maxWidth: contentWidth,
-          ensureSpace,
-        });
-
-        doc.setFontSize(9);
-        ensureSpace(20);
-        doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 36);
-        doc.text("Cash Disc is the sheet cash scheme. Value Disc applies when the SKU value exceeds 5,000 SAR.", marginX, pageHeight - 24);
-        addPdfBuildFooter(doc);
+        const doc = await createOrderPdfDocument(liveSnapshot, { analytics: monthlyAnalytics });
 
         const fileName = buildOrderPdfFileName({
           orderId: snapshot.orderId,
           customerCode: snapshot.customerCode,
           savedAtIso: new Date().toISOString(),
         });
-        const summaryText = buildOrderWhatsappSummary(snapshot, language);
+        const summaryText = buildOrderWhatsappSummary(liveSnapshot, language);
 
         if (options.returnFileOnly) {
           const blob = doc.output("blob");

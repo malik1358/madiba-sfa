@@ -23,7 +23,9 @@ import {
   ksaMidnightEndIso,
   readInactivityPromptSnoozeUntil,
   shouldCaptureIdleGpsPing,
+  lateLoginReminderSlot,
   shouldEmailInactivity,
+  shouldSendLateLoginReminder,
   shouldWarnInactivity,
   snoozeInactivityPrompt,
   writeInactivityPromptSnoozeUntil,
@@ -256,6 +258,32 @@ test("deriveActivityStatus marks active users with recent transactions", () => {
   });
 
   assert.equal(status, "active");
+});
+
+test("shouldSendLateLoginReminder starts at 11:00 KSA and skips login, Friday, and after hours", () => {
+  assert.equal(shouldSendLateLoginReminder({
+    loginAt: null,
+    now: new Date("2026-09-06T07:59:00.000Z"),
+  }), false);
+  assert.equal(shouldSendLateLoginReminder({
+    loginAt: null,
+    now: new Date("2026-09-06T08:00:00.000Z"),
+  }), true);
+  assert.equal(shouldSendLateLoginReminder({
+    loginAt: "2026-09-06T05:00:00.000Z",
+    now: new Date("2026-09-06T08:00:00.000Z"),
+  }), false);
+  assert.equal(shouldSendLateLoginReminder({
+    loginAt: null,
+    now: new Date("2026-09-04T08:00:00.000Z"),
+  }), false);
+  assert.equal(shouldSendLateLoginReminder({
+    loginAt: null,
+    now: new Date("2026-09-06T19:00:00.000Z"),
+  }), false);
+  assert.equal(lateLoginReminderSlot(new Date("2026-09-06T08:00:00.000Z")), 0);
+  assert.equal(lateLoginReminderSlot(new Date("2026-09-06T08:29:00.000Z")), 0);
+  assert.equal(lateLoginReminderSlot(new Date("2026-09-06T08:30:00.000Z")), 1);
 });
 
 test("shouldEmailInactivity is false until 50 minutes without activity", () => {

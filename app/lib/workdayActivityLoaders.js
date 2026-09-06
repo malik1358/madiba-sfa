@@ -1,8 +1,14 @@
 import { shouldRequireTransactionGps } from "./moduleAccess.js";
+import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { ksaDayBounds } from "./workdayActivity.js";
 
 function normalizeRole(value) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "").trim().toLowerCase().replace(/_/g, "-");
+}
+
+export function isFieldAttendanceRole(role) {
+  const normalized = normalizeRole(role);
+  return normalized === "salesman" || normalized === "collector";
 }
 
 export async function loadActiveFieldUsers(admin, reportDate) {
@@ -55,6 +61,38 @@ export async function loadActiveFieldUsers(admin, reportDate) {
       userId,
       loginLog: loginByUserId.get(userId),
       preferredLanguage: profileByUserId.get(userId)?.preferred_language || "en",
+    }));
+}
+
+export async function loadUsersPendingMorningLogin(admin, reportDate) {
+  const { startIso, endIso } = ksaDayBounds(reportDate);
+  const profileSelect = "id,role,is_active,preferred_language";
+  const profileFallback = "id,role,preferred_language";
+
+  let profilesRes = await admin.from("profiles").select(profileSelect);
+  if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
+    profilesRes = await admin.from("profiles").select(profileFallback);
+  }
+  if (profilesRes.error) throw profilesRes.error;
+
+  const { data: morningRows, error: morningError } = await admin
+    .from("daily_activity_logs")
+    .select("user_id")
+    .eq("entry_type", "MORNING_ATTENDANCE")
+    .gte("created_at", startIso)
+    .lte("created_at", endIso);
+
+  if (morningError) throw morningError;
+
+  const loggedIn = new Set((morningRows || []).map((row) => row.user_id).filter(Boolean));
+
+  return (profilesRes.data || [])
+    .filter((profile) => profile.is_active !== false)
+    .filter((profile) => isFieldAttendanceRole(profile.role))
+    .filter((profile) => !loggedIn.has(profile.id))
+    .map((profile) => ({
+      userId: profile.id,
+      preferredLanguage: profile.preferred_language || "en",
     }));
 }
 

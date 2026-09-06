@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import {
   INACTIVITY_EMAIL_MINUTES,
   buildInactivityAlertEmail,
+  buildLateLoginReminderEmail,
   inactivityEmailReferenceKey,
+  lateLoginEmailReferenceKey,
   resolveInactivityEmailRecipients,
 } from "../app/lib/inactivityEmail.js";
 import { runInactivityEmailCycle } from "../app/lib/inactivityEmailServer.js";
@@ -146,6 +148,26 @@ test("inactivityEmailReferenceKey is unique per idle stretch", () => {
   );
 });
 
+test("lateLoginEmailReferenceKey is unique per 30-minute slot", () => {
+  assert.equal(
+    lateLoginEmailReferenceKey({ userId: "u1", reportDate: "2026-09-06", slot: 1 }),
+    "late_login_email:u1:2026-09-06:1",
+  );
+});
+
+test("buildLateLoginReminderEmail names the user and 11:00 cutoff", () => {
+  const message = buildLateLoginReminderEmail({
+    date: "2026-09-06",
+    userName: "Ahmed (SM001)",
+    reminderTime: "2026-09-06T08:00:00.000Z",
+  });
+
+  assert.match(message.subject, /Not logged in by 11:00/);
+  assert.match(message.subject, /Ahmed \(SM001\)/);
+  assert.match(message.text, /11:00 KSA/);
+  assert.match(message.html, /every 30 minutes/);
+});
+
 function createLogTable(existingKeys = []) {
   const rows = existingKeys.map((reference_key) => ({ reference_key }));
   return {
@@ -251,4 +273,66 @@ test("runInactivityEmailCycle skips when email is not configured", async () => {
 
   assert.equal(result.skipped, true);
   assert.equal(result.reason, "email_not_configured");
+});
+
+test("runInactivityEmailCycle reminds every 30 minutes when a field user has not logged in by 11:00", async () => {
+  const sent = [];
+  const logTable = createLogTable();
+  const admin = {
+    from(table) {
+      if (table === "push_notification_log") return logTable;
+      if (table === "profiles") {
+        return {
+          select() {
+            return {
+              in() {
+                return Promise.resolve({
+                  data: [
+                    { id: "u1", salesman_name: "Ahmed", salesman_code: "SM001", email: "ahmed@company.com", report_email: "" },
+                    { id: "boss", salesman_name: "Nabil", salesman_code: "NABIL", email: "boss@madiba.com", report_email: "" },
+                  ],
+                  error: null,
+                });
+              },
+            };
+          },
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
+    },
+  };
+
+  const options = {
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    resolveChain: async () => [{ id: "boss" }],
+    loadActiveUsers: async () => [],
+    loadActivity: async () => ({ logs: [], collections: [], orders: [] }),
+    loadPendingLoginUsers: async () => [{ userId: "u1" }],
+  };
+
+  const first = await runInactivityEmailCycle(admin, {
+    ...options,
+    now: new Date("2026-09-06T08:05:00.000Z"),
+  });
+  assert.equal(first.loginRemindersSent, 1);
+  assert.deepEqual(sent[0].to, ["ahmed@company.com", "boss@madiba.com"]);
+  assert.match(sent[0].subject, /Not logged in by 11:00/);
+
+  const sameSlot = await runInactivityEmailCycle(admin, {
+    ...options,
+    now: new Date("2026-09-06T08:20:00.000Z"),
+  });
+  assert.equal(sameSlot.loginRemindersSent, 0);
+  assert.equal(sent.length, 1);
+
+  const nextSlot = await runInactivityEmailCycle(admin, {
+    ...options,
+    now: new Date("2026-09-06T08:35:00.000Z"),
+  });
+  assert.equal(nextSlot.loginRemindersSent, 1);
+  assert.equal(sent.length, 2);
 });

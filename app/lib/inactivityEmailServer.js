@@ -1,12 +1,19 @@
 import { resolveReportingChain } from "./salesHierarchy.js";
 import {
   INACTIVITY_EMAIL_TYPE,
+  LATE_LOGIN_EMAIL_TYPE,
   buildInactivityAlertEmail,
+  buildLateLoginReminderEmail,
   inactivityEmailDisplayName,
   inactivityEmailReferenceKey,
+  lateLoginEmailReferenceKey,
   resolveInactivityEmailRecipients,
 } from "./inactivityEmail.js";
-import { loadActiveFieldUsers, loadUserActivity } from "./workdayActivityLoaders.js";
+import {
+  loadActiveFieldUsers,
+  loadUserActivity,
+  loadUsersPendingMorningLogin,
+} from "./workdayActivityLoaders.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { resolveUserReportEmail } from "./dailyVisitReportEmail.js";
@@ -14,11 +21,13 @@ import {
   getKsaDateString,
   inactivityReferenceTimestamp,
   ksaDayBounds,
+  lateLoginReminderSlot,
   logEventTimestamp,
   shouldEmailInactivity,
+  shouldSendLateLoginReminder,
 } from "./workdayActivity.js";
 
-export { INACTIVITY_EMAIL_TYPE };
+export { INACTIVITY_EMAIL_TYPE, LATE_LOGIN_EMAIL_TYPE };
 
 function profileEmail(profile) {
   return resolveUserReportEmail({
@@ -56,6 +65,7 @@ async function hasSentInactivityEmail(admin, referenceKey) {
 
 async function logInactivityEmail(admin, {
   userId,
+  notificationType = INACTIVITY_EMAIL_TYPE,
   title,
   body,
   successCount,
@@ -64,7 +74,7 @@ async function logInactivityEmail(admin, {
 }) {
   const { error } = await admin.from("push_notification_log").insert({
     user_id: userId,
-    notification_type: INACTIVITY_EMAIL_TYPE,
+    notification_type: notificationType,
     title,
     body,
     success_count: successCount,
@@ -75,6 +85,63 @@ async function logInactivityEmail(admin, {
   if (error) throw error;
 }
 
+async function sendHierarchyAlert({
+  admin,
+  userId,
+  resolveChain,
+  message,
+  referenceKey,
+  notificationType,
+  send,
+  env,
+}) {
+  if (await hasSentInactivityEmail(admin, referenceKey)) {
+    return { userId, status: "skipped", reason: "already_sent" };
+  }
+
+  const chain = await resolveChain(admin, userId);
+  const profileById = await loadProfilesById(admin, [userId, ...(chain || []).map((boss) => boss.id)]);
+  const userProfile = profileById.get(userId) || {};
+  const chainEmails = (chain || [])
+    .map((boss) => profileEmail(profileById.get(boss.id) || boss))
+    .filter(Boolean);
+  const { to } = resolveInactivityEmailRecipients({
+    reportEmail: userProfile.report_email,
+    userEmail: userProfile.email,
+    chainEmails,
+  });
+
+  if (!to.length) {
+    return { userId, status: "skipped", reason: "no_recipients" };
+  }
+
+  try {
+    const result = await send({ ...message, to }, env);
+    await logInactivityEmail(admin, {
+      userId,
+      notificationType,
+      title: message.subject,
+      body: message.text,
+      successCount: 1,
+      failureCount: 0,
+      referenceKey,
+    });
+    return {
+      userId,
+      status: "sent",
+      to,
+      provider: result?.provider || null,
+    };
+  } catch (error) {
+    return {
+      userId,
+      status: "failed",
+      to,
+      error: error.message || "Unable to send inactivity email",
+    };
+  }
+}
+
 export async function runInactivityEmailCycle(admin, {
   now = new Date(),
   env = process.env,
@@ -82,6 +149,7 @@ export async function runInactivityEmailCycle(admin, {
   resolveChain = resolveReportingChain,
   loadActiveUsers = loadActiveFieldUsers,
   loadActivity = loadUserActivity,
+  loadPendingLoginUsers = loadUsersPendingMorningLogin,
 } = {}) {
   if (!isEmailConfigured(getMailerConfig(env))) {
     return {
@@ -99,7 +167,38 @@ export async function runInactivityEmailCycle(admin, {
 
   let checked = 0;
   let sent = 0;
+  let loginRemindersSent = 0;
   const details = [];
+
+  const pendingLoginUsers = shouldSendLateLoginReminder({ loginAt: null, now })
+    ? await loadPendingLoginUsers(admin, reportDate)
+    : [];
+  const loginSlot = lateLoginReminderSlot(now);
+  for (const { userId } of pendingLoginUsers) {
+    const userProfilePlaceholder = await loadProfilesById(admin, [userId]);
+    const pendingProfile = userProfilePlaceholder.get(userId) || {};
+    const userName = inactivityEmailDisplayName({
+      salesmanName: pendingProfile.salesman_name,
+      salesmanCode: pendingProfile.salesman_code,
+    });
+    const message = buildLateLoginReminderEmail({
+      date: reportDate,
+      userName,
+      reminderTime: now,
+    });
+    const outcome = await sendHierarchyAlert({
+      admin,
+      userId,
+      resolveChain,
+      message,
+      referenceKey: lateLoginEmailReferenceKey({ userId, reportDate, slot: loginSlot }),
+      notificationType: LATE_LOGIN_EMAIL_TYPE,
+      send,
+      env,
+    });
+    details.push({ ...outcome, kind: "late_login" });
+    if (outcome.status === "sent") loginRemindersSent += 1;
+  }
 
   for (const { userId, loginLog } of activeUsers) {
     checked += 1;
@@ -131,34 +230,8 @@ export async function runInactivityEmailCycle(admin, {
       collections,
       orders,
     });
-    const referenceKey = inactivityEmailReferenceKey({
-      userId,
-      reportDate,
-      idleSinceTs,
-    });
-
-    if (await hasSentInactivityEmail(admin, referenceKey)) {
-      details.push({ userId, status: "skipped", reason: "already_sent" });
-      continue;
-    }
-
-    const chain = await resolveChain(admin, userId);
-    const profileById = await loadProfilesById(admin, [userId, ...(chain || []).map((boss) => boss.id)]);
+    const profileById = await loadProfilesById(admin, [userId]);
     const userProfile = profileById.get(userId) || {};
-    const chainEmails = (chain || [])
-      .map((boss) => profileEmail(profileById.get(boss.id) || boss))
-      .filter(Boolean);
-    const { to } = resolveInactivityEmailRecipients({
-      reportEmail: userProfile.report_email,
-      userEmail: userProfile.email,
-      chainEmails,
-    });
-
-    if (!to.length) {
-      details.push({ userId, status: "skipped", reason: "no_recipients" });
-      continue;
-    }
-
     const userName = inactivityEmailDisplayName({
       salesmanName: userProfile.salesman_name,
       salesmanCode: userProfile.salesman_code,
@@ -171,32 +244,22 @@ export async function runInactivityEmailCycle(admin, {
       lastActivityAt: new Date(idleSinceTs).toISOString(),
       loginAt,
     });
-
-    try {
-      const result = await send({ ...message, to }, env);
-      await logInactivityEmail(admin, {
+    const outcome = await sendHierarchyAlert({
+      admin,
+      userId,
+      resolveChain,
+      message,
+      referenceKey: inactivityEmailReferenceKey({
         userId,
-        title: message.subject,
-        body: message.text,
-        successCount: 1,
-        failureCount: 0,
-        referenceKey,
-      });
-      sent += 1;
-      details.push({
-        userId,
-        status: "sent",
-        to,
-        provider: result?.provider || null,
-      });
-    } catch (error) {
-      details.push({
-        userId,
-        status: "failed",
-        to,
-        error: error.message || "Unable to send inactivity email",
-      });
-    }
+        reportDate,
+        idleSinceTs,
+      }),
+      notificationType: INACTIVITY_EMAIL_TYPE,
+      send,
+      env,
+    });
+    details.push({ ...outcome, kind: "inactivity" });
+    if (outcome.status === "sent") sent += 1;
   }
 
   return {
@@ -204,6 +267,7 @@ export async function runInactivityEmailCycle(admin, {
     skipped: false,
     checked,
     sent,
+    loginRemindersSent,
     reportDate,
     details,
   };

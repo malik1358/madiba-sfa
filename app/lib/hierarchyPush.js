@@ -1,8 +1,5 @@
+import { resolveReportingChainFromAuth } from "./salesHierarchy.js";
 import { isFcmConfigured, sendPushToUser } from "./fcm.js";
-
-function normalizeCode(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
-}
 
 export async function resolveReportingChain(admin, actorUserId) {
   const [profilesRes, usersRes] = await Promise.all([
@@ -16,37 +13,16 @@ export async function resolveReportingChain(admin, actorUserId) {
   if (profilesRes.error) throw profilesRes.error;
   if (usersRes.error) throw usersRes.error;
 
-  const profileByCode = new Map();
-  (profilesRes.data || []).forEach((profile) => {
-    const code = normalizeCode(profile.salesman_code);
-    if (code) profileByCode.set(code, profile);
-  });
-
-  const authById = new Map((usersRes.data?.users || []).map((entry) => [entry.id, entry]));
-  const chain = [];
-  const seen = new Set();
-
-  let currentAuth = authById.get(actorUserId);
-  while (currentAuth) {
-    const metadata = currentAuth.user_metadata || currentAuth.app_metadata || {};
-    const headCode = normalizeCode(metadata.head_salesman_code);
-    if (!headCode) break;
-
-    const headProfile = profileByCode.get(headCode);
-    if (!headProfile || seen.has(headProfile.id)) break;
-
-    seen.add(headProfile.id);
-    chain.push({
-      id: headProfile.id,
-      salesman_code: headProfile.salesman_code || "",
-      salesman_name: headProfile.salesman_name || "",
-      role: headProfile.role || "",
-    });
-
-    currentAuth = authById.get(headProfile.id);
-  }
-
-  return chain;
+  return resolveReportingChainFromAuth({
+    actorUserId,
+    profiles: profilesRes.data || [],
+    authUsers: usersRes.data?.users || [],
+  }).map((head) => ({
+    id: head.id,
+    salesman_code: head.salesman_code || "",
+    salesman_name: head.salesman_name || "",
+    role: head.role || "",
+  }));
 }
 
 async function hasDuplicateReference(admin, referenceKey) {

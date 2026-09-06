@@ -23,6 +23,7 @@ import {
 import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
 import { buildDayRoutePoints } from "./dayRouteMap.js";
+import { assignOnSiteVisitNumbers, buildVisitDaySplit, loginLogoutLocationNotes } from "./dailyVisitReportStats.js";
 import { filterLogsByKsaEventDate, ksaDayBounds } from "./workdayActivity.js";
 
 const ACTIVITY_ENTRY_TYPES = [
@@ -430,7 +431,7 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
   });
 
   const users = [...grouped.entries()].map(([entryUserId, rows]) => {
-    const enrichedEntries = enrichEntries(rows, customerMap, profileMap);
+    const enrichedEntries = assignOnSiteVisitNumbers(enrichEntries(rows, customerMap, profileMap));
     const profile = profileMap.get(entryUserId) || {};
     return {
       userId: entryUserId,
@@ -487,6 +488,8 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
       ...entryUser,
       daySummary,
       idleGaps,
+      activitySplit: buildVisitDaySplit(entryUser.entries, daySummary?.stats || {}),
+      locationNotes: loginLogoutLocationNotes(entryUser.entries),
       routePoints: buildDayRoutePoints(entryUser.entries, idleGaps),
     };
   });

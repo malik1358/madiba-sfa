@@ -27,6 +27,7 @@ import { addKsaCalendarDays, getKsaDateString, getKsaWeekdayIndexForDateString }
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { visitReportRowClassName, VISIT_REPORT_ROW_LEGEND } from "../../lib/visitReportRowColors";
+import { formatEntryCoordinates, formatSplitMoney } from "../../lib/dailyVisitReportStats";
 
 const TEXT = {
   title: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومي" },
@@ -85,7 +86,16 @@ const TEXT = {
   longestIdleTitle: { en: "Longest idle", ar: "أطول توقف" },
   openThisPlace: { en: "Open this place", ar: "فتح هذا المكان" },
   openLongestIdle: { en: "Open longest idle in Google Maps", ar: "فتح أطول توقف في خرائط جوجل" },
-  routeStops: { en: "Named stops and idle places", ar: "المحطات المسماة وأماكن التوقف" },
+  routeStops: { en: "Login, lunch, logout, and idle", ar: "الدخول والغداء والخروج والتوقف" },
+  visitNumber: { en: "Visit #", ar: "رقم الزيارة" },
+  coordinates: { en: "Coordinates", ar: "الإحداثيات" },
+  daySplitTitle: { en: "Day split", ar: "تفصيل اليوم" },
+  visitWithoutOrder: { en: "Visit without order", ar: "زيارة بدون طلب" },
+  newCustomerOrders: { en: "New-customer orders", ar: "طلبات عملاء جدد" },
+  repeatCustomerOrders: { en: "Repeat-customer orders", ar: "طلبات عملاء متكررين" },
+  collectionsSplit: { en: "Collections", ar: "تحصيلات" },
+  splitCount: { en: "Count", ar: "العدد" },
+  splitValue: { en: "Value", ar: "القيمة" },
   idleBubblesTitle: { en: "Unlogged idle circles", ar: "دوائر التوقف غير المسجل" },
   idleBubblesHint: {
     en: "Bigger red circle = longer time with no visit, order, collection, or lunch logged.",
@@ -681,6 +691,40 @@ export default function DailyVisitReportPage() {
                     />
                   ) : null}
 
+                  {entryUser.activitySplit ? (
+                    <table className="moduleTable visitDaySplitTable">
+                      <thead>
+                        <tr>
+                          <th>{t("daySplitTitle")}</th>
+                          <th>{t("splitCount")}</th>
+                          <th>{t("splitValue")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>{t("visitWithoutOrder")}</td>
+                          <td>{entryUser.activitySplit.visitWithoutOrderCount}</td>
+                          <td>-</td>
+                        </tr>
+                        <tr>
+                          <td>{t("newCustomerOrders")}</td>
+                          <td>{entryUser.activitySplit.newCustomerOrderCount}</td>
+                          <td>{formatSplitMoney(entryUser.activitySplit.newCustomerOrderValue)} SAR</td>
+                        </tr>
+                        <tr>
+                          <td>{t("repeatCustomerOrders")}</td>
+                          <td>{entryUser.activitySplit.repeatCustomerOrderCount}</td>
+                          <td>{formatSplitMoney(entryUser.activitySplit.repeatCustomerOrderValue)} SAR</td>
+                        </tr>
+                        <tr>
+                          <td>{t("collectionsSplit")}</td>
+                          <td>{entryUser.activitySplit.collectionCount}</td>
+                          <td>{formatSplitMoney(entryUser.activitySplit.collectionValue)} SAR</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  ) : null}
+
                   <DayRouteMap
                     points={entryUser.routePoints || []}
                     idleGaps={entryUser.idleGaps || entryUser.daySummary?.idleGaps || []}
@@ -710,12 +754,14 @@ export default function DailyVisitReportPage() {
                       <thead>
                         <tr>
                           <th>{t("sequence")}</th>
+                          <th>{t("visitNumber")}</th>
                           <th>{t("time")}</th>
                           <th>{t("userName")}</th>
                           <th>{t("customer")}</th>
                           <th>{t("transaction")}</th>
                           <th>{t("distanceFromCustomer")}</th>
                           <th>{t("distanceFromPrevious")}</th>
+                          <th>{t("coordinates")}</th>
                           <th>{t("area")}</th>
                           <th>{t("street")}</th>
                           <th>{t("speed")}</th>
@@ -728,6 +774,7 @@ export default function DailyVisitReportPage() {
                         {(entryUser.entries || []).map((entry, entryIndex, entries) => (
                           <tr key={entry.id} className={visitReportRowClassName(entry, entryUser.idleGaps)}>
                             <td>{entry.visitSequence}</td>
+                            <td>{entry.onSiteVisitNumber || "-"}</td>
                             <td>{formatTime(entry.savedAt)}</td>
                             <td>{entry.userName || entryUser.userName}</td>
                             <td>
@@ -766,6 +813,7 @@ export default function DailyVisitReportPage() {
                                 ? "-"
                                 : `${formatNumber(entry.distanceFromPreviousKm)} km`}
                             </td>
+                            <td>{formatEntryCoordinates(entry)}</td>
                             <td>{entry.area || "-"}</td>
                             <td>{entry.street || "-"}</td>
                             <td>

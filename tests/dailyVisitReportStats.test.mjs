@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   assignOnSiteVisitNumbers,
   buildVisitDaySplit,
+  entryDisplayAmount,
   loginLogoutLocationNotes,
 } from "../app/lib/dailyVisitReportStats.js";
 
@@ -42,6 +43,28 @@ test("day split counts visit without order separately from collections", () => {
   assert.equal(split.collectionValue, 600);
   assert.equal(split.newCustomerOrderCount, 1);
   assert.equal(split.repeatCustomerOrderCount, 2);
+});
+
+test("buildVisitDaySplit uses posted order totals when new/repeat fields are missing", () => {
+  const split = buildVisitDaySplit(
+    [
+      { transactionType: "ORDER_SUBMITTED", customerCode: "1108C" },
+      { transactionType: "ORDER_SUBMITTED", customerCode: "1481" },
+      { transactionType: "ORDER_SUBMITTED", customerCode: "1481" },
+    ],
+    { orderCount: 3, orderValue: 15380.6 },
+  );
+
+  assert.equal(split.orderCount, 3);
+  assert.equal(split.newCustomerOrderCount, 3);
+  assert.equal(split.newCustomerOrderValue, 15380.6);
+  assert.equal(split.repeatCustomerOrderCount, 0);
+});
+
+test("entryDisplayAmount uses order value when collection amount is empty", () => {
+  assert.equal(entryDisplayAmount({ transactionType: "ORDER_SUBMITTED", orderValue: 5380.6 }), 5380.6);
+  assert.equal(entryDisplayAmount({ transactionType: "COLLECTION_VISIT", amountReceived: 11000 }), 11000);
+  assert.equal(entryDisplayAmount({ transactionType: "ORDER_DRAFT" }), 0);
 });
 
 test("login logout coaching fires when GPS is away from first and last customer", () => {

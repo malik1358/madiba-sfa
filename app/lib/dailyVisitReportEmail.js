@@ -7,6 +7,7 @@ import {
 } from "./dayRouteMap.js";
 import {
   buildVisitDaySplit,
+  entryDisplayAmount,
   formatEntryCoordinates,
   formatSplitMoney,
   loginLogoutLocationNotes,
@@ -88,8 +89,8 @@ function distanceFromCustomerLabel(entry) {
 
 function transactionLabel(entry) {
   const parts = [entry?.transactionLabel || entry?.transactionType || "-"];
-  const amount = Number(entry?.amountReceived || 0);
-  if (String(entry?.transactionType || "").toUpperCase() === "COLLECTION_VISIT" && amount > 0) {
+  const amount = entryDisplayAmount(entry);
+  if (amount > 0) {
     parts.push(`${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR`);
   }
   if (entry?.logoutAutoClosed) parts.push("Auto-closed");

@@ -368,6 +368,31 @@ test("buildCollectionDaySummary includes posted order count and value", () => {
   assert.match(joined, /Posted 4 order\(s\) totalling 12,500\.5 SAR/);
   assert.equal(summary.stats.orderCount, 4);
   assert.equal(summary.stats.orderValue, 12500.5);
+  assert.equal(summary.stats.newCustomerOrderCount, 4);
+  assert.equal(summary.stats.newCustomerOrderValue, 12500.5);
+  assert.equal(summary.stats.repeatCustomerOrderCount, 0);
+});
+
+test("buildCollectionDaySummary keeps new vs repeat order split", () => {
+  const summary = buildCollectionDaySummary(
+    [],
+    new Map(),
+    {
+      orderStats: {
+        orderCount: 3,
+        orderValue: 15380.6,
+        newCustomerOrderCount: 1,
+        newCustomerOrderValue: 4200,
+        repeatCustomerOrderCount: 2,
+        repeatCustomerOrderValue: 11180.6,
+      },
+    },
+  );
+
+  assert.equal(summary.stats.newCustomerOrderCount, 1);
+  assert.equal(summary.stats.newCustomerOrderValue, 4200);
+  assert.equal(summary.stats.repeatCustomerOrderCount, 2);
+  assert.equal(summary.stats.repeatCustomerOrderValue, 11180.6);
 });
 
 test("formatNarrativeTime uses KSA clock", () => {

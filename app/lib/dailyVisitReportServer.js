@@ -21,6 +21,7 @@ import {
   summarizeRouteDistanceKm,
 } from "./geo.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
+import { sumOrderLineValue } from "./collectionDaySummary.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
 import { buildDayRoutePoints } from "./dayRouteMap.js";
 import { assignOnSiteVisitNumbers, buildVisitDaySplit, loginLogoutLocationNotes } from "./dailyVisitReportStats.js";
@@ -270,6 +271,28 @@ async function hydrateOrderCustomers(admin, orderIds) {
   return new Map((data || []).map((row) => [Number(row.id), row]));
 }
 
+async function hydrateOrderValues(admin, orderIds) {
+  if (!orderIds.length) return new Map();
+
+  const { data, error } = await admin
+    .from("sales_order_items")
+    .select("order_id,line_value,quantity,rate")
+    .in("order_id", orderIds);
+
+  if (error) {
+    if (isMissingTableError(error) || isMissingColumnError(error)) return new Map();
+    throw error;
+  }
+
+  const values = new Map();
+  (data || []).forEach((line) => {
+    const orderId = Number(line?.order_id);
+    if (!orderId) return;
+    values.set(orderId, Number(values.get(orderId) || 0) + sumOrderLineValue([line]));
+  });
+  return values;
+}
+
 function enrichEntries(entries, customerMap, profileMap) {
   const sorted = [...entries].sort(
     (left, right) => new Date(left.saved_at).getTime() - new Date(right.saved_at).getTime(),
@@ -326,6 +349,7 @@ function enrichEntries(entries, customerMap, profileMap) {
       visitOutcome: entry.meta?.visitOutcome || entry.meta?.outcome || null,
       amountReceived: Number(entry.meta?.amountReceived || 0),
       orderId: entry.meta?.orderId || null,
+      orderValue: Number(entry.meta?.orderValue || 0),
       logoutAutoClosed: entry.transaction_type === "END_OF_DAY" && entry.meta?.autoClosed,
       entryLatitude: entry.latitude,
       entryLongitude: entry.longitude,
@@ -390,17 +414,21 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
     loadActivityLogEntries(admin, startIso, endIso, null, date),
   ]);
 
-  const orderMap = await hydrateOrderCustomers(admin, activityResult.orderIds);
+  const [orderMap, orderValueMap] = await Promise.all([
+    hydrateOrderCustomers(admin, activityResult.orderIds),
+    hydrateOrderValues(admin, activityResult.orderIds),
+  ]);
   const activityEntries = activityResult.entries.map((entry) => {
-    if (entry.customer_code || !entry.meta?.orderId) return entry;
-    const order = orderMap.get(Number(entry.meta.orderId));
-    if (!order) return entry;
+    const orderId = Number(entry.meta?.orderId);
+    const order = orderId ? orderMap.get(orderId) : null;
+    const orderValue = orderId ? Number(orderValueMap.get(orderId) || 0) : 0;
     return {
       ...entry,
-      customer_code: order.customer_code,
+      customer_code: entry.customer_code || order?.customer_code || "",
       meta: {
         ...entry.meta,
-        customerName: order.customer_name,
+        customerName: entry.meta?.customerName || order?.customer_name,
+        orderValue,
       },
     };
   });

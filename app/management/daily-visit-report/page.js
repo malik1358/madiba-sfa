@@ -27,7 +27,7 @@ import { addKsaCalendarDays, getKsaDateString, getKsaWeekdayIndexForDateString }
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { visitReportRowClassName, VISIT_REPORT_ROW_LEGEND } from "../../lib/visitReportRowColors";
-import { formatEntryCoordinates, formatSplitMoney } from "../../lib/dailyVisitReportStats";
+import { entryDisplayAmount, formatEntryCoordinates, formatSplitMoney } from "../../lib/dailyVisitReportStats";
 
 const TEXT = {
   title: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومي" },
@@ -789,9 +789,9 @@ export default function DailyVisitReportPage() {
                             </td>
                             <td>
                               {entry.transactionLabel}
-                              {Number(entry.amountReceived) > 0 ? (
+                              {entryDisplayAmount(entry) > 0 ? (
                                 <div className="moduleCode">
-                                  {Number(entry.amountReceived).toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR
+                                  {entryDisplayAmount(entry).toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR
                                 </div>
                               ) : null}
                               {entry.logoutAutoClosed ? (

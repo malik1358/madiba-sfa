@@ -46,6 +46,7 @@ import { appendMonthlyPerformanceToPdf } from "../../lib/orderPdfMonthlyPerforma
 import { buildAnalytics } from "../customer-audit/lib/analytics";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
+import { isBuildingMaterialCustomer } from "../my-day/customerEligibility";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -713,6 +714,7 @@ export default function NewOrderPage() {
   const filteredCustomers = useMemo(() => {
     const q = customerSearch.trim().toLowerCase();
     return customers.filter((customer) => {
+      if (isBuildingMaterialCustomer(customer)) return false;
       if (!q) return true;
       return (
         String(customer.customer_code || "").toLowerCase().includes(q) ||
@@ -1647,13 +1649,16 @@ export default function NewOrderPage() {
         if (itemsRes.error) throw itemsRes.error;
         if (draftsRes.error) throw draftsRes.error;
 
-        const mergedCustomers = prefilledCustomer && !loadedCustomers.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
-          ? [prefilledCustomer, ...loadedCustomers]
-          : loadedCustomers;
+        const visibleCustomers = (loadedCustomers || []).filter((customer) => !isBuildingMaterialCustomer(customer));
+        const allowPrefilled = Boolean(prefilledCustomer)
+          && (!isBuildingMaterialCustomer(prefilledCustomer) || Boolean(editOrderId));
+        const mergedCustomers = allowPrefilled && !visibleCustomers.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
+          ? [prefilledCustomer, ...visibleCustomers]
+          : visibleCustomers;
 
         setCustomers(mergedCustomers);
         setItemsMaster(itemsRes.data || []);
-        setPreviousDrafts(draftsRes.data || []);
+        setPreviousDrafts((draftsRes.data || []).filter((draft) => !isBuildingMaterialCustomer(draft)));
 
         fetchItemCategoryLookup(supabase, scope)
           .then((categories) => setHistoryCategoryLookup(categories || new Map()))
@@ -1680,14 +1685,15 @@ export default function NewOrderPage() {
 
     loadFoundation();
     loadPrices();
-  }, [prefilledCustomer]);
+  }, [editOrderId, prefilledCustomer]);
 
   useEffect(() => {
     if (!prefilledCustomer?.customer_code) return;
+    if (isBuildingMaterialCustomer(prefilledCustomer) && !editOrderId) return;
 
     setSelectedCustomerCode(prefilledCustomer.customer_code);
     setMessage(`Prospect ${prefilledCustomer.customer_name} is ready for order creation.`);
-  }, [prefilledCustomer]);
+  }, [editOrderId, prefilledCustomer]);
 
   useEffect(() => {
     async function loadCustomerHistory() {

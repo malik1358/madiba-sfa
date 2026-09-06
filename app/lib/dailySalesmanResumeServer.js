@@ -1,14 +1,17 @@
 import { sumOrderLineValue } from "./collectionDaySummary.js";
 import {
   extractWorkdayTimesFromTimelineRows,
+  loadLoggedActivityTimesByUser,
   loadWorkdayEventsByUser,
 } from "./collectionDaySummaryServer.js";
 import {
   buildDailySalesmanResumeEmail,
   emptySalesmanResumeRow,
   resolveDailySalesmanResumeRecipients,
+  resolveResumeWorkingEndAt,
   sortSalesmanResumeRows,
 } from "./dailySalesmanResume.js";
+import { groupSalesRowsIntoInvoices } from "./salesInvoices.js";
 import { formatCollectorDisplayName } from "./geo.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
 import {
@@ -172,22 +175,34 @@ async function loadVisitCountsByUser(admin, reportDate) {
   return counts;
 }
 
-async function loadCollectionCountsByUser(admin, reportDate) {
+function laterIso(current, next) {
+  const currentTs = Date.parse(String(current || ""));
+  const nextTs = Date.parse(String(next || ""));
+  if (!Number.isFinite(nextTs) || nextTs <= 0) return current || "";
+  if (!Number.isFinite(currentTs) || nextTs > currentTs) return String(next);
+  return current || "";
+}
+
+async function loadCollectionMetricsByUser(admin, reportDate) {
   const { startIso, endIso } = ksaDayBounds(reportDate);
   const rows = await fetchPagedRows(
     admin,
     "collection_visits",
-    "id,created_by,saved_at",
+    "id,created_by,saved_at,amount_received",
     (query) => query.gte("saved_at", startIso).lte("saved_at", endIso),
   );
 
-  const counts = new Map();
+  const metrics = new Map();
   for (const row of rows) {
     const userId = String(row.created_by || "").trim();
     if (!userId) continue;
-    counts.set(userId, (counts.get(userId) || 0) + 1);
+    const current = metrics.get(userId) || { count: 0, value: 0, lastAt: "" };
+    current.count += 1;
+    current.value += Number(row.amount_received || 0);
+    current.lastAt = laterIso(current.lastAt, row.saved_at);
+    metrics.set(userId, current);
   }
-  return counts;
+  return metrics;
 }
 
 function orderTimestampIso(row) {
@@ -224,25 +239,26 @@ async function loadOrderMetricsByUser(admin, reportDate) {
   for (const row of dayOrders) {
     const userId = String(row.created_by || "").trim();
     if (!userId) continue;
-    const current = metrics.get(userId) || { orders: 0, orderValue: 0, skuSoldCount: 0 };
+    const current = metrics.get(userId) || {
+      orders: 0,
+      orderValue: 0,
+      skuSoldCount: 0,
+      lastAt: "",
+      skuCodes: new Set(),
+    };
     current.orders += 1;
-    const quantity = Number(row.total_quantity);
-    const items = Number(row.total_items);
-    if (Number.isFinite(quantity) && quantity > 0) {
-      current.skuSoldCount += quantity;
-    } else if (Number.isFinite(items) && items > 0) {
-      current.skuSoldCount += items;
-    }
+    current.lastAt = laterIso(current.lastAt, orderTimestampIso(row));
     metrics.set(userId, current);
   }
 
   const orderIds = dayOrders.map((row) => Number(row.id)).filter(Boolean);
   const valueByOrderId = new Map();
+  const linesByOrderId = new Map();
   for (const chunk of chunkList(orderIds, 200)) {
     const lines = await fetchPagedRows(
       admin,
       "sales_order_items",
-      "order_id,line_value,quantity,rate",
+      "order_id,item_code,line_value,quantity,rate",
       (query) => query.in("order_id", chunk),
     );
     const grouped = new Map();
@@ -254,6 +270,7 @@ async function loadOrderMetricsByUser(admin, reportDate) {
     }
     grouped.forEach((orderLines, orderId) => {
       valueByOrderId.set(orderId, sumOrderLineValue(orderLines));
+      linesByOrderId.set(orderId, orderLines);
     });
   }
 
@@ -262,13 +279,69 @@ async function loadOrderMetricsByUser(admin, reportDate) {
     if (!userId) continue;
     const current = metrics.get(userId);
     if (!current) continue;
+    const orderLines = linesByOrderId.get(Number(row.id)) || [];
     current.orderValue += Number(valueByOrderId.get(Number(row.id)) || 0);
+    orderLines.forEach((line) => {
+      const code = String(line.item_code || "").trim().toUpperCase();
+      const quantity = Number(line.quantity);
+      if (!code) return;
+      if (Number.isFinite(quantity) && quantity <= 0) return;
+      current.skuCodes.add(code);
+    });
   }
+
+  metrics.forEach((current) => {
+    current.skuSoldCount = current.skuCodes.size;
+    delete current.skuCodes;
+  });
 
   return metrics;
 }
 
-async function loadWorkdaysByUser(admin, userIds, reportDate) {
+async function loadInvoiceMetricsBySalesman(admin, reportDate) {
+  const rows = await fetchPagedRows(
+    admin,
+    "active_sales",
+    "id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,sales_amount,item_code",
+    (query) => query.eq("transaction_date", reportDate),
+  );
+  const invoices = groupSalesRowsIntoInvoices(rows);
+  const metrics = new Map();
+
+  invoices.forEach((invoice) => {
+    const code = String(invoice.salesman_code || "").trim().toUpperCase();
+    if (!code) return;
+    const current = metrics.get(code) || { count: 0, amount: 0 };
+    current.count += 1;
+    current.amount += Number(invoice.total_amount || 0);
+    metrics.set(code, current);
+  });
+
+  return metrics;
+}
+
+async function loadLastActivityByUser(admin, userIds, reportDate, extras = new Map()) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  const { startIso, endIso } = ksaDayBounds(reportDate);
+  const lastAt = new Map();
+
+  extras.forEach((iso, userId) => {
+    lastAt.set(userId, laterIso(lastAt.get(userId), iso));
+  });
+
+  for (const chunk of chunkList(ids, 100)) {
+    const activities = await loadLoggedActivityTimesByUser(admin, chunk, startIso, endIso, reportDate);
+    activities.forEach((rows, userId) => {
+      (rows || []).forEach((row) => {
+        lastAt.set(userId, laterIso(lastAt.get(userId), row.saved_at || row.savedAt));
+      });
+    });
+  }
+
+  return lastAt;
+}
+
+async function loadWorkdaysByUser(admin, userIds, lastActivityByUser, reportDate) {
   const ids = [...new Set((userIds || []).filter(Boolean))];
   const { startIso, endIso } = ksaDayBounds(reportDate);
   const eventsByUser = new Map();
@@ -281,9 +354,19 @@ async function loadWorkdaysByUser(admin, userIds, reportDate) {
   const workdays = new Map();
   ids.forEach((userId) => {
     const times = extractWorkdayTimesFromTimelineRows(eventsByUser.get(userId) || []);
+    const lastActivityAt = lastActivityByUser.get(userId) || "";
+    const workingEndAt = resolveResumeWorkingEndAt({
+      logoutAt: times.logoutAt,
+      logoutAutoClosed: times.logoutAutoClosed,
+      lastActivityAt,
+    });
     workdays.set(userId, {
       ...times,
-      workingMinutes: calculateWorkingHoursMinutes(times),
+      lastActivityAt,
+      workingMinutes: calculateWorkingHoursMinutes({
+        ...times,
+        logoutAt: workingEndAt,
+      }),
     });
   });
   return workdays;
@@ -293,9 +376,14 @@ export function buildSalesmanResumeRows({
   profiles = [],
   visitCounts = new Map(),
   collectionCounts = new Map(),
+  collectionMetrics = new Map(),
   orderMetrics = new Map(),
+  invoiceMetrics = new Map(),
   workdays = new Map(),
 } = {}) {
+  const collectionsByUser = collectionMetrics.size
+    ? collectionMetrics
+    : new Map([...collectionCounts.entries()].map(([userId, count]) => [userId, { count, value: 0 }]));
   const byUserId = new Map();
 
   for (const profile of profiles || []) {
@@ -307,9 +395,11 @@ export function buildSalesmanResumeRows({
     if (row) row.visits = Number(visits || 0);
   }
 
-  for (const [userId, collections] of collectionCounts.entries()) {
+  for (const [userId, collections] of collectionsByUser.entries()) {
     const row = ensureRow(byUserId, { id: userId });
-    if (row) row.collections = Number(collections || 0);
+    if (!row) continue;
+    row.collections = Number(collections?.count ?? collections ?? 0);
+    row.collectionValue = Number(collections?.value || 0);
   }
 
   for (const [userId, metrics] of orderMetrics.entries()) {
@@ -320,6 +410,23 @@ export function buildSalesmanResumeRows({
     row.skuSoldCount = Number(metrics?.skuSoldCount || 0);
   }
 
+  const userIdByCode = new Map();
+  byUserId.forEach((row) => {
+    const code = String(row.salesmanCode || "").trim().toUpperCase();
+    if (code && !userIdByCode.has(code)) userIdByCode.set(code, row.userId);
+  });
+
+  for (const [salesmanCode, invoice] of invoiceMetrics.entries()) {
+    const code = String(salesmanCode || "").trim().toUpperCase();
+    const userId = userIdByCode.get(code);
+    const row = userId
+      ? byUserId.get(userId)
+      : ensureRow(byUserId, { id: `code:${code}`, salesman_code: code });
+    if (!row) continue;
+    row.invoiceCount = Number(invoice?.count || 0);
+    row.invoiceAmount = Number(invoice?.amount || 0);
+  }
+
   for (const [userId, workday] of workdays.entries()) {
     const row = ensureRow(byUserId, { id: userId });
     if (!row || !workday) continue;
@@ -327,13 +434,25 @@ export function buildSalesmanResumeRows({
     row.lunchOutAt = workday.lunchOutAt || "";
     row.lunchInAt = workday.lunchInAt || "";
     row.logoutAt = workday.logoutAt || "";
-    row.workingMinutes = workday.workingMinutes ?? calculateWorkingHoursMinutes(workday);
+    row.logoutAutoClosed = Boolean(workday.logoutAutoClosed);
+    row.lastActivityAt = workday.lastActivityAt || "";
+    row.workingMinutes = workday.workingMinutes ?? calculateWorkingHoursMinutes({
+      ...workday,
+      logoutAt: resolveResumeWorkingEndAt({
+        logoutAt: workday.logoutAt,
+        logoutAutoClosed: workday.logoutAutoClosed,
+        lastActivityAt: workday.lastActivityAt,
+      }),
+    });
   }
 
   return sortSalesmanResumeRows([...byUserId.values()].filter((row) => (
     Number(row.orders || 0)
     + Number(row.orderValue || 0)
+    + Number(row.invoiceCount || 0)
+    + Number(row.invoiceAmount || 0)
     + Number(row.collections || 0)
+    + Number(row.collectionValue || 0)
     + Number(row.visits || 0)
     + Number(row.skuSoldCount || 0) > 0
     || SALESMAN_ROLES.has(normalizeRole(row.role))
@@ -342,28 +461,34 @@ export function buildSalesmanResumeRows({
 
 export async function buildDailySalesmanResume(admin, { date, now = new Date() } = {}) {
   const reportDate = parseResumeDateParam(date, now);
-  const [profiles, visitCounts, collectionCounts, orderMetrics] = await Promise.all([
+  const [profiles, visitCounts, collectionMetrics, orderMetrics, invoiceMetrics] = await Promise.all([
     loadSalesmanResumeProfiles(admin),
     loadVisitCountsByUser(admin, reportDate),
-    loadCollectionCountsByUser(admin, reportDate),
+    loadCollectionMetricsByUser(admin, reportDate),
     loadOrderMetricsByUser(admin, reportDate),
+    loadInvoiceMetricsBySalesman(admin, reportDate),
   ]);
 
   const userIds = [
     ...new Set([
       ...profiles.map((profile) => profile.id),
       ...visitCounts.keys(),
-      ...collectionCounts.keys(),
+      ...collectionMetrics.keys(),
       ...orderMetrics.keys(),
     ].filter(Boolean)),
   ];
-  const workdays = await loadWorkdaysByUser(admin, userIds, reportDate);
+  const extraLastActivity = new Map();
+  collectionMetrics.forEach((metric, userId) => extraLastActivity.set(userId, laterIso(extraLastActivity.get(userId), metric.lastAt)));
+  orderMetrics.forEach((metric, userId) => extraLastActivity.set(userId, laterIso(extraLastActivity.get(userId), metric.lastAt)));
+  const lastActivityByUser = await loadLastActivityByUser(admin, userIds, reportDate, extraLastActivity);
+  const workdays = await loadWorkdaysByUser(admin, userIds, lastActivityByUser, reportDate);
 
   const rows = buildSalesmanResumeRows({
     profiles,
     visitCounts,
-    collectionCounts,
+    collectionMetrics,
     orderMetrics,
+    invoiceMetrics,
     workdays,
   });
 

@@ -30,7 +30,7 @@ import {
   regionPriceMapFor,
   resolveOrderPricingRegion,
 } from "../../lib/regionalPricing";
-import { resolveOverdueDaysFromDueDate, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, resolveOverdueDaysFromDueDate, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { fetchOutstandingCached } from "../../lib/mobileDataCache";
 
 import { shortDate } from "./lib/format";
@@ -240,13 +240,14 @@ function CustomerAuditPageContent() {
     loadOutstanding();
   }, [selectedCustomer, setError]);
 
-  const visibleOutstandingBuckets = useMemo(
-    () => visibleOutstandingBucketLabels(
+  const visibleOutstandingBuckets = useMemo(() => {
+    const resolved = resolveOutstandingBucketLabels(
       outstandingInfo.bucketLabels,
       outstandingInfo.customer?.buckets
-    ),
-    [outstandingInfo.bucketLabels, outstandingInfo.customer]
-  );
+    );
+    const baseLabels = resolved.length ? resolved : DEFAULT_OUTSTANDING_BUCKET_LABELS;
+    return visibleOutstandingBucketLabels(baseLabels, outstandingInfo.customer?.buckets);
+  }, [outstandingInfo.bucketLabels, outstandingInfo.customer]);
 
   useEffect(() => {
     async function loadPrices() {
@@ -434,7 +435,7 @@ function CustomerAuditPageContent() {
 
           {outstandingLoading && <div className="auditEmpty">Loading outstanding buckets...</div>}
 
-          {!outstandingLoading && outstandingInfo.customer && (
+          {!outstandingLoading && (
             <>
               <ExportableTable filename="customer-outstanding-buckets" sheetName="Outstanding" className="moduleTableWrap" style={{ marginTop: "10px" }}>
                 <table className="moduleTable">
@@ -502,7 +503,7 @@ function CustomerAuditPageContent() {
           )}
 
           {!outstandingLoading && !outstandingInfo.customer && (
-            <div className="auditEmpty">No outstanding row found for this customer in latest upload.</div>
+            <div className="auditEmpty">No outstanding row found for this customer in latest upload. Showing zeros.</div>
           )}
         </section>
 
@@ -543,7 +544,10 @@ function CustomerAuditPageContent() {
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}
           changeOrderQty={updateQty}
-          priceList={displayPriceList}
+          priceList={regionPriceList}
+          cashDiscountMap={cashDiscountMap}
+          valueDiscountMap={valueDiscountMap}
+          paymentType={paymentType}
         />
 
         <QuickOrder
@@ -552,7 +556,10 @@ function CustomerAuditPageContent() {
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}
           changeOrderQty={updateQty}
-          priceList={displayPriceList}
+          priceList={regionPriceList}
+          cashDiscountMap={cashDiscountMap}
+          valueDiscountMap={valueDiscountMap}
+          paymentType={paymentType}
         />
 
         <FullItemList
@@ -562,9 +569,10 @@ function CustomerAuditPageContent() {
           decreaseOrderQty={decreaseQty}
           increaseOrderQty={increaseQty}
           changeOrderQty={updateQty}
-          priceList={displayPriceList}
+          priceList={regionPriceList}
           cashDiscountMap={cashDiscountMap}
           valueDiscountMap={valueDiscountMap}
+          paymentType={paymentType}
         />
 
         <OrderBar

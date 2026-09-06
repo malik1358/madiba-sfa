@@ -1,0 +1,141 @@
+import { isSuccessfulCollection } from "./collectionDaySummary.js";
+import { haversineDistanceKm, hasGpsCoordinates } from "./geo.js";
+
+const ON_SITE_VISIT_TYPES = new Set([
+  "VISIT_REPORT",
+  "COLLECTION_VISIT",
+  "ORDER_SUBMITTED",
+]);
+
+export function visitEntryType(entry) {
+  return String(entry?.transactionType || entry?.transaction_type || "").trim().toUpperCase();
+}
+
+function normalizeCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function entryCoords(entry) {
+  const latitude = Number(entry?.entryLatitude ?? entry?.latitude);
+  const longitude = Number(entry?.entryLongitude ?? entry?.longitude);
+  if (!hasGpsCoordinates({ latitude, longitude })) return null;
+  return { latitude, longitude };
+}
+
+export function isOnSiteCustomerVisit(entry) {
+  if (!ON_SITE_VISIT_TYPES.has(visitEntryType(entry))) return false;
+  return !entry?.isFarFromCustomer;
+}
+
+export function assignOnSiteVisitNumbers(entries = []) {
+  let visitNumber = 0;
+  let lastVisitCode = "";
+  return (entries || []).map((entry) => {
+    if (!isOnSiteCustomerVisit(entry)) {
+      return { ...entry, onSiteVisitNumber: null };
+    }
+    const code = normalizeCode(entry?.customerCode || entry?.customer_code);
+    if (!code || code !== lastVisitCode) {
+      visitNumber += 1;
+      lastVisitCode = code;
+    }
+    return { ...entry, onSiteVisitNumber: visitNumber };
+  });
+}
+
+export function formatEntryCoordinates(entry) {
+  const coords = entryCoords(entry);
+  if (!coords) return "-";
+  return `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`;
+}
+
+export function buildVisitDaySplit(entries = [], orderStats = {}) {
+  const visitCodes = new Set();
+  const orderCodes = new Set();
+  let collectionCount = 0;
+  let collectionValue = 0;
+
+  (entries || []).forEach((entry) => {
+    const type = visitEntryType(entry);
+    const code = normalizeCode(entry?.customerCode || entry?.customer_code);
+    if (type === "VISIT_REPORT" && code) visitCodes.add(code);
+    if (type === "ORDER_SUBMITTED" && code) orderCodes.add(code);
+    if (type === "COLLECTION_VISIT" && isSuccessfulCollection(entry)) {
+      collectionCount += 1;
+      collectionValue += Number(entry?.amountReceived ?? entry?.amount_received ?? 0);
+    }
+  });
+
+  let visitWithoutOrderCount = 0;
+  visitCodes.forEach((code) => {
+    if (!orderCodes.has(code)) visitWithoutOrderCount += 1;
+  });
+
+  let newCustomerOrderCount = Number(orderStats.newCustomerOrderCount || 0);
+  let newCustomerOrderValue = Number(orderStats.newCustomerOrderValue || 0);
+  const repeatCustomerOrderCount = Number(orderStats.repeatCustomerOrderCount || 0);
+  const repeatCustomerOrderValue = Number(orderStats.repeatCustomerOrderValue || 0);
+  const orderCount = Number(orderStats.orderCount || 0) || orderCodes.size;
+  const orderValue = Number(orderStats.orderValue || 0);
+  if (orderCount > 0 && newCustomerOrderCount + repeatCustomerOrderCount === 0) {
+    newCustomerOrderCount = orderCount;
+    newCustomerOrderValue = orderValue;
+  }
+
+  return {
+    visitWithoutOrderCount,
+    newCustomerOrderCount,
+    newCustomerOrderValue,
+    repeatCustomerOrderCount,
+    repeatCustomerOrderValue,
+    orderCount,
+    orderValue,
+    collectionCount,
+    collectionValue,
+  };
+}
+
+function isNearEntry(left, right, thresholdKm) {
+  const from = entryCoords(left);
+  const to = entryCoords(right);
+  if (!from || !to) return false;
+  return haversineDistanceKm(from.latitude, from.longitude, to.latitude, to.longitude) <= thresholdKm;
+}
+
+export function loginLogoutLocationNotes(entries = [], thresholdKm = 0.5) {
+  const list = entries || [];
+  const login = list.find((entry) => visitEntryType(entry) === "MORNING_ATTENDANCE");
+  const logout = [...list].reverse().find((entry) => visitEntryType(entry) === "END_OF_DAY");
+  const visits = list.filter(isOnSiteCustomerVisit);
+  const first = visits[0];
+  const last = visits[visits.length - 1];
+  const notes = [];
+
+  if (login && first && !isNearEntry(login, first, thresholdKm)) {
+    notes.push(
+      "Login was not done at the first customer location. Login should be marked at the first customer of the day.",
+    );
+  }
+  if (logout && last && !isNearEntry(logout, last, thresholdKm)) {
+    notes.push(
+      "Logout was not done at the last customer location. Logout should be marked at the last customer of the day.",
+    );
+  }
+
+  return notes;
+}
+
+export function formatSplitMoney(value) {
+  return Number(value || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function entryDisplayAmount(entry) {
+  const collection = Number(entry?.amountReceived ?? entry?.amount_received ?? 0);
+  if (Number.isFinite(collection) && collection > 0) return collection;
+  const order = Number(entry?.orderValue ?? entry?.order_value ?? 0);
+  if (Number.isFinite(order) && order > 0) return order;
+  return 0;
+}

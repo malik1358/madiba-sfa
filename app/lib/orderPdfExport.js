@@ -50,6 +50,7 @@ export async function saveOrShareOrderPdf(doc, fileName, options = {}) {
   const title = String(options.title || "MADIBA Sales Order").trim();
   const text = String(options.text || "").trim();
   const dialogTitle = String(options.dialogTitle || "Save or share order PDF").trim();
+  const forceDownload = Boolean(options.forceDownload);
 
   if (await isNativeMobilePlatform()) {
     const { Filesystem, Directory } = await import("@capacitor/filesystem");
@@ -86,7 +87,7 @@ export async function saveOrShareOrderPdf(doc, fileName, options = {}) {
   const blob = doc.output("blob");
   const file = new File([blob], safeName, { type: "application/pdf" });
 
-  if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+  if (!forceDownload && typeof navigator !== "undefined" && typeof navigator.share === "function") {
     try {
       if (!navigator.canShare || navigator.canShare({ files: [file] })) {
         await navigator.share({

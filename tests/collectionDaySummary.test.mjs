@@ -216,6 +216,24 @@ test("findUnloggedIdleGaps does not flag logged lunch windows", () => {
   );
 });
 
+test("findUnloggedIdleGaps stops at logout even if GPS or activity continues", () => {
+  const date = { year: 2026, month: 9, day: 5 };
+  const gaps = findUnloggedIdleGaps({
+    loginAt: ksaIso(date, 9, 20),
+    logoutAt: ksaIso(date, 21, 3),
+    visits: [
+      { saved_at: ksaIso(date, 19, 41) },
+    ],
+    activities: [
+      { saved_at: ksaIso(date, 21, 3) },
+      { saved_at: ksaIso(date, 22, 14) },
+    ],
+  });
+
+  assert.equal(gaps.some((gap) => gap.minutes === 71), false);
+  assert.equal(gaps.some((gap) => gap.minutes === 82), true);
+});
+
 test("findUnloggedIdleGaps ignores an open lunch-out until the next activity", () => {
   const date = { year: 2026, month: 8, day: 30 };
   const gaps = findUnloggedIdleGaps({
@@ -368,6 +386,31 @@ test("buildCollectionDaySummary includes posted order count and value", () => {
   assert.match(joined, /Posted 4 order\(s\) totalling 12,500\.5 SAR/);
   assert.equal(summary.stats.orderCount, 4);
   assert.equal(summary.stats.orderValue, 12500.5);
+  assert.equal(summary.stats.newCustomerOrderCount, 4);
+  assert.equal(summary.stats.newCustomerOrderValue, 12500.5);
+  assert.equal(summary.stats.repeatCustomerOrderCount, 0);
+});
+
+test("buildCollectionDaySummary keeps new vs repeat order split", () => {
+  const summary = buildCollectionDaySummary(
+    [],
+    new Map(),
+    {
+      orderStats: {
+        orderCount: 3,
+        orderValue: 15380.6,
+        newCustomerOrderCount: 1,
+        newCustomerOrderValue: 4200,
+        repeatCustomerOrderCount: 2,
+        repeatCustomerOrderValue: 11180.6,
+      },
+    },
+  );
+
+  assert.equal(summary.stats.newCustomerOrderCount, 1);
+  assert.equal(summary.stats.newCustomerOrderValue, 4200);
+  assert.equal(summary.stats.repeatCustomerOrderCount, 2);
+  assert.equal(summary.stats.repeatCustomerOrderValue, 11180.6);
 });
 
 test("formatNarrativeTime uses KSA clock", () => {

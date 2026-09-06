@@ -8,12 +8,13 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
+import { invalidateSalesScopeCache } from "../../lib/mobileDataCache";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "Salesman Hierarchy", ar: "هيكل مندوبي المبيعات" },
-  subtitle: { en: "Assign salesmen under a head salesman, set report email and pricing region, and manage default testing passwords", ar: "تعيين المندوبين تحت رئيس مندوبين وتحديد بريد التقرير ومنطقة التسعير وإدارة كلمات المرور الافتراضية" },
+  subtitle: { en: "Assign salesmen under a head salesman, set each person's report email, and daily visit mail also goes to every head above them. Set pricing region and default testing passwords.", ar: "تعيين المندوبين تحت رئيس مندوبين وتحديد بريد التقرير لكل شخص، وتذهب تقارير الزيارة أيضاً لكل الرؤساء فوقه. حدد منطقة التسعير وكلمات المرور الافتراضية." },
   management: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading salesman hierarchy...", ar: "جاري تحميل هيكل المندوبين..." },
   statusActive: { en: "Active", ar: "نشط" },
@@ -246,6 +247,11 @@ export default function SalesmanHierarchyPage() {
       messages.push(result.message || "Head salesman saved.");
 
       setMessage(messages.join(" "));
+      const supabase = getSupabaseClient();
+      const { data: { session } } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
+      if (session?.user?.id) {
+        await invalidateSalesScopeCache(session.user.id);
+      }
       await loadHierarchy(false);
     } catch (err) {
       setError(err.message || "Unable to save assignment.");
@@ -503,7 +509,7 @@ export default function SalesmanHierarchyPage() {
                   <th>Role</th>
                   <th>Region</th>
                   <th>Username</th>
-                  <th>Report email</th>
+                  <th title="This person's inbox. Heads above them also receive the daily visit report.">Report email</th>
                   <th>Current Head</th>
                   <th>Assign Head</th>
                   <th>Default Password</th>

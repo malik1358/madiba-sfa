@@ -4243,6 +4243,44 @@ th:has(.moduleTableColumnFilterInput) {
   font-weight: 700;
 }
 
+.moduleOrderTotals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 8px 0 14px;
+}
+
+.moduleOrderTotals > div {
+  background: #f4f8f9;
+  border: 1px solid #d5e3e7;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.moduleOrderTotals span {
+  display: block;
+  color: #698087;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.moduleOrderTotals strong {
+  display: block;
+  margin-top: 4px;
+  color: #073f4c;
+  font-size: 18px;
+}
+
+.moduleOrderTotalsExcl,
+.moduleOrderTotalsIncl {
+  background: #e8f4f2;
+  border-color: #b9d8d3;
+}
+
+.moduleOrderTotalsIncl strong {
+  font-size: 22px;
+}
+
 .moduleOrderBar {
   display: flex;
   justify-content: space-between;
@@ -5469,6 +5507,10 @@ th:has(.moduleTableColumnFilterInput) {
     grid-template-columns: 1fr 1fr;
   }
 
+  .moduleOrderTotals {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .moduleOrderBar {
     flex-direction: column;
     align-items: stretch;
@@ -5990,4 +6032,10 @@ th:has(.moduleTableColumnFilterInput) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.visitDaySplitTable {
+  width: auto;
+  max-width: 520px;
+  margin: 0 0 14px;
 }

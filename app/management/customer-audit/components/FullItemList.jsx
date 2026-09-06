@@ -2,8 +2,8 @@
 
 import { Fragment, useDeferredValue, useMemo, useState } from "react";
 import { getPrice, isDoNotUseItem, normalizeCode } from "../lib/helpers";
-import { isExcludedCategory, pickCatalogCategory } from "../../../lib/pricePayload";
-import { formatDiscountPercent, lookupDiscountRate } from "../../../lib/regionalPricing";
+import { isBuildingMaterialItem, pickCatalogCategory } from "../../../lib/pricePayload";
+import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from "../../../lib/regionalPricing";
 import ExportableTable from "../../../components/ExportableTable";
 
 function normalizedText(value) {
@@ -29,16 +29,22 @@ function hasCurrentItemName(value, itemCode) {
 
 function buildCatalog(itemCatalog, priceSheetItems, priceList) {
   const itemMap = new Map();
+  const excludedCodes = new Set();
 
   (itemCatalog || []).forEach((item) => {
     const code = normalizeCode(item?.item_code);
     if (!code) return;
-    itemMap.set(code, {
+    const nextItem = {
       ...item,
       item_code: code,
       item_name: String(item.item_name || code).trim(),
       category: pickCatalogCategory(item.category) || "Unclassified",
-    });
+    };
+    if (isBuildingMaterialItem(nextItem)) {
+      excludedCodes.add(code);
+      return;
+    }
+    itemMap.set(code, nextItem);
   });
 
   (priceSheetItems || []).forEach((sheetItem) => {
@@ -47,20 +53,25 @@ function buildCatalog(itemCatalog, priceSheetItems, priceList) {
     const existing = itemMap.get(code);
     const sheetName = String(sheetItem.item_name || "").trim();
     const sheetCategory = String(sheetItem.category || "").trim();
-
-    itemMap.set(code, {
+    const nextItem = {
       ...(existing || {}),
       item_code: code,
       item_name: hasCurrentItemName(sheetName, code)
         ? sheetName
         : (hasCurrentItemName(existing?.item_name, code) ? existing.item_name : code),
       category: pickCatalogCategory(sheetCategory, existing?.category) || "Missing Category",
-    });
+    };
+    if (isBuildingMaterialItem(nextItem)) {
+      excludedCodes.add(code);
+      itemMap.delete(code);
+      return;
+    }
+    itemMap.set(code, nextItem);
   });
 
   Object.keys(priceList || {}).forEach((rawCode) => {
     const code = normalizeCode(rawCode);
-    if (!code || itemMap.has(code)) return;
+    if (!code || itemMap.has(code) || excludedCodes.has(code)) return;
     itemMap.set(code, {
       item_code: code,
       item_name: code,
@@ -69,11 +80,11 @@ function buildCatalog(itemCatalog, priceSheetItems, priceList) {
   });
 
   return Array.from(itemMap.values())
-    .filter((item) => !isDoNotUseItem(item.item_name) && !isExcludedCategory(item.category))
+    .filter((item) => !isDoNotUseItem(item.item_name) && !isBuildingMaterialItem(item))
     .sort((left, right) => String(left.item_name || left.item_code).localeCompare(String(right.item_name || right.item_code)));
 }
 
-export default function FullItemList({ itemCatalog, priceSheetItems, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {} }) {
+export default function FullItemList({ itemCatalog, priceSheetItems, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = "credit" }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [expandedCategories, setExpandedCategories] = useState({});
@@ -151,17 +162,31 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
                   {isExpanded && group.items.map((item) => {
                     const code = String(item.item_code || "").trim();
                     const orderQty = Number(orderQuantities[code] || 0);
-                    const price = getPrice(priceList, code);
+                    const wholesale = getPrice(priceList, code);
+                    const cashDiscount = lookupDiscountRate(cashDiscountMap, code);
+                    const valueDiscount = lookupDiscountRate(valueDiscountMap, code);
+                    const priced = getPricedOrderLine({
+                      wholesaleRate: wholesale,
+                      quantity: orderQty,
+                      paymentType,
+                      cashDiscountRate: cashDiscount,
+                      valueDiscountRate: valueDiscount,
+                    });
                     const nameIsCode = normalizeCode(item.item_name) === normalizeCode(code);
                     return (
                       <tr key={code} className="moduleItemRow">
                         <td>{group.category}</td>
                         <td><strong>{nameIsCode ? code : item.item_name}</strong>{!nameIsCode && <div className="moduleCode">{code}</div>}</td>
-                        <td>{price ? Number(price).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "NOT FOUND"}</td>
-                        <td>{formatDiscountPercent(lookupDiscountRate(cashDiscountMap, code))}</td>
-                        <td>{formatDiscountPercent(lookupDiscountRate(valueDiscountMap, code))}</td>
+                        <td>
+                          {wholesale ? Number(wholesale).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "NOT FOUND"}
+                          {wholesale && orderQty > 0 && priced.rate !== wholesale ? (
+                            <div className="moduleCode">Net {Number(priced.rate).toLocaleString("en-US", { maximumFractionDigits: 2 })}</div>
+                          ) : null}
+                        </td>
+                        <td>{formatAppliedDiscount(cashDiscount, priced.applied.cash)}</td>
+                        <td>{formatAppliedDiscount(valueDiscount, priced.applied.value)}</td>
                         <td><div className="moduleQtyControl"><button type="button" onClick={() => decreaseOrderQty(code)}>−</button><input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} /><button type="button" onClick={() => increaseOrderQty(code)}>+</button></div></td>
-                        <td>{(price * orderQty).toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
+                        <td>{Number(priced.lineValue || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
                       </tr>
                     );
                   })}

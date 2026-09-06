@@ -1,7 +1,8 @@
 import { qtyFormat } from '../lib/format';
 import ExportableTable from '../../../components/ExportableTable';
+import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from '../../../lib/regionalPricing';
 
-export default function QuickOrder({ quickOrderSuggestions, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList }) {
+export default function QuickOrder({ quickOrderSuggestions, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = 'credit' }) {
   const quickOrderAllItems = [
     ...quickOrderSuggestions.newItems,
     ...quickOrderSuggestions.notBoughtRecently,
@@ -51,12 +52,25 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
                         <th>Category</th>
                         <th>History</th>
                         <th>Rate</th>
+                        <th>Cash Disc</th>
+                        <th>Value Disc</th>
                         <th>Order Qty</th>
                       </tr>
                     </thead>
                     <tbody>
                       {group.items.map((item) => {
                         const orderQty = Number(orderQuantities[item.item_code] || 0);
+                        const itemCode = String(item.item_code || '').trim().toUpperCase();
+                        const wholesale = Number(priceList[itemCode] || 0);
+                        const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
+                        const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+                        const priced = getPricedOrderLine({
+                          wholesaleRate: wholesale,
+                          quantity: orderQty,
+                          paymentType,
+                          cashDiscountRate: cashDiscount,
+                          valueDiscountRate: valueDiscount,
+                        });
                         return (
                           <tr key={`${group.key}-${item.item_code}`}>
                             <td>
@@ -86,8 +100,13 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
                               )}
                             </td>
                             <td className="auditQuickRate">
-                              {priceList[String(item.item_code).trim().toUpperCase()] ? Number(priceList[String(item.item_code).trim().toUpperCase()]).toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'NOT FOUND'}
+                              {wholesale ? Number(wholesale).toLocaleString('en-US', { maximumFractionDigits: 2 }) : 'NOT FOUND'}
+                              {wholesale && orderQty > 0 && priced.rate !== wholesale ? (
+                                <div>Net {Number(priced.rate).toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
+                              ) : null}
                             </td>
+                            <td>{formatAppliedDiscount(cashDiscount, priced.applied.cash)}</td>
+                            <td>{formatAppliedDiscount(valueDiscount, priced.applied.value)}</td>
                             <td>
                               <div className="auditQtyControl">
                                 <button type="button" className="auditQtyButton" onClick={() => decreaseOrderQty(item.item_code)}>−</button>

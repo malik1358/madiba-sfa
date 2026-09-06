@@ -1,12 +1,102 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isExcludedCategory, loadPricePayload, parsePricePayload, pickCatalogCategory } from '../app/lib/pricePayload.js';
+import { isBuildingMaterialItem, isExcludedCategory, loadPricePayload, parsePricePayload, pickCatalogCategory } from '../app/lib/pricePayload.js';
 
 test('isExcludedCategory hides building material from order catalogs', () => {
   assert.equal(isExcludedCategory('Building Material'), true);
   assert.equal(isExcludedCategory('Building Materials'), true);
   assert.equal(isExcludedCategory('Body Care'), false);
+});
+
+test('isBuildingMaterialItem hides unclassified boards, ladders, and fans', () => {
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A003622',
+    item_name: 'A003622_GRADE-E2 5 MM X 1220MM X 2440MM',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A003623',
+    item_name: 'A003623_MDF 7.5 MM X 1220MM X 2440MM X',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: '16',
+    item_name: '16-Inch portable Ventilation Fan',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A',
+    item_name: 'A Type Ladder - 5.2 Mtr',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A005425',
+    item_name: 'PHOTOCOPY PAPER A4 80GSM',
+    category: 'Stationery',
+  }), false);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'LP00190',
+    item_name: 'Cement Board 1.22X2.44MtrX12MM',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'LP00268',
+    item_name: 'Steel Mesh 1X2MtrX3MM',
+    category: 'Unclassified',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004429',
+    item_name: 'A004429_MADIBA LVL Board 38*225*4000mm Fushi Woods China',
+    category: 'Missing Category',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004456',
+    item_name: 'A004456_Welding Rod 6013 2.5 mm x 350 L 21gm per stick, Per Carton 16kg.',
+    category: 'Missing Category',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004458',
+    item_name: 'A004458- WING NUT 160 GRAM',
+    category: 'Missing Category',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004460',
+    item_name: 'A004460- JUTE HESSIAN CLOTH FOR CURING, 38INCH X 5OZ',
+    category: 'Missing Category',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004601',
+    item_name: 'A004601_MADIBA 6 x 16 MM MTR TIE ROD, 8 KG EACH PCS X 8 KG PCS',
+    category: 'Missing Category',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004999',
+    item_name: 'Unmapped hardware leftover',
+    category: 'Missing Category',
+  }), true);
+});
+
+test('parsePricePayload drops building material rows from the order catalog', () => {
+  const { priceMap, sheetItems } = parsePricePayload([
+    {
+      item_code: 'A003623',
+      item_name: 'A003623_MDF 7.5 MM X 1220MM X 2440MM X',
+      category: 'Unclassified',
+      rate: 29,
+    },
+    {
+      item_code: 'A005425',
+      item_name: 'PHOTOCOPY PAPER A4 80GSM',
+      category: 'Stationery',
+      rate: 76,
+    },
+  ]);
+
+  assert.equal(priceMap.A003623, undefined);
+  assert.equal(priceMap.A005425, 76);
+  assert.equal(sheetItems.some((item) => item.item_code === 'A003623'), false);
+  assert.equal(sheetItems.some((item) => item.item_code === 'A005425'), true);
 });
 
 test('pickCatalogCategory prefers live sales or sheet over stale Cosmetics', () => {

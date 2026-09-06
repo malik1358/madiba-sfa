@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -10,12 +9,15 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
-import { isExcludedCategory, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
+import { isBuildingMaterialItem, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
 import {
   buildEffectivePriceList,
+  formatDiscountDetail,
   formatDiscountPercent,
+  formatMoneyAmount,
   getPricedOrderLine,
   lookupDiscountRate,
+  summarizePricedLines,
   normalizePaymentType,
   pricingRegionLabel,
   regionPriceMapFor,
@@ -27,7 +29,6 @@ import ExportableTable from "../../components/ExportableTable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
 import { qtyFormat } from "../customer-audit/lib/format";
-import { calculateGrandTotal } from "../customer-audit/lib/orderHelpers";
 import { useAnalytics } from "../customer-audit/hooks/useAnalytics";
 import { useQuickOrder } from "../customer-audit/hooks/useQuickOrder";
 import CustomerHeader from "../customer-audit/components/CustomerHeader";
@@ -35,7 +36,7 @@ import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance"
 import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
-import { buildOutstandingPdfBucketRows, resolveOutstandingBucketLabels, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { buildOutstandingPdfBucketRows, DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, sortBucketLabels, syncOutstandingCustomerFromInvoices, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
@@ -46,6 +47,7 @@ import { appendMonthlyPerformanceToPdf } from "../../lib/orderPdfMonthlyPerforma
 import { buildAnalytics } from "../customer-audit/lib/analytics";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
+import { isExcludedNewOrderCustomer } from "../../lib/buildingMaterialCustomerFilter";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -64,6 +66,71 @@ function formatMoney(value) {
 
 function formatReceivableMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function OrderTotalsPanel({ totals, actions, remark }) {
+  const cashLabel = totals.cashDiscountTotal > 0
+    ? formatMoneyAmount(totals.cashDiscountTotal)
+    : "None";
+  const valueLabel = totals.valueDiscountTotal > 0
+    ? formatMoneyAmount(totals.valueDiscountTotal)
+    : "None";
+
+  return (
+    <>
+      <div className="moduleOrderTotals">
+        <div>
+          <span>Before discount</span>
+          <strong>{formatMoneyAmount(totals.wholesaleTotal)}</strong>
+        </div>
+        <div>
+          <span>Cash discount</span>
+          <strong>{cashLabel}</strong>
+        </div>
+        <div>
+          <span>Value discount (SKU ≥ 5,000)</span>
+          <strong>{valueLabel}</strong>
+        </div>
+        <div className="moduleOrderTotalsExcl">
+          <span>Amount without VAT</span>
+          <strong>{formatMoneyAmount(totals.amountExclVat)}</strong>
+        </div>
+        <div>
+          <span>VAT 15%</span>
+          <strong>{formatMoneyAmount(totals.vatAmount)}</strong>
+        </div>
+        <div className="moduleOrderTotalsIncl">
+          <span>Amount after VAT</span>
+          <strong>{formatMoneyAmount(totals.amountInclVat)}</strong>
+        </div>
+      </div>
+      {actions}
+      {remark}
+    </>
+  );
+}
+
+function PaymentTypeControl({ paymentType, onChange, pricingRegion }) {
+  return (
+    <div className="moduleFilterRow" style={{ marginTop: "12px" }}>
+      <label>
+        Payment Type
+        <select
+          className="moduleInput"
+          value={paymentType}
+          onChange={(event) => onChange(normalizePaymentType(event.target.value))}
+        >
+          <option value="credit">Credit</option>
+          <option value="cash">Cash</option>
+        </select>
+      </label>
+      <div className="moduleHint" style={{ alignSelf: "end", paddingBottom: "8px" }}>
+        {pricingRegionLabel(pricingRegion)} prices
+        {paymentType === "cash" ? " • cash discount applied when published" : ""}
+        {" • value discount applies when a SKU exceeds 5,000 SAR"}
+      </div>
+    </div>
+  );
 }
 
 async function waitForAccessToken(supabase, attempts = 8, delayMs = 250) {
@@ -231,7 +298,7 @@ async function fetchItemCategoryLookup(supabase, scope) {
 }
 
 async function fetchVisibleCustomers(token) {
-  const response = await fetch("/api/customers/visible", {
+  const response = await fetch("/api/customers/visible?excludeBuildingMaterial=1", {
     cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -505,7 +572,6 @@ function parsePricePayload(payload) {
 }
 
 export default function NewOrderPage() {
-  const router = useRouter();
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
@@ -533,7 +599,6 @@ export default function NewOrderPage() {
   const [cashDiscountMap, setCashDiscountMap] = useState({});
   const [valueDiscountMap, setValueDiscountMap] = useState({});
   const [paymentType, setPaymentType] = useState("credit");
-  const [previousDrafts, setPreviousDrafts] = useState([]);
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [outstandingUploadFile, setOutstandingUploadFile] = useState(null);
@@ -577,19 +642,26 @@ export default function NewOrderPage() {
 
   const mergedItemsMaster = useMemo(() => {
     const itemMap = new Map();
+    const excludedCodes = new Set();
 
     (itemsMaster || []).forEach((item) => {
       const code = normalizeCode(item.item_code);
       if (!code) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
-
-      itemMap.set(code, {
+      const nextItem = {
         ...item,
         item_code: code,
         item_name: String(historyFallback.item_name || item.item_name || code).trim(),
         category: pickCatalogCategory(historyFallback.category, item.category) || "Unclassified",
         source: "ITEM_MASTER",
-      });
+      };
+
+      if (isBuildingMaterialItem(nextItem)) {
+        excludedCodes.add(code);
+        return;
+      }
+
+      itemMap.set(code, nextItem);
     });
 
     (priceSheetItems || []).forEach((sheetItem) => {
@@ -607,13 +679,19 @@ export default function NewOrderPage() {
           ? historyName
           : (hasCurrentItemName(sheetName, code) ? sheetName : code);
         const nextCategory = pickCatalogCategory(sheetCategory, historyCategory) || MISSING_CATEGORY;
-
-        itemMap.set(code, {
+        const nextItem = {
           item_code: code,
           item_name: nextName,
           category: nextCategory,
           source: "PRICE_SHEET_ONLY",
-        });
+        };
+
+        if (isBuildingMaterialItem(nextItem)) {
+          excludedCodes.add(code);
+          return;
+        }
+
+        itemMap.set(code, nextItem);
         return;
       }
 
@@ -630,18 +708,25 @@ export default function NewOrderPage() {
           ? sheetName
           : (hasCurrentItemName(existingName, code) ? existingName : code));
       const nextCategory = pickCatalogCategory(sheetCategory, historyFallback.category, existingCategory) || "Unclassified";
-
-      itemMap.set(code, {
+      const nextItem = {
         ...existing,
         item_name: nextName,
         category: nextCategory,
         source: existing.source === "PRICE_SHEET_ONLY" || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : existing.source,
-      });
+      };
+
+      if (isBuildingMaterialItem(nextItem)) {
+        excludedCodes.add(code);
+        itemMap.delete(code);
+        return;
+      }
+
+      itemMap.set(code, nextItem);
     });
 
     Object.keys(priceList || {}).forEach((rawCode) => {
       const code = normalizeCode(rawCode);
-      if (!code || itemMap.has(code)) return;
+      if (!code || itemMap.has(code) || excludedCodes.has(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
 
       const fallbackName = hasCurrentItemName(historyFallback.item_name, code)
@@ -658,7 +743,7 @@ export default function NewOrderPage() {
     });
 
     return Array.from(itemMap.values())
-      .filter((item) => !isDoNotUseItem(item.item_name) && !isExcludedCategory(item.category))
+      .filter((item) => !isDoNotUseItem(item.item_name) && !isBuildingMaterialItem(item))
       .sort((a, b) => String(a.item_name || "").localeCompare(String(b.item_name || "")));
   }, [historyCategoryLookup, itemsMaster, priceSheetItems, priceList]);
 
@@ -713,6 +798,7 @@ export default function NewOrderPage() {
   const filteredCustomers = useMemo(() => {
     const q = customerSearch.trim().toLowerCase();
     return customers.filter((customer) => {
+      if (isExcludedNewOrderCustomer(customer)) return false;
       if (!q) return true;
       return (
         String(customer.customer_code || "").toLowerCase().includes(q) ||
@@ -765,13 +851,14 @@ export default function NewOrderPage() {
       .sort((a, b) => a.category.localeCompare(b.category));
   }, [filteredItems]);
 
-  const visibleOutstandingBuckets = useMemo(
-    () => visibleOutstandingBucketLabels(
-      resolveOutstandingBucketLabels(outstandingInfo.bucketLabels, outstandingInfo.customer?.buckets),
+  const visibleOutstandingBuckets = useMemo(() => {
+    const resolved = resolveOutstandingBucketLabels(
+      outstandingInfo.bucketLabels,
       outstandingInfo.customer?.buckets
-    ),
-    [outstandingInfo.bucketLabels, outstandingInfo.customer]
-  );
+    );
+    const baseLabels = resolved.length ? resolved : DEFAULT_OUTSTANDING_BUCKET_LABELS;
+    return visibleOutstandingBucketLabels(baseLabels, outstandingInfo.customer?.buckets);
+  }, [outstandingInfo.bucketLabels, outstandingInfo.customer]);
 
   const canUploadOutstanding = useMemo(() => {
     const role = String(accessScope?.role || "").toLowerCase();
@@ -850,10 +937,40 @@ export default function NewOrderPage() {
     [cashDiscountMap, orderQuantities, paymentType, regionPriceList, valueDiscountMap]
   );
 
-  const orderGrandTotal = useMemo(
-    () => calculateGrandTotal(orderItems, displayPriceList),
-    [displayPriceList, orderItems]
+  const pricedOrderLines = useMemo(
+    () => (orderItems || []).map((item) => {
+      const quantity = Number(item.order_quantity || 0);
+      const wholesaleRate = Number(getPrice(regionPriceList, item.item_code) || 0);
+      const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
+      const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+      const priced = getPricedOrderLine({
+        wholesaleRate,
+        quantity,
+        paymentType,
+        cashDiscountRate: cashDiscount,
+        valueDiscountRate: valueDiscount,
+      });
+      return {
+        ...priced,
+        item_code: item.item_code,
+        item_name: item.item_name,
+        category: item.category || "Unclassified",
+        cashDiscount,
+        valueDiscount,
+        cashApplied: priced.applied.cash,
+        valueApplied: priced.applied.value,
+        lineTotal: priced.lineValue,
+      };
+    }),
+    [cashDiscountMap, orderItems, paymentType, regionPriceList, valueDiscountMap]
   );
+
+  const orderTotals = useMemo(
+    () => summarizePricedLines(pricedOrderLines),
+    [pricedOrderLines]
+  );
+
+  const orderGrandTotal = orderTotals.amountExclVat;
 
   const creditApproval = useMemo(
     () => evaluateCreditApproval({
@@ -870,33 +987,8 @@ export default function NewOrderPage() {
       if (!selectedCustomer || orderItems.length === 0) return null;
 
       const savedAtIso = new Date().toISOString();
-      const lines = orderItems.map((item) => {
-        const quantity = Number(item.order_quantity || 0);
-        const wholesaleRate = Number(getPrice(regionPriceList, item.item_code) || 0);
-        const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
-        const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
-        const priced = getPricedOrderLine({
-          wholesaleRate,
-          quantity,
-          paymentType,
-          cashDiscountRate: cashDiscount,
-          valueDiscountRate: valueDiscount,
-        });
-
-        return {
-          item_code: item.item_code,
-          item_name: item.item_name,
-          category: item.category || "Unclassified",
-          quantity,
-          wholesaleRate,
-          cashDiscount,
-          valueDiscount,
-          cashApplied: priced.applied.cash,
-          valueApplied: priced.applied.value,
-          rate: priced.rate,
-          lineTotal: priced.lineValue,
-        };
-      });
+      const lines = pricedOrderLines;
+      const totals = summarizePricedLines(lines);
 
       return {
         orderId,
@@ -909,7 +1001,8 @@ export default function NewOrderPage() {
         pricingRegion,
         itemCount: orderSummary.itemCount,
         totalQuantity: orderSummary.totalQuantity,
-        grandTotal: calculateGrandTotal(orderItems, displayPriceList),
+        grandTotal: totals.amountExclVat,
+        totals,
         lines,
         history: orderHistory,
         creditApprovalRemark: creditApproval.remark,
@@ -927,10 +1020,7 @@ export default function NewOrderPage() {
       orderSummary.totalQuantity,
       outstandingInfo,
       creditApproval.remark,
-      displayPriceList,
-      cashDiscountMap,
-      valueDiscountMap,
-      regionPriceList,
+      pricedOrderLines,
       paymentType,
       pricingRegion,
       selectedCustomer,
@@ -953,27 +1043,29 @@ export default function NewOrderPage() {
         const marginTop = 38;
         const contentWidth = pageWidth - marginX * 2;
         const tableStartX = marginX;
-        const vatRate = 0.15;
-        const subtotal = Number(snapshot.grandTotal || 0);
-        const vatAmount = subtotal * vatRate;
-        const totalWithVat = subtotal + vatAmount;
+        const pdfTotals = snapshot.totals || summarizePricedLines(snapshot.lines || []);
+        const subtotal = Number(pdfTotals.amountExclVat || snapshot.grandTotal || 0);
+        const vatAmount = Number(pdfTotals.vatAmount || subtotal * 0.15);
+        const totalWithVat = Number(pdfTotals.amountInclVat || subtotal + vatAmount);
 
         const columns = [
-          { key: "item_code", label: "Item Code", width: 62, align: "left" },
-          { key: "item_name", label: "Item Name", width: 148, align: "left" },
-          { key: "quantity", label: "Qty", width: 36, align: "right" },
-          { key: "rate", label: "Rate", width: 54, align: "right" },
-          { key: "cashDiscount", label: "Cash Disc", width: 54, align: "right" },
-          { key: "valueDiscount", label: "Value Disc", width: 58, align: "right" },
-          { key: "lineTotal", label: "Line Total", width: 103, align: "right" },
+          { key: "item_code", label: "Code", width: 48, align: "left" },
+          { key: "item_name", label: "Item", width: 96, align: "left" },
+          { key: "quantity", label: "Qty", width: 28, align: "right" },
+          { key: "rate", label: "Rate", width: 42, align: "right" },
+          { key: "cashDiscount", label: "Cash Disc", width: 62, align: "right" },
+          { key: "valueDiscount", label: "Value Disc", width: 62, align: "right" },
+          { key: "exclVat", label: "Excl. VAT", width: 58, align: "right" },
+          { key: "vat", label: "VAT 15%", width: 50, align: "right" },
+          { key: "inclVat", label: "Incl. VAT", width: 69, align: "right" },
         ];
 
         const orderSummaryColumns = [
           { label: "Items", value: String(snapshot.itemCount), align: "left" },
           { label: "Total Qty", value: qtyFormat(snapshot.totalQuantity), align: "left" },
-          { label: "Subtotal", value: formatMoney(subtotal), align: "left" },
-          { label: "VAT 15%", value: formatMoney(vatAmount), align: "left" },
-          { label: "Total Incl. VAT", value: formatMoney(totalWithVat), align: "left" },
+          { label: "Without VAT", value: formatMoneyAmount(subtotal), align: "left" },
+          { label: "VAT 15%", value: formatMoneyAmount(vatAmount), align: "left" },
+          { label: "After VAT", value: formatMoneyAmount(totalWithVat), align: "left" },
         ];
 
         function drawCellText(text, x, y, width, align = "left") {
@@ -1062,10 +1154,12 @@ export default function NewOrderPage() {
             item_code: String(line.item_code || "-"),
             item_name: String(line.item_name || "-"),
             quantity: String(line.quantity),
-            rate: formatMoney(line.rate),
-            cashDiscount: formatDiscountPercent(line.cashDiscount),
-            valueDiscount: formatDiscountPercent(line.valueDiscount),
-            lineTotal: formatMoney(line.lineTotal),
+            rate: formatMoneyAmount(line.wholesaleRate || line.rate),
+            cashDiscount: formatDiscountDetail(line.cashDiscount, line.cashApplied, line.cashDiscountAmount),
+            valueDiscount: formatDiscountDetail(line.valueDiscount, line.valueApplied, line.valueDiscountAmount),
+            exclVat: formatMoneyAmount(line.lineValue || line.lineTotal),
+            vat: formatMoneyAmount(line.vatAmount),
+            inclVat: formatMoneyAmount(line.lineTotalInclVat),
           };
 
           const itemNameCol = columns.find((column) => column.key === "item_name");
@@ -1096,8 +1190,8 @@ export default function NewOrderPage() {
           y += rowHeight;
         });
 
-        const summaryBoxWidth = 220;
-        const summaryBoxHeight = 68;
+        const summaryBoxWidth = 260;
+        const summaryBoxHeight = 128;
         const summaryX = pageWidth - marginX - summaryBoxWidth;
         const bottomMargin = 52;
         let cursorY = y + 16;
@@ -1113,20 +1207,20 @@ export default function NewOrderPage() {
         let outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
         let outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
 
-        if (!outstandingCustomer && snapshot.customerCode) {
+        if (snapshot.customerCode) {
           try {
             const supabase = getSupabaseClient();
             const accessToken = supabase ? await waitForAccessToken(supabase) : "";
             if (accessToken) {
               const outstandingResponse = await fetch(
                 `${OUTSTANDING_API}?customerCode=${encodeURIComponent(snapshot.customerCode || "")}&customerName=${encodeURIComponent(snapshot.customerName || "")}`,
-                { headers: { Authorization: `Bearer ${accessToken}` } }
+                { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
               );
               const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
               if (outstandingResponse.ok && outstandingPayload.success) {
-                outstandingCustomer = outstandingPayload.customer || null;
-                outstandingBuckets = sortBucketLabels(outstandingPayload.bucketLabels || []);
-                outstandingInvoices = Array.isArray(outstandingPayload.customerInvoices) ? outstandingPayload.customerInvoices : [];
+                outstandingCustomer = outstandingPayload.customer || outstandingCustomer;
+                outstandingBuckets = sortBucketLabels(outstandingPayload.bucketLabels || outstandingBuckets);
+                outstandingInvoices = Array.isArray(outstandingPayload.customerInvoices) ? outstandingPayload.customerInvoices : outstandingInvoices;
               }
             }
           } catch {
@@ -1134,9 +1228,10 @@ export default function NewOrderPage() {
           }
         }
 
+        outstandingCustomer = syncOutstandingCustomerFromInvoices(outstandingCustomer, outstandingInvoices);
+
         function formatOutstandingValue(value, digits = 0, withCurrency = true) {
           const number = parseOutstandingNumber(value);
-          if (number === 0) return "";
           if (withCurrency) return formatReceivableMoney(number);
           return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
         }
@@ -1187,14 +1282,24 @@ export default function NewOrderPage() {
 
         doc.roundedRect(summaryX, summaryY, summaryBoxWidth, summaryBoxHeight, 4, 4);
         doc.setFont(undefined, "normal");
-        doc.text("Subtotal (Excl. VAT)", summaryX + 10, summaryY + 18);
-        doc.text(formatMoney(subtotal), summaryX + summaryBoxWidth - 10, summaryY + 18, { align: "right" });
-        doc.text("VAT @ 15%", summaryX + 10, summaryY + 34);
-        doc.text(formatMoney(vatAmount), summaryX + summaryBoxWidth - 10, summaryY + 34, { align: "right" });
+        doc.setFontSize(9);
+        const summaryRows = [
+          ["Before discount", formatMoneyAmount(pdfTotals.wholesaleTotal)],
+          ["Cash discount", pdfTotals.cashDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.cashDiscountTotal) : "None"],
+          ["Value discount", pdfTotals.valueDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.valueDiscountTotal) : "None"],
+          ["Amount without VAT", formatMoneyAmount(subtotal)],
+          ["VAT 15%", formatMoneyAmount(vatAmount)],
+        ];
+        summaryRows.forEach((row, index) => {
+          doc.text(row[0], summaryX + 10, summaryY + 16 + index * 16);
+          doc.text(row[1], summaryX + summaryBoxWidth - 10, summaryY + 16 + index * 16, { align: "right" });
+        });
         doc.setFont(undefined, "bold");
-        doc.text("Total (Incl. VAT)", summaryX + 10, summaryY + 54);
-        doc.text(formatMoney(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 54, { align: "right" });
+        doc.setFontSize(11);
+        doc.text("Amount after VAT", summaryX + 10, summaryY + 114);
+        doc.text(formatMoneyAmount(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 114, { align: "right" });
         doc.setFont(undefined, "normal");
+        doc.setFontSize(10);
 
         cursorY = Math.max(cursorY, summaryY + summaryBoxHeight) + 24;
 
@@ -1337,7 +1442,7 @@ export default function NewOrderPage() {
         const fileName = buildOrderPdfFileName({
           orderId: snapshot.orderId,
           customerCode: snapshot.customerCode,
-          savedAtIso: snapshot.savedAtIso,
+          savedAtIso: new Date().toISOString(),
         });
         const summaryText = buildOrderWhatsappSummary(snapshot, language);
 
@@ -1403,20 +1508,6 @@ export default function NewOrderPage() {
 
     const snapshot = buildOrderSnapshot(orderId, "Draft Saved");
     if (!snapshot) return;
-
-    setPreviousDrafts((current) => {
-      const next = current.filter((draft) => draft.id !== orderId);
-      return [
-        {
-          id: orderId,
-          customer_code: snapshot.customerCode,
-          customer_name: snapshot.customerName,
-          updated_at: snapshot.savedAtIso,
-          status: "DRAFT",
-        },
-        ...next,
-      ].slice(0, 25);
-    });
 
     const queued = String(orderId).startsWith("pending:");
     const savedMessage = queued
@@ -1620,38 +1711,28 @@ export default function NewOrderPage() {
           throw new Error("Please login again.");
         }
 
-        const scope = await fetchSalesScope();
+        const scope = await fetchSalesScope({ forceRefresh: true });
         setAccessScope(scope);
 
-        let draftsQuery = supabase
-          .from("sales_orders")
-          .select("id,customer_code,customer_name,updated_at,status")
-          .eq("status", "DRAFT")
-          .order("updated_at", { ascending: false });
-
-        if (!scope.hasAllAccess) {
-          draftsQuery = draftsQuery.in("created_by", scope.visibleUserIds);
-        }
-
-        const [loadedCustomers, itemsRes, draftsRes] = await Promise.all([
+        const [loadedCustomers, itemsRes] = await Promise.all([
           fetchVisibleCustomers(accessToken),
           supabase
             .from("items_master")
             .select("item_code,item_name,category")
             .order("item_name"),
-          draftsQuery,
         ]);
 
         if (itemsRes.error) throw itemsRes.error;
-        if (draftsRes.error) throw draftsRes.error;
 
-        const mergedCustomers = prefilledCustomer && !loadedCustomers.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
-          ? [prefilledCustomer, ...loadedCustomers]
-          : loadedCustomers;
+        const visibleCustomers = (loadedCustomers || []).filter((customer) => !isExcludedNewOrderCustomer(customer));
+        const allowPrefilled = Boolean(prefilledCustomer)
+          && (!isExcludedNewOrderCustomer(prefilledCustomer) || Boolean(editOrderId));
+        const mergedCustomers = allowPrefilled && !visibleCustomers.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
+          ? [prefilledCustomer, ...visibleCustomers]
+          : visibleCustomers;
 
         setCustomers(mergedCustomers);
-        setItemsMaster(itemsRes.data || []);
-        setPreviousDrafts(draftsRes.data || []);
+        setItemsMaster((itemsRes.data || []).filter((item) => !isBuildingMaterialItem(item)));
 
         fetchItemCategoryLookup(supabase, scope)
           .then((categories) => setHistoryCategoryLookup(categories || new Map()))
@@ -1678,14 +1759,15 @@ export default function NewOrderPage() {
 
     loadFoundation();
     loadPrices();
-  }, [prefilledCustomer]);
+  }, [editOrderId, prefilledCustomer]);
 
   useEffect(() => {
     if (!prefilledCustomer?.customer_code) return;
+    if (isExcludedNewOrderCustomer(prefilledCustomer) && !editOrderId) return;
 
     setSelectedCustomerCode(prefilledCustomer.customer_code);
     setMessage(`Prospect ${prefilledCustomer.customer_name} is ready for order creation.`);
-  }, [prefilledCustomer]);
+  }, [editOrderId, prefilledCustomer]);
 
   useEffect(() => {
     async function loadCustomerHistory() {
@@ -1826,7 +1908,7 @@ export default function NewOrderPage() {
 
           {selectedCustomer && outstandingLoading && <div className="moduleLoading">Loading outstanding details...</div>}
 
-          {selectedCustomer && !outstandingLoading && outstandingInfo.customer && (
+          {selectedCustomer && !outstandingLoading && (
             <>
               <ExportableTable filename="order-outstanding-buckets" sheetName="Outstanding" className="moduleTableWrap" style={{ marginTop: "10px" }}>
                 <table className="moduleTable">
@@ -1894,7 +1976,7 @@ export default function NewOrderPage() {
           )}
 
           {selectedCustomer && !outstandingLoading && !outstandingInfo.customer && (
-            <div className="moduleHint">No outstanding row found for this customer in latest upload.</div>
+            <div className="moduleHint">No outstanding row found for this customer in latest upload. Showing zeros.</div>
           )}
         </section>
 
@@ -1950,26 +2032,11 @@ export default function NewOrderPage() {
             </select>
           </div>
 
-          {selectedCustomer && (
-            <div className="moduleFilterRow" style={{ marginTop: "12px" }}>
-              <label>
-                Payment Type
-                <select
-                  className="moduleInput"
-                  value={paymentType}
-                  onChange={(event) => setPaymentType(normalizePaymentType(event.target.value))}
-                >
-                  <option value="credit">Credit</option>
-                  <option value="cash">Cash</option>
-                </select>
-              </label>
-              <div className="moduleHint" style={{ alignSelf: "end", paddingBottom: "8px" }}>
-                {pricingRegionLabel(pricingRegion)} prices
-                {paymentType === "cash" ? " • cash discount applied when published" : ""}
-                {" • value discount applies when a SKU exceeds 5,000 SAR"}
-              </div>
-            </div>
-          )}
+          <PaymentTypeControl
+            paymentType={paymentType}
+            onChange={setPaymentType}
+            pricingRegion={pricingRegion}
+          />
 
           {!selectedCustomer && (
             <div className="moduleHint">Select a customer to start building an order.</div>
@@ -1997,7 +2064,10 @@ export default function NewOrderPage() {
                   decreaseOrderQty={decreaseQty}
                   increaseOrderQty={increaseQty}
                   changeOrderQty={updateQty}
-                  priceList={displayPriceList}
+                  priceList={regionPriceList}
+                  cashDiscountMap={cashDiscountMap}
+                  valueDiscountMap={valueDiscountMap}
+                  paymentType={paymentType}
                 />
                 <QuickOrder
                   quickOrderSuggestions={quickOrderSuggestions}
@@ -2005,13 +2075,10 @@ export default function NewOrderPage() {
                   decreaseOrderQty={decreaseQty}
                   increaseOrderQty={increaseQty}
                   changeOrderQty={updateQty}
-                  priceList={displayPriceList}
-                />
-                <TransactionHistory
-                  transactions={transactions}
-                  showTransactions={showTransactions}
-                  setShowTransactions={setShowTransactions}
-                  analytics={analytics}
+                  priceList={regionPriceList}
+                  cashDiscountMap={cashDiscountMap}
+                  valueDiscountMap={valueDiscountMap}
+                  paymentType={paymentType}
                 />
 
                 {Array.isArray(orderHistory) && orderHistory.length > 0 && (
@@ -2122,9 +2189,16 @@ export default function NewOrderPage() {
                           {isExpanded &&
                             group.items.map((item) => {
                               const qty = Number(orderQuantities[item.item_code] || 0);
-                              const price = getPrice(displayPriceList, item.item_code);
+                              const wholesale = getPrice(regionPriceList, item.item_code);
                               const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
                               const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+                              const priced = getPricedOrderLine({
+                                wholesaleRate: wholesale,
+                                quantity: qty,
+                                paymentType,
+                                cashDiscountRate: cashDiscount,
+                                valueDiscountRate: valueDiscount,
+                              });
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
                               const hasDoNotUseBadge = isDoNotUseItem(item.item_name);
@@ -2145,9 +2219,14 @@ export default function NewOrderPage() {
                                       </div>
                                     )}
                                   </td>
-                                  <td>{price ? formatMoney(price) : "NOT FOUND"}</td>
-                                  <td>{formatDiscountPercent(cashDiscount)}</td>
-                                  <td>{formatDiscountPercent(valueDiscount)}</td>
+                                  <td>
+                                    {wholesale ? formatMoney(wholesale) : "NOT FOUND"}
+                                    {wholesale && qty > 0 && priced.rate !== wholesale ? (
+                                      <div className="moduleCode">Net {formatMoney(priced.rate)}</div>
+                                    ) : null}
+                                  </td>
+                                  <td>{formatDiscountDetail(cashDiscount, priced.applied.cash, priced.cashDiscountAmount)}</td>
+                                  <td>{formatDiscountDetail(valueDiscount, priced.applied.value, priced.valueDiscountAmount)}</td>
                                   <td>
                                     <div className="moduleQtyControl">
                                       <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
@@ -2161,7 +2240,7 @@ export default function NewOrderPage() {
                                       <button type="button" onClick={() => increaseQty(item.item_code)}>+</button>
                                     </div>
                                   </td>
-                                  <td>{formatMoney(price * qty)}</td>
+                                  <td>{formatMoney(priced.lineValue)}</td>
                                 </tr>
                               );
                             })}
@@ -2179,31 +2258,52 @@ export default function NewOrderPage() {
             </section>
 
             <section className="moduleSection">
-              <div className="moduleOrderBar">
-                <div>
-                  <span>Current Order</span>
-                  <strong>{formatMoney(orderGrandTotal)}</strong>
-                </div>
-                <div className="moduleOrderActions">
-                  <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>
-                    {savingOrder ? "Saving..." : draftOrderId ? "Update Draft" : "Save Draft"}
-                  </button>
-                  <button type="button" onClick={handleSubmitOrder} disabled={savingOrder || submittingOrder || downloadingPdf}>
-                    {submittingOrder ? "Submitting..." : "Submit Order"}
-                  </button>
-                </div>
-              </div>
-              <div
-                className="moduleHint"
-                style={{
-                  marginTop: "10px",
-                  fontWeight: 700,
-                  color: creditApproval.required ? "#9b1c1c" : undefined,
-                }}
-              >
-                {creditApproval.remark}
-              </div>
+              <PaymentTypeControl
+                paymentType={paymentType}
+                onChange={setPaymentType}
+                pricingRegion={pricingRegion}
+              />
+              <OrderTotalsPanel
+                totals={orderTotals}
+                actions={(
+                  <div className="moduleOrderBar">
+                    <div>
+                      <span>Current Order after VAT</span>
+                      <strong>{formatMoneyAmount(orderTotals.amountInclVat)}</strong>
+                    </div>
+                    <div className="moduleOrderActions">
+                      <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>
+                        {savingOrder ? "Saving..." : draftOrderId ? "Update Draft" : "Save Draft"}
+                      </button>
+                      <button type="button" onClick={handleSubmitOrder} disabled={savingOrder || submittingOrder || downloadingPdf}>
+                        {submittingOrder ? "Submitting..." : "Submit Order"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                remark={(
+                  <div
+                    className="moduleHint"
+                    style={{
+                      marginTop: "10px",
+                      fontWeight: 700,
+                      color: creditApproval.required ? "#9b1c1c" : undefined,
+                    }}
+                  >
+                    {creditApproval.remark}
+                  </div>
+                )}
+              />
             </section>
+
+            {!loadingCustomerHistory && analytics && (
+              <TransactionHistory
+                transactions={transactions}
+                showTransactions={showTransactions}
+                setShowTransactions={setShowTransactions}
+                analytics={analytics}
+              />
+            )}
 
             {lastSavedOrder && (
               <section className="moduleSection moduleReviewSection">
@@ -2226,8 +2326,12 @@ export default function NewOrderPage() {
                     <strong>{new Date(lastSavedOrder.savedAtIso).toLocaleString("en-GB")}</strong>
                   </div>
                   <div>
-                    <span>Total</span>
-                    <strong>{formatMoney(lastSavedOrder.grandTotal)}</strong>
+                    <span>Amount without VAT</span>
+                    <strong>{formatMoneyAmount(lastSavedOrder.totals?.amountExclVat ?? lastSavedOrder.grandTotal)}</strong>
+                  </div>
+                  <div>
+                    <span>Amount after VAT</span>
+                    <strong>{formatMoneyAmount(lastSavedOrder.totals?.amountInclVat ?? lastSavedOrder.grandTotal * 1.15)}</strong>
                   </div>
                   <div>
                     <span>Payment</span>
@@ -2238,6 +2342,8 @@ export default function NewOrderPage() {
                     <strong>{pricingRegionLabel(lastSavedOrder.pricingRegion)}</strong>
                   </div>
                 </div>
+
+                {lastSavedOrder.totals ? <OrderTotalsPanel totals={lastSavedOrder.totals} /> : null}
 
                 {lastSavedOrder.creditApprovalRemark ? (
                   <div
@@ -2262,7 +2368,9 @@ export default function NewOrderPage() {
                         <th>Rate</th>
                         <th>Cash Discount</th>
                         <th>Value Discount</th>
-                        <th>Line Total</th>
+                        <th>Without VAT</th>
+                        <th>VAT 15%</th>
+                        <th>After VAT</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2272,9 +2380,11 @@ export default function NewOrderPage() {
                           <td>{line.item_name}</td>
                           <td>{line.quantity}</td>
                           <td>{formatMoney(line.rate)}</td>
-                          <td>{formatDiscountPercent(line.cashDiscount)}</td>
-                          <td>{formatDiscountPercent(line.valueDiscount)}</td>
-                          <td>{formatMoney(line.lineTotal)}</td>
+                          <td>{formatDiscountDetail(line.cashDiscount, line.cashApplied, line.cashDiscountAmount)}</td>
+                          <td>{formatDiscountDetail(line.valueDiscount, line.valueApplied, line.valueDiscountAmount)}</td>
+                          <td>{formatMoneyAmount(line.lineValue || line.lineTotal)}</td>
+                          <td>{formatMoneyAmount(line.vatAmount)}</td>
+                          <td>{formatMoneyAmount(line.lineTotalInclVat)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2307,53 +2417,6 @@ export default function NewOrderPage() {
           </>
         )}
 
-        <section className="moduleSection">
-          <div className="moduleSectionHeader">
-            <h2>Previous Drafts</h2>
-          </div>
-          <ExportableTable filename="previous-drafts" sheetName="Drafts" className="moduleTableWrap">
-            <table className="moduleTable">
-              <thead>
-                <tr>
-                  <th>Draft ID</th>
-                  <th>Customer</th>
-                  <th>Updated</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {previousDrafts.map((draft) => (
-                  <tr key={draft.id}>
-                    <td>{draft.id}</td>
-                    <td>{draft.customer_name || draft.customer_code}</td>
-                    <td>{draft.updated_at ? new Date(draft.updated_at).toLocaleString("en-GB") : "-"}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="moduleInlineButton"
-                        onClick={() => {
-                          const params = new URLSearchParams();
-                          if (draft.id) params.set("order_id", String(draft.id));
-                          if (draft.customer_code) params.set("customer_code", String(draft.customer_code));
-                          if (draft.customer_name) params.set("customer_name", String(draft.customer_name));
-                          if (draft.salesman_code) params.set("salesman_code", String(draft.salesman_code));
-                          router.push(`/management/new-order?${params.toString()}`);
-                        }}
-                      >
-                        Open Draft
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {previousDrafts.length === 0 && (
-                  <tr>
-                    <td colSpan={4}>No draft orders found.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </ExportableTable>
-        </section>
       </div>
     </main>
     </MorningAttendanceGate>

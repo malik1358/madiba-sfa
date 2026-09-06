@@ -5,7 +5,7 @@ import {
   buildDayRouteSvg,
   buildGoogleRouteUrl,
   buildIdleBubbles,
-  buildNamedRouteStops,
+  buildWorkdayRouteStops,
   idleBubbleRadius,
   longestIdlePlace,
 } from "../lib/dayRouteMap";
@@ -22,14 +22,14 @@ export default function DayRouteMap({
   longestIdleTitle = "Longest idle",
   openPlaceLabel = "Open this place",
   openLongestIdleLabel = "Open longest idle in Google Maps",
-  stopsTitle = "Named stops and idle places",
+  stopsTitle = "Login, lunch, logout, and idle",
   idleBubblesTitle = "Unlogged idle circles",
   idleBubblesHint = "Bigger red circle = longer time with no visit, order, collection, or lunch logged. Open a circle to see that GPS place.",
 }) {
   const svg = buildDayRouteSvg(points, { idleGaps });
   const drivingUrl = buildGoogleRouteUrl(points);
   const longestIdle = longestIdlePlace(points, idleGaps);
-  const stops = buildNamedRouteStops(points, idleGaps);
+  const stops = buildWorkdayRouteStops(points, idleGaps);
   const idleBubbles = buildIdleBubbles(points, idleGaps);
   if (!svg) return null;
 

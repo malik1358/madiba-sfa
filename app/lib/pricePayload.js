@@ -33,13 +33,49 @@ function looksLikeItemName(value) {
   return text.length >= 3;
 }
 
-function isExcludedItemCode(value) {
+export function isExcludedItemCode(value) {
   return normalizeCode(value).startsWith("LP");
 }
 
 export function isExcludedCategory(value) {
   const compact = normalizeText(value).toLowerCase().replace(/[^a-z]/g, "");
   return ["buildingmaterial", "buildingmaterials", "buidingmaterial", "buidingmaterials"].includes(compact);
+}
+
+export function isMissingOrderCategory(value) {
+  const compact = normalizeText(value).toLowerCase().replace(/[^a-z]/g, "");
+  return compact === "missingcategory";
+}
+
+const BUILDING_MATERIAL_NAME_PATTERN = /(?:^|[^a-z0-9])(?:mdf|hdf|osb|hmr|lvl|grade[\s-]*e2|plywood|chipboard|particle\s*boards?|gypsum|plasterboards?|ventilation|ladders?|melamine|blockboards?|sandwich\s*panels?|rebar|concrete|steel\s*mesh|steel\s*bars?|angle\s*irons?|cement\s*boards?|tie\s*rods?|welding\s*rods?|wing\s*nuts?|hessian|jute|curing|mesh)(?:[^a-z0-9]|$)/i;
+const BUILDING_MATERIAL_SHEET_SIZE_PATTERN = /\b\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)?\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)(?:\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in))?\b/i;
+const BUILDING_MATERIAL_FAN_PATTERN = /(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b).{0,24}\bfans?\b|\bfans?\b.{0,24}(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b|\bventilation\b)/i;
+
+export function isBuildingMaterialName(value) {
+  const text = normalizeText(value);
+  if (!text) return false;
+
+  const compact = text.toLowerCase().replace(/[^a-z]/g, "");
+  if (compact.includes("buildingmaterial") || compact.includes("buidingmaterial")) return true;
+  if (/مواد\s*ال?بناء/.test(text)) return true;
+  if (BUILDING_MATERIAL_NAME_PATTERN.test(text)) return true;
+  if (/\bcement\b/i.test(text)) return true;
+  if (BUILDING_MATERIAL_FAN_PATTERN.test(text)) return true;
+  if (/\b1220\s*mm\b/i.test(text) && /\b2440\s*mm\b/i.test(text)) return true;
+  return BUILDING_MATERIAL_SHEET_SIZE_PATTERN.test(text);
+}
+
+export function isBuildingMaterialItem(item) {
+  if (item == null) return false;
+  if (typeof item !== "object") {
+    return isExcludedCategory(item) || isBuildingMaterialName(item) || isExcludedItemCode(item);
+  }
+
+  return isExcludedCategory(item.category)
+    || isMissingOrderCategory(item.category)
+    || isExcludedItemCode(item.item_code || item.code)
+    || isBuildingMaterialName(item.item_name)
+    || isBuildingMaterialName(item.name);
 }
 
 export function isStaleCatalogCategory(value) {
@@ -226,13 +262,39 @@ function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valu
 
   const resolvedRegions = withRegionFallbacks(aliasedRegions, applyPriceCodeAliases(priceMap));
   const resolvedPriceMap = resolvedRegions.riyadh;
+  const excludedCodes = new Set();
+  const keptSheetItems = [];
+
+  (Array.isArray(sheetItems) ? sheetItems : []).forEach((item) => {
+    const code = normalizeCode(item?.item_code);
+    if (isBuildingMaterialItem(item) || isExcludedItemCode(code)) {
+      if (code) excludedCodes.add(code);
+      return;
+    }
+    keptSheetItems.push(item);
+  });
+
+  function stripExcludedPrices(target) {
+    const next = { ...(target || {}) };
+    Object.keys(next).forEach((rawCode) => {
+      const code = normalizeCode(rawCode);
+      if (excludedCodes.has(code) || isExcludedItemCode(code)) {
+        delete next[rawCode];
+      }
+    });
+    return next;
+  }
 
   return {
-    priceMap: resolvedPriceMap,
-    regionPriceMaps: resolvedRegions,
-    cashDiscountMap: applyDiscountCodeAliases(cashDiscountMap),
-    valueDiscountMap: applyDiscountCodeAliases(valueDiscountMap),
-    sheetItems,
+    priceMap: stripExcludedPrices(resolvedPriceMap),
+    regionPriceMaps: {
+      riyadh: stripExcludedPrices(resolvedRegions.riyadh),
+      dammam: stripExcludedPrices(resolvedRegions.dammam),
+      jeddah: stripExcludedPrices(resolvedRegions.jeddah),
+    },
+    cashDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(cashDiscountMap)),
+    valueDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(valueDiscountMap)),
+    sheetItems: keptSheetItems,
   };
 }
 
@@ -356,7 +418,7 @@ export function parsePricePayload(payload) {
 
     const name = normalizeText(rawName);
     const category = normalizeText(rawCategory);
-    if (isExcludedCategory(category)) return;
+    if (isBuildingMaterialItem({ item_code: code, item_name: name, category })) return;
     const key = `${code}::${name}::${category}`;
     if (seen.has(key)) return;
 
@@ -532,7 +594,11 @@ export function parsePricePayload(payload) {
           const dammamRate = dammamIndex >= 0 ? sheetCell(row, dammamIndex) : "";
           const jeddahRate = jeddahIndex >= 0 ? sheetCell(row, jeddahIndex) : "";
 
-          upsertSheetItem(code, rawName || code, rawCategory || "Unclassified");
+          const itemName = rawName || code;
+          const itemCategory = rawCategory || "Unclassified";
+          if (isBuildingMaterialItem({ item_code: code, item_name: itemName, category: itemCategory })) return;
+
+          upsertSheetItem(code, itemName, itemCategory);
           addRate(code, riyadhRate || rawRate, "riyadh");
           addRate(code, dammamRate, "dammam");
           addRate(code, jeddahRate, "jeddah");
@@ -557,12 +623,14 @@ export function parsePricePayload(payload) {
       const valueDiscount = readAny(value, ["valueDiscount", "value_discount", "CL", "Sales Value > 5000 SAR"]);
 
       if (code) {
-        addRate(code, rate, "riyadh");
-        addRate(code, readAny(value, ["dammam", "CF"]), "dammam");
-        addRate(code, readAny(value, ["jeddah", "CJ"]), "jeddah");
-        addDiscount(cashDiscountMap, code, cashDiscount);
-        addDiscount(valueDiscountMap, code, valueDiscount);
-        upsertSheetItem(code, name, category);
+        if (!isBuildingMaterialItem({ item_code: code, item_name: name, category })) {
+          addRate(code, rate, "riyadh");
+          addRate(code, readAny(value, ["dammam", "CF"]), "dammam");
+          addRate(code, readAny(value, ["jeddah", "CJ"]), "jeddah");
+          addDiscount(cashDiscountMap, code, cashDiscount);
+          addDiscount(valueDiscountMap, code, valueDiscount);
+          upsertSheetItem(code, name, category);
+        }
       }
     }
 

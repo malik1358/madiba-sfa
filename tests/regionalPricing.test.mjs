@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 
 import {
   buildEffectivePriceList,
+  formatAppliedDiscount,
+  formatDiscountDetail,
   formatDiscountPercent,
   getPricedOrderLine,
   lookupDiscountRate,
   parseDiscountRate,
   resolveOrderPricingRegion,
+  summarizePricedLines,
 } from "../app/lib/regionalPricing.js";
 
 test("formatDiscountPercent and lookupDiscountRate show item scheme rates", () => {
@@ -43,8 +46,19 @@ test("cash discount applies only to cash orders", () => {
   assert.equal(cash.applied.cash, true);
 });
 
+test("formatAppliedDiscount marks the scheme only when it reduced the line", () => {
+  assert.equal(formatAppliedDiscount(0.04, true), "4% applied");
+  assert.equal(formatAppliedDiscount(0.04, false), "4%");
+  assert.equal(formatAppliedDiscount(0, false), "—");
+});
+
 test("value discount applies when SKU value exceeds 5000 SAR", () => {
   const below = getPricedOrderLine({
+    wholesaleRate: 100,
+    quantity: 49,
+    valueDiscountRate: 0.03,
+  });
+  const atThreshold = getPricedOrderLine({
     wholesaleRate: 100,
     quantity: 50,
     valueDiscountRate: 0.03,
@@ -57,6 +71,7 @@ test("value discount applies when SKU value exceeds 5000 SAR", () => {
 
   assert.equal(below.applied.value, false);
   assert.equal(below.rate, 100);
+  assert.equal(atThreshold.applied.value, true);
   assert.equal(above.applied.value, true);
   assert.equal(Number(above.rate.toFixed(2)), 97);
 });
@@ -75,6 +90,36 @@ test("cash and value discounts can stack", () => {
   assert.equal(Number(priced.rate.toFixed(4)), Number((114.33 * 0.97 * 0.98).toFixed(4)));
 });
 
+test("A004190 credit line over 5000 applies value only; cash stacks both", () => {
+  const credit = getPricedOrderLine({
+    wholesaleRate: 58,
+    quantity: 113,
+    paymentType: "credit",
+    cashDiscountRate: 0.04,
+    valueDiscountRate: 0.04,
+  });
+  const cash = getPricedOrderLine({
+    wholesaleRate: 58,
+    quantity: 113,
+    paymentType: "cash",
+    cashDiscountRate: 0.04,
+    valueDiscountRate: 0.04,
+  });
+
+  assert.equal(credit.applied.value, true);
+  assert.equal(credit.applied.cash, false);
+  assert.equal(Number(credit.rate.toFixed(2)), 55.68);
+  assert.equal(Number(credit.valueDiscountAmount.toFixed(2)), Number((58 * 113 * 0.04).toFixed(2)));
+  assert.equal(credit.cashDiscountAmount, 0);
+  const totals = summarizePricedLines([credit]);
+  assert.equal(Number(totals.amountExclVat.toFixed(2)), Number(credit.lineValue.toFixed(2)));
+  assert.equal(Number(totals.vatAmount.toFixed(2)), Number((credit.lineValue * 0.15).toFixed(2)));
+  assert.equal(formatDiscountDetail(0.04, true, 262.16), "4% applied · 262.16");
+  assert.equal(cash.applied.value, true);
+  assert.equal(cash.applied.cash, true);
+  assert.equal(Number(cash.rate.toFixed(4)), Number((58 * 0.96 * 0.96).toFixed(4)));
+});
+
 test("buildEffectivePriceList uses current quantity for value discount", () => {
   const prices = buildEffectivePriceList({
     wholesaleMap: { A006061: 114.33 },
@@ -87,12 +132,12 @@ test("buildEffectivePriceList uses current quantity for value discount", () => {
   assert.equal(Number(prices.A006061.toFixed(4)), Number((114.33 * 0.97 * 0.98).toFixed(4)));
 });
 
-test("resolveOrderPricingRegion prefers the customer salesman region", () => {
+test("resolveOrderPricingRegion prefers the logged-in user region", () => {
   assert.equal(
     resolveOrderPricingRegion({
-      currentUserRegion: "riyadh",
+      currentUserRegion: "dammam",
       customerSalesmanCode: "SM002",
-      pricingRegionBySalesmanCode: { SM002: "dammam" },
+      pricingRegionBySalesmanCode: { SM002: "riyadh" },
     }),
     "dammam"
   );

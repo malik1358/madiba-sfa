@@ -48,6 +48,41 @@ export function resolveSubordinateUserIds(authUsers, leaderProfile) {
   return subordinateIds;
 }
 
+export function findHeadProfile(metadata, profiles = [], seenIds = new Set()) {
+  const candidates = (profiles || []).filter((profile) => (
+    profile?.id
+    && !seenIds.has(profile.id)
+    && headSalesmanMetadataMatchesLeader(metadata, profile)
+  ));
+  if (!candidates.length) return null;
+
+  const headCode = normalizeCode(metadata?.head_salesman_code);
+  return candidates.find((profile) => normalizeCode(profile.salesman_code) === headCode)
+    || candidates[0];
+}
+
+export function resolveReportingChainFromAuth({
+  actorUserId,
+  profiles = [],
+  authUsers = [],
+} = {}) {
+  const authById = new Map((authUsers || []).map((entry) => [entry.id, entry]));
+  const chain = [];
+  const seen = new Set([String(actorUserId || "").trim()].filter(Boolean));
+  let currentAuth = authById.get(actorUserId);
+
+  while (currentAuth) {
+    const metadata = currentAuth.user_metadata || currentAuth.app_metadata || {};
+    const head = findHeadProfile(metadata, profiles, seen);
+    if (!head) break;
+    seen.add(head.id);
+    chain.push(head);
+    currentAuth = authById.get(head.id);
+  }
+
+  return chain;
+}
+
 export function resolvePeersUnderSameHeadUserIds(authUsers, headProfile) {
   const peerIds = new Set();
 
@@ -73,39 +108,18 @@ export async function resolveReportingChain(admin, actorUserId) {
   }
   if (profilesRes.error) throw profilesRes.error;
 
-  const profileByCode = new Map();
-  (profilesRes.data || []).forEach((profile) => {
-    const code = normalizeCode(profile.salesman_code);
-    if (code) profileByCode.set(code, profile);
-  });
-
-  const authById = new Map((usersRes.data?.users || []).map((entry) => [entry.id, entry]));
-  const chain = [];
-  const seen = new Set();
-
-  let currentAuth = authById.get(actorUserId);
-  while (currentAuth) {
-    const metadata = currentAuth.user_metadata || currentAuth.app_metadata || {};
-    const headCode = normalizeCode(metadata.head_salesman_code);
-    if (!headCode) break;
-
-    const headProfile = profileByCode.get(headCode);
-    if (!headProfile || seen.has(headProfile.id)) break;
-
-    seen.add(headProfile.id);
-    chain.push({
-      id: headProfile.id,
-      salesman_code: headProfile.salesman_code || "",
-      salesman_name: headProfile.salesman_name || "",
-      role: headProfile.role || "",
-      email: headProfile.email || "",
-      report_email: headProfile.report_email || "",
-    });
-
-    currentAuth = authById.get(headProfile.id);
-  }
-
-  return chain;
+  return resolveReportingChainFromAuth({
+    actorUserId,
+    profiles: profilesRes.data || [],
+    authUsers: usersRes.data?.users || [],
+  }).map((head) => ({
+    id: head.id,
+    salesman_code: head.salesman_code || "",
+    salesman_name: head.salesman_name || "",
+    role: head.role || "",
+    email: head.email || "",
+    report_email: head.report_email || "",
+  }));
 }
 
 export function customerSalesmanAssignmentMatchesScope(customerSalesmanCode, scope) {

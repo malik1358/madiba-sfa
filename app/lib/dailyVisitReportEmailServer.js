@@ -1,4 +1,5 @@
 import { buildUserVisitReportEmail, resolveUserReportEmail, resolveVisitReportRecipients } from "./dailyVisitReportEmail.js";
+import { resolveReportingChainFromAuth } from "./salesHierarchy.js";
 import {
   buildDailyVisitReport,
   loadProfilesForVisitReportEmails,
@@ -99,6 +100,22 @@ export function parseReportEmailOverrides(value) {
   return next;
 }
 
+export function resolveVisitReportChainEmails(chain = []) {
+  return (chain || [])
+    .map((boss) => resolveUserReportEmail({
+      reportEmail: boss?.report_email || boss?.reportEmail,
+      email: boss?.email,
+    }))
+    .filter(Boolean);
+}
+
+async function loadAuthUsersForReportingChain(admin) {
+  if (typeof admin?.auth?.admin?.listUsers !== "function") return [];
+  const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (usersRes.error) throw usersRes.error;
+  return usersRes.data?.users || [];
+}
+
 async function persistReportEmails(admin, reportEmails) {
   if (typeof admin?.from !== "function") return;
   const entries = Object.entries(reportEmails || {});
@@ -120,6 +137,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   send = sendEmail,
   loadReport = buildDailyVisitReport,
   loadProfiles = loadProfilesForVisitReportEmails,
+  loadAuthUsers = loadAuthUsersForReportingChain,
   loadSummary = loadCollectionDaySummaryForUser,
   loadKpis = loadPerformanceSnapshotsForSalesmen,
 } = {}) {
@@ -154,9 +172,10 @@ export async function runDailyVisitReportEmailCycle(admin, {
   const managerEmails = parseEmailList(env.DAILY_VISIT_REPORT_TO);
   const sendToUser = envFlagEnabled(env.DAILY_VISIT_REPORT_SEND_TO_USERS, true);
 
-  const [report, profiles] = await Promise.all([
+  const [report, profiles, authUsers] = await Promise.all([
     loadReport(admin, { date: reportDate }),
     loadProfiles(admin),
+    loadAuthUsers(admin),
   ]);
 
   const reportByUserId = new Map((report.users || []).map((user) => [user.userId, user]));
@@ -237,10 +256,16 @@ export async function runDailyVisitReportEmailCycle(admin, {
       userReport = { ...userReport, daySummary: summaryPayload.daySummary };
     }
 
+    const chainEmails = resolveVisitReportChainEmails(resolveReportingChainFromAuth({
+      actorUserId: user.userId,
+      profiles,
+      authUsers,
+    }));
     const { to } = resolveVisitReportRecipients({
       reportEmail: reportEmailOverrides[user.userId] || profile.report_email,
       userEmail: profile.email || userReport.email,
       managerEmails,
+      chainEmails,
       sendToUser,
     });
 

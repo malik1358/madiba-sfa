@@ -6,7 +6,6 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
-import DaySummaryBox from "../../components/DaySummaryBox";
 import DayRouteMap from "../../components/DayRouteMap";
 import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -27,6 +26,7 @@ import { addKsaCalendarDays, getKsaDateString, getKsaWeekdayIndexForDateString }
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { visitReportRowClassName, VISIT_REPORT_ROW_LEGEND } from "../../lib/visitReportRowColors";
+import { entryDisplayAmount, formatEntryCoordinates, formatSplitMoney } from "../../lib/dailyVisitReportStats";
 
 const TEXT = {
   title: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومي" },
@@ -74,8 +74,6 @@ const TEXT = {
   routeTotal: { en: "Route total", ar: "إجمالي المسار" },
   autoClosed: { en: "Auto-closed", ar: "إغلاق تلقائي" },
   platform: { en: "Platform", ar: "المنصة" },
-  daySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
-  userDaySummaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
   dayRoute: { en: "Day route", ar: "مسار اليوم" },
   openRouteMap: { en: "Driving route (no names)", ar: "مسار القيادة (بدون أسماء)" },
   mapsHint: {
@@ -85,7 +83,16 @@ const TEXT = {
   longestIdleTitle: { en: "Longest idle", ar: "أطول توقف" },
   openThisPlace: { en: "Open this place", ar: "فتح هذا المكان" },
   openLongestIdle: { en: "Open longest idle in Google Maps", ar: "فتح أطول توقف في خرائط جوجل" },
-  routeStops: { en: "Named stops and idle places", ar: "المحطات المسماة وأماكن التوقف" },
+  routeStops: { en: "Login, lunch, logout, and idle", ar: "الدخول والغداء والخروج والتوقف" },
+  visitNumber: { en: "Visit #", ar: "رقم الزيارة" },
+  coordinates: { en: "Coordinates", ar: "الإحداثيات" },
+  daySplitTitle: { en: "Day split", ar: "تفصيل اليوم" },
+  visitWithoutOrder: { en: "Visit without order", ar: "زيارة بدون طلب" },
+  newCustomerOrders: { en: "New-customer orders", ar: "طلبات عملاء جدد" },
+  repeatCustomerOrders: { en: "Repeat-customer orders", ar: "طلبات عملاء متكررين" },
+  collectionsSplit: { en: "Collections", ar: "تحصيلات" },
+  splitCount: { en: "Count", ar: "العدد" },
+  splitValue: { en: "Value", ar: "القيمة" },
   idleBubblesTitle: { en: "Unlogged idle circles", ar: "دوائر التوقف غير المسجل" },
   idleBubblesHint: {
     en: "Bigger red circle = longer time with no visit, order, collection, or lunch logged.",
@@ -97,8 +104,8 @@ const TEXT = {
   emailUsers: { en: "Users to email", ar: "المستخدمون للإرسال" },
   reportEmail: { en: "Report email", ar: "بريد التقرير" },
   reportEmailHint: {
-    en: "Visit report mail is sent to this address. Login usernames are not used.",
-    ar: "يُرسل بريد تقرير الزيارة إلى هذا العنوان. لا يُستخدم اسم الدخول.",
+    en: "Visit report mail is sent to this address and to every head above the user. Login usernames are not used.",
+    ar: "يُرسل بريد تقرير الزيارة إلى هذا العنوان وإلى كل الرؤساء فوق المستخدم. لا يُستخدم اسم الدخول.",
   },
   selectAllUsers: { en: "Select all users", ar: "تحديد كل المستخدمين" },
   sendEmail: { en: "Send selected", ar: "إرسال المحددين" },
@@ -610,12 +617,6 @@ export default function DailyVisitReportPage() {
 
           {!loading && report && (
             <>
-              <DaySummaryBox
-                summary={report.daySummary}
-                language={language}
-                title={t("daySummaryTitle")}
-              />
-
               <div className="moduleMetricGrid">
                 <section className="moduleMetricCard">
                   <span>{t("totalEntries")}</span>
@@ -673,12 +674,38 @@ export default function DailyVisitReportPage() {
                     </span>
                   </div>
 
-                  {displayUsers.length > 1 && entryUser.daySummary ? (
-                    <DaySummaryBox
-                      summary={entryUser.daySummary}
-                      language={language}
-                      title={t("userDaySummaryTitle")}
-                    />
+                  {entryUser.activitySplit ? (
+                    <table className="moduleTable visitDaySplitTable">
+                      <thead>
+                        <tr>
+                          <th>{t("daySplitTitle")}</th>
+                          <th>{t("splitCount")}</th>
+                          <th>{t("splitValue")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>{t("visitWithoutOrder")}</td>
+                          <td>{entryUser.activitySplit.visitWithoutOrderCount}</td>
+                          <td>-</td>
+                        </tr>
+                        <tr>
+                          <td>{t("newCustomerOrders")}</td>
+                          <td>{entryUser.activitySplit.newCustomerOrderCount}</td>
+                          <td>{formatSplitMoney(entryUser.activitySplit.newCustomerOrderValue)} SAR</td>
+                        </tr>
+                        <tr>
+                          <td>{t("repeatCustomerOrders")}</td>
+                          <td>{entryUser.activitySplit.repeatCustomerOrderCount}</td>
+                          <td>{formatSplitMoney(entryUser.activitySplit.repeatCustomerOrderValue)} SAR</td>
+                        </tr>
+                        <tr>
+                          <td>{t("collectionsSplit")}</td>
+                          <td>{entryUser.activitySplit.collectionCount}</td>
+                          <td>{formatSplitMoney(entryUser.activitySplit.collectionValue)} SAR</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   ) : null}
 
                   <DayRouteMap
@@ -710,12 +737,14 @@ export default function DailyVisitReportPage() {
                       <thead>
                         <tr>
                           <th>{t("sequence")}</th>
+                          <th>{t("visitNumber")}</th>
                           <th>{t("time")}</th>
                           <th>{t("userName")}</th>
                           <th>{t("customer")}</th>
                           <th>{t("transaction")}</th>
                           <th>{t("distanceFromCustomer")}</th>
                           <th>{t("distanceFromPrevious")}</th>
+                          <th>{t("coordinates")}</th>
                           <th>{t("area")}</th>
                           <th>{t("street")}</th>
                           <th>{t("speed")}</th>
@@ -728,6 +757,7 @@ export default function DailyVisitReportPage() {
                         {(entryUser.entries || []).map((entry, entryIndex, entries) => (
                           <tr key={entry.id} className={visitReportRowClassName(entry, entryUser.idleGaps)}>
                             <td>{entry.visitSequence}</td>
+                            <td>{entry.onSiteVisitNumber || "-"}</td>
                             <td>{formatTime(entry.savedAt)}</td>
                             <td>{entry.userName || entryUser.userName}</td>
                             <td>
@@ -742,9 +772,9 @@ export default function DailyVisitReportPage() {
                             </td>
                             <td>
                               {entry.transactionLabel}
-                              {Number(entry.amountReceived) > 0 ? (
+                              {entryDisplayAmount(entry) > 0 ? (
                                 <div className="moduleCode">
-                                  {Number(entry.amountReceived).toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR
+                                  {entryDisplayAmount(entry).toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR
                                 </div>
                               ) : null}
                               {entry.logoutAutoClosed ? (
@@ -766,6 +796,7 @@ export default function DailyVisitReportPage() {
                                 ? "-"
                                 : `${formatNumber(entry.distanceFromPreviousKm)} km`}
                             </td>
+                            <td>{formatEntryCoordinates(entry)}</td>
                             <td>{entry.area || "-"}</td>
                             <td>{entry.street || "-"}</td>
                             <td>

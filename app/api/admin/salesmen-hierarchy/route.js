@@ -695,7 +695,7 @@ export async function POST(request) {
       return NextResponse.json({
         success: true,
         message: reportEmail
-          ? `Daily visit reports for ${target.salesman_name || target.salesman_code || salesmanId} will go to ${reportEmail}.`
+          ? `Daily visit reports for ${target.salesman_name || target.salesman_code || salesmanId} will go to ${reportEmail}, plus every head above them.`
           : `Cleared the report email for ${target.salesman_name || target.salesman_code || salesmanId}.`,
         reportEmail,
       });

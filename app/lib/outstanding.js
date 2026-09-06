@@ -507,20 +507,50 @@ export function buildCollectionOutstandingBucketsFromInvoices(invoices, todayIso
   return outstanding;
 }
 
+export function collectionFieldsToOutstandingBuckets(fields) {
+  return {
+    "0-30": toNumber(fields?.outstanding_0_30),
+    "31-60": toNumber(fields?.outstanding_30_60),
+    "61-90": toNumber(fields?.outstanding_61_90),
+    "91-120": toNumber(fields?.outstanding_91_120),
+    ">120": toNumber(fields?.outstanding_above_120),
+  };
+}
+
+export function syncOutstandingCustomerFromInvoices(customer, invoices, todayIso = new Date().toISOString()) {
+  const usableInvoices = (invoices || []).filter((invoice) => toNumber(invoice?.pending_amount) > 0);
+  if (usableInvoices.length === 0) return customer || null;
+
+  const buckets = collectionFieldsToOutstandingBuckets(
+    buildCollectionOutstandingBucketsFromInvoices(usableInvoices, todayIso),
+  );
+  const totalOutstanding = Object.values(buckets).reduce((sum, value) => sum + toNumber(value), 0);
+  const first = usableInvoices[0] || {};
+
+  return {
+    ...(customer || {}),
+    customer_code: customer?.customer_code || first.customer_code || "",
+    customer_name: customer?.customer_name || first.customer_name || "",
+    buckets,
+    open_invoices: usableInvoices.length,
+    total_outstanding: totalOutstanding,
+  };
+}
+
 export function resolveCollectionOutstandingBuckets({
   rowBuckets,
   invoices,
   todayIso = new Date().toISOString(),
 }) {
-  const hasRowBuckets = Object.values(rowBuckets || {}).some((value) => toNumber(value) > 0);
-  if (hasRowBuckets) {
-    return {
-      outstanding_cash: 0,
-      ...mapOutstandingBucketsToCollectionFields(rowBuckets),
-    };
+  const usableInvoices = (invoices || []).filter((invoice) => toNumber(invoice?.pending_amount) > 0);
+  if (usableInvoices.length > 0) {
+    return buildCollectionOutstandingBucketsFromInvoices(usableInvoices, todayIso);
   }
 
-  return buildCollectionOutstandingBucketsFromInvoices(invoices, todayIso);
+  return {
+    outstanding_cash: 0,
+    ...mapOutstandingBucketsToCollectionFields(rowBuckets),
+  };
 }
 
 export function resolveOverdueDaysFromDueDate(invoice, todayIso = new Date().toISOString()) {
@@ -955,8 +985,14 @@ export function selectPreferredOutstandingParses(parsedBySheetName) {
   const pendingBills = entries.filter((entry) => (
     normalizeOutstandingHeader(entry.sheetName).includes("pending bills")
   ));
-  const chosen = pendingBills.length ? pendingBills : entries;
-  return chosen.map((entry) => entry.parsed);
+  if (pendingBills.length) return pendingBills.map((entry) => entry.parsed);
+
+  const billsReceivable = entries.filter((entry) => (
+    normalizeOutstandingHeader(entry.sheetName).includes("bills receivable")
+  ));
+  if (billsReceivable.length) return billsReceivable.map((entry) => entry.parsed);
+
+  return entries.map((entry) => entry.parsed);
 }
 
 export function combineOutstandingHeaderRows(rows, rowIndex) {
@@ -1133,22 +1169,35 @@ export function resolveOutstandingBucketLabels(labels, bucketsOrRows) {
   return sortBucketLabels(Object.keys(bucketsOrRows || {}));
 }
 
-export function buildOutstandingPdfBucketRows(customer, labels = []) {
-  if (!customer) return [];
+export const DEFAULT_OUTSTANDING_BUCKET_LABELS = ["0-30", "31-60", "61-90", "91-120", ">120"];
 
-  const displayLabels = visibleOutstandingBucketLabels(
-    resolveOutstandingBucketLabels(labels, customer.buckets),
-    customer.buckets
-  );
+export function emptyOutstandingCustomer(overrides = {}) {
+  return {
+    customer_code: "",
+    customer_name: "",
+    buckets: {},
+    open_invoices: 0,
+    total_outstanding: 0,
+    ...overrides,
+  };
+}
+
+export function buildOutstandingPdfBucketRows(customer, labels = []) {
+  // Always render a zero table when the customer has no outstanding row so PDFs
+  // and screens can confirm clearance instead of hiding the section.
+  const safeCustomer = customer || emptyOutstandingCustomer();
+  const resolvedLabels = resolveOutstandingBucketLabels(labels, safeCustomer.buckets);
+  const baseLabels = resolvedLabels.length ? resolvedLabels : DEFAULT_OUTSTANDING_BUCKET_LABELS;
+  const displayLabels = visibleOutstandingBucketLabels(baseLabels, safeCustomer.buckets);
 
   return [
     ...displayLabels.map((label) => ({
       label: `${label} days`,
-      amount: toNumber(customer.buckets?.[label]),
+      amount: toNumber(safeCustomer.buckets?.[label]),
       kind: "bucket",
     })),
-    { label: "Open invoices", amount: toNumber(customer.open_invoices), kind: "count" },
-    { label: "Total outstanding", amount: toNumber(customer.total_outstanding), kind: "total" },
+    { label: "Open invoices", amount: toNumber(safeCustomer.open_invoices), kind: "count" },
+    { label: "Total outstanding", amount: toNumber(safeCustomer.total_outstanding), kind: "total" },
   ];
 }
 
@@ -1160,7 +1209,10 @@ export function visibleOutstandingBucketLabels(labels, buckets) {
     if (toNumber(buckets?.[label]) !== 0) lastNonZeroIndex = index;
   });
 
-  return lastNonZeroIndex < 0 ? [] : sortedLabels.slice(0, lastNonZeroIndex + 1);
+  // All zeros: keep every label visible so clearance is explicit.
+  if (lastNonZeroIndex < 0) return sortedLabels;
+
+  return sortedLabels.slice(0, lastNonZeroIndex + 1);
 }
 
 export function summarizeOutstandingBuckets(buckets) {
@@ -1231,16 +1283,13 @@ export function findOutstandingForCustomer(dataset, customerCode, customerName) 
   const rows = Array.isArray(dataset?.rows) ? dataset.rows : [];
   const code = normalizeCode(customerCode);
   const name = normalizeName(customerName);
-  const codeNoZeros = code.replace(/^0+/, "");
   const cmpName = normalizeComparableName(customerName);
 
   if (code) {
-    const byCode = rows.find((row) => {
-      const rowCode = normalizeCode(row.customer_code);
-      if (!rowCode) return false;
-      if (rowCode === code) return true;
-      return rowCode.replace(/^0+/, "") === codeNoZeros;
-    });
+    const byCode = rows.find((row) => (
+      customerAccountCodesMatch(row.customer_code, code)
+      || customerAccountCodesMatch(row.customer_name, code)
+    ));
     if (byCode) return buildOutstandingRow(byCode);
   }
 
@@ -1266,13 +1315,11 @@ export function isSameOutstandingCustomer(rowCustomerCode, rowCustomerName, cust
 
   const targetCode = normalizeCode(customerCode);
   const targetName = normalizeName(customerName);
-  const targetCodeNoZeros = targetCode.replace(/^0+/, "");
   const targetCmpName = normalizeComparableName(customerName);
 
-  const rowCode = normalizeCode(rowCustomerCode);
-  if (targetCode && rowCode) {
-    if (rowCode === targetCode) return true;
-    if (rowCode.replace(/^0+/, "") === targetCodeNoZeros) return true;
+  if (targetCode) {
+    if (customerAccountCodesMatch(rowCustomerCode, targetCode)) return true;
+    if (customerAccountCodesMatch(rowCustomerName, targetCode)) return true;
   }
 
   const rowName = normalizeName(rowCustomerName);

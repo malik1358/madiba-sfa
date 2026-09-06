@@ -35,7 +35,7 @@ import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance"
 import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
-import { sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { buildOutstandingPdfBucketRows, resolveOutstandingBucketLabels, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
@@ -767,7 +767,7 @@ export default function NewOrderPage() {
 
   const visibleOutstandingBuckets = useMemo(
     () => visibleOutstandingBucketLabels(
-      outstandingInfo.bucketLabels,
+      resolveOutstandingBucketLabels(outstandingInfo.bucketLabels, outstandingInfo.customer?.buckets),
       outstandingInfo.customer?.buckets
     ),
     [outstandingInfo.bucketLabels, outstandingInfo.customer]
@@ -1109,9 +1109,30 @@ export default function NewOrderPage() {
           }
         }
 
-        const outstandingCustomer = snapshot.outstanding?.customer || null;
-        const outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
-        const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
+        let outstandingCustomer = snapshot.outstanding?.customer || null;
+        let outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
+        let outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
+
+        if (!outstandingCustomer && snapshot.customerCode) {
+          try {
+            const supabase = getSupabaseClient();
+            const accessToken = supabase ? await waitForAccessToken(supabase) : "";
+            if (accessToken) {
+              const outstandingResponse = await fetch(
+                `${OUTSTANDING_API}?customerCode=${encodeURIComponent(snapshot.customerCode || "")}&customerName=${encodeURIComponent(snapshot.customerName || "")}`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+              );
+              const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
+              if (outstandingResponse.ok && outstandingPayload.success) {
+                outstandingCustomer = outstandingPayload.customer || null;
+                outstandingBuckets = sortBucketLabels(outstandingPayload.bucketLabels || []);
+                outstandingInvoices = Array.isArray(outstandingPayload.customerInvoices) ? outstandingPayload.customerInvoices : [];
+              }
+            }
+          } catch {
+            // Keep generating the order PDF even if outstanding cannot be refreshed.
+          }
+        }
 
         function formatOutstandingValue(value, digits = 0, withCurrency = true) {
           const number = parseOutstandingNumber(value);
@@ -1120,16 +1141,10 @@ export default function NewOrderPage() {
           return number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
         }
 
-        const bucketRows = outstandingCustomer && outstandingBuckets.length > 0
-          ? [
-              ...outstandingBuckets.map((label) => ({
-                label: `${label} days`,
-                value: formatOutstandingValue(outstandingCustomer?.buckets?.[label], 0, true),
-              })),
-              { label: "Open invoices", value: formatOutstandingValue(outstandingCustomer?.open_invoices, 0, false) },
-              { label: "Total outstanding", value: formatOutstandingValue(outstandingCustomer?.total_outstanding, 0, true) },
-            ]
-          : [];
+        const bucketRows = buildOutstandingPdfBucketRows(outstandingCustomer, outstandingBuckets).map((row) => ({
+          label: row.label,
+          value: formatOutstandingValue(row.amount, 0, row.kind !== "count"),
+        }));
         const outstandingBlockHeight = bucketRows.length > 0
           ? 14 + 10 + bucketRows.length * 18
           : 0;

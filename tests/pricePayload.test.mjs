@@ -45,6 +45,36 @@ test('isBuildingMaterialItem hides unclassified boards, ladders, and fans', () =
     item_name: 'Steel Mesh 1X2MtrX3MM',
     category: 'Unclassified',
   }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004429',
+    item_name: 'A004429_MADIBA LVL Board 38*225*4000mm Fushi Woods China',
+    category: 'Missing Category',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004456',
+    item_name: 'A004456_Welding Rod 6013 2.5 mm x 350 L 21gm per stick, Per Carton 16kg.',
+    category: 'Missing Category',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004458',
+    item_name: 'A004458- WING NUT 160 GRAM',
+    category: 'Missing Category',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004460',
+    item_name: 'A004460- JUTE HESSIAN CLOTH FOR CURING, 38INCH X 5OZ',
+    category: 'Missing Category',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004601',
+    item_name: 'A004601_MADIBA 6 x 16 MM MTR TIE ROD, 8 KG EACH PCS X 8 KG PCS',
+    category: 'Missing Category',
+  }), true);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004999',
+    item_name: 'Unmapped hardware leftover',
+    category: 'Missing Category',
+  }), true);
 });
 
 test('parsePricePayload drops building material rows from the order catalog', () => {

@@ -42,8 +42,13 @@ export function isExcludedCategory(value) {
   return ["buildingmaterial", "buildingmaterials", "buidingmaterial", "buidingmaterials"].includes(compact);
 }
 
-const BUILDING_MATERIAL_NAME_PATTERN = /(?:^|[^a-z0-9])(?:mdf|hdf|osb|hmr|grade[\s-]*e2|plywood|chipboard|particle\s*boards?|gypsum|plasterboards?|ventilation|ladders?|melamine|blockboards?|sandwich\s*panels?|rebar|concrete|steel\s*mesh|steel\s*bars?|angle\s*irons?|cement\s*boards?|mesh)(?:[^a-z0-9]|$)/i;
-const BUILDING_MATERIAL_SHEET_SIZE_PATTERN = /\b\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)\s*[x×]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)(?:\s*[x×]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in))?\b/i;
+export function isMissingOrderCategory(value) {
+  const compact = normalizeText(value).toLowerCase().replace(/[^a-z]/g, "");
+  return compact === "missingcategory";
+}
+
+const BUILDING_MATERIAL_NAME_PATTERN = /(?:^|[^a-z0-9])(?:mdf|hdf|osb|hmr|lvl|grade[\s-]*e2|plywood|chipboard|particle\s*boards?|gypsum|plasterboards?|ventilation|ladders?|melamine|blockboards?|sandwich\s*panels?|rebar|concrete|steel\s*mesh|steel\s*bars?|angle\s*irons?|cement\s*boards?|tie\s*rods?|welding\s*rods?|wing\s*nuts?|hessian|jute|curing|mesh)(?:[^a-z0-9]|$)/i;
+const BUILDING_MATERIAL_SHEET_SIZE_PATTERN = /\b\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)?\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)(?:\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in))?\b/i;
 const BUILDING_MATERIAL_FAN_PATTERN = /(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b).{0,24}\bfans?\b|\bfans?\b.{0,24}(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b|\bventilation\b)/i;
 
 export function isBuildingMaterialName(value) {
@@ -67,6 +72,7 @@ export function isBuildingMaterialItem(item) {
   }
 
   return isExcludedCategory(item.category)
+    || isMissingOrderCategory(item.category)
     || isExcludedItemCode(item.item_code || item.code)
     || isBuildingMaterialName(item.item_name)
     || isBuildingMaterialName(item.name);

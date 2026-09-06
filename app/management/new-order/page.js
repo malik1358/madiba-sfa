@@ -35,7 +35,7 @@ import MonthlyPerformance from "../customer-audit/components/MonthlyPerformance"
 import CategoryPerformance from "../customer-audit/components/CategoryPerformance";
 import QuickOrder from "../customer-audit/components/QuickOrder";
 import TransactionHistory from "../customer-audit/components/TransactionHistory";
-import { buildOutstandingPdfBucketRows, resolveOutstandingBucketLabels, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { buildOutstandingPdfBucketRows, resolveOutstandingBucketLabels, sortBucketLabels, syncOutstandingCustomerFromInvoices, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { evaluateCreditApproval, appendCreditControlRemarkToPdf } from "../../lib/creditApproval";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
@@ -232,7 +232,7 @@ async function fetchItemCategoryLookup(supabase, scope) {
 }
 
 async function fetchVisibleCustomers(token) {
-  const response = await fetch("/api/customers/visible", {
+  const response = await fetch("/api/customers/visible?excludeBuildingMaterial=1", {
     cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -1115,26 +1115,28 @@ export default function NewOrderPage() {
         let outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
         let outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
 
-        if (!outstandingCustomer && snapshot.customerCode) {
+        if (snapshot.customerCode) {
           try {
             const supabase = getSupabaseClient();
             const accessToken = supabase ? await waitForAccessToken(supabase) : "";
             if (accessToken) {
               const outstandingResponse = await fetch(
                 `${OUTSTANDING_API}?customerCode=${encodeURIComponent(snapshot.customerCode || "")}&customerName=${encodeURIComponent(snapshot.customerName || "")}`,
-                { headers: { Authorization: `Bearer ${accessToken}` } }
+                { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
               );
               const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
               if (outstandingResponse.ok && outstandingPayload.success) {
-                outstandingCustomer = outstandingPayload.customer || null;
-                outstandingBuckets = sortBucketLabels(outstandingPayload.bucketLabels || []);
-                outstandingInvoices = Array.isArray(outstandingPayload.customerInvoices) ? outstandingPayload.customerInvoices : [];
+                outstandingCustomer = outstandingPayload.customer || outstandingCustomer;
+                outstandingBuckets = sortBucketLabels(outstandingPayload.bucketLabels || outstandingBuckets);
+                outstandingInvoices = Array.isArray(outstandingPayload.customerInvoices) ? outstandingPayload.customerInvoices : outstandingInvoices;
               }
             }
           } catch {
             // Keep generating the order PDF even if outstanding cannot be refreshed.
           }
         }
+
+        outstandingCustomer = syncOutstandingCustomerFromInvoices(outstandingCustomer, outstandingInvoices);
 
         function formatOutstandingValue(value, digits = 0, withCurrency = true) {
           const number = parseOutstandingNumber(value);
@@ -1339,7 +1341,7 @@ export default function NewOrderPage() {
         const fileName = buildOrderPdfFileName({
           orderId: snapshot.orderId,
           customerCode: snapshot.customerCode,
-          savedAtIso: snapshot.savedAtIso,
+          savedAtIso: new Date().toISOString(),
         });
         const summaryText = buildOrderWhatsappSummary(snapshot, language);
 

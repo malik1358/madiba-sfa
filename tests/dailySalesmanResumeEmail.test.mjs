@@ -9,6 +9,7 @@ import {
   resolveResumeWorkingEndAt,
   sortSalesmanResumeRows,
   summarizeSalesmanResumeRows,
+  uniqueSkuCountFromOrderLines,
 } from "../app/lib/dailySalesmanResume.js";
 import {
   buildSalesmanResumeRows,
@@ -17,11 +18,20 @@ import {
   withJwtClockSkewRetry,
 } from "../app/lib/dailySalesmanResumeServer.js";
 
-test("resolveDailySalesmanResumeRecipients defaults to malik@pinasz.com", () => {
-  assert.deepEqual(resolveDailySalesmanResumeRecipients({}), [DEFAULT_DAILY_SALESMAN_RESUME_TO]);
+test("resolveDailySalesmanResumeRecipients always includes the default manager inboxes", () => {
+  assert.deepEqual(resolveDailySalesmanResumeRecipients({}), [
+    DEFAULT_DAILY_SALESMAN_RESUME_TO,
+    "soyeb@noorshukran.com",
+    "fazlur.rahiman@noorshukran.com",
+  ]);
   assert.deepEqual(
     resolveDailySalesmanResumeRecipients({ DAILY_SALESMAN_RESUME_TO: "boss@madiba.com, malik@pinasz.com" }),
-    ["boss@madiba.com", "malik@pinasz.com"],
+    [
+      DEFAULT_DAILY_SALESMAN_RESUME_TO,
+      "soyeb@noorshukran.com",
+      "fazlur.rahiman@noorshukran.com",
+      "boss@madiba.com",
+    ],
   );
 });
 
@@ -34,6 +44,8 @@ test("buildDailySalesmanResumeEmail renders salesman table columns", () => {
         salesmanCode: "SM001",
         orders: 2,
         orderValue: 1900.6,
+        invoiceCount: 4,
+        invoiceAmount: 2200.4,
         collections: 3,
         collectionValue: 1250.4,
         visits: 5,
@@ -60,6 +72,8 @@ test("buildDailySalesmanResumeEmail renders salesman table columns", () => {
   assert.match(message.subject, /2026-09-04/);
   assert.match(message.html, /Orders/);
   assert.match(message.html, /Order value/);
+  assert.match(message.html, /Invoices/);
+  assert.match(message.html, /Invoice amount/);
   assert.match(message.html, /Collections/);
   assert.match(message.html, /Collection value/);
   assert.match(message.html, /Visits/);
@@ -69,19 +83,32 @@ test("buildDailySalesmanResumeEmail renders salesman table columns", () => {
   assert.match(message.html, /Ahmed \(SM001\)/);
   assert.match(message.html, /1,901/);
   assert.match(message.html, /1,250/);
+  assert.match(message.html, /2,200/);
   assert.equal(message.html.includes("SAR"), false);
   assert.match(message.html, /#0f4c81/);
   assert.match(message.html, /7h/);
-  assert.match(message.text, /Sara \(SM002\) \| 0 \| 0 \| 1 \| 80 \| 2 \| 0 \| - \| - \| - \| - \| -/);
+  assert.match(message.text, /Sara \(SM002\) \| 0 \| 0 \| 0 \| 0 \| 1 \| 80 \| 2 \| 0 \| - \| - \| - \| - \| -/);
   assert.deepEqual(message.totals, {
     orders: 2,
     orderValue: 1900.6,
+    invoiceCount: 4,
+    invoiceAmount: 2200.4,
     collections: 4,
     collectionValue: 1330.4,
     visits: 7,
     skuSoldCount: 12,
     workingMinutes: 420,
   });
+});
+
+test("uniqueSkuCountFromOrderLines counts distinct item codes", () => {
+  assert.equal(uniqueSkuCountFromOrderLines([
+    { item_code: "A1", quantity: 2 },
+    { item_code: "a1", quantity: 1 },
+    { item_code: "B2", quantity: 4 },
+    { item_code: "C3", quantity: 0 },
+    { item_code: "", quantity: 5 },
+  ]), 2);
 });
 
 test("formatResumeMoney rounds to whole numbers without currency", () => {
@@ -129,6 +156,7 @@ test("buildSalesmanResumeRows aggregates metrics by user", () => {
       ["u2", { count: 1, value: 80 }],
     ]),
     orderMetrics: new Map([["u1", { orders: 3, orderValue: 450, skuSoldCount: 15 }]]),
+    invoiceMetrics: new Map([["SM001", { count: 2, amount: 800 }]]),
     workdays: new Map([["u1", {
       loginAt: "2026-09-04T06:00:00.000Z",
       lunchOutAt: "2026-09-04T09:00:00.000Z",
@@ -145,23 +173,35 @@ test("buildSalesmanResumeRows aggregates metrics by user", () => {
     {
       orders: ahmed.orders,
       orderValue: ahmed.orderValue,
+      invoiceCount: ahmed.invoiceCount,
+      invoiceAmount: ahmed.invoiceAmount,
       collections: ahmed.collections,
       collectionValue: ahmed.collectionValue,
       visits: ahmed.visits,
       skuSoldCount: ahmed.skuSoldCount,
       workingMinutes: ahmed.workingMinutes,
     },
-    { orders: 3, orderValue: 450, collections: 2, collectionValue: 400, visits: 4, skuSoldCount: 15, workingMinutes: 300 },
+    {
+      orders: 3,
+      orderValue: 450,
+      invoiceCount: 2,
+      invoiceAmount: 800,
+      collections: 2,
+      collectionValue: 400,
+      visits: 4,
+      skuSoldCount: 15,
+      workingMinutes: 300,
+    },
   );
 });
 
 test("summarizeSalesmanResumeRows totals columns", () => {
   assert.deepEqual(
     summarizeSalesmanResumeRows([
-      { orders: 1, orderValue: 10, collections: 2, collectionValue: 15, visits: 3, skuSoldCount: 4, workingMinutes: 60 },
-      { orders: 5, orderValue: 20, collections: 6, collectionValue: 25, visits: 7, skuSoldCount: 8, workingMinutes: 90 },
+      { orders: 1, orderValue: 10, invoiceCount: 1, invoiceAmount: 12, collections: 2, collectionValue: 15, visits: 3, skuSoldCount: 4, workingMinutes: 60 },
+      { orders: 5, orderValue: 20, invoiceCount: 2, invoiceAmount: 18, collections: 6, collectionValue: 25, visits: 7, skuSoldCount: 8, workingMinutes: 90 },
     ]),
-    { orders: 6, orderValue: 30, collections: 8, collectionValue: 40, visits: 10, skuSoldCount: 12, workingMinutes: 150 },
+    { orders: 6, orderValue: 30, invoiceCount: 3, invoiceAmount: 30, collections: 8, collectionValue: 40, visits: 10, skuSoldCount: 12, workingMinutes: 150 },
   );
 });
 
@@ -195,7 +235,11 @@ test("runDailySalesmanResumeEmailCycle sends one table email", async () => {
 
   assert.equal(result.sentCount, 1);
   assert.equal(sent.length, 1);
-  assert.deepEqual(sent[0].to, ["malik@pinasz.com"]);
+  assert.deepEqual(sent[0].to, [
+    "malik@pinasz.com",
+    "soyeb@noorshukran.com",
+    "fazlur.rahiman@noorshukran.com",
+  ]);
   assert.match(sent[0].html, /Ahmed \(SM001\)/);
   assert.match(sent[0].subject, /Daily salesman resume/);
 });

@@ -11,6 +11,7 @@ import {
   resolveResumeWorkingEndAt,
   sortSalesmanResumeRows,
 } from "./dailySalesmanResume.js";
+import { groupSalesRowsIntoInvoices } from "./salesInvoices.js";
 import { formatCollectorDisplayName } from "./geo.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
 import {
@@ -238,26 +239,26 @@ async function loadOrderMetricsByUser(admin, reportDate) {
   for (const row of dayOrders) {
     const userId = String(row.created_by || "").trim();
     if (!userId) continue;
-    const current = metrics.get(userId) || { orders: 0, orderValue: 0, skuSoldCount: 0, lastAt: "" };
+    const current = metrics.get(userId) || {
+      orders: 0,
+      orderValue: 0,
+      skuSoldCount: 0,
+      lastAt: "",
+      skuCodes: new Set(),
+    };
     current.orders += 1;
     current.lastAt = laterIso(current.lastAt, orderTimestampIso(row));
-    const quantity = Number(row.total_quantity);
-    const items = Number(row.total_items);
-    if (Number.isFinite(quantity) && quantity > 0) {
-      current.skuSoldCount += quantity;
-    } else if (Number.isFinite(items) && items > 0) {
-      current.skuSoldCount += items;
-    }
     metrics.set(userId, current);
   }
 
   const orderIds = dayOrders.map((row) => Number(row.id)).filter(Boolean);
   const valueByOrderId = new Map();
+  const linesByOrderId = new Map();
   for (const chunk of chunkList(orderIds, 200)) {
     const lines = await fetchPagedRows(
       admin,
       "sales_order_items",
-      "order_id,line_value,quantity,rate",
+      "order_id,item_code,line_value,quantity,rate",
       (query) => query.in("order_id", chunk),
     );
     const grouped = new Map();
@@ -269,6 +270,7 @@ async function loadOrderMetricsByUser(admin, reportDate) {
     }
     grouped.forEach((orderLines, orderId) => {
       valueByOrderId.set(orderId, sumOrderLineValue(orderLines));
+      linesByOrderId.set(orderId, orderLines);
     });
   }
 
@@ -277,8 +279,43 @@ async function loadOrderMetricsByUser(admin, reportDate) {
     if (!userId) continue;
     const current = metrics.get(userId);
     if (!current) continue;
+    const orderLines = linesByOrderId.get(Number(row.id)) || [];
     current.orderValue += Number(valueByOrderId.get(Number(row.id)) || 0);
+    orderLines.forEach((line) => {
+      const code = String(line.item_code || "").trim().toUpperCase();
+      const quantity = Number(line.quantity);
+      if (!code) return;
+      if (Number.isFinite(quantity) && quantity <= 0) return;
+      current.skuCodes.add(code);
+    });
   }
+
+  metrics.forEach((current) => {
+    current.skuSoldCount = current.skuCodes.size;
+    delete current.skuCodes;
+  });
+
+  return metrics;
+}
+
+async function loadInvoiceMetricsBySalesman(admin, reportDate) {
+  const rows = await fetchPagedRows(
+    admin,
+    "active_sales",
+    "id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,sales_amount,item_code",
+    (query) => query.eq("transaction_date", reportDate),
+  );
+  const invoices = groupSalesRowsIntoInvoices(rows);
+  const metrics = new Map();
+
+  invoices.forEach((invoice) => {
+    const code = String(invoice.salesman_code || "").trim().toUpperCase();
+    if (!code) return;
+    const current = metrics.get(code) || { count: 0, amount: 0 };
+    current.count += 1;
+    current.amount += Number(invoice.total_amount || 0);
+    metrics.set(code, current);
+  });
 
   return metrics;
 }
@@ -341,6 +378,7 @@ export function buildSalesmanResumeRows({
   collectionCounts = new Map(),
   collectionMetrics = new Map(),
   orderMetrics = new Map(),
+  invoiceMetrics = new Map(),
   workdays = new Map(),
 } = {}) {
   const collectionsByUser = collectionMetrics.size
@@ -372,6 +410,23 @@ export function buildSalesmanResumeRows({
     row.skuSoldCount = Number(metrics?.skuSoldCount || 0);
   }
 
+  const userIdByCode = new Map();
+  byUserId.forEach((row) => {
+    const code = String(row.salesmanCode || "").trim().toUpperCase();
+    if (code && !userIdByCode.has(code)) userIdByCode.set(code, row.userId);
+  });
+
+  for (const [salesmanCode, invoice] of invoiceMetrics.entries()) {
+    const code = String(salesmanCode || "").trim().toUpperCase();
+    const userId = userIdByCode.get(code);
+    const row = userId
+      ? byUserId.get(userId)
+      : ensureRow(byUserId, { id: `code:${code}`, salesman_code: code });
+    if (!row) continue;
+    row.invoiceCount = Number(invoice?.count || 0);
+    row.invoiceAmount = Number(invoice?.amount || 0);
+  }
+
   for (const [userId, workday] of workdays.entries()) {
     const row = ensureRow(byUserId, { id: userId });
     if (!row || !workday) continue;
@@ -394,6 +449,8 @@ export function buildSalesmanResumeRows({
   return sortSalesmanResumeRows([...byUserId.values()].filter((row) => (
     Number(row.orders || 0)
     + Number(row.orderValue || 0)
+    + Number(row.invoiceCount || 0)
+    + Number(row.invoiceAmount || 0)
     + Number(row.collections || 0)
     + Number(row.collectionValue || 0)
     + Number(row.visits || 0)
@@ -404,11 +461,12 @@ export function buildSalesmanResumeRows({
 
 export async function buildDailySalesmanResume(admin, { date, now = new Date() } = {}) {
   const reportDate = parseResumeDateParam(date, now);
-  const [profiles, visitCounts, collectionMetrics, orderMetrics] = await Promise.all([
+  const [profiles, visitCounts, collectionMetrics, orderMetrics, invoiceMetrics] = await Promise.all([
     loadSalesmanResumeProfiles(admin),
     loadVisitCountsByUser(admin, reportDate),
     loadCollectionMetricsByUser(admin, reportDate),
     loadOrderMetricsByUser(admin, reportDate),
+    loadInvoiceMetricsBySalesman(admin, reportDate),
   ]);
 
   const userIds = [
@@ -430,6 +488,7 @@ export async function buildDailySalesmanResume(admin, { date, now = new Date() }
     visitCounts,
     collectionMetrics,
     orderMetrics,
+    invoiceMetrics,
     workdays,
   });
 

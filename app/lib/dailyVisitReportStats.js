@@ -66,14 +66,25 @@ export function buildVisitDaySplit(entries = [], orderStats = {}) {
     if (!orderCodes.has(code)) visitWithoutOrderCount += 1;
   });
 
+  let newCustomerOrderCount = Number(orderStats.newCustomerOrderCount || 0);
+  let newCustomerOrderValue = Number(orderStats.newCustomerOrderValue || 0);
+  const repeatCustomerOrderCount = Number(orderStats.repeatCustomerOrderCount || 0);
+  const repeatCustomerOrderValue = Number(orderStats.repeatCustomerOrderValue || 0);
+  const orderCount = Number(orderStats.orderCount || 0) || orderCodes.size;
+  const orderValue = Number(orderStats.orderValue || 0);
+  if (orderCount > 0 && newCustomerOrderCount + repeatCustomerOrderCount === 0) {
+    newCustomerOrderCount = orderCount;
+    newCustomerOrderValue = orderValue;
+  }
+
   return {
     visitWithoutOrderCount,
-    newCustomerOrderCount: Number(orderStats.newCustomerOrderCount || 0),
-    newCustomerOrderValue: Number(orderStats.newCustomerOrderValue || 0),
-    repeatCustomerOrderCount: Number(orderStats.repeatCustomerOrderCount || 0),
-    repeatCustomerOrderValue: Number(orderStats.repeatCustomerOrderValue || 0),
-    orderCount: Number(orderStats.orderCount || 0),
-    orderValue: Number(orderStats.orderValue || 0),
+    newCustomerOrderCount,
+    newCustomerOrderValue,
+    repeatCustomerOrderCount,
+    repeatCustomerOrderValue,
+    orderCount,
+    orderValue,
     collectionCount,
     collectionValue,
   };
@@ -114,4 +125,12 @@ export function formatSplitMoney(value) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   });
+}
+
+export function entryDisplayAmount(entry) {
+  const collection = Number(entry?.amountReceived ?? entry?.amount_received ?? 0);
+  if (Number.isFinite(collection) && collection > 0) return collection;
+  const order = Number(entry?.orderValue ?? entry?.order_value ?? 0);
+  if (Number.isFinite(order) && order > 0) return order;
+  return 0;
 }

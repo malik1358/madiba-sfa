@@ -108,6 +108,35 @@ test("buildUserVisitReportEmail includes the user name and timeline", () => {
   assert.match(message.html, /24\.70000, 46\.70000/);
 });
 
+test("buildUserVisitReportEmail shows posted order values", () => {
+  const message = buildUserVisitReportEmail({
+    date: "2026-09-05",
+    user: {
+      userName: "PARVEZ (PARVEZ)",
+      entries: [
+        {
+          visitSequence: 9,
+          savedAt: "2026-09-05T10:18:00.000Z",
+          customerName: "Delta Egyptian Trading Est.",
+          customerCode: "1108C",
+          transactionLabel: "Order submitted",
+          transactionType: "ORDER_SUBMITTED",
+          orderValue: 5380.6,
+          hasEntryGps: true,
+          hasCustomerLocation: true,
+          distanceFromCustomerKm: 0.1,
+        },
+      ],
+      daySummary: {
+        stats: { orderCount: 3, orderValue: 15380.6 },
+      },
+    },
+  });
+
+  assert.match(message.html, /New-customer orders<\/td><td>3<\/td><td>15,380\.6/);
+  assert.match(message.html, /Order submitted · 5,380\.6 SAR/);
+});
+
 test("isEmailConfigured requires from plus SMTP or Resend", () => {
   assert.equal(isEmailConfigured(getMailerConfig({})), false);
   assert.equal(isEmailConfigured(getMailerConfig({ SMTP_HOST: "smtp.office365.com", SMTP_FROM: "sfa@madiba.com" })), true);

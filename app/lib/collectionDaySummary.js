@@ -545,11 +545,26 @@ function itemsToLines(items) {
 }
 
 function resolveOrderStats(lunchEvents) {
-  const count = Number(lunchEvents?.orderStats?.orderCount || 0);
-  const value = Number(lunchEvents?.orderStats?.orderValue || 0);
+  const raw = lunchEvents?.orderStats || {};
+  const count = Number(raw.orderCount || 0);
+  const value = Number(raw.orderValue || 0);
+  let newCount = Number(raw.newCustomerOrderCount || 0);
+  let newValue = Number(raw.newCustomerOrderValue || 0);
+  let repeatCount = Number(raw.repeatCustomerOrderCount || 0);
+  let repeatValue = Number(raw.repeatCustomerOrderValue || 0);
+  const orderCount = Number.isFinite(count) && count > 0 ? count : 0;
+  const orderValue = Number.isFinite(value) && value > 0 ? value : 0;
+  if (orderCount > 0 && newCount + repeatCount === 0) {
+    newCount = orderCount;
+    newValue = orderValue;
+  }
   return {
-    orderCount: Number.isFinite(count) && count > 0 ? count : 0,
-    orderValue: Number.isFinite(value) && value > 0 ? value : 0,
+    orderCount,
+    orderValue,
+    newCustomerOrderCount: Number.isFinite(newCount) && newCount > 0 ? newCount : 0,
+    newCustomerOrderValue: Number.isFinite(newValue) && newValue > 0 ? newValue : 0,
+    repeatCustomerOrderCount: Number.isFinite(repeatCount) && repeatCount > 0 ? repeatCount : 0,
+    repeatCustomerOrderValue: Number.isFinite(repeatValue) && repeatValue > 0 ? repeatValue : 0,
   };
 }
 

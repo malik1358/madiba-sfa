@@ -205,11 +205,11 @@ async function loadCustomerLocationMap(admin, customerCodes) {
 }
 
 async function loadSubmittedOrderStats(admin, userId, startIso, endIso) {
-  if (!userId) return { orderCount: 0, orderValue: 0 };
+  if (!userId) return emptyOrderStats();
 
   let query = admin
     .from("sales_orders")
-    .select("id,status,submitted_at,created_at")
+    .select("id,customer_code,status,submitted_at,created_at")
     .eq("created_by", userId)
     .eq("status", "SUBMITTED")
     .gte("submitted_at", startIso)
@@ -219,7 +219,7 @@ async function loadSubmittedOrderStats(admin, userId, startIso, endIso) {
   if (error && isMissingColumnError(error)) {
     ({ data, error } = await admin
       .from("sales_orders")
-      .select("id,status,created_at")
+      .select("id,customer_code,status,created_at")
       .eq("created_by", userId)
       .eq("status", "SUBMITTED")
       .gte("created_at", startIso)
@@ -228,14 +228,14 @@ async function loadSubmittedOrderStats(admin, userId, startIso, endIso) {
 
   if (error) {
     if (isMissingTableError(error) || isMissingColumnError(error)) {
-      return { orderCount: 0, orderValue: 0 };
+      return emptyOrderStats();
     }
     throw error;
   }
 
   const rows = Array.isArray(data) ? data : [];
   const orderIds = [...new Set(rows.map((row) => Number(row?.id)).filter(Boolean))];
-  if (!orderIds.length) return { orderCount: 0, orderValue: 0 };
+  if (!orderIds.length) return emptyOrderStats();
 
   const { data: lines, error: lineError } = await admin
     .from("sales_order_items")
@@ -244,14 +244,69 @@ async function loadSubmittedOrderStats(admin, userId, startIso, endIso) {
 
   if (lineError) {
     if (isMissingTableError(lineError) || isMissingColumnError(lineError)) {
-      return { orderCount: orderIds.length, orderValue: 0 };
+      return { ...emptyOrderStats(), orderCount: orderIds.length };
     }
     throw lineError;
   }
 
+  const valueByOrderId = new Map();
+  (lines || []).forEach((line) => {
+    const orderId = Number(line?.order_id);
+    if (!orderId) return;
+    valueByOrderId.set(orderId, Number(valueByOrderId.get(orderId) || 0) + sumOrderLineValue([line]));
+  });
+
+  const customerCodes = [...new Set(rows.map((row) => normalizeCode(row.customer_code)).filter(Boolean))];
+  const priorCodes = new Set();
+  if (customerCodes.length) {
+    const { data: priorRows, error: priorError } = await admin
+      .from("sales_orders")
+      .select("customer_code")
+      .in("customer_code", customerCodes)
+      .eq("status", "SUBMITTED")
+      .lt("submitted_at", startIso);
+    if (!priorError) {
+      (priorRows || []).forEach((row) => {
+        const code = normalizeCode(row.customer_code);
+        if (code) priorCodes.add(code);
+      });
+    }
+  }
+
+  let newCustomerOrderCount = 0;
+  let newCustomerOrderValue = 0;
+  let repeatCustomerOrderCount = 0;
+  let repeatCustomerOrderValue = 0;
+  rows.forEach((row) => {
+    const code = normalizeCode(row.customer_code);
+    const value = Number(valueByOrderId.get(Number(row.id)) || 0);
+    if (code && priorCodes.has(code)) {
+      repeatCustomerOrderCount += 1;
+      repeatCustomerOrderValue += value;
+      return;
+    }
+    newCustomerOrderCount += 1;
+    newCustomerOrderValue += value;
+  });
+
   return {
     orderCount: orderIds.length,
     orderValue: sumOrderLineValue(lines),
+    newCustomerOrderCount,
+    newCustomerOrderValue,
+    repeatCustomerOrderCount,
+    repeatCustomerOrderValue,
+  };
+}
+
+function emptyOrderStats() {
+  return {
+    orderCount: 0,
+    orderValue: 0,
+    newCustomerOrderCount: 0,
+    newCustomerOrderValue: 0,
+    repeatCustomerOrderCount: 0,
+    repeatCustomerOrderValue: 0,
   };
 }
 

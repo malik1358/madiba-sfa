@@ -7,6 +7,7 @@ import {
   buildGooglePlaceUrl,
   buildIdleBubbles,
   buildNamedRouteStops,
+  buildWorkdayRouteStops,
   idleBubbleRadius,
   longestIdlePlace,
 } from "../app/lib/dayRouteMap.js";
@@ -87,4 +88,10 @@ test("longest idle place uses GPS inside the gap and names the next customer", (
   ]);
   assert.equal(stops.some((stop) => stop.label.includes("Enjaz Gateway")), true);
   assert.equal(stops.some((stop) => stop.kind === "idle"), true);
+
+  const workdayStops = buildWorkdayRouteStops(points, [
+    { fromAt: "2026-09-01T08:19:00.000Z", toAt: "2026-09-01T12:39:00.000Z", minutes: 200 },
+  ]);
+  assert.equal(workdayStops.some((stop) => stop.label.includes("Enjaz Gateway")), false);
+  assert.equal(workdayStops.some((stop) => stop.kind === "idle"), true);
 });

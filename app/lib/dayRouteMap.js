@@ -154,6 +154,31 @@ export function longestIdlePlace(points = [], idleGaps = []) {
   return idlePlaceForGap(points, ranked[0]);
 }
 
+const WORKDAY_STOP_TYPES = new Set([
+  "MORNING_ATTENDANCE",
+  "END_OF_DAY",
+  "LUNCH_BREAK_OUT",
+  "LUNCH_BREAK_IN",
+]);
+
+export function buildWorkdayRouteStops(points = [], idleGaps = []) {
+  const stops = [];
+  (points || []).forEach((point) => {
+    if (!WORKDAY_STOP_TYPES.has(String(point.type || "").toUpperCase())) return;
+    const mapLabel = routePointLabel(point);
+    stops.push({
+      kind: "workday",
+      ts: point.ts,
+      label: mapLabel,
+      mapsUrl: buildGooglePlaceUrl({ ...point, mapLabel }),
+    });
+  });
+  (idleGaps || []).forEach((gap) => {
+    stops.push(idlePlaceForGap(points, gap));
+  });
+  return stops.sort((left, right) => left.ts - right.ts);
+}
+
 export function buildNamedRouteStops(points = [], idleGaps = []) {
   const stops = [];
   let lastCustomer = "";
@@ -257,7 +282,7 @@ function spreadOverlapping(points) {
   });
 }
 
-export function buildDayRouteSvg(points = [], { width = 800, height = 360, idleGaps = [] } = {}) {
+export function buildDayRouteSvg(points = [], { width = 800, height = 360, idleGaps = [], showIdleLabels = true } = {}) {
   if (!points.length) return "";
   const padding = idleGaps.length ? 48 : 24;
   const bounds = mapBounds(points);
@@ -289,7 +314,7 @@ export function buildDayRouteSvg(points = [], { width = 800, height = 360, idleG
     return `<g>
       <title>${title}</title>
       <circle cx="${bubble.x.toFixed(1)}" cy="${bubble.y.toFixed(1)}" r="${radius}" fill="rgba(220,38,38,0.18)" stroke="#dc2626" stroke-width="2" />
-      <text x="${bubble.x.toFixed(1)}" y="${bubble.y.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" fill="#7f1d1d" font-size="11" font-weight="700">${escapeXml(label)}</text>
+      ${showIdleLabels ? `<text x="${bubble.x.toFixed(1)}" y="${bubble.y.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" fill="#7f1d1d" font-size="11" font-weight="700">${escapeXml(label)}</text>` : ""}
     </g>`;
   }).join("");
 

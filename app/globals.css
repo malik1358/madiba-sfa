@@ -5991,3 +5991,9 @@ th:has(.moduleTableColumnFilterInput) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.visitDaySplitTable {
+  width: auto;
+  max-width: 520px;
+  margin: 0 0 14px;
+}

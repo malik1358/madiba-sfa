@@ -2,6 +2,12 @@ import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import { loadPricePayload } from "./pricePayload.js";
 import { fetchAndHydrateMobileSnapshot } from "./mobileDataCache.js";
 import {
+  finishDataRefreshJob,
+  markDataRefreshStep,
+  snapshotRefreshSteps,
+  startDataRefreshJob,
+} from "./dataRefreshStatus.js";
+import {
   parseOfflineRefreshKinds,
   shouldApplyOfflineDataVersion,
 } from "./offlineDataBroadcastShared.js";
@@ -67,15 +73,26 @@ export async function refreshOfflineDeviceData(detail = {}) {
       || kinds.includes("prices")
       || kinds.includes("schemes");
 
-    if (needsSnapshot) {
-      await fetchAndHydrateMobileSnapshot();
-    }
+    const steps = snapshotRefreshSteps(needsPrices);
+    startDataRefreshJob("device-data", needsSnapshot ? steps : ["prices"]);
 
-    if (needsPrices) {
-      await loadPricePayload("/api/pricing/cache", PRICE_CACHE_KEY);
-    }
+    try {
+      if (needsSnapshot) {
+        await fetchAndHydrateMobileSnapshot({ manageJob: false });
+      }
 
-    writeLastApplied(nextVersion, nextHash);
+      if (needsPrices) {
+        markDataRefreshStep("prices", "running");
+        await loadPricePayload("/api/pricing/cache", PRICE_CACHE_KEY);
+        markDataRefreshStep("prices", "done");
+      }
+
+      writeLastApplied(nextVersion, nextHash);
+      finishDataRefreshJob({ lastSavedAt: Date.now() });
+    } catch (error) {
+      finishDataRefreshJob({ error: error.message || "Unable to refresh device data." });
+      throw error;
+    }
 
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(OFFLINE_DATA_REFRESHED_EVENT, {

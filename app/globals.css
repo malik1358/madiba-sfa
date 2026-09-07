@@ -66,6 +66,63 @@ body {
   background: #39464a;
 }
 
+.globalAppStatusDataWarn {
+  color: #ffd38a;
+}
+
+.globalAppStatusMeter {
+  display: inline-block;
+  width: 72px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.globalAppStatusMeter > i {
+  display: block;
+  height: 100%;
+  background: #7ee0a3;
+}
+
+.globalAppStatusSteps {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.globalAppStatusSteps em {
+  font-style: normal;
+  opacity: 0.72;
+}
+
+.globalAppStatusSteps em[data-status="running"] {
+  opacity: 1;
+  font-weight: 700;
+}
+
+.globalAppStatusSteps em[data-status="done"] {
+  opacity: 0.95;
+  color: #b8f0cc;
+}
+
+.globalAppStatusRefresh {
+  min-height: 22px;
+  padding: 1px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 4px;
+  background: transparent;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.globalAppStatusRefresh:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .globalAppStatus span:first-child {
   min-width: 0;
   overflow: hidden;

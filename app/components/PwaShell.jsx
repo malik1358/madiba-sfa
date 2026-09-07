@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { countPendingOfflineQueue, processOfflineQueue } from "../lib/offlineSyncQueue";
-import { fetchAndHydrateMobileSnapshot, hydrateFoundationFromCache } from "../lib/mobileDataCache";
+import { ensureMobileSnapshotFresh } from "../lib/mobileDataCache";
 import {
   OFFLINE_DATA_REFRESH_EVENT,
   refreshOfflineDeviceData,
@@ -10,16 +10,8 @@ import {
 import { getSupabaseClient } from "../lib/supabase";
 
 async function hydrateMobileSnapshotIfMissing() {
-  if (typeof navigator !== "undefined" && !navigator.onLine) return;
-
   try {
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.id) return;
-    const foundation = await hydrateFoundationFromCache(session.user.id);
-    if (Array.isArray(foundation?.customers) && foundation.customers.length > 0) return;
-    await fetchAndHydrateMobileSnapshot();
+    await ensureMobileSnapshotFresh();
   } catch {
     // Keep using whatever is already saved on the device.
   }

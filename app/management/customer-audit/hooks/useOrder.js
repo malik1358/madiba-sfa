@@ -4,6 +4,8 @@ import {
   captureGpsLocationWithFallbackConfirm,
 } from '../../../lib/customerLocation';
 import { postJsonResilient } from '../../../lib/offlineApi';
+import { upsertLocalPendingOrder } from '../../../lib/mobileDataCache';
+import { buildQueuedPendingOrderId } from '../../../lib/queuedSalesOrders';
 import { resolveGpsCapturePlatform } from '../../../lib/geo';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
@@ -15,7 +17,7 @@ function isPendingOrderId(orderId) {
 }
 
 function buildPendingOrderId(queueId) {
-  return `pending:${String(queueId || '').slice(0, 12)}`;
+  return buildQueuedPendingOrderId(queueId);
 }
 
 function buildOrderPayload({
@@ -270,7 +272,6 @@ export function useOrder({
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
-        queueFirst: true,
         jsonBody: buildOrderPayload({
           action: 'save_draft',
           selectedCustomer,
@@ -302,6 +303,21 @@ export function useOrder({
         if (!draftOrderId) {
           setDraftOrderId(pendingOrderId);
         }
+        if (accessScope) {
+          void upsertLocalPendingOrder(session.user.id, accessScope, {
+            id: pendingOrderId,
+            customer_code: selectedCustomer.customer_code,
+            customer_name: selectedCustomer.customer_name,
+            salesman_code: String(selectedCustomer.current_salesman_code || '').trim().toUpperCase(),
+            created_at: capturedAt,
+            updated_at: capturedAt,
+            status: 'DRAFT',
+            queuedLocally: true,
+          });
+        }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('madiba-pending-orders-changed'));
+        }
         if (!options.silent) {
           setMessage(saveResult.message || 'Draft saved on device. It will sync automatically when you are back online.');
         }
@@ -326,7 +342,7 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
     if (orderItems.length === 0) {
@@ -364,7 +380,6 @@ export function useOrder({
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
-        queueFirst: true,
         jsonBody: buildOrderPayload({
           action: 'submit',
           selectedCustomer,
@@ -396,6 +411,21 @@ export function useOrder({
         if (!draftOrderId) {
           setDraftOrderId(pendingOrderId);
         }
+        if (accessScope) {
+          void upsertLocalPendingOrder(session.user.id, accessScope, {
+            id: pendingOrderId,
+            customer_code: selectedCustomer?.customer_code || '',
+            customer_name: selectedCustomer?.customer_name || '',
+            salesman_code: String(selectedCustomer?.current_salesman_code || '').trim().toUpperCase(),
+            created_at: capturedAt,
+            updated_at: capturedAt,
+            status: 'SUBMITTED',
+            queuedLocally: true,
+          });
+        }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('madiba-pending-orders-changed'));
+        }
         if (!options.silent) {
           setMessage(saveResult.message || 'Order saved on device. It will submit automatically when you are back online.');
         }
@@ -423,7 +453,7 @@ export function useOrder({
     } finally {
       setSubmittingOrder(false);
     }
-  }, [cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

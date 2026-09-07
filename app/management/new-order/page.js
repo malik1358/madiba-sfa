@@ -48,6 +48,9 @@ import { createOrderPdfDocument, enrichOrderPdfLiveData, formatHistoryChange } f
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 import { isExcludedNewOrderCustomer } from "../../lib/buildingMaterialCustomerFilter";
+import { processOfflineQueue } from "../../lib/offlineApi";
+import { isQueuedPendingOrderId } from "../../lib/queuedSalesOrders";
+import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -987,6 +990,7 @@ export default function NewOrderPage() {
 
       return {
         orderId,
+        orderNumber: formatSalesOrderNumber({ id: orderId }),
         statusLabel,
         savedAtIso,
         customerCode: selectedCustomer.customer_code,
@@ -1031,14 +1035,18 @@ export default function NewOrderPage() {
       try {
         const supabase = getSupabaseClient();
         const accessToken = supabase ? await waitForAccessToken(supabase) : "";
+        if (accessToken && isQueuedPendingOrderId(snapshot.orderId)) {
+          await processOfflineQueue(async () => accessToken).catch(() => undefined);
+        }
         const { snapshot: liveSnapshot, analytics: monthlyAnalytics } = await enrichOrderPdfLiveData(snapshot, {
           accessToken,
           analyticsFallback: analytics,
         });
+        const orderNumber = formatSalesOrderNumber(liveSnapshot) || liveSnapshot.orderId;
         const doc = await createOrderPdfDocument(liveSnapshot, { analytics: monthlyAnalytics });
 
         const fileName = buildOrderPdfFileName({
-          orderId: snapshot.orderId,
+          orderId: orderNumber,
           customerCode: snapshot.customerCode,
           savedAtIso: new Date().toISOString(),
         });
@@ -1051,11 +1059,12 @@ export default function NewOrderPage() {
             file: new File([blob], fileName, { type: "application/pdf" }),
             fileName,
             summaryText,
+            snapshot: liveSnapshot,
           };
         }
 
         const shareResult = await saveOrShareOrderPdf(doc, fileName, {
-          title: `Order #${snapshot.orderId}`,
+          title: `Order #${orderNumber}`,
           text: summaryText,
           dialogTitle: "Save or share order PDF",
         });
@@ -1080,6 +1089,9 @@ export default function NewOrderPage() {
     setLastSavedOrder(snapshot);
 
     const prepared = await downloadOrderPdf(snapshot, { returnFileOnly: true });
+    if (prepared?.snapshot) {
+      setLastSavedOrder(prepared.snapshot);
+    }
     if (!prepared?.file) {
       showPopup({
         message: language === "ar"
@@ -1107,14 +1119,15 @@ export default function NewOrderPage() {
     const snapshot = buildOrderSnapshot(orderId, "Draft Saved");
     if (!snapshot) return;
 
-    const queued = String(orderId).startsWith("pending:");
+    const queued = isQueuedPendingOrderId(orderId);
+    const orderNumber = formatSalesOrderNumber({ id: orderId });
     const savedMessage = queued
       ? (language === "ar"
-        ? `تم حفظ مسودة الطلب #${orderId} على الجهاز وسيتم المزامنة تلقائياً.`
-        : `Draft order #${orderId} saved on device and will sync automatically.`)
+        ? `تم حفظ مسودة الطلب #${orderNumber} على الجهاز وسيتم المزامنة تلقائياً.`
+        : `Draft order #${orderNumber} saved on device and will sync automatically.`)
       : (language === "ar"
-        ? `تم حفظ مسودة الطلب #${orderId}.`
-        : `Draft order #${orderId} saved.`);
+        ? `تم حفظ مسودة الطلب #${orderNumber}.`
+        : `Draft order #${orderNumber} saved.`);
 
     await presentOrderWhatsappShare(snapshot, { savedMessage, queued });
   }, [buildOrderSnapshot, language, presentOrderWhatsappShare, saveDraft]);
@@ -1131,21 +1144,22 @@ export default function NewOrderPage() {
       statusLabel: "Submitted",
     };
 
-    const queued = String(orderId).startsWith("pending:");
+    const queued = isQueuedPendingOrderId(orderId);
+    const orderNumber = formatSalesOrderNumber({ id: orderId });
     const savedMessage = queued
       ? (language === "ar"
-        ? `تم حفظ الطلب #${orderId} على الجهاز وسيتم الإرسال عند عودة الاتصال.`
-        : `Order #${orderId} saved on device and will submit when back online.`)
+        ? `تم حفظ الطلب #${orderNumber} على الجهاز وسيتم الإرسال عند عودة الاتصال.`
+        : `Order #${orderNumber} saved on device and will submit when back online.`)
       : (language === "ar"
-        ? `تم إرسال الطلب #${orderId}.`
-        : `Order #${orderId} submitted.`);
+        ? `تم إرسال الطلب #${orderNumber}.`
+        : `Order #${orderNumber} submitted.`);
 
     await presentOrderWhatsappShare(snapshot, { savedMessage, queued });
   }, [buildOrderSnapshot, draftOrderId, language, presentOrderWhatsappShare, submitOrder]);
 
   const shareText = useMemo(() => {
     if (!lastSavedOrder) return "";
-    return `Order #${lastSavedOrder.orderId} (${lastSavedOrder.statusLabel}) for ${lastSavedOrder.customerName} - ${formatMoney(lastSavedOrder.grandTotal)}. PDF downloaded and ready to attach.`;
+    return `Order #${formatSalesOrderNumber(lastSavedOrder) || lastSavedOrder.orderId} (${lastSavedOrder.statusLabel}) for ${lastSavedOrder.customerName} - ${formatMoney(lastSavedOrder.grandTotal)}. PDF downloaded and ready to attach.`;
   }, [lastSavedOrder]);
 
   const fetchOutstandingForCustomer = useCallback(async (customer) => {
@@ -1286,7 +1300,7 @@ export default function NewOrderPage() {
 
   const emailShareUrl = useMemo(() => {
     if (!lastSavedOrder) return "#";
-    const subject = `Order #${lastSavedOrder.orderId} - ${lastSavedOrder.customerName}`;
+    const subject = `Order #${formatSalesOrderNumber(lastSavedOrder) || lastSavedOrder.orderId} - ${lastSavedOrder.customerName}`;
     const body = `${shareText}\n\nUse Save / Share PDF in the app to attach the order PDF.`;
     return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }, [lastSavedOrder, shareText]);
@@ -1929,8 +1943,8 @@ export default function NewOrderPage() {
 
                 <div className="moduleReviewMeta">
                   <div>
-                    <span>Order ID</span>
-                    <strong>#{lastSavedOrder.orderId}</strong>
+                    <span>Order Number</span>
+                    <strong>#{formatSalesOrderNumber(lastSavedOrder) || lastSavedOrder.orderId}</strong>
                   </div>
                   <div>
                     <span>Customer</span>
@@ -2016,8 +2030,8 @@ export default function NewOrderPage() {
                     onClick={() => {
                       void presentOrderWhatsappShare(lastSavedOrder, {
                         savedMessage: language === "ar"
-                          ? `PDF للطلب #${lastSavedOrder.orderId} جاهز للمشاركة.`
-                          : `Order #${lastSavedOrder.orderId} PDF is ready to share.`,
+                          ? `PDF للطلب #${formatSalesOrderNumber(lastSavedOrder) || lastSavedOrder.orderId} جاهز للمشاركة.`
+                          : `Order #${formatSalesOrderNumber(lastSavedOrder) || lastSavedOrder.orderId} PDF is ready to share.`,
                       });
                     }}
                   >

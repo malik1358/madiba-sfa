@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildOrderPdfSnapshotFromSavedOrder,
+  enrichOrderPdfLiveData,
   formatHistoryChange,
   inferPricingFromHistory,
   mapSavedOrderLinesToPdfLines,
@@ -123,6 +124,7 @@ test("buildOrderPdfSnapshotFromSavedOrder matches the new-order snapshot shape",
   });
 
   assert.equal(snapshot.orderId, 296);
+  assert.equal(snapshot.orderNumber, "296");
   assert.equal(snapshot.statusLabel, "SUBMITTED");
   assert.equal(snapshot.paymentType, "credit");
   assert.equal(snapshot.itemCount, 1);
@@ -159,10 +161,40 @@ test("renderOrderPdfDocument draws the new order layout", () => {
 
   renderOrderPdfDocument(doc, snapshot);
 
+  assert.ok(doc.texts.includes("Order Number: 296"));
   assert.ok(doc.texts.includes("Cash Disc"));
   assert.ok(doc.texts.includes("Outstanding Details"));
   assert.ok(doc.texts.includes("Amount after VAT"));
   assert.equal(doc.texts.includes("Item Code"), false);
   assert.equal(doc.texts.includes("Line Total"), false);
   assert.equal(doc.texts.includes("Outstanding Buckets"), false);
+});
+
+test("enrichOrderPdfLiveData replaces a pending queue id with the live order number", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/api/sales-orders")) {
+      return {
+        ok: true,
+        json: async () => ({ success: true, found: true, orderId: 4451, orderNumber: "4451" }),
+      };
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  try {
+    const { snapshot } = await enrichOrderPdfLiveData({
+      orderId: "pending:8981a846-ca3",
+      customerCode: "1059",
+      customerName: "Test Customer",
+      lines: [],
+      outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+    }, { accessToken: "token" });
+
+    assert.equal(snapshot.orderNumber, "4451");
+    assert.equal(snapshot.orderId, 4451);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

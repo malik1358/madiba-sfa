@@ -163,11 +163,59 @@ test("renderOrderPdfDocument draws the new order layout", () => {
 
   assert.ok(doc.texts.includes("Order Number: 296"));
   assert.ok(doc.texts.includes("Cash Disc"));
+  assert.ok(doc.texts.includes("Scheme"));
   assert.ok(doc.texts.includes("Outstanding Details"));
   assert.ok(doc.texts.includes("Amount after VAT"));
   assert.equal(doc.texts.includes("Item Code"), false);
   assert.equal(doc.texts.includes("Line Total"), false);
   assert.equal(doc.texts.includes("Outstanding Buckets"), false);
+});
+
+test("renderOrderPdfDocument shows scheme discount on the item row", () => {
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, {
+    orderId: 325,
+    orderNumber: "325",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-09-07T08:30:44.000Z",
+    customerCode: "PROSPECT-OFF",
+    customerName: "test",
+    salesmanCode: "ADMIN",
+    paymentType: "credit",
+    pricingRegion: "dammam",
+    itemCount: 1,
+    totalQuantity: 40,
+    grandTotal: 2080,
+    totals: {
+      wholesaleTotal: 2153.2,
+      cashDiscountTotal: 0,
+      valueDiscountTotal: 0,
+      schemeDiscountTotal: 73.2,
+      amountExclVat: 2080,
+      vatAmount: 312,
+      amountInclVat: 2392,
+    },
+    lines: [{
+      item_code: "A005425",
+      item_name: "GOLDEN STAR PAPER",
+      quantity: 40,
+      wholesaleRate: 53.83,
+      rate: 52,
+      cashDiscount: 0.02,
+      valueDiscount: 0,
+      cashApplied: false,
+      valueApplied: false,
+      schemeDiscountAmount: 73.2,
+      lineValue: 2080,
+      vatAmount: 312,
+      lineTotalInclVat: 2392,
+    }],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+
+  assert.ok(doc.texts.includes("Scheme"));
+  assert.ok(doc.texts.filter((text) => text === "73.20").length >= 2);
 });
 
 test("enrichOrderPdfLiveData replaces a pending queue id with the live order number", async () => {

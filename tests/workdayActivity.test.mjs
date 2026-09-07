@@ -27,6 +27,7 @@ import {
   shouldEmailInactivity,
   shouldSendLateLoginReminder,
   shouldWarnInactivity,
+  areActivityRemindersEnabled,
   snoozeInactivityPrompt,
   writeInactivityPromptSnoozeUntil,
 } from "../app/lib/workdayActivity.js";
@@ -425,6 +426,14 @@ test("shouldCaptureIdleGpsPing skips when a recent ping already happened", () =>
     }),
     false,
   );
+});
+
+test("areActivityRemindersEnabled defaults on and can be turned off per user", () => {
+  assert.equal(areActivityRemindersEnabled(undefined), true);
+  assert.equal(areActivityRemindersEnabled({}), true);
+  assert.equal(areActivityRemindersEnabled({ activity_reminders_enabled: true }), true);
+  assert.equal(areActivityRemindersEnabled({ activity_reminders_enabled: false }), false);
+  assert.equal(areActivityRemindersEnabled(false), false);
 });
 
 test("inactivity prompt snooze persists across reads", () => {

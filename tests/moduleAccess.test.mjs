@@ -12,6 +12,7 @@ import {
   pinnedModuleKeysForAccess,
   shouldRequireTransactionGps,
   shouldRequireGpsAccessGate,
+  shouldEnableBackgroundGps,
 } from "../app/lib/moduleAccess.js";
 
 test("collector-only users only see collection modules", () => {
@@ -83,6 +84,14 @@ test("admin and manager bypass GPS access gate on management pages", () => {
   assert.equal(shouldRequireGpsAccessGate("manager"), false);
   assert.equal(shouldRequireGpsAccessGate("salesman"), true);
   assert.equal(shouldRequireGpsAccessGate("invoice-maker"), false);
+});
+
+test("managers still get background GPS like other field users", () => {
+  assert.equal(shouldEnableBackgroundGps("manager"), true);
+  assert.equal(shouldEnableBackgroundGps("salesman"), true);
+  assert.equal(shouldEnableBackgroundGps("collector"), true);
+  assert.equal(shouldEnableBackgroundGps("admin"), false);
+  assert.equal(shouldEnableBackgroundGps("invoice-maker"), false);
 });
 
 test("business dashboard is limited to admin and manager", () => {

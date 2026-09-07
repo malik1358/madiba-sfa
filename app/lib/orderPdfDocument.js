@@ -146,10 +146,6 @@ export function mapSavedOrderLinesToPdfLines(lines = [], {
       schemeDiscountedQty: scheme.discountedQty,
     });
 
-    if (existing.rate > 0 && Math.abs(priced.lineValue - existing.lineValue) > 0.05) {
-      return existing;
-    }
-
     return {
       ...existing,
       ...priced,

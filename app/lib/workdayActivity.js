@@ -595,6 +595,13 @@ export function shouldFlagInactivity({
   return now.getTime() - referenceTs >= thresholdMs;
 }
 
+export function areActivityRemindersEnabled(profileOrFlag) {
+  if (profileOrFlag && typeof profileOrFlag === "object") {
+    return profileOrFlag.activity_reminders_enabled !== false;
+  }
+  return profileOrFlag !== false;
+}
+
 export function shouldWarnInactivity(args = {}) {
   return shouldFlagInactivity({
     ...args,

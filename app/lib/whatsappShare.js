@@ -19,6 +19,34 @@ export function buildWhatsappAppUrl(text) {
   return `whatsapp://send?text=${encodeURIComponent(message)}`;
 }
 
+function openUrlWithoutLeaving(url) {
+  if (!url || typeof window === "undefined") {
+    return { success: false, reason: "unavailable" };
+  }
+
+  try {
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (opened) {
+      return { success: true, method: "whatsapp-url" };
+    }
+  } catch {
+    // Fall through to a hidden launch that does not replace MADIBA.
+  }
+
+  try {
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("hidden", "");
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    window.setTimeout(() => {
+      iframe.remove();
+    }, 1500);
+    return { success: true, method: "whatsapp-url" };
+  } catch {
+    return { success: false, reason: "unavailable" };
+  }
+}
+
 export function openWhatsappDirect(text, options = {}) {
   const message = String(text || "").trim();
   if (!message) {
@@ -29,13 +57,13 @@ export function openWhatsappDirect(text, options = {}) {
   }
 
   const phoneNumber = String(options.phoneNumber || process.env.NEXT_PUBLIC_COLLECTION_WHATSAPP_NUMBER || "").trim();
-  const url = buildWhatsappShareUrl(message, phoneNumber);
-  if (!url) {
-    return { success: false, reason: "unavailable" };
+  const appUrl = buildWhatsappAppUrl(message);
+  const webUrl = buildWhatsappShareUrl(message, phoneNumber);
+  const launched = openUrlWithoutLeaving(appUrl);
+  if (launched.success) {
+    return launched;
   }
-
-  window.location.assign(url);
-  return { success: true, method: "whatsapp-web" };
+  return openUrlWithoutLeaving(webUrl);
 }
 
 export async function isNativeMobilePlatform() {
@@ -48,11 +76,6 @@ export async function isNativeMobilePlatform() {
   } catch {
     return false;
   }
-}
-
-function isMobileUserAgent() {
-  if (typeof navigator === "undefined") return false;
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
 }
 
 export function toWhatsappShareFile(file, fallbackName = "attachment.jpg") {
@@ -73,13 +96,6 @@ function normalizeShareFiles(files = []) {
   return (files || [])
     .map((file, index) => toWhatsappShareFile(file, `attachment-${index + 1}.jpg`))
     .filter(Boolean);
-}
-
-export function filesIncludePdf(files = []) {
-  return (files || []).some((file) => {
-    const type = String(file?.type || file?.name || "").toLowerCase();
-    return type.includes("pdf");
-  });
 }
 
 async function blobToBase64(blob) {
@@ -198,26 +214,7 @@ export async function shareTextOnWhatsapp(text, options = {}) {
     }
   }
 
-  const url = buildWhatsappShareUrl(message, phoneNumber);
-  if (!url || typeof window === "undefined") {
-    return { success: false, reason: "unavailable" };
-  }
-
-  if (preferWhatsappUrl) {
-    return openWhatsappDirect(message, { phoneNumber });
-  }
-
-  if (isMobileUserAgent()) {
-    window.location.assign(url);
-    return { success: true, method: "whatsapp-url" };
-  }
-
-  const opened = window.open(url, "_blank", "noopener,noreferrer");
-  if (!opened) {
-    return openWhatsappDirect(message, { phoneNumber });
-  }
-
-  return { success: true, method: "whatsapp-url" };
+  return openWhatsappDirect(message, { phoneNumber });
 }
 
 export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}) {
@@ -238,48 +235,16 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
 
   const dialogTitle = String(options.dialogTitle || "Share receipt and summary on WhatsApp").trim();
   const title = String(options.title || "Collection visit").trim();
-  const shareTextFirst = Boolean(message) && filesIncludePdf(shareFiles);
 
   if (await isNativeMobilePlatform()) {
-    if (shareTextFirst) {
-      try {
-        const { Share } = await import("@capacitor/share");
-        await Share.share({
-          title,
-          text: message,
-          dialogTitle,
-        });
-      } catch (error) {
-        const cancelled = String(error?.message || error || "").toLowerCase().includes("cancel");
-        if (cancelled) {
-          return { success: false, reason: "cancelled" };
-        }
-      }
-    }
-
     try {
-      await shareFilesViaCapacitor(shareFiles, shareTextFirst ? "" : message, dialogTitle, title);
-      return { success: true, method: shareTextFirst ? "capacitor-share-text-then-files" : "capacitor-share-files" };
+      await shareFilesViaCapacitor(shareFiles, message, dialogTitle, title);
+      return { success: true, method: "capacitor-share-files" };
     } catch (error) {
       const cancelled = String(error?.message || error || "").toLowerCase().includes("cancel");
       if (cancelled) {
         return { success: false, reason: "cancelled" };
       }
-      if (shareTextFirst) {
-        return { success: true, fallback: true, reason: "files-not-supported", method: "capacitor-share-text" };
-      }
-    }
-  }
-
-  if (shareTextFirst) {
-    const textResult = await shareTextOnWhatsapp(message, {
-      ...options,
-      title,
-      dialogTitle,
-      preferNativeShare: false,
-    });
-    if (!textResult.success && textResult.reason === "cancelled") {
-      return textResult;
     }
   }
 
@@ -287,15 +252,14 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
     try {
       const payload = {
         title,
-        text: shareTextFirst ? "" : message,
+        text: message,
+        files: shareFiles,
       };
-      if (!navigator.canShare || navigator.canShare({ ...payload, files: shareFiles })) {
-        payload.files = shareFiles;
-      } else if (!navigator.canShare || navigator.canShare({ files: shareFiles })) {
-        payload.files = shareFiles;
+      if (navigator.canShare && !navigator.canShare({ files: shareFiles }) && !navigator.canShare(payload)) {
+        throw new Error("files-not-supported");
       }
       await navigator.share(payload);
-      return { success: true, method: payload.files ? "web-share-files" : "web-share" };
+      return { success: true, method: "web-share-files" };
     } catch (error) {
       if (error?.name === "AbortError") {
         return { success: false, reason: "cancelled" };
@@ -303,22 +267,5 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
     }
   }
 
-  if (shareTextFirst) {
-    return { success: true, fallback: true, reason: "files-not-supported", method: "whatsapp-text-first" };
-  }
-
-  const textResult = await shareTextOnWhatsapp(message, {
-    ...options,
-    preferNativeShare: false,
-  });
-
-  if (!textResult.success) {
-    return textResult;
-  }
-
-  return {
-    ...textResult,
-    fallback: true,
-    reason: "files-not-supported",
-  };
+  return { success: false, reason: "files-not-supported" };
 }

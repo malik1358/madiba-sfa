@@ -1,4 +1,11 @@
 import { fetchWithLocalCache, fetchWithLocalCacheResilient, readCacheEntry, writeCacheEntry } from "./localDataStore.js";
+import {
+  finishDataRefreshJob,
+  markDataRefreshStep,
+  seedDataRefreshMeta,
+  snapshotRefreshSteps,
+  startDataRefreshJob,
+} from "./dataRefreshStatus.js";
 import { getSupabaseClient } from "./supabase.js";
 import { buildScopeHash } from "./scopeHash.js";
 import {
@@ -8,6 +15,9 @@ import {
 } from "./pendingOrdersQuery.js";
 
 export { buildScopeHash } from "./scopeHash.js";
+
+export const SNAPSHOT_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+const MOBILE_SNAPSHOT_META_KEY = "mobileSnapshot:meta:v1";
 
 export const CACHE_TTL = {
   scopeMs: 15 * 60 * 1000,
@@ -291,6 +301,16 @@ export async function writeMyDaySnapshot(userId, dateKey, snapshot) {
   );
 }
 
+export async function readMobileSnapshotMeta() {
+  const entry = await readCacheEntry(MOBILE_SNAPSHOT_META_KEY);
+  return entry?.value && typeof entry.value === "object" ? entry.value : null;
+}
+
+export async function writeMobileSnapshotMeta(meta) {
+  if (!meta || typeof meta !== "object") return false;
+  return writeCacheEntry(MOBILE_SNAPSHOT_META_KEY, meta, { ttlMs: CACHE_TTL.mobileSnapshotMs });
+}
+
 export async function hydrateFoundationFromCache(userId) {
   const scopeEntry = await readCacheEntry(scopeCacheKey(userId));
   if (!scopeEntry?.value) return null;
@@ -422,55 +442,74 @@ export async function fetchCollectionQueuesCached(accessToken, userId, options =
 export async function hydrateFromMobileSnapshot(snapshot, userId) {
   if (!snapshot || !userId) return false;
 
-  const writes = [];
+  markDataRefreshStep("download", "done");
+  markDataRefreshStep("customers", "running");
+  const customerWrites = [];
 
   if (snapshot.salesScope) {
-    writes.push(writeCacheEntry(scopeCacheKey(userId), snapshot.salesScope, { ttlMs: CACHE_TTL.scopeMs }));
+    customerWrites.push(writeCacheEntry(scopeCacheKey(userId), snapshot.salesScope, { ttlMs: CACHE_TTL.scopeMs }));
   }
 
   const customerScope = snapshot.customerScope || snapshot.salesScope;
   if (customerScope) {
     if (Array.isArray(snapshot.customersBasic)) {
-      writes.push(writeCacheEntry(
+      customerWrites.push(writeCacheEntry(
         customersCacheKey(customerScope, false),
         snapshot.customersBasic,
         { ttlMs: CACHE_TTL.customersBasicMs },
       ));
     }
     if (snapshot.customersEnriched) {
-      writes.push(writeCacheEntry(
+      customerWrites.push(writeCacheEntry(
         customersCacheKey(customerScope, true),
         snapshot.customersEnriched,
         { ttlMs: CACHE_TTL.customersEnrichedMs },
       ));
     }
   }
+  await Promise.all(customerWrites);
+  markDataRefreshStep("customers", "done");
 
+  markDataRefreshStep("collections", "running");
+  const collectionWrites = [];
   const collectionScope = snapshot.collectionScope || snapshot.salesScope;
   if (collectionScope) {
-    writes.push(writeCacheEntry(collectionScopeCacheKey(userId), collectionScope, { ttlMs: CACHE_TTL.scopeMs }));
+    collectionWrites.push(writeCacheEntry(collectionScopeCacheKey(userId), collectionScope, { ttlMs: CACHE_TTL.scopeMs }));
     if (snapshot.collectionQueues) {
-      writes.push(writeCacheEntry(
+      collectionWrites.push(writeCacheEntry(
         collectionQueuesCacheKey(collectionScope),
         snapshot.collectionQueues,
         { ttlMs: CACHE_TTL.collectionQueuesMs },
       ));
     }
   }
+  await Promise.all(collectionWrites);
+  markDataRefreshStep("collections", "done");
 
+  markDataRefreshStep("items", "running");
   if (snapshot.itemsMaster) {
-    writes.push(writeCacheEntry(itemsMasterCacheKey(), snapshot.itemsMaster, { ttlMs: CACHE_TTL.itemsMasterMs }));
+    await writeCacheEntry(itemsMasterCacheKey(), snapshot.itemsMaster, { ttlMs: CACHE_TTL.itemsMasterMs });
   }
+  markDataRefreshStep("items", "done");
 
+  markDataRefreshStep("orders", "running");
   if (Array.isArray(snapshot.pendingOrders) && snapshot.salesScope) {
-    writes.push(writeCacheEntry(
+    await writeCacheEntry(
       pendingOrdersCacheKey(userId, snapshot.salesScope),
       snapshot.pendingOrders,
       { ttlMs: CACHE_TTL.pendingOrdersMs },
-    ));
+    );
   }
+  markDataRefreshStep("orders", "done");
 
-  await Promise.all(writes);
+  const savedAt = Date.now();
+  const builtAt = snapshot.builtAt || new Date(savedAt).toISOString();
+  await writeMobileSnapshotMeta({
+    builtAt,
+    savedAt,
+    snapshotKey: snapshot.snapshotKey || "",
+  });
+  seedDataRefreshMeta({ lastBuiltAt: builtAt, lastSavedAt: savedAt });
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("madiba-mobile-snapshot-hydrated"));
@@ -479,7 +518,8 @@ export async function hydrateFromMobileSnapshot(snapshot, userId) {
   return true;
 }
 
-export async function fetchAndHydrateMobileSnapshot() {
+export async function fetchAndHydrateMobileSnapshot(options = {}) {
+  const manageJob = options.manageJob !== false;
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error("Supabase is not configured.");
 
@@ -488,9 +528,58 @@ export async function fetchAndHydrateMobileSnapshot() {
     throw new Error("Please login again.");
   }
 
-  const snapshot = await fetchMobileSnapshotNetwork(session.access_token);
-  await hydrateFromMobileSnapshot(snapshot, session.user.id);
-  return { snapshot, userId: session.user.id };
+  if (manageJob) {
+    startDataRefreshJob("device-data", snapshotRefreshSteps(false));
+  }
+
+  try {
+    markDataRefreshStep("download", "running");
+    const snapshot = await fetchMobileSnapshotNetwork(session.access_token);
+    await hydrateFromMobileSnapshot(snapshot, session.user.id);
+    if (manageJob) {
+      finishDataRefreshJob({
+        lastBuiltAt: snapshot.builtAt,
+        lastSavedAt: Date.now(),
+      });
+    }
+    return { snapshot, userId: session.user.id };
+  } catch (error) {
+    if (manageJob) {
+      finishDataRefreshJob({ error: error.message || "Unable to refresh device data." });
+    }
+    throw error;
+  }
+}
+
+export async function ensureMobileSnapshotFresh(options = {}) {
+  if (typeof navigator !== "undefined" && !navigator.onLine && !options.forceRefresh) {
+    const meta = await readMobileSnapshotMeta();
+    if (meta) seedDataRefreshMeta({ lastBuiltAt: meta.builtAt, lastSavedAt: meta.savedAt });
+    return { skipped: true, offline: true, meta };
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return { skipped: true };
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user?.id) return { skipped: true };
+
+  const [foundation, meta] = await Promise.all([
+    hydrateFoundationFromCache(session.user.id),
+    readMobileSnapshotMeta(),
+  ]);
+  if (meta) {
+    seedDataRefreshMeta({ lastBuiltAt: meta.builtAt, lastSavedAt: meta.savedAt });
+  }
+
+  const hasCustomers = Array.isArray(foundation?.customers) && foundation.customers.length > 0;
+  const savedAt = Number(meta?.savedAt || 0);
+  const ageMs = savedAt > 0 ? Date.now() - savedAt : Number.POSITIVE_INFINITY;
+  const stale = !hasCustomers || ageMs > SNAPSHOT_STALE_AFTER_MS;
+  if (!options.forceRefresh && !stale) {
+    return { skipped: true, meta };
+  }
+
+  return fetchAndHydrateMobileSnapshot(options);
 }
 
 async function fetchPendingOrdersNetwork(scope) {
@@ -509,6 +598,26 @@ async function fetchPendingOrdersNetwork(scope) {
   return filterPendingOrdersForScope(data, scope);
 }
 
+export async function invalidatePendingOrdersCache(userId, scope) {
+  const { removeCacheEntry } = await import("./localDataStore.js");
+  await removeCacheEntry(pendingOrdersCacheKey(userId, scope));
+}
+
+export async function upsertLocalPendingOrder(userId, scope, order) {
+  if (!userId || !scope || !order?.id) return false;
+  const current = await readPendingOrdersCache(userId, scope);
+  const rows = Array.isArray(current) ? current : [];
+  const next = [
+    order,
+    ...rows.filter((row) => String(row?.id) !== String(order.id)),
+  ];
+  return writeCacheEntry(
+    pendingOrdersCacheKey(userId, scope),
+    next,
+    { ttlMs: CACHE_TTL.pendingOrdersMs },
+  );
+}
+
 export async function fetchPendingOrdersCached(userId, scope, options = {}) {
   if (!userId) throw new Error("Please login again.");
 
@@ -516,7 +625,11 @@ export async function fetchPendingOrdersCached(userId, scope, options = {}) {
     pendingOrdersCacheKey(userId, scope),
     CACHE_TTL.pendingOrdersMs,
     () => fetchPendingOrdersNetwork(scope),
-    { onUpdate: options.onUpdate },
+    {
+      onUpdate: options.onUpdate,
+      revalidate: Boolean(options.revalidate),
+      forceRefresh: Boolean(options.forceRefresh),
+    },
   );
 }
 

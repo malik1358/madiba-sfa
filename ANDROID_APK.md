@@ -55,6 +55,8 @@ Push alerts to salesmen (even when the app is not open) require Firebase Cloud M
 
 After deploy, MADIBA automatically sends **45-minute inactivity push alerts**, repeating every **15 minutes** while still idle, during each user's active work session (login → lunch out, lunch in → logout) via `/api/cron/inactivity-push` (GitHub Actions workflow **Inactivity Push**). Alerts use each user's selected language (English or Arabic). The same cron also sends **one email** after **50 minutes** with no visit, order, or collection — to the user and every boss in **Salesman Hierarchy** — skipping lunch break and ended workdays. If a salesman or collector has **not logged in by 11:00 KSA**, the same cron emails the user and hierarchy bosses **every 30 minutes** until they log in (skipped on Friday).
 
+Submitted orders with **no invoice uploaded after 1 hour** are emailed every **15 minutes** via `/api/cron/missing-invoice-email` (GitHub Actions workflow **Missing Invoice Email**) to the invoice-ops list. Orders marked **Rejected by management** are excluded.
+
 Every field transaction (visit, order, collection, prospect, attendance, etc.) also sends **push alerts up the reporting chain** — each boss in **Salesman Hierarchy** receives the alert, and if that boss also has a head, the alert continues to the top.
 
 Admins can also send a manual push:

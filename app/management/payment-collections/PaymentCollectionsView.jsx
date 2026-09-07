@@ -254,6 +254,10 @@ const TEXT = {
     en: "Showing saved queue. Refreshing in background...",
     ar: "عرض القائمة المحفوظة. جاري التحديث في الخلفية...",
   },
+  msgQueueLoadTimeout: {
+    en: "Queue load timed out. Showing saved data if available.",
+    ar: "انتهت مهلة تحميل القائمة. يتم عرض البيانات المحفوظة إن وُجدت.",
+  },
   msgGpsRequired: { en: "GPS is required. Allow location access in the browser before saving.", ar: "GPS مطلوب. اسمح بالموقع في المتصفح قبل الحفظ." },
   msgWhatsappNotSent: { en: "WhatsApp not sent", ar: "لم يتم إرسال واتساب" },
   msgSpeechUnsupported: { en: "Speech dictation is not supported in this browser.", ar: "الإملاء الصوتي غير مدعوم في هذا المتصفح." },
@@ -847,6 +851,16 @@ function mapInitialOutcome(row) {
   return "RESPONSIBLE_NOT_AVAILABLE";
 }
 
+const QUEUE_NETWORK_TIMEOUT_MS = 45000;
+
+function queueHasRows(queues) {
+  return Boolean(
+    queues?.dueCustomers?.length
+    || queues?.notDueCustomers?.length
+    || queues?.legalCustomers?.length,
+  );
+}
+
 function buildInitialForm(row) {
   return {
     visitOutcome: mapInitialOutcome(row),
@@ -900,6 +914,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const locationPromptResolverRef = useRef(null);
   const recognitionRef = useRef(null);
   const loadSeqRef = useRef(0);
+  const queueRefreshWatchdogRef = useRef(0);
   const queuesRef = useRef({ dueCustomers: [], notDueCustomers: [], legalCustomers: [] });
   const pendingSyncCountRef = useRef(0);
   const activeRowKeyRef = useRef("");
@@ -1058,15 +1073,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
     }
 
     setError("");
-
-    const safetyTimer = window.setTimeout(() => {
-      if (loadSeqRef.current !== seq) return;
-      setLoading(false);
-      setRefreshingQueue(false);
-      setError((current) => current || "Queue load timed out. Showing saved data if available.");
-    }, 15000);
+    window.clearTimeout(queueRefreshWatchdogRef.current);
+    queueRefreshWatchdogRef.current = 0;
 
     let cachedResult = null;
+    let keepWatchdog = false;
+    let watchdog = 0;
 
     try {
       const session = await resolveAuthSession(supabase, 8000);
@@ -1085,13 +1097,32 @@ export default function PaymentCollectionsView({ view = "due" }) {
         setLoading(true);
       }
 
+      watchdog = window.setTimeout(() => {
+        if (loadSeqRef.current !== seq) return;
+        if (queueRefreshWatchdogRef.current === watchdog) {
+          queueRefreshWatchdogRef.current = 0;
+        }
+        setLoading(false);
+        setRefreshingQueue(false);
+        const hasSavedQueue = Boolean(cachedResult) || queueHasRows(queuesRef.current);
+        if (!hasSavedQueue) {
+          setError((current) => current || t("msgQueueLoadTimeout"));
+        }
+      }, QUEUE_NETWORK_TIMEOUT_MS);
+      queueRefreshWatchdogRef.current = watchdog;
+
       const queueResult = await fetchCollectionQueuesCached(session.access_token, session.user.id, {
         onUpdate: (freshQueues) => {
           if (loadSeqRef.current !== seq) return;
+          if (queueRefreshWatchdogRef.current === watchdog) {
+            window.clearTimeout(watchdog);
+            queueRefreshWatchdogRef.current = 0;
+          }
           applyQueuePayload(freshQueues, preferredKey);
           setQueueFromCache(false);
           setQueueOffline(false);
           setRefreshingQueue(false);
+          setError("");
         },
       });
 
@@ -1103,24 +1134,26 @@ export default function PaymentCollectionsView({ view = "due" }) {
       }, preferredKey);
       setQueueFromCache(Boolean(queueResult.fromCache));
       setQueueOffline(Boolean(queueResult.offline));
-      setRefreshingQueue(Boolean(queueResult.fromCache && !queueResult.offline));
+      keepWatchdog = Boolean(queueResult.fromCache && queueResult.stale && !queueResult.offline);
+      setRefreshingQueue(keepWatchdog);
       setError("");
       return result;
     } catch (err) {
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
 
-      if (cachedResult) {
+      if (cachedResult || queueHasRows(queuesRef.current)) {
         setQueueFromCache(true);
         setQueueOffline(typeof navigator !== "undefined" && !navigator.onLine);
+        setRefreshingQueue(false);
         setError("");
-        return cachedResult;
+        return cachedResult || queuesRef.current;
       }
 
       const message = String(err.message || "");
       if (message === "SESSION_TIMEOUT") {
         setError("Session check timed out. Please refresh the page or login again.");
       } else if (message.includes("timed out")) {
-        setError(message);
+        setError(t("msgQueueLoadTimeout"));
       } else {
         setError(localizeApiMessage(message || "Unable to load payment collection queue."));
       }
@@ -1129,10 +1162,15 @@ export default function PaymentCollectionsView({ view = "due" }) {
       setLegalCustomers([]);
       return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
     } finally {
-      window.clearTimeout(safetyTimer);
+      if (!keepWatchdog && queueRefreshWatchdogRef.current === watchdog) {
+        window.clearTimeout(watchdog);
+        queueRefreshWatchdogRef.current = 0;
+        if (loadSeqRef.current === seq) {
+          setRefreshingQueue(false);
+        }
+      }
       if (loadSeqRef.current === seq) {
         setLoading(false);
-        setRefreshingQueue(false);
       }
     }
   }
@@ -1185,6 +1223,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
     window.addEventListener("online", onQueueChanged);
     return () => {
       loadSeqRef.current += 1;
+      window.clearTimeout(queueRefreshWatchdogRef.current);
+      queueRefreshWatchdogRef.current = 0;
       window.removeEventListener("madiba-mobile-snapshot-hydrated", onSnapshotHydrated);
       window.removeEventListener("madiba-offline-queue-changed", onQueueChanged);
       window.removeEventListener("online", onQueueChanged);

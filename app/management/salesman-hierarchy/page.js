@@ -34,6 +34,11 @@ const TEXT = {
     en: "Uncheck for managers who do not log their own visits or collections. Background GPS still runs so you can see their location. They will not get inactivity or late-login reminders.",
     ar: "ألغِ التحديد للمديرين الذين لا يسجلون زياراتهم أو تحصيلاتهم بأنفسهم. يستمر تتبع الموقع في الخلفية لمعرفة موقعهم. لن تصلهم تذكيرات عدم النشاط أو تأخر تسجيل الدخول.",
   },
+  saveAll: { en: "Save all", ar: "حفظ الكل" },
+  savingAll: { en: "Saving all...", ar: "جاري حفظ الكل..." },
+  noChanges: { en: "No changes to save.", ar: "لا توجد تغييرات للحفظ." },
+  savedAll: { en: "Saved {count} users.", ar: "تم حفظ {count} مستخدمين." },
+  savedOne: { en: "Saved 1 user.", ar: "تم حفظ مستخدم واحد." },
 };
 
 function normalizeCode(value) {
@@ -91,6 +96,7 @@ export default function SalesmanHierarchyPage() {
   const [resettingId, setResettingId] = useState("");
   const [togglingActiveId, setTogglingActiveId] = useState("");
   const [bulkResetting, setBulkResetting] = useState(false);
+  const [savingAll, setSavingAll] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -220,64 +226,136 @@ export default function SalesmanHierarchyPage() {
     return data;
   }
 
+  function pendingSalesmanChanges(salesman) {
+    const nextRole = normalizeRoleValue(roleSelections[salesman.id]);
+    const nextHead = String(headSelections[salesman.id] || "");
+    const nextRegion = String(regionSelections[salesman.id] || salesman.pricing_region || "riyadh");
+    const nextReportEmail = String(reportEmailSelections[salesman.id] || "").trim();
+    const nextActivityReminders = activityReminderSelections[salesman.id] !== false;
+
+    return {
+      nextRole,
+      nextHead,
+      nextRegion,
+      nextReportEmail,
+      nextActivityReminders,
+      roleChanged: nextRole !== normalizeRoleValue(salesman.role),
+      headChanged: nextHead !== String(salesman.head_salesman_code || ""),
+      regionChanged: nextRegion !== String(salesman.pricing_region || "riyadh"),
+      reportEmailChanged: nextReportEmail !== String(salesman.report_email || "").trim(),
+      remindersChanged: nextActivityReminders !== (salesman.activity_reminders_enabled !== false),
+    };
+  }
+
+  function isSalesmanDirty(salesman) {
+    const pending = pendingSalesmanChanges(salesman);
+    return pending.roleChanged
+      || pending.headChanged
+      || pending.regionChanged
+      || pending.reportEmailChanged
+      || pending.remindersChanged;
+  }
+
+  async function persistSalesmanChanges(salesman) {
+    const pending = pendingSalesmanChanges(salesman);
+    const messages = [];
+
+    if (pending.roleChanged) {
+      const roleResult = await postAction({
+        mode: "update-role",
+        salesmanId: salesman.id,
+        role: pending.nextRole,
+      });
+      messages.push(roleResult.message || "Role updated.");
+    }
+
+    if (pending.headChanged || pending.regionChanged) {
+      const result = await postAction({
+        mode: "assign-head",
+        salesmanId: salesman.id,
+        headSalesmanCode: pending.nextHead,
+        pricingRegion: pending.nextRegion,
+      });
+      messages.push(result.message || "Head salesman saved.");
+    }
+
+    if (pending.reportEmailChanged) {
+      const emailResult = await postAction({
+        mode: "set-report-email",
+        salesmanId: salesman.id,
+        reportEmail: pending.nextReportEmail,
+      });
+      messages.push(emailResult.message || "Report email saved.");
+    }
+
+    if (pending.remindersChanged) {
+      const reminderResult = await postAction({
+        mode: "set-activity-reminders",
+        salesmanId: salesman.id,
+        activityRemindersEnabled: pending.nextActivityReminders,
+      });
+      messages.push(reminderResult.message || "Activity reminders updated.");
+    }
+
+    return messages;
+  }
+
+  async function refreshAfterSave() {
+    const supabase = getSupabaseClient();
+    const { data: { session } } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
+    if (session?.user?.id) {
+      await invalidateSalesScopeCache(session.user.id);
+    }
+    await loadHierarchy(false);
+  }
+
   async function saveHeadAssignment(salesman) {
     setSavingId(salesman.id);
     setError("");
     setMessage("");
 
     try {
-      const nextRole = normalizeRoleValue(roleSelections[salesman.id]);
-      const messages = [];
-
-      if (nextRole !== normalizeRoleValue(salesman.role)) {
-        const roleResult = await postAction({
-          mode: "update-role",
-          salesmanId: salesman.id,
-          role: nextRole,
-        });
-        messages.push(roleResult.message || "Role updated.");
+      if (!isSalesmanDirty(salesman)) {
+        setMessage(t("noChanges"));
+        return;
       }
-
-      const result = await postAction({
-        mode: "assign-head",
-        salesmanId: salesman.id,
-        headSalesmanCode: headSelections[salesman.id] || "",
-        pricingRegion: regionSelections[salesman.id] || "riyadh",
-      });
-      messages.push(result.message || "Head salesman saved.");
-
-      const nextReportEmail = String(reportEmailSelections[salesman.id] || "").trim();
-      if (nextReportEmail !== String(salesman.report_email || "").trim()) {
-        const emailResult = await postAction({
-          mode: "set-report-email",
-          salesmanId: salesman.id,
-          reportEmail: nextReportEmail,
-        });
-        messages.push(emailResult.message || "Report email saved.");
-      }
-
-      const nextActivityReminders = activityReminderSelections[salesman.id] !== false;
-      if (nextActivityReminders !== (salesman.activity_reminders_enabled !== false)) {
-        const reminderResult = await postAction({
-          mode: "set-activity-reminders",
-          salesmanId: salesman.id,
-          activityRemindersEnabled: nextActivityReminders,
-        });
-        messages.push(reminderResult.message || "Activity reminders updated.");
-      }
-      messages.push(result.message || "Head salesman saved.");
-
-      setMessage(messages.join(" "));
-      const supabase = getSupabaseClient();
-      const { data: { session } } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
-      if (session?.user?.id) {
-        await invalidateSalesScopeCache(session.user.id);
-      }
-      await loadHierarchy(false);
+      const messages = await persistSalesmanChanges(salesman);
+      setMessage(messages.join(" ") || t("savedOne"));
+      await refreshAfterSave();
     } catch (err) {
       setError(err.message || "Unable to save assignment.");
     } finally {
       setSavingId("");
+    }
+  }
+
+  async function saveAllAssignments() {
+    const dirty = salesmen.filter((salesman) => isSalesmanDirty(salesman));
+    if (!dirty.length) {
+      setError("");
+      setMessage(t("noChanges"));
+      return;
+    }
+
+    setSavingAll(true);
+    setError("");
+    setMessage("");
+
+    try {
+      for (const salesman of dirty) {
+        await persistSalesmanChanges(salesman);
+      }
+      setMessage(
+        dirty.length === 1
+          ? t("savedOne")
+          : t("savedAll").replace("{count}", String(dirty.length)),
+      );
+      await refreshAfterSave();
+    } catch (err) {
+      setError(err.message || "Unable to save assignments.");
+      await loadHierarchy(false);
+    } finally {
+      setSavingAll(false);
     }
   }
 
@@ -515,9 +593,14 @@ export default function SalesmanHierarchyPage() {
         <section className="moduleSection">
           <div className="moduleSectionHeader">
             <h2>Hierarchy Assignment</h2>
-            <button type="button" className="moduleInlineButton" onClick={resetAllPasswords} disabled={bulkResetting}>
-              {bulkResetting ? "Resetting..." : "Reset All Passwords"}
-            </button>
+            <div className="moduleActionRow">
+              <button type="button" className="modulePrimaryButton" onClick={saveAllAssignments} disabled={savingAll || Boolean(savingId) || bulkResetting}>
+                {savingAll ? t("savingAll") : t("saveAll")}
+              </button>
+              <button type="button" className="moduleInlineButton" onClick={resetAllPasswords} disabled={bulkResetting || savingAll}>
+                {bulkResetting ? "Resetting..." : "Reset All Passwords"}
+              </button>
+            </div>
           </div>
           <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("inactiveHint")}</div>
           <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("activityRemindersHint")}</div>
@@ -631,7 +714,7 @@ export default function SalesmanHierarchyPage() {
                             type="button"
                             className="moduleInlineButton"
                             onClick={() => saveHeadAssignment(salesman)}
-                            disabled={savingId === salesman.id}
+                            disabled={savingAll || savingId === salesman.id}
                           >
                             {savingId === salesman.id ? "Saving..." : "Save"}
                           </button>
@@ -639,7 +722,7 @@ export default function SalesmanHierarchyPage() {
                             type="button"
                             className="moduleInlineButton"
                             onClick={() => resetPassword(salesman)}
-                            disabled={resettingId === salesman.id}
+                            disabled={savingAll || resettingId === salesman.id}
                           >
                             {resettingId === salesman.id ? "Resetting..." : "Reset Password"}
                           </button>
@@ -647,7 +730,7 @@ export default function SalesmanHierarchyPage() {
                             type="button"
                             className="moduleInlineButton"
                             onClick={() => toggleActiveStatus(salesman)}
-                            disabled={togglingActiveId === salesman.id}
+                            disabled={savingAll || togglingActiveId === salesman.id}
                           >
                             {togglingActiveId === salesman.id
                               ? "Saving..."

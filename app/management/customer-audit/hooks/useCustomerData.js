@@ -70,7 +70,7 @@ export function useCustomerData({ setError, setMessage }) {
         });
         const scope = scopeResult.scope;
         setAccessScope(scope);
-        if (scopeResult.fromCache) {
+        if (scopeResult.fromCache && scopeResult.stale) {
           setRefreshing(true);
         }
 

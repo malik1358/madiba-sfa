@@ -1,3 +1,5 @@
+import { formatSalesOrderNumber } from "./salesOrderNumber.js";
+
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
@@ -34,7 +36,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
 
   return [
     labels.title,
-    `${labels.orderId}: ${snapshot.orderId}`,
+    `${labels.orderId}: ${formatSalesOrderNumber(snapshot) || snapshot.orderId}`,
     `${labels.customer}: ${snapshot.customerName || snapshot.customerCode || "-"}`,
     `${labels.code}: ${snapshot.customerCode || "-"}`,
     `${labels.salesman}: ${snapshot.salesmanCode || "-"}`,

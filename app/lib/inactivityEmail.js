@@ -62,7 +62,7 @@ export function buildInactivityAlertEmail({
     `Date (KSA): ${date}`,
     `Login: ${loginTime}`,
     `Last logged activity: ${lastActivity}`,
-    `This alert is sent every ${INACTIVITY_EMAIL_MINUTES} minutes until the next visit, order, or collection, and is skipped during lunch break.`,
+    `This alert is sent every ${INACTIVITY_EMAIL_MINUTES} minutes until 10:00 PM KSA or the next visit, order, or collection, and is skipped during lunch break.`,
   ].join("\n");
 
   const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
@@ -73,7 +73,7 @@ export function buildInactivityAlertEmail({
     <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Login</td><td>${escapeHtml(loginTime)}</td></tr>
     <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Last logged activity</td><td>${escapeHtml(lastActivity)}</td></tr>
   </table>
-  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">An email is sent every ${INACTIVITY_EMAIL_MINUTES} minutes to the user and bosses in the reporting hierarchy until the next visit, order, or collection. Lunch break is excluded.</p>
+  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">An email is sent every ${INACTIVITY_EMAIL_MINUTES} minutes until 10:00 PM KSA to the user and bosses in the reporting hierarchy until the next visit, order, or collection. Lunch break is excluded.</p>
 </div>`;
 
   return { subject, text, html };

@@ -99,6 +99,12 @@ export function isCacheEntryFresh(entry, ttlMs, now = Date.now()) {
   return Number(entry.expiresAt) > now;
 }
 
+export function shouldUseLocalCacheOnly(cached, options = {}) {
+  if (!cached || cached.value === undefined) return false;
+  if (options.forceRefresh || options.revalidate) return false;
+  return true;
+}
+
 export async function readCacheEntry(key) {
   if (!key) return null;
 
@@ -150,6 +156,7 @@ export async function fetchWithLocalCache(key, ttlMs, fetcher, options = {}) {
   const onUpdate = typeof options.onUpdate === "function" ? options.onUpdate : null;
   const allowStale = options.allowStale !== false;
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const forceRefresh = Boolean(options.forceRefresh);
 
   if (offline) {
     if (cached?.value !== undefined) {
@@ -164,7 +171,16 @@ export async function fetchWithLocalCache(key, ttlMs, fetcher, options = {}) {
     throw new Error("You are offline and this data is not available on the device yet.");
   }
 
-  if (cached && isCacheEntryFresh(cached, ttlMs)) {
+  if (!forceRefresh && shouldUseLocalCacheOnly(cached, options)) {
+    return {
+      data: cached.value,
+      fromCache: true,
+      stale: !isCacheEntryFresh(cached, ttlMs),
+      offline: false,
+    };
+  }
+
+  if (!forceRefresh && cached && isCacheEntryFresh(cached, ttlMs)) {
     if (onUpdate) {
       Promise.resolve()
         .then(fetcher)
@@ -182,7 +198,7 @@ export async function fetchWithLocalCache(key, ttlMs, fetcher, options = {}) {
     };
   }
 
-  if (cached && allowStale) {
+  if (!forceRefresh && cached && allowStale) {
     Promise.resolve()
       .then(fetcher)
       .then(async (fresh) => {

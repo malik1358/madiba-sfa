@@ -226,6 +226,21 @@ async function registerPushNotifications(userId) {
 
   await PushNotifications.addListener("registrationError", () => {}).catch(() => {});
 
+  const forwardOfflineDataRefresh = async (notification) => {
+    const data = notification?.data || notification?.notification?.data || {};
+    if (String(data.type || "") !== "offline_data_refresh") return;
+    const { emitOfflineDataRefresh } = await import("./offlineDataRefresh.js");
+    emitOfflineDataRefresh(data);
+  };
+
+  await PushNotifications.addListener("pushNotificationReceived", (notification) => {
+    forwardOfflineDataRefresh(notification).catch(() => {});
+  }).catch(() => {});
+
+  await PushNotifications.addListener("pushNotificationActionPerformed", (event) => {
+    forwardOfflineDataRefresh(event?.notification || event).catch(() => {});
+  }).catch(() => {});
+
   await PushNotifications.register().catch(() => {});
 }
 

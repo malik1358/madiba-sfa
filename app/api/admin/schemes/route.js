@@ -117,6 +117,17 @@ export async function PUT(request) {
 
     if (error) throw error;
 
+    try {
+      const { hashOfflineDataContent, publishOfflineDataUpdate } = await import("../../../lib/offlineDataBroadcast.js");
+      await publishOfflineDataUpdate(admin, {
+        trigger: "schemes-update",
+        kinds: ["schemes"],
+        contentHash: hashOfflineDataContent(schemes),
+      });
+    } catch (publishError) {
+      console.error("Offline data publish after schemes update failed:", publishError);
+    }
+
     return NextResponse.json({
       success: true,
       schemes,

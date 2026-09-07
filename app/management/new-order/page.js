@@ -8,6 +8,7 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
+import { listLocalProspectsAsCustomers } from "../../lib/offlineProspects";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { evaluateOrderSchemes, formatSchemeDetail, lookupSchemeApplication } from "../../lib/orderSchemes";
 import { isBuildingMaterialItem, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
@@ -1311,12 +1312,13 @@ export default function NewOrderPage() {
         const scope = await fetchSalesScope({ forceRefresh: true });
         setAccessScope(scope);
 
-        const [loadedCustomers, itemsRes] = await Promise.all([
-          fetchVisibleCustomers(accessToken),
+        const [loadedCustomers, itemsRes, localProspects] = await Promise.all([
+          fetchVisibleCustomers(accessToken).catch(() => []),
           supabase
             .from("items_master")
             .select("item_code,item_name,category")
             .order("item_name"),
+          listLocalProspectsAsCustomers().catch(() => []),
         ]);
 
         if (itemsRes.error) throw itemsRes.error;
@@ -1324,9 +1326,17 @@ export default function NewOrderPage() {
         const visibleCustomers = (loadedCustomers || []).filter((customer) => !isExcludedNewOrderCustomer(customer));
         const allowPrefilled = Boolean(prefilledCustomer)
           && (!isExcludedNewOrderCustomer(prefilledCustomer) || Boolean(editOrderId));
-        const mergedCustomers = allowPrefilled && !visibleCustomers.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
-          ? [prefilledCustomer, ...visibleCustomers]
-          : visibleCustomers;
+        const withLocalProspects = [
+          ...(Array.isArray(localProspects) ? localProspects : []),
+          ...visibleCustomers,
+        ].filter((customer, index, rows) => {
+          const code = String(customer?.customer_code || "").trim().toUpperCase();
+          if (!code) return false;
+          return rows.findIndex((row) => String(row?.customer_code || "").trim().toUpperCase() === code) === index;
+        });
+        const mergedCustomers = allowPrefilled && !withLocalProspects.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
+          ? [prefilledCustomer, ...withLocalProspects]
+          : withLocalProspects;
 
         setCustomers(mergedCustomers);
         setItemsMaster((itemsRes.data || []).filter((item) => !isBuildingMaterialItem(item)));

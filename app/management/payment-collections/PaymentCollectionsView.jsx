@@ -30,7 +30,7 @@ import {
   patchCollectionQueuesWithOptimisticVisit,
   resolveCollectionVisitNumberForDay,
 } from "../../lib/collectionOffline";
-import { listOfflineQueue, processOfflineQueue } from "../../lib/offlineSyncQueue";
+import { listOfflineQueue } from "../../lib/offlineSyncQueue";
 import {
   fetchCollectionQueuesCached,
   fetchSalesScopeCached,
@@ -1713,6 +1713,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         },
         timeoutMs: 25000,
         queueOnTimeout: true,
+        queueFirst: true,
       });
 
       const payload = saveResult.payload || {};

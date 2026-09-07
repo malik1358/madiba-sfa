@@ -769,3 +769,7 @@ export async function createOrderPdfDocument(snapshot, options = {}) {
   renderOrderPdfDocument(doc, snapshot, options);
   return doc;
 }
+
+export function preloadOrderPdfLibrary() {
+  return import("jspdf");
+}

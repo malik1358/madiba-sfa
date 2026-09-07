@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildWhatsappAppUrl, buildWhatsappShareUrl, toWhatsappShareFile, withWhatsappCaptionFile } from "../app/lib/whatsappShare.js";
+import { buildWhatsappAppUrl, buildWhatsappShareUrl, toWhatsappShareFile, wrapWhatsappSummaryLines } from "../app/lib/whatsappShare.js";
 
 test("buildWhatsappShareUrl encodes message text", () => {
   const url = buildWhatsappShareUrl("Customer: Test\nCode: 1254");
@@ -28,11 +28,7 @@ test("toWhatsappShareFile names unnamed blobs for WhatsApp attachments", () => {
   assert.equal(file.type, "image/jpeg");
 });
 
-test("withWhatsappCaptionFile attaches the chat summary next to a PDF", () => {
-  const pdf = new File(["pdf"], "order-325.pdf", { type: "application/pdf" });
-  const files = withWhatsappCaptionFile([pdf], "Sales order\nOrder #: 325");
-  assert.equal(files.length, 2);
-  assert.equal(files[0].name, "order-325.pdf");
-  assert.equal(files[1].name, "order-whatsapp-message.txt");
-  assert.equal(files[1].type, "text/plain");
+test("wrapWhatsappSummaryLines keeps the order summary readable on a share image", () => {
+  const lines = wrapWhatsappSummaryLines("Sales order\nOrder #: 325\nCustomer: test");
+  assert.deepEqual(lines, ["Sales order", "Order #: 325", "Customer: test"]);
 });

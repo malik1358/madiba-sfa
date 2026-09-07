@@ -35,9 +35,9 @@ test("saved empty scheme list is respected", () => {
   assert.deepEqual(resolveStoredOrderSchemes({ schemes: [] }), []);
 });
 
-test("A005425 scheme also applies to Golden Star paper A003234", () => {
+test("A005425 scheme does not apply to alias paper codes", () => {
   const applied = evaluateOrderSchemes({ A003234: 40, A004225: 1 }, DEFAULT_ORDER_SCHEMES);
-  assert.equal(lookupSchemeApplication(applied, "A003234").schemeAmount, 73.2);
+  assert.equal(lookupSchemeApplication(applied, "A003234").schemeAmount, 0);
   assert.equal(lookupSchemeApplication(applied, "A005425").schemeAmount, 0);
 });
 
@@ -111,8 +111,8 @@ test("priceOrderLines fills a missing A003234 rate from the A005425 family", () 
     },
   );
 
-  assert.equal(Number(lines[0].rate.toFixed(2)), Number((52.83 - 1.83).toFixed(2)));
-  assert.equal(Number(lines[0].line_value.toFixed(2)), Number(((52.83 - 1.83) * 40).toFixed(2)));
+  assert.equal(Number(lines[0].rate.toFixed(2)), 52.83);
+  assert.equal(Number(lines[0].line_value.toFixed(2)), Number((52.83 * 40).toFixed(2)));
 });
 
 test("describeOrderScheme explains the first configured deal", () => {

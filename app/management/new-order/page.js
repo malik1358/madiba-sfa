@@ -1095,7 +1095,10 @@ export default function NewOrderPage() {
     setMessage("");
     setLastSavedOrder(snapshot);
 
-    const prepared = await downloadOrderPdf(snapshot, { returnFileOnly: true, fast: true });
+    const [prepared, isNative] = await Promise.all([
+      downloadOrderPdf(snapshot, { returnFileOnly: true, fast: true }),
+      isNativeMobilePlatform(),
+    ]);
     if (prepared?.snapshot) {
       setLastSavedOrder(prepared.snapshot);
     }
@@ -1109,7 +1112,6 @@ export default function NewOrderPage() {
       return;
     }
 
-    const isNative = await isNativeMobilePlatform();
     showPopup({
       message: savedMessage,
       variant: "success",

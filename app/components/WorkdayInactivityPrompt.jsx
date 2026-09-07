@@ -46,6 +46,16 @@ export default function WorkdayInactivityPrompt() {
         const userId = session?.user?.id;
         if (!userId || cancelled) return;
 
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("activity_reminders_enabled")
+          .eq("id", userId)
+          .maybeSingle();
+        if (profile?.activity_reminders_enabled === false) {
+          setVisible(false);
+          return;
+        }
+
         const reportDate = getKsaDateString();
         const { startIso, endIso } = ksaDayBounds(reportDate);
 

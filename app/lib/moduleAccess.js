@@ -64,6 +64,14 @@ export function shouldRequireGpsAccessGate(role) {
   return shouldRequireTransactionGps(role);
 }
 
+export function shouldEnableBackgroundGps(role) {
+  const normalized = normalizeAccessRole(role);
+  if (normalized === "admin" || isInvoiceMakerRole(role)) {
+    return false;
+  }
+  return shouldRequireTransactionGps(role);
+}
+
 export function isProductPromoterRole(role) {
   const normalized = normalizeAccessRole(role);
   return normalized === "product-promoter";

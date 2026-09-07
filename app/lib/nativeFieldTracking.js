@@ -3,6 +3,7 @@ import {
   IDLE_GPS_ACTIVITY_ENTRY_TYPES,
   INACTIVITY_MS,
   INACTIVITY_ALERT_REPEAT_MS,
+  areActivityRemindersEnabled,
   getInactivityAlertMessage,
   shouldCaptureIdleGpsPing,
   shouldWarnInactivity,
@@ -335,7 +336,7 @@ async function runTrackingCycle(userId) {
       }
     }
 
-    const [{ data: collections }, { data: orders }] = await Promise.all([
+    const [{ data: collections }, { data: orders }, { data: profile }] = await Promise.all([
       supabase
         .from("collection_visits")
         .select("saved_at")
@@ -348,15 +349,23 @@ async function runTrackingCycle(userId) {
         .eq("created_by", userId)
         .gte("updated_at", startIso)
         .lte("updated_at", endIso),
+      supabase
+        .from("profiles")
+        .select("activity_reminders_enabled")
+        .eq("id", userId)
+        .maybeSingle(),
     ]);
 
-    if (shouldWarnInactivity({
-      loginAt,
-      logoutAt,
-      userLogs: logs || [],
-      collections: collections || [],
-      orders: orders || [],
-    })) {
+    if (
+      areActivityRemindersEnabled(profile)
+      && shouldWarnInactivity({
+        loginAt,
+        logoutAt,
+        userLogs: logs || [],
+        collections: collections || [],
+        orders: orders || [],
+      })
+    ) {
       await maybeShowInactivityNotification(userId, lastActivityTs, loginAt);
     }
   } catch {

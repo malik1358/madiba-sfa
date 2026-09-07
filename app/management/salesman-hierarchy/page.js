@@ -27,6 +27,13 @@ const TEXT = {
     en: "Inactive users are hidden from User Activity but remain in the hierarchy for reference.",
     ar: "المستخدمون غير النشطين لا يظهرون في نشاط المستخدمين لكنهم يبقون في الهيكل للرجوع إليهم.",
   },
+  activityReminders: { en: "Activity reminders", ar: "تذكيرات النشاط" },
+  remindersOn: { en: "On", ar: "تشغيل" },
+  remindersOff: { en: "Off", ar: "إيقاف" },
+  activityRemindersHint: {
+    en: "Uncheck for managers who do not log their own visits or collections. Background GPS still runs so you can see their location. They will not get inactivity or late-login reminders.",
+    ar: "ألغِ التحديد للمديرين الذين لا يسجلون زياراتهم أو تحصيلاتهم بأنفسهم. يستمر تتبع الموقع في الخلفية لمعرفة موقعهم. لن تصلهم تذكيرات عدم النشاط أو تأخر تسجيل الدخول.",
+  },
 };
 
 function normalizeCode(value) {
@@ -93,6 +100,7 @@ export default function SalesmanHierarchyPage() {
   const [headSelections, setHeadSelections] = useState({});
   const [roleSelections, setRoleSelections] = useState({});
   const [reportEmailSelections, setReportEmailSelections] = useState({});
+  const [activityReminderSelections, setActivityReminderSelections] = useState({});
   const [newSalesman, setNewSalesman] = useState({
     salesmanName: "",
     salesmanCode: "",
@@ -150,6 +158,9 @@ export default function SalesmanHierarchyPage() {
       );
       setReportEmailSelections(
         Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.report_email || ""]))
+      );
+      setActivityReminderSelections(
+        Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.activity_reminders_enabled !== false]))
       );
     } catch (err) {
       setError(err.message || "Unable to load salesman hierarchy.");
@@ -243,6 +254,16 @@ export default function SalesmanHierarchyPage() {
           reportEmail: nextReportEmail,
         });
         messages.push(emailResult.message || "Report email saved.");
+      }
+
+      const nextActivityReminders = activityReminderSelections[salesman.id] !== false;
+      if (nextActivityReminders !== (salesman.activity_reminders_enabled !== false)) {
+        const reminderResult = await postAction({
+          mode: "set-activity-reminders",
+          salesmanId: salesman.id,
+          activityRemindersEnabled: nextActivityReminders,
+        });
+        messages.push(reminderResult.message || "Activity reminders updated.");
       }
       messages.push(result.message || "Head salesman saved.");
 
@@ -499,6 +520,7 @@ export default function SalesmanHierarchyPage() {
             </button>
           </div>
           <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("inactiveHint")}</div>
+          <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("activityRemindersHint")}</div>
 
           <ExportableTable filename="salesman-hierarchy" sheetName="Hierarchy" className="moduleTableWrap">
             <table className="moduleTable">
@@ -510,6 +532,7 @@ export default function SalesmanHierarchyPage() {
                   <th>Region</th>
                   <th>Username</th>
                   <th title="This person's inbox. Heads above them also receive the daily visit report.">Report email</th>
+                  <th title={t("activityRemindersHint")}>{t("activityReminders")}</th>
                   <th>Current Head</th>
                   <th>Assign Head</th>
                   <th>Default Password</th>
@@ -570,6 +593,19 @@ export default function SalesmanHierarchyPage() {
                           placeholder="name@company.com"
                         />
                       </td>
+                      <td>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                          <input
+                            type="checkbox"
+                            checked={activityReminderSelections[salesman.id] !== false}
+                            onChange={(event) => setActivityReminderSelections((current) => ({
+                              ...current,
+                              [salesman.id]: event.target.checked,
+                            }))}
+                          />
+                          <span>{activityReminderSelections[salesman.id] !== false ? t("remindersOn") : t("remindersOff")}</span>
+                        </label>
+                      </td>
                       <td>{currentHead ? `${currentHead.salesman_name || currentHead.salesman_code} (${currentHead.salesman_code})` : "-"}</td>
                       <td>
                         <select
@@ -625,7 +661,7 @@ export default function SalesmanHierarchyPage() {
 
                 {salesmen.length === 0 && (
                   <tr>
-                    <td colSpan={10}>No users found.</td>
+                    <td colSpan={11}>No users found.</td>
                   </tr>
                 )}
               </tbody>

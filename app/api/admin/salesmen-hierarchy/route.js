@@ -357,9 +357,17 @@ async function loadSalesmen(admin) {
   const roleFilter = ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"];
   let profilesRes = await admin
     .from("profiles")
-    .select("id,salesman_code,salesman_name,role,is_active,report_email")
+    .select("id,salesman_code,salesman_name,role,is_active,report_email,activity_reminders_enabled")
     .in("role", roleFilter)
     .order("salesman_name");
+
+  if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
+    profilesRes = await admin
+      .from("profiles")
+      .select("id,salesman_code,salesman_name,role,is_active,report_email")
+      .in("role", roleFilter)
+      .order("salesman_name");
+  }
 
   if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
     profilesRes = await admin
@@ -387,6 +395,7 @@ async function loadSalesmen(admin) {
       salesman_name: profile.salesman_name || "",
       role: profile.role || "",
       is_active: profile.is_active !== false,
+      activity_reminders_enabled: profile.activity_reminders_enabled !== false,
       email: authUser?.email || "",
       report_email: String(profile.report_email || "").trim(),
       login_name: displayLoginName(authUser?.email || ""),
@@ -698,6 +707,46 @@ export async function POST(request) {
           ? `Daily visit reports for ${target.salesman_name || target.salesman_code || salesmanId} will go to ${reportEmail}, plus every head above them.`
           : `Cleared the report email for ${target.salesman_name || target.salesman_code || salesmanId}.`,
         reportEmail,
+      });
+    }
+
+    if (mode === "set-activity-reminders") {
+      const salesmanId = String(body?.salesmanId || "").trim();
+      const activityRemindersEnabled = body?.activityRemindersEnabled !== false;
+
+      if (!salesmanId) {
+        return NextResponse.json({ success: false, error: "Missing salesman id." }, { status: 400 });
+      }
+
+      const { data: target, error: targetError } = await admin
+        .from("profiles")
+        .select("id,salesman_code,salesman_name")
+        .eq("id", salesmanId)
+        .single();
+
+      if (targetError) throw targetError;
+
+      const { error: updateError } = await admin
+        .from("profiles")
+        .update({ activity_reminders_enabled: activityRemindersEnabled })
+        .eq("id", salesmanId);
+
+      if (updateError) {
+        if (isMissingSchemaColumn(updateError)) {
+          return NextResponse.json({
+            success: false,
+            error: "Run sql/setup_profile_activity_reminders.sql in Supabase to store the activity reminder setting.",
+          }, { status: 400 });
+        }
+        throw updateError;
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: activityRemindersEnabled
+          ? `Activity reminders are on for ${target.salesman_name || target.salesman_code || salesmanId}.`
+          : `Activity reminders are off for ${target.salesman_name || target.salesman_code || salesmanId}. They will not get inactivity or late-login reminders. Background GPS still runs.`,
+        activityRemindersEnabled,
       });
     }
 

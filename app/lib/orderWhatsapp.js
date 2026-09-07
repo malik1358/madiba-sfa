@@ -36,7 +36,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
 
   return [
     labels.title,
-    `${labels.orderId}: ${formatSalesOrderNumber(snapshot) || snapshot.orderId}`,
+        `${labels.orderId}: ${formatSalesOrderNumber(snapshot) || "—"}`,
     `${labels.customer}: ${snapshot.customerName || snapshot.customerCode || "-"}`,
     `${labels.code}: ${snapshot.customerCode || "-"}`,
     `${labels.salesman}: ${snapshot.salesmanCode || "-"}`,

@@ -30,7 +30,7 @@ import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfEx
 import {
   buildOrderPdfSnapshotFromSavedOrder,
   createOrderPdfDocument,
-  enrichOrderPdfLiveData,
+  resolveLiveOrderPdfSnapshot,
 } from "../../lib/orderPdfDocument";
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 
@@ -559,8 +559,12 @@ export default function PendingOrdersPage() {
         creditApprovalRemark: creditApprovalByOrder?.[activeOrder.id]?.remark || "",
       });
 
-      const { snapshot: liveSnapshot, analytics } = await enrichOrderPdfLiveData(snapshot, {
+      const { snapshot: liveSnapshot, analytics } = await resolveLiveOrderPdfSnapshot(snapshot, {
         accessToken: token,
+      }, {
+        processQueue: token
+          ? () => processOfflineQueue(async () => token)
+          : undefined,
       });
 
       let creditEvaluation = creditApprovalByOrder?.[activeOrder.id] || null;
@@ -590,10 +594,10 @@ export default function PendingOrdersPage() {
         creditApprovalRemark: creditEvaluation?.remark || liveSnapshot.creditApprovalRemark,
       }, { analytics });
 
-      const orderNumber = formatSalesOrderNumber(liveSnapshot) || liveSnapshot.orderId || activeOrder.id;
+      const orderNumber = formatSalesOrderNumber(liveSnapshot) || "order";
       const fileName = buildOrderPdfFileName({
         orderId: orderNumber,
-        customerCode: activeOrder.customer_code,
+        customerCode: liveSnapshot.customerCode || activeOrder.customer_code,
         savedAtIso: new Date().toISOString(),
       });
       await saveOrShareOrderPdf(doc, fileName, {

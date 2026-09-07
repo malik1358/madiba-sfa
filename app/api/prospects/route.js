@@ -7,6 +7,7 @@ import {
   insertProspectWithColumnFallback,
   listProspectsWithOrdersForScope,
   normalizeProspectSalesmanCode,
+  resolveProspectCustomerCode,
   withOfflineIdRemarks,
 } from "../../lib/prospects.js";
 import { linkProspectToCustomer, findProspectLinkCustomerSuggestions } from "../../lib/prospectCustomerLink.js";
@@ -69,6 +70,24 @@ export async function GET(request) {
     const { admin, scope } = await resolveRequestScope(request);
     const url = new URL(request.url);
     const linkSuggestionsFor = Number(url.searchParams.get("linkSuggestionsFor"));
+    const offlineId = String(url.searchParams.get("offlineId") || "").trim();
+
+    if (offlineId) {
+      const prospect = await findProspectByOfflineId(admin, offlineId);
+      if (!prospect?.id) {
+        return NextResponse.json({ success: true, found: false });
+      }
+      if (!canAccessProspectSalesmanCode(scope, prospect.salesman_code)) {
+        return NextResponse.json({ success: false, error: "You do not have access to this prospect." }, { status: 403 });
+      }
+      return NextResponse.json({
+        success: true,
+        found: true,
+        prospect,
+        customerCode: resolveProspectCustomerCode(prospect),
+        customerName: prospect.company_name || prospect.shop_name || prospect.customer_name || "",
+      });
+    }
 
     if (Number.isFinite(linkSuggestionsFor) && linkSuggestionsFor > 0) {
       const { data: prospect, error: prospectError } = await admin

@@ -44,7 +44,7 @@ import { useAppPopup } from "../../components/AppPopupProvider";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
-import { createOrderPdfDocument, enrichOrderPdfLiveData, formatHistoryChange } from "../../lib/orderPdfDocument";
+import { createOrderPdfDocument, formatHistoryChange, resolveLiveOrderPdfSnapshot } from "../../lib/orderPdfDocument";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 import { isExcludedNewOrderCustomer } from "../../lib/buildingMaterialCustomerFilter";
@@ -981,7 +981,7 @@ export default function NewOrderPage() {
   );
 
   const buildOrderSnapshot = useCallback(
-    (orderId, statusLabel) => {
+    (orderId, statusLabel, orderNumber = "") => {
       if (!selectedCustomer || orderItems.length === 0) return null;
 
       const savedAtIso = new Date().toISOString();
@@ -990,7 +990,7 @@ export default function NewOrderPage() {
 
       return {
         orderId,
-        orderNumber: formatSalesOrderNumber({ id: orderId }),
+        orderNumber: formatSalesOrderNumber({ id: orderId, orderNumber }),
         statusLabel,
         savedAtIso,
         customerCode: selectedCustomer.customer_code,
@@ -1035,19 +1035,20 @@ export default function NewOrderPage() {
       try {
         const supabase = getSupabaseClient();
         const accessToken = supabase ? await waitForAccessToken(supabase) : "";
-        if (accessToken && isQueuedPendingOrderId(snapshot.orderId)) {
-          await processOfflineQueue(async () => accessToken).catch(() => undefined);
-        }
-        const { snapshot: liveSnapshot, analytics: monthlyAnalytics } = await enrichOrderPdfLiveData(snapshot, {
+        const { snapshot: liveSnapshot, analytics: monthlyAnalytics } = await resolveLiveOrderPdfSnapshot(snapshot, {
           accessToken,
           analyticsFallback: analytics,
+        }, {
+          processQueue: accessToken
+            ? () => processOfflineQueue(async () => accessToken)
+            : undefined,
         });
-        const orderNumber = formatSalesOrderNumber(liveSnapshot) || liveSnapshot.orderId;
+        const orderNumber = formatSalesOrderNumber(liveSnapshot);
         const doc = await createOrderPdfDocument(liveSnapshot, { analytics: monthlyAnalytics });
 
         const fileName = buildOrderPdfFileName({
-          orderId: orderNumber,
-          customerCode: snapshot.customerCode,
+          orderId: orderNumber || "syncing",
+          customerCode: liveSnapshot.customerCode || snapshot.customerCode,
           savedAtIso: new Date().toISOString(),
         });
         const summaryText = buildOrderWhatsappSummary(liveSnapshot, language);
@@ -1113,14 +1114,15 @@ export default function NewOrderPage() {
   }, [downloadOrderPdf, language, showPopup]);
 
   const handleSaveDraft = useCallback(async () => {
-    const orderId = await saveDraft({ silent: true });
-    if (!orderId) return;
+    const saved = await saveDraft({ silent: true });
+    if (!saved?.orderId) return;
 
-    const snapshot = buildOrderSnapshot(orderId, "Draft Saved");
+    const snapshot = buildOrderSnapshot(saved.orderId, "Draft Saved", saved.orderNumber);
     if (!snapshot) return;
 
-    const queued = isQueuedPendingOrderId(orderId);
-    const orderNumber = formatSalesOrderNumber({ id: orderId });
+    const queued = isQueuedPendingOrderId(saved.orderId);
+    const orderNumber = formatSalesOrderNumber({ id: saved.orderId, orderNumber: saved.orderNumber })
+      || (queued ? (language === "ar" ? "على الجهاز" : "on this device") : "—");
     const savedMessage = queued
       ? (language === "ar"
         ? `تم حفظ مسودة الطلب #${orderNumber} على الجهاز وسيتم المزامنة تلقائياً.`
@@ -1133,19 +1135,15 @@ export default function NewOrderPage() {
   }, [buildOrderSnapshot, language, presentOrderWhatsappShare, saveDraft]);
 
   const handleSubmitOrder = useCallback(async () => {
-    const pendingSnapshot = buildOrderSnapshot(draftOrderId || "pending", "Submitted");
-    const orderId = await submitOrder({ silent: true });
-    if (!orderId || !pendingSnapshot) return;
+    const saved = await submitOrder({ silent: true });
+    if (!saved?.orderId) return;
 
-    const snapshot = {
-      ...pendingSnapshot,
-      orderId,
-      savedAtIso: new Date().toISOString(),
-      statusLabel: "Submitted",
-    };
+    const snapshot = buildOrderSnapshot(saved.orderId, "Submitted", saved.orderNumber);
+    if (!snapshot) return;
 
-    const queued = isQueuedPendingOrderId(orderId);
-    const orderNumber = formatSalesOrderNumber({ id: orderId });
+    const queued = isQueuedPendingOrderId(saved.orderId);
+    const orderNumber = formatSalesOrderNumber({ id: saved.orderId, orderNumber: saved.orderNumber })
+      || (queued ? (language === "ar" ? "على الجهاز" : "on this device") : "—");
     const savedMessage = queued
       ? (language === "ar"
         ? `تم حفظ الطلب #${orderNumber} على الجهاز وسيتم الإرسال عند عودة الاتصال.`
@@ -1155,11 +1153,11 @@ export default function NewOrderPage() {
         : `Order #${orderNumber} submitted.`);
 
     await presentOrderWhatsappShare(snapshot, { savedMessage, queued });
-  }, [buildOrderSnapshot, draftOrderId, language, presentOrderWhatsappShare, submitOrder]);
+  }, [buildOrderSnapshot, language, presentOrderWhatsappShare, submitOrder]);
 
   const shareText = useMemo(() => {
     if (!lastSavedOrder) return "";
-    return `Order #${formatSalesOrderNumber(lastSavedOrder) || lastSavedOrder.orderId} (${lastSavedOrder.statusLabel}) for ${lastSavedOrder.customerName} - ${formatMoney(lastSavedOrder.grandTotal)}. PDF downloaded and ready to attach.`;
+    return `Order #${formatSalesOrderNumber(lastSavedOrder) || "—"} (${lastSavedOrder.statusLabel}) for ${lastSavedOrder.customerName} - ${formatMoney(lastSavedOrder.grandTotal)}. PDF downloaded and ready to attach.`;
   }, [lastSavedOrder]);
 
   const fetchOutstandingForCustomer = useCallback(async (customer) => {
@@ -1300,7 +1298,7 @@ export default function NewOrderPage() {
 
   const emailShareUrl = useMemo(() => {
     if (!lastSavedOrder) return "#";
-    const subject = `Order #${formatSalesOrderNumber(lastSavedOrder) || lastSavedOrder.orderId} - ${lastSavedOrder.customerName}`;
+    const subject = `Order #${formatSalesOrderNumber(lastSavedOrder) || "—"} - ${lastSavedOrder.customerName}`;
     const body = `${shareText}\n\nUse Save / Share PDF in the app to attach the order PDF.`;
     return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }, [lastSavedOrder, shareText]);
@@ -1944,7 +1942,7 @@ export default function NewOrderPage() {
                 <div className="moduleReviewMeta">
                   <div>
                     <span>Order Number</span>
-                    <strong>#{formatSalesOrderNumber(lastSavedOrder) || lastSavedOrder.orderId}</strong>
+                    <strong>#{formatSalesOrderNumber(lastSavedOrder) || "—"}</strong>
                   </div>
                   <div>
                     <span>Customer</span>
@@ -2030,8 +2028,8 @@ export default function NewOrderPage() {
                     onClick={() => {
                       void presentOrderWhatsappShare(lastSavedOrder, {
                         savedMessage: language === "ar"
-                          ? `PDF للطلب #${formatSalesOrderNumber(lastSavedOrder) || lastSavedOrder.orderId} جاهز للمشاركة.`
-                          : `Order #${formatSalesOrderNumber(lastSavedOrder) || lastSavedOrder.orderId} PDF is ready to share.`,
+                          ? `PDF للطلب #${formatSalesOrderNumber(lastSavedOrder) || "—"} جاهز للمشاركة.`
+                          : `Order #${formatSalesOrderNumber(lastSavedOrder) || "—"} PDF is ready to share.`,
                       });
                     }}
                   >

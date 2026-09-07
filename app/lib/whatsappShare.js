@@ -75,12 +75,56 @@ function normalizeShareFiles(files = []) {
     .filter(Boolean);
 }
 
-export function withWhatsappCaptionFile(files = [], text = "") {
-  const shareFiles = normalizeShareFiles(files);
+export function wrapWhatsappSummaryLines(text, maxChars = 48) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const value = String(line || "");
+      if (value.length <= maxChars) return [value || " "];
+      const parts = [];
+      for (let index = 0; index < value.length; index += maxChars) {
+        parts.push(value.slice(index, index + maxChars));
+      }
+      return parts;
+    });
+}
+
+export async function buildWhatsappSummaryImageFile(text, fileName = "order-whatsapp-message.jpg") {
   const message = String(text || "").trim();
-  if (!message) return shareFiles;
-  const caption = toWhatsappShareFile(new Blob([`${message}\n`], { type: "text/plain" }), "order-whatsapp-message.txt");
-  return caption ? [...shareFiles, caption] : shareFiles;
+  if (!message || typeof document === "undefined" || typeof document.createElement !== "function") {
+    return null;
+  }
+
+  const lines = wrapWhatsappSummaryLines(message);
+  const padding = 28;
+  const lineHeight = 30;
+  const width = 720;
+  const height = Math.max(220, padding * 2 + lines.length * lineHeight);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#0b5364";
+  ctx.font = "bold 24px sans-serif";
+  ctx.fillText("MADIBA SFA", padding, padding + 8);
+  ctx.font = "22px sans-serif";
+  ctx.fillStyle = "#123f4b";
+  lines.forEach((line, index) => {
+    ctx.fillText(line, padding, padding + 40 + ((index + 1) * lineHeight));
+  });
+
+  const blob = await new Promise((resolve) => {
+    if (typeof canvas.toBlob === "function") {
+      canvas.toBlob((result) => resolve(result), "image/jpeg", 0.86);
+      return;
+    }
+    resolve(null);
+  });
+  return toWhatsappShareFile(blob, fileName);
 }
 
 async function blobToBase64(blob) {
@@ -237,7 +281,8 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
     await copyTextToClipboard(message);
   }
 
-  const filesWithCaption = withWhatsappCaptionFile(shareFiles, message);
+  const summaryImage = await buildWhatsappSummaryImageFile(message);
+  const filesWithCaption = summaryImage ? [summaryImage, ...shareFiles] : shareFiles;
   const dialogTitle = String(options.dialogTitle || "Share receipt and summary on WhatsApp").trim();
   const title = String(options.title || "Collection visit").trim();
 

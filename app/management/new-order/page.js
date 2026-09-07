@@ -44,7 +44,7 @@ import { useAppPopup } from "../../components/AppPopupProvider";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
-import { createOrderPdfDocument, formatHistoryChange, resolveLiveOrderPdfSnapshot } from "../../lib/orderPdfDocument";
+import { createOrderPdfDocument, formatHistoryChange, preloadOrderPdfLibrary, resolveLiveOrderPdfSnapshot } from "../../lib/orderPdfDocument";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 import { isExcludedNewOrderCustomer } from "../../lib/buildingMaterialCustomerFilter";
@@ -605,6 +605,10 @@ export default function NewOrderPage() {
   const [editOrderId, setEditOrderId] = useState("");
 
   useEffect(() => {
+    void preloadOrderPdfLibrary();
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
     const params = new URLSearchParams(window.location.search);
@@ -1033,20 +1037,34 @@ export default function NewOrderPage() {
 
       setDownloadingPdf(true);
       try {
+        if (options.fast) {
+          const orderNumber = formatSalesOrderNumber(snapshot) || snapshot.orderId;
+          const doc = await createOrderPdfDocument(snapshot, { analytics: null });
+          const fileName = buildOrderPdfFileName({
+            orderId: orderNumber || "syncing",
+            customerCode: snapshot.customerCode,
+            savedAtIso: new Date().toISOString(),
+          });
+          const summaryText = buildOrderWhatsappSummary(snapshot, language);
+          const blob = doc.output("blob");
+          return {
+            method: "prepared",
+            file: new File([blob], fileName, { type: "application/pdf" }),
+            fileName,
+            summaryText,
+            snapshot,
+          };
+        }
+
         const supabase = getSupabaseClient();
         const accessToken = supabase ? await waitForAccessToken(supabase) : "";
         const { snapshot: liveSnapshot, analytics: monthlyAnalytics } = await resolveLiveOrderPdfSnapshot(snapshot, {
           accessToken,
           analyticsFallback: analytics,
-          skipOutstanding: Boolean(options.fast),
-          skipHistory: Boolean(options.fast),
-          skipPricing: Boolean(options.fast),
         }, {
           processQueue: accessToken
             ? () => processOfflineQueue(async () => accessToken)
             : undefined,
-          attempts: options.fast ? 2 : 8,
-          delayMs: options.fast ? 150 : 400,
         });
         const orderNumber = formatSalesOrderNumber(liveSnapshot);
         const doc = await createOrderPdfDocument(liveSnapshot, { analytics: monthlyAnalytics });
@@ -1094,7 +1112,10 @@ export default function NewOrderPage() {
     setMessage("");
     setLastSavedOrder(snapshot);
 
-    const prepared = await downloadOrderPdf(snapshot, { returnFileOnly: true, fast: true });
+    const [prepared, isNative] = await Promise.all([
+      downloadOrderPdf(snapshot, { returnFileOnly: true, fast: true }),
+      isNativeMobilePlatform(),
+    ]);
     if (prepared?.snapshot) {
       setLastSavedOrder(prepared.snapshot);
     }

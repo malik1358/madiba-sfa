@@ -99,7 +99,7 @@ export function AppPopupProvider({ children }) {
         }
         await shareWhatsappPayload(popup);
       })();
-    }, 450);
+    }, 50);
 
     return () => window.clearTimeout(timer);
   }, [popup, shareWhatsappPayload]);

@@ -1,5 +1,3 @@
-import { getRelatedItemCodes } from "./itemCodeAliases.js";
-
 export const ORDER_SCHEMES_CACHE_KEY = "order_schemes";
 export const SCHEME_TYPE_CONDITIONAL_UNIT = "conditional_unit_discount";
 
@@ -166,27 +164,19 @@ export function evaluateOrderSchemes(quantities = {}, schemes = []) {
     if (!scheme.active) return;
     if (!qualifierSatisfied(qtyMap, scheme)) return;
 
-    const rewardCodes = getRelatedItemCodes(scheme.rewardItemCode);
-    const rewardQty = rewardCodes.reduce((sum, code) => sum + Number(qtyMap[code] || 0), 0);
+    const rewardQty = Number(qtyMap[scheme.rewardItemCode] || 0);
     const discountedQty = discountedRewardQty(rewardQty, scheme.rewardEveryQty, scheme.applyTo);
-    if (!(discountedQty > 0) || !(rewardQty > 0)) return;
+    if (!(discountedQty > 0)) return;
 
-    const schemeAmount = discountedQty * scheme.unitDiscountSar;
-    rewardCodes.forEach((code) => {
-      const qty = Number(qtyMap[code] || 0);
-      if (!(qty > 0)) return;
-
-      const current = applications[code] || emptySchemeApplication();
-      const share = schemeAmount * (qty / rewardQty);
-      const nextAmount = current.schemeAmount + share;
-      applications[code] = {
-        unitDiscount: qty > 0 ? nextAmount / qty : 0,
-        discountedQty: qty,
-        schemeAmount: nextAmount,
-        schemeNames: [...current.schemeNames, scheme.name],
-        schemeIds: [...current.schemeIds, scheme.id],
-      };
-    });
+    const current = applications[scheme.rewardItemCode] || emptySchemeApplication();
+    const nextAmount = current.schemeAmount + (discountedQty * scheme.unitDiscountSar);
+    applications[scheme.rewardItemCode] = {
+      unitDiscount: rewardQty > 0 ? nextAmount / rewardQty : 0,
+      discountedQty: rewardQty,
+      schemeAmount: nextAmount,
+      schemeNames: [...current.schemeNames, scheme.name],
+      schemeIds: [...current.schemeIds, scheme.id],
+    };
   });
 
   return applications;

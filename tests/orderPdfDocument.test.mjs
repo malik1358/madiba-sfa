@@ -53,7 +53,7 @@ test("mapSavedOrderLinesToPdfLines keeps stored totals when catalog does not mat
   assert.equal(line.lineTotalInclVat, 1656);
 });
 
-test("mapSavedOrderLinesToPdfLines recovers a zero stored rate and applies the paper scheme", () => {
+test("mapSavedOrderLinesToPdfLines recovers a zero stored A003234 rate without applying the A005425 scheme", () => {
   const [line] = mapSavedOrderLinesToPdfLines(
     [
       { item_code: "A003234", item_name: "GOLDEN STAR PAPER", quantity: 40, rate: 0, line_value: 0 },
@@ -83,9 +83,9 @@ test("mapSavedOrderLinesToPdfLines recovers a zero stored rate and applies the p
     }
   );
 
-  assert.equal(Number(line.rate.toFixed(2)), Number((52.83 - 1.83).toFixed(2)));
-  assert.equal(Number(line.schemeDiscountAmount.toFixed(2)), 73.2);
-  assert.equal(line.applied.scheme, true);
+  assert.equal(Number(line.rate.toFixed(2)), 52.83);
+  assert.equal(Number(line.schemeDiscountAmount || 0), 0);
+  assert.equal(Boolean(line.applied?.scheme), false);
 });
 
 test("mapSavedOrderLinesToPdfLines fills discount columns when catalog reprices to the saved total", () => {

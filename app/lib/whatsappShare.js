@@ -75,56 +75,11 @@ function normalizeShareFiles(files = []) {
     .filter(Boolean);
 }
 
-export function wrapWhatsappSummaryLines(text, maxChars = 48) {
-  return String(text || "")
-    .split(/\r?\n/)
-    .flatMap((line) => {
-      const value = String(line || "");
-      if (value.length <= maxChars) return [value || " "];
-      const parts = [];
-      for (let index = 0; index < value.length; index += maxChars) {
-        parts.push(value.slice(index, index + maxChars));
-      }
-      return parts;
-    });
-}
-
-export async function buildWhatsappSummaryImageFile(text, fileName = "order-whatsapp-message.jpg") {
-  const message = String(text || "").trim();
-  if (!message || typeof document === "undefined" || typeof document.createElement !== "function") {
-    return null;
-  }
-
-  const lines = wrapWhatsappSummaryLines(message);
-  const padding = 28;
-  const lineHeight = 30;
-  const width = 720;
-  const height = Math.max(220, padding * 2 + lines.length * lineHeight);
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = "#0b5364";
-  ctx.font = "bold 24px sans-serif";
-  ctx.fillText("MADIBA SFA", padding, padding + 8);
-  ctx.font = "22px sans-serif";
-  ctx.fillStyle = "#123f4b";
-  lines.forEach((line, index) => {
-    ctx.fillText(line, padding, padding + 40 + ((index + 1) * lineHeight));
+export function filesIncludePdf(files = []) {
+  return (files || []).some((file) => {
+    const type = String(file?.type || file?.name || "").toLowerCase();
+    return type.includes("pdf");
   });
-
-  const blob = await new Promise((resolve) => {
-    if (typeof canvas.toBlob === "function") {
-      canvas.toBlob((result) => resolve(result), "image/jpeg", 0.86);
-      return;
-    }
-    resolve(null);
-  });
-  return toWhatsappShareFile(blob, fileName);
 }
 
 async function blobToBase64(blob) {
@@ -281,20 +236,50 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
     await copyTextToClipboard(message);
   }
 
-  const summaryImage = await buildWhatsappSummaryImageFile(message);
-  const filesWithCaption = summaryImage ? [summaryImage, ...shareFiles] : shareFiles;
   const dialogTitle = String(options.dialogTitle || "Share receipt and summary on WhatsApp").trim();
   const title = String(options.title || "Collection visit").trim();
+  const shareTextFirst = Boolean(message) && filesIncludePdf(shareFiles);
 
   if (await isNativeMobilePlatform()) {
+    if (shareTextFirst) {
+      try {
+        const { Share } = await import("@capacitor/share");
+        await Share.share({
+          title,
+          text: message,
+          dialogTitle,
+        });
+      } catch (error) {
+        const cancelled = String(error?.message || error || "").toLowerCase().includes("cancel");
+        if (cancelled) {
+          return { success: false, reason: "cancelled" };
+        }
+      }
+    }
+
     try {
-      await shareFilesViaCapacitor(filesWithCaption, message, dialogTitle, title);
-      return { success: true, method: "capacitor-share-files" };
+      await shareFilesViaCapacitor(shareFiles, shareTextFirst ? "" : message, dialogTitle, title);
+      return { success: true, method: shareTextFirst ? "capacitor-share-text-then-files" : "capacitor-share-files" };
     } catch (error) {
       const cancelled = String(error?.message || error || "").toLowerCase().includes("cancel");
       if (cancelled) {
         return { success: false, reason: "cancelled" };
       }
+      if (shareTextFirst) {
+        return { success: true, fallback: true, reason: "files-not-supported", method: "capacitor-share-text" };
+      }
+    }
+  }
+
+  if (shareTextFirst) {
+    const textResult = await shareTextOnWhatsapp(message, {
+      ...options,
+      title,
+      dialogTitle,
+      preferNativeShare: false,
+    });
+    if (!textResult.success && textResult.reason === "cancelled") {
+      return textResult;
     }
   }
 
@@ -302,12 +287,12 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
     try {
       const payload = {
         title,
-        text: message,
+        text: shareTextFirst ? "" : message,
       };
-      if (!navigator.canShare || navigator.canShare({ ...payload, files: filesWithCaption })) {
-        payload.files = filesWithCaption;
-      } else if (!navigator.canShare || navigator.canShare({ files: filesWithCaption })) {
-        payload.files = filesWithCaption;
+      if (!navigator.canShare || navigator.canShare({ ...payload, files: shareFiles })) {
+        payload.files = shareFiles;
+      } else if (!navigator.canShare || navigator.canShare({ files: shareFiles })) {
+        payload.files = shareFiles;
       }
       await navigator.share(payload);
       return { success: true, method: payload.files ? "web-share-files" : "web-share" };
@@ -316,6 +301,10 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
         return { success: false, reason: "cancelled" };
       }
     }
+  }
+
+  if (shareTextFirst) {
+    return { success: true, fallback: true, reason: "files-not-supported", method: "whatsapp-text-first" };
   }
 
   const textResult = await shareTextOnWhatsapp(message, {

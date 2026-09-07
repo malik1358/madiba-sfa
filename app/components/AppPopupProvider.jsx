@@ -147,8 +147,8 @@ export function AppPopupProvider({ children }) {
   const whatsappHint = hasWhatsappFiles
     ? (isSinglePdf
       ? (language === "ar"
-        ? "تم نسخ الملخص. شارك PDF والملخص على واتساب الآن."
-        : "Summary copied. Share the PDF and summary on WhatsApp now.")
+        ? "واتساب سيفتح بالملخص كنص، ثم أرفق PDF."
+        : "WhatsApp will open with the summary as text, then attach the PDF.")
       : (language === "ar"
         ? "تم نسخ الملخص. شارك المرفقات والملخص على واتساب الآن."
         : "Summary copied. Share the attachments and summary on WhatsApp now."))

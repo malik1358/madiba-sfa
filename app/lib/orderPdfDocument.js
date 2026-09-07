@@ -25,9 +25,12 @@ import {
 import { evaluateOrderSchemes, lookupSchemeApplication } from "./orderSchemes.js";
 import { loadPricePayload } from "./pricePayload.js";
 import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
+import { formatSalesOrderNumber, salesOrderNumberNeedsLiveLookup } from "./salesOrderNumber.js";
+import { isQueuedPendingOrderId } from "./queuedSalesOrders.js";
 
 export const ORDER_PDF_OUTSTANDING_API = "/api/outstanding";
 export const ORDER_PDF_CUSTOMER_HISTORY_API = "/api/customer-history";
+export const ORDER_PDF_SALES_ORDER_API = "/api/sales-orders";
 
 function formatHistoryMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -179,9 +182,11 @@ export function buildOrderPdfSnapshotFromSavedOrder({
     pricingRegion: resolvedRegion,
   });
   const totals = summarizePricedLines(pdfLines);
+  const orderNumber = formatSalesOrderNumber(order);
 
   return {
     orderId: order?.id,
+    orderNumber,
     statusLabel: order?.status || "-",
     savedAtIso: order?.updated_at || order?.created_at || new Date().toISOString(),
     customerCode: order?.customer_code || "",
@@ -208,10 +213,12 @@ export async function enrichOrderPdfLiveData(snapshot, {
   accessToken = "",
   outstandingApi = ORDER_PDF_OUTSTANDING_API,
   customerHistoryApi = ORDER_PDF_CUSTOMER_HISTORY_API,
+  salesOrderApi = ORDER_PDF_SALES_ORDER_API,
   analyticsFallback = null,
 } = {}) {
   const next = {
     ...snapshot,
+    orderNumber: formatSalesOrderNumber(snapshot),
     outstanding: {
       bucketLabels: Array.isArray(snapshot?.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [],
       customer: snapshot?.outstanding?.customer || null,
@@ -220,6 +227,36 @@ export async function enrichOrderPdfLiveData(snapshot, {
   };
 
   let analytics = analyticsFallback;
+
+  if (accessToken) {
+    try {
+      const params = new URLSearchParams();
+      if (snapshot?.orderId && !isQueuedPendingOrderId(snapshot.orderId) && !Number.isNaN(Number(snapshot.orderId))) {
+        params.set("orderId", String(snapshot.orderId));
+      } else if (salesOrderNumberNeedsLiveLookup(snapshot) && snapshot?.customerCode) {
+        params.set("customerCode", snapshot.customerCode);
+        params.set("latest", "1");
+      }
+
+      if ([...params.keys()].length > 0) {
+        const orderResponse = await fetch(`${salesOrderApi}?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        });
+        const orderPayload = await orderResponse.json().catch(() => ({}));
+        if (orderResponse.ok && orderPayload.success && orderPayload.found !== false && orderPayload.orderId) {
+          const liveNumber = formatSalesOrderNumber({
+            id: orderPayload.orderId,
+            order_number: orderPayload.orderNumber,
+          });
+          next.orderId = orderPayload.orderId;
+          next.orderNumber = liveNumber;
+        }
+      }
+    } catch {
+      // Keep the local snapshot if the live order number cannot be fetched.
+    }
+  }
 
   if (snapshot?.customerCode && accessToken) {
     try {
@@ -348,7 +385,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
 
   doc.setFont(undefined, "normal");
   doc.setFontSize(10);
-  doc.text(`Order ID: ${snapshot.orderId}`, marginX + 12, marginTop + 64);
+  doc.text(`Order Number: ${formatSalesOrderNumber(snapshot) || snapshot.orderId || "-"}`, marginX + 12, marginTop + 64);
 
   doc.text(
     `Status: ${snapshot.statusLabel} | ${String(snapshot.paymentType || "credit").toUpperCase()} | ${pricingRegionLabel(snapshot.pricingRegion)}`,

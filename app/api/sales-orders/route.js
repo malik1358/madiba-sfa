@@ -212,6 +212,27 @@ async function ensureOrderAccess(admin, orderId, userId) {
   return order;
 }
 
+function storedOrderNumber(order) {
+  const orderNumber = String(order?.order_number || "").trim();
+  if (orderNumber) return orderNumber;
+  if (order?.id == null || order.id === "") return "";
+  return String(order.id);
+}
+
+async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "") {
+  const current = String(existingOrderNumber || "").trim();
+  if (current) return current;
+  const next = String(orderId);
+  const { error } = await admin
+    .from("sales_orders")
+    .update({ order_number: next })
+    .eq("id", orderId);
+  if (error && !/duplicate|unique/i.test(String(error.message || ""))) {
+    throw error;
+  }
+  return next;
+}
+
 async function persistDraftOrder(admin, {
   userId,
   orderId,
@@ -224,6 +245,7 @@ async function persistDraftOrder(admin, {
   const nowIso = capturedAt || new Date().toISOString();
   let existingLines = [];
   let resolvedOrderId = orderId ? Number(orderId) : null;
+  let resolvedOrderNumber = "";
 
   if (resolvedOrderId) {
     await ensureOrderAccess(admin, resolvedOrderId, userId);
@@ -246,23 +268,29 @@ async function persistDraftOrder(admin, {
         created_by: userId,
         updated_at: nowIso,
       })
-      .select("id")
+      .select("id,order_number")
       .single();
 
     if (orderError) throw orderError;
     resolvedOrderId = newOrder.id;
+    resolvedOrderNumber = storedOrderNumber(newOrder);
   } else {
-    const { error: updateError } = await admin
+    const { data: updatedOrder, error: updateError } = await admin
       .from("sales_orders")
       .update({
         customer_name: customerName,
         salesman_code: salesmanCode,
         updated_at: nowIso,
       })
-      .eq("id", resolvedOrderId);
+      .eq("id", resolvedOrderId)
+      .select("id,order_number")
+      .maybeSingle();
 
     if (updateError) throw updateError;
+    resolvedOrderNumber = storedOrderNumber(updatedOrder);
   }
+
+  resolvedOrderNumber = await ensureStoredOrderNumber(admin, resolvedOrderId, resolvedOrderNumber);
 
   const { error: deleteError } = await admin
     .from("sales_order_items")
@@ -297,10 +325,90 @@ async function persistDraftOrder(admin, {
 
   return {
     orderId: resolvedOrderId,
+    orderNumber: resolvedOrderNumber,
     existingLines,
     changeSet,
     nowIso,
   };
+}
+
+const RECENT_ORDER_LOOKUP_MS = 20 * 60 * 1000;
+
+export async function GET(request) {
+  try {
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
+    }
+
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
+    }
+
+    const url = new URL(request.url);
+    const requestedOrderId = String(url.searchParams.get("orderId") || "").trim();
+    const customerCode = String(url.searchParams.get("customerCode") || "").trim();
+    const latest = String(url.searchParams.get("latest") || "") === "1";
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const user = await getAuthUser(admin, authHeader.replace("Bearer ", ""));
+
+    let order = null;
+
+    if (requestedOrderId && !requestedOrderId.startsWith("pending:")) {
+      const numericId = Number(requestedOrderId);
+      if (!Number.isFinite(numericId) || numericId <= 0) {
+        return NextResponse.json({ success: false, error: "Invalid order id." }, { status: 400 });
+      }
+
+      const { data, error } = await admin
+        .from("sales_orders")
+        .select("id,order_number,status,customer_code,created_by,updated_at")
+        .eq("id", numericId)
+        .maybeSingle();
+      if (error) throw error;
+      order = data;
+    } else if (latest && customerCode) {
+      const sinceIso = new Date(Date.now() - RECENT_ORDER_LOOKUP_MS).toISOString();
+      const { data, error } = await admin
+        .from("sales_orders")
+        .select("id,order_number,status,customer_code,created_by,updated_at")
+        .eq("customer_code", customerCode)
+        .eq("created_by", user.id)
+        .gte("updated_at", sinceIso)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      order = data;
+    } else {
+      return NextResponse.json({ success: false, error: "Order id or latest customer lookup is required." }, { status: 400 });
+    }
+
+    if (!order) {
+      return NextResponse.json({ success: true, found: false });
+    }
+
+    if (order.created_by !== user.id) {
+      return NextResponse.json({ success: false, error: "You do not have access to this order." }, { status: 403 });
+    }
+
+    const orderNumber = await ensureStoredOrderNumber(admin, order.id, order.order_number);
+    return NextResponse.json({
+      success: true,
+      found: true,
+      orderId: order.id,
+      orderNumber,
+      status: order.status,
+    });
+  } catch (error) {
+    return NextResponse.json({
+      success: false,
+      error: error.message || "Unable to load order number.",
+    }, { status: 500 });
+  }
 }
 
 export async function POST(request) {
@@ -369,7 +477,7 @@ export async function POST(request) {
     });
     const pricedLines = priceOrderLines(lines, pricedCatalog);
 
-    const { orderId, changeSet, nowIso } = await persistDraftOrder(admin, {
+    const { orderId, orderNumber, changeSet, nowIso } = await persistDraftOrder(admin, {
       userId: user.id,
       orderId: requestedOrderId,
       customerCode,
@@ -471,6 +579,7 @@ export async function POST(request) {
     return NextResponse.json({
       success: true,
       orderId,
+      orderNumber,
       status,
       history,
       action,

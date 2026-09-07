@@ -266,6 +266,10 @@ export async function processOfflineQueue(getAccessToken, options = {}) {
 
       await removeQueueItem(item);
       options.onSynced?.(item, payload);
+      if (typeof window !== "undefined" && (item.metadata?.type === "sales_order" || String(item.url || "").includes("/api/sales-orders"))) {
+        window.dispatchEvent(new CustomEvent("madiba-offline-queue-changed"));
+        window.dispatchEvent(new CustomEvent("madiba-pending-orders-changed"));
+      }
       processed += 1;
     } catch (error) {
       failed += 1;

@@ -13,9 +13,15 @@ import {
   fetchPendingOrdersCached,
   fetchSalesScopeCached,
   readPendingOrdersInvoiceMeta,
-  waitForPendingOrdersHydration,
   writePendingOrdersInvoiceMeta,
 } from "../../lib/mobileDataCache";
+import {
+  isQueuedPendingOrderId,
+  listQueuedPendingOrders,
+  mergeServerAndQueuedOrders,
+} from "../../lib/queuedSalesOrders";
+import { processOfflineQueue } from "../../lib/offlineApi";
+import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
 import { sortBucketLabels } from "../../lib/outstanding";
 import { evaluateCreditApproval } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
@@ -36,6 +42,8 @@ const TEXT = {
   loading: { en: "Loading old pending orders...", ar: "جاري تحميل الطلبات المعلقة القديمة..." },
   cacheRefreshing: { en: "Showing saved data. Refreshing in background...", ar: "عرض البيانات المحفوظة. جاري التحديث في الخلفية..." },
   cacheOffline: { en: "Offline — showing last saved pending orders.", ar: "غير متصل — عرض آخر الطلبات المحفوظة." },
+  onDevice: { en: "On this device", ar: "على هذا الجهاز" },
+  syncFailed: { en: "Sync failed", ar: "فشل المزامنة" },
 };
 
 const PENDING_STATUSES = PENDING_ORDER_STATUSES;
@@ -98,7 +106,10 @@ function isInvoiceMakerRole(role) {
   return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
-function invoiceStatusText(meta) {
+function invoiceStatusText(meta, order = null) {
+  if (order?.queuedLocally) {
+    return order.syncStatus === "failed" ? "Sync failed" : "On this device";
+  }
   if (!meta) return "-";
   if (meta.status) return meta.status;
   if (meta.invoiceUploadedAt) return INVOICE_STATUS_MADE;
@@ -267,6 +278,14 @@ export default function PendingOrdersPage() {
     setError("");
 
     try {
+      if (isQueuedPendingOrderId(orderId)) {
+        const queuedOrder = orders.find((entry) => entry.id === orderId) || null;
+        setActiveOrderId(orderId);
+        setOrderLines(Array.isArray(queuedOrder?.queuedLines) ? queuedOrder.queuedLines : []);
+        setOrderHistory([]);
+        return;
+      }
+
       const { data, error: linesError } = await supabase
         .from("sales_order_items")
         .select("id,item_code,item_name,category,quantity,rate,line_value")
@@ -407,33 +426,37 @@ export default function PendingOrdersPage() {
         const role = String(scope?.role || "").toLowerCase();
         setUserRole(role);
 
-        await waitForPendingOrdersHydration(session.user.id, scope);
+        async function applyOrders(serverOrders) {
+          const queued = await listQueuedPendingOrders();
+          const merged = mergeServerAndQueuedOrders(serverOrders, queued);
+          setOrders(merged);
+          const serverIds = merged
+            .filter((order) => !isQueuedPendingOrderId(order.id))
+            .map((order) => order.id);
+          void loadInvoiceMeta(serverIds, session.user.id);
+          return merged;
+        }
 
         const ordersResult = await fetchPendingOrdersCached(session.user.id, scope, {
+          revalidate: true,
           onUpdate: (freshOrders) => {
             if (cancelled) return;
-            setOrders(Array.isArray(freshOrders) ? freshOrders : []);
+            void applyOrders(Array.isArray(freshOrders) ? freshOrders : []);
             setRefreshing(false);
             setOfflineHint(false);
-            void loadInvoiceMeta(
-              (Array.isArray(freshOrders) ? freshOrders : []).map((order) => order.id),
-              session.user.id,
-            );
           },
         });
 
         if (cancelled) return;
 
         const visibleOrders = Array.isArray(ordersResult.data) ? ordersResult.data : [];
-        setOrders(visibleOrders);
+        await applyOrders(visibleOrders);
         setLoading(false);
 
         if (ordersResult.fromCache) {
-          setRefreshing(!ordersResult.stale);
+          setRefreshing(Boolean(ordersResult.stale));
           setOfflineHint(Boolean(ordersResult.offline));
         }
-
-        void loadInvoiceMeta(visibleOrders.map((order) => order.id), session.user.id);
       } catch (err) {
         if (!cancelled) {
           setError(err.message || "Unable to load pending orders.");
@@ -444,8 +467,27 @@ export default function PendingOrdersPage() {
 
     load();
 
+    function onQueueChanged() {
+      void listQueuedPendingOrders().then((queued) => {
+        if (cancelled) return;
+        setOrders((current) => mergeServerAndQueuedOrders(
+          (current || []).filter((order) => !isQueuedPendingOrderId(order.id)),
+          queued,
+        ));
+      }).catch(() => {});
+    }
+
+    function onPendingChanged() {
+      void load();
+    }
+
+    window.addEventListener("madiba-offline-queue-changed", onQueueChanged);
+    window.addEventListener("madiba-pending-orders-changed", onPendingChanged);
+
     return () => {
       cancelled = true;
+      window.removeEventListener("madiba-offline-queue-changed", onQueueChanged);
+      window.removeEventListener("madiba-pending-orders-changed", onPendingChanged);
     };
   }, []);
 
@@ -481,7 +523,7 @@ export default function PendingOrdersPage() {
         && includesFilter(order.customer_name || order.customer_code, columnFilters.customer)
         && includesFilter(order.salesman_code, columnFilters.salesman)
         && includesFilter(order.status, columnFilters.status)
-        && includesFilter(invoiceStatusText(meta), columnFilters.invoiceStatus)
+        && includesFilter(invoiceStatusText(meta, order), columnFilters.invoiceStatus)
         && includesFilter(formatDateTime(meta?.invoiceUploadedAt), columnFilters.uploadedAt)
         && includesFilter(formatDuration(meta?.invoiceBuildSeconds), columnFilters.timeToMake)
         && includesFilter(formatDateTime(order.created_at), columnFilters.created)
@@ -506,6 +548,9 @@ export default function PendingOrdersPage() {
 
     try {
       const token = await getAuthToken();
+      if (token && isQueuedPendingOrderId(activeOrder.id)) {
+        await processOfflineQueue(async () => token).catch(() => undefined);
+      }
       const snapshot = buildOrderPdfSnapshotFromSavedOrder({
         order: activeOrder,
         lines: orderLines,
@@ -545,13 +590,14 @@ export default function PendingOrdersPage() {
         creditApprovalRemark: creditEvaluation?.remark || liveSnapshot.creditApprovalRemark,
       }, { analytics });
 
+      const orderNumber = formatSalesOrderNumber(liveSnapshot) || liveSnapshot.orderId || activeOrder.id;
       const fileName = buildOrderPdfFileName({
-        orderId: activeOrder.id,
+        orderId: orderNumber,
         customerCode: activeOrder.customer_code,
         savedAtIso: new Date().toISOString(),
       });
       await saveOrShareOrderPdf(doc, fileName, {
-        title: `Order #${activeOrder.id}`,
+        title: `Order #${orderNumber}`,
         text: `Sales order for ${activeOrder.customer_name || activeOrder.customer_code || "customer"}`,
         dialogTitle: "Save or share order PDF",
         forceDownload: true,
@@ -575,7 +621,7 @@ export default function PendingOrdersPage() {
       };
 
       const queueRows = orders.map((order) => ({
-        "Order ID": order.id,
+        "Order Number": formatSalesOrderNumber(order) || order.id,
         Customer: order.customer_name || order.customer_code || "-",
         "Customer Code": order.customer_code || "-",
         Salesman: order.salesman_code || "-",
@@ -593,7 +639,7 @@ export default function PendingOrdersPage() {
 
       if (activeOrder && Array.isArray(orderLines) && orderLines.length > 0) {
         const lineRows = orderLines.map((line) => ({
-          "Order ID": activeOrder.id,
+          "Order Number": formatSalesOrderNumber(activeOrder) || activeOrder.id,
           "Item Code": line.item_code || "-",
           "Item Name": line.item_name || "-",
           Category: line.category || "-",
@@ -758,7 +804,7 @@ export default function PendingOrdersPage() {
               <table className="moduleTable">
                 <thead>
                   <tr>
-                    <th>Order ID</th>
+                    <th>Order Number</th>
                     <th>Customer</th>
                     <th>Salesman</th>
                     <th>Status</th>
@@ -815,11 +861,11 @@ export default function PendingOrdersPage() {
                     return (
                       <Fragment key={order.id}>
                         <tr>
-                          <td>{order.id}</td>
+                          <td>{formatSalesOrderNumber(order) || order.id}</td>
                           <td>{order.customer_name || order.customer_code || "-"}</td>
                           <td>{order.salesman_code || "-"}</td>
                           <td>{order.status || "-"}</td>
-                          <td>{invoiceStatusText(meta)}</td>
+                          <td>{invoiceStatusText(meta, order)}</td>
                           <td>{formatDateTime(meta?.invoiceUploadedAt)}</td>
                           <td>{formatDuration(meta?.invoiceBuildSeconds)}</td>
                           <td>{formatDateTime(order.created_at)}</td>
@@ -842,7 +888,7 @@ export default function PendingOrdersPage() {
                             <td colSpan={11}>
                               <div style={{ marginTop: "8px", marginBottom: "8px" }}>
                                 <div className="moduleSectionHeader">
-                                  <h2>Order #{order.id} Details</h2>
+                                  <h2>Order #{formatSalesOrderNumber(order) || order.id} Details</h2>
                                   <span>{loadingLines ? "Loading..." : `${orderLines.length} line(s)`}</span>
                                 </div>
 

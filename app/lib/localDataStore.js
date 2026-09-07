@@ -195,7 +195,7 @@ export async function fetchWithLocalCache(key, ttlMs, fetcher, options = {}) {
     };
   }
 
-  if (!forceRefresh && cached && isCacheEntryFresh(cached, ttlMs)) {
+  if (!forceRefresh && !options.revalidate && cached && isCacheEntryFresh(cached, ttlMs)) {
     return {
       data: cached.value,
       fromCache: true,
@@ -203,7 +203,7 @@ export async function fetchWithLocalCache(key, ttlMs, fetcher, options = {}) {
     };
   }
 
-  if (!forceRefresh && cached && allowStale) {
+  if (!forceRefresh && !options.revalidate && cached && allowStale) {
     revalidateInBackground();
     return {
       data: cached.value,

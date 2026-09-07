@@ -171,26 +171,31 @@ export async function fetchWithLocalCache(key, ttlMs, fetcher, options = {}) {
     throw new Error("You are offline and this data is not available on the device yet.");
   }
 
+  function revalidateInBackground() {
+    if (!onUpdate) return;
+    Promise.resolve()
+      .then(fetcher)
+      .then(async (fresh) => {
+        await writeCacheEntry(key, fresh, { ttlMs });
+        onUpdate(fresh, { fromCache: false, stale: false });
+      })
+      .catch(() => {});
+  }
+
   if (!forceRefresh && shouldUseLocalCacheOnly(cached, options)) {
+    const stale = !isCacheEntryFresh(cached, ttlMs);
+    if (stale) {
+      revalidateInBackground();
+    }
     return {
       data: cached.value,
       fromCache: true,
-      stale: !isCacheEntryFresh(cached, ttlMs),
+      stale,
       offline: false,
     };
   }
 
   if (!forceRefresh && cached && isCacheEntryFresh(cached, ttlMs)) {
-    if (onUpdate) {
-      Promise.resolve()
-        .then(fetcher)
-        .then(async (fresh) => {
-          await writeCacheEntry(key, fresh, { ttlMs });
-          onUpdate(fresh, { fromCache: false, stale: false });
-        })
-        .catch(() => {});
-    }
-
     return {
       data: cached.value,
       fromCache: true,
@@ -199,14 +204,7 @@ export async function fetchWithLocalCache(key, ttlMs, fetcher, options = {}) {
   }
 
   if (!forceRefresh && cached && allowStale) {
-    Promise.resolve()
-      .then(fetcher)
-      .then(async (fresh) => {
-        await writeCacheEntry(key, fresh, { ttlMs });
-        onUpdate?.(fresh, { fromCache: false, stale: false });
-      })
-      .catch(() => {});
-
+    revalidateInBackground();
     return {
       data: cached.value,
       fromCache: true,

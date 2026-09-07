@@ -4114,11 +4114,24 @@ table.auditMatrix td.auditTrendSame {
   border-radius: 8px;
   color: #073f4c;
   background: #ffffff;
+  unicode-bidi: isolate;
 }
 
 .moduleTextArea {
   min-height: 96px;
   resize: vertical;
+}
+
+.moduleInput[lang="en"],
+.moduleTextArea[lang="en"] {
+  direction: ltr;
+  text-align: left;
+}
+
+.moduleInput[lang="ar"],
+.moduleTextArea[lang="ar"] {
+  direction: rtl;
+  text-align: right;
 }
 
 .moduleExportableTableBar {

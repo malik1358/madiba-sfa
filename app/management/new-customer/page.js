@@ -12,7 +12,7 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
-import { translateText } from "../../lib/translateText";
+import { isMostlyLatinLetters } from "../../lib/translateText";
 import { detectTable } from "../../lib/schemaGuards";
 import { insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
@@ -186,8 +186,14 @@ async function reverseGeocode(lat, lng) {
 }
 
 async function translateToArabic(text) {
-  const translated = await translateText(text, { from: "en", to: "ar" });
-  if (!translated) {
+  const response = await fetch("/api/translate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, from: "en", to: "ar" }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  const translated = String(payload?.translatedText || "").trim();
+  if (!response.ok || !payload.success || !translated) {
     throw new Error("Translation request failed.");
   }
   return translated;
@@ -281,7 +287,7 @@ export default function NewCustomerPage() {
   useEffect(() => {
     const englishName = String(form.customer_name_en || "").trim();
 
-    if (!englishName || arabicNameEdited) {
+    if (!englishName || arabicNameEdited || !isMostlyLatinLetters(englishName)) {
       return undefined;
     }
 
@@ -988,12 +994,16 @@ export default function NewCustomerPage() {
             <h2>Prospect Form</h2>
           </div>
 
-          <form className="moduleFormGrid" onSubmit={handleSubmit}>
+          <form className="moduleFormGrid notranslate" translate="no" onSubmit={handleSubmit}>
             <label>
               Customer Name (English)
               <input
                 className="moduleInput"
                 required
+                dir="ltr"
+                lang="en"
+                translate="no"
+                autoComplete="name"
                 value={form.customer_name_en}
                 onChange={(e) => {
                   const next = e.target.value;
@@ -1007,6 +1017,9 @@ export default function NewCustomerPage() {
               <input
                 className="moduleInput"
                 dir="rtl"
+                lang="ar"
+                translate="no"
+                autoComplete="off"
                 value={form.customer_name_ar}
                 onChange={(e) => {
                   setArabicNameEdited(true);

@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_DAILY_SALESMAN_RESUME_TO,
   buildDailySalesmanResumeEmail,
+  isOccasionalResumeSalesman,
+  shouldIncludeSalesmanResumeRow,
   formatResumeMoney,
   resolveDailySalesmanResumeRecipients,
   resolveResumeWorkingEndAt,
@@ -193,6 +195,39 @@ test("buildSalesmanResumeRows aggregates metrics by user", () => {
       workingMinutes: 300,
     },
   );
+});
+
+test("occasional office names appear only with an order or collection", () => {
+  assert.equal(isOccasionalResumeSalesman({
+    salesmanName: "AHMED NABIL",
+    salesmanCode: "AHMED NABIL",
+  }), true);
+  assert.equal(shouldIncludeSalesmanResumeRow({
+    salesmanName: "SOYEB",
+    salesmanCode: "SOYEB",
+    loginAt: "2026-09-06T06:35:00.000Z",
+    logoutAt: "2026-09-06T20:59:00.000Z",
+  }), false);
+
+  const rows = buildSalesmanResumeRows({
+    profiles: [
+      { id: "nabil", role: "salesman", salesman_name: "AHMED NABIL", salesman_code: "AHMED NABIL" },
+      { id: "fazlur", role: "salesman", salesman_name: "FAZLUR RAHMAN", salesman_code: "FAZLUR RAHMAN" },
+      { id: "soyeb", role: "salesman", salesman_name: "SOYEB", salesman_code: "SOYEB" },
+      { id: "junaid", role: "salesman", salesman_name: "JUNAID", salesman_code: "JUNAID" },
+      { id: "george", role: "salesman", salesman_name: "GEORGE", salesman_code: "GEORGE" },
+    ],
+    collectionMetrics: new Map([["soyeb", { count: 1, value: 250 }]]),
+    orderMetrics: new Map([["junaid", { orders: 1, orderValue: 100, skuSoldCount: 2 }]]),
+    workdays: new Map([
+      ["nabil", { loginAt: "", logoutAt: "" }],
+      ["soyeb", { loginAt: "2026-09-06T06:35:00.000Z", logoutAt: "2026-09-06T20:59:59.999Z", logoutAutoClosed: true }],
+      ["junaid", { loginAt: "2026-09-06T06:00:00.000Z" }],
+    ]),
+  });
+
+  assert.deepEqual(rows.map((row) => row.userId).sort(), ["george", "junaid", "soyeb"]);
+  assert.equal(rows.some((row) => row.userId === "nabil" || row.userId === "fazlur"), false);
 });
 
 test("summarizeSalesmanResumeRows totals columns", () => {

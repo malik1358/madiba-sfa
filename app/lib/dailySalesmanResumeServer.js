@@ -9,6 +9,7 @@ import {
   emptySalesmanResumeRow,
   resolveDailySalesmanResumeRecipients,
   resolveResumeWorkingEndAt,
+  shouldIncludeSalesmanResumeRow,
   sortSalesmanResumeRows,
 } from "./dailySalesmanResume.js";
 import { groupSalesRowsIntoInvoices } from "./salesInvoices.js";
@@ -446,17 +447,18 @@ export function buildSalesmanResumeRows({
     });
   }
 
-  return sortSalesmanResumeRows([...byUserId.values()].filter((row) => (
-    Number(row.orders || 0)
-    + Number(row.orderValue || 0)
-    + Number(row.invoiceCount || 0)
-    + Number(row.invoiceAmount || 0)
-    + Number(row.collections || 0)
-    + Number(row.collectionValue || 0)
-    + Number(row.visits || 0)
-    + Number(row.skuSoldCount || 0) > 0
-    || SALESMAN_ROLES.has(normalizeRole(row.role))
-  )));
+  return sortSalesmanResumeRows([...byUserId.values()].filter((row) => {
+    if (!shouldIncludeSalesmanResumeRow(row)) return false;
+    return Number(row.orders || 0)
+      + Number(row.orderValue || 0)
+      + Number(row.invoiceCount || 0)
+      + Number(row.invoiceAmount || 0)
+      + Number(row.collections || 0)
+      + Number(row.collectionValue || 0)
+      + Number(row.visits || 0)
+      + Number(row.skuSoldCount || 0) > 0
+      || SALESMAN_ROLES.has(normalizeRole(row.role));
+  }));
 }
 
 export async function buildDailySalesmanResume(admin, { date, now = new Date() } = {}) {

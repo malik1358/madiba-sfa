@@ -46,6 +46,54 @@ export function emptySalesmanResumeRow({
   };
 }
 
+export const OCCASIONAL_RESUME_SALESMEN = [
+  "AHMED NABIL",
+  "FAZLUR RAHMAN",
+  "SOYEB",
+];
+
+function comparableResumeName(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resumeIdentities(row = {}) {
+  const identities = new Set();
+  [row.salesmanCode, row.salesmanName, row.salesman_code, row.salesman_name].forEach((value) => {
+    const comparable = comparableResumeName(value);
+    if (comparable) identities.add(comparable);
+    const parenthetical = String(value || "").match(/\(([^)]+)\)/);
+    if (parenthetical) {
+      const alias = comparableResumeName(parenthetical[1]);
+      if (alias) identities.add(alias);
+    }
+  });
+  return identities;
+}
+
+export function isOccasionalResumeSalesman(row = {}) {
+  const identities = resumeIdentities(row);
+  return OCCASIONAL_RESUME_SALESMEN.some((name) => identities.has(comparableResumeName(name)));
+}
+
+export function resumeRowHasOrderOrCollection(row = {}) {
+  return Number(row?.orders || 0) > 0
+    || Number(row?.orderValue || 0) > 0
+    || Number(row?.collections || 0) > 0
+    || Number(row?.collectionValue || 0) > 0;
+}
+
+export function shouldIncludeSalesmanResumeRow(row = {}) {
+  if (isOccasionalResumeSalesman(row) && !resumeRowHasOrderOrCollection(row)) {
+    return false;
+  }
+  return true;
+}
+
 export function salesmanResumeDisplayName(row = {}) {
   const name = String(row.salesmanName || "").trim();
   const code = String(row.salesmanCode || "").trim();
@@ -168,7 +216,7 @@ function resumeRowCells(row) {
 }
 
 export function buildDailySalesmanResumeEmail({ date, rows = [] } = {}) {
-  const sorted = sortSalesmanResumeRows(rows);
+  const sorted = sortSalesmanResumeRows((rows || []).filter(shouldIncludeSalesmanResumeRow));
   const totals = summarizeSalesmanResumeRows(sorted);
   const subject = `Daily salesman resume — ${date}`;
 

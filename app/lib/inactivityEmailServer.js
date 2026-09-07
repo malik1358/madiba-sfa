@@ -19,6 +19,7 @@ import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { resolveUserReportEmail } from "./dailyVisitReportEmail.js";
 import {
   getKsaDateString,
+  inactivityEmailReminderSlot,
   inactivityReferenceTimestamp,
   ksaDayBounds,
   lateLoginReminderSlot,
@@ -253,6 +254,7 @@ export async function runInactivityEmailCycle(admin, {
         userId,
         reportDate,
         idleSinceTs,
+        slot: inactivityEmailReminderSlot(idleSinceTs, now),
       }),
       notificationType: INACTIVITY_EMAIL_TYPE,
       send,

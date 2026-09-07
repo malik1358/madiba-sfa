@@ -1,6 +1,6 @@
 export const KSA_TIMEZONE = "Asia/Riyadh";
 export const INACTIVITY_MS = 45 * 60 * 1000;
-export const INACTIVITY_EMAIL_MS = 50 * 60 * 1000;
+export const INACTIVITY_EMAIL_MS = 40 * 60 * 1000;
 export const INACTIVITY_ALERT_REPEAT_MS = 15 * 60 * 1000;
 export const LUNCH_BREAK_REMINDER_MS = 3 * 60 * 60 * 1000;
 
@@ -184,6 +184,14 @@ export function lateLoginReminderSlot(now = new Date()) {
   const elapsed = now.getTime() - ksaClockTimestamp(date, LOGIN_REMINDER_HOUR);
   if (elapsed < 0) return -1;
   return Math.floor(elapsed / LOGIN_REMINDER_REPEAT_MS);
+}
+
+export function inactivityEmailReminderSlot(idleSinceTs, now = new Date()) {
+  const start = Number(idleSinceTs || 0);
+  if (!start) return -1;
+  const elapsed = now.getTime() - start;
+  if (elapsed < INACTIVITY_EMAIL_MS) return -1;
+  return Math.floor(elapsed / INACTIVITY_EMAIL_MS);
 }
 
 export function shouldSendLateLoginReminder({

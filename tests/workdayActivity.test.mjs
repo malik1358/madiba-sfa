@@ -292,7 +292,7 @@ test("shouldSendLateLoginReminder starts at 11:00 KSA and skips login, Friday, a
   assert.equal(lateLoginReminderSlot(new Date("2026-09-06T08:30:00.000Z")), 1);
 });
 
-test("shouldEmailInactivity is false until 50 minutes without activity", () => {
+test("shouldEmailInactivity is false until 40 minutes without activity", () => {
   const loginAt = "2026-08-18T03:00:00.000Z";
 
   assert.equal(
@@ -300,7 +300,7 @@ test("shouldEmailInactivity is false until 50 minutes without activity", () => {
       loginAt,
       logoutAt: null,
       userLogs: [],
-      now: new Date("2026-08-18T03:49:00.000Z"),
+      now: new Date("2026-08-18T03:39:00.000Z"),
     }),
     false,
   );
@@ -310,7 +310,7 @@ test("shouldEmailInactivity is false until 50 minutes without activity", () => {
       loginAt,
       logoutAt: null,
       userLogs: [],
-      now: new Date("2026-08-18T03:50:00.000Z"),
+      now: new Date("2026-08-18T03:40:00.000Z"),
     }),
     true,
   );

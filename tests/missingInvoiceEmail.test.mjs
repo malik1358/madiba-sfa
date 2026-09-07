@@ -10,6 +10,8 @@ import {
   isCreatedFromSeptember2026,
   isMissingInvoiceOverdue,
   isRejectedByManagement,
+  isTestCustomerName,
+  isTestCustomerOrder,
   missingInvoiceCreatedFromIso,
   resolveMissingInvoiceEmailRecipients,
   selectMissingInvoiceOrders,
@@ -50,6 +52,28 @@ test("only orders created from September 2026 KSA are considered", () => {
   assert.equal(isMissingInvoiceOverdue(submittedOrder(8, "2026-08-31T20:59:59.000Z"), {}, now), false);
 });
 
+test("customer names that contain the word test are treated as test orders", () => {
+  assert.equal(isTestCustomerName("TEST CUSTOMER"), true);
+  assert.equal(isTestCustomerName("Customer Test Shop"), true);
+  assert.equal(isTestCustomerName("test"), true);
+  assert.equal(isTestCustomerName("Latest Trading Company"), false);
+  assert.equal(isTestCustomerName("Contest Supplies"), false);
+  assert.equal(isTestCustomerOrder({ ...submittedOrder(20), customer_name: "TEST ORDER CUSTOMER" }), true);
+  assert.equal(isMissingInvoiceOverdue({ ...submittedOrder(21), customer_name: "TEST CUSTOMER" }, {}, now), false);
+  assert.equal(isMissingInvoiceOverdue({ ...submittedOrder(22), customer_name: "Rokn Al-Muhareb Trading Company" }, {}, now), true);
+
+  const selected = selectMissingInvoiceOrders(
+    [
+      { ...submittedOrder(23), customer_name: "TEST CUSTOMER" },
+      submittedOrder(24),
+    ],
+    new Map(),
+    now,
+  ).map((order) => order.id);
+
+  assert.deepEqual(selected, [24]);
+});
+
 test("rejected and uploaded invoices are excluded from the overdue list", () => {
   assert.equal(isRejectedByManagement({ status: MISSING_INVOICE_STATUS_REJECTED }), true);
   assert.equal(hasUploadedInvoice({ invoiceFilePath: "C1/1/file.pdf" }), true);
@@ -86,7 +110,7 @@ test("buildMissingInvoiceAlertEmail lists overdue orders", () => {
   assert.match(message.html, /Pending for credit approval/);
   assert.match(message.html, /every 15 minutes/);
   assert.match(message.text, /from September 2026 onward/);
-  assert.match(message.text, /Orders rejected by management and orders created before September 2026 are excluded/);
+  assert.match(message.text, /Orders rejected by management, test-customer orders, and orders created before September 2026 are excluded/);
   assert.equal(message.orderCount, 1);
 });
 

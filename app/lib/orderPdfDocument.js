@@ -27,10 +27,12 @@ import { loadPricePayload } from "./pricePayload.js";
 import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import { formatSalesOrderNumber, salesOrderNumberNeedsLiveLookup } from "./salesOrderNumber.js";
 import { isQueuedPendingOrderId } from "./queuedSalesOrders.js";
+import { parseOfflineProspectIdFromCustomerCode } from "./prospects.js";
 
 export const ORDER_PDF_OUTSTANDING_API = "/api/outstanding";
 export const ORDER_PDF_CUSTOMER_HISTORY_API = "/api/customer-history";
 export const ORDER_PDF_SALES_ORDER_API = "/api/sales-orders";
+export const ORDER_PDF_PROSPECTS_API = "/api/prospects";
 
 function formatHistoryMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -214,6 +216,7 @@ export async function enrichOrderPdfLiveData(snapshot, {
   outstandingApi = ORDER_PDF_OUTSTANDING_API,
   customerHistoryApi = ORDER_PDF_CUSTOMER_HISTORY_API,
   salesOrderApi = ORDER_PDF_SALES_ORDER_API,
+  prospectsApi = ORDER_PDF_PROSPECTS_API,
   analyticsFallback = null,
 } = {}) {
   const next = {
@@ -251,17 +254,38 @@ export async function enrichOrderPdfLiveData(snapshot, {
           });
           next.orderId = orderPayload.orderId;
           next.orderNumber = liveNumber;
+          if (orderPayload.customerCode) next.customerCode = orderPayload.customerCode;
+          if (orderPayload.customerName) next.customerName = orderPayload.customerName;
         }
       }
     } catch {
       // Keep the local snapshot if the live order number cannot be fetched.
     }
+
+    try {
+      const offlineId = parseOfflineProspectIdFromCustomerCode(next.customerCode || snapshot?.customerCode);
+      if (offlineId) {
+        const prospectResponse = await fetch(`${prospectsApi}?offlineId=${encodeURIComponent(offlineId)}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        });
+        const prospectPayload = await prospectResponse.json().catch(() => ({}));
+        if (prospectResponse.ok && prospectPayload.success && prospectPayload.found !== false && prospectPayload.customerCode) {
+          next.customerCode = prospectPayload.customerCode;
+          if (prospectPayload.customerName) next.customerName = prospectPayload.customerName;
+        }
+      }
+    } catch {
+      // Keep the saved customer code if the live prospect cannot be fetched.
+    }
   }
 
-  if (snapshot?.customerCode && accessToken) {
+  if ((next.customerCode || snapshot?.customerCode) && accessToken) {
+    const liveCustomerCode = next.customerCode || snapshot.customerCode;
+    const liveCustomerName = next.customerName || snapshot.customerName;
     try {
       const outstandingResponse = await fetch(
-        `${outstandingApi}?customerCode=${encodeURIComponent(snapshot.customerCode || "")}&customerName=${encodeURIComponent(snapshot.customerName || "")}`,
+        `${outstandingApi}?customerCode=${encodeURIComponent(liveCustomerCode || "")}&customerName=${encodeURIComponent(liveCustomerName || "")}`,
         { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
       );
       const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
@@ -279,7 +303,7 @@ export async function enrichOrderPdfLiveData(snapshot, {
     if (!analytics?.monthlySummary?.length) {
       try {
         const historyResponse = await fetch(
-          `${customerHistoryApi}?customerCode=${encodeURIComponent(snapshot.customerCode)}`,
+          `${customerHistoryApi}?customerCode=${encodeURIComponent(liveCustomerCode)}`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         const historyPayload = await historyResponse.json().catch(() => ({}));
@@ -316,6 +340,39 @@ export async function enrichOrderPdfLiveData(snapshot, {
   return { snapshot: next, analytics };
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function resolveLiveOrderPdfSnapshot(snapshot, options = {}, {
+  processQueue,
+  attempts = 8,
+  delayMs = 400,
+} = {}) {
+  let current = snapshot;
+  let analytics = options.analyticsFallback || null;
+  const canLookup = Boolean(options.accessToken);
+
+  for (let attempt = 0; attempt < (canLookup ? attempts : 1); attempt += 1) {
+    if (typeof processQueue === "function" && salesOrderNumberNeedsLiveLookup(current)) {
+      await processQueue().catch(() => undefined);
+    }
+
+    const enriched = await enrichOrderPdfLiveData(current, {
+      ...options,
+      analyticsFallback: analytics,
+    });
+    current = enriched.snapshot;
+    analytics = enriched.analytics;
+    if (!salesOrderNumberNeedsLiveLookup(current)) {
+      return { snapshot: current, analytics };
+    }
+    if (attempt < attempts - 1) await wait(delayMs);
+  }
+
+  return { snapshot: current, analytics };
+}
+
 export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {}) {
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -329,15 +386,16 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const totalWithVat = Number(pdfTotals.amountInclVat || subtotal + vatAmount);
 
   const columns = [
-    { key: "item_code", label: "Code", width: 48, align: "left" },
-    { key: "item_name", label: "Item", width: 96, align: "left" },
-    { key: "quantity", label: "Qty", width: 28, align: "right" },
-    { key: "rate", label: "Rate", width: 42, align: "right" },
-    { key: "cashDiscount", label: "Cash Disc", width: 62, align: "right" },
-    { key: "valueDiscount", label: "Value Disc", width: 62, align: "right" },
-    { key: "exclVat", label: "Excl. VAT", width: 58, align: "right" },
-    { key: "vat", label: "VAT 15%", width: 50, align: "right" },
-    { key: "inclVat", label: "Incl. VAT", width: 69, align: "right" },
+    { key: "item_code", label: "Code", width: 46, align: "left" },
+    { key: "item_name", label: "Item", width: 78, align: "left" },
+    { key: "quantity", label: "Qty", width: 26, align: "right" },
+    { key: "rate", label: "Rate", width: 40, align: "right" },
+    { key: "cashDiscount", label: "Cash Disc", width: 50, align: "right" },
+    { key: "valueDiscount", label: "Value Disc", width: 50, align: "right" },
+    { key: "schemeDiscount", label: "Scheme", width: 48, align: "right" },
+    { key: "exclVat", label: "Excl. VAT", width: 52, align: "right" },
+    { key: "vat", label: "VAT 15%", width: 46, align: "right" },
+    { key: "inclVat", label: "Incl. VAT", width: 79, align: "right" },
   ];
 
   const orderSummaryColumns = [
@@ -373,9 +431,11 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     return startY + 24;
   }
 
+  const orderNumberLabel = formatSalesOrderNumber(snapshot) || "—";
+
   doc.setDrawColor(72, 110, 120);
   doc.setLineWidth(1);
-  doc.roundedRect(marginX, marginTop, contentWidth, 92, 6, 6);
+  doc.roundedRect(marginX, marginTop, contentWidth, 108, 6, 6);
 
   doc.setFontSize(18);
   doc.setFont(undefined, "bold");
@@ -383,35 +443,36 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   doc.setFontSize(12);
   doc.text("SALES ORDER", marginX + 12, marginTop + 44);
 
+  doc.setFontSize(16);
+  doc.text(`Order Number  ${orderNumberLabel}`, marginX + 12, marginTop + 70);
+
   doc.setFont(undefined, "normal");
   doc.setFontSize(10);
-  doc.text(`Order Number: ${formatSalesOrderNumber(snapshot) || snapshot.orderId || "-"}`, marginX + 12, marginTop + 64);
-
   doc.text(
     `Status: ${snapshot.statusLabel} | ${String(snapshot.paymentType || "credit").toUpperCase()} | ${pricingRegionLabel(snapshot.pricingRegion)}`,
     marginX + 12,
-    marginTop + 78
+    marginTop + 90
   );
 
   const rightColX = marginX + contentWidth - 210;
-  doc.text(`Date: ${new Date(snapshot.savedAtIso).toLocaleString("en-GB")}`, rightColX, marginTop + 64);
-  doc.text(`Salesman: ${snapshot.salesmanCode || "-"}`, rightColX, marginTop + 78);
+  doc.text(`Date: ${new Date(snapshot.savedAtIso).toLocaleString("en-GB")}`, rightColX, marginTop + 24);
+  doc.text(`Salesman: ${snapshot.salesmanCode || "-"}`, rightColX, marginTop + 40);
 
   doc.setLineWidth(0.8);
-  doc.roundedRect(marginX, marginTop + 104, contentWidth, 56, 5, 5);
+  doc.roundedRect(marginX, marginTop + 120, contentWidth, 56, 5, 5);
   doc.setFont(undefined, "bold");
-  doc.text("Customer", marginX + 12, marginTop + 124);
+  doc.text("Customer", marginX + 12, marginTop + 140);
   doc.setFont(undefined, "normal");
   const customerText = `${snapshot.customerCode} - ${snapshot.customerName}`;
   const customerLines = doc.splitTextToSize(customerText, contentWidth - 24);
   const customerLine1 = Array.isArray(customerLines) ? customerLines[0] : customerText;
   const customerLine2 = Array.isArray(customerLines) && customerLines.length > 1 ? customerLines[1] : "";
-  doc.text(customerLine1, marginX + 12, marginTop + 140);
+  doc.text(customerLine1, marginX + 12, marginTop + 156);
   if (customerLine2) {
-    doc.text(customerLine2, marginX + 12, marginTop + 152);
+    doc.text(customerLine2, marginX + 12, marginTop + 168);
   }
 
-  const orderSummaryY = marginTop + 172;
+  const orderSummaryY = marginTop + 188;
   const orderSummaryHeight = 40;
   const orderSummaryColWidth = contentWidth / orderSummaryColumns.length;
   doc.roundedRect(marginX, orderSummaryY, contentWidth, orderSummaryHeight, 5, 5);
@@ -426,7 +487,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     doc.text(col.value, colX + 8, orderSummaryY + 32);
   });
 
-  let y = drawTableHeader(marginTop + 226);
+  let y = drawTableHeader(marginTop + 242);
   doc.setFontSize(9);
 
   (snapshot.lines || []).forEach((line) => {
@@ -437,6 +498,9 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
       rate: formatMoneyAmount(line.wholesaleRate || line.rate),
       cashDiscount: formatDiscountDetail(line.cashDiscount, line.cashApplied, line.cashDiscountAmount),
       valueDiscount: formatDiscountDetail(line.valueDiscount, line.valueApplied, line.valueDiscountAmount),
+      schemeDiscount: Number(line.schemeDiscountAmount || 0) > 0
+        ? formatMoneyAmount(line.schemeDiscountAmount)
+        : "—",
       exclVat: formatMoneyAmount(line.lineValue || line.lineTotal),
       vat: formatMoneyAmount(line.vatAmount),
       inclVat: formatMoneyAmount(line.lineTotalInclVat),
@@ -675,7 +739,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   doc.setFontSize(9);
   ensureSpace(20);
   doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 36);
-  doc.text("Cash Disc is the sheet cash scheme. Value Disc applies when the SKU value exceeds 5,000 SAR.", marginX, pageHeight - 24);
+  doc.text("Cash Disc is the sheet cash scheme. Value Disc applies when the SKU value exceeds 5,000 SAR. Scheme is the mix carton offer on that line.", marginX, pageHeight - 24);
   addPdfBuildFooter(doc);
   return doc;
 }

@@ -321,7 +321,7 @@ export function useOrder({
         if (!options.silent) {
           setMessage(saveResult.message || 'Draft saved on device. It will sync automatically when you are back online.');
         }
-        return pendingOrderId;
+        return { orderId: pendingOrderId, orderNumber: "" };
       }
 
       const payload = saveResult.payload || {};
@@ -335,7 +335,10 @@ export function useOrder({
       if (!options.silent) {
         setMessage('Draft order saved successfully.');
       }
-      return payload.orderId;
+      return {
+        orderId: payload.orderId,
+        orderNumber: payload.orderNumber || String(payload.orderId),
+      };
     } catch (err) {
       setError(err.message || 'Unable to save draft order.');
       return null;
@@ -431,7 +434,7 @@ export function useOrder({
         }
         setShowOrderReview(false);
         setLoadedOrderStatus('SUBMITTED');
-        return pendingOrderId;
+        return { orderId: pendingOrderId, orderNumber: "" };
       }
 
       const payload = saveResult.payload || {};
@@ -443,10 +446,13 @@ export function useOrder({
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'SUBMITTED').toUpperCase());
       if (!options.silent) {
-        setMessage(`Order #${payload.orderId} submitted successfully.`);
+        setMessage(`Order #${payload.orderNumber || payload.orderId} submitted successfully.`);
       }
       setShowOrderReview(false);
-      return payload.orderId;
+      return {
+        orderId: payload.orderId,
+        orderNumber: payload.orderNumber || String(payload.orderId),
+      };
     } catch (err) {
       setError(err.message || 'Unable to submit order.');
       return null;

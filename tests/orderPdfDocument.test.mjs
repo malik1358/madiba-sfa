@@ -8,6 +8,7 @@ import {
   inferPricingFromHistory,
   mapSavedOrderLinesToPdfLines,
   renderOrderPdfDocument,
+  resolveLiveOrderPdfSnapshot,
 } from "../app/lib/orderPdfDocument.js";
 
 function createMockDoc() {
@@ -161,13 +162,86 @@ test("renderOrderPdfDocument draws the new order layout", () => {
 
   renderOrderPdfDocument(doc, snapshot);
 
-  assert.ok(doc.texts.includes("Order Number: 296"));
+  assert.ok(doc.texts.includes("Order Number  296"));
   assert.ok(doc.texts.includes("Cash Disc"));
+  assert.ok(doc.texts.includes("Scheme"));
   assert.ok(doc.texts.includes("Outstanding Details"));
   assert.ok(doc.texts.includes("Amount after VAT"));
   assert.equal(doc.texts.includes("Item Code"), false);
   assert.equal(doc.texts.includes("Line Total"), false);
   assert.equal(doc.texts.includes("Outstanding Buckets"), false);
+});
+
+test("renderOrderPdfDocument never prints a pending queue id as the order number", () => {
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, {
+    orderId: "pending:8981a846-ca3",
+    orderNumber: "pending:8981a846-ca3",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-09-07T08:30:44.000Z",
+    customerCode: "1059",
+    customerName: "Test",
+    salesmanCode: "ADMIN",
+    paymentType: "credit",
+    pricingRegion: "riyadh",
+    itemCount: 0,
+    totalQuantity: 0,
+    grandTotal: 0,
+    totals: {},
+    lines: [],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+
+  assert.ok(doc.texts.includes("Order Number  —"));
+  assert.equal(doc.texts.some((text) => text.includes("pending:")), false);
+});
+
+test("renderOrderPdfDocument shows scheme discount on the item row", () => {
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, {
+    orderId: 325,
+    orderNumber: "325",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-09-07T08:30:44.000Z",
+    customerCode: "PROSPECT-OFF",
+    customerName: "test",
+    salesmanCode: "ADMIN",
+    paymentType: "credit",
+    pricingRegion: "dammam",
+    itemCount: 1,
+    totalQuantity: 40,
+    grandTotal: 2080,
+    totals: {
+      wholesaleTotal: 2153.2,
+      cashDiscountTotal: 0,
+      valueDiscountTotal: 0,
+      schemeDiscountTotal: 73.2,
+      amountExclVat: 2080,
+      vatAmount: 312,
+      amountInclVat: 2392,
+    },
+    lines: [{
+      item_code: "A005425",
+      item_name: "GOLDEN STAR PAPER",
+      quantity: 40,
+      wholesaleRate: 53.83,
+      rate: 52,
+      cashDiscount: 0.02,
+      valueDiscount: 0,
+      cashApplied: false,
+      valueApplied: false,
+      schemeDiscountAmount: 73.2,
+      lineValue: 2080,
+      vatAmount: 312,
+      lineTotalInclVat: 2392,
+    }],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+
+  assert.ok(doc.texts.includes("Scheme"));
+  assert.ok(doc.texts.filter((text) => text === "73.20").length >= 2);
 });
 
 test("enrichOrderPdfLiveData replaces a pending queue id with the live order number", async () => {
@@ -194,6 +268,85 @@ test("enrichOrderPdfLiveData replaces a pending queue id with the live order num
 
     assert.equal(snapshot.orderNumber, "4451");
     assert.equal(snapshot.orderId, 4451);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("resolveLiveOrderPdfSnapshot retries until the live order number is available", async () => {
+  const originalFetch = global.fetch;
+  let salesOrderCalls = 0;
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/api/sales-orders")) {
+      salesOrderCalls += 1;
+      if (salesOrderCalls < 3) {
+        return { ok: true, json: async () => ({ success: true, found: false }) };
+      }
+      return {
+        ok: true,
+        json: async () => ({ success: true, found: true, orderId: 325, orderNumber: "325" }),
+      };
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  try {
+    const { snapshot } = await resolveLiveOrderPdfSnapshot({
+      orderId: "pending:ccc3f31333cd",
+      customerCode: "PROSPECT-OFF-ccc3f31333cd4cfe",
+      lines: [],
+      outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+    }, { accessToken: "token" }, { delayMs: 0 });
+
+    assert.equal(snapshot.orderNumber, "325");
+    assert.equal(salesOrderCalls, 3);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("enrichOrderPdfLiveData replaces offline prospect codes with the live PROSPECT id", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/api/sales-orders")) {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          found: true,
+          orderId: 325,
+          orderNumber: "325",
+          customerCode: "PROSPECT-OFF-ccc3f31333cd4cfe",
+        }),
+      };
+    }
+    if (href.includes("/api/prospects")) {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          found: true,
+          customerCode: "PROSPECT-412",
+          customerName: "test",
+        }),
+      };
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  try {
+    const { snapshot } = await enrichOrderPdfLiveData({
+      orderId: 325,
+      customerCode: "PROSPECT-OFF-ccc3f31333cd4cfe",
+      customerName: "test",
+      lines: [],
+      outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+    }, { accessToken: "token" });
+
+    assert.equal(snapshot.orderNumber, "325");
+    assert.equal(snapshot.customerCode, "PROSPECT-412");
   } finally {
     global.fetch = originalFetch;
   }

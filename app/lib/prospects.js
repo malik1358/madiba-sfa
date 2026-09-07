@@ -118,11 +118,23 @@ export function buildProspectCustomerCode(prospectId) {
 
 export function resolveProspectCustomerCode(prospect) {
   if (prospect && typeof prospect === "object") {
+    const liveCode = buildProspectCustomerCode(prospect.id);
+    if (liveCode) return liveCode;
     const offlineId = String(prospect.offline_id || extractOfflineIdFromRemarks(prospect.remarks) || "").trim();
     if (offlineId) return buildOfflineProspectCustomerCode(offlineId);
-    return buildProspectCustomerCode(prospect.id);
+    return "";
   }
   return buildProspectCustomerCode(prospect);
+}
+
+export function prospectCustomerCodes(prospect) {
+  const codes = [];
+  const liveCode = buildProspectCustomerCode(prospect?.id);
+  if (liveCode) codes.push(liveCode);
+  const offlineId = String(prospect?.offline_id || extractOfflineIdFromRemarks(prospect?.remarks) || "").trim();
+  const offlineCode = buildOfflineProspectCustomerCode(offlineId);
+  if (offlineCode) codes.push(offlineCode);
+  return [...new Set(codes.map((code) => String(code).trim().toUpperCase()).filter(Boolean))];
 }
 
 export function parseProspectIdFromCustomerCode(customerCode) {
@@ -174,8 +186,17 @@ export function enrichProspectsWithOrders(prospects, orders) {
   const orderMap = mapProspectOrderNumbers(orders);
 
   return (prospects || []).map((prospect) => {
-    const code = resolveProspectCustomerCode(prospect);
-    const prospectOrders = orderMap.get(code) || [];
+    const codes = prospectCustomerCodes(prospect);
+    const seen = new Set();
+    const prospectOrders = codes
+      .flatMap((code) => orderMap.get(code) || [])
+      .filter((order) => {
+        const key = String(order?.id || "");
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((left, right) => new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime());
     const orderNumbers = prospectOrders.map((order) => order.order_number).filter(Boolean);
 
     return {
@@ -216,9 +237,7 @@ export async function fetchProspectOrders(admin, prospectsOrIds) {
     value && typeof value === "object" ? value : { id: value }
   ));
   const allowedCodes = new Set(
-    prospects
-      .map((row) => String(resolveProspectCustomerCode(row) || "").trim().toUpperCase())
-      .filter(Boolean),
+    prospects.flatMap((row) => prospectCustomerCodes(row)),
   );
 
   if (allowedCodes.size === 0) return [];

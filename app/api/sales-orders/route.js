@@ -5,6 +5,11 @@ import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { loadCachedPricingCatalog, priceOrderLines, resolveCatalogForOrder } from "../../lib/orderPricing.js";
 import { normalizePaymentType, normalizePricingRegion } from "../../lib/regionalPricing.js";
+import {
+  findProspectByOfflineId,
+  parseOfflineProspectIdFromCustomerCode,
+  resolveProspectCustomerCode,
+} from "../../lib/prospects.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -212,6 +217,15 @@ async function ensureOrderAccess(admin, orderId, userId) {
   return order;
 }
 
+async function resolvePersistedCustomerCode(admin, customerCode) {
+  const requested = String(customerCode || "").trim();
+  const offlineId = parseOfflineProspectIdFromCustomerCode(requested);
+  if (!offlineId) return requested;
+
+  const prospect = await findProspectByOfflineId(admin, offlineId);
+  return resolveProspectCustomerCode(prospect) || requested;
+}
+
 function storedOrderNumber(order) {
   const orderNumber = String(order?.order_number || "").trim();
   if (orderNumber) return orderNumber;
@@ -243,6 +257,7 @@ async function persistDraftOrder(admin, {
   capturedAt,
 }) {
   const nowIso = capturedAt || new Date().toISOString();
+  const resolvedCustomerCode = await resolvePersistedCustomerCode(admin, customerCode);
   let existingLines = [];
   let resolvedOrderId = orderId ? Number(orderId) : null;
   let resolvedOrderNumber = "";
@@ -261,7 +276,7 @@ async function persistDraftOrder(admin, {
     const { data: newOrder, error: orderError } = await admin
       .from("sales_orders")
       .insert({
-        customer_code: customerCode,
+        customer_code: resolvedCustomerCode,
         customer_name: customerName,
         salesman_code: salesmanCode,
         status: "DRAFT",
@@ -278,6 +293,7 @@ async function persistDraftOrder(admin, {
     const { data: updatedOrder, error: updateError } = await admin
       .from("sales_orders")
       .update({
+        customer_code: resolvedCustomerCode,
         customer_name: customerName,
         salesman_code: salesmanCode,
         updated_at: nowIso,
@@ -326,6 +342,7 @@ async function persistDraftOrder(admin, {
   return {
     orderId: resolvedOrderId,
     orderNumber: resolvedOrderNumber,
+    customerCode: resolvedCustomerCode,
     existingLines,
     changeSet,
     nowIso,
@@ -365,7 +382,7 @@ export async function GET(request) {
 
       const { data, error } = await admin
         .from("sales_orders")
-        .select("id,order_number,status,customer_code,created_by,updated_at")
+        .select("id,order_number,status,customer_code,customer_name,created_by,updated_at")
         .eq("id", numericId)
         .maybeSingle();
       if (error) throw error;
@@ -374,7 +391,7 @@ export async function GET(request) {
       const sinceIso = new Date(Date.now() - RECENT_ORDER_LOOKUP_MS).toISOString();
       const { data, error } = await admin
         .from("sales_orders")
-        .select("id,order_number,status,customer_code,created_by,updated_at")
+        .select("id,order_number,status,customer_code,customer_name,created_by,updated_at")
         .eq("customer_code", customerCode)
         .eq("created_by", user.id)
         .gte("updated_at", sinceIso)
@@ -396,11 +413,17 @@ export async function GET(request) {
     }
 
     const orderNumber = await ensureStoredOrderNumber(admin, order.id, order.order_number);
+    const liveCustomerCode = await resolvePersistedCustomerCode(admin, order.customer_code);
+    if (liveCustomerCode && liveCustomerCode !== order.customer_code) {
+      await admin.from("sales_orders").update({ customer_code: liveCustomerCode }).eq("id", order.id);
+    }
     return NextResponse.json({
       success: true,
       found: true,
       orderId: order.id,
       orderNumber,
+      customerCode: liveCustomerCode || order.customer_code || "",
+      customerName: order.customer_name || "",
       status: order.status,
     });
   } catch (error) {
@@ -477,7 +500,7 @@ export async function POST(request) {
     });
     const pricedLines = priceOrderLines(lines, pricedCatalog);
 
-    const { orderId, orderNumber, changeSet, nowIso } = await persistDraftOrder(admin, {
+    const { orderId, orderNumber, customerCode: persistedCustomerCode, changeSet, nowIso } = await persistDraftOrder(admin, {
       userId: user.id,
       orderId: requestedOrderId,
       customerCode,
@@ -486,6 +509,7 @@ export async function POST(request) {
       lines: pricedLines,
       capturedAt,
     });
+    const historyCustomerCode = persistedCustomerCode || customerCode;
 
     await writeOrderPricingMeta(admin, orderId, {
       paymentType: requestedPaymentType,
@@ -497,7 +521,7 @@ export async function POST(request) {
 
     let history = await appendOrderHistory(admin, {
       orderId,
-      customerCode,
+      customerCode: historyCustomerCode,
       userId: user.id,
       action: draftHistoryAction,
       previousStatus: loadedOrderStatus || "DRAFT",
@@ -516,7 +540,7 @@ export async function POST(request) {
         location,
         {
           order_id: orderId,
-          customer_code: customerCode,
+          customer_code: historyCustomerCode,
           customer_name: customerName,
           platform: capturePlatform,
         },
@@ -539,7 +563,7 @@ export async function POST(request) {
 
       history = await appendOrderHistory(admin, {
         orderId,
-        customerCode,
+        customerCode: historyCustomerCode,
         userId: user.id,
         action: "SUBMITTED_ORDER",
         previousStatus: loadedOrderStatus || "DRAFT",
@@ -553,7 +577,7 @@ export async function POST(request) {
       if (requireGps && hasGpsCoordinates(location)) {
         await insertGpsActivityLog(admin, user.id, "ORDER_SUBMITTED", location, {
           order_id: orderId,
-          customer_code: customerCode,
+          customer_code: historyCustomerCode,
           platform: capturePlatform,
         });
       }
@@ -570,7 +594,7 @@ export async function POST(request) {
         ? `order:${orderId}:submit`
         : (isNewOrder ? `order:${orderId}:draft` : `order:${orderId}:edit:${nowIso}`),
       details: {
-        customerCode,
+        customerCode: historyCustomerCode,
         customerName,
         referenceId: orderId,
       },
@@ -580,6 +604,7 @@ export async function POST(request) {
       success: true,
       orderId,
       orderNumber,
+      customerCode: historyCustomerCode,
       status,
       history,
       action,

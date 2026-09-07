@@ -2,14 +2,14 @@ export const DATA_REFRESH_STATUS_EVENT = "madiba-data-refresh-status";
 
 export const DATA_REFRESH_STEPS = [
   "download",
-  "customers",
   "collections",
+  "customers",
   "items",
   "orders",
   "prices",
 ];
 
-const SNAPSHOT_STEPS = ["download", "customers", "collections", "items", "orders"];
+const SNAPSHOT_STEPS = ["download", "collections", "customers", "items", "orders"];
 
 let state = {
   active: false,

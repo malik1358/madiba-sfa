@@ -20,7 +20,6 @@ import {
   findOutstandingForCustomer,
   hydrateOutstandingInvoices,
   isPlaceholderSalesmanValue,
-  mergeOutstandingInvoiceSources,
   pickLongestCustomerName,
   pickOutstandingSalesmanName,
   customerAccountCodesMatch,
@@ -181,9 +180,11 @@ async function readOutstandingDataset(admin) {
     const hydrated = hydrateOutstandingInvoices(parsed);
     const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
     if (hydrated.length > 0) {
-      const tableInvoices = await readOutstandingInvoicesFromTable(admin);
+      // The uploaded outstanding workbook is the collection-queue source.
+      // Merging the invoices table here re-read every open invoice and the
+      // full customer master on each queue load.
       return {
-        invoices: mergeOutstandingInvoiceSources(hydrated, tableInvoices),
+        invoices: hydrated,
         rows,
       };
     }
@@ -518,6 +519,46 @@ export async function getSalesScope(admin, userId) {
   };
 }
 
+const CUSTOMER_PAGE_SIZE = 1000;
+const CUSTOMER_LOOKUP_BATCH_SIZE = 200;
+const CUSTOMER_COLLECTION_SELECT = "customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude";
+
+async function fetchAllCustomerRows(admin) {
+  const rows = [];
+
+  for (let from = 0; ; from += CUSTOMER_PAGE_SIZE) {
+    const { data, error } = await admin
+      .from("customers")
+      .select(CUSTOMER_COLLECTION_SELECT)
+      .order("customer_code", { ascending: true })
+      .range(from, from + CUSTOMER_PAGE_SIZE - 1);
+
+    if (error) throw error;
+    const page = Array.isArray(data) ? data : [];
+    rows.push(...page);
+    if (page.length < CUSTOMER_PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
+async function fetchCustomersByCodes(admin, codes) {
+  const rows = [];
+
+  for (let index = 0; index < codes.length; index += CUSTOMER_LOOKUP_BATCH_SIZE) {
+    const batch = codes.slice(index, index + CUSTOMER_LOOKUP_BATCH_SIZE);
+    const { data, error } = await admin
+      .from("customers")
+      .select(CUSTOMER_COLLECTION_SELECT)
+      .in("customer_code", batch);
+
+    if (error) throw error;
+    if (Array.isArray(data)) rows.push(...data);
+  }
+
+  return rows;
+}
+
 async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
   const lookupCodes = new Set();
   (outstandingInvoices || []).forEach((invoice) => {
@@ -531,26 +572,15 @@ async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
 
   if (lookupCodes.size === 0) return [];
 
-  const codes = [...lookupCodes];
-  const batchSize = 200;
-  const rows = [];
-
-  for (let index = 0; index < codes.length; index += batchSize) {
-    const batch = codes.slice(index, index + batchSize);
-    const filters = batch.flatMap((code) => [
-      `customer_code.eq.${code}`,
-      `customer_code.ilike.${code}%`,
-    ]).join(",");
-    const { data, error } = await admin
-      .from("customers")
-      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude")
-      .or(filters);
-
-    if (error) throw error;
-    if (Array.isArray(data)) rows.push(...data);
+  // Prefix matching used to be done in SQL with one OR/ilike pair per invoice
+  // code. That became dozens of huge PostgREST filters on the outstanding file.
+  // Load the customer master in pages (or a few .in() batches) and match codes
+  // in memory with preferMatchingCustomerKey instead.
+  if (lookupCodes.size >= CUSTOMER_LOOKUP_BATCH_SIZE) {
+    return fetchAllCustomerRows(admin);
   }
 
-  return rows;
+  return fetchCustomersByCodes(admin, [...lookupCodes]);
 }
 
 export async function fetchOutstandingAndCollectionRecords(admin, scope) {

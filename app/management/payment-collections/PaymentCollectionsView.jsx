@@ -37,8 +37,10 @@ import {
   fetchSalesScopeCached,
   invalidateCollectionQueuesForUser,
   readCollectionQueuesForUser,
+  waitForHydratedCollectionQueues,
   writeCollectionQueuesForUser,
 } from "../../lib/mobileDataCache";
+import { getDataRefreshStatus } from "../../lib/dataRefreshStatus";
 import { resolveAuthSession } from "../../lib/authSession";
 import {
   isCashOnlyQueueCustomer,
@@ -1079,8 +1081,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (!session?.access_token || !session?.user?.id) throw new Error("Please login again.");
 
-      const cachedQueues = await readCollectionQueuesForUser(session.user.id);
+      let cachedQueues = await readCollectionQueuesForUser(session.user.id);
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
+      if (!cachedQueues && getDataRefreshStatus().active) {
+        setLoading(true);
+        cachedQueues = await waitForHydratedCollectionQueues(session.user.id);
+        if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
+      }
       if (cachedQueues) {
         cachedResult = await applyQueuePayload(cachedQueues, preferredKey);
         setQueueFromCache(true);

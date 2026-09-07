@@ -8,6 +8,7 @@ import {
   getDataRefreshStatus,
   isDataRefreshStale,
   markDataRefreshStep,
+  snapshotRefreshSteps,
   startDataRefreshJob,
 } from "../app/lib/dataRefreshStatus.js";
 
@@ -18,6 +19,16 @@ test("formatDataAge describes how old saved device data is", () => {
   assert.equal(formatDataAge(now - 5 * 60 * 60 * 1000, now), "5h ago");
   assert.equal(formatDataAge(now - 2 * 24 * 60 * 60 * 1000, now), "2d ago");
   assert.equal(formatDataAge("", now), "unknown");
+});
+
+test("device snapshot saves the collection queue before the customer dump", () => {
+  assert.deepEqual(snapshotRefreshSteps(), [
+    "download",
+    "collections",
+    "customers",
+    "items",
+    "orders",
+  ]);
 });
 
 test("data refresh job tracks done versus pending steps", () => {

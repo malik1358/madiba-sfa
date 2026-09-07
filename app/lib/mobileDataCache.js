@@ -17,7 +17,9 @@ import {
 export { buildScopeHash } from "./scopeHash.js";
 
 export const SNAPSHOT_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+export const COLLECTION_QUEUES_READY_EVENT = "madiba-collection-queues-ready";
 const MOBILE_SNAPSHOT_META_KEY = "mobileSnapshot:meta:v1";
+const COLLECTION_QUEUE_HYDRATE_WAIT_MS = 45000;
 
 export const CACHE_TTL = {
   scopeMs: 15 * 60 * 1000,
@@ -351,6 +353,41 @@ export async function readCollectionQueuesForUser(userId) {
   return entry?.value || null;
 }
 
+function emitCollectionQueuesReady() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(COLLECTION_QUEUES_READY_EVENT));
+}
+
+export async function waitForHydratedCollectionQueues(userId, maxMs = COLLECTION_QUEUE_HYDRATE_WAIT_MS) {
+  const existing = await readCollectionQueuesForUser(userId);
+  if (existing) return existing;
+  if (typeof window === "undefined" || !userId) return null;
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const finish = async () => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener(COLLECTION_QUEUES_READY_EVENT, onReady);
+      window.removeEventListener("madiba-mobile-snapshot-hydrated", onReady);
+      window.clearTimeout(timer);
+      resolve(await readCollectionQueuesForUser(userId));
+    };
+
+    const onReady = () => {
+      finish();
+    };
+
+    const timer = window.setTimeout(() => {
+      finish();
+    }, Math.max(0, Number(maxMs) || COLLECTION_QUEUE_HYDRATE_WAIT_MS));
+
+    window.addEventListener(COLLECTION_QUEUES_READY_EVENT, onReady);
+    window.addEventListener("madiba-mobile-snapshot-hydrated", onReady);
+  });
+}
+
 async function fetchCollectionQueuesNetwork(accessToken) {
   const response = await fetch("/api/payment-collections", {
     cache: "no-store",
@@ -443,6 +480,23 @@ export async function hydrateFromMobileSnapshot(snapshot, userId) {
   if (!snapshot || !userId) return false;
 
   markDataRefreshStep("download", "done");
+  markDataRefreshStep("collections", "running");
+  const collectionWrites = [];
+  const collectionScope = snapshot.collectionScope || snapshot.salesScope;
+  if (collectionScope) {
+    collectionWrites.push(writeCacheEntry(collectionScopeCacheKey(userId), collectionScope, { ttlMs: CACHE_TTL.scopeMs }));
+    if (snapshot.collectionQueues) {
+      collectionWrites.push(writeCacheEntry(
+        collectionQueuesCacheKey(collectionScope),
+        snapshot.collectionQueues,
+        { ttlMs: CACHE_TTL.collectionQueuesMs },
+      ));
+    }
+  }
+  await Promise.all(collectionWrites);
+  markDataRefreshStep("collections", "done");
+  emitCollectionQueuesReady();
+
   markDataRefreshStep("customers", "running");
   const customerWrites = [];
 
@@ -469,22 +523,6 @@ export async function hydrateFromMobileSnapshot(snapshot, userId) {
   }
   await Promise.all(customerWrites);
   markDataRefreshStep("customers", "done");
-
-  markDataRefreshStep("collections", "running");
-  const collectionWrites = [];
-  const collectionScope = snapshot.collectionScope || snapshot.salesScope;
-  if (collectionScope) {
-    collectionWrites.push(writeCacheEntry(collectionScopeCacheKey(userId), collectionScope, { ttlMs: CACHE_TTL.scopeMs }));
-    if (snapshot.collectionQueues) {
-      collectionWrites.push(writeCacheEntry(
-        collectionQueuesCacheKey(collectionScope),
-        snapshot.collectionQueues,
-        { ttlMs: CACHE_TTL.collectionQueuesMs },
-      ));
-    }
-  }
-  await Promise.all(collectionWrites);
-  markDataRefreshStep("collections", "done");
 
   markDataRefreshStep("items", "running");
   if (snapshot.itemsMaster) {

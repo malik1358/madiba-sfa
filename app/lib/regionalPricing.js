@@ -61,8 +61,7 @@ export function formatMoneyAmount(value) {
 
 export function formatDiscountDetail(rate, applied, amount) {
   const label = formatDiscountPercent(rate);
-  if (label === "—") return "—";
-  if (!applied) return label;
+  if (label === "—" || !applied) return "—";
   return `${label} applied · ${formatMoneyAmount(amount)}`;
 }
 

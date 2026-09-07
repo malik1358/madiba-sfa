@@ -3,9 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 import {
   canAccessProspectSalesmanCode,
+  findProspectByOfflineId,
   insertProspectWithColumnFallback,
   listProspectsWithOrdersForScope,
   normalizeProspectSalesmanCode,
+  withOfflineIdRemarks,
 } from "../../lib/prospects.js";
 import { linkProspectToCustomer, findProspectLinkCustomerSuggestions } from "../../lib/prospectCustomerLink.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
@@ -121,6 +123,7 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Company name is required." }, { status: 400 });
     }
 
+    const offlineId = String(body.offline_id || "").trim();
     const payload = {
       company_name: companyName,
       company_name_ar: String(body.company_name_ar || "").trim() || null,
@@ -131,14 +134,15 @@ export async function POST(request) {
       latitude: body.latitude == null ? null : Number(body.latitude),
       longitude: body.longitude == null ? null : Number(body.longitude),
       salesman_code: salesmanCode,
-      remarks: String(body.remarks || "").trim() || null,
+      remarks: withOfflineIdRemarks(body.remarks, offlineId),
+      offline_id: offlineId || null,
     };
 
     const { data, removedColumns } = await insertProspectWithColumnFallback(admin, payload);
 
     return NextResponse.json({
       success: true,
-      data,
+      data: { ...data, offline_id: offlineId || data?.offline_id || null },
       removedColumns,
     });
   } catch (error) {
@@ -157,17 +161,23 @@ export async function PATCH(request) {
     const { admin, scope } = await resolveRequestScope(request);
     const body = await request.json().catch(() => ({}));
     const prospectId = Number(body.id);
-    if (!Number.isFinite(prospectId) || prospectId <= 0) {
-      return NextResponse.json({ success: false, error: "Prospect id is required." }, { status: 400 });
+    const offlineId = String(body.offline_id || "").trim();
+    let existing = null;
+
+    if (Number.isFinite(prospectId) && prospectId > 0) {
+      const { data, error: loadError } = await admin
+        .from("prospects")
+        .select("id,salesman_code")
+        .eq("id", prospectId)
+        .maybeSingle();
+      if (loadError) throw loadError;
+      existing = data;
     }
 
-    const { data: existing, error: loadError } = await admin
-      .from("prospects")
-      .select("id,salesman_code")
-      .eq("id", prospectId)
-      .maybeSingle();
+    if (!existing?.id && offlineId) {
+      existing = await findProspectByOfflineId(admin, offlineId);
+    }
 
-    if (loadError) throw loadError;
     if (!existing?.id) {
       return NextResponse.json({ success: false, error: "Prospect not found." }, { status: 404 });
     }
@@ -180,7 +190,7 @@ export async function PATCH(request) {
     if (action === "link_customer") {
       const customerCode = String(body.customer_code || "").trim();
       const result = await linkProspectToCustomer(admin, {
-        prospectId,
+        prospectId: existing.id,
         customerCode,
         copyGps: body.copy_gps !== false,
         overwriteCustomerGps: Boolean(body.overwrite_customer_gps),
@@ -202,7 +212,7 @@ export async function PATCH(request) {
     const { data, error: updateError } = await admin
       .from("prospects")
       .update({ status: "FOLLOW_UP", follow_up_date: followUpDate })
-      .eq("id", prospectId)
+      .eq("id", existing.id)
       .select("id,status,follow_up_date,salesman_code")
       .single();
 

@@ -3,7 +3,7 @@ import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import { normalizeImportedItemName } from "../../lib/itemName.js";
-import { scheduleMobileFieldSnapshotRebuild } from "../../lib/server/mobileFieldSnapshot.js";
+import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -1135,7 +1135,18 @@ export async function POST(request) {
         const rebuildAdmin = createClient(supabaseUrl, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false },
         });
-        await scheduleMobileFieldSnapshotRebuild(rebuildAdmin, { trigger: "sales-upload" });
+        await publishOfflineDataUpdate(rebuildAdmin, {
+          trigger: "sales-upload",
+          kinds: ["transactions"],
+          contentHash: hashOfflineDataContent({
+            fileName,
+            rows: mappedRows.length,
+            customers: customers.size,
+            items: items.size,
+            minDate,
+            maxDate,
+          }),
+        });
       } catch (rebuildError) {
         console.error("Mobile snapshot rebuild after sales upload failed:", rebuildError);
       }

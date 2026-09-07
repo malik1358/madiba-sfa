@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../../lib/offlineDataBroadcast.js";
 import { isBuildingMaterialItem, parseCsvToRows, parsePricePayload } from "../../../lib/pricePayload.js";
 import { PRICE_SHEET_GID, PRICE_SHEET_ID, PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
 import { withRegionFallbacks } from "../../../lib/regionalPricing.js";
@@ -527,6 +529,12 @@ async function runSync(sourcePayload = null) {
     sourceUrlUsed: PRICE_SOURCE_URL,
     sourceGeneratedAt: normalizeText(payload?.generatedAt) || null,
     sourceMode: sourcePayload ? "provided_payload" : "fetched_from_source",
+    contentHash: hashOfflineDataContent({
+      priceMap: parsed.priceMap,
+      regionPriceMaps,
+      cashDiscountMap: parsed.cashDiscountMap || {},
+      valueDiscountMap: parsed.valueDiscountMap || {},
+    }),
   };
 }
 
@@ -538,6 +546,21 @@ export async function POST(request) {
 
     const body = await readRequestBody(request);
     const result = await runSync(extractSourcePayload(body));
+    after(async () => {
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const admin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        await publishOfflineDataUpdate(admin, {
+          trigger: "price-sync",
+          kinds: ["prices", "schemes"],
+          contentHash: result.contentHash,
+        });
+      } catch (publishError) {
+        console.error("Offline data publish after price sync failed:", publishError);
+      }
+    });
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     return NextResponse.json(

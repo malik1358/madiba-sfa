@@ -38,6 +38,19 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = ONLINE_PROBE_TIME
   }
 }
 
+function accessTokenFromHeaders(headers = {}) {
+  const authorization = String(headers.Authorization || headers.authorization || "").trim();
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match?.[1] || "";
+}
+
+function kickBackgroundSync(headers = {}) {
+  const accessToken = accessTokenFromHeaders(headers);
+  Promise.resolve()
+    .then(() => processOfflineQueue(async () => accessToken))
+    .catch(() => undefined);
+}
+
 export async function postFormDataResilient({
   url,
   formData,
@@ -46,6 +59,7 @@ export async function postFormDataResilient({
   onQueued,
   timeoutMs = FORM_UPLOAD_TIMEOUT_MS,
   queueOnTimeout = true,
+  queueFirst = false,
 }) {
   const payload = await formDataToOfflinePayload(formData);
 
@@ -60,16 +74,17 @@ export async function postFormDataResilient({
       metadata,
     });
     onQueued?.(queued);
+    kickBackgroundSync(headers);
     return {
       success: true,
       queued: true,
-      offline: true,
+      offline: typeof navigator !== "undefined" && navigator.onLine === false,
       queueId: queued.id,
-      message: "Saved on device. It will sync automatically when internet returns.",
+      message: "Saved on this device. Syncing to the server in the background.",
     };
   }
 
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
+  if (queueFirst || (typeof navigator !== "undefined" && !navigator.onLine)) {
     return queueForSync();
   }
 
@@ -104,36 +119,43 @@ export async function postFormDataResilient({
   }
 }
 
-export async function postJsonResilient({
+export async function sendJsonResilient({
   url,
+  method = "POST",
   jsonBody,
   headers = {},
   metadata = {},
   onQueued,
+  queueFirst = false,
   timeoutMs = ONLINE_PROBE_TIMEOUT_MS,
 }) {
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
+  async function queueForSync() {
     const queued = await enqueueOfflineRequest({
       url,
-      method: "POST",
+      method,
       headers,
       bodyType: "json",
       jsonBody,
       metadata,
     });
     onQueued?.(queued);
+    kickBackgroundSync(headers);
     return {
       success: true,
       queued: true,
-      offline: true,
+      offline: typeof navigator !== "undefined" && navigator.onLine === false,
       queueId: queued.id,
-      message: "Saved on device. It will sync automatically when you are back online.",
+      message: "Saved on this device. Syncing to the server in the background.",
     };
+  }
+
+  if (queueFirst || (typeof navigator !== "undefined" && navigator.onLine === false)) {
+    return queueForSync();
   }
 
   try {
     const response = await fetchWithTimeout(url, {
-      method: "POST",
+      method,
       headers: {
         ...headers,
         "Content-Type": "application/json",
@@ -157,27 +179,16 @@ export async function postJsonResilient({
       throw error;
     }
 
-    if (isFetchAbortError(error) && typeof navigator !== "undefined" && navigator.onLine) {
+    if (isFetchAbortError(error) && typeof navigator !== "undefined" && navigator.onLine && !queueFirst) {
       throw toFriendlyFetchError(error);
     }
 
-    const queued = await enqueueOfflineRequest({
-      url,
-      method: "POST",
-      headers,
-      bodyType: "json",
-      jsonBody,
-      metadata,
-    });
-    onQueued?.(queued);
-    return {
-      success: true,
-      queued: true,
-      offline: true,
-      queueId: queued.id,
-      message: "Saved on device. It will sync automatically when you are back online.",
-    };
+    return queueForSync();
   }
+}
+
+export async function postJsonResilient(options = {}) {
+  return sendJsonResilient({ ...options, method: options.method || "POST" });
 }
 
 export { processOfflineQueue };

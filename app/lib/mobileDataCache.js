@@ -204,6 +204,41 @@ export async function fetchSalesScopeCached(options = {}) {
   };
 }
 
+export async function upsertLocalVisibleCustomer(scope, customer) {
+  if (!scope || !customer?.customer_code) return false;
+
+  const code = String(customer.customer_code || "").trim().toUpperCase();
+  const nextCustomer = { ...customer, customer_code: customer.customer_code };
+
+  async function merge(enriched) {
+    const key = customersCacheKey(scope, enriched);
+    const entry = await readCacheEntry(key);
+    if (enriched) {
+      const current = entry?.value && typeof entry.value === "object" ? entry.value : { customers: [], inactiveCustomers: [] };
+      const customers = [
+        nextCustomer,
+        ...(Array.isArray(current.customers) ? current.customers : []).filter((row) => (
+          String(row?.customer_code || "").trim().toUpperCase() !== code
+        )),
+      ];
+      await writeCacheEntry(key, { ...current, customers }, {
+        ttlMs: enriched ? CACHE_TTL.customersEnrichedMs : CACHE_TTL.customersBasicMs,
+      });
+      return;
+    }
+
+    const current = Array.isArray(entry?.value) ? entry.value : [];
+    await writeCacheEntry(
+      key,
+      [nextCustomer, ...current.filter((row) => String(row?.customer_code || "").trim().toUpperCase() !== code)],
+      { ttlMs: CACHE_TTL.customersBasicMs },
+    );
+  }
+
+  await Promise.all([merge(false), merge(true)]);
+  return true;
+}
+
 export async function fetchVisibleCustomersCached(accessToken, scope, options = {}) {
   const enriched = Boolean(options.enriched);
   const ttlMs = enriched ? CACHE_TTL.customersEnrichedMs : CACHE_TTL.customersBasicMs;

@@ -270,6 +270,7 @@ export function useOrder({
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
+        queueFirst: true,
         jsonBody: buildOrderPayload({
           action: 'save_draft',
           selectedCustomer,
@@ -363,6 +364,7 @@ export function useOrder({
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
+        queueFirst: true,
         jsonBody: buildOrderPayload({
           action: 'submit',
           selectedCustomer,

@@ -19,7 +19,14 @@ import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { resolveAuthSession } from "../../lib/authSession";
 import ExportableTable from "../../components/ExportableTable";
-import { extractMissingProspectsColumn, normalizeProspectSalesmanCode } from "../../lib/prospects";
+import {
+  createOfflineProspectId,
+  normalizeProspectSalesmanCode,
+  resolveProspectCustomerCode,
+} from "../../lib/prospects";
+import { postJsonResilient } from "../../lib/offlineApi";
+import { prospectToOrderCustomer, readLocalProspects, upsertLocalProspect } from "../../lib/offlineProspects";
+import { upsertLocalVisibleCustomer } from "../../lib/mobileDataCache";
 import { getTodayDateKey, validateNextVisitDate } from "../../lib/nextVisitDate";
 
 const TEXT = {
@@ -104,9 +111,9 @@ function parseGpsCoordinates(rawValue) {
   return { lat, lng };
 }
 
-function buildProspectOrderParams({ id, customerName, salesmanCode }) {
-  const customerCode = `PROSPECT-${id}`;
-  const resolvedName = String(customerName || "").trim() || `Prospect ${id}`;
+function buildProspectOrderParams({ id, offlineId, customerName, salesmanCode }) {
+  const customerCode = resolveProspectCustomerCode({ id, offline_id: offlineId }) || `PROSPECT-${id}`;
+  const resolvedName = String(customerName || "").trim() || `Prospect ${id || offlineId}`;
   const params = new URLSearchParams({
     customer_code: customerCode,
     customer_name: resolvedName,
@@ -231,26 +238,41 @@ export default function NewCustomerPage() {
   const [loadingProspects, setLoadingProspects] = useState(false);
 
   async function loadProspectsList(accessToken) {
-    if (!accessToken) {
-      setRecent([]);
-      return;
-    }
-
     setLoadingProspects(true);
     try {
-      const response = await fetch("/api/prospects", {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to load prospects.");
+      const localProspects = await readLocalProspects();
+      let serverProspects = [];
+
+      if (accessToken) {
+        const response = await fetch("/api/prospects", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (response.ok && payload.success) {
+          serverProspects = Array.isArray(payload.prospects) ? payload.prospects : [];
+        }
       }
-      setRecent(Array.isArray(payload.prospects) ? payload.prospects : []);
+
+      const merged = [];
+      const seen = new Set();
+      for (const row of [...localProspects, ...serverProspects]) {
+        const key = String(row?.offline_id || row?.id || "").trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        merged.push(row);
+      }
+      setRecent(merged);
     } catch (err) {
-      setRecent([]);
-      setError(err.message || "Unable to load prospects.");
+      try {
+        setRecent(await readLocalProspects());
+      } catch {
+        setRecent([]);
+      }
+      if (accessToken) {
+        setError(err.message || "Unable to load prospects.");
+      }
     } finally {
       setLoadingProspects(false);
     }
@@ -368,11 +390,7 @@ export default function NewCustomerPage() {
           }));
         }
 
-        if (prospectsCheck.available) {
-          await loadProspectsList(session.access_token);
-        } else {
-          setRecent([]);
-        }
+        await loadProspectsList(session.access_token);
       } catch (err) {
         setError(err.message || "Unable to load setup data.");
       } finally {
@@ -519,48 +537,89 @@ export default function NewCustomerPage() {
         longitude: parsedGps ? Number(parsedGps.lng.toFixed(7)) : null,
         salesman_code: form.salesman_code || currentSalesmanCode,
         remarks,
+        offline_id: createOfflineProspectId(),
+      };
+      const offlineId = payload.offline_id;
+      const localProspect = {
+        id: null,
+        offline_id: offlineId,
+        company_name: payload.company_name,
+        company_name_ar: payload.company_name_ar,
+        contact_person: payload.contact_person,
+        mobile: payload.mobile,
+        city: payload.city,
+        area: payload.area,
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        salesman_code: payload.salesman_code,
+        remarks: payload.remarks,
+        status: "NEW",
+        created_at: new Date().toISOString(),
       };
 
-      const response = await fetch("/api/prospects", {
-        method: "POST",
+      const saveResult = await postJsonResilient({
+        url: "/api/prospects",
+        queueFirst: true,
+        jsonBody: payload,
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify(payload),
+        metadata: {
+          type: "prospect_create",
+          offlineId,
+        },
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || "Unable to register prospect.");
+
+      if (!saveResult.success) {
+        throw new Error(saveResult.message || "Unable to register prospect.");
       }
 
-      const data = result.data;
-      const removedColumns = Array.isArray(result.removedColumns) ? result.removedColumns : [];
+      const data = saveResult.payload?.data || localProspect;
+      const removedColumns = Array.isArray(saveResult.payload?.removedColumns) ? saveResult.payload.removedColumns : [];
 
       if (removedColumns.length > 0) {
         const removed = Array.from(new Set(removedColumns)).join(", ");
         setSchemaWarning(`Prospect was saved, but these missing columns were skipped: ${removed}`);
       }
 
+      await upsertLocalProspect({
+        ...localProspect,
+        ...data,
+        offline_id: offlineId,
+      });
+
+      try {
+        const scope = await fetchSalesScope();
+        await upsertLocalVisibleCustomer(scope, prospectToOrderCustomer({
+          ...localProspect,
+          offline_id: offlineId,
+        }));
+      } catch {
+        // Local customer cache is best-effort so order creation can still use URL params.
+      }
+
       queueTransactionAlert(session.access_token, {
         transactionType: "PROSPECT_REGISTERED",
-        referenceKey: `prospect:${data.id}:registered`,
+        referenceKey: `prospect:${offlineId}:registered`,
         companyName: form.customer_name_en || form.shop_name,
-        customerCode: data.id,
+        customerCode: resolveProspectCustomerCode({ offline_id: offlineId }),
       });
 
       await loadProspectsList(session.access_token);
 
       const query = buildProspectOrderParams({
         id: data.id,
+        offlineId,
         customerName: form.customer_name_en || form.shop_name,
         salesmanCode: form.salesman_code,
       });
 
-      setSavedProspect({ id: data.id, query });
+      setSavedProspect({ id: data.id, offlineId, query });
       setShowFollowUpDate(false);
       setFollowUpDate("");
-      setMessage("Prospect saved. Confirm whether an order was received.");
+      setMessage(saveResult.queued
+        ? "Prospect saved on this device. You can create the order now — sync continues in the background."
+        : "Prospect saved. Confirm whether an order was received.");
     } catch (err) {
       const message = String(err.message || "Unable to register prospect.");
       if (message.toLowerCase().includes("row-level security")) {
@@ -574,7 +633,7 @@ export default function NewCustomerPage() {
   }
 
   async function saveFollowUp() {
-    if (!savedProspect?.id || !followUpDate) {
+    if ((!savedProspect?.id && !savedProspect?.offlineId) || !followUpDate) {
       setError("Next Visit Date is required.");
       return;
     }
@@ -602,27 +661,36 @@ export default function NewCustomerPage() {
 
       const location = await requireGpsLocation({ role: access.role });
 
-      const response = await fetch("/api/prospects", {
+      const result = await postJsonResilient({
+        url: "/api/prospects",
         method: "PATCH",
+        queueFirst: true,
+        jsonBody: {
+          id: savedProspect.id,
+          offline_id: savedProspect.offlineId || "",
+          follow_up_date: followUpDate,
+        },
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({
-          id: savedProspect.id,
-          follow_up_date: followUpDate,
-        }),
+        metadata: {
+          type: "prospect_follow_up",
+          offlineId: savedProspect.offlineId || "",
+        },
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || "Unable to schedule follow-up visit.");
+      if (!result.success) {
+        throw new Error(result.message || "Unable to schedule follow-up visit.");
       }
 
       if (location) {
-        await insertGpsActivityLog(supabase, session.user.id, "PROSPECT_FOLLOW_UP", location, {
-          prospect_id: savedProspect.id,
-          follow_up_date: followUpDate,
-        });
+        try {
+          await insertGpsActivityLog(supabase, session.user.id, "PROSPECT_FOLLOW_UP", location, {
+            prospect_id: savedProspect.id,
+            follow_up_date: followUpDate,
+          });
+        } catch {
+          // Follow-up is already queued locally; GPS log can sync later.
+        }
       }
 
       queueTransactionAlert(session.access_token, {
@@ -633,7 +701,7 @@ export default function NewCustomerPage() {
       });
 
       setRecent((current) => current.map((row) => (
-        row.id === savedProspect.id
+        row.id === savedProspect.id || row.offline_id === savedProspect.offlineId
           ? { ...row, status: "FOLLOW_UP", follow_up_date: followUpDate }
           : row
       )));
@@ -1166,6 +1234,7 @@ export default function NewCustomerPage() {
                               onClick={() => {
                                 const query = buildProspectOrderParams({
                                   id: row.id,
+                                  offlineId: row.offline_id,
                                   customerName: row.company_name || row.customer_name || row.shop_name,
                                   salesmanCode: row.salesman_code || form.salesman_code,
                                 });

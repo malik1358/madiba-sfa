@@ -1252,6 +1252,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       // for Visit Without Order even when activity-log mode is enabled.
       saveResult = await postJsonResilient({
         url: "/api/visit-reports",
+        queueFirst: true,
         jsonBody: {
           customerCode: customer.customer_code,
           customerName: customer.customer_name,

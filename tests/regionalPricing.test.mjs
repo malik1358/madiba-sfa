@@ -115,6 +115,8 @@ test("A004190 credit line over 5000 applies value only; cash stacks both", () =>
   assert.equal(Number(totals.amountExclVat.toFixed(2)), Number(credit.lineValue.toFixed(2)));
   assert.equal(Number(totals.vatAmount.toFixed(2)), Number((credit.lineValue * 0.15).toFixed(2)));
   assert.equal(formatDiscountDetail(0.04, true, 262.16), "4% applied · 262.16");
+  assert.equal(formatDiscountDetail(0.03, false, 0), "—");
+  assert.equal(formatDiscountDetail(0.02, false, 0), "—");
   assert.equal(cash.applied.value, true);
   assert.equal(cash.applied.cash, true);
   assert.equal(Number(cash.rate.toFixed(4)), Number((58 * 0.96 * 0.96).toFixed(4)));

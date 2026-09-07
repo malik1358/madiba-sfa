@@ -197,6 +197,72 @@ test("renderOrderPdfDocument never prints a pending queue id as the order number
   assert.equal(doc.texts.some((text) => text.includes("pending:")), false);
 });
 
+test("renderOrderPdfDocument hides cash and value percents when they are not applied", () => {
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, {
+    orderId: 337,
+    orderNumber: "337",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-09-07T14:33:49.000Z",
+    customerCode: "1367",
+    customerName: "Wubl Al Khaleej Trading Company",
+    salesmanCode: "AHMED NABIL",
+    paymentType: "credit",
+    pricingRegion: "riyadh",
+    itemCount: 2,
+    totalQuantity: 50,
+    grandTotal: 2850,
+    totals: {
+      wholesaleTotal: 2850,
+      cashDiscountTotal: 0,
+      valueDiscountTotal: 0,
+      schemeDiscountTotal: 0,
+      amountExclVat: 2850,
+      vatAmount: 427.5,
+      amountInclVat: 3277.5,
+    },
+    lines: [
+      {
+        item_code: "A004075",
+        item_name: "THERMAL POS ROLL",
+        quantity: 20,
+        wholesaleRate: 69,
+        rate: 69,
+        cashDiscount: 0.03,
+        valueDiscount: 0.02,
+        cashApplied: false,
+        valueApplied: false,
+        schemeDiscountAmount: 0,
+        lineValue: 1380,
+        vatAmount: 207,
+        lineTotalInclVat: 1587,
+      },
+      {
+        item_code: "A004379",
+        item_name: "SANDWICH ROLL PAPER",
+        quantity: 30,
+        wholesaleRate: 49,
+        rate: 49,
+        cashDiscount: 0.02,
+        valueDiscount: 0,
+        cashApplied: false,
+        valueApplied: false,
+        schemeDiscountAmount: 0,
+        lineValue: 1470,
+        vatAmount: 220.5,
+        lineTotalInclVat: 1690.5,
+      },
+    ],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+
+  assert.equal(doc.texts.includes("3%"), false);
+  assert.equal(doc.texts.includes("2%"), false);
+  assert.equal(doc.texts.some((text) => text.includes("3% applied")), false);
+  assert.equal(doc.texts.some((text) => text.includes("2% applied")), false);
+});
+
 test("renderOrderPdfDocument shows scheme discount on the item row", () => {
   const doc = createMockDoc();
   renderOrderPdfDocument(doc, {

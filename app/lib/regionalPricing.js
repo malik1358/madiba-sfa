@@ -29,6 +29,53 @@ export function pricingRegionLabel(value) {
   return "Riyadh";
 }
 
+function knownPricingRegion(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return PRICING_REGIONS.includes(text) ? text : "";
+}
+
+export function normalizePricingRegions(value, fallback = DEFAULT_PRICING_REGION) {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[,|]/)
+      : [];
+  const regions = [];
+  raw.forEach((entry) => {
+    const region = knownPricingRegion(entry);
+    if (region && !regions.includes(region)) regions.push(region);
+  });
+  if (regions.length) return regions;
+  return [normalizePricingRegion(fallback)];
+}
+
+export function pricingRegionsFromMetadata(metadata = {}) {
+  const primary = knownPricingRegion(metadata.pricing_region) || DEFAULT_PRICING_REGION;
+  const extras = normalizePricingRegions(metadata.pricing_regions, primary).filter((region) => region !== primary);
+  return [primary, ...extras];
+}
+
+export function pricingRegionMetadata(value) {
+  const regions = normalizePricingRegions(value);
+  return {
+    pricing_region: regions[0],
+    pricing_regions: regions,
+  };
+}
+
+export function samePricingRegions(left, right) {
+  const a = normalizePricingRegions(left);
+  const b = normalizePricingRegions(right);
+  return a.length === b.length && a.every((region, index) => region === b[index]);
+}
+
+export function allowedOrderPricingRegions({
+  currentUserRegions,
+  currentUserRegion,
+} = {}) {
+  return normalizePricingRegions(currentUserRegions?.length ? currentUserRegions : currentUserRegion);
+}
+
 export function normalizePaymentType(value) {
   const text = String(value || "").trim().toLowerCase();
   return text === "cash" ? "cash" : DEFAULT_PAYMENT_TYPE;
@@ -213,16 +260,27 @@ export function buildEffectivePriceList({
 }
 
 export function resolveOrderPricingRegion({
+  selectedRegion,
   currentUserRegion,
+  currentUserRegions,
   customerSalesmanCode,
   pricingRegionBySalesmanCode = {},
 } = {}) {
+  const allowed = allowedOrderPricingRegions({
+    currentUserRegions,
+    currentUserRegion,
+  });
+  const selected = knownPricingRegion(selectedRegion);
+  if (selected && allowed.includes(selected)) return selected;
+
   const salesmanCode = String(customerSalesmanCode || "").trim().toUpperCase();
   const salesmanRegion = salesmanCode
     ? pricingRegionBySalesmanCode[salesmanCode]
     : "";
 
-  return normalizePricingRegion(currentUserRegion || salesmanRegion);
+  const fallback = normalizePricingRegion(currentUserRegion || salesmanRegion);
+  if (allowed.includes(fallback)) return fallback;
+  return allowed[0] || DEFAULT_PRICING_REGION;
 }
 
 export function emptyRegionPriceMaps() {

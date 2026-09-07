@@ -491,7 +491,9 @@ export async function POST(request) {
 
     const catalog = await loadCachedPricingCatalog(admin);
     const pricedCatalog = resolveCatalogForOrder(catalog, {
-      currentUserRegion: requestedPricingRegion || userMetadata.pricing_region,
+      selectedRegion: requestedPricingRegion,
+      currentUserRegion: userMetadata.pricing_region,
+      currentUserRegions: userMetadata.pricing_regions,
       customerSalesmanCode: salesmanCode,
       pricingRegionBySalesmanCode: salesmanCode
         ? { [String(salesmanCode).trim().toUpperCase()]: requestedPricingRegion || userMetadata.pricing_region }

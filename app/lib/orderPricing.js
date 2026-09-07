@@ -91,13 +91,17 @@ export async function loadCachedPricingCatalog(admin) {
 }
 
 export function resolveCatalogForOrder(catalog, {
+  selectedRegion,
   currentUserRegion,
+  currentUserRegions,
   customerSalesmanCode,
   pricingRegionBySalesmanCode,
   paymentType,
 } = {}) {
   const region = resolveOrderPricingRegion({
+    selectedRegion,
     currentUserRegion,
+    currentUserRegions,
     customerSalesmanCode,
     pricingRegionBySalesmanCode,
   });

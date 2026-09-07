@@ -15,6 +15,9 @@ import { resolveBuildId, resolveBuildTime, formatBuildDateTime } from "./lib/bui
 export const metadata = {
   title: "MADIBA SFA",
   description: "KSA Sales Force Automation System",
+  other: {
+    google: "notranslate",
+  },
   manifest: "/manifest.webmanifest",
   applicationName: "MADIBA SFA",
   appleWebApp: {
@@ -44,7 +47,7 @@ export default function RootLayout({ children }) {
   const buildTime = formatBuildDateTime(resolveBuildTime());
 
   return (
-    <html lang="en">
+    <html lang="en" translate="no" className="notranslate">
       <body data-build-id={buildId} data-build-time={buildTime}>
         <AppLanguageProvider>
           <AppPopupProvider>

@@ -26,6 +26,8 @@ function applyDocumentLanguage(language) {
   window.localStorage.setItem(STORAGE_KEY, language);
   document.documentElement.lang = language;
   document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
+  document.documentElement.setAttribute("translate", "no");
+  document.documentElement.classList.add("notranslate");
   document.body.dir = language === "ar" ? "rtl" : "ltr";
 }
 

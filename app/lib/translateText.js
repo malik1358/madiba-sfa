@@ -38,10 +38,39 @@ export function clearTranslationCache() {
   translationCache.clear();
 }
 
+const LETTER_RE = /\p{L}/u;
+const LATIN_LETTER_RE = /[A-Za-z]/;
+const ARABIC_SCRIPT_RE = /[\u0600-\u06FF]/;
+
+function letterRatio(text, predicate) {
+  const letters = [...String(text || "")].filter((ch) => LETTER_RE.test(ch));
+  if (!letters.length) return 0;
+  return letters.filter(predicate).length / letters.length;
+}
+
+export function containsArabicScript(text) {
+  return ARABIC_SCRIPT_RE.test(String(text || ""));
+}
+
+export function isMostlyLatinLetters(text) {
+  return letterRatio(text, (ch) => LATIN_LETTER_RE.test(ch)) >= 0.7;
+}
+
+export function isPlausibleTranslatedText(text, to) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  if (to === "ar") return containsArabicScript(value);
+  if (to === "en") return isMostlyLatinLetters(value);
+  return true;
+}
+
 function parseGoogleTranslatePayload(payload) {
-  const translated = Array.isArray(payload?.[0])
-    ? payload[0].map((part) => String(part?.[0] || "")).join("")
-    : "";
+  if (!Array.isArray(payload?.[0])) return "";
+
+  const translated = payload[0]
+    .filter((part) => Array.isArray(part) && typeof part[0] === "string" && typeof part[1] === "string")
+    .map((part) => part[0])
+    .join("");
   return translated.trim();
 }
 
@@ -90,13 +119,13 @@ export async function translateText(text, { from = "ar", to = "en" } = {}) {
   if (cached) return cached;
 
   const googleTranslated = await translateWithGoogle(source, from, to);
-  if (googleTranslated) {
+  if (isPlausibleTranslatedText(googleTranslated, to)) {
     writeTranslationCache(from, to, source, googleTranslated);
     return googleTranslated;
   }
 
   const myMemoryTranslated = await translateWithMyMemory(source, from, to);
-  if (myMemoryTranslated) {
+  if (isPlausibleTranslatedText(myMemoryTranslated, to)) {
     writeTranslationCache(from, to, source, myMemoryTranslated);
     return myMemoryTranslated;
   }

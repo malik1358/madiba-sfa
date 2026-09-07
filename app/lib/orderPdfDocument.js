@@ -329,15 +329,16 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const totalWithVat = Number(pdfTotals.amountInclVat || subtotal + vatAmount);
 
   const columns = [
-    { key: "item_code", label: "Code", width: 48, align: "left" },
-    { key: "item_name", label: "Item", width: 96, align: "left" },
-    { key: "quantity", label: "Qty", width: 28, align: "right" },
-    { key: "rate", label: "Rate", width: 42, align: "right" },
-    { key: "cashDiscount", label: "Cash Disc", width: 62, align: "right" },
-    { key: "valueDiscount", label: "Value Disc", width: 62, align: "right" },
-    { key: "exclVat", label: "Excl. VAT", width: 58, align: "right" },
-    { key: "vat", label: "VAT 15%", width: 50, align: "right" },
-    { key: "inclVat", label: "Incl. VAT", width: 69, align: "right" },
+    { key: "item_code", label: "Code", width: 46, align: "left" },
+    { key: "item_name", label: "Item", width: 78, align: "left" },
+    { key: "quantity", label: "Qty", width: 26, align: "right" },
+    { key: "rate", label: "Rate", width: 40, align: "right" },
+    { key: "cashDiscount", label: "Cash Disc", width: 50, align: "right" },
+    { key: "valueDiscount", label: "Value Disc", width: 50, align: "right" },
+    { key: "schemeDiscount", label: "Scheme", width: 48, align: "right" },
+    { key: "exclVat", label: "Excl. VAT", width: 52, align: "right" },
+    { key: "vat", label: "VAT 15%", width: 46, align: "right" },
+    { key: "inclVat", label: "Incl. VAT", width: 79, align: "right" },
   ];
 
   const orderSummaryColumns = [
@@ -437,6 +438,9 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
       rate: formatMoneyAmount(line.wholesaleRate || line.rate),
       cashDiscount: formatDiscountDetail(line.cashDiscount, line.cashApplied, line.cashDiscountAmount),
       valueDiscount: formatDiscountDetail(line.valueDiscount, line.valueApplied, line.valueDiscountAmount),
+      schemeDiscount: Number(line.schemeDiscountAmount || 0) > 0
+        ? formatMoneyAmount(line.schemeDiscountAmount)
+        : "—",
       exclVat: formatMoneyAmount(line.lineValue || line.lineTotal),
       vat: formatMoneyAmount(line.vatAmount),
       inclVat: formatMoneyAmount(line.lineTotalInclVat),
@@ -675,7 +679,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   doc.setFontSize(9);
   ensureSpace(20);
   doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 36);
-  doc.text("Cash Disc is the sheet cash scheme. Value Disc applies when the SKU value exceeds 5,000 SAR.", marginX, pageHeight - 24);
+  doc.text("Cash Disc is the sheet cash scheme. Value Disc applies when the SKU value exceeds 5,000 SAR. Scheme is the mix carton offer on that line.", marginX, pageHeight - 24);
   addPdfBuildFooter(doc);
   return doc;
 }

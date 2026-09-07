@@ -60,6 +60,17 @@ test("customerRecordMatchesCode resolves ERP code from combined customer name", 
   assert.equal(customerRecordMatchesCode(row, "1302"), false);
 });
 
+test("customerRecordMatchesCode treats 1544 and 1544C as the same account", () => {
+  assert.equal(customerRecordMatchesCode({
+    customer_code: "1544C",
+    customer_name: "Field Customer",
+  }, "1544"), true);
+  assert.equal(customerRecordMatchesCode({
+    customer_code: "1544 Customer Name",
+    customer_name: "1544 Customer Name",
+  }, "1544"), true);
+});
+
 test("formatCustomerLookupPreview returns cleaned ERP code and name", () => {
   const preview = formatCustomerLookupPreview({
     customer_code: "1301 AL TAWFEER TRADING COMPANY",

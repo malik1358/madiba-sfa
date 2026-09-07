@@ -218,6 +218,9 @@ export async function enrichOrderPdfLiveData(snapshot, {
   salesOrderApi = ORDER_PDF_SALES_ORDER_API,
   prospectsApi = ORDER_PDF_PROSPECTS_API,
   analyticsFallback = null,
+  skipOutstanding = false,
+  skipHistory = false,
+  skipPricing = false,
 } = {}) {
   const next = {
     ...snapshot,
@@ -230,8 +233,9 @@ export async function enrichOrderPdfLiveData(snapshot, {
   };
 
   let analytics = analyticsFallback;
+  const authHeaders = accessToken ? { Authorization: `Bearer ${accessToken}` } : null;
 
-  if (accessToken) {
+  if (authHeaders) {
     try {
       const params = new URLSearchParams();
       if (snapshot?.orderId && !isQueuedPendingOrderId(snapshot.orderId) && !Number.isNaN(Number(snapshot.orderId))) {
@@ -243,17 +247,16 @@ export async function enrichOrderPdfLiveData(snapshot, {
 
       if ([...params.keys()].length > 0) {
         const orderResponse = await fetch(`${salesOrderApi}?${params.toString()}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
+          headers: authHeaders,
           cache: "no-store",
         });
         const orderPayload = await orderResponse.json().catch(() => ({}));
         if (orderResponse.ok && orderPayload.success && orderPayload.found !== false && orderPayload.orderId) {
-          const liveNumber = formatSalesOrderNumber({
+          next.orderId = orderPayload.orderId;
+          next.orderNumber = formatSalesOrderNumber({
             id: orderPayload.orderId,
             order_number: orderPayload.orderNumber,
           });
-          next.orderId = orderPayload.orderId;
-          next.orderNumber = liveNumber;
           if (orderPayload.customerCode) next.customerCode = orderPayload.customerCode;
           if (orderPayload.customerName) next.customerName = orderPayload.customerName;
         }
@@ -266,7 +269,7 @@ export async function enrichOrderPdfLiveData(snapshot, {
       const offlineId = parseOfflineProspectIdFromCustomerCode(next.customerCode || snapshot?.customerCode);
       if (offlineId) {
         const prospectResponse = await fetch(`${prospectsApi}?offlineId=${encodeURIComponent(offlineId)}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
+          headers: authHeaders,
           cache: "no-store",
         });
         const prospectPayload = await prospectResponse.json().catch(() => ({}));
@@ -280,31 +283,37 @@ export async function enrichOrderPdfLiveData(snapshot, {
     }
   }
 
-  if ((next.customerCode || snapshot?.customerCode) && accessToken) {
-    const liveCustomerCode = next.customerCode || snapshot.customerCode;
-    const liveCustomerName = next.customerName || snapshot.customerName;
-    try {
-      const outstandingResponse = await fetch(
-        `${outstandingApi}?customerCode=${encodeURIComponent(liveCustomerCode || "")}&customerName=${encodeURIComponent(liveCustomerName || "")}`,
-        { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
-      );
-      const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
-      if (outstandingResponse.ok && outstandingPayload.success) {
-        next.outstanding.customer = outstandingPayload.customer || next.outstanding.customer;
-        next.outstanding.bucketLabels = sortBucketLabels(outstandingPayload.bucketLabels || next.outstanding.bucketLabels);
-        next.outstanding.customerInvoices = Array.isArray(outstandingPayload.customerInvoices)
-          ? outstandingPayload.customerInvoices
-          : next.outstanding.customerInvoices;
-      }
-    } catch {
-      // Keep generating the order PDF even if outstanding cannot be refreshed.
-    }
+  const liveCustomerCode = next.customerCode || snapshot?.customerCode;
+  const liveCustomerName = next.customerName || snapshot?.customerName;
+  const dataLookups = [];
 
-    if (!analytics?.monthlySummary?.length) {
+  if (authHeaders && liveCustomerCode && !skipOutstanding) {
+    dataLookups.push((async () => {
+      try {
+        const outstandingResponse = await fetch(
+          `${outstandingApi}?customerCode=${encodeURIComponent(liveCustomerCode || "")}&customerName=${encodeURIComponent(liveCustomerName || "")}`,
+          { headers: authHeaders, cache: "no-store" }
+        );
+        const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
+        if (outstandingResponse.ok && outstandingPayload.success) {
+          next.outstanding.customer = outstandingPayload.customer || next.outstanding.customer;
+          next.outstanding.bucketLabels = sortBucketLabels(outstandingPayload.bucketLabels || next.outstanding.bucketLabels);
+          next.outstanding.customerInvoices = Array.isArray(outstandingPayload.customerInvoices)
+            ? outstandingPayload.customerInvoices
+            : next.outstanding.customerInvoices;
+        }
+      } catch {
+        // Keep generating the order PDF even if outstanding cannot be refreshed.
+      }
+    })());
+  }
+
+  if (authHeaders && liveCustomerCode && !skipHistory && !analytics?.monthlySummary?.length) {
+    dataLookups.push((async () => {
       try {
         const historyResponse = await fetch(
           `${customerHistoryApi}?customerCode=${encodeURIComponent(liveCustomerCode)}`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
+          { headers: authHeaders }
         );
         const historyPayload = await historyResponse.json().catch(() => ({}));
         if (historyResponse.ok && historyPayload.success) {
@@ -314,28 +323,34 @@ export async function enrichOrderPdfLiveData(snapshot, {
       } catch {
         analytics = analyticsFallback;
       }
-    }
+    })());
   }
+
+  if (!skipPricing) {
+    dataLookups.push((async () => {
+      try {
+        const pricingCatalog = await loadPricePayload("/api/pricing/cache", PRICE_CACHE_KEY);
+        const repriced = mapSavedOrderLinesToPdfLines(next.lines || snapshot.lines || [], {
+          paymentType: next.paymentType || snapshot.paymentType,
+          pricingCatalog,
+          pricingRegion: next.pricingRegion || snapshot.pricingRegion,
+        });
+        const totals = summarizePricedLines(repriced);
+        next.lines = repriced;
+        next.totals = totals;
+        next.grandTotal = totals.amountExclVat;
+      } catch {
+        // Keep the saved snapshot if the live price catalog cannot be loaded.
+      }
+    })());
+  }
+
+  await Promise.all(dataLookups);
 
   next.outstanding.customer = syncOutstandingCustomerFromInvoices(
     next.outstanding.customer,
     next.outstanding.customerInvoices,
   );
-
-  try {
-    const pricingCatalog = await loadPricePayload("/api/pricing/cache", PRICE_CACHE_KEY);
-    const repriced = mapSavedOrderLinesToPdfLines(next.lines || snapshot.lines || [], {
-      paymentType: next.paymentType || snapshot.paymentType,
-      pricingCatalog,
-      pricingRegion: next.pricingRegion || snapshot.pricingRegion,
-    });
-    const totals = summarizePricedLines(repriced);
-    next.lines = repriced;
-    next.totals = totals;
-    next.grandTotal = totals.amountExclVat;
-  } catch {
-    // Keep the saved snapshot if the live price catalog cannot be loaded.
-  }
 
   return { snapshot: next, analytics };
 }
@@ -358,9 +373,13 @@ export async function resolveLiveOrderPdfSnapshot(snapshot, options = {}, {
       await processQueue().catch(() => undefined);
     }
 
+    const identityOnly = attempt > 0;
     const enriched = await enrichOrderPdfLiveData(current, {
       ...options,
       analyticsFallback: analytics,
+      skipOutstanding: identityOnly || options.skipOutstanding,
+      skipHistory: identityOnly || options.skipHistory,
+      skipPricing: identityOnly || options.skipPricing,
     });
     current = enriched.snapshot;
     analytics = enriched.analytics;

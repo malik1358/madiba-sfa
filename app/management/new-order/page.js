@@ -1038,10 +1038,15 @@ export default function NewOrderPage() {
         const { snapshot: liveSnapshot, analytics: monthlyAnalytics } = await resolveLiveOrderPdfSnapshot(snapshot, {
           accessToken,
           analyticsFallback: analytics,
+          skipOutstanding: Boolean(options.fast),
+          skipHistory: Boolean(options.fast),
+          skipPricing: Boolean(options.fast),
         }, {
           processQueue: accessToken
             ? () => processOfflineQueue(async () => accessToken)
             : undefined,
+          attempts: options.fast ? 2 : 8,
+          delayMs: options.fast ? 150 : 400,
         });
         const orderNumber = formatSalesOrderNumber(liveSnapshot);
         const doc = await createOrderPdfDocument(liveSnapshot, { analytics: monthlyAnalytics });
@@ -1089,7 +1094,7 @@ export default function NewOrderPage() {
     setMessage("");
     setLastSavedOrder(snapshot);
 
-    const prepared = await downloadOrderPdf(snapshot, { returnFileOnly: true });
+    const prepared = await downloadOrderPdf(snapshot, { returnFileOnly: true, fast: true });
     if (prepared?.snapshot) {
       setLastSavedOrder(prepared.snapshot);
     }

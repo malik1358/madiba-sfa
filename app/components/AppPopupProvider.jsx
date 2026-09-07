@@ -17,15 +17,22 @@ const VARIANT_LABELS = {
   info: { en: "MADIBA SFA", ar: "MADIBA SFA" },
 };
 
+function isShareableFile(file) {
+  return Boolean(file) && (
+    (typeof Blob !== "undefined" && file instanceof Blob)
+    || typeof file?.arrayBuffer === "function"
+  );
+}
+
 function normalizeWhatsappFiles(payload = {}) {
   const files = [];
   if (Array.isArray(payload.whatsappFiles)) {
     files.push(...payload.whatsappFiles);
   }
-  if (payload.whatsappFile instanceof Blob) {
+  if (isShareableFile(payload.whatsappFile)) {
     files.push(payload.whatsappFile);
   }
-  return files.filter((file) => file instanceof Blob);
+  return files.filter(isShareableFile);
 }
 
 export function AppPopupProvider({ children }) {
@@ -53,7 +60,7 @@ export function AppPopupProvider({ children }) {
 
   const shareWhatsappPayload = useCallback(async (payload, options = {}) => {
     const text = String(payload?.whatsappText || "").trim();
-    const files = Array.isArray(payload?.whatsappFiles) ? payload.whatsappFiles.filter((file) => file instanceof Blob) : [];
+    const files = Array.isArray(payload?.whatsappFiles) ? payload.whatsappFiles.filter(isShareableFile) : [];
     if (!text && files.length === 0) return { success: false, reason: "empty" };
 
     const title = language === "ar" ? "ملخص للمشاركة" : "Share summary";
@@ -86,7 +93,12 @@ export function AppPopupProvider({ children }) {
     if (!popup.autoShareWhatsapp) return undefined;
 
     const timer = window.setTimeout(() => {
-      void shareWhatsappPayload(popup);
+      void (async () => {
+        if (popup.whatsappText) {
+          await copyTextToClipboard(popup.whatsappText);
+        }
+        await shareWhatsappPayload(popup);
+      })();
     }, 450);
 
     return () => window.clearTimeout(timer);

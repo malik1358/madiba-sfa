@@ -75,6 +75,14 @@ function normalizeShareFiles(files = []) {
     .filter(Boolean);
 }
 
+export function withWhatsappCaptionFile(files = [], text = "") {
+  const shareFiles = normalizeShareFiles(files);
+  const message = String(text || "").trim();
+  if (!message) return shareFiles;
+  const caption = toWhatsappShareFile(new Blob([`${message}\n`], { type: "text/plain" }), "order-whatsapp-message.txt");
+  return caption ? [...shareFiles, caption] : shareFiles;
+}
+
 async function blobToBase64(blob) {
   const buffer = await blob.arrayBuffer();
   const bytes = new Uint8Array(buffer);
@@ -85,7 +93,7 @@ async function blobToBase64(blob) {
   return btoa(binary);
 }
 
-async function shareFilesViaCapacitor(files, text, dialogTitle) {
+async function shareFilesViaCapacitor(files, text, dialogTitle, title) {
   const { Filesystem, Directory } = await import("@capacitor/filesystem");
   const { Share } = await import("@capacitor/share");
   const uris = [];
@@ -108,6 +116,7 @@ async function shareFilesViaCapacitor(files, text, dialogTitle) {
   }
 
   await Share.share({
+    title: String(title || text || "WhatsApp share").trim(),
     text: String(text || "").trim(),
     dialogTitle,
     files: uris,
@@ -224,12 +233,17 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
     return shareTextOnWhatsapp(message, options);
   }
 
+  if (message) {
+    await copyTextToClipboard(message);
+  }
+
+  const filesWithCaption = withWhatsappCaptionFile(shareFiles, message);
   const dialogTitle = String(options.dialogTitle || "Share receipt and summary on WhatsApp").trim();
   const title = String(options.title || "Collection visit").trim();
 
   if (await isNativeMobilePlatform()) {
     try {
-      await shareFilesViaCapacitor(shareFiles, message, dialogTitle);
+      await shareFilesViaCapacitor(filesWithCaption, message, dialogTitle, title);
       return { success: true, method: "capacitor-share-files" };
     } catch (error) {
       const cancelled = String(error?.message || error || "").toLowerCase().includes("cancel");
@@ -245,8 +259,10 @@ export async function shareTextAndFilesOnWhatsapp(text, files = [], options = {}
         title,
         text: message,
       };
-      if (!navigator.canShare || navigator.canShare({ ...payload, files: shareFiles })) {
-        payload.files = shareFiles;
+      if (!navigator.canShare || navigator.canShare({ ...payload, files: filesWithCaption })) {
+        payload.files = filesWithCaption;
+      } else if (!navigator.canShare || navigator.canShare({ files: filesWithCaption })) {
+        payload.files = filesWithCaption;
       }
       await navigator.share(payload);
       return { success: true, method: payload.files ? "web-share-files" : "web-share" };

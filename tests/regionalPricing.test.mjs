@@ -9,6 +9,7 @@ import {
   getPricedOrderLine,
   lookupDiscountRate,
   parseDiscountRate,
+  pricingRegionsFromMetadata,
   resolveOrderPricingRegion,
   summarizePricedLines,
 } from "../app/lib/regionalPricing.js";
@@ -150,5 +151,28 @@ test("resolveOrderPricingRegion prefers the logged-in user region", () => {
       pricingRegionBySalesmanCode: {},
     }),
     "jeddah"
+  );
+});
+
+test("multi-region salesmen can pick an assigned order region", () => {
+  assert.deepEqual(
+    pricingRegionsFromMetadata({ pricing_region: "riyadh", pricing_regions: ["riyadh", "dammam"] }),
+    ["riyadh", "dammam"]
+  );
+  assert.equal(
+    resolveOrderPricingRegion({
+      selectedRegion: "dammam",
+      currentUserRegion: "riyadh",
+      currentUserRegions: ["riyadh", "dammam"],
+    }),
+    "dammam"
+  );
+  assert.equal(
+    resolveOrderPricingRegion({
+      selectedRegion: "jeddah",
+      currentUserRegion: "riyadh",
+      currentUserRegions: ["riyadh", "dammam"],
+    }),
+    "riyadh"
   );
 });

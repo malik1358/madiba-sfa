@@ -11,6 +11,37 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { invalidateSalesScopeCache } from "../../lib/mobileDataCache";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import ExportableTable from "../../components/ExportableTable";
+import {
+  PRICING_REGIONS,
+  normalizePricingRegions,
+  pricingRegionLabel,
+  samePricingRegions,
+} from "../../lib/regionalPricing";
+
+function PricingRegionChecks({ value, onChange }) {
+  const selected = normalizePricingRegions(value);
+
+  function toggle(region) {
+    const has = selected.includes(region);
+    if (has && selected.length === 1) return;
+    onChange(has ? selected.filter((entry) => entry !== region) : [...selected, region]);
+  }
+
+  return (
+    <div style={{ display: "grid", gap: "6px" }}>
+      {PRICING_REGIONS.map((region) => (
+        <label key={region} style={{ display: "inline-flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
+          <input
+            type="checkbox"
+            checked={selected.includes(region)}
+            onChange={() => toggle(region)}
+          />
+          <span>{pricingRegionLabel(region)}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
 
 const TEXT = {
   title: { en: "Salesman Hierarchy", ar: "هيكل مندوبي المبيعات" },
@@ -114,7 +145,7 @@ export default function SalesmanHierarchyPage() {
     reportEmail: "",
     role: "salesman",
     headSalesmanCode: "",
-    pricingRegion: "riyadh",
+    pricingRegions: ["riyadh"],
   });
   const [regionSelections, setRegionSelections] = useState({});
 
@@ -160,7 +191,10 @@ export default function SalesmanHierarchyPage() {
         Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, normalizeRoleValue(salesman.role)]))
       );
       setRegionSelections(
-        Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.pricing_region || "riyadh"]))
+        Object.fromEntries((data.salesmen || []).map((salesman) => [
+          salesman.id,
+          normalizePricingRegions(salesman.pricing_regions || salesman.pricing_region),
+        ]))
       );
       setReportEmailSelections(
         Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.report_email || ""]))
@@ -229,19 +263,19 @@ export default function SalesmanHierarchyPage() {
   function pendingSalesmanChanges(salesman) {
     const nextRole = normalizeRoleValue(roleSelections[salesman.id]);
     const nextHead = String(headSelections[salesman.id] || "");
-    const nextRegion = String(regionSelections[salesman.id] || salesman.pricing_region || "riyadh");
+    const nextRegions = normalizePricingRegions(regionSelections[salesman.id] || salesman.pricing_regions || salesman.pricing_region);
     const nextReportEmail = String(reportEmailSelections[salesman.id] || "").trim();
     const nextActivityReminders = activityReminderSelections[salesman.id] !== false;
 
     return {
       nextRole,
       nextHead,
-      nextRegion,
+      nextRegions,
       nextReportEmail,
       nextActivityReminders,
       roleChanged: nextRole !== normalizeRoleValue(salesman.role),
       headChanged: nextHead !== String(salesman.head_salesman_code || ""),
-      regionChanged: nextRegion !== String(salesman.pricing_region || "riyadh"),
+      regionChanged: !samePricingRegions(nextRegions, salesman.pricing_regions || salesman.pricing_region),
       reportEmailChanged: nextReportEmail !== String(salesman.report_email || "").trim(),
       remindersChanged: nextActivityReminders !== (salesman.activity_reminders_enabled !== false),
     };
@@ -274,7 +308,7 @@ export default function SalesmanHierarchyPage() {
         mode: "assign-head",
         salesmanId: salesman.id,
         headSalesmanCode: pending.nextHead,
-        pricingRegion: pending.nextRegion,
+        pricingRegions: pending.nextRegions,
       });
       messages.push(result.message || "Head salesman saved.");
     }
@@ -393,7 +427,7 @@ export default function SalesmanHierarchyPage() {
         reportEmail: String(newSalesman.reportEmail || "").trim().toLowerCase(),
         role: String(newSalesman.role || "salesman"),
         headSalesmanCode: normalizeCode(newSalesman.headSalesmanCode || ""),
-        pricingRegion: newSalesman.pricingRegion || "riyadh",
+        pricingRegions: newSalesman.pricingRegions || ["riyadh"],
       });
 
       const created = result.created || {};
@@ -401,7 +435,7 @@ export default function SalesmanHierarchyPage() {
       setMessage(
         `${result.message || "User created."} Role: ${createdRole.toUpperCase()} | Username: ${created.login_name || displayLoginName(created.email) || "-"} | Password: ${created.password || "-"}`
       );
-      setNewSalesman({ salesmanName: "", salesmanCode: "", email: "", reportEmail: "", role: "salesman", headSalesmanCode: "", pricingRegion: "riyadh" });
+      setNewSalesman({ salesmanName: "", salesmanCode: "", email: "", reportEmail: "", role: "salesman", headSalesmanCode: "", pricingRegions: ["riyadh"] });
       await loadHierarchy(false);
     } catch (err) {
       setError(err.message || "Unable to create salesman.");
@@ -553,16 +587,11 @@ export default function SalesmanHierarchyPage() {
             </label>
 
             <label>
-              Pricing Region
-              <select
-                className="moduleInput"
-                value={newSalesman.pricingRegion}
-                onChange={(event) => setNewSalesman((current) => ({ ...current, pricingRegion: event.target.value }))}
-              >
-                <option value="riyadh">Riyadh</option>
-                <option value="dammam">Dammam</option>
-                <option value="jeddah">Jeddah</option>
-              </select>
+              Pricing Regions
+              <PricingRegionChecks
+                value={newSalesman.pricingRegions}
+                onChange={(pricingRegions) => setNewSalesman((current) => ({ ...current, pricingRegions }))}
+              />
             </label>
 
             <label>
@@ -653,15 +682,10 @@ export default function SalesmanHierarchyPage() {
                         </select>
                       </td>
                       <td>
-                        <select
-                          className="moduleInput"
-                          value={regionSelections[salesman.id] || salesman.pricing_region || "riyadh"}
-                          onChange={(event) => setRegionSelections((current) => ({ ...current, [salesman.id]: event.target.value }))}
-                        >
-                          <option value="riyadh">Riyadh</option>
-                          <option value="dammam">Dammam</option>
-                          <option value="jeddah">Jeddah</option>
-                        </select>
+                        <PricingRegionChecks
+                          value={regionSelections[salesman.id] || salesman.pricing_regions || salesman.pricing_region}
+                          onChange={(pricingRegions) => setRegionSelections((current) => ({ ...current, [salesman.id]: pricingRegions }))}
+                        />
                       </td>
                       <td>{loginName || "No username"}</td>
                       <td>

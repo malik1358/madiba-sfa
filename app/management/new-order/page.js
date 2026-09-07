@@ -16,6 +16,7 @@ import {
   buildEffectivePriceList,
   formatDiscountDetail,
   formatDiscountPercent,
+  allowedOrderPricingRegions,
   formatMoneyAmount,
   getPricedOrderLine,
   lookupDiscountRate,
@@ -117,9 +118,27 @@ function OrderTotalsPanel({ totals, actions, remark }) {
   );
 }
 
-function PaymentTypeControl({ paymentType, onChange, pricingRegion }) {
+function PaymentTypeControl({ paymentType, onChange, pricingRegion, allowedRegions, onRegionChange }) {
+  const canSelectRegion = Array.isArray(allowedRegions) && allowedRegions.length > 1;
+
   return (
     <div className="moduleFilterRow" style={{ marginTop: "12px" }}>
+      {canSelectRegion ? (
+        <label>
+          Pricing Region
+          <select
+            className="moduleInput"
+            value={pricingRegion}
+            onChange={(event) => onRegionChange(event.target.value)}
+          >
+            {allowedRegions.map((region) => (
+              <option key={region} value={region}>
+                {pricingRegionLabel(region)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label>
         Payment Type
         <select
@@ -586,6 +605,7 @@ export default function NewOrderPage() {
   const [valueDiscountMap, setValueDiscountMap] = useState({});
   const [schemes, setSchemes] = useState([]);
   const [paymentType, setPaymentType] = useState("credit");
+  const [selectedPricingRegion, setSelectedPricingRegion] = useState("");
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [outstandingUploadFile, setOutstandingUploadFile] = useState(null);
@@ -743,13 +763,23 @@ export default function NewOrderPage() {
     [customers, selectedCustomerCode]
   );
 
+  const allowedPricingRegions = useMemo(
+    () => allowedOrderPricingRegions({
+      currentUserRegions: accessScope?.pricingRegions,
+      currentUserRegion: accessScope?.pricingRegion,
+    }),
+    [accessScope]
+  );
+
   const pricingRegion = useMemo(
     () => resolveOrderPricingRegion({
+      selectedRegion: selectedPricingRegion,
       currentUserRegion: accessScope?.pricingRegion,
+      currentUserRegions: accessScope?.pricingRegions,
       customerSalesmanCode: selectedCustomer?.current_salesman_code,
       pricingRegionBySalesmanCode: accessScope?.pricingRegionBySalesmanCode || {},
     }),
-    [accessScope, selectedCustomer]
+    [accessScope, selectedCustomer, selectedPricingRegion]
   );
 
   const regionPriceList = useMemo(
@@ -911,6 +941,7 @@ export default function NewOrderPage() {
     valueDiscountMap,
     schemes,
     pricingRegion,
+    setPricingRegion: setSelectedPricingRegion,
     setError,
     setMessage,
     accessScope,
@@ -1683,6 +1714,8 @@ export default function NewOrderPage() {
             paymentType={paymentType}
             onChange={setPaymentType}
             pricingRegion={pricingRegion}
+            allowedRegions={allowedPricingRegions}
+            onRegionChange={setSelectedPricingRegion}
           />
 
           {!selectedCustomer && (
@@ -1916,6 +1949,8 @@ export default function NewOrderPage() {
                 paymentType={paymentType}
                 onChange={setPaymentType}
                 pricingRegion={pricingRegion}
+                allowedRegions={allowedPricingRegions}
+                onRegionChange={setSelectedPricingRegion}
               />
               <OrderTotalsPanel
                 totals={orderTotals}

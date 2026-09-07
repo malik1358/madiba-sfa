@@ -25,6 +25,7 @@ import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { evaluateOrderSchemes } from "../../lib/orderSchemes";
 import { loadPricePayload } from "../../lib/pricePayload";
 import {
+  allowedOrderPricingRegions,
   buildEffectivePriceList,
   normalizePaymentType,
   pricingRegionLabel,
@@ -84,6 +85,7 @@ function CustomerAuditPageContent() {
   const [valueDiscountMap, setValueDiscountMap] = useState({});
   const [schemes, setSchemes] = useState([]);
   const [paymentType, setPaymentType] = useState("credit");
+  const [selectedPricingRegion, setSelectedPricingRegion] = useState("");
   const [priceSheetItems, setPriceSheetItems] = useState([]);
   const [requestedCustomerCode, setRequestedCustomerCode] = useState("");
   const [outstandingLoading, setOutstandingLoading] = useState(false);
@@ -121,13 +123,22 @@ function CustomerAuditPageContent() {
   const { access } = useModuleAccess();
   const analytics = useAnalytics(transactions);
   const quickOrderSuggestions = useQuickOrder({ analytics, transactions, peerTransactions, itemMaster });
+  const allowedPricingRegions = useMemo(
+    () => allowedOrderPricingRegions({
+      currentUserRegions: accessScope?.pricingRegions,
+      currentUserRegion: accessScope?.pricingRegion,
+    }),
+    [accessScope]
+  );
   const pricingRegion = useMemo(
     () => resolveOrderPricingRegion({
+      selectedRegion: selectedPricingRegion,
       currentUserRegion: accessScope?.pricingRegion,
+      currentUserRegions: accessScope?.pricingRegions,
       customerSalesmanCode: selectedCustomer?.current_salesman_code,
       pricingRegionBySalesmanCode: accessScope?.pricingRegionBySalesmanCode || {},
     }),
-    [accessScope, selectedCustomer]
+    [accessScope, selectedCustomer, selectedPricingRegion]
   );
 
   const regionPriceList = useMemo(
@@ -170,6 +181,7 @@ function CustomerAuditPageContent() {
     valueDiscountMap,
     schemes,
     pricingRegion,
+    setPricingRegion: setSelectedPricingRegion,
     setError,
     setMessage,
     accessScope,
@@ -530,6 +542,22 @@ function CustomerAuditPageContent() {
             Loaded {Object.keys(regionPriceList).length} {pricingRegionLabel(pricingRegion)} prices • Item master {itemMasterStatus}
           </div>
           <div className="moduleFilterRow" style={{ marginTop: "10px" }}>
+            {allowedPricingRegions.length > 1 ? (
+              <label>
+                Pricing Region
+                <select
+                  className="moduleInput"
+                  value={pricingRegion}
+                  onChange={(event) => setSelectedPricingRegion(event.target.value)}
+                >
+                  {allowedPricingRegions.map((region) => (
+                    <option key={region} value={region}>
+                      {pricingRegionLabel(region)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label>
               Payment Type
               <select

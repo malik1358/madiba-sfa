@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomInt } from "crypto";
-import { DEFAULT_PRICING_REGION, normalizePricingRegion } from "../../../lib/regionalPricing.js";
+import { pricingRegionMetadata, pricingRegionsFromMetadata } from "../../../lib/regionalPricing.js";
 import { isMissingSchemaColumn } from "../../../lib/performanceKpis.js";
 import { normalizeDeliverableEmail } from "../../../lib/mailer.js";
 
@@ -401,7 +401,8 @@ async function loadSalesmen(admin) {
       login_name: displayLoginName(authUser?.email || ""),
       head_salesman_code: metadata.head_salesman_code || "",
       head_salesman_name: metadata.head_salesman_name || "",
-      pricing_region: normalizePricingRegion(metadata.pricing_region),
+      pricing_region: pricingRegionsFromMetadata(metadata)[0],
+      pricing_regions: pricingRegionsFromMetadata(metadata),
       default_password: getStoredPassword(metadata),
     };
   });
@@ -547,7 +548,7 @@ export async function POST(request) {
           collection_only: isCollectionOnly,
           head_salesman_code: isInvoiceMakerRole(selectedRole) ? null : (headSalesmanCode || null),
           head_salesman_name: isInvoiceMakerRole(selectedRole) ? null : (headSalesmanName || null),
-          pricing_region: normalizePricingRegion(body?.pricingRegion || DEFAULT_PRICING_REGION),
+          ...pricingRegionMetadata(body?.pricingRegions || body?.pricingRegion),
           generated_password: password,
           generated_password_mode: "random6",
         },
@@ -623,15 +624,16 @@ export async function POST(request) {
         headSalesmanName = headSalesman.salesman_name || "";
       }
 
+      const regionMeta = pricingRegionMetadata(body?.pricingRegions || body?.pricingRegion);
       await mergeUserMetadata(admin, salesmen.id, {
         head_salesman_code: headSalesmanCode || null,
         head_salesman_name: headSalesmanName || null,
-        pricing_region: normalizePricingRegion(body?.pricingRegion),
+        ...regionMeta,
       });
 
       return NextResponse.json({
         success: true,
-        message: `Saved ${salesmen.salesman_name || salesmen.salesman_code || salesmanId}: head ${headSalesmanCode || "none"}, region ${normalizePricingRegion(body?.pricingRegion)}.`,
+        message: `Saved ${salesmen.salesman_name || salesmen.salesman_code || salesmanId}: head ${headSalesmanCode || "none"}, region ${regionMeta.pricing_regions.join(" + ")}.`,
       });
     }
 
@@ -808,7 +810,7 @@ export async function POST(request) {
       const password = await setGeneratedPassword(admin, salesmen.id, {
         head_salesman_code: currentSalesman?.head_salesman_code || null,
         head_salesman_name: currentSalesman?.head_salesman_name || null,
-        pricing_region: normalizePricingRegion(currentSalesman?.pricing_region),
+        ...pricingRegionMetadata(currentSalesman?.pricing_regions || currentSalesman?.pricing_region),
       });
 
       return NextResponse.json({
@@ -827,7 +829,7 @@ export async function POST(request) {
           const password = await setGeneratedPassword(admin, salesman.id, {
             head_salesman_code: salesman.head_salesman_code || null,
             head_salesman_name: salesman.head_salesman_name || null,
-            pricing_region: normalizePricingRegion(salesman.pricing_region),
+            ...pricingRegionMetadata(salesman.pricing_regions || salesman.pricing_region),
           });
 
           results.push({ salesmanId: salesman.id, success: true, password });

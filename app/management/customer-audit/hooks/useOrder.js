@@ -88,6 +88,7 @@ export function useOrder({
   valueDiscountMap = {},
   schemes = [],
   pricingRegion = 'riyadh',
+  setPricingRegion = null,
 }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
   const [orderQuantities, setOrderQuantities] = useState({});
@@ -214,6 +215,10 @@ export function useOrder({
           const latestPaymentType = [...history].reverse().find((entry) => entry?.paymentType)?.paymentType;
           if (latestPaymentType && typeof setPaymentType === "function") {
             setPaymentType(normalizePaymentType(latestPaymentType));
+          }
+          const latestPricingRegion = [...history].reverse().find((entry) => entry?.pricingRegion)?.pricingRegion;
+          if (latestPricingRegion && typeof setPricingRegion === "function") {
+            setPricingRegion(latestPricingRegion);
           }
         }
       } catch (err) {

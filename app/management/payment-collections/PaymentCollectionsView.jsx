@@ -23,6 +23,7 @@ import {
   CUSTOMER_LOCATION_UPDATE_UPDATE,
   evaluateCustomerLocationUpdatePrompt,
 } from "../../lib/customerLocation";
+import { promptCustomerMobileUpdateIfMissing } from "../../lib/customerContact";
 import { postFormDataResilient } from "../../lib/offlineApi";
 import {
   buildOptimisticLatestCollection,
@@ -1679,6 +1680,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
         return;
       }
+
+      await promptCustomerMobileUpdateIfMissing({
+        language,
+        customer: row,
+        customerCode: row.customer_code,
+        customerName: row.customer_name,
+        accessToken: session.access_token,
+      });
 
       const customerCodeKey = String(row.customer_code || "").trim().toUpperCase();
       const resolvedQueuePriority = dueQueuePriorityByCode.get(customerCodeKey)

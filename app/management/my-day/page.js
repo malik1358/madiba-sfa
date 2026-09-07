@@ -26,6 +26,7 @@ import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { resolveVisitLastInvoiceDate } from "../../lib/outstanding";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
+import { promptCustomerMobileUpdateIfMissing } from "../../lib/customerContact";
 import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
 import { buildGpsActivityNote, formatCollectorDisplayName, resolveGpsCapturePlatform } from "../../lib/geo";
 import {
@@ -1244,6 +1245,13 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
       const location = await captureLocation();
       await promptCustomerGpsIfFar(customer, location, session.access_token);
+      await promptCustomerMobileUpdateIfMissing({
+        language,
+        customer,
+        customerCode: customer.customer_code,
+        customerName: customer.customer_name,
+        accessToken: session.access_token,
+      });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
       let saveResult = null;

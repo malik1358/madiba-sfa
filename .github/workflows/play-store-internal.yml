@@ -38,17 +38,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           check-latest: true
           cache: npm
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
@@ -60,7 +60,7 @@ jobs:
         run: npm ci
 
       - name: Ensure Node.js 22+ for Capacitor
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           check-latest: true
@@ -98,7 +98,7 @@ jobs:
             -PmadibaVersionName="$VERSION_NAME"
 
       - name: Upload AAB artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: madiba-sfa-release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab

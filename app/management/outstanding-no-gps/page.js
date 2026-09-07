@@ -10,6 +10,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { normalizeCustomerMasterSearch } from "../../lib/customerMasterQuery.js";
 import { resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
+import { formatKsaDateOnly } from "../../lib/workdayActivity";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useAppPopup } from "../../components/AppPopupProvider";
 import ExportableTable from "../../components/ExportableTable";
@@ -62,15 +63,7 @@ function formatOutstanding(value) {
 }
 
 function formatDateOnly(value) {
-  const input = String(value || "").trim();
-  if (!input) return "-";
-  if (/^\d{4}-\d{2}-\d{2}/.test(input)) {
-    const [year, month, day] = input.slice(0, 10).split("-");
-    return `${day}/${month}/${year}`;
-  }
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleDateString("en-GB");
+  return formatKsaDateOnly(value);
 }
 
 export default function OutstandingNoGpsPage() {

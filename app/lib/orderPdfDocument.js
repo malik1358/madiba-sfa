@@ -28,6 +28,7 @@ import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import { formatSalesOrderNumber, salesOrderNumberNeedsLiveLookup } from "./salesOrderNumber.js";
 import { isQueuedPendingOrderId } from "./queuedSalesOrders.js";
 import { parseOfflineProspectIdFromCustomerCode } from "./prospects.js";
+import { formatKsaDateTime } from "./workdayActivity.js";
 
 export const ORDER_PDF_OUTSTANDING_API = "/api/outstanding";
 export const ORDER_PDF_CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -474,7 +475,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   );
 
   const rightColX = marginX + contentWidth - 210;
-  doc.text(`Date: ${new Date(snapshot.savedAtIso).toLocaleString("en-GB")}`, rightColX, marginTop + 24);
+  doc.text(`Date: ${formatKsaDateTime(snapshot.savedAtIso)}`, rightColX, marginTop + 24);
   doc.text(`Salesman: ${snapshot.salesmanCode || "-"}`, rightColX, marginTop + 40);
 
   doc.setLineWidth(0.8);
@@ -720,7 +721,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
 
     snapshot.history.slice(-6).forEach((entry) => {
       const when = entry.changedAt || entry.savedAt || entry.saved_at || entry.timestamp || "";
-      const label = `${when ? new Date(when).toLocaleString("en-GB") : "-"} • ${entry.action || "UPDATED"}`;
+      const label = `${when ? formatKsaDateTime(when) : "-"} • ${entry.action || "UPDATED"}`;
       const lines = [label, ...(Array.isArray(entry.changes) ? entry.changes.map(formatHistoryChange) : [])].filter(Boolean);
       const entryHeight = lines.reduce((sum, line) => {
         const wrapped = doc.splitTextToSize(line, pageWidth - marginX * 2 - 16);

@@ -269,6 +269,19 @@ export function formatKsaTime(value) {
   });
 }
 
+export function formatKsaDateOnly(value, empty = "-") {
+  const input = String(value || "").trim();
+  if (!input) return empty;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    const [year, month, day] = input.split("-");
+    return `${day}/${month}/${year}`;
+  }
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return empty;
+  const { year, month, day } = getKsaDateTimeParts(date);
+  return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`;
+}
+
 function parseEventTimestamp(value) {
   const ts = Date.parse(String(value || ""));
   return Number.isFinite(ts) ? ts : null;

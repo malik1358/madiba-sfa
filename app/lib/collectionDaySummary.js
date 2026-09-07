@@ -1,5 +1,5 @@
 import { countUniqueGpsLocations } from "./geo.js";
-import { getKsaDateTimeParts, KSA_TIMEZONE } from "./workdayActivity.js";
+import { formatKsaTime, getKsaDateTimeParts } from "./workdayActivity.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -751,12 +751,5 @@ export function buildAggregateCollectionDaySummary(collectorSummaries, labels = 
 }
 
 export function formatDaySummaryTimestamp(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleTimeString("en-GB", {
-    timeZone: KSA_TIMEZONE,
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatKsaTime(value);
 }

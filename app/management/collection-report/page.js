@@ -19,7 +19,7 @@ import {
 } from "../../lib/geo";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
-import { getKsaDateString } from "../../lib/workdayActivity";
+import { formatKsaDateOnly, formatKsaTime, getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 
@@ -141,20 +141,11 @@ function formatNumber(value, digits = 2) {
 }
 
 function formatTime(value) {
-  if (!value) return "-";
-  return new Date(value).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return formatKsaTime(value);
 }
 
 function formatDateOnly(value) {
-  const input = String(value || "").trim();
-  if (!input) return "-";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
-    const [y, m, d] = input.split("-");
-    return `${d}/${m}/${y}`;
-  }
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleDateString("en-GB");
+  return formatKsaDateOnly(value);
 }
 
 function formatAmount(value) {

@@ -11,6 +11,7 @@ import MostVisitedPages from "../components/MostVisitedPages";
 import { usePopupMessages } from "../hooks/usePopupMessages";
 import { useAppPopup } from "../components/AppPopupProvider";
 import { buildModuleAccess, listAccessibleModules, localizedModuleLabel } from "../lib/moduleAccess";
+import { formatKsaDateTime } from "../lib/workdayActivity";
 import ExportableTable from "../components/ExportableTable";
 
 const TEXT = {
@@ -326,7 +327,7 @@ export default function ManagementPage() {
               <div className="moduleHealthGrid">
                 <div><span>Session User</span><strong>{health.sessionUser}</strong></div>
                 <div><span>Active Sales Batch</span><strong>{health.activeBatch}</strong></div>
-                <div><span>Latest Import</span><strong>{health.latestImportAt === "-" ? "-" : new Date(health.latestImportAt).toLocaleString("en-GB")}</strong></div>
+                <div><span>Latest Import</span><strong>{health.latestImportAt === "-" ? "-" : formatKsaDateTime(health.latestImportAt)}</strong></div>
               </div>
             </section>
 
@@ -352,7 +353,7 @@ export default function ManagementPage() {
                         <td>{row.customer_name || row.customer_code}</td>
                         <td>{row.salesman_code || "-"}</td>
                         <td>{row.status || "-"}</td>
-                        <td>{row.updated_at ? new Date(row.updated_at).toLocaleString("en-GB") : "-"}</td>
+                        <td>{formatKsaDateTime(row.updated_at)}</td>
                       </tr>
                     ))}
                     {recentOrders.length === 0 && (

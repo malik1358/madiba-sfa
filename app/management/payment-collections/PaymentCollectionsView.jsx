@@ -56,7 +56,7 @@ import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsap
 import { getSupabaseClient } from "../../lib/supabase";
 import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
-import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
+import { formatKsaDateOnly, formatKsaDateTime, getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
 import { getScheduleTodayKey, isScheduleDateInWindow } from "../../lib/scheduleDateWindow";
 import {
   getTodayDateKey,
@@ -545,7 +545,7 @@ async function fetchTodayCollectionVisitCount(supabase, userId) {
 }
 
 function formatLastUpdateText(row, t) {
-  const savedAt = row?.latest_collection?.saved_at ? new Date(row.latest_collection.saved_at).toLocaleString("en-GB") : "-";
+  const savedAt = row?.latest_collection?.saved_at ? formatKsaDateTime(row.latest_collection.saved_at) : "-";
   const amount = Number(row?.latest_collection?.amount_received || 0);
   const amountText = amount > 0 ? formatMoney(amount) : "0";
   return `${savedAt} | ${t("amount")}: ${amountText}`;
@@ -720,21 +720,13 @@ function toDateInputValue(value) {
 }
 
 function formatDateOnly(value) {
-  const input = String(value || "").trim();
-  if (!input) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
-    const [y, m, d] = input.split("-");
-    return `${d}/${m}/${y}`;
-  }
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("en-GB");
+  return formatKsaDateOnly(value, "");
 }
 
 function formatLastVisitDate(row) {
   const savedAt = row?.latest_collection?.saved_at;
   if (!savedAt) return "-";
-  return formatDateOnly(savedAt) || new Date(savedAt).toLocaleDateString("en-GB");
+  return formatDateOnly(savedAt) || formatKsaDateOnly(savedAt);
 }
 
 function getScheduledByLabel(row) {

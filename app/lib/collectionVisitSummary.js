@@ -1,17 +1,11 @@
+import { formatKsaDateOnly } from "./workdayActivity.js";
+
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 function formatDateOnly(value) {
-  const input = String(value || "").trim();
-  if (!input) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
-    const [y, m, d] = input.split("-");
-    return `${d}/${m}/${y}`;
-  }
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("en-GB");
+  return formatKsaDateOnly(value, "");
 }
 
 const OUTCOME_LABELS = {

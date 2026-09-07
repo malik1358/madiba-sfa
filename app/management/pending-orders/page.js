@@ -33,6 +33,7 @@ import {
   resolveLiveOrderPdfSnapshot,
 } from "../../lib/orderPdfDocument";
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
+import { formatKsaDateTime } from "../../lib/workdayActivity";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -77,8 +78,7 @@ function formatMoney(value) {
 }
 
 function formatDateTime(value) {
-  if (!value) return "-";
-  return new Date(value).toLocaleString("en-GB");
+  return formatKsaDateTime(value);
 }
 
 function formatDuration(secondsValue) {
@@ -1054,7 +1054,7 @@ export default function PendingOrdersPage() {
                                         <tbody>
                                           {orderHistory.slice().reverse().map((entry, index) => (
                                             <tr key={`${entry.changedAt || index}-${index}`}>
-                                              <td>{entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-GB") : "-"}</td>
+                                              <td>{formatKsaDateTime(entry.changedAt)}</td>
                                               <td>{entry.action || "UPDATED"}</td>
                                               <td>
                                                 {(Array.isArray(entry.changes) ? entry.changes : []).map((change, changeIndex) => (

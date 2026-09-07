@@ -22,7 +22,7 @@ import {
   formatPerformanceKpiValue,
   performanceUpdatedStatusLabel,
 } from "./performanceKpis.js";
-import { KSA_TIMEZONE } from "./workdayActivity.js";
+import { formatKsaTime } from "./workdayActivity.js";
 
 export function escapeHtml(value) {
   return String(value ?? "")
@@ -34,14 +34,7 @@ export function escapeHtml(value) {
 }
 
 export function formatReportTime(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleTimeString("en-GB", {
-    timeZone: KSA_TIMEZONE,
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatKsaTime(value);
 }
 
 export function formatKm(value, digits = 2) {

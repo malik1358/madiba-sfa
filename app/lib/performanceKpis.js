@@ -1,4 +1,5 @@
 import { currentMonthDateRange } from "./salesInvoices.js";
+import { KSA_TIMEZONE } from "./workdayActivity.js";
 
 export function isMissingSchemaColumn(error) {
   const message = String(error?.message || error?.details || error?.hint || "").toLowerCase();
@@ -288,6 +289,7 @@ export function formatPerformanceUpdatedAt(value) {
     return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
   }
   return date.toLocaleDateString("en-GB", {
+    timeZone: KSA_TIMEZONE,
     day: "2-digit",
     month: "short",
     year: "numeric",

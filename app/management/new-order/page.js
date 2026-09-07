@@ -51,6 +51,7 @@ import { isExcludedNewOrderCustomer } from "../../lib/buildingMaterialCustomerFi
 import { processOfflineQueue } from "../../lib/offlineApi";
 import { isQueuedPendingOrderId } from "../../lib/queuedSalesOrders";
 import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
+import { formatKsaDateTime } from "../../lib/workdayActivity";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -1521,7 +1522,7 @@ export default function NewOrderPage() {
             <h2>Outstanding Customerwise</h2>
             <span>
               {outstandingInfo.uploadedAt
-                ? `Uploaded ${new Date(outstandingInfo.uploadedAt).toLocaleString("en-GB")}`
+                ? `Uploaded ${formatKsaDateTime(outstandingInfo.uploadedAt)}`
                 : "No outstanding upload yet"}
             </span>
           </div>
@@ -1747,7 +1748,7 @@ export default function NewOrderPage() {
                         <tbody>
                           {orderHistory.slice().reverse().map((entry, index) => (
                             <tr key={`${entry.changedAt || entry.savedAt || entry.saved_at || index}-${index}`}>
-                              <td>{entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-GB") : entry.savedAt || entry.saved_at || "-"}</td>
+                              <td>{entry.changedAt ? formatKsaDateTime(entry.changedAt) : formatKsaDateTime(entry.savedAt || entry.saved_at)}</td>
                               <td>{entry.action || "UPDATED"}</td>
                               <td>
                                 {(Array.isArray(entry.changes) ? entry.changes : []).map((change, changeIndex) => (
@@ -1976,7 +1977,7 @@ export default function NewOrderPage() {
                   </div>
                   <div>
                     <span>Saved At</span>
-                    <strong>{new Date(lastSavedOrder.savedAtIso).toLocaleString("en-GB")}</strong>
+                    <strong>{formatKsaDateTime(lastSavedOrder.savedAtIso)}</strong>
                   </div>
                   <div>
                     <span>Amount without VAT</span>

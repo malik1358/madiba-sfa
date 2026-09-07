@@ -21,6 +21,7 @@ import ExportableTable from "../../components/ExportableTable";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess";
 import { detectTable } from "../../lib/schemaGuards";
+import { looksLikeCustomerCodeSearch } from "../../lib/customerMasterQuery";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { resolveVisitLastInvoiceDate } from "../../lib/outstanding";
@@ -281,6 +282,35 @@ function findVisitRowByCode(rows, code) {
   return (rows || []).find(
     (entry) => String(entry?.customer_code || "").trim().toUpperCase() === upper,
   ) || null;
+}
+
+function visitRowFromCustomerRecord(customer, extras = {}) {
+  const code = String(customer?.customer_code || "").trim();
+  if (!code) return null;
+
+  return withVisitLastInvoice({
+    customer_code: code,
+    customer_name: customer.customer_name || "",
+    city: customer.city || "",
+    area: customer.area || "",
+    salesman_code: String(customer.current_salesman_code || customer.salesman_code || "").trim().toUpperCase(),
+    salesman_name: customer.salesman_name || String(customer.current_salesman_code || customer.salesman_code || "").trim().toUpperCase(),
+    last_invoice_date: customer.latest_transaction_date || customer.last_invoice_date || null,
+    latest_transaction_date: customer.latest_transaction_date || null,
+    last_visit_date: customer.last_visit_date || null,
+    next_visit_at: customer.next_visit_at || null,
+    recent_sales_value: Number(customer.recent_sales_value || 0),
+    average_monthly_purchase: Number(customer.average_monthly_purchase || 0),
+    highest_monthly_sales: Number(customer.highest_monthly_sales || 0),
+    outstanding_0_30: Number(customer.outstanding_0_30 || 0),
+    outstanding_30_60: Number(customer.outstanding_30_60 || 0),
+    outstanding_61_90: Number(customer.outstanding_61_90 || 0),
+    outstanding_above_90: Number(customer.outstanding_above_90 || 0),
+    latitude: customer.latitude,
+    longitude: customer.longitude,
+    status: extras.status || customer.status || "Planned",
+    is_active: customer.is_active,
+  });
 }
 
 function visitRowFromSearchParams(code) {
@@ -1598,14 +1628,68 @@ export default function MyDayPage({ mode = "default" } = {}) {
     });
   }
 
+  const searchableVisitStatusRows = useMemo(() => {
+    if (!String(visitStatusSearch || "").trim()) return visitStatusRows;
+
+    const seen = new Set(visitStatusRows.map((row) => String(row.customer_code || "").trim().toUpperCase()));
+    const inactiveMatches = (inactiveCustomers || [])
+      .filter((row) => {
+        const code = String(row.customer_code || "").trim().toUpperCase();
+        return code && !seen.has(code);
+      })
+      .map((row) => visitRowFromCustomerRecord(row));
+
+    return [...visitStatusRows, ...inactiveMatches.filter(Boolean)];
+  }, [visitStatusRows, inactiveCustomers, visitStatusSearch]);
+
   const rankedVisitStatusRows = useMemo(() => {
-    const customerFiltered = filterAndRankVisitCustomers(visitStatusRows, visitStatusSearch);
+    const customerFiltered = filterAndRankVisitCustomers(searchableVisitStatusRows, visitStatusSearch);
     if (selectedVisitStatusSalesmen.length === 0) return customerFiltered;
 
     return customerFiltered.filter((row) =>
       selectedVisitStatusSalesmen.includes(String(row.salesman_name || "").trim() || "__UNASSIGNED__")
     );
-  }, [visitStatusRows, visitStatusSearch, selectedVisitStatusSalesmen]);
+  }, [searchableVisitStatusRows, visitStatusSearch, selectedVisitStatusSalesmen]);
+
+  useEffect(() => {
+    if (!looksLikeCustomerCodeSearch(visitStatusSearch)) return undefined;
+    if (filterAndRankVisitCustomers(searchableVisitStatusRows, visitStatusSearch).length > 0) return undefined;
+
+    const query = String(visitStatusSearch || "").trim();
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token || cancelled) return;
+
+      try {
+        const response = await fetch(`/api/customers/lookup?code=${encodeURIComponent(query)}`, {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success || !payload.customer || cancelled) return;
+
+        const nextRow = visitRowFromCustomerRecord(payload.customer);
+        if (!nextRow) return;
+
+        setVisitStatusRows((current) => {
+          const exists = filterAndRankVisitCustomers(current, query).length > 0
+            || current.some((row) => String(row.customer_code || "").trim().toUpperCase() === String(nextRow.customer_code || "").trim().toUpperCase());
+          return exists ? current : [...current, nextRow];
+        });
+      } catch {
+        // Keep the empty local search result if lookup is unavailable.
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [visitStatusSearch, searchableVisitStatusRows]);
 
   const groupedVisitStatusRows = useMemo(
     () => splitVisitCustomersByOutstanding(rankedVisitStatusRows),

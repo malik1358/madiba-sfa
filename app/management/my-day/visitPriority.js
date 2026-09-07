@@ -1,5 +1,21 @@
+import { customerMatchesMasterSearch } from "../../lib/customerMasterQuery.js";
+import { customerAccountCodesMatch } from "../../lib/outstanding.js";
+
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
+}
+
+export function customerMatchesVisitSearch(row, search = "") {
+  const query = String(search || "").trim();
+  if (!query) return true;
+
+  const lower = query.toLowerCase();
+  if ([row?.customer_code, row?.customer_name].some((value) => String(value || "").toLowerCase().includes(lower))) {
+    return true;
+  }
+
+  if (customerMatchesMasterSearch(row, query)) return true;
+  return customerAccountCodesMatch(row?.customer_code, query);
 }
 
 export function buildRecentSalesByCustomer(rows) {
@@ -63,14 +79,8 @@ export function outstandingVisitBand(row) {
 }
 
 export function filterAndRankVisitCustomers(rows, search = "") {
-  const query = String(search || "").trim().toLowerCase();
-
   return (rows || [])
-    .filter((row) => {
-      if (!query) return true;
-      return [row?.customer_code, row?.customer_name]
-        .some((value) => String(value || "").toLowerCase().includes(query));
-    })
+    .filter((row) => customerMatchesVisitSearch(row, search))
     .sort((a, b) => {
       const byAging = outstandingVisitBand(a) - outstandingVisitBand(b);
       if (byAging !== 0) return byAging;

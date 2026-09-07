@@ -4,11 +4,12 @@ import {
   isValidLongitude,
 } from "./customerLocationImport.js";
 import { normalizeCustomerNameKey, resolveCustomerMasterExportFields } from "./customerCode.js";
-import { normalizeCode } from "./outstanding.js";
+import { backfillCustomersFromSalesRaw, looksLikeCustomerCodeSearch } from "./customerMasterQuery.js";
+import { customerAccountCodesMatch, normalizeCode } from "./outstanding.js";
 import { extractMissingProspectsColumn, normalizeProspectSalesmanCode } from "./prospects.js";
 import { applyCustomerSalesmanScopeFilter } from "./customerSalesmanAssignment.js";
 
-const CUSTOMER_LOOKUP_FIELDS = "customer_code,customer_name,current_salesman_code,previous_salesman_code,latitude,longitude,city,area";
+const CUSTOMER_LOOKUP_FIELDS = "customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,customer_type,city,area,mobile,latitude,longitude,is_active";
 
 const PROSPECT_MATCH_STOP_WORDS = new Set([
   "FOR", "THE", "AND", "EST", "CO", "OF", "AL", "EL", "IN", "AT", "TO",
@@ -24,16 +25,15 @@ export function customerRecordMatchesCode(customer, customerCode) {
   if (!target || !customer) return false;
 
   const storedCode = normalizeCustomerCode(customer.customer_code);
-  if (storedCode) {
-    if (storedCode === target) return true;
-    if (storedCode.replace(/^0+/, "") === target.replace(/^0+/, "")) return true;
-  }
-
   const display = resolveCustomerMasterExportFields(customer);
   const resolvedCode = normalizeCustomerCode(display.customer_code);
-  if (!resolvedCode) return false;
-  if (resolvedCode === target) return true;
-  return resolvedCode.replace(/^0+/, "") === target.replace(/^0+/, "");
+  const candidates = [...new Set([storedCode, resolvedCode].filter(Boolean))];
+
+  return candidates.some((code) => (
+    code === target
+    || code.replace(/^0+/, "") === target.replace(/^0+/, "")
+    || customerAccountCodesMatch(code, target)
+  ));
 }
 
 export function formatCustomerLookupPreview(customer) {
@@ -65,7 +65,17 @@ export async function findCustomerByCode(admin, customerCode) {
     .limit(50);
   if (error) throw error;
 
-  return (candidates || []).find((row) => customerRecordMatchesCode(row, code)) || null;
+  const matched = (candidates || []).find((row) => customerRecordMatchesCode(row, code));
+  if (matched) return matched;
+
+  if (!looksLikeCustomerCodeSearch(code)) return null;
+
+  try {
+    const created = await backfillCustomersFromSalesRaw(admin, code);
+    return (created || []).find((row) => customerRecordMatchesCode(row, code)) || created?.[0] || null;
+  } catch {
+    return null;
+  }
 }
 
 export function buildProspectNameSearchTokens(value) {

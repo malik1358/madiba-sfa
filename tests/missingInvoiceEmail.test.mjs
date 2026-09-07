@@ -7,8 +7,10 @@ import {
   MISSING_INVOICE_STATUS_REJECTED,
   buildMissingInvoiceAlertEmail,
   hasUploadedInvoice,
+  isCreatedFromSeptember2026,
   isMissingInvoiceOverdue,
   isRejectedByManagement,
+  missingInvoiceCreatedFromIso,
   resolveMissingInvoiceEmailRecipients,
   selectMissingInvoiceOrders,
 } from "../app/lib/missingInvoiceEmail.js";
@@ -38,6 +40,14 @@ test("resolveMissingInvoiceEmailRecipients always includes the default inboxes",
     resolveMissingInvoiceEmailRecipients({ MISSING_INVOICE_EMAIL_TO: "extra@madiba.com, malik@pinasz.com" }),
     [...DEFAULT_MISSING_INVOICE_EMAIL_TO, "extra@madiba.com"],
   );
+});
+
+test("only orders created from September 2026 KSA are considered", () => {
+  assert.equal(missingInvoiceCreatedFromIso(), "2026-08-31T21:00:00.000Z");
+  assert.equal(isCreatedFromSeptember2026(submittedOrder(8, "2026-08-31T20:59:59.000Z")), false);
+  assert.equal(isCreatedFromSeptember2026(submittedOrder(8, "2026-08-31T21:00:00.000Z")), true);
+  assert.equal(isMissingInvoiceOverdue(submittedOrder(8, "2026-08-01T08:00:00.000Z"), {}, now), false);
+  assert.equal(isMissingInvoiceOverdue(submittedOrder(8, "2026-08-31T20:59:59.000Z"), {}, now), false);
 });
 
 test("rejected and uploaded invoices are excluded from the overdue list", () => {
@@ -75,7 +85,8 @@ test("buildMissingInvoiceAlertEmail lists overdue orders", () => {
   assert.match(message.html, /Ahmed \(SM001\)/);
   assert.match(message.html, /Pending for credit approval/);
   assert.match(message.html, /every 15 minutes/);
-  assert.match(message.text, /Orders rejected by management are excluded/);
+  assert.match(message.text, /from September 2026 onward/);
+  assert.match(message.text, /Orders rejected by management and orders created before September 2026 are excluded/);
   assert.equal(message.orderCount, 1);
 });
 

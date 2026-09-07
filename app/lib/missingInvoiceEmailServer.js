@@ -3,6 +3,7 @@ import {
   MISSING_INVOICE_GRACE_MS,
   buildMissingInvoiceAlertEmail,
   invoiceMetaKey,
+  missingInvoiceCreatedFromIso,
   parseInvoiceMeta,
   resolveMissingInvoiceEmailRecipients,
   selectMissingInvoiceOrders,
@@ -20,7 +21,7 @@ function chunkList(items, size) {
   return chunks;
 }
 
-export async function loadSubmittedOrdersOlderThan(admin, cutoffIso) {
+export async function loadSubmittedOrdersOlderThan(admin, cutoffIso, createdFromIso = missingInvoiceCreatedFromIso()) {
   const rows = [];
   let from = 0;
 
@@ -29,6 +30,7 @@ export async function loadSubmittedOrdersOlderThan(admin, cutoffIso) {
       .from("sales_orders")
       .select(ORDERS_SELECT)
       .eq("status", "SUBMITTED")
+      .gte("created_at", createdFromIso)
       .lte("created_at", cutoffIso)
       .order("created_at", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
@@ -71,7 +73,7 @@ export async function loadInvoiceMetaMap(admin, orderIds) {
 
 export async function loadMissingInvoiceOrders(admin, now = new Date()) {
   const cutoffIso = new Date(now.getTime() - MISSING_INVOICE_GRACE_MS).toISOString();
-  const orders = await loadSubmittedOrdersOlderThan(admin, cutoffIso);
+  const orders = await loadSubmittedOrdersOlderThan(admin, cutoffIso, missingInvoiceCreatedFromIso());
   const metaByOrder = await loadInvoiceMetaMap(admin, orders.map((order) => order.id));
   return {
     orders: selectMissingInvoiceOrders(orders, metaByOrder, now),

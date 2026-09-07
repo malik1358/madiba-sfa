@@ -119,6 +119,24 @@ test("shouldEmailInactivity skips lunch, logout, and the first 40 minutes after 
   }), true);
 });
 
+test("shouldEmailInactivity stops at 10:00 PM KSA", () => {
+  const logs = [visitAt("2026-09-06T17:00:00.000Z")];
+
+  assert.equal(shouldEmailInactivity({
+    loginAt,
+    logoutAt: null,
+    userLogs: logs,
+    now: new Date("2026-09-06T18:59:00.000Z"),
+  }), true);
+
+  assert.equal(shouldEmailInactivity({
+    loginAt,
+    logoutAt: null,
+    userLogs: logs,
+    now: new Date("2026-09-06T19:00:00.000Z"),
+  }), false);
+});
+
 test("resolveInactivityEmailRecipients puts the user and bosses on one email", () => {
   assert.deepEqual(
     resolveInactivityEmailRecipients({

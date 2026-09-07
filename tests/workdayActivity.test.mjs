@@ -314,6 +314,16 @@ test("shouldEmailInactivity is false until 40 minutes without activity", () => {
     }),
     true,
   );
+
+  assert.equal(
+    shouldEmailInactivity({
+      loginAt,
+      logoutAt: null,
+      userLogs: [],
+      now: new Date("2026-08-18T19:00:00.000Z"),
+    }),
+    false,
+  );
 });
 
 test("shouldWarnInactivity ignores lunch break and ended workdays", () => {

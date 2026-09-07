@@ -631,6 +631,7 @@ export function shouldWarnInactivity(args = {}) {
 }
 
 export function shouldEmailInactivity(args = {}) {
+  if (!isWithinKsaWorkingHours(args.now || new Date())) return false;
   return shouldFlagInactivity({
     ...args,
     thresholdMs: INACTIVITY_EMAIL_MS,

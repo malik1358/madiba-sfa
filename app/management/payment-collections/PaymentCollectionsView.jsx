@@ -34,6 +34,7 @@ import {
 import { listOfflineQueue } from "../../lib/offlineSyncQueue";
 import {
   fetchCollectionQueuesCached,
+  collectionQueuesHaveRows,
   fetchSalesScopeCached,
   invalidateCollectionQueuesForUser,
   readCollectionQueuesForUser,
@@ -97,6 +98,11 @@ const TEXT = {
   open: { en: "Open", ar: "فتح" },
   close: { en: "Close", ar: "إغلاق" },
   noDue: { en: "No due customers available for collection.", ar: "لا يوجد عملاء مستحقون للتحصيل حالياً." },
+  noFilterMatch: {
+    en: "No customers match this filter. Clear the customer name/code box to see the full queue.",
+    ar: "لا يوجد عملاء مطابقون لهذا التصفية. امسح مربع اسم/كود العميل لعرض القائمة كاملة.",
+  },
+  clearCustomerFilter: { en: "Clear customer filter", ar: "مسح تصفية العميل" },
   legalSearchMatch: { en: "Legal", ar: "قانوني" },
   notDueQueue: { en: "Not Yet Due Invoices", ar: "فواتير غير مستحقة بعد" },
   notDueHint: {
@@ -849,11 +855,7 @@ function mapInitialOutcome(row) {
 const QUEUE_NETWORK_TIMEOUT_MS = 45000;
 
 function queueHasRows(queues) {
-  return Boolean(
-    queues?.dueCustomers?.length
-    || queues?.notDueCustomers?.length
-    || queues?.legalCustomers?.length,
-  );
+  return collectionQueuesHaveRows(queues);
 }
 
 function buildInitialForm(row) {
@@ -1083,12 +1085,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       let cachedQueues = await readCollectionQueuesForUser(session.user.id);
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
-      if (!cachedQueues && getDataRefreshStatus().active) {
+      if (!queueHasRows(cachedQueues) && getDataRefreshStatus().active) {
         setLoading(true);
         cachedQueues = await waitForHydratedCollectionQueues(session.user.id);
         if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
       }
-      if (cachedQueues) {
+      if (queueHasRows(cachedQueues)) {
         cachedResult = await applyQueuePayload(cachedQueues, preferredKey);
         setQueueFromCache(true);
         setLoading(false);
@@ -2256,12 +2258,24 @@ export default function PaymentCollectionsView({ view = "due" }) {
             ) : null}
 
             <div className="moduleCollectorFilterGrid" style={{ marginBottom: "10px" }}>
-              <input
-                className="moduleInput"
-                value={customerFilter}
-                onChange={(event) => setCustomerFilter(event.target.value)}
-                placeholder={t("customerFilterPlaceholder")}
-              />
+              <div>
+                <input
+                  className="moduleInput"
+                  value={customerFilter}
+                  onChange={(event) => setCustomerFilter(event.target.value)}
+                  placeholder={t("customerFilterPlaceholder")}
+                />
+                {String(customerFilter || "").trim() ? (
+                  <button
+                    type="button"
+                    className="moduleInlineButton moduleActionButton"
+                    style={{ marginTop: "6px" }}
+                    onClick={() => setCustomerFilter("")}
+                  >
+                    {t("clearCustomerFilter")}
+                  </button>
+                ) : null}
+              </div>
               <div>
                 <div className="moduleCollectorCheckboxList" role="group" aria-label={t("salesmanFilter")}>
                   {salesmanOptions.length === 0 ? (
@@ -2962,7 +2976,23 @@ export default function PaymentCollectionsView({ view = "due" }) {
             </ExportableTable>
 
             {!loading && visibleRows.length === 0 && visibleNotDueRows.length === 0 && (
-              <div className="moduleHint">{view === "legal" ? t("noLegal") : t("noDue")}</div>
+              <div className="moduleHint">
+                {String(customerFilter || "").trim() && queueHasRows({ dueCustomers, notDueCustomers, legalCustomers })
+                  ? (
+                    <>
+                      <div>{t("noFilterMatch")}</div>
+                      <button
+                        type="button"
+                        className="moduleInlineButton moduleActionButton"
+                        style={{ marginTop: "8px" }}
+                        onClick={() => setCustomerFilter("")}
+                      >
+                        {t("clearCustomerFilter")}
+                      </button>
+                    </>
+                  )
+                  : (view === "legal" ? t("noLegal") : t("noDue"))}
+              </div>
             )}
           </section>
 

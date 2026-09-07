@@ -574,13 +574,16 @@ async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
 
   // Prefix matching used to be done in SQL with one OR/ilike pair per invoice
   // code. That became dozens of huge PostgREST filters on the outstanding file.
-  // Load the customer master in pages (or a few .in() batches) and match codes
-  // in memory with preferMatchingCustomerKey instead.
-  if (lookupCodes.size >= CUSTOMER_LOOKUP_BATCH_SIZE) {
+  // Load the customer master in pages and match codes in memory with
+  // preferMatchingCustomerKey. Exact .in() batches miss codes like
+  // "1119C NAME" when the master only stores "1119C".
+  const codes = [...lookupCodes];
+  const needsFuzzyMatch = codes.some((code) => /[\s_-]/.test(String(code || "")));
+  if (needsFuzzyMatch || codes.length >= CUSTOMER_LOOKUP_BATCH_SIZE) {
     return fetchAllCustomerRows(admin);
   }
 
-  return fetchCustomersByCodes(admin, [...lookupCodes]);
+  return fetchCustomersByCodes(admin, codes);
 }
 
 export async function fetchOutstandingAndCollectionRecords(admin, scope) {

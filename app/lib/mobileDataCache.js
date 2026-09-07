@@ -56,7 +56,20 @@ function outstandingCacheKey(customerCode, customerName) {
 }
 
 function collectionQueuesCacheKey(scope) {
-  return `collectionQueues:v4:${buildScopeHash(scope)}`;
+  // v5: ignore empty queues left behind by the v4 hydrate-wait race.
+  return `collectionQueues:v5:${buildScopeHash(scope)}`;
+}
+
+export function collectionQueuesHaveRows(queues) {
+  return Boolean(
+    queues?.dueCustomers?.length
+    || queues?.notDueCustomers?.length
+    || queues?.legalCustomers?.length,
+  );
+}
+
+function isBrowserOnline() {
+  return typeof navigator === "undefined" || navigator.onLine !== false;
 }
 
 function collectionScopeCacheKey(userId) {
@@ -360,31 +373,39 @@ function emitCollectionQueuesReady() {
 
 export async function waitForHydratedCollectionQueues(userId, maxMs = COLLECTION_QUEUE_HYDRATE_WAIT_MS) {
   const existing = await readCollectionQueuesForUser(userId);
-  if (existing) return existing;
-  if (typeof window === "undefined" || !userId) return null;
+  // An empty queue is not "ready" — a partial hydrate can write {} before the
+  // live API has customers. Keep waiting for rows or the full snapshot finish.
+  if (collectionQueuesHaveRows(existing)) return existing;
+  if (typeof window === "undefined" || !userId) return existing || null;
 
   return new Promise((resolve) => {
     let settled = false;
 
-    const finish = async () => {
+    const finish = async (acceptEmpty = false) => {
       if (settled) return;
+      const next = await readCollectionQueuesForUser(userId);
+      if (!acceptEmpty && !collectionQueuesHaveRows(next)) return;
       settled = true;
-      window.removeEventListener(COLLECTION_QUEUES_READY_EVENT, onReady);
-      window.removeEventListener("madiba-mobile-snapshot-hydrated", onReady);
+      window.removeEventListener(COLLECTION_QUEUES_READY_EVENT, onQueuesReady);
+      window.removeEventListener("madiba-mobile-snapshot-hydrated", onSnapshotHydrated);
       window.clearTimeout(timer);
-      resolve(await readCollectionQueuesForUser(userId));
+      resolve(next);
     };
 
-    const onReady = () => {
-      finish();
+    const onQueuesReady = () => {
+      void finish(false);
+    };
+
+    const onSnapshotHydrated = () => {
+      void finish(true);
     };
 
     const timer = window.setTimeout(() => {
-      finish();
+      void finish(true);
     }, Math.max(0, Number(maxMs) || COLLECTION_QUEUE_HYDRATE_WAIT_MS));
 
-    window.addEventListener(COLLECTION_QUEUES_READY_EVENT, onReady);
-    window.addEventListener("madiba-mobile-snapshot-hydrated", onReady);
+    window.addEventListener(COLLECTION_QUEUES_READY_EVENT, onQueuesReady);
+    window.addEventListener("madiba-mobile-snapshot-hydrated", onSnapshotHydrated);
   });
 }
 
@@ -456,16 +477,38 @@ export async function fetchCollectionQueuesCached(accessToken, userId, options =
   }
 
   const scope = await resolveCollectionScopeForUser(accessToken, userId, options.scope);
+  const cacheKey = collectionQueuesCacheKey(scope);
+  const cached = await readCacheEntry(cacheKey);
+  const emptyCached = !collectionQueuesHaveRows(cached?.value);
+  // Empty queues must not stick for the full TTL — refetch while online.
+  const forceRefresh = Boolean(options.forceRefresh)
+    || (emptyCached && isBrowserOnline());
 
   const result = await fetchWithLocalCacheResilient(
-    collectionQueuesCacheKey(scope),
+    cacheKey,
     CACHE_TTL.collectionQueuesMs,
     async () => {
       const queues = await fetchCollectionQueuesNetwork(accessToken);
-      await writeCollectionQueuesForUser(userId, scope, queues);
+      const writeScope = queues.salesScope || scope;
+      await writeCollectionQueuesForUser(userId, writeScope, queues);
+      // Keep the lookup key in sync when the API scope hash differs from the
+      // provisional sales-scope used to start this fetch.
+      if (buildScopeHash(writeScope) !== buildScopeHash(scope)) {
+        await writeCacheEntry(cacheKey, {
+          dueCustomers: queues.dueCustomers || [],
+          notDueCustomers: queues.notDueCustomers || [],
+          legalCustomers: queues.legalCustomers || [],
+          salesScope: queues.salesScope || null,
+          schedulerScope: queues.schedulerScope || null,
+        }, { ttlMs: CACHE_TTL.collectionQueuesMs });
+      }
       return queues;
     },
-    { onUpdate: options.onUpdate },
+    {
+      onUpdate: options.onUpdate,
+      forceRefresh,
+      revalidate: Boolean(options.revalidate),
+    },
   );
 
   return {

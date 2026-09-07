@@ -1,13 +1,7 @@
+import { formatKsaDateOnly } from "./workdayActivity.js";
+
 function formatDateOnly(value) {
-  const input = String(value || "").trim();
-  if (!input) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
-    const [y, m, d] = input.split("-");
-    return `${d}/${m}/${y}`;
-  }
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("en-GB");
+  return formatKsaDateOnly(value, "");
 }
 
 function formatMoney(value) {

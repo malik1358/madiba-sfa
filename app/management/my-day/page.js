@@ -49,6 +49,7 @@ import {
   nextVisitDateInputValue,
   validateNextVisitDate,
 } from "../../lib/nextVisitDate";
+import { formatKsaDateTime, formatKsaTime } from "../../lib/workdayActivity";
 
 const CUSTOMER_HISTORY_API = "/api/customer-history";
 
@@ -2027,7 +2028,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
               {todayLogs.map((row) => (
                 <li key={row.id}>
                   <strong>{row.entry_type}</strong>
-                  <span>{row.created_at ? new Date(row.created_at).toLocaleTimeString("en-GB") : ""}</span>
+                  <span>{row.created_at ? formatKsaTime(row.created_at) : ""}</span>
                   {getLogPreview(row) ? <p>{getLogPreview(row)}</p> : null}
                 </li>
               ))}
@@ -2110,7 +2111,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                   <tbody>
                     {day.rows.map((row) => (
                       <tr key={`planned-${day.dateKey}-${row.customer_code}`} id={`visit-customer-${row.customer_code}`}>
-                        <td data-label={t("calendarTime")}>{row.is_prospect || !/T\d{2}:\d{2}/.test(String(row.next_visit_at || "")) ? "-" : new Date(row.next_visit_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</td>
+                        <td data-label={t("calendarTime")}>{row.is_prospect || !/T\d{2}:\d{2}/.test(String(row.next_visit_at || "")) ? "-" : formatKsaTime(row.next_visit_at)}</td>
                         <td data-label={t("customer")} className="moduleScheduleCellPrimary">{row.customer_name || row.customer_code}</td>
                         <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                         <td data-label={t("actions")} className="moduleScheduleCellActions">
@@ -2343,7 +2344,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
                     <td>{row.customer_name || row.customer_code}</td>
                     <td>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                     <td>{row.days_since_last_invoice == null ? "-" : row.days_since_last_invoice}</td>
-                    <td>{row.inactive_marked_at ? new Date(row.inactive_marked_at).toLocaleString("en-GB") : "-"}</td>
+                    <td>{formatKsaDateTime(row.inactive_marked_at)}</td>
                     <td>
                       <div className="moduleInlineStack moduleActionStack">
                         <Link

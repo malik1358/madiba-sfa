@@ -28,6 +28,7 @@ import { postJsonResilient } from "../../lib/offlineApi";
 import { prospectToOrderCustomer, readLocalProspects, upsertLocalProspect } from "../../lib/offlineProspects";
 import { fetchVisibleCustomersCached, upsertLocalVisibleCustomer } from "../../lib/mobileDataCache";
 import { getTodayDateKey, validateNextVisitDate } from "../../lib/nextVisitDate";
+import { formatKsaDateTime } from "../../lib/workdayActivity";
 import {
   formatExistingCustomerDuplicateMessage,
   isValidKsaMobile,
@@ -1326,7 +1327,7 @@ export default function NewCustomerPage() {
                         </Link>
                       ) : "-"}
                     </td>
-                    <td>{row.created_at ? new Date(row.created_at).toLocaleString("en-GB") : "-"}</td>
+                    <td>{formatKsaDateTime(row.created_at)}</td>
                     <td>
                       <div className="moduleInlineStack moduleActionStack">
                         {!isConverted ? (

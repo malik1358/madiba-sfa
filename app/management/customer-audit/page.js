@@ -33,6 +33,7 @@ import {
 } from "../../lib/regionalPricing";
 import { DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, resolveOverdueDaysFromDueDate, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { fetchOutstandingCached } from "../../lib/mobileDataCache";
+import { formatKsaDateTime } from "../../lib/workdayActivity";
 
 import { shortDate } from "./lib/format";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -437,7 +438,7 @@ function CustomerAuditPageContent() {
               <h3>Outstanding Customerwise</h3>
               <p className="auditSectionNote">
                 {outstandingInfo.uploadedAt
-                  ? `Latest upload: ${new Date(outstandingInfo.uploadedAt).toLocaleString("en-GB")}`
+                  ? `Latest upload: ${formatKsaDateTime(outstandingInfo.uploadedAt)}`
                   : "No outstanding upload yet"}
               </p>
             </div>

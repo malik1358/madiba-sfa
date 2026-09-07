@@ -39,7 +39,7 @@ test("resolveBuildTime reads public build time", () => {
 test("formatBuildDateTime formats build timestamp", () => {
   const formatted = formatBuildDateTime("2026-08-20T08:30:00.000Z", "en-GB");
   assert.match(formatted, /20 Aug 2026/);
-  assert.match(formatted, /08:30|12:30/);
+  assert.match(formatted, /11:30/);
 });
 
 test("buildCacheBustingReloadUrl adds build query param", () => {

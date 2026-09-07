@@ -8,6 +8,7 @@ import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { formatGpsCapturePlatformLabel, inferGpsCapturePlatformFromNote } from "../../lib/geo";
+import { formatKsaDateTime, formatKsaTime } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import ExportableTable from "../../components/ExportableTable";
@@ -902,8 +903,8 @@ export default function GpsMapPage() {
                     <tr key={`${street.streetName}-${street.fromTs}-${street.toTs}-${street.pinCount}`}>
                       <td>{street.streetName}</td>
                       <td>{street.customers.length > 0 ? street.customers.join(", ") : "-"}</td>
-                      <td>{new Date(street.fromTs).toLocaleString("en-GB")}</td>
-                      <td>{new Date(street.toTs).toLocaleString("en-GB")}</td>
+                      <td>{formatKsaDateTime(street.fromTs)}</td>
+                      <td>{formatKsaDateTime(street.toTs)}</td>
                       <td>{formatDurationFromMs(street.durationMs)}</td>
                       <td>{street.pinCount}</td>
                       <td>{street.durationMs >= 30 * 60 * 1000 ? "Yes" : "No"}</td>
@@ -968,7 +969,7 @@ export default function GpsMapPage() {
                       <td>{point.action || point.entry_type}</td>
                       <td>{point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}</td>
                       <td>{point.platform_label || "-"}</td>
-                      <td>{point.captured_at ? new Date(point.captured_at).toLocaleString("en-GB") : "-"}</td>
+                      <td>{formatKsaDateTime(point.captured_at)}</td>
                       <td>
                         <div className="moduleInlineStack">
                           <button type="button" className="moduleInlineButton" onClick={() => setSelectedCustomerCode(point.customer_code || "")}>View</button>
@@ -1011,7 +1012,7 @@ export default function GpsMapPage() {
                       <td>{getUserRoleLabel(row.role)}</td>
                       <td><span className="moduleCode">{row.user_id}</span></td>
                       <td>{row.action || row.entry_type || "-"}</td>
-                      <td>{row.captured_at ? new Date(row.captured_at).toLocaleString("en-GB") : "-"}</td>
+                      <td>{formatKsaDateTime(row.captured_at)}</td>
                       <td>{row.latitude.toFixed(6)}, {row.longitude.toFixed(6)}</td>
                     </tr>
                   ))}
@@ -1052,7 +1053,7 @@ export default function GpsMapPage() {
                   {enrichedFilteredRecords.map((point) => (
                     <tr key={point.id}>
                       <td>{toDateValue(point.captured_at || point.created_at) || "-"}</td>
-                      <td>{point.captured_at ? new Date(point.captured_at).toLocaleTimeString("en-GB") : "-"}</td>
+                      <td>{formatKsaTime(point.captured_at)}</td>
                       <td>{getUserLabel(point)}</td>
                       <td>{getUserRoleLabel(point.role)}</td>
                       <td>{point.customer_name || point.customer_code || "-"}</td>

@@ -22,6 +22,7 @@ export function formatBuildDateTime(isoString, locale = "en-GB") {
   if (Number.isNaN(date.getTime())) return "";
 
   return date.toLocaleString(locale, {
+    timeZone: "Asia/Riyadh",
     day: "2-digit",
     month: "short",
     year: "numeric",

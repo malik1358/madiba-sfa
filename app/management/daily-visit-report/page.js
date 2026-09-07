@@ -22,7 +22,7 @@ import {
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
 import { useReverseGeocodeCache } from "../../hooks/useReverseGeocodeCache";
-import { addKsaCalendarDays, getKsaDateString, getKsaWeekdayIndexForDateString } from "../../lib/workdayActivity";
+import { addKsaCalendarDays, formatKsaTime, getKsaDateString, getKsaWeekdayIndexForDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { visitReportRowClassName, VISIT_REPORT_ROW_LEGEND } from "../../lib/visitReportRowColors";
@@ -149,8 +149,7 @@ function mostRecentKsaDateOnWeekday(weekday) {
 }
 
 function formatTime(value) {
-  if (!value) return "-";
-  return new Date(value).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return formatKsaTime(value);
 }
 
 export default function DailyVisitReportPage() {

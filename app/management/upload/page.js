@@ -8,6 +8,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { formatKsaDateTime } from "../../lib/workdayActivity";
 
 const TEXT = {
   title: { en: "Upload Sales Data", ar: "رفع بيانات المبيعات" },
@@ -24,7 +25,7 @@ function formatUploadTimestamp(value) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString("en-GB");
+  return formatKsaDateTime(value);
 }
 
 export default function UploadSalesPage() {
@@ -463,7 +464,7 @@ export default function UploadSalesPage() {
                 </div>
                 <div>
                   <span>Uploaded At</span>
-                  <strong>{outstandingResult.uploadedAt ? new Date(outstandingResult.uploadedAt).toLocaleString("en-GB") : "-"}</strong>
+                  <strong>{formatUploadTimestamp(outstandingResult.uploadedAt)}</strong>
                 </div>
               </div>
             </div>

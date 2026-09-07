@@ -1,4 +1,5 @@
 import { coordinateCacheKey } from "./geo.js";
+import { formatKsaDateTime } from "./workdayActivity.js";
 
 export const CUSTOMER_GPS_SOURCE = {
   customerMaster: "customer_master",
@@ -46,7 +47,7 @@ export function formatGpsUpdatedAt(value) {
   if (!input) return "";
   const date = new Date(input);
   if (Number.isNaN(date.getTime())) return input;
-  return date.toLocaleString("en-GB");
+  return formatKsaDateTime(input);
 }
 
 export function gpsSourceLabel(source) {

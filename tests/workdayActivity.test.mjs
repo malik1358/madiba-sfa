@@ -9,7 +9,9 @@ import {
   deriveActivityStatus,
   extractLunchTimes,
   filterLogsByKsaEventDate,
+  formatKsaDateOnly,
   formatKsaDateTime,
+  formatKsaTime,
   formatWorkingHours,
   getKsaDateString,
   isOnLunchBreak,
@@ -41,6 +43,9 @@ test("ksaDayBounds covers the full KSA calendar day", () => {
 test("ksaMidnightEndIso stores 11:59 PM KSA", () => {
   assert.equal(ksaMidnightEndIso("2026-08-18"), "2026-08-18T20:59:59.999Z");
   assert.equal(formatKsaDateTime("2026-08-18T20:59:59.999Z"), "18/08/2026, 23:59");
+  assert.equal(formatKsaTime("2026-09-07T07:34:00.000Z"), "10:34");
+  assert.equal(formatKsaDateOnly("2026-09-07"), "07/09/2026");
+  assert.equal(formatKsaDateOnly("2026-09-07T21:30:00.000Z"), "08/09/2026");
 });
 
 test("getPreviousKsaDateString returns the KSA calendar day that just ended", () => {

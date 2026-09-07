@@ -1841,12 +1841,12 @@ export default function NewOrderPage() {
                     <tr>
                       <th>Category</th>
                       <th>Item</th>
+                      <th>Qty</th>
+                      <th>Total</th>
                       <th>Price</th>
                       <th>Cash Discount</th>
                       <th>Value Discount</th>
                       <th>Scheme</th>
-                      <th>Qty</th>
-                      <th>Total</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1906,15 +1906,6 @@ export default function NewOrderPage() {
                                     )}
                                   </td>
                                   <td>
-                                    {wholesale ? formatMoney(wholesale) : "NOT FOUND"}
-                                    {wholesale && qty > 0 && priced.rate !== wholesale ? (
-                                      <div className="moduleCode">Net {formatMoney(priced.rate)}</div>
-                                    ) : null}
-                                  </td>
-                                  <td>{formatDiscountDetail(cashDiscount, priced.applied.cash, priced.cashDiscountAmount)}</td>
-                                  <td>{formatDiscountDetail(valueDiscount, priced.applied.value, priced.valueDiscountAmount)}</td>
-                                  <td>{formatSchemeDetail(scheme)}</td>
-                                  <td>
                                     <div className="moduleQtyControl">
                                       <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
                                       <input
@@ -1928,6 +1919,15 @@ export default function NewOrderPage() {
                                     </div>
                                   </td>
                                   <td>{formatMoney(priced.lineValue)}</td>
+                                  <td>
+                                    {wholesale ? formatMoney(wholesale) : "NOT FOUND"}
+                                    {wholesale && qty > 0 && priced.rate !== wholesale ? (
+                                      <div className="moduleCode">Net {formatMoney(priced.rate)}</div>
+                                    ) : null}
+                                  </td>
+                                  <td>{formatDiscountDetail(cashDiscount, priced.applied.cash, priced.cashDiscountAmount)}</td>
+                                  <td>{formatDiscountDetail(valueDiscount, priced.applied.value, priced.valueDiscountAmount)}</td>
+                                  <td>{formatSchemeDetail(scheme)}</td>
                                 </tr>
                               );
                             })}

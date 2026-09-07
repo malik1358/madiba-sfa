@@ -141,12 +141,12 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
             <tr>
               <th>Category</th>
               <th>Item</th>
+              <th>Qty</th>
+              <th>Total</th>
               <th>Price</th>
               <th>Cash Discount</th>
               <th>Value Discount</th>
               <th>Scheme</th>
-              <th>Qty</th>
-              <th>Total</th>
             </tr>
           </thead>
           <tbody>
@@ -182,6 +182,8 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
                       <tr key={code} className="moduleItemRow">
                         <td>{group.category}</td>
                         <td><strong>{nameIsCode ? code : item.item_name}</strong>{!nameIsCode && <div className="moduleCode">{code}</div>}</td>
+                        <td><div className="moduleQtyControl"><button type="button" onClick={() => decreaseOrderQty(code)}>−</button><input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} /><button type="button" onClick={() => increaseOrderQty(code)}>+</button></div></td>
+                        <td>{Number(priced.lineValue || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
                         <td>
                           {wholesale ? Number(wholesale).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "NOT FOUND"}
                           {wholesale && orderQty > 0 && priced.rate !== wholesale ? (
@@ -191,8 +193,6 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
                         <td>{formatAppliedDiscount(cashDiscount, priced.applied.cash)}</td>
                         <td>{formatAppliedDiscount(valueDiscount, priced.applied.value)}</td>
                         <td>{formatSchemeDetail(scheme)}</td>
-                        <td><div className="moduleQtyControl"><button type="button" onClick={() => decreaseOrderQty(code)}>−</button><input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} /><button type="button" onClick={() => increaseOrderQty(code)}>+</button></div></td>
-                        <td>{Number(priced.lineValue || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
                       </tr>
                     );
                   })}

@@ -1,8 +1,9 @@
 import { qtyFormat } from '../lib/format';
 import ExportableTable from '../../../components/ExportableTable';
+import { formatSchemeDetail, lookupSchemeApplication } from '../../../lib/orderSchemes';
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from '../../../lib/regionalPricing';
 
-export default function QuickOrder({ quickOrderSuggestions, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = 'credit' }) {
+export default function QuickOrder({ quickOrderSuggestions, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = 'credit', schemeApplications = {} }) {
   const quickOrderAllItems = [
     ...quickOrderSuggestions.newItems,
     ...quickOrderSuggestions.notBoughtRecently,
@@ -64,12 +65,15 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
                         const wholesale = Number(priceList[itemCode] || 0);
                         const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
                         const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+                        const scheme = lookupSchemeApplication(schemeApplications, item.item_code);
                         const priced = getPricedOrderLine({
                           wholesaleRate: wholesale,
                           quantity: orderQty,
                           paymentType,
                           cashDiscountRate: cashDiscount,
                           valueDiscountRate: valueDiscount,
+                          schemeUnitDiscount: scheme.unitDiscount,
+                          schemeDiscountedQty: scheme.discountedQty,
                         });
                         return (
                           <tr key={`${group.key}-${item.item_code}`}>
@@ -104,6 +108,7 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
                               {wholesale && orderQty > 0 && priced.rate !== wholesale ? (
                                 <div>Net {Number(priced.rate).toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
                               ) : null}
+                              {priced.applied.scheme ? <div>{formatSchemeDetail(scheme)}</div> : null}
                             </td>
                             <td>{formatAppliedDiscount(cashDiscount, priced.applied.cash)}</td>
                             <td>{formatAppliedDiscount(valueDiscount, priced.applied.value)}</td>

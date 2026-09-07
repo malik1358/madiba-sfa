@@ -1,4 +1,5 @@
 import { PRICE_CACHE_KEY as DEFAULT_PRICE_CACHE_KEY } from "./priceApiConfig.js";
+import { resolveStoredOrderSchemes } from "./orderSchemes.js";
 import {
   DEFAULT_PRICING_REGION,
   PRICING_REGIONS,
@@ -254,7 +255,7 @@ function findSchemeIndex(rows, aliases, fallbackColumn, maxRows = 5) {
   return (wideEnough || hasDataAtIndex(rows, fallbackIndex)) ? fallbackIndex : -1;
 }
 
-function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems) {
+function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems, schemes) {
   const aliasedRegions = {};
   PRICING_REGIONS.forEach((region) => {
     aliasedRegions[region] = applyPriceCodeAliases(regionPriceMaps?.[region] || {});
@@ -295,6 +296,7 @@ function normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valu
     cashDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(cashDiscountMap)),
     valueDiscountMap: stripExcludedPrices(applyDiscountCodeAliases(valueDiscountMap)),
     sheetItems: keptSheetItems,
+    schemes: resolveStoredOrderSchemes({ schemes }),
   };
 }
 
@@ -679,6 +681,15 @@ export function parsePricePayload(payload) {
         addRate(key, value, "riyadh");
       }
     });
+
+    return normalizeCatalogResult(
+      priceMap,
+      regionPriceMaps,
+      cashDiscountMap,
+      valueDiscountMap,
+      sheetItems,
+      payload.schemes,
+    );
   }
 
   return normalizeCatalogResult(priceMap, regionPriceMaps, cashDiscountMap, valueDiscountMap, sheetItems);
@@ -698,6 +709,7 @@ function readCached(cacheKey) {
       parsed.cashDiscountMap,
       parsed.valueDiscountMap,
       Array.isArray(parsed.sheetItems) ? parsed.sheetItems : [],
+      parsed.schemes,
     );
   } catch {
     return null;
@@ -744,6 +756,7 @@ export async function loadPricePayload(apiUrl, cacheKey = DEFAULT_PRICE_CACHE_KE
             data.cashDiscountMap,
             data.valueDiscountMap,
             Array.isArray(data.sheetItems) ? data.sheetItems : [],
+            data.schemes,
           )
         : parsePricePayload(data || {});
 

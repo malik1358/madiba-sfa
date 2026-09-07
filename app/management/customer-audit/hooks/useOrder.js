@@ -26,6 +26,7 @@ function buildOrderPayload({
   paymentType,
   cashDiscountMap,
   valueDiscountMap,
+  schemes,
   pricingRegion,
   draftOrderId,
   loadedOrderStatus,
@@ -46,6 +47,7 @@ function buildOrderPayload({
       cashDiscountMap,
       valueDiscountMap,
       paymentType,
+      schemes,
     },
   );
 
@@ -81,6 +83,7 @@ export function useOrder({
   setPaymentType = null,
   cashDiscountMap = {},
   valueDiscountMap = {},
+  schemes = [],
   pricingRegion = 'riyadh',
 }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
@@ -275,6 +278,7 @@ export function useOrder({
           paymentType,
           cashDiscountMap,
           valueDiscountMap,
+          schemes,
           pricingRegion,
           draftOrderId,
           loadedOrderStatus,
@@ -321,7 +325,7 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
     if (orderItems.length === 0) {
@@ -367,6 +371,7 @@ export function useOrder({
           paymentType,
           cashDiscountMap,
           valueDiscountMap,
+          schemes,
           pricingRegion,
           draftOrderId,
           loadedOrderStatus,
@@ -416,7 +421,7 @@ export function useOrder({
     } finally {
       setSubmittingOrder(false);
     }
-  }, [cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

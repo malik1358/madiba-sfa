@@ -22,6 +22,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
+import { evaluateOrderSchemes } from "../../lib/orderSchemes";
 import { loadPricePayload } from "../../lib/pricePayload";
 import {
   buildEffectivePriceList,
@@ -80,6 +81,7 @@ function CustomerAuditPageContent() {
   const [regionPriceMaps, setRegionPriceMaps] = useState({});
   const [cashDiscountMap, setCashDiscountMap] = useState({});
   const [valueDiscountMap, setValueDiscountMap] = useState({});
+  const [schemes, setSchemes] = useState([]);
   const [paymentType, setPaymentType] = useState("credit");
   const [priceSheetItems, setPriceSheetItems] = useState([]);
   const [requestedCustomerCode, setRequestedCustomerCode] = useState("");
@@ -165,6 +167,7 @@ function CustomerAuditPageContent() {
     setPaymentType,
     cashDiscountMap,
     valueDiscountMap,
+    schemes,
     pricingRegion,
     setError,
     setMessage,
@@ -173,6 +176,11 @@ function CustomerAuditPageContent() {
     userRole: access.role,
   });
 
+  const schemeApplications = useMemo(
+    () => evaluateOrderSchemes(orderQuantities || {}, schemes),
+    [orderQuantities, schemes],
+  );
+
   const displayPriceList = useMemo(
     () => buildEffectivePriceList({
       wholesaleMap: regionPriceList,
@@ -180,8 +188,9 @@ function CustomerAuditPageContent() {
       valueDiscountMap,
       paymentType,
       quantities: orderQuantities || {},
+      schemeApplications,
     }),
-    [cashDiscountMap, orderQuantities, paymentType, regionPriceList, valueDiscountMap]
+    [cashDiscountMap, orderQuantities, paymentType, regionPriceList, schemeApplications, valueDiscountMap]
   );
 
   useEffect(() => {
@@ -257,6 +266,7 @@ function CustomerAuditPageContent() {
         setRegionPriceMaps(parsed.regionPriceMaps || {});
         setCashDiscountMap(parsed.cashDiscountMap || {});
         setValueDiscountMap(parsed.valueDiscountMap || {});
+        setSchemes(parsed.schemes || []);
         setPriceSheetItems(parsed.sheetItems || []);
       } catch {
         // Keep previous prices if fresh fetch fails.
@@ -548,6 +558,7 @@ function CustomerAuditPageContent() {
           cashDiscountMap={cashDiscountMap}
           valueDiscountMap={valueDiscountMap}
           paymentType={paymentType}
+          schemeApplications={schemeApplications}
         />
 
         <QuickOrder
@@ -560,6 +571,7 @@ function CustomerAuditPageContent() {
           cashDiscountMap={cashDiscountMap}
           valueDiscountMap={valueDiscountMap}
           paymentType={paymentType}
+          schemeApplications={schemeApplications}
         />
 
         <FullItemList
@@ -573,6 +585,7 @@ function CustomerAuditPageContent() {
           cashDiscountMap={cashDiscountMap}
           valueDiscountMap={valueDiscountMap}
           paymentType={paymentType}
+          schemeApplications={schemeApplications}
         />
 
         <OrderBar

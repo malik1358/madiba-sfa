@@ -101,6 +101,8 @@ export function getPricedOrderLine({
   cashDiscountRate = 0,
   valueDiscountRate = 0,
   valueThreshold = VALUE_DISCOUNT_THRESHOLD_SAR,
+  schemeUnitDiscount = 0,
+  schemeDiscountedQty = 0,
 } = {}) {
   const qty = Number(quantity || 0);
   const wholesale = Number(wholesaleRate || 0);
@@ -109,7 +111,7 @@ export function getPricedOrderLine({
   const lineBeforeDiscount = qty * wholesale;
 
   let rate = wholesale;
-  const applied = { cash: false, value: false };
+  const applied = { cash: false, value: false, scheme: false };
 
   if (lineBeforeDiscount >= valueThreshold && valueRate > 0) {
     rate *= (1 - valueRate);
@@ -123,7 +125,14 @@ export function getPricedOrderLine({
 
   const safeQty = Number.isFinite(qty) ? Math.max(qty, 0) : 0;
   const wholesaleLineValue = safeQty * wholesale;
-  const lineValue = safeQty * rate;
+  const schemeQty = Math.min(Math.max(Number(schemeDiscountedQty || 0), 0), safeQty);
+  const schemeRate = Math.max(Number(schemeUnitDiscount || 0), 0);
+  const schemeDiscountAmount = schemeQty * schemeRate;
+  const lineValue = Math.max(0, (safeQty * rate) - schemeDiscountAmount);
+  if (schemeDiscountAmount > 0) {
+    applied.scheme = true;
+    rate = safeQty > 0 ? lineValue / safeQty : rate;
+  }
   const valueDiscountAmount = applied.value ? wholesaleLineValue * valueRate : 0;
   const cashDiscountAmount = applied.cash ? (wholesaleLineValue - valueDiscountAmount) * cashRate : 0;
   const vatAmount = lineValue * VAT_RATE;
@@ -135,6 +144,7 @@ export function getPricedOrderLine({
     wholesaleLineValue,
     valueDiscountAmount,
     cashDiscountAmount,
+    schemeDiscountAmount,
     lineValue,
     vatAmount,
     lineTotalInclVat: lineValue + vatAmount,
@@ -147,6 +157,7 @@ export function summarizePricedLines(lines = []) {
     wholesaleTotal: 0,
     cashDiscountTotal: 0,
     valueDiscountTotal: 0,
+    schemeDiscountTotal: 0,
     amountExclVat: 0,
     vatAmount: 0,
     amountInclVat: 0,
@@ -156,12 +167,14 @@ export function summarizePricedLines(lines = []) {
     const wholesaleTotal = totals.wholesaleTotal + Number(line.wholesaleLineValue || 0);
     const cashDiscountTotal = totals.cashDiscountTotal + Number(line.cashDiscountAmount || 0);
     const valueDiscountTotal = totals.valueDiscountTotal + Number(line.valueDiscountAmount || 0);
+    const schemeDiscountTotal = totals.schemeDiscountTotal + Number(line.schemeDiscountAmount || 0);
     const amountExclVat = totals.amountExclVat + Number(line.lineValue || line.lineTotal || 0);
     const vatAmount = amountExclVat * VAT_RATE;
     return {
       wholesaleTotal,
       cashDiscountTotal,
       valueDiscountTotal,
+      schemeDiscountTotal,
       amountExclVat,
       vatAmount,
       amountInclVat: amountExclVat + vatAmount,
@@ -175,6 +188,7 @@ export function buildEffectivePriceList({
   valueDiscountMap = {},
   paymentType = DEFAULT_PAYMENT_TYPE,
   quantities = {},
+  schemeApplications = {},
 } = {}) {
   const next = {};
 
@@ -182,12 +196,15 @@ export function buildEffectivePriceList({
     const code = String(rawCode || "").trim().toUpperCase();
     if (!code) return;
 
+    const scheme = schemeApplications?.[code] || schemeApplications?.[rawCode] || {};
     const priced = getPricedOrderLine({
       wholesaleRate,
       quantity: lookupQuantity(quantities, code) || lookupQuantity(quantities, rawCode),
       paymentType,
       cashDiscountRate: lookupDiscountRate(cashDiscountMap, code) || lookupDiscountRate(cashDiscountMap, rawCode),
       valueDiscountRate: lookupDiscountRate(valueDiscountMap, code) || lookupDiscountRate(valueDiscountMap, rawCode),
+      schemeUnitDiscount: Number(scheme.unitDiscount || 0),
+      schemeDiscountedQty: Number(scheme.discountedQty || 0),
     });
 
     next[code] = priced.rate;

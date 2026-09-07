@@ -9,6 +9,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
+import { evaluateOrderSchemes, formatSchemeDetail, lookupSchemeApplication } from "../../lib/orderSchemes";
 import { isBuildingMaterialItem, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
 import {
   buildEffectivePriceList,
@@ -69,6 +70,9 @@ function OrderTotalsPanel({ totals, actions, remark }) {
   const valueLabel = totals.valueDiscountTotal > 0
     ? formatMoneyAmount(totals.valueDiscountTotal)
     : "None";
+  const schemeLabel = totals.schemeDiscountTotal > 0
+    ? formatMoneyAmount(totals.schemeDiscountTotal)
+    : "None";
 
   return (
     <>
@@ -84,6 +88,10 @@ function OrderTotalsPanel({ totals, actions, remark }) {
         <div>
           <span>Value discount (SKU ≥ 5,000)</span>
           <strong>{valueLabel}</strong>
+        </div>
+        <div>
+          <span>Scheme discount</span>
+          <strong>{schemeLabel}</strong>
         </div>
         <div className="moduleOrderTotalsExcl">
           <span>Amount without VAT</span>
@@ -571,6 +579,7 @@ export default function NewOrderPage() {
   const [regionPriceMaps, setRegionPriceMaps] = useState({});
   const [cashDiscountMap, setCashDiscountMap] = useState({});
   const [valueDiscountMap, setValueDiscountMap] = useState({});
+  const [schemes, setSchemes] = useState([]);
   const [paymentType, setPaymentType] = useState("credit");
   const [lastSavedOrder, setLastSavedOrder] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -891,6 +900,7 @@ export default function NewOrderPage() {
     setPaymentType,
     cashDiscountMap,
     valueDiscountMap,
+    schemes,
     pricingRegion,
     setError,
     setMessage,
@@ -899,6 +909,11 @@ export default function NewOrderPage() {
     language,
   });
 
+  const schemeApplications = useMemo(
+    () => evaluateOrderSchemes(orderQuantities || {}, schemes),
+    [orderQuantities, schemes],
+  );
+
   const displayPriceList = useMemo(
     () => buildEffectivePriceList({
       wholesaleMap: regionPriceList,
@@ -906,8 +921,9 @@ export default function NewOrderPage() {
       valueDiscountMap,
       paymentType,
       quantities: orderQuantities || {},
+      schemeApplications,
     }),
-    [cashDiscountMap, orderQuantities, paymentType, regionPriceList, valueDiscountMap]
+    [cashDiscountMap, orderQuantities, paymentType, regionPriceList, schemeApplications, valueDiscountMap]
   );
 
   const pricedOrderLines = useMemo(
@@ -916,12 +932,15 @@ export default function NewOrderPage() {
       const wholesaleRate = Number(getPrice(regionPriceList, item.item_code) || 0);
       const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
       const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+      const scheme = lookupSchemeApplication(schemeApplications, item.item_code);
       const priced = getPricedOrderLine({
         wholesaleRate,
         quantity,
         paymentType,
         cashDiscountRate: cashDiscount,
         valueDiscountRate: valueDiscount,
+        schemeUnitDiscount: scheme.unitDiscount,
+        schemeDiscountedQty: scheme.discountedQty,
       });
       return {
         ...priced,
@@ -930,12 +949,14 @@ export default function NewOrderPage() {
         category: item.category || "Unclassified",
         cashDiscount,
         valueDiscount,
+        schemeDetail: formatSchemeDetail(scheme),
         cashApplied: priced.applied.cash,
         valueApplied: priced.applied.value,
+        schemeApplied: priced.applied.scheme,
         lineTotal: priced.lineValue,
       };
     }),
-    [cashDiscountMap, orderItems, paymentType, regionPriceList, valueDiscountMap]
+    [cashDiscountMap, orderItems, paymentType, regionPriceList, schemeApplications, valueDiscountMap]
   );
 
   const orderTotals = useMemo(
@@ -1327,6 +1348,7 @@ export default function NewOrderPage() {
         setRegionPriceMaps(parsed.regionPriceMaps || {});
         setCashDiscountMap(parsed.cashDiscountMap || {});
         setValueDiscountMap(parsed.valueDiscountMap || {});
+        setSchemes(parsed.schemes || []);
         setPriceSheetItems(parsed.sheetItems || []);
       } catch {
         // Keep previously loaded prices if fresh and cached sources are unavailable.
@@ -1644,6 +1666,7 @@ export default function NewOrderPage() {
                   cashDiscountMap={cashDiscountMap}
                   valueDiscountMap={valueDiscountMap}
                   paymentType={paymentType}
+                  schemeApplications={schemeApplications}
                 />
                 <QuickOrder
                   quickOrderSuggestions={quickOrderSuggestions}
@@ -1655,6 +1678,7 @@ export default function NewOrderPage() {
                   cashDiscountMap={cashDiscountMap}
                   valueDiscountMap={valueDiscountMap}
                   paymentType={paymentType}
+                  schemeApplications={schemeApplications}
                 />
 
                 {Array.isArray(orderHistory) && orderHistory.length > 0 && (
@@ -1738,6 +1762,7 @@ export default function NewOrderPage() {
                       <th>Price</th>
                       <th>Cash Discount</th>
                       <th>Value Discount</th>
+                      <th>Scheme</th>
                       <th>Qty</th>
                       <th>Total</th>
                     </tr>
@@ -1749,7 +1774,7 @@ export default function NewOrderPage() {
                       return (
                         <Fragment key={`group-${group.category}`}>
                           <tr className="moduleCategoryRow">
-                            <td colSpan={7}>
+                            <td colSpan={8}>
                               <button
                                 type="button"
                                 className="moduleCategoryToggle"
@@ -1768,12 +1793,15 @@ export default function NewOrderPage() {
                               const wholesale = getPrice(regionPriceList, item.item_code);
                               const cashDiscount = lookupDiscountRate(cashDiscountMap, item.item_code);
                               const valueDiscount = lookupDiscountRate(valueDiscountMap, item.item_code);
+                              const scheme = lookupSchemeApplication(schemeApplications, item.item_code);
                               const priced = getPricedOrderLine({
                                 wholesaleRate: wholesale,
                                 quantity: qty,
                                 paymentType,
                                 cashDiscountRate: cashDiscount,
                                 valueDiscountRate: valueDiscount,
+                                schemeUnitDiscount: scheme.unitDiscount,
+                                schemeDiscountedQty: scheme.discountedQty,
                               });
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
@@ -1803,6 +1831,7 @@ export default function NewOrderPage() {
                                   </td>
                                   <td>{formatDiscountDetail(cashDiscount, priced.applied.cash, priced.cashDiscountAmount)}</td>
                                   <td>{formatDiscountDetail(valueDiscount, priced.applied.value, priced.valueDiscountAmount)}</td>
+                                  <td>{formatSchemeDetail(scheme)}</td>
                                   <td>
                                     <div className="moduleQtyControl">
                                       <button type="button" onClick={() => decreaseQty(item.item_code)}>−</button>
@@ -1825,7 +1854,7 @@ export default function NewOrderPage() {
                     })}
                     {groupedItems.length === 0 && (
                       <tr>
-                        <td colSpan={7}>No items found for this filter.</td>
+                        <td colSpan={8}>No items found for this filter.</td>
                       </tr>
                     )}
                   </tbody>
@@ -1944,6 +1973,7 @@ export default function NewOrderPage() {
                         <th>Rate</th>
                         <th>Cash Discount</th>
                         <th>Value Discount</th>
+                        <th>Scheme</th>
                         <th>Without VAT</th>
                         <th>VAT 15%</th>
                         <th>After VAT</th>
@@ -1958,6 +1988,7 @@ export default function NewOrderPage() {
                           <td>{formatMoney(line.rate)}</td>
                           <td>{formatDiscountDetail(line.cashDiscount, line.cashApplied, line.cashDiscountAmount)}</td>
                           <td>{formatDiscountDetail(line.valueDiscount, line.valueApplied, line.valueDiscountAmount)}</td>
+                          <td>{line.schemeDetail || formatSchemeDetail({ schemeAmount: line.schemeDiscountAmount })}</td>
                           <td>{formatMoneyAmount(line.lineValue || line.lineTotal)}</td>
                           <td>{formatMoneyAmount(line.vatAmount)}</td>
                           <td>{formatMoneyAmount(line.lineTotalInclVat)}</td>

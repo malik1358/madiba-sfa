@@ -74,15 +74,7 @@ export async function ensureCustomerVisibleToScope(admin, customerCode, scope) {
   const matchedScope = withSalesScopeMatchers(scope);
   const normalizedCode = normalizeCode(customerCode);
 
-  const { data: exactCustomer, error } = await admin
-    .from("customers")
-    .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latitude,longitude,city,area")
-    .eq("customer_code", normalizedCode)
-    .maybeSingle();
-
-  if (error) throw error;
-
-  const customer = exactCustomer || await findCustomerByCode(admin, customerCode);
+  const customer = await findCustomerByCode(admin, normalizedCode || customerCode);
   if (!customer) {
     throw new Error("Customer not found.");
   }

@@ -54,6 +54,9 @@ test("visit customer search matches name and code", () => {
 
   assert.deepEqual(filterAndRankVisitCustomers(rows, "rawaa").map((row) => row.customer_code), ["1173C"]);
   assert.deepEqual(filterAndRankVisitCustomers(rows, "1173").map((row) => row.customer_code), ["1173C"]);
+  assert.deepEqual(filterAndRankVisitCustomers([
+    { customer_code: "1544C", customer_name: "Visit Customer", recent_sales_value: 100 },
+  ], "1544").map((row) => row.customer_code), ["1544C"]);
 });
 
 test("visit customers with outstanding over 60 days rank after current outstanding", () => {

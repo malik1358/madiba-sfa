@@ -19,6 +19,7 @@ export const MODULES = {
   outstandingNoGps: { href: "/management/outstanding-no-gps", label: "Outstanding Without GPS" },
   salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
   kpiTargets: { href: "/management/kpi-targets", label: "KPI Targets" },
+  schemes: { href: "/management/schemes", label: "Schemes" },
   gpsMap: { href: "/management/gps-map", label: "GPS Map" },
   upload: { href: "/management/upload", label: "Imports" },
 };
@@ -38,7 +39,7 @@ export const NAV_GROUPS = [
   {
     key: "admin",
     label: "Admin",
-    modules: ["businessDashboard", "customerMaster", "outstandingNoGps", "userActivity", "salesmanHierarchy", "kpiTargets", "gpsMap", "upload"],
+    modules: ["businessDashboard", "customerMaster", "outstandingNoGps", "userActivity", "salesmanHierarchy", "kpiTargets", "schemes", "gpsMap", "upload"],
   },
 ];
 
@@ -111,6 +112,7 @@ export function buildModuleAccess(context = {}) {
       outstandingNoGps: isAdmin || isManager,
       salesmanHierarchy: isAdmin || isManager || isInvoiceMaker,
       kpiTargets: isAdmin || isManager,
+      schemes: isAdmin || isManager,
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
       upload: isAdmin || isManager || isInvoiceMaker,
     },
@@ -172,6 +174,7 @@ export const MODULE_LABELS = {
   outstandingNoGps: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
   salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },
   kpiTargets: { en: "KPI Targets", ar: "أهداف الأداء" },
+  schemes: { en: "Schemes", ar: "العروض" },
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },
   upload: { en: "Imports", ar: "الاستيراد" },
 };

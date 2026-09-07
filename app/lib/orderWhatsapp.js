@@ -17,6 +17,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
     totalQty: isAr ? "إجمالي الكمية" : "Total qty",
     cashDiscount: isAr ? "خصم نقدي" : "Cash discount",
     valueDiscount: isAr ? "خصم القيمة" : "Value discount",
+    schemeDiscount: isAr ? "خصم العرض" : "Scheme discount",
     subtotal: isAr ? "المبلغ بدون ضريبة" : "Amount without VAT",
     vat: isAr ? "ضريبة 15%" : "VAT 15%",
     totalInclVat: isAr ? "المبلغ بعد الضريبة" : "Amount after VAT",
@@ -29,6 +30,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
   const totalWithVat = Number(totals.amountInclVat || subtotal + vatAmount);
   const cashDiscount = Number(totals.cashDiscountTotal || 0);
   const valueDiscount = Number(totals.valueDiscountTotal || 0);
+  const schemeDiscount = Number(totals.schemeDiscountTotal || 0);
 
   return [
     labels.title,
@@ -43,6 +45,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
     `${labels.totalQty}: ${Number(snapshot.totalQuantity || 0)}`,
     `${labels.cashDiscount}: ${formatMoney(cashDiscount)}`,
     `${labels.valueDiscount}: ${formatMoney(valueDiscount)}`,
+    `${labels.schemeDiscount}: ${formatMoney(schemeDiscount)}`,
     `${labels.subtotal}: ${formatMoney(subtotal)}`,
     `${labels.vat}: ${formatMoney(vatAmount)}`,
     `${labels.totalInclVat}: ${formatMoney(totalWithVat)}`,

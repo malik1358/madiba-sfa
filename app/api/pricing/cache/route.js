@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { ORDER_SCHEMES_CACHE_KEY, resolveStoredOrderSchemes } from "../../../lib/orderSchemes.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -28,7 +29,7 @@ export async function GET() {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const [{ data, error }, { data: rulesRow }] = await Promise.all([
+    const [{ data, error }, { data: rulesRow }, { data: schemesRow }] = await Promise.all([
       admin
         .from("price_catalog_cache")
         .select("cache_key,price_map,sheet_items,source_synced_at,updated_at")
@@ -38,6 +39,11 @@ export async function GET() {
         .from("price_catalog_cache")
         .select("price_map")
         .eq("cache_key", "pricing_rules")
+        .maybeSingle(),
+      admin
+        .from("price_catalog_cache")
+        .select("price_map")
+        .eq("cache_key", ORDER_SCHEMES_CACHE_KEY)
         .maybeSingle(),
     ]);
 
@@ -63,6 +69,7 @@ export async function GET() {
       regionPriceMaps: rules.regionPriceMaps || {},
       cashDiscountMap: rules.cashDiscountMap || {},
       valueDiscountMap: rules.valueDiscountMap || {},
+      schemes: resolveStoredOrderSchemes(schemesRow?.price_map),
       sheetItems: Array.isArray(data.sheet_items) ? data.sheet_items : [],
     });
   } catch (error) {

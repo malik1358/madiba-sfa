@@ -413,16 +413,16 @@ export async function GET(request) {
     }
 
     const orderNumber = await ensureStoredOrderNumber(admin, order.id, order.order_number);
-    const customerCode = await resolvePersistedCustomerCode(admin, order.customer_code);
-    if (customerCode && customerCode !== order.customer_code) {
-      await admin.from("sales_orders").update({ customer_code: customerCode }).eq("id", order.id);
+    const liveCustomerCode = await resolvePersistedCustomerCode(admin, order.customer_code);
+    if (liveCustomerCode && liveCustomerCode !== order.customer_code) {
+      await admin.from("sales_orders").update({ customer_code: liveCustomerCode }).eq("id", order.id);
     }
     return NextResponse.json({
       success: true,
       found: true,
       orderId: order.id,
       orderNumber,
-      customerCode,
+      customerCode: liveCustomerCode || order.customer_code || "",
       customerName: order.customer_name || "",
       status: order.status,
     });

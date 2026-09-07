@@ -276,6 +276,7 @@ test("enrichOrderPdfLiveData replaces a pending queue id with the live order num
 test("resolveLiveOrderPdfSnapshot retries until the live order number is available", async () => {
   const originalFetch = global.fetch;
   let salesOrderCalls = 0;
+  let outstandingCalls = 0;
   global.fetch = async (url) => {
     const href = String(url);
     if (href.includes("/api/sales-orders")) {
@@ -287,6 +288,10 @@ test("resolveLiveOrderPdfSnapshot retries until the live order number is availab
         ok: true,
         json: async () => ({ success: true, found: true, orderId: 325, orderNumber: "325" }),
       };
+    }
+    if (href.includes("/api/outstanding")) {
+      outstandingCalls += 1;
+      return { ok: false, json: async () => ({}) };
     }
     return { ok: false, json: async () => ({}) };
   };
@@ -301,6 +306,7 @@ test("resolveLiveOrderPdfSnapshot retries until the live order number is availab
 
     assert.equal(snapshot.orderNumber, "325");
     assert.equal(salesOrderCalls, 3);
+    assert.equal(outstandingCalls, 1);
   } finally {
     global.fetch = originalFetch;
   }

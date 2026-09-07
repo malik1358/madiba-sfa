@@ -1,6 +1,6 @@
 import { shouldRequireTransactionGps } from "./moduleAccess.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
-import { ksaDayBounds } from "./workdayActivity.js";
+import { areActivityRemindersEnabled, ksaDayBounds } from "./workdayActivity.js";
 
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase().replace(/_/g, "-");
@@ -46,17 +46,23 @@ export async function loadActiveFieldUsers(admin, reportDate) {
     return [];
   }
 
-  const { data: profiles, error: profileError } = await admin
+  let profilesRes = await admin
     .from("profiles")
-    .select("id,role,preferred_language")
+    .select("id,role,preferred_language,activity_reminders_enabled")
     .in("id", userIds);
+  if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
+    profilesRes = await admin
+      .from("profiles")
+      .select("id,role,preferred_language")
+      .in("id", userIds);
+  }
+  if (profilesRes.error) throw profilesRes.error;
 
-  if (profileError) throw profileError;
-
-  const profileByUserId = new Map((profiles || []).map((row) => [row.id, row]));
+  const profileByUserId = new Map((profilesRes.data || []).map((row) => [row.id, row]));
 
   return userIds
     .filter((userId) => shouldRequireTransactionGps(normalizeRole(profileByUserId.get(userId)?.role)))
+    .filter((userId) => areActivityRemindersEnabled(profileByUserId.get(userId)))
     .map((userId) => ({
       userId,
       loginLog: loginByUserId.get(userId),
@@ -66,12 +72,16 @@ export async function loadActiveFieldUsers(admin, reportDate) {
 
 export async function loadUsersPendingMorningLogin(admin, reportDate) {
   const { startIso, endIso } = ksaDayBounds(reportDate);
-  const profileSelect = "id,role,is_active,preferred_language";
-  const profileFallback = "id,role,preferred_language";
+  const profileSelect = "id,role,is_active,preferred_language,activity_reminders_enabled";
+  const profileFallback = "id,role,is_active,preferred_language";
+  const profileMinimal = "id,role,preferred_language";
 
   let profilesRes = await admin.from("profiles").select(profileSelect);
   if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
     profilesRes = await admin.from("profiles").select(profileFallback);
+  }
+  if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
+    profilesRes = await admin.from("profiles").select(profileMinimal);
   }
   if (profilesRes.error) throw profilesRes.error;
 
@@ -89,6 +99,7 @@ export async function loadUsersPendingMorningLogin(admin, reportDate) {
   return (profilesRes.data || [])
     .filter((profile) => profile.is_active !== false)
     .filter((profile) => isFieldAttendanceRole(profile.role))
+    .filter((profile) => areActivityRemindersEnabled(profile))
     .filter((profile) => !loggedIn.has(profile.id))
     .map((profile) => ({
       userId: profile.id,

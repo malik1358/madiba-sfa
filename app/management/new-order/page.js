@@ -1129,7 +1129,6 @@ export default function NewOrderPage() {
       return;
     }
 
-    const isNative = await isNativeMobilePlatform();
     showPopup({
       message: savedMessage,
       variant: "success",

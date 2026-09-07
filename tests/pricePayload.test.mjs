@@ -36,6 +36,16 @@ test('isBuildingMaterialItem hides unclassified boards, ladders, and fans', () =
     category: 'Stationery',
   }), false);
   assert.equal(isBuildingMaterialItem({
+    item_code: 'A003234',
+    item_name: 'A003234_GOLDEN STAR PHOTOCOPY PAPER A4 80 GSM - 5RM/Ctn',
+    category: 'Missing Category',
+  }), false);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A005425',
+    item_name: 'PHOTOCOPY PAPER A4 80GSM 500SHEE/PCK , 5PCK/BOX, GOLDEN STAR',
+    category: 'Missing Category',
+  }), false);
+  assert.equal(isBuildingMaterialItem({
     item_code: 'LP00190',
     item_name: 'Cement Board 1.22X2.44MtrX12MM',
     category: 'Unclassified',
@@ -143,6 +153,7 @@ test('parsePricePayload applies alias fallback for missing target code', () => {
 
   const { priceMap } = parsePricePayload(payload);
   assert.equal(priceMap.A005425, 51.3);
+  assert.equal(priceMap.A003234, 51.3);
 });
 
 test('parsePricePayload reads nested priceMap objects from source payload', () => {

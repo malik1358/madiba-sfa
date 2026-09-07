@@ -1,3 +1,4 @@
+import { applyPriceCodeAliases } from "./itemCodeAliases.js";
 import { PRICE_CACHE_KEY as DEFAULT_PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import { resolveStoredOrderSchemes } from "./orderSchemes.js";
 import {
@@ -9,10 +10,6 @@ import {
   parseDiscountRate,
   withRegionFallbacks,
 } from "./regionalPricing.js";
-
-const PRICE_CODE_ALIASES = {
-  A005425: ["A004555", "A000057"],
-};
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -48,13 +45,19 @@ export function isMissingOrderCategory(value) {
   return compact === "missingcategory";
 }
 
+const PAPER_STATIONERY_NAME_PATTERN = /photocopy|copy\s*paper|\bgsm\b|\breams?\b|(?:\ba4\b.{0,24}\bpaper\b)|(?:\bpaper\b.{0,24}\ba4\b)/i;
 const BUILDING_MATERIAL_NAME_PATTERN = /(?:^|[^a-z0-9])(?:mdf|hdf|osb|hmr|lvl|grade[\s-]*e2|plywood|chipboard|particle\s*boards?|gypsum|plasterboards?|ventilation|ladders?|melamine|blockboards?|sandwich\s*panels?|rebar|concrete|steel\s*mesh|steel\s*bars?|angle\s*irons?|cement\s*boards?|tie\s*rods?|welding\s*rods?|wing\s*nuts?|hessian|jute|curing|mesh)(?:[^a-z0-9]|$)/i;
 const BUILDING_MATERIAL_SHEET_SIZE_PATTERN = /\b\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)?\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)(?:\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in))?\b/i;
 const BUILDING_MATERIAL_FAN_PATTERN = /(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b).{0,24}\bfans?\b|\bfans?\b.{0,24}(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b|\bventilation\b)/i;
 
+export function isPaperStationeryName(value) {
+  return PAPER_STATIONERY_NAME_PATTERN.test(normalizeText(value));
+}
+
 export function isBuildingMaterialName(value) {
   const text = normalizeText(value);
   if (!text) return false;
+  if (isPaperStationeryName(text)) return false;
 
   const compact = text.toLowerCase().replace(/[^a-z]/g, "");
   if (compact.includes("buildingmaterial") || compact.includes("buidingmaterial")) return true;
@@ -69,7 +72,12 @@ export function isBuildingMaterialName(value) {
 export function isBuildingMaterialItem(item) {
   if (item == null) return false;
   if (typeof item !== "object") {
-    return isExcludedCategory(item) || isBuildingMaterialName(item) || isExcludedItemCode(item);
+    return !isPaperStationeryName(item)
+      && (isExcludedCategory(item) || isBuildingMaterialName(item) || isExcludedItemCode(item));
+  }
+
+  if (isPaperStationeryName(item.item_name) || isPaperStationeryName(item.name)) {
+    return false;
   }
 
   return isExcludedCategory(item.category)
@@ -102,31 +110,6 @@ function toNumber(value) {
     .trim();
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function applyPriceCodeAliases(priceMap) {
-  const next = { ...(priceMap || {}) };
-
-  Object.entries(PRICE_CODE_ALIASES).forEach(([targetCode, sourceCodes]) => {
-    const target = normalizeCode(targetCode);
-    if (!target) return;
-
-    const currentRate = toNumber(next[target]);
-    if (currentRate > 0) return;
-
-    for (const sourceCode of sourceCodes) {
-      const source = normalizeCode(sourceCode);
-      if (!source) continue;
-
-      const sourceRate = toNumber(next[source]);
-      if (sourceRate > 0) {
-        next[target] = sourceRate;
-        break;
-      }
-    }
-  });
-
-  return next;
 }
 
 function applyDiscountCodeAliases(discountMap) {

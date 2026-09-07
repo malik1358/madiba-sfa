@@ -35,6 +35,12 @@ test("saved empty scheme list is respected", () => {
   assert.deepEqual(resolveStoredOrderSchemes({ schemes: [] }), []);
 });
 
+test("A005425 scheme also applies to Golden Star paper A003234", () => {
+  const applied = evaluateOrderSchemes({ A003234: 40, A004225: 1 }, DEFAULT_ORDER_SCHEMES);
+  assert.equal(lookupSchemeApplication(applied, "A003234").schemeAmount, 73.2);
+  assert.equal(lookupSchemeApplication(applied, "A005425").schemeAmount, 0);
+});
+
 test("A005425 scheme needs 40 cartons plus one mix item", () => {
   const noMix = evaluateOrderSchemes({ A005425: 40 }, DEFAULT_ORDER_SCHEMES);
   const shortQty = evaluateOrderSchemes({ A005425: 39, A004224: 1 }, DEFAULT_ORDER_SCHEMES);
@@ -91,6 +97,22 @@ test("priceOrderLines applies the configured scheme on save", () => {
   assert.equal(Number(lines[0].rate.toFixed(2)), 48.17);
   assert.equal(Number(lines[0].line_value.toFixed(2)), 1926.8);
   assert.equal(lines[1].rate, 10);
+});
+
+test("priceOrderLines fills a missing A003234 rate from the A005425 family", () => {
+  const lines = priceOrderLines(
+    [
+      { item_code: "A003234", quantity: 40, rate: 0 },
+      { item_code: "A004225", quantity: 1, rate: 243 },
+    ],
+    {
+      regionPriceMap: { A005425: 52.83, A004225: 243 },
+      schemes: DEFAULT_ORDER_SCHEMES,
+    },
+  );
+
+  assert.equal(Number(lines[0].rate.toFixed(2)), Number((52.83 - 1.83).toFixed(2)));
+  assert.equal(Number(lines[0].line_value.toFixed(2)), Number(((52.83 - 1.83) * 40).toFixed(2)));
 });
 
 test("describeOrderScheme explains the first configured deal", () => {

@@ -1,3 +1,4 @@
+import { lookupPositiveRate } from "./itemCodeAliases.js";
 import { parsePricePayload } from "./pricePayload.js";
 import {
   evaluateOrderSchemes,
@@ -34,7 +35,7 @@ export function priceOrderLines(lines, {
     const quantity = toNumber(line?.quantity ?? line?.order_quantity);
     const scheme = lookupSchemeApplication(schemeApplications, code);
     const priced = getPricedOrderLine({
-      wholesaleRate: toNumber(regionPriceMap[code] ?? line?.rate),
+      wholesaleRate: lookupPositiveRate(regionPriceMap, code, line?.rate ?? line?.wholesaleRate),
       quantity,
       paymentType,
       cashDiscountRate: cashDiscountMap[code] || 0,

@@ -15,7 +15,8 @@ test("buildProspectCustomerCode formats prospect order customer codes", () => {
   assert.equal(buildProspectCustomerCode("64"), "PROSPECT-64");
   assert.equal(buildProspectCustomerCode(0), "");
   assert.equal(buildOfflineProspectCustomerCode("abc123"), "PROSPECT-OFF-abc123");
-  assert.equal(resolveProspectCustomerCode({ offline_id: "abc123", id: 9 }), "PROSPECT-OFF-abc123");
+  assert.equal(resolveProspectCustomerCode({ offline_id: "abc123", id: 9 }), "PROSPECT-9");
+  assert.equal(resolveProspectCustomerCode({ offline_id: "abc123" }), "PROSPECT-OFF-abc123");
 });
 
 test("formatProspectOrderLabel prefers order_number then falls back to id", () => {
@@ -45,6 +46,19 @@ test("enrichProspectsWithOrders attaches order numbers to prospect rows", () => 
 
   assert.equal(enriched[0].latest_order_number, "SO-200");
   assert.deepEqual(enriched[0].order_numbers, ["SO-200"]);
+});
+
+test("enrichProspectsWithOrders matches both live and offline prospect customer codes", () => {
+  const enriched = enrichProspectsWithOrders(
+    [{ id: 9, offline_id: "abc123", company_name: "Test Shop" }],
+    [
+      { id: 3, order_number: "SO-OFF", customer_code: "PROSPECT-OFF-abc123", status: "SUBMITTED", created_at: "2026-09-01T10:00:00Z" },
+      { id: 4, order_number: "325", customer_code: "PROSPECT-9", status: "SUBMITTED", created_at: "2026-09-07T08:00:00Z" },
+    ],
+  );
+
+  assert.equal(enriched[0].latest_order_number, "325");
+  assert.deepEqual(enriched[0].order_numbers, ["325", "SO-OFF"]);
 });
 
 test("mapProspectOrderNumbers includes offline prospect customer codes", () => {

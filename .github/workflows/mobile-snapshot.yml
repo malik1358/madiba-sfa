@@ -38,8 +38,7 @@ jobs:
             echo "Mobile snapshot batch ${batch}"
             export SNAP_CURSOR="$cursor"
             export SNAP_START="$start"
-            python3 -c 'import json,os; c=os.environ.get("SNAP_CURSOR") or ""; s=os.environ.get("SNAP_START")=="true"; p={"limit":1,"start":s and not c,"resume":not (s and not c)};
-p.update({"cursor":c} if c else {}); print(json.dumps(p))' > payload.json
+            python3 -c 'import json,os; c=os.environ.get("SNAP_CURSOR") or ""; s=os.environ.get("SNAP_START")=="true"; payload={"limit":1,"start":bool(s and not c),"resume":not (s and not c)}; payload.update({"cursor":c} if c else {}); print(json.dumps(payload))' > payload.json
 
             set +e
             status_code="$(curl -sS -L --post301 --post302 --post303 --max-time 260 -o response.json -w "%{http_code}" -X POST "$MOBILE_SNAPSHOT_URL_EFFECTIVE" \

@@ -1,3 +1,4 @@
+import { lookupPositiveRate } from "./itemCodeAliases.js";
 import { addPdfBuildFooter } from "./buildInfo.js";
 import { appendCreditControlRemarkToPdf } from "./creditApproval.js";
 import { appendMonthlyPerformanceToPdf } from "./orderPdfMonthlyPerformance.js";
@@ -22,6 +23,8 @@ import {
   summarizePricedLines,
 } from "./regionalPricing.js";
 import { evaluateOrderSchemes, lookupSchemeApplication } from "./orderSchemes.js";
+import { loadPricePayload } from "./pricePayload.js";
+import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
 
 export const ORDER_PDF_OUTSTANDING_API = "/api/outstanding";
 export const ORDER_PDF_CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -127,7 +130,7 @@ export function mapSavedOrderLinesToPdfLines(lines = [], {
   return (Array.isArray(lines) ? lines : []).map((line) => {
     const existing = fallbackPdfLine(line);
     const code = String(line?.item_code || "").trim().toUpperCase();
-    const catalogWholesale = toAmount(regionPriceMap[code]);
+    const catalogWholesale = lookupPositiveRate(regionPriceMap, code, 0);
     if (!(catalogWholesale > 0)) return existing;
 
     const cashDiscount = lookupDiscountRate(cashDiscountMap, code);
@@ -143,7 +146,7 @@ export function mapSavedOrderLinesToPdfLines(lines = [], {
       schemeDiscountedQty: scheme.discountedQty,
     });
 
-    if (Math.abs(priced.lineValue - existing.lineValue) > 0.05) {
+    if (existing.rate > 0 && Math.abs(priced.lineValue - existing.lineValue) > 0.05) {
       return existing;
     }
 
@@ -261,6 +264,21 @@ export async function enrichOrderPdfLiveData(snapshot, {
     next.outstanding.customer,
     next.outstanding.customerInvoices,
   );
+
+  try {
+    const pricingCatalog = await loadPricePayload("/api/pricing/cache", PRICE_CACHE_KEY);
+    const repriced = mapSavedOrderLinesToPdfLines(next.lines || snapshot.lines || [], {
+      paymentType: next.paymentType || snapshot.paymentType,
+      pricingCatalog,
+      pricingRegion: next.pricingRegion || snapshot.pricingRegion,
+    });
+    const totals = summarizePricedLines(repriced);
+    next.lines = repriced;
+    next.totals = totals;
+    next.grandTotal = totals.amountExclVat;
+  } catch {
+    // Keep the saved snapshot if the live price catalog cannot be loaded.
+  }
 
   return { snapshot: next, analytics };
 }

@@ -1,3 +1,5 @@
+import { lookupPositiveRate } from "../../../lib/itemCodeAliases.js";
+
 export function normalizeCode(code) {
   return String(code || "")
     .trim()
@@ -5,11 +7,7 @@ export function normalizeCode(code) {
 }
 
 export function getPrice(priceList, itemCode) {
-  return Number(
-    priceList[
-      normalizeCode(itemCode)
-    ] || 0
-  );
+  return lookupPositiveRate(priceList, itemCode, 0);
 }
 
 export function lineTotal(

@@ -7,6 +7,7 @@ import {
   isSoyebProfile,
   mergeMutualGroupProfiles,
   resolveMutualGroupCodes,
+  resolveSharedBookProfiles,
   salesmanValueMatchesScope,
 } from "../app/lib/mutualSalesmanGroups.js";
 
@@ -67,6 +68,20 @@ test("Parvez scope matchers include Junaid customers assigned as JUNAID", () => 
 
   assert.equal(salesmanValueMatchesScope("JUNAID", matchers), true);
   assert.equal(salesmanValueMatchesScope("Junaid", matchers), true);
+});
+
+test("Abdalla can see Ahmed Nabil customers without sharing his own book back", () => {
+  const ahmed = { id: "nabil", salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil" };
+  const abdalla = { id: "abdalla", salesman_code: "ABDALLA", salesman_name: "Abdalla Anthanath" };
+  const abadallaLogin = { id: "abadalla", salesman_code: "ABADALLA", salesman_name: "Abadalla Anthanath" };
+  const profiles = [ahmed, abdalla, { id: "j1", salesman_code: "JUNAID", salesman_name: "Junaid" }];
+
+  assert.equal(resolveSharedBookProfiles(profiles, abdalla).some((row) => row.id === "nabil"), true);
+  assert.equal(resolveSharedBookProfiles(profiles, abadallaLogin).some((row) => row.id === "nabil"), true);
+  assert.deepEqual(resolveSharedBookProfiles(profiles, ahmed), []);
+  assert.equal(expandMutualGroupScopeIdentities(profiles, abdalla).includes("AHMED NABIL"), true);
+  assert.equal(mergeMutualGroupProfiles([abdalla], profiles, abdalla).some((row) => row.salesman_code === "AHMED NABIL"), true);
+  assert.equal(mergeMutualGroupProfiles([ahmed], profiles, ahmed).some((row) => row.salesman_code === "ABDALLA"), false);
 });
 
 test("isSoyebProfile matches Soyeb name, alias, and ST103 code", () => {

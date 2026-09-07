@@ -1,5 +1,20 @@
 export const MUTUAL_SALESMAN_GROUPS = [["JUNAID", "PARVEZ", "SOYEB"]];
 
+// One-way: the viewer can see the source salesman's customers, not the reverse.
+export const SHARED_CUSTOMER_BOOKS = [
+  {
+    source: ["AHMED NABIL", "AHMED.NABIL"],
+    viewers: [
+      "ABDALLA",
+      "ABADALLA",
+      "ABDALLA ANTHANATH",
+      "ABADALLA ANTHANATH",
+      "ABDALLA.ANTHANATH",
+      "ABADALLA.ANTHANATH",
+    ],
+  },
+];
+
 export function normalizeSalesmanName(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
@@ -58,6 +73,47 @@ function matchesMutualGroup(profile, group) {
   return keys.some((key) => group.includes(key));
 }
 
+function normalizeShareIdentity(value) {
+  return normalizeSalesmanName(value).replace(/[._-]+/g, " ").trim();
+}
+
+function profileShareIdentities(profile) {
+  const emailLocal = String(profile?.email || "").trim().toLowerCase().split("@")[0] || "";
+  return [...new Set([
+    ...profileGroupKeys(profile),
+    normalizeShareIdentity(profile?.salesman_code),
+    normalizeShareIdentity(profile?.salesman_name),
+    normalizeShareIdentity(emailLocal),
+    normalizeSalesmanCode(emailLocal),
+  ].map(normalizeShareIdentity).filter(Boolean))];
+}
+
+function matchesShareIdentities(profile, identities) {
+  const wanted = new Set((identities || []).map(normalizeShareIdentity).filter(Boolean));
+  if (wanted.size === 0) return false;
+  return profileShareIdentities(profile).some((key) => wanted.has(key));
+}
+
+export function resolveSharedBookProfiles(allProfiles, currentProfile) {
+  const shared = [];
+  const seenIds = new Set();
+
+  (SHARED_CUSTOMER_BOOKS || []).forEach((book) => {
+    if (!matchesShareIdentities(currentProfile, book.viewers)) return;
+
+    (allProfiles || []).forEach((profile) => {
+      if (!matchesShareIdentities(profile, book.source)) return;
+      if (profile?.id) {
+        if (seenIds.has(profile.id)) return;
+        seenIds.add(profile.id);
+      }
+      shared.push(profile);
+    });
+  });
+
+  return shared;
+}
+
 export function salesmanScopeIdentities(profile) {
   return [...new Set(profileGroupKeys(profile))];
 }
@@ -73,7 +129,10 @@ export function mergeMutualGroupProfiles(members, allProfiles, currentProfile) {
   const merged = [...(members || [])];
   const seenIds = new Set(merged.map((row) => row?.id).filter(Boolean));
 
-  resolveMutualGroupProfiles(allProfiles, currentProfile).forEach((profile) => {
+  [
+    ...resolveMutualGroupProfiles(allProfiles, currentProfile),
+    ...resolveSharedBookProfiles(allProfiles, currentProfile),
+  ].forEach((profile) => {
     if (profile?.id && seenIds.has(profile.id)) return;
     if (profile?.id) seenIds.add(profile.id);
     merged.push(profile);
@@ -92,8 +151,10 @@ export function resolveMutualGroupCodes(allProfiles, currentProfile) {
 
 export function expandMutualGroupScopeIdentities(allProfiles, currentProfile) {
   return [...new Set(
-    resolveMutualGroupProfiles(allProfiles, currentProfile)
-      .flatMap((profile) => salesmanScopeIdentities(profile)),
+    [
+      ...resolveMutualGroupProfiles(allProfiles, currentProfile),
+      ...resolveSharedBookProfiles(allProfiles, currentProfile),
+    ].flatMap((profile) => salesmanScopeIdentities(profile)),
   )];
 }
 

@@ -135,6 +135,26 @@ export async function sendPushToTokens(tokens, { title, body, data = {} }) {
   return { successCount, failureCount, invalidTokens };
 }
 
+export async function sendPushToAllDevices(admin, payload) {
+  const { data: tokenRows, error } = await admin
+    .from("device_push_tokens")
+    .select("token");
+
+  if (error) throw error;
+
+  const tokens = (tokenRows || []).map((row) => row.token).filter(Boolean);
+  const result = await sendPushToTokens(tokens, payload);
+
+  if (result.invalidTokens.length > 0) {
+    await admin
+      .from("device_push_tokens")
+      .delete()
+      .in("token", result.invalidTokens);
+  }
+
+  return result;
+}
+
 export async function sendPushToUser(admin, userId, payload) {
   const { data: tokenRows, error } = await admin
     .from("device_push_tokens")

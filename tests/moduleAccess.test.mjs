@@ -106,6 +106,13 @@ test("KPI targets can be updated by admin and manager only", () => {
   assert.equal(localizedModuleLabel("kpiTargets", "en"), "KPI Targets");
 });
 
+test("schemes can be configured by admin and manager only", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("schemes"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("schemes"), true);
+  assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("schemes"), false);
+  assert.equal(localizedModuleLabel("schemes", "en"), "Schemes");
+});
+
 test("admin shortcut buttons stay the same set on every page", () => {
   const access = buildModuleAccess({ role: "admin" });
   assert.deepEqual(pinnedModuleKeysForAccess(access), [

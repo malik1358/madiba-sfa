@@ -171,23 +171,40 @@ export async function resolveSnapshotKeyForUser(admin, userId) {
   return buildSnapshotKey(collectionScope, customerScope);
 }
 
+export async function markSnapshotsRequiringRebuild(admin, options = {}) {
+  const meta = await readSnapshotMeta(admin);
+  const requiredVersion = Number(options.version || Date.now());
+  await writeSnapshotMeta(admin, {
+    ...meta,
+    requiredVersion,
+    staleReason: String(options.trigger || "upload"),
+    staleAt: new Date().toISOString(),
+  });
+  return requiredVersion;
+}
+
 export async function getMobileFieldSnapshotForUser(admin, userId) {
   const snapshotKey = await resolveSnapshotKeyForUser(admin, userId);
+  const meta = await readSnapshotMeta(admin);
+  const requiredVersion = Number(meta.requiredVersion || 0);
   let snapshot = await readMobileFieldSnapshot(admin, snapshotKey);
 
-  if (!snapshot) {
+  if (!snapshot || Number(snapshot.version || 0) < requiredVersion) {
     snapshot = await buildMobileFieldSnapshot(admin, userId);
     await saveMobileFieldSnapshot(admin, snapshot);
-    const meta = await readSnapshotMeta(admin);
-    meta[snapshotKey] = {
-      builtAt: snapshot.builtAt,
-      version: snapshot.version,
+    const nextMeta = await readSnapshotMeta(admin);
+    nextMeta.snapshots = {
+      ...(nextMeta.snapshots || {}),
+      [snapshotKey]: {
+        builtAt: snapshot.builtAt,
+        version: snapshot.version,
+      },
     };
-    meta.userSnapshotKeys = {
-      ...(meta.userSnapshotKeys || {}),
+    nextMeta.userSnapshotKeys = {
+      ...(nextMeta.userSnapshotKeys || {}),
       [userId]: snapshotKey,
     };
-    await writeSnapshotMeta(admin, meta);
+    await writeSnapshotMeta(admin, nextMeta);
   }
 
   return snapshot;

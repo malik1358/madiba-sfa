@@ -14,6 +14,56 @@ export function extractMissingProspectsColumn(errorMessage) {
   return schemaCacheStyle?.[1] || "";
 }
 
+export function createOfflineProspectId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function extractOfflineIdFromRemarks(remarks) {
+  const match = String(remarks || "").match(/OfflineId:\s*([A-Za-z0-9]+)/i);
+  return match?.[1] || "";
+}
+
+export function withOfflineIdRemarks(remarks, offlineId) {
+  const id = String(offlineId || "").trim();
+  if (!id) return remarks || null;
+  if (extractOfflineIdFromRemarks(remarks)) return remarks || null;
+  return [String(remarks || "").trim(), `OfflineId: ${id}`].filter(Boolean).join("\n");
+}
+
+export function buildOfflineProspectCustomerCode(offlineId) {
+  const id = String(offlineId || "").trim();
+  return id ? `PROSPECT-OFF-${id}` : "";
+}
+
+export function parseOfflineProspectIdFromCustomerCode(customerCode) {
+  const match = String(customerCode || "").trim().match(/^PROSPECT-OFF-([A-Za-z0-9]+)$/i);
+  return match?.[1] || "";
+}
+
+export async function findProspectByOfflineId(admin, offlineId) {
+  const id = String(offlineId || "").trim();
+  if (!id) return null;
+
+  const { data: byColumn, error: columnError } = await admin
+    .from("prospects")
+    .select("id,salesman_code,company_name,remarks,status,follow_up_date")
+    .eq("offline_id", id)
+    .maybeSingle();
+
+  if (!columnError && byColumn?.id) return byColumn;
+
+  const { data: byRemarks } = await admin
+    .from("prospects")
+    .select("id,salesman_code,company_name,remarks,status,follow_up_date")
+    .ilike("remarks", `%OfflineId: ${id}%`)
+    .limit(5);
+
+  return Array.isArray(byRemarks) && byRemarks.length > 0 ? byRemarks[0] : null;
+}
+
 export async function insertProspectWithColumnFallback(admin, payload) {
   const workingPayload = { ...payload };
   const removedColumns = [];
@@ -66,6 +116,15 @@ export function buildProspectCustomerCode(prospectId) {
   return `PROSPECT-${id}`;
 }
 
+export function resolveProspectCustomerCode(prospect) {
+  if (prospect && typeof prospect === "object") {
+    const offlineId = String(prospect.offline_id || extractOfflineIdFromRemarks(prospect.remarks) || "").trim();
+    if (offlineId) return buildOfflineProspectCustomerCode(offlineId);
+    return buildProspectCustomerCode(prospect.id);
+  }
+  return buildProspectCustomerCode(prospect);
+}
+
 export function parseProspectIdFromCustomerCode(customerCode) {
   const match = String(customerCode || "").trim().match(/^PROSPECT-(\d+)$/i);
   if (!match) return null;
@@ -87,7 +146,7 @@ export function mapProspectOrderNumbers(orders) {
 
   (orders || []).forEach((order) => {
     const code = String(order?.customer_code || "").trim().toUpperCase();
-    if (!/^PROSPECT-\d+$/i.test(code)) return;
+    if (!/^PROSPECT-(?:OFF-)?[A-Z0-9]+$/i.test(code)) return;
 
     const label = formatProspectOrderLabel(order);
     if (!label) return;
@@ -115,7 +174,7 @@ export function enrichProspectsWithOrders(prospects, orders) {
   const orderMap = mapProspectOrderNumbers(orders);
 
   return (prospects || []).map((prospect) => {
-    const code = buildProspectCustomerCode(prospect.id);
+    const code = resolveProspectCustomerCode(prospect);
     const prospectOrders = orderMap.get(code) || [];
     const orderNumbers = prospectOrders.map((order) => order.order_number).filter(Boolean);
 
@@ -152,14 +211,17 @@ export async function listProspectsForScope(admin, scope) {
   return data || [];
 }
 
-export async function fetchProspectOrders(admin, prospectIds) {
-  const allowedIds = new Set(
-    (prospectIds || [])
-      .map((prospectId) => Number(prospectId))
-      .filter((id) => Number.isFinite(id) && id > 0),
+export async function fetchProspectOrders(admin, prospectsOrIds) {
+  const prospects = (prospectsOrIds || []).map((value) => (
+    value && typeof value === "object" ? value : { id: value }
+  ));
+  const allowedCodes = new Set(
+    prospects
+      .map((row) => String(resolveProspectCustomerCode(row) || "").trim().toUpperCase())
+      .filter(Boolean),
   );
 
-  if (allowedIds.size === 0) return [];
+  if (allowedCodes.size === 0) return [];
 
   const { data, error } = await admin
     .from("sales_orders")
@@ -169,15 +231,13 @@ export async function fetchProspectOrders(admin, prospectIds) {
 
   if (error) throw error;
 
-  return (data || []).filter((order) => {
-    const match = String(order.customer_code || "").trim().match(/^PROSPECT-(\d+)$/i);
-    if (!match) return false;
-    return allowedIds.has(Number(match[1]));
-  });
+  return (data || []).filter((order) => (
+    allowedCodes.has(String(order.customer_code || "").trim().toUpperCase())
+  ));
 }
 
 export async function listProspectsWithOrdersForScope(admin, scope) {
   const prospects = await listProspectsForScope(admin, scope);
-  const orders = await fetchProspectOrders(admin, prospects.map((row) => row.id));
+  const orders = await fetchProspectOrders(admin, prospects);
   return enrichProspectsWithOrders(prospects, orders);
 }

@@ -15,7 +15,7 @@ import {
   resolveOutstandingBucketLabels,
   syncOutstandingCustomerFromInvoices,
 } from "../../lib/outstanding";
-import { scheduleMobileFieldSnapshotRebuild } from "../../lib/server/mobileFieldSnapshot.js";
+import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -246,7 +246,17 @@ export async function POST(request) {
         const rebuildAdmin = createClient(supabaseUrl, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false },
         });
-        await scheduleMobileFieldSnapshotRebuild(rebuildAdmin, { trigger: "outstanding-upload" });
+        await publishOfflineDataUpdate(rebuildAdmin, {
+          trigger: "outstanding-upload",
+          kinds: ["outstanding"],
+          contentHash: hashOfflineDataContent({
+            fileName,
+            rowsCount: payload.rowsCount,
+            bucketLabels: payload.bucketLabels,
+            rows: payload.rows,
+            invoices: payload.invoices,
+          }),
+        });
       } catch (rebuildError) {
         console.error("Mobile snapshot rebuild after outstanding upload failed:", rebuildError);
       }

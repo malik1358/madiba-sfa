@@ -2,16 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildOfflineProspectCustomerCode,
   buildProspectCustomerCode,
   enrichProspectsWithOrders,
   formatProspectOrderLabel,
   mapProspectOrderNumbers,
+  resolveProspectCustomerCode,
 } from "../app/lib/prospects.js";
 
 test("buildProspectCustomerCode formats prospect order customer codes", () => {
   assert.equal(buildProspectCustomerCode(126), "PROSPECT-126");
   assert.equal(buildProspectCustomerCode("64"), "PROSPECT-64");
   assert.equal(buildProspectCustomerCode(0), "");
+  assert.equal(buildOfflineProspectCustomerCode("abc123"), "PROSPECT-OFF-abc123");
+  assert.equal(resolveProspectCustomerCode({ offline_id: "abc123", id: 9 }), "PROSPECT-OFF-abc123");
 });
 
 test("formatProspectOrderLabel prefers order_number then falls back to id", () => {
@@ -41,4 +45,11 @@ test("enrichProspectsWithOrders attaches order numbers to prospect rows", () => 
 
   assert.equal(enriched[0].latest_order_number, "SO-200");
   assert.deepEqual(enriched[0].order_numbers, ["SO-200"]);
+});
+
+test("mapProspectOrderNumbers includes offline prospect customer codes", () => {
+  const grouped = mapProspectOrderNumbers([
+    { id: 3, order_number: "SO-OFF", customer_code: "PROSPECT-OFF-abc123", status: "SUBMITTED", created_at: "2026-09-01T10:00:00Z" },
+  ]);
+  assert.equal(grouped.get("PROSPECT-OFF-ABC123")?.[0]?.order_number, "SO-OFF");
 });

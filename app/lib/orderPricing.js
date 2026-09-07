@@ -1,4 +1,11 @@
+import { lookupPositiveRate } from "./itemCodeAliases.js";
 import { parsePricePayload } from "./pricePayload.js";
+import {
+  evaluateOrderSchemes,
+  lookupSchemeApplication,
+  ORDER_SCHEMES_CACHE_KEY,
+  resolveStoredOrderSchemes,
+} from "./orderSchemes.js";
 import {
   getPricedOrderLine,
   normalizePaymentType,
@@ -20,16 +27,21 @@ export function priceOrderLines(lines, {
   cashDiscountMap = {},
   valueDiscountMap = {},
   paymentType = "credit",
+  schemes = [],
 } = {}) {
+  const schemeApplications = evaluateOrderSchemes(lines, schemes);
   return (Array.isArray(lines) ? lines : []).map((line) => {
     const code = normalizeCode(line?.item_code);
     const quantity = toNumber(line?.quantity ?? line?.order_quantity);
+    const scheme = lookupSchemeApplication(schemeApplications, code);
     const priced = getPricedOrderLine({
-      wholesaleRate: toNumber(regionPriceMap[code] ?? line?.rate),
+      wholesaleRate: lookupPositiveRate(regionPriceMap, code, line?.rate ?? line?.wholesaleRate),
       quantity,
       paymentType,
       cashDiscountRate: cashDiscountMap[code] || 0,
       valueDiscountRate: valueDiscountMap[code] || 0,
+      schemeUnitDiscount: scheme.unitDiscount,
+      schemeDiscountedQty: scheme.discountedQty,
     });
 
     return {
@@ -43,7 +55,7 @@ export function priceOrderLines(lines, {
 }
 
 export async function loadCachedPricingCatalog(admin) {
-  const [{ data: defaultRow, error: defaultError }, { data: rulesRow }] = await Promise.all([
+  const [{ data: defaultRow, error: defaultError }, { data: rulesRow }, { data: schemesRow }] = await Promise.all([
     admin
       .from("price_catalog_cache")
       .select("price_map,sheet_items")
@@ -53,6 +65,11 @@ export async function loadCachedPricingCatalog(admin) {
       .from("price_catalog_cache")
       .select("price_map")
       .eq("cache_key", "pricing_rules")
+      .maybeSingle(),
+    admin
+      .from("price_catalog_cache")
+      .select("price_map")
+      .eq("cache_key", ORDER_SCHEMES_CACHE_KEY)
       .maybeSingle(),
   ]);
 
@@ -67,7 +84,10 @@ export async function loadCachedPricingCatalog(admin) {
     sheetItems: Array.isArray(defaultRow?.sheet_items) ? defaultRow.sheet_items : [],
   });
 
-  return parsed;
+  return {
+    ...parsed,
+    schemes: resolveStoredOrderSchemes(schemesRow?.price_map),
+  };
 }
 
 export function resolveCatalogForOrder(catalog, {
@@ -88,5 +108,6 @@ export function resolveCatalogForOrder(catalog, {
     regionPriceMap: regionPriceMapFor(catalog?.regionPriceMaps, region, catalog?.priceMap),
     cashDiscountMap: catalog?.cashDiscountMap || {},
     valueDiscountMap: catalog?.valueDiscountMap || {},
+    schemes: catalog?.schemes || [],
   };
 }

@@ -2,12 +2,27 @@
 
 import { useEffect, useState } from "react";
 import { countPendingOfflineQueue, processOfflineQueue } from "../lib/offlineSyncQueue";
-import { fetchAndHydrateMobileSnapshot } from "../lib/mobileDataCache";
+import { fetchAndHydrateMobileSnapshot, hydrateFoundationFromCache } from "../lib/mobileDataCache";
+import {
+  OFFLINE_DATA_REFRESH_EVENT,
+  refreshOfflineDeviceData,
+} from "../lib/offlineDataRefresh";
 import { getSupabaseClient } from "../lib/supabase";
 
-function hydrateMobileSnapshotIfOnline() {
+async function hydrateMobileSnapshotIfMissing() {
   if (typeof navigator !== "undefined" && !navigator.onLine) return;
-  fetchAndHydrateMobileSnapshot().catch(() => undefined);
+
+  try {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.id) return;
+    const foundation = await hydrateFoundationFromCache(session.user.id);
+    if (Array.isArray(foundation?.customers) && foundation.customers.length > 0) return;
+    await fetchAndHydrateMobileSnapshot();
+  } catch {
+    // Keep using whatever is already saved on the device.
+  }
 }
 
 export default function PwaShell() {
@@ -31,11 +46,11 @@ export default function PwaShell() {
   }, []);
 
   useEffect(() => {
-    hydrateMobileSnapshotIfOnline();
+    hydrateMobileSnapshotIfMissing();
 
     const supabase = getSupabaseClient();
     if (!supabase) {
-      const onOnline = () => hydrateMobileSnapshotIfOnline();
+      const onOnline = () => hydrateMobileSnapshotIfMissing();
       window.addEventListener("online", onOnline);
       return () => window.removeEventListener("online", onOnline);
     }
@@ -43,12 +58,12 @@ export default function PwaShell() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.access_token && (event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED")) {
-        hydrateMobileSnapshotIfOnline();
+      if (session?.access_token && (event === "SIGNED_IN" || event === "INITIAL_SESSION")) {
+        hydrateMobileSnapshotIfMissing();
       }
     });
 
-    const onOnline = () => hydrateMobileSnapshotIfOnline();
+    const onOnline = () => hydrateMobileSnapshotIfMissing();
     window.addEventListener("online", onOnline);
 
     return () => {
@@ -102,6 +117,67 @@ export default function PwaShell() {
     return () => {
       window.removeEventListener("online", syncNow);
       clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onRefresh = (event) => {
+      refreshOfflineDeviceData(event?.detail || {}).catch(() => undefined);
+    };
+    window.addEventListener(OFFLINE_DATA_REFRESH_EVENT, onRefresh);
+
+    const supabase = getSupabaseClient();
+    let cancelled = false;
+    let channel = null;
+
+    async function pollVersion() {
+      try {
+        if (!supabase) return;
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token || cancelled) return;
+        const response = await fetch("/api/offline-data-version", {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload?.version) return;
+        await refreshOfflineDeviceData(payload);
+      } catch {
+        // Keep using saved device data if the version check fails.
+      }
+    }
+
+    pollVersion();
+    const timer = window.setInterval(pollVersion, 30 * 1000);
+
+    if (supabase) {
+      channel = supabase
+        .channel("offline-data-version")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "system_settings",
+            filter: "setting_key=eq.offline_data_version_v1",
+          },
+          (message) => {
+            try {
+              const payload = JSON.parse(message?.new?.setting_value || "null");
+              if (payload) refreshOfflineDeviceData(payload).catch(() => undefined);
+            } catch {
+              pollVersion();
+            }
+          },
+        )
+        .subscribe();
+    }
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener(OFFLINE_DATA_REFRESH_EVENT, onRefresh);
+      if (channel) supabase.removeChannel(channel);
     };
   }, []);
 

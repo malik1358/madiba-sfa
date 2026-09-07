@@ -53,6 +53,41 @@ test("mapSavedOrderLinesToPdfLines keeps stored totals when catalog does not mat
   assert.equal(line.lineTotalInclVat, 1656);
 });
 
+test("mapSavedOrderLinesToPdfLines recovers a zero stored A003234 rate without applying the A005425 scheme", () => {
+  const [line] = mapSavedOrderLinesToPdfLines(
+    [
+      { item_code: "A003234", item_name: "GOLDEN STAR PAPER", quantity: 40, rate: 0, line_value: 0 },
+      { item_code: "A004225", item_name: "TRI STAR PEN", quantity: 1, rate: 243, line_value: 243 },
+    ],
+    {
+      paymentType: "credit",
+      pricingRegion: "dammam",
+      pricingCatalog: {
+        priceMap: { A005425: 52.83, A004225: 243 },
+        regionPriceMaps: { dammam: { A005425: 52.83, A004225: 243 } },
+        cashDiscountMap: {},
+        valueDiscountMap: {},
+        schemes: [{
+          id: "default-a005425-mix-40",
+          name: "A005425 + mix 40 CTN",
+          active: true,
+          rewardItemCode: "A005425",
+          rewardEveryQty: 40,
+          applyTo: "complete_lots",
+          unitDiscountSar: 1.83,
+          qualifierItemCodes: ["A004224", "A004225", "A004226", "A004227"],
+          qualifierMinQty: 1,
+          qualifierMode: "any",
+        }],
+      },
+    }
+  );
+
+  assert.equal(Number(line.rate.toFixed(2)), 52.83);
+  assert.equal(Number(line.schemeDiscountAmount || 0), 0);
+  assert.equal(Boolean(line.applied?.scheme), false);
+});
+
 test("mapSavedOrderLinesToPdfLines fills discount columns when catalog reprices to the saved total", () => {
   const [line] = mapSavedOrderLinesToPdfLines(
     [{ item_code: "A1", item_name: "Item", quantity: 10, rate: 90, line_value: 900 }],

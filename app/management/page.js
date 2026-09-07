@@ -222,6 +222,7 @@ export default function ManagementPage() {
       "visitWithoutOrder",
       "salesmanHierarchy",
       "kpiTargets",
+      "schemes",
       "gpsMap",
       "pendingOrders",
       "newCustomer",

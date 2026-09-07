@@ -1,3 +1,4 @@
+import { lookupPositiveRate } from "./itemCodeAliases.js";
 import { addPdfBuildFooter } from "./buildInfo.js";
 import { appendCreditControlRemarkToPdf } from "./creditApproval.js";
 import { appendMonthlyPerformanceToPdf } from "./orderPdfMonthlyPerformance.js";
@@ -21,6 +22,9 @@ import {
   regionPriceMapFor,
   summarizePricedLines,
 } from "./regionalPricing.js";
+import { evaluateOrderSchemes, lookupSchemeApplication } from "./orderSchemes.js";
+import { loadPricePayload } from "./pricePayload.js";
+import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
 
 export const ORDER_PDF_OUTSTANDING_API = "/api/outstanding";
 export const ORDER_PDF_CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -100,6 +104,7 @@ function fallbackPdfLine(line) {
     valueApplied: Boolean(line?.valueApplied),
     cashDiscountAmount: toAmount(line?.cashDiscountAmount),
     valueDiscountAmount: toAmount(line?.valueDiscountAmount),
+    schemeDiscountAmount: toAmount(line?.schemeDiscountAmount),
     wholesaleLineValue: toAmount(line?.wholesaleLineValue ?? quantity * wholesaleRate),
     lineValue,
     lineTotal: lineValue,
@@ -120,24 +125,28 @@ export function mapSavedOrderLinesToPdfLines(lines = [], {
   const cashDiscountMap = pricingCatalog?.cashDiscountMap || {};
   const valueDiscountMap = pricingCatalog?.valueDiscountMap || {};
   const resolvedPayment = normalizePaymentType(paymentType);
+  const schemeApplications = evaluateOrderSchemes(lines, pricingCatalog?.schemes || []);
 
   return (Array.isArray(lines) ? lines : []).map((line) => {
     const existing = fallbackPdfLine(line);
     const code = String(line?.item_code || "").trim().toUpperCase();
-    const catalogWholesale = toAmount(regionPriceMap[code]);
+    const catalogWholesale = lookupPositiveRate(regionPriceMap, code, 0);
     if (!(catalogWholesale > 0)) return existing;
 
     const cashDiscount = lookupDiscountRate(cashDiscountMap, code);
     const valueDiscount = lookupDiscountRate(valueDiscountMap, code);
+    const scheme = lookupSchemeApplication(schemeApplications, code);
     const priced = getPricedOrderLine({
       wholesaleRate: catalogWholesale,
       quantity: existing.quantity,
       paymentType: resolvedPayment,
       cashDiscountRate: cashDiscount,
       valueDiscountRate: valueDiscount,
+      schemeUnitDiscount: scheme.unitDiscount,
+      schemeDiscountedQty: scheme.discountedQty,
     });
 
-    if (Math.abs(priced.lineValue - existing.lineValue) > 0.05) {
+    if (existing.rate > 0 && Math.abs(priced.lineValue - existing.lineValue) > 0.05) {
       return existing;
     }
 
@@ -255,6 +264,21 @@ export async function enrichOrderPdfLiveData(snapshot, {
     next.outstanding.customer,
     next.outstanding.customerInvoices,
   );
+
+  try {
+    const pricingCatalog = await loadPricePayload("/api/pricing/cache", PRICE_CACHE_KEY);
+    const repriced = mapSavedOrderLinesToPdfLines(next.lines || snapshot.lines || [], {
+      paymentType: next.paymentType || snapshot.paymentType,
+      pricingCatalog,
+      pricingRegion: next.pricingRegion || snapshot.pricingRegion,
+    });
+    const totals = summarizePricedLines(repriced);
+    next.lines = repriced;
+    next.totals = totals;
+    next.grandTotal = totals.amountExclVat;
+  } catch {
+    // Keep the saved snapshot if the live price catalog cannot be loaded.
+  }
 
   return { snapshot: next, analytics };
 }
@@ -414,7 +438,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   });
 
   const summaryBoxWidth = 260;
-  const summaryBoxHeight = 128;
+  const summaryBoxHeight = 144;
   const summaryX = pageWidth - marginX - summaryBoxWidth;
   const bottomMargin = 52;
   let cursorY = y + 16;
@@ -487,6 +511,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     ["Before discount", formatMoneyAmount(pdfTotals.wholesaleTotal)],
     ["Cash discount", pdfTotals.cashDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.cashDiscountTotal) : "None"],
     ["Value discount", pdfTotals.valueDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.valueDiscountTotal) : "None"],
+    ["Scheme discount", pdfTotals.schemeDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.schemeDiscountTotal) : "None"],
     ["Amount without VAT", formatMoneyAmount(subtotal)],
     ["VAT 15%", formatMoneyAmount(vatAmount)],
   ];
@@ -496,8 +521,9 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   });
   doc.setFont(undefined, "bold");
   doc.setFontSize(11);
-  doc.text("Amount after VAT", summaryX + 10, summaryY + 114);
-  doc.text(formatMoneyAmount(totalWithVat), summaryX + summaryBoxWidth - 10, summaryY + 114, { align: "right" });
+  const totalY = summaryY + 16 + summaryRows.length * 16 + 6;
+  doc.text("Amount after VAT", summaryX + 10, totalY);
+  doc.text(formatMoneyAmount(totalWithVat), summaryX + summaryBoxWidth - 10, totalY, { align: "right" });
   doc.setFont(undefined, "normal");
   doc.setFontSize(10);
 

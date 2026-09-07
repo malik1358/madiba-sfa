@@ -3,6 +3,7 @@
 import { Fragment, useDeferredValue, useMemo, useState } from "react";
 import { getPrice, isDoNotUseItem, normalizeCode } from "../lib/helpers";
 import { isBuildingMaterialItem, pickCatalogCategory } from "../../../lib/pricePayload";
+import { formatSchemeDetail, lookupSchemeApplication } from "../../../lib/orderSchemes";
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from "../../../lib/regionalPricing";
 import ExportableTable from "../../../components/ExportableTable";
 
@@ -84,7 +85,7 @@ function buildCatalog(itemCatalog, priceSheetItems, priceList) {
     .sort((left, right) => String(left.item_name || left.item_code).localeCompare(String(right.item_name || right.item_code)));
 }
 
-export default function FullItemList({ itemCatalog, priceSheetItems, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = "credit" }) {
+export default function FullItemList({ itemCatalog, priceSheetItems, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = "credit", schemeApplications = {} }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [expandedCategories, setExpandedCategories] = useState({});
@@ -143,6 +144,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
               <th>Price</th>
               <th>Cash Discount</th>
               <th>Value Discount</th>
+              <th>Scheme</th>
               <th>Qty</th>
               <th>Total</th>
             </tr>
@@ -153,7 +155,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
               return (
                 <Fragment key={group.category}>
                   <tr className="moduleCategoryRow">
-                    <td colSpan={7}>
+                    <td colSpan={8}>
                       <button type="button" className="moduleCategoryToggle" onClick={() => setExpandedCategories((current) => ({ ...current, [group.category]: !current[group.category] }))} aria-expanded={isExpanded}>
                         <span className="moduleCategorySymbol">{isExpanded ? "−" : "+"}</span><strong>{group.category}</strong><small>{group.items.length} items</small>
                       </button>
@@ -165,12 +167,15 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
                     const wholesale = getPrice(priceList, code);
                     const cashDiscount = lookupDiscountRate(cashDiscountMap, code);
                     const valueDiscount = lookupDiscountRate(valueDiscountMap, code);
+                    const scheme = lookupSchemeApplication(schemeApplications, code);
                     const priced = getPricedOrderLine({
                       wholesaleRate: wholesale,
                       quantity: orderQty,
                       paymentType,
                       cashDiscountRate: cashDiscount,
                       valueDiscountRate: valueDiscount,
+                      schemeUnitDiscount: scheme.unitDiscount,
+                      schemeDiscountedQty: scheme.discountedQty,
                     });
                     const nameIsCode = normalizeCode(item.item_name) === normalizeCode(code);
                     return (
@@ -185,6 +190,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
                         </td>
                         <td>{formatAppliedDiscount(cashDiscount, priced.applied.cash)}</td>
                         <td>{formatAppliedDiscount(valueDiscount, priced.applied.value)}</td>
+                        <td>{formatSchemeDetail(scheme)}</td>
                         <td><div className="moduleQtyControl"><button type="button" onClick={() => decreaseOrderQty(code)}>−</button><input type="number" min="0" step="1" inputMode="numeric" value={orderQty || ""} placeholder="0" onChange={(event) => changeOrderQty(code, event.target.value)} /><button type="button" onClick={() => increaseOrderQty(code)}>+</button></div></td>
                         <td>{Number(priced.lineValue || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
                       </tr>
@@ -194,7 +200,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
               );
             })}
             {groups.length === 0 && (
-              <tr><td colSpan={7}>No catalog items match this search.</td></tr>
+              <tr><td colSpan={8}>No catalog items match this search.</td></tr>
             )}
           </tbody>
         </table>

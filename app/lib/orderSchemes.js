@@ -1,3 +1,5 @@
+import { getRelatedItemCodes } from "./itemCodeAliases.js";
+
 export const ORDER_SCHEMES_CACHE_KEY = "order_schemes";
 export const SCHEME_TYPE_CONDITIONAL_UNIT = "conditional_unit_discount";
 
@@ -164,19 +166,26 @@ export function evaluateOrderSchemes(quantities = {}, schemes = []) {
     if (!scheme.active) return;
     if (!qualifierSatisfied(qtyMap, scheme)) return;
 
-    const rewardQty = Number(qtyMap[scheme.rewardItemCode] || 0);
+    const familyCodes = getRelatedItemCodes(scheme.rewardItemCode);
+    const rewardQty = familyCodes.reduce((sum, code) => sum + Number(qtyMap[code] || 0), 0);
     const discountedQty = discountedRewardQty(rewardQty, scheme.rewardEveryQty, scheme.applyTo);
     if (!(discountedQty > 0)) return;
 
-    const current = applications[scheme.rewardItemCode] || emptySchemeApplication();
-    const nextAmount = current.schemeAmount + (discountedQty * scheme.unitDiscountSar);
-    applications[scheme.rewardItemCode] = {
-      unitDiscount: rewardQty > 0 ? nextAmount / rewardQty : 0,
-      discountedQty: rewardQty,
-      schemeAmount: nextAmount,
-      schemeNames: [...current.schemeNames, scheme.name],
-      schemeIds: [...current.schemeIds, scheme.id],
-    };
+    const familyAmount = discountedQty * scheme.unitDiscountSar;
+    familyCodes.forEach((code) => {
+      const codeQty = Number(qtyMap[code] || 0);
+      if (!(codeQty > 0)) return;
+      const shareAmount = rewardQty > 0 ? familyAmount * (codeQty / rewardQty) : 0;
+      const current = applications[code] || emptySchemeApplication();
+      const nextAmount = current.schemeAmount + shareAmount;
+      applications[code] = {
+        unitDiscount: codeQty > 0 ? nextAmount / codeQty : 0,
+        discountedQty: codeQty,
+        schemeAmount: nextAmount,
+        schemeNames: [...current.schemeNames, scheme.name],
+        schemeIds: [...current.schemeIds, scheme.id],
+      };
+    });
   });
 
   return applications;

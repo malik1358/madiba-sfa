@@ -911,6 +911,7 @@ export default function NewOrderPage() {
     accessScope,
     editOrderId,
     language,
+    userRole: accessScope?.role || "",
   });
 
   const schemeApplications = useMemo(

@@ -26,8 +26,14 @@ import {
 } from "../../lib/prospects";
 import { postJsonResilient } from "../../lib/offlineApi";
 import { prospectToOrderCustomer, readLocalProspects, upsertLocalProspect } from "../../lib/offlineProspects";
-import { upsertLocalVisibleCustomer } from "../../lib/mobileDataCache";
+import { fetchVisibleCustomersCached, upsertLocalVisibleCustomer } from "../../lib/mobileDataCache";
 import { getTodayDateKey, validateNextVisitDate } from "../../lib/nextVisitDate";
+import {
+  formatExistingCustomerDuplicateMessage,
+  isValidKsaMobile,
+  lookupExistingCustomersByMobile,
+  normalizeKsaMobile,
+} from "../../lib/customerContact";
 
 const TEXT = {
   title: { en: "New Customer", ar: "عميل جديد" },
@@ -72,6 +78,15 @@ const TEXT = {
   noSuggestedMatches: { en: "No close ERP matches without GPS were found.", ar: "لم يتم العثور على تطابقات ERP قريبة بدون GPS." },
   useSuggestedCustomer: { en: "Use", ar: "استخدام" },
   missingGpsLabel: { en: "No GPS", ar: "بدون GPS" },
+  existingCustomerTitle: { en: "This customer already exists", ar: "هذا العميل موجود مسبقاً" },
+  existingCustomerHint: {
+    en: "A customer with this mobile number is already in the master. Use the existing customer instead of creating a new one.",
+    ar: "يوجد عميل بنفس رقم الجوال في البيانات. استخدم العميل الحالي بدلاً من إنشاء عميل جديد.",
+  },
+  existingCustomerCode: { en: "Customer code", ar: "كود العميل" },
+  existingCustomerName: { en: "Customer name", ar: "اسم العميل" },
+  existingCustomerSalesman: { en: "Salesman", ar: "المندوب" },
+  openExistingCustomer: { en: "Open existing customer", ar: "فتح العميل الحالي" },
   allProspects: { en: "All Prospects", ar: "كل العملاء المحتملين" },
   allProspectsHint: { en: "All registered prospects in your scope, newest first.", ar: "كل العملاء المحتملين المسجلين ضمن صلاحياتك، الأحدث أولاً." },
   searchProspects: { en: "Search prospects", ar: "بحث في العملاء المحتملين" },
@@ -242,6 +257,8 @@ export default function NewCustomerPage() {
   const [loadingLinkSuggestions, setLoadingLinkSuggestions] = useState(false);
   const [prospectSearch, setProspectSearch] = useState("");
   const [loadingProspects, setLoadingProspects] = useState(false);
+  const [visibleCustomers, setVisibleCustomers] = useState([]);
+  const [existingCustomerMatch, setExistingCustomerMatch] = useState(null);
 
   async function loadProspectsList(accessToken) {
     setLoadingProspects(true);
@@ -283,6 +300,44 @@ export default function NewCustomerPage() {
       setLoadingProspects(false);
     }
   }
+
+  async function checkExistingCustomerByMobile(rawMobile) {
+    const normalizedMobile = normalizeKsaMobile(rawMobile);
+    if (!isValidKsaMobile(normalizedMobile)) {
+      setExistingCustomerMatch(null);
+      return null;
+    }
+
+    const supabase = getSupabaseClient();
+    let accessToken = "";
+    if (supabase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      accessToken = session?.access_token || "";
+    }
+
+    const matches = await lookupExistingCustomersByMobile({
+      accessToken,
+      mobile: normalizedMobile,
+      localCustomers: visibleCustomers,
+    });
+    const match = matches[0] || null;
+    setExistingCustomerMatch(match);
+    return match;
+  }
+
+  useEffect(() => {
+    const normalizedMobile = normalizeKsaMobile(form.mobile);
+    if (!isValidKsaMobile(normalizedMobile)) {
+      setExistingCustomerMatch(null);
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      void checkExistingCustomerByMobile(normalizedMobile);
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [form.mobile, visibleCustomers]);
 
   useEffect(() => {
     const englishName = String(form.customer_name_en || "").trim();
@@ -396,6 +451,13 @@ export default function NewCustomerPage() {
           }));
         }
 
+        try {
+          const customersResult = await fetchVisibleCustomersCached(session.access_token, scope);
+          setVisibleCustomers(Array.isArray(customersResult?.data) ? customersResult.data : []);
+        } catch {
+          setVisibleCustomers([]);
+        }
+
         await loadProspectsList(session.access_token);
       } catch (err) {
         setError(err.message || "Unable to load setup data.");
@@ -487,6 +549,14 @@ export default function NewCustomerPage() {
     const normalizedMobile = String(form.mobile || "").replace(/\D/g, "");
     if (!/^05\d{8}$/.test(normalizedMobile)) {
       setError("Mobile must be a valid KSA number with 10 digits starting with 05.");
+      return;
+    }
+
+    const duplicateCustomer = existingCustomerMatch
+      || await checkExistingCustomerByMobile(normalizedMobile);
+    if (duplicateCustomer) {
+      setExistingCustomerMatch(duplicateCustomer);
+      setError(formatExistingCustomerDuplicateMessage({ language, customer: duplicateCustomer }));
       return;
     }
 
@@ -1052,6 +1122,33 @@ export default function NewCustomerPage() {
                 onChange={(e) => setForm({ ...form, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) })}
               />
             </label>
+            {existingCustomerMatch ? (
+              <div className="moduleWarning moduleFieldFull" role="alert">
+                <strong>{t("existingCustomerTitle")}</strong>
+                <p>{t("existingCustomerHint")}</p>
+                <p>
+                  {t("existingCustomerCode")}: <strong>{existingCustomerMatch.customer_code}</strong>
+                </p>
+                <p>
+                  {t("existingCustomerName")}: <strong>{existingCustomerMatch.customer_name}</strong>
+                </p>
+                {existingCustomerMatch.current_salesman_code ? (
+                  <p>
+                    {t("existingCustomerSalesman")}: <strong>{existingCustomerMatch.current_salesman_code}</strong>
+                  </p>
+                ) : null}
+                <Link
+                  className="moduleBackLink"
+                  href={`/management/new-order?${new URLSearchParams({
+                    customer_code: String(existingCustomerMatch.customer_code || ""),
+                    customer_name: String(existingCustomerMatch.customer_name || ""),
+                    salesman_code: String(existingCustomerMatch.current_salesman_code || form.salesman_code || ""),
+                  }).toString()}`}
+                >
+                  {t("openExistingCustomer")}
+                </Link>
+              </div>
+            ) : null}
             <label>
               WhatsApp
               <input className="moduleInput" value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
@@ -1142,7 +1239,7 @@ export default function NewCustomerPage() {
               <textarea className="moduleTextArea" rows={4} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </label>
             <div className="moduleFieldFull">
-              <button className="modulePrimaryButton" type="submit" disabled={saving || !prospectsEnabled || Boolean(savedProspect)}>
+              <button className="modulePrimaryButton" type="submit" disabled={saving || !prospectsEnabled || Boolean(savedProspect) || Boolean(existingCustomerMatch)}>
                 {saving ? "Saving..." : "Save Prospect"}
               </button>
             </div>

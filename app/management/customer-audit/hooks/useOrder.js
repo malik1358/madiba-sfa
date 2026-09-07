@@ -5,6 +5,7 @@ import {
 } from '../../../lib/customerLocation';
 import { postJsonResilient } from '../../../lib/offlineApi';
 import { upsertLocalPendingOrder } from '../../../lib/mobileDataCache';
+import { promptCustomerMobileUpdateIfMissing } from '../../../lib/customerContact';
 import { buildQueuedPendingOrderId } from '../../../lib/queuedSalesOrders';
 import { resolveGpsCapturePlatform } from '../../../lib/geo';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
@@ -260,6 +261,15 @@ export function useOrder({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please login again.');
 
+      await promptCustomerMobileUpdateIfMissing({
+        language,
+        customer: selectedCustomer,
+        customerCode: selectedCustomer.customer_code,
+        customerName: selectedCustomer.customer_name,
+        accessToken: session.access_token,
+        scope: accessScope,
+      });
+
       const location = await captureGpsLocationWithFallbackConfirm(language, {
         customerCode: selectedCustomer.customer_code,
         customerName: selectedCustomer.customer_name,
@@ -370,6 +380,15 @@ export function useOrder({
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please login again.');
+
+      await promptCustomerMobileUpdateIfMissing({
+        language,
+        customer: selectedCustomer,
+        customerCode: selectedCustomer?.customer_code,
+        customerName: selectedCustomer?.customer_name,
+        accessToken: session.access_token,
+        scope: accessScope,
+      });
 
       const location = await captureGpsLocationWithFallbackConfirm(language, {
         customerCode: selectedCustomer?.customer_code,

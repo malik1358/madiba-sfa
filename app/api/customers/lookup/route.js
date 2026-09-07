@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { ensureCustomerVisibleToScope, withSalesScopeMatchers } from "../../../lib/customerAccess.js";
 import { resolveCustomerMasterExportFields } from "../../../lib/customerCode.js";
+import { findCustomersByMobile, isValidKsaMobile, normalizeKsaMobile } from "../../../lib/customerContact.js";
 import { resolveSalesScopeForUserId } from "../../user/sales-scope/route.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -35,14 +36,32 @@ export async function GET(request) {
 
     const url = new URL(request.url);
     const customerCode = normalizeCode(url.searchParams.get("code") || url.searchParams.get("customerCode") || "");
-    if (!customerCode) {
-      return Response.json({ success: false, error: "Customer code is required" }, { status: 400 });
+    const mobile = normalizeKsaMobile(url.searchParams.get("mobile") || "");
+
+    if (!customerCode && !isValidKsaMobile(mobile)) {
+      return Response.json({ success: false, error: "Customer code or mobile is required" }, { status: 400 });
     }
 
     const user = await getAuthUser(request);
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+
+    if (isValidKsaMobile(mobile) && !customerCode) {
+      const matches = await findCustomersByMobile(admin, mobile);
+      return Response.json({
+        success: true,
+        customers: matches.map((row) => {
+          const display = resolveCustomerMasterExportFields(row);
+          return {
+            customer_code: display.customer_code || row.customer_code,
+            customer_name: display.customer_name || row.customer_name,
+            current_salesman_code: row.current_salesman_code || "",
+            mobile: normalizeKsaMobile(row.mobile) || row.mobile,
+          };
+        }),
+      });
+    }
 
     const payload = await resolveSalesScopeForUserId(admin, user.id);
     const scope = withSalesScopeMatchers({

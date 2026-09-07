@@ -12,6 +12,12 @@ import {
 } from "../../lib/prospects.js";
 import { linkProspectToCustomer, findProspectLinkCustomerSuggestions } from "../../lib/prospectCustomerLink.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
+import {
+  findCustomersByMobile,
+  formatExistingCustomerDuplicateMessage,
+  isValidKsaMobile,
+  normalizeKsaMobile,
+} from "../../lib/customerContact.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -143,11 +149,24 @@ export async function POST(request) {
     }
 
     const offlineId = String(body.offline_id || "").trim();
+    const mobile = normalizeKsaMobile(body.mobile) || String(body.mobile || "").trim() || null;
+    if (isValidKsaMobile(mobile)) {
+      const existingCustomers = await findCustomersByMobile(admin, mobile);
+      if (existingCustomers.length > 0) {
+        const existingCustomer = existingCustomers[0];
+        return NextResponse.json({
+          success: false,
+          error: formatExistingCustomerDuplicateMessage({ customer: existingCustomer }),
+          existingCustomer,
+        }, { status: 409 });
+      }
+    }
+
     const payload = {
       company_name: companyName,
       company_name_ar: String(body.company_name_ar || "").trim() || null,
       contact_person: String(body.contact_person || "").trim() || null,
-      mobile: String(body.mobile || "").trim() || null,
+      mobile,
       city: String(body.city || "").trim() || null,
       area: String(body.area || "").trim() || null,
       latitude: body.latitude == null ? null : Number(body.latitude),

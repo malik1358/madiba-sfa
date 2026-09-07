@@ -29,3 +29,11 @@ test("shouldUseLocalCacheOnly prefers saved data even when online", () => {
   assert.equal(shouldUseLocalCacheOnly(cached, { forceRefresh: true }), false);
   assert.equal(shouldUseLocalCacheOnly(null), false);
 });
+
+test("collection queue cache key version is v5 so empty v4 caches are discarded", async () => {
+  const source = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")
+  ));
+  assert.match(source, /collectionQueues:v5:/);
+  assert.doesNotMatch(source, /collectionQueues:v4:/);
+});

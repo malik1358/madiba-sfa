@@ -5,6 +5,7 @@ import {
   assignOnSiteVisitNumbers,
   buildVisitDaySplit,
   entryDisplayAmount,
+  hideSupersededOrderDrafts,
   loginLogoutLocationNotes,
 } from "../app/lib/dailyVisitReportStats.js";
 
@@ -77,6 +78,28 @@ test("buildVisitDaySplit uses posted order totals when new/repeat fields are mis
   assert.equal(split.newCustomerOrderCount, 3);
   assert.equal(split.newCustomerOrderValue, 15380.6);
   assert.equal(split.repeatCustomerOrderCount, 0);
+});
+
+test("hides a draft that was submitted as the same order", () => {
+  const visible = hideSupersededOrderDrafts([
+    { transactionType: "ORDER_DRAFT", orderId: 88, customerCode: "PROSPECT-308", savedAt: "2026-09-08T07:20:00.000Z" },
+    { transactionType: "ORDER_SUBMITTED", orderId: 88, customerCode: "PROSPECT-308", savedAt: "2026-09-08T07:20:02.000Z" },
+    { transactionType: "ORDER_DRAFT", orderId: 99, customerCode: "1087C", savedAt: "2026-09-08T08:00:00.000Z" },
+  ]);
+
+  assert.equal(visible.length, 2);
+  assert.equal(visible[0].transactionType, "ORDER_SUBMITTED");
+  assert.equal(visible[1].orderId, 99);
+});
+
+test("hides a same-minute draft without order id when submit is for the same customer", () => {
+  const visible = hideSupersededOrderDrafts([
+    { transaction_type: "ORDER_DRAFT", customer_code: "1087C", saved_at: "2026-09-08T09:24:10.000Z", user_id: "u1" },
+    { transaction_type: "ORDER_SUBMITTED", customer_code: "1087C", saved_at: "2026-09-08T09:24:12.000Z", user_id: "u1" },
+  ]);
+
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].transaction_type, "ORDER_SUBMITTED");
 });
 
 test("entryDisplayAmount uses order value when collection amount is empty", () => {

@@ -7,6 +7,9 @@ const ON_SITE_VISIT_TYPES = new Set([
   "ORDER_SUBMITTED",
 ]);
 
+const SUPERSEDED_ORDER_TYPES = new Set(["ORDER_DRAFT", "ORDER_EDITED"]);
+const SUBMIT_PAIR_WINDOW_MS = 2 * 60 * 1000;
+
 export function visitEntryType(entry) {
   return String(entry?.transactionType || entry?.transaction_type || "").trim().toUpperCase();
 }
@@ -20,6 +23,44 @@ function entryCoords(entry) {
   const longitude = Number(entry?.entryLongitude ?? entry?.longitude);
   if (!hasGpsCoordinates({ latitude, longitude })) return null;
   return { latitude, longitude };
+}
+
+function entryOrderId(entry) {
+  const value = Number(entry?.orderId ?? entry?.order_id ?? entry?.meta?.orderId ?? entry?.meta?.order_id);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function entrySavedAtMs(entry) {
+  const value = new Date(entry?.savedAt || entry?.saved_at || "").getTime();
+  return Number.isFinite(value) ? value : NaN;
+}
+
+function draftMatchesSubmit(draft, submit) {
+  const draftOrderId = entryOrderId(draft);
+  const submitOrderId = entryOrderId(submit);
+  if (draftOrderId && submitOrderId) return draftOrderId === submitOrderId;
+
+  const draftUser = String(draft?.userId || draft?.user_id || "").trim();
+  const submitUser = String(submit?.userId || submit?.user_id || "").trim();
+  if (draftUser && submitUser && draftUser !== submitUser) return false;
+
+  const draftCode = normalizeCode(draft?.customerCode || draft?.customer_code);
+  const submitCode = normalizeCode(submit?.customerCode || submit?.customer_code);
+  if (!draftCode || draftCode !== submitCode) return false;
+
+  const delta = Math.abs(entrySavedAtMs(draft) - entrySavedAtMs(submit));
+  return Number.isFinite(delta) && delta <= SUBMIT_PAIR_WINDOW_MS;
+}
+
+export function hideSupersededOrderDrafts(entries = []) {
+  const list = Array.isArray(entries) ? entries : [];
+  const submits = list.filter((entry) => visitEntryType(entry) === "ORDER_SUBMITTED");
+  if (!submits.length) return list;
+
+  return list.filter((entry) => {
+    if (!SUPERSEDED_ORDER_TYPES.has(visitEntryType(entry))) return true;
+    return !submits.some((submit) => draftMatchesSubmit(entry, submit));
+  });
 }
 
 export function isOnSiteCustomerVisit(entry) {

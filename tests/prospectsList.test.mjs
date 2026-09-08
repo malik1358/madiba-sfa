@@ -6,7 +6,11 @@ import {
   buildProspectCustomerCode,
   enrichProspectsWithOrders,
   formatProspectOrderLabel,
+  hiddenProspectCustomerCodes,
+  isOpenProspectForOrderScreens,
   mapProspectOrderNumbers,
+  mergeUniqueCustomersByCode,
+  prospectDisplayName,
   resolveProspectCustomerCode,
 } from "../app/lib/prospects.js";
 
@@ -66,4 +70,36 @@ test("mapProspectOrderNumbers includes offline prospect customer codes", () => {
     { id: 3, order_number: "SO-OFF", customer_code: "PROSPECT-OFF-abc123", status: "SUBMITTED", created_at: "2026-09-01T10:00:00Z" },
   ]);
   assert.equal(grouped.get("PROSPECT-OFF-ABC123")?.[0]?.order_number, "SO-OFF");
+});
+
+test("prospectDisplayName prefers company then shop then customer name", () => {
+  assert.equal(prospectDisplayName({ company_name: "AL NOOR STATIONERY" }), "AL NOOR STATIONERY");
+  assert.equal(prospectDisplayName({ shop_name: "Noor Shop" }), "Noor Shop");
+});
+
+test("open prospect helpers keep unordered prospects and hide ordered or converted ones", () => {
+  const openProspect = { id: 11, company_name: "New Shop" };
+  const orderedProspect = {
+    id: 12,
+    company_name: "Ordered Shop",
+    latest_order_id: 88,
+    order_numbers: ["SO-88"],
+  };
+  const convertedProspect = {
+    id: 13,
+    company_name: "Linked Shop",
+    converted_customer_code: "1173C",
+  };
+
+  assert.equal(isOpenProspectForOrderScreens(openProspect), true);
+  assert.equal(isOpenProspectForOrderScreens(orderedProspect), false);
+  assert.equal(isOpenProspectForOrderScreens(convertedProspect), false);
+  assert.deepEqual([...hiddenProspectCustomerCodes([openProspect, orderedProspect, convertedProspect])].sort(), [
+    "PROSPECT-12",
+    "PROSPECT-13",
+  ]);
+  assert.equal(mergeUniqueCustomersByCode(
+    [{ customer_code: "PROSPECT-11", customer_name: "New Shop" }],
+    [{ customer_code: "prospect-11", customer_name: "Duplicate" }, { customer_code: "1173C", customer_name: "Real" }],
+  ).map((row) => row.customer_code).join(","), "PROSPECT-11,1173C");
 });

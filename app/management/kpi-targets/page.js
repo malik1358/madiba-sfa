@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
-  achievementPercent,
+  buildPerformanceKpi,
   formatAchievementPercent,
   formatPerformanceKpiValue,
   PERFORMANCE_DISPLAY_KPI_KEYS,
@@ -22,8 +22,8 @@ import ExportableTable from "../../components/ExportableTable";
 const TEXT = {
   title: { en: "KPI Targets", ar: "أهداف الأداء" },
   subtitle: {
-    en: "Set monthly Office supplies and Others targets. Total sales is the sum of those two. Collection, New customers, and Repeat customers stay separate.",
-    ar: "حدد أهداف مستلزمات المكتب وغيرها. إجمالي المبيعات هو مجموع الاثنين. التحصيل والعملاء الجدد والمتكررون منفصلون.",
+    en: "Ach. % is actual vs the full month target. The line under it is vs typical sales by this date from the last 6 months, or working days if history is thin.",
+    ar: "نسبة الإنجاز هي الفعلي مقابل هدف الشهر. السطر تحتها يقارن بالمبيعات المعتادة حتى هذا التاريخ من آخر 6 أشهر، أو بأيام العمل إن قلّ التاريخ.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   performance: { en: "My Performance", ar: "أدائي" },
@@ -59,6 +59,9 @@ function emptyDraft(snapshot) {
     newCustomers: String(snapshot.targets?.newCustomers ?? 0),
     repeatCustomers: String(snapshot.targets?.repeatCustomers ?? 0),
     kpis: snapshot.kpis || [],
+    paceShares: snapshot.paceShares || null,
+    todayIso: snapshot.todayIso || null,
+    reportDate: snapshot.reportDate || null,
   };
 }
 
@@ -240,15 +243,23 @@ export default function KpiTargetsPage() {
                             || Number(row.totalSales || 0),
                           )
                           : row[key];
-                        const liveAchievement = isTotalSales
-                          ? achievementPercent(kpi?.actual, targetValue)
-                          : kpi?.achievement;
+                        const liveKpi = buildPerformanceKpi(key, {
+                          actual: kpi?.actual || 0,
+                          target: Number(targetValue || 0),
+                          reportDate: row.reportDate || `${month}-01`,
+                          todayIso: row.todayIso || getKsaDateString(),
+                          paceShares: row.paceShares,
+                        });
+                        const expectedLabel = liveKpi.expected == null
+                          ? ""
+                          : `Expected ${formatAchievementPercent(liveKpi.expected)} by today`;
                         return (
                           <KpiTargetCells
                             key={key}
                             actual={formatPerformanceKpiValue(key, kpi?.actual)}
-                            achievement={formatAchievementPercent(liveAchievement)}
-                            status={kpi?.status?.label || "No target"}
+                            achievement={formatAchievementPercent(liveKpi.achievement)}
+                            status={liveKpi.status?.label || "No target"}
+                            expected={expectedLabel}
                             value={targetValue}
                             readOnly={isTotalSales}
                             onChange={(value) => {
@@ -286,7 +297,7 @@ function FragmentHeader({ group, actual, achievement }) {
   );
 }
 
-function KpiTargetCells({ actual, achievement, status, value, onChange, readOnly = false }) {
+function KpiTargetCells({ actual, achievement, status, expected, value, onChange, readOnly = false }) {
   return (
     <>
       <td>{actual}</td>
@@ -305,6 +316,7 @@ function KpiTargetCells({ actual, achievement, status, value, onChange, readOnly
       <td>
         <div>{achievement}</div>
         <div className="moduleKpiMeta">{status}</div>
+        {expected ? <div className="moduleKpiMeta">{expected}</div> : null}
       </td>
     </>
   );

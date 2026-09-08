@@ -42,8 +42,10 @@ const TEXT = {
 
 const STATUS_LABELS = {
   achieved: { en: "Achieved", ar: "محقق" },
-  on_track: { en: "On track", ar: "على المسار" },
-  behind: { en: "Behind", ar: "متأخر" },
+  ahead: { en: "Ahead of pace", ar: "متقدم عن المسار" },
+  on_pace: { en: "On pace", ar: "على المسار" },
+  on_track: { en: "On pace", ar: "على المسار" },
+  behind: { en: "Behind pace", ar: "متأخر عن المسار" },
   no_target: { en: "No target", ar: "بدون هدف" },
 };
 
@@ -58,7 +60,9 @@ const KPI_LABELS = {
 
 function statusClass(statusKey) {
   if (statusKey === "achieved") return "moduleKpiStatus--achieved";
-  if (statusKey === "on_track") return "moduleKpiStatus--onTrack";
+  if (statusKey === "on_track" || statusKey === "on_pace" || statusKey === "ahead") {
+    return "moduleKpiStatus--onTrack";
+  }
   if (statusKey === "behind") return "moduleKpiStatus--behind";
   return "moduleKpiStatus--neutral";
 }
@@ -215,9 +219,10 @@ export default function MyPerformancePage() {
                   {t("actual")}: {formatPerformanceKpiValue(kpi.key, kpi.actual)}
                   {" · "}
                   {t("target")}: {kpi.target > 0 ? formatPerformanceKpiValue(kpi.key, kpi.target) : "—"}
+                  {kpi.expected != null ? ` · Expected ${formatAchievementPercent(kpi.expected)} by today` : ""}
                 </p>
                 <em className={`moduleKpiStatus ${statusClass(statusKey)}`}>
-                  {STATUS_LABELS[statusKey]?.[language] || kpi.status?.label}
+                  {kpi.status?.label || STATUS_LABELS[statusKey]?.[language] || kpi.status?.label}
                 </em>
               </section>
             );

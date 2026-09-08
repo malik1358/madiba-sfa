@@ -8,10 +8,11 @@ import {
   isMissingSchemaColumn,
   normalizePerformanceTargets,
   normalizeSalesmanCode,
+  averageCumulativeDayShares,
   splitSalesActuals,
   sumCollectionAmount,
 } from "./performanceKpis.js";
-import { ksaDayBounds } from "./workdayActivity.js";
+import { getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
 const TARGET_SELECTS = [
   "id,salesman_code,target_month,sales_target,office_supplies_sales_target,other_sales_target,collection_target,new_buying_customers_target,existing_customers_buying_target,is_approved,updated_at,updated_by",
@@ -128,6 +129,64 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
   };
 }
 
+function shiftMonthStart(iso, monthDelta) {
+  const date = String(iso || "").slice(0, 10);
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  const shifted = new Date(Date.UTC(year, month - 1 + monthDelta, 1));
+  return shifted.toISOString().slice(0, 10);
+}
+
+export async function loadSalesPaceShares(admin, { reportDate } = {}) {
+  const monthStart = monthWindow(reportDate).from;
+  const historyStart = shiftMonthStart(monthStart, -6);
+  const historyLastDay = monthWindow(shiftMonthStart(monthStart, -1)).to;
+
+  if (!(historyStart < monthStart)) {
+    return { company: null, bySalesman: new Map() };
+  }
+
+  let rows = [];
+  try {
+    rows = await fetchPagedRows(
+      admin,
+      "active_sales",
+      "salesman_code,transaction_date,sales_amount",
+      (query) => query
+        .gte("transaction_date", historyStart)
+        .lte("transaction_date", historyLastDay),
+    );
+  } catch (error) {
+    if (!isMissingColumnError(error) && !isMissingTableError(error)) throw error;
+    return { company: null, bySalesman: new Map() };
+  }
+
+  const company = averageCumulativeDayShares(rows);
+  const bySalesman = new Map();
+  const grouped = new Map();
+  (rows || []).forEach((row) => {
+    const code = normalizeSalesmanCode(row.salesman_code);
+    if (!code) return;
+    const list = grouped.get(code) || [];
+    list.push(row);
+    grouped.set(code, list);
+  });
+  grouped.forEach((list, code) => {
+    const curve = averageCumulativeDayShares(list);
+    if (curve.monthCount >= 2) bySalesman.set(code, curve.shares);
+  });
+
+  return {
+    company: company.monthCount >= 2 ? company.shares : null,
+    bySalesman,
+  };
+}
+
+export function paceSharesForSalesman(pace, salesmanCode) {
+  const code = normalizeSalesmanCode(salesmanCode);
+  return pace?.bySalesman?.get(code) || pace?.company || null;
+}
+
 export async function loadCollectionActual(admin, { salesmanCode, reportDate }) {
   const code = normalizeSalesmanCode(salesmanCode);
   if (!code) return 0;
@@ -215,11 +274,14 @@ export async function loadPerformanceSnapshot(admin, {
   salesmanName = "",
   reportDate,
   targetRow = null,
+  todayIso = getKsaDateString(),
+  paceShares = null,
 } = {}) {
   const code = normalizeSalesmanCode(salesmanCode);
-  const [salesActuals, collection] = await Promise.all([
+  const [salesActuals, collection, loadedPace] = await Promise.all([
     loadSalesActuals(admin, { salesmanCode: code, reportDate }),
     loadCollectionActual(admin, { salesmanCode: code, reportDate }),
+    paceShares ? Promise.resolve(null) : loadSalesPaceShares(admin, { reportDate }),
   ]);
   const classified = classifyBuyingCustomers(
     salesActuals.monthCustomerCodes,
@@ -240,6 +302,7 @@ export async function loadPerformanceSnapshot(admin, {
     resolvedTarget = targets.get(code) || null;
   }
 
+  const resolvedPace = paceShares || loadedPace;
   return buildPerformanceSnapshot({
     reportDate,
     salesmanCode: code,
@@ -248,6 +311,8 @@ export async function loadPerformanceSnapshot(admin, {
     targets: resolvedTarget?.targets || emptyPerformanceTargets(),
     updatedAt: resolvedTarget?.updatedAt || null,
     updatedByName: resolvedTarget?.updatedByName || "",
+    todayIso,
+    paceShares: paceSharesForSalesman(resolvedPace, code),
   });
 }
 
@@ -258,7 +323,11 @@ export async function loadPerformanceSnapshotsForSalesmen(admin, {
   const codes = [...new Set(
     (salesmen || []).map((row) => normalizeSalesmanCode(row.salesmanCode || row.salesman_code)).filter(Boolean),
   )];
-  const targetsByCode = await loadKpiTargetsBySalesman(admin, { salesmanCodes: codes, reportDate });
+  const todayIso = getKsaDateString();
+  const [targetsByCode, pace] = await Promise.all([
+    loadKpiTargetsBySalesman(admin, { salesmanCodes: codes, reportDate }),
+    loadSalesPaceShares(admin, { reportDate }),
+  ]);
   return Promise.all((salesmen || []).map((salesman) => {
     const code = normalizeSalesmanCode(salesman.salesmanCode || salesman.salesman_code);
     return loadPerformanceSnapshot(admin, {
@@ -266,6 +335,8 @@ export async function loadPerformanceSnapshotsForSalesmen(admin, {
       salesmanName: salesman.salesmanName || salesman.salesman_name || "",
       reportDate,
       targetRow: targetsByCode.get(code) || null,
+      todayIso,
+      paceShares: pace,
     });
   }));
 }

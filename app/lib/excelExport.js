@@ -40,20 +40,51 @@ export function cellTextFromNode(node) {
   return String(node?.innerText || node?.textContent || "").replace(/\s+/g, " ").trim();
 }
 
+function isGenericColumnFilterInput(element) {
+  return Boolean(element?.classList?.contains?.("moduleTableColumnFilterInput"));
+}
+
+export function isExcelFilterHeaderRow(row) {
+  if (!row) return false;
+  if (row.classList?.contains?.("moduleCollectorFilterRow")) return true;
+  const controls = typeof row.querySelectorAll === "function"
+    ? [...row.querySelectorAll("input, select")]
+    : [];
+  return controls.some((element) => !isGenericColumnFilterInput(element));
+}
+
+function excelHeaderTextFromCell(cell, index) {
+  const labeled = String(cell?.dataset?.columnFilterLabel || "").trim();
+  if (labeled) return labeled;
+
+  const parts = [...(cell?.childNodes || [])]
+    .filter((node) => {
+      if (node.nodeType === 3) return true;
+      if (node.nodeType !== 1) return false;
+      if (node.matches?.("input, select, button, textarea")) return false;
+      return !isGenericColumnFilterInput(node);
+    })
+    .map((node) => cellTextFromNode(node))
+    .filter(Boolean);
+
+  return parts.join(" ").trim() || cellTextFromNode(cell) || `Column ${index + 1}`;
+}
+
 export function rowsFromHtmlTable(table) {
   if (!table) return [];
 
-  const headerRows = [...table.querySelectorAll(":scope > thead > tr")];
+  const headerRows = [...table.querySelectorAll(":scope > thead > tr")]
+    .filter((row) => !isExcelFilterHeaderRow(row));
   const lastHeaderRow = headerRows[headerRows.length - 1];
   const lastHeaderCells = [...(lastHeaderRow?.querySelectorAll(":scope > th, :scope > td") || [])];
   const leadingHeaders = headerRows.length > 1
     ? [...headerRows[0].querySelectorAll(":scope > th, :scope > td")]
       .filter((cell) => Number(cell.rowSpan || 1) > 1)
-      .map((cell) => cell.dataset?.columnFilterLabel || cellTextFromNode(cell))
+      .map((cell, index) => excelHeaderTextFromCell(cell, index))
     : [];
   const headers = [
     ...leadingHeaders,
-    ...lastHeaderCells.map((cell, index) => cell.dataset?.columnFilterLabel || cellTextFromNode(cell) || `Column ${index + 1}`),
+    ...lastHeaderCells.map((cell, index) => excelHeaderTextFromCell(cell, index)),
   ];
   const bodyRows = [...table.querySelectorAll(":scope > tbody > tr")].map((row) => {
     if (row.hidden || row.classList?.contains?.("moduleTableRowFilteredOut")) return null;

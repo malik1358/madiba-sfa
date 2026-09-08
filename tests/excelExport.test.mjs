@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   excelFileStamp,
+  isExcelFilterHeaderRow,
   normalizeExcelFilename,
   rowsFromTableMatrix,
   uniqueExcelHeader,
@@ -32,4 +33,19 @@ test("uniqueExcelHeader keeps duplicate column titles distinct", () => {
   const used = new Set();
   assert.equal(uniqueExcelHeader("Customer", used), "Customer");
   assert.equal(uniqueExcelHeader("Customer", used), "Customer 2");
+});
+
+test("isExcelFilterHeaderRow skips collector filter rows and custom header controls", () => {
+  assert.equal(isExcelFilterHeaderRow({
+    classList: { contains: (name) => name === "moduleCollectorFilterRow" },
+    querySelectorAll: () => [],
+  }), true);
+  assert.equal(isExcelFilterHeaderRow({
+    classList: { contains: () => false },
+    querySelectorAll: () => [{ classList: { contains: () => false } }],
+  }), true);
+  assert.equal(isExcelFilterHeaderRow({
+    classList: { contains: () => false },
+    querySelectorAll: () => [{ classList: { contains: (name) => name === "moduleTableColumnFilterInput" } }],
+  }), false);
 });

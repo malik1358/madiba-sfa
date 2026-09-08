@@ -357,7 +357,7 @@ async function loadSalesmen(admin) {
   const roleFilter = ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"];
   let profilesRes = await admin
     .from("profiles")
-    .select("id,salesman_code,salesman_name,role,is_active,report_email,activity_reminders_enabled")
+    .select("id,salesman_code,salesman_name,role,is_active,report_email,activity_reminders_enabled,stock_take_access")
     .in("role", roleFilter)
     .order("salesman_name");
 
@@ -396,6 +396,7 @@ async function loadSalesmen(admin) {
       role: profile.role || "",
       is_active: profile.is_active !== false,
       activity_reminders_enabled: profile.activity_reminders_enabled !== false,
+      stock_take_access: profile.stock_take_access === true,
       email: authUser?.email || "",
       report_email: String(profile.report_email || "").trim(),
       login_name: displayLoginName(authUser?.email || ""),
@@ -749,6 +750,46 @@ export async function POST(request) {
           ? `Activity reminders are on for ${target.salesman_name || target.salesman_code || salesmanId}.`
           : `Activity reminders are off for ${target.salesman_name || target.salesman_code || salesmanId}. They will not get inactivity or late-login reminders. Background GPS still runs.`,
         activityRemindersEnabled,
+      });
+    }
+
+    if (mode === "set-stock-take-access") {
+      const salesmanId = String(body?.salesmanId || "").trim();
+      const stockTakeAccess = body?.stockTakeAccess === true;
+
+      if (!salesmanId) {
+        return NextResponse.json({ success: false, error: "Missing salesman id." }, { status: 400 });
+      }
+
+      const { data: target, error: targetError } = await admin
+        .from("profiles")
+        .select("id,salesman_code,salesman_name")
+        .eq("id", salesmanId)
+        .single();
+
+      if (targetError) throw targetError;
+
+      const { error: updateError } = await admin
+        .from("profiles")
+        .update({ stock_take_access: stockTakeAccess })
+        .eq("id", salesmanId);
+
+      if (updateError) {
+        if (isMissingSchemaColumn(updateError)) {
+          return NextResponse.json({
+            success: false,
+            error: "Run sql/setup_stock_take.sql in Supabase to store stock take access.",
+          }, { status: 400 });
+        }
+        throw updateError;
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: stockTakeAccess
+          ? `Stock Take access is on for ${target.salesman_name || target.salesman_code || salesmanId}.`
+          : `Stock Take access is off for ${target.salesman_name || target.salesman_code || salesmanId}.`,
+        stockTakeAccess,
       });
     }
 

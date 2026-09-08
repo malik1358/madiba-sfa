@@ -23,6 +23,7 @@ export const MODULES = {
   schemes: { href: "/management/schemes", label: "Schemes" },
   gpsMap: { href: "/management/gps-map", label: "GPS Map" },
   upload: { href: "/management/upload", label: "Imports" },
+  stockTake: { href: "/management/stock-take", label: "Stock Take" },
 };
 
 export const NAV_GROUPS = [
@@ -36,6 +37,11 @@ export const NAV_GROUPS = [
     key: "collections",
     label: "Collections",
     modules: ["paymentCollections", "collectionReport", "dailyVisitReport"],
+  },
+  {
+    key: "warehouse",
+    label: "Warehouse",
+    modules: ["stockTake"],
   },
   {
     key: "admin",
@@ -95,6 +101,7 @@ export function buildModuleAccess(context = {}) {
   const isProductPromoter = isProductPromoterRole(role);
   const isCollector = collectionOnly;
   const isFieldSales = isSalesman || isManager || isAdmin || isInvoiceMaker || isProductPromoter;
+  const stockTakeAccess = isAdmin || Boolean(context.stockTakeAccess);
 
   const access = {
     role,
@@ -125,6 +132,7 @@ export function buildModuleAccess(context = {}) {
       schemes: isAdmin || isManager,
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
       upload: isAdmin || isManager || isInvoiceMaker,
+      stockTake: stockTakeAccess,
     },
   };
 
@@ -188,12 +196,14 @@ export const MODULE_LABELS = {
   schemes: { en: "Schemes", ar: "العروض" },
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },
   upload: { en: "Imports", ar: "الاستيراد" },
+  stockTake: { en: "Stock Take", ar: "جرد المخزون" },
 };
 
 export const NAV_GROUP_LABELS = {
   home: { en: "Home", ar: "الرئيسية" },
   field: { en: "Field Sales", ar: "المبيعات الميدانية" },
   collections: { en: "Collections", ar: "التحصيلات" },
+  warehouse: { en: "Warehouse", ar: "المستودع" },
   admin: { en: "Admin", ar: "الإدارة" },
 };
 

@@ -65,6 +65,13 @@ const TEXT = {
     en: "Uncheck for managers who do not log their own visits or collections. Background GPS still runs so you can see their location. They will not get inactivity or late-login reminders.",
     ar: "ألغِ التحديد للمديرين الذين لا يسجلون زياراتهم أو تحصيلاتهم بأنفسهم. يستمر تتبع الموقع في الخلفية لمعرفة موقعهم. لن تصلهم تذكيرات عدم النشاط أو تأخر تسجيل الدخول.",
   },
+  stockTake: { en: "Stock Take", ar: "جرد المخزون" },
+  stockTakeOn: { en: "On", ar: "تشغيل" },
+  stockTakeOff: { en: "Off", ar: "إيقاف" },
+  stockTakeHint: {
+    en: "Tick to let this user open Stock Take and the scan report. Admins always have access even if this is off.",
+    ar: "حدد للسماح لهذا المستخدم بفتح الجرد وتقرير المسح. المديرون العامون يصلون دائماً حتى لو كان هذا متوقفاً.",
+  },
   saveAll: { en: "Save all", ar: "حفظ الكل" },
   savingAll: { en: "Saving all...", ar: "جاري حفظ الكل..." },
   noChanges: { en: "No changes to save.", ar: "لا توجد تغييرات للحفظ." },
@@ -138,6 +145,7 @@ export default function SalesmanHierarchyPage() {
   const [roleSelections, setRoleSelections] = useState({});
   const [reportEmailSelections, setReportEmailSelections] = useState({});
   const [activityReminderSelections, setActivityReminderSelections] = useState({});
+  const [stockTakeAccessSelections, setStockTakeAccessSelections] = useState({});
   const [newSalesman, setNewSalesman] = useState({
     salesmanName: "",
     salesmanCode: "",
@@ -201,6 +209,9 @@ export default function SalesmanHierarchyPage() {
       );
       setActivityReminderSelections(
         Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.activity_reminders_enabled !== false]))
+      );
+      setStockTakeAccessSelections(
+        Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.stock_take_access === true]))
       );
     } catch (err) {
       setError(err.message || "Unable to load salesman hierarchy.");
@@ -266,6 +277,7 @@ export default function SalesmanHierarchyPage() {
     const nextRegions = normalizePricingRegions(regionSelections[salesman.id] || salesman.pricing_regions || salesman.pricing_region);
     const nextReportEmail = String(reportEmailSelections[salesman.id] || "").trim();
     const nextActivityReminders = activityReminderSelections[salesman.id] !== false;
+    const nextStockTakeAccess = stockTakeAccessSelections[salesman.id] === true;
 
     return {
       nextRole,
@@ -273,11 +285,13 @@ export default function SalesmanHierarchyPage() {
       nextRegions,
       nextReportEmail,
       nextActivityReminders,
+      nextStockTakeAccess,
       roleChanged: nextRole !== normalizeRoleValue(salesman.role),
       headChanged: nextHead !== String(salesman.head_salesman_code || ""),
       regionChanged: !samePricingRegions(nextRegions, salesman.pricing_regions || salesman.pricing_region),
       reportEmailChanged: nextReportEmail !== String(salesman.report_email || "").trim(),
       remindersChanged: nextActivityReminders !== (salesman.activity_reminders_enabled !== false),
+      stockTakeChanged: nextStockTakeAccess !== (salesman.stock_take_access === true),
     };
   }
 
@@ -287,7 +301,8 @@ export default function SalesmanHierarchyPage() {
       || pending.headChanged
       || pending.regionChanged
       || pending.reportEmailChanged
-      || pending.remindersChanged;
+      || pending.remindersChanged
+      || pending.stockTakeChanged;
   }
 
   async function persistSalesmanChanges(salesman) {
@@ -329,6 +344,15 @@ export default function SalesmanHierarchyPage() {
         activityRemindersEnabled: pending.nextActivityReminders,
       });
       messages.push(reminderResult.message || "Activity reminders updated.");
+    }
+
+    if (pending.stockTakeChanged) {
+      const stockTakeResult = await postAction({
+        mode: "set-stock-take-access",
+        salesmanId: salesman.id,
+        stockTakeAccess: pending.nextStockTakeAccess,
+      });
+      messages.push(stockTakeResult.message || "Stock take access updated.");
     }
 
     return messages;
@@ -633,6 +657,7 @@ export default function SalesmanHierarchyPage() {
           </div>
           <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("inactiveHint")}</div>
           <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("activityRemindersHint")}</div>
+          <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("stockTakeHint")}</div>
 
           <ExportableTable filename="salesman-hierarchy" sheetName="Hierarchy" className="moduleTableWrap">
             <table className="moduleTable">
@@ -645,6 +670,7 @@ export default function SalesmanHierarchyPage() {
                   <th>Username</th>
                   <th title="This person's inbox. Heads above them also receive the daily visit report.">Report email</th>
                   <th title={t("activityRemindersHint")}>{t("activityReminders")}</th>
+                  <th title={t("stockTakeHint")}>{t("stockTake")}</th>
                   <th>Current Head</th>
                   <th>Assign Head</th>
                   <th>Default Password</th>
@@ -713,6 +739,19 @@ export default function SalesmanHierarchyPage() {
                           <span>{activityReminderSelections[salesman.id] !== false ? t("remindersOn") : t("remindersOff")}</span>
                         </label>
                       </td>
+                      <td>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                          <input
+                            type="checkbox"
+                            checked={stockTakeAccessSelections[salesman.id] === true}
+                            onChange={(event) => setStockTakeAccessSelections((current) => ({
+                              ...current,
+                              [salesman.id]: event.target.checked,
+                            }))}
+                          />
+                          <span>{stockTakeAccessSelections[salesman.id] === true ? t("stockTakeOn") : t("stockTakeOff")}</span>
+                        </label>
+                      </td>
                       <td>{currentHead ? `${currentHead.salesman_name || currentHead.salesman_code} (${currentHead.salesman_code})` : "-"}</td>
                       <td>
                         <select
@@ -768,7 +807,7 @@ export default function SalesmanHierarchyPage() {
 
                 {salesmen.length === 0 && (
                   <tr>
-                    <td colSpan={11}>No users found.</td>
+                    <td colSpan={12}>No users found.</td>
                   </tr>
                 )}
               </tbody>

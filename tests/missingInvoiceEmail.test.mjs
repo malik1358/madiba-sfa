@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DEFAULT_MISSING_INVOICE_EMAIL_CC,
   DEFAULT_MISSING_INVOICE_EMAIL_TO,
   MISSING_INVOICE_GRACE_MS,
   MISSING_INVOICE_STATUS_NOT_UPLOADED,
@@ -14,7 +15,9 @@ import {
   isRejectedByManagement,
   isTestCustomerName,
   isTestCustomerOrder,
+  isWithinMissingInvoiceEmailWindow,
   missingInvoiceCreatedFromIso,
+  resolveMissingInvoiceEmailCc,
   resolveMissingInvoiceEmailRecipients,
   selectMissingInvoiceOrders,
 } from "../app/lib/missingInvoiceEmail.js";
@@ -44,6 +47,28 @@ test("resolveMissingInvoiceEmailRecipients always includes the default inboxes",
     resolveMissingInvoiceEmailRecipients({ MISSING_INVOICE_EMAIL_TO: "extra@madiba.com, malik@pinasz.com" }),
     [...DEFAULT_MISSING_INVOICE_EMAIL_TO, "extra@madiba.com"],
   );
+});
+
+test("resolveMissingInvoiceEmailCc includes Jenil and extra CC addresses", () => {
+  assert.deepEqual(resolveMissingInvoiceEmailCc({}), DEFAULT_MISSING_INVOICE_EMAIL_CC);
+  assert.deepEqual(
+    resolveMissingInvoiceEmailCc({ MISSING_INVOICE_EMAIL_CC: "extra-cc@madiba.com, jenil.modi@noorshukran.com" }),
+    [...DEFAULT_MISSING_INVOICE_EMAIL_CC, "extra-cc@madiba.com"],
+  );
+  assert.deepEqual(
+    resolveMissingInvoiceEmailCc({}, [...DEFAULT_MISSING_INVOICE_EMAIL_TO, "jenil.modi@noorshukran.com"]),
+    [],
+  );
+});
+
+test("missing invoice emails are limited to Saturday-Thursday 9am-8pm IST", () => {
+  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-07T03:29:00.000Z")), false);
+  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-07T03:30:00.000Z")), true);
+  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-07T10:00:00.000Z")), true);
+  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-07T14:30:00.000Z")), true);
+  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-07T14:45:00.000Z")), false);
+  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-11T10:00:00.000Z")), false);
+  assert.equal(isWithinMissingInvoiceEmailWindow(new Date("2026-09-12T03:30:00.000Z")), true);
 });
 
 test("only orders created from September 2026 KSA are considered", () => {
@@ -135,7 +160,7 @@ test("buildMissingInvoiceAlertEmail lists overdue orders", () => {
   assert.match(message.html, /Ahmed \(SM001\)/);
   assert.match(message.html, /Invoice not uploaded/);
   assert.doesNotMatch(message.html, /Pending for credit approval|Stock unavailable/);
-  assert.match(message.html, /every 15 minutes/);
+  assert.match(message.html, /Saturday–Thursday, 9:00 AM–8:00 PM IST/);
   assert.match(message.text, /from September 2026 onward/);
   assert.match(message.text, /Orders rejected by management, pending credit approval, stock unavailable, test-customer orders, and orders created before September 2026 are excluded/);
   assert.equal(message.orderCount, 1);
@@ -174,11 +199,30 @@ test("runMissingInvoiceEmailCycle sends one digest to the default list", async (
   assert.equal(result.sentCount, 1);
   assert.equal(result.orderCount, 1);
   assert.deepEqual(sent[0].to, DEFAULT_MISSING_INVOICE_EMAIL_TO);
+  assert.deepEqual(sent[0].cc, DEFAULT_MISSING_INVOICE_EMAIL_CC);
+  assert.deepEqual(result.cc, DEFAULT_MISSING_INVOICE_EMAIL_CC);
   assert.match(sent[0].subject, /SO-7|1 order missing invoice/);
+});
+
+test("runMissingInvoiceEmailCycle skips outside India back-office hours", async () => {
+  const result = await runMissingInvoiceEmailCycle({}, {
+    now: new Date("2026-09-11T10:00:00.000Z"),
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    send: async () => {
+      throw new Error("should not send");
+    },
+    loadOrders: async () => {
+      throw new Error("should not load orders");
+    },
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "outside_india_back_office_hours");
 });
 
 test("runMissingInvoiceEmailCycle skips when email is not configured", async () => {
   const result = await runMissingInvoiceEmailCycle({}, {
+    now,
     env: {},
     send: async () => {
       throw new Error("should not send");

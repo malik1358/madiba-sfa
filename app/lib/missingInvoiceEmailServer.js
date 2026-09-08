@@ -4,7 +4,9 @@ import {
   buildMissingInvoiceAlertEmail,
   invoiceMetaKey,
   missingInvoiceCreatedFromIso,
+  isWithinMissingInvoiceEmailWindow,
   parseInvoiceMeta,
+  resolveMissingInvoiceEmailCc,
   resolveMissingInvoiceEmailRecipients,
   selectMissingInvoiceOrders,
 } from "./missingInvoiceEmail.js";
@@ -87,6 +89,15 @@ export async function runMissingInvoiceEmailCycle(admin, {
   send = sendEmail,
   loadOrders = loadMissingInvoiceOrders,
 } = {}) {
+  if (!isWithinMissingInvoiceEmailWindow(now)) {
+    return {
+      skipped: true,
+      reason: "outside_india_back_office_hours",
+      sentCount: 0,
+      orderCount: 0,
+    };
+  }
+
   if (!isEmailConfigured(getMailerConfig(env))) {
     return {
       skipped: true,
@@ -97,6 +108,7 @@ export async function runMissingInvoiceEmailCycle(admin, {
   }
 
   const to = resolveMissingInvoiceEmailRecipients(env);
+  const cc = resolveMissingInvoiceEmailCc(env, to);
   if (!to.length) {
     return {
       skipped: true,
@@ -117,19 +129,21 @@ export async function runMissingInvoiceEmailCycle(admin, {
       sentCount: 0,
       orderCount: 0,
       to,
+      cc,
     };
   }
 
   const message = buildMissingInvoiceAlertEmail({ now, orders, metaByOrder });
 
   try {
-    const sent = await send({ ...message, to }, env);
+    const sent = await send({ ...message, to, cc }, env);
     return {
       skipped: false,
       sentCount: 1,
       failedCount: 0,
       orderCount: message.orderCount,
       to,
+      cc,
       provider: sent?.provider || null,
     };
   } catch (error) {
@@ -139,6 +153,7 @@ export async function runMissingInvoiceEmailCycle(admin, {
       failedCount: 1,
       orderCount: message.orderCount,
       to,
+      cc,
       error: error.message || "Unable to send email",
     };
   }

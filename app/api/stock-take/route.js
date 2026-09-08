@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
-import { isMissingSchemaColumn } from "../../../lib/performanceKpis.js";
+import { isMissingSchemaColumn } from "../../lib/performanceKpis.js";
 import {
   convertEnteredQtyToUnits,
   findItemByBarcode,
@@ -11,12 +11,12 @@ import {
   resolveScannedUom,
   uomLabel,
   warehouseKey,
-} from "../../../lib/stockTake.js";
+} from "../../lib/stockTake.js";
 import {
   parseStockTakeMasterRows,
   parseSystemInventoryRows,
   rowsFromSheetMatrix,
-} from "../../../lib/stockTakeMasterImport.js";
+} from "../../lib/stockTakeMasterImport.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;

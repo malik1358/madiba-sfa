@@ -1072,7 +1072,9 @@ export default function NewOrderPage() {
       try {
         if (options.fast) {
           const orderNumber = formatSalesOrderNumber(snapshot) || snapshot.orderId;
-          const doc = await createOrderPdfDocument(snapshot, { analytics: null });
+          // Keep the already-loaded customer analytics so the Monthly Performance
+          // (historic sales) table still appears without waiting on live lookups.
+          const doc = await createOrderPdfDocument(snapshot, { analytics: analytics || null });
           const fileName = buildOrderPdfFileName({
             orderId: orderNumber || "syncing",
             customerCode: snapshot.customerCode,

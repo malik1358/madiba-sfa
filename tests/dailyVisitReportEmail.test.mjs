@@ -122,6 +122,53 @@ test("buildUserVisitReportEmail includes the user name and timeline", () => {
   assert.match(message.html, /24\.70000, 46\.70000/);
 });
 
+test("buildUserVisitReportEmail appends working hours after the day route", () => {
+  const message = buildUserVisitReportEmail({
+    date: "2026-09-07",
+    user: {
+      userName: "OSAMA (OSAMA)",
+      visitCount: 1,
+      entries: [
+        {
+          savedAt: "2026-09-07T07:34:00.000Z",
+          transactionType: "MORNING_ATTENDANCE",
+          transactionLabel: "Login",
+          hasEntryGps: true,
+          entryLatitude: 24.7,
+          entryLongitude: 46.7,
+        },
+        {
+          savedAt: "2026-09-07T10:47:00.000Z",
+          transactionType: "LUNCH_BREAK_OUT",
+          transactionLabel: "Lunch out",
+          hasEntryGps: true,
+          entryLatitude: 24.71,
+          entryLongitude: 46.71,
+        },
+        {
+          savedAt: "2026-09-07T12:14:00.000Z",
+          transactionType: "LUNCH_BREAK_IN",
+          transactionLabel: "Lunch in",
+          hasEntryGps: true,
+          entryLatitude: 24.71,
+          entryLongitude: 46.71,
+        },
+        {
+          savedAt: "2026-09-07T16:10:00.000Z",
+          transactionType: "END_OF_DAY",
+          transactionLabel: "Logout",
+          hasEntryGps: true,
+          entryLatitude: 24.72,
+          entryLongitude: 46.72,
+        },
+      ],
+    },
+  });
+
+  assert.match(message.html, /Day route/);
+  assert.match(message.html, /Working hours:<\/strong> 7h 9m/);
+});
+
 test("buildUserVisitReportEmail shows posted order values", () => {
   const message = buildUserVisitReportEmail({
     date: "2026-09-05",

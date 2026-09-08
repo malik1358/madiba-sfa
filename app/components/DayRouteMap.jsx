@@ -8,6 +8,7 @@ import {
   buildWorkdayRouteStops,
   idleBubbleRadius,
   longestIdlePlace,
+  resolveDayRouteWorkingHours,
 } from "../lib/dayRouteMap";
 
 export default function DayRouteMap({
@@ -25,12 +26,15 @@ export default function DayRouteMap({
   stopsTitle = "Login, lunch, logout, and idle",
   idleBubblesTitle = "Unlogged idle circles",
   idleBubblesHint = "Bigger red circle = longer time with no visit, order, collection, or lunch logged. Open a circle to see that GPS place.",
+  entries = [],
+  workingHoursTitle = "Working hours",
 }) {
   const svg = buildDayRouteSvg(points, { idleGaps });
   const drivingUrl = buildGoogleRouteUrl(points);
   const longestIdle = longestIdlePlace(points, idleGaps);
   const stops = buildWorkdayRouteStops(points, idleGaps);
   const idleBubbles = buildIdleBubbles(points, idleGaps);
+  const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : points);
   if (!svg) return null;
 
   return (
@@ -123,7 +127,16 @@ export default function DayRouteMap({
               </li>
             ))}
           </ul>
+          {workingHours.value !== "-" ? (
+            <p className="dayRouteMapWorkingHours">
+              <strong>{workingHoursTitle}:</strong> {workingHours.value}
+            </p>
+          ) : null}
         </div>
+      ) : workingHours.value !== "-" ? (
+        <p className="dayRouteMapWorkingHours">
+          <strong>{workingHoursTitle}:</strong> {workingHours.value}
+        </p>
       ) : null}
     </div>
   );

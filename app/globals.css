@@ -6077,6 +6077,11 @@ th:has(.moduleTableColumnFilterInput) {
   line-height: 1.5;
 }
 
+.dayRouteMapWorkingHours {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
 .dayRouteMapStops a {
   font-weight: 700;
 }

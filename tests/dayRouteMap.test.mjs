@@ -10,6 +10,7 @@ import {
   buildWorkdayRouteStops,
   idleBubbleRadius,
   longestIdlePlace,
+  resolveDayRouteWorkingHours,
 } from "../app/lib/dayRouteMap.js";
 
 test("day route map marks GPS pings inside idle gaps as unlogged", () => {
@@ -94,4 +95,25 @@ test("longest idle place uses GPS inside the gap and names the next customer", (
   ]);
   assert.equal(workdayStops.some((stop) => stop.label.includes("Enjaz Gateway")), false);
   assert.equal(workdayStops.some((stop) => stop.kind === "idle"), true);
+});
+
+test("resolveDayRouteWorkingHours excludes lunch between login and logout", () => {
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-07T07:34:00.000Z", transactionType: "MORNING_ATTENDANCE" },
+    { savedAt: "2026-09-07T10:47:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
+    { savedAt: "2026-09-07T12:14:00.000Z", transactionType: "LUNCH_BREAK_IN" },
+    { savedAt: "2026-09-07T16:10:00.000Z", transactionType: "END_OF_DAY" },
+  ]);
+
+  assert.equal(hours.minutes, 429);
+  assert.equal(hours.value, "7h 9m");
+});
+
+test("resolveDayRouteWorkingHours uses login to logout when lunch is missing", () => {
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-07T07:34:00.000Z", type: "MORNING_ATTENDANCE" },
+    { savedAt: "2026-09-07T16:10:00.000Z", type: "END_OF_DAY" },
+  ]);
+
+  assert.equal(hours.value, "8h 36m");
 });

@@ -172,6 +172,45 @@ test("renderOrderPdfDocument draws the new order layout", () => {
   assert.equal(doc.texts.includes("Outstanding Buckets"), false);
 });
 
+test("renderOrderPdfDocument includes the historic Monthly Performance table", () => {
+  const doc = createMockDoc();
+  const snapshot = buildOrderPdfSnapshotFromSavedOrder({
+    order: {
+      id: 346,
+      status: "SUBMITTED",
+      customer_code: "1041",
+      customer_name: "AL KHAMIS ARABIYA TRADING Co.",
+      salesman_code: "ABADALLA ANTHANATH",
+      updated_at: "2026-09-08T02:57:00.000Z",
+    },
+    lines: [{ item_code: "A004379", item_name: "SANDWICH ROLL PAPER", quantity: 20, rate: 49, line_value: 980 }],
+    outstanding: {
+      bucketLabels: ["0-30 days"],
+      customer: { buckets: { "0-30 days": 17164 }, open_invoices: 9, total_outstanding: 30211 },
+      customerInvoices: [],
+    },
+  });
+
+  renderOrderPdfDocument(doc, snapshot, {
+    analytics: {
+      months: ["2026-01", "2026-03", "2026-08"],
+      yearGroups: [{ year: "2026", months: ["2026-01", "2026-03", "2026-08"] }],
+      monthlySummary: [
+        { month: "2026-01", sales: 12000, skuCount: 4 },
+        { month: "2026-03", sales: 8000, skuCount: 3 },
+        { month: "2026-08", sales: 15000, skuCount: 7 },
+      ],
+      itemCount: 14,
+    },
+  });
+
+  assert.ok(doc.texts.includes("Monthly Performance"));
+  assert.ok(doc.texts.includes("Sales"));
+  assert.ok(doc.texts.includes("SKUs Sold"));
+  assert.ok(doc.texts.includes("JAN"));
+  assert.ok(doc.texts.includes("AUG"));
+});
+
 test("renderOrderPdfDocument never prints a pending queue id as the order number", () => {
   const doc = createMockDoc();
   renderOrderPdfDocument(doc, {

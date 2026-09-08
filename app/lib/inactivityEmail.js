@@ -61,7 +61,8 @@ export function buildInactivityAlertEmail({
     `${who} has no visit, order, or collection logged for ${idleLabel}.`,
     `Date (KSA): ${date}`,
     `Login: ${loginTime}`,
-    `Last logged activity: ${lastActivity}`,
+    `Idle since: ${lastActivity}`,
+    `Idle time starts at login or lunch in, then resets only on a visit, submitted order, or collection. Background order updates are ignored.`,
     `This alert is sent every ${INACTIVITY_EMAIL_MINUTES} minutes until 10:00 PM KSA or the next visit, order, or collection, and is skipped during lunch break.`,
   ].join("\n");
 
@@ -71,7 +72,7 @@ export function buildInactivityAlertEmail({
   <table style="border-collapse: collapse; font-size: 14px;">
     <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Date (KSA)</td><td>${escapeHtml(date || "-")}</td></tr>
     <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Login</td><td>${escapeHtml(loginTime)}</td></tr>
-    <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Last logged activity</td><td>${escapeHtml(lastActivity)}</td></tr>
+    <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Idle since</td><td>${escapeHtml(lastActivity)}</td></tr>
   </table>
   <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">An email is sent every ${INACTIVITY_EMAIL_MINUTES} minutes until 10:00 PM KSA to the user and bosses in the reporting hierarchy until the next visit, order, or collection. Lunch break is excluded.</p>
 </div>`;

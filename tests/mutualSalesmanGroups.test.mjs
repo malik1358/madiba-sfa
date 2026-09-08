@@ -84,6 +84,28 @@ test("Abdalla can see Ahmed Nabil customers without sharing his own book back", 
   assert.equal(mergeMutualGroupProfiles([ahmed], profiles, ahmed).some((row) => row.salesman_code === "ABDALLA"), false);
 });
 
+test("Moinudin and Junaid can see Mohammed Mubeen customers without sharing back or to Parvez", () => {
+  const mubeen = { id: "mubeen", salesman_code: "MOHAMMED MUBEEN", salesman_name: "Mohammed Mubeen" };
+  const moinudin = { id: "moinudin", salesman_code: "MOINUDIN", salesman_name: "Moinudin Khaja (MOINUDIN)" };
+  const moinudinFull = { id: "moinudin-full", salesman_code: "MOINUDIN KHAJA", salesman_name: "Moinudin Khaja" };
+  const junaid = { id: "j1", salesman_code: "JUNAID", salesman_name: "Junaid" };
+  const parvez = { id: "p1", salesman_code: "PARVEZ", salesman_name: "Parvez (PARVEZ)" };
+  const profiles = [mubeen, moinudin, junaid, parvez];
+
+  assert.equal(resolveSharedBookProfiles(profiles, moinudin).some((row) => row.id === "mubeen"), true);
+  assert.equal(resolveSharedBookProfiles(profiles, moinudinFull).some((row) => row.id === "mubeen"), true);
+  assert.equal(resolveSharedBookProfiles(profiles, junaid).some((row) => row.id === "mubeen"), true);
+  assert.deepEqual(resolveSharedBookProfiles(profiles, mubeen), []);
+  assert.deepEqual(resolveSharedBookProfiles(profiles, parvez), []);
+  assert.equal(expandMutualGroupScopeIdentities(profiles, moinudin).includes("MOHAMMED MUBEEN"), true);
+  assert.equal(expandMutualGroupScopeIdentities(profiles, junaid).includes("MOHAMMED MUBEEN"), true);
+  assert.equal(expandMutualGroupScopeIdentities(profiles, parvez).includes("MOHAMMED MUBEEN"), false);
+  assert.equal(mergeMutualGroupProfiles([moinudin], profiles, moinudin).some((row) => row.salesman_code === "MOHAMMED MUBEEN"), true);
+  assert.equal(mergeMutualGroupProfiles([junaid], profiles, junaid).some((row) => row.salesman_code === "MOHAMMED MUBEEN"), true);
+  assert.equal(mergeMutualGroupProfiles([mubeen], profiles, mubeen).some((row) => row.salesman_code === "MOINUDIN"), false);
+  assert.equal(mergeMutualGroupProfiles([mubeen], profiles, mubeen).some((row) => row.salesman_code === "JUNAID"), false);
+});
+
 test("isSoyebProfile matches Soyeb name, alias, and ST103 code", () => {
   assert.equal(isSoyebProfile({ salesman_name: "Soyeb", salesman_code: "SOYEB" }), true);
   assert.equal(isSoyebProfile({ salesman_name: "Soyeb (SOYEB)", salesman_code: "ST103" }), true);

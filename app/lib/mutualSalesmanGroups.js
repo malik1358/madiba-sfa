@@ -13,6 +13,23 @@ export const SHARED_CUSTOMER_BOOKS = [
       "ABADALLA.ANTHANATH",
     ],
   },
+  // One-way: Moinudin Khaja and Junaid see Mohammed Mubeen's customers on
+  // My Day, Collection, Visit without order, and New order (via sales-scope).
+  {
+    source: [
+      "MOHAMMED MUBEEN",
+      "MOHAMMAD MUBEEN",
+      "MOHAMMED.MUBEEN",
+      "MOHAMMAD.MUBEEN",
+      "MUBEEN",
+    ],
+    viewers: [
+      "MOINUDIN",
+      "MOINUDIN KHAJA",
+      "MOINUDIN.KHAJA",
+      "JUNAID",
+    ],
+  },
 ];
 
 export function normalizeSalesmanName(value) {

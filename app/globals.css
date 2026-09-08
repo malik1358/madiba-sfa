@@ -4211,6 +4211,18 @@ th:has(.moduleTableColumnFilterInput) {
   vertical-align: top;
 }
 
+.moduleKpiTargetsTable .moduleKpiTargetInput {
+  min-width: 11.5rem;
+  width: 11.5rem;
+  max-width: none;
+  box-sizing: border-box;
+  font-variant-numeric: tabular-nums;
+}
+
+.moduleKpiTargetsTable .moduleKpiTargetInput::-webkit-outer-spin-button,
+.moduleKpiTargetsTable .moduleKpiTargetInput::-webkit-inner-spin-button {
+  height: 1.2em;
+}
 
 .moduleTable td {
   color: #073f4c;
@@ -6149,3 +6161,37 @@ th:has(.moduleTableColumnFilterInput) {
   max-width: 520px;
   margin: 0 0 14px;
 }
+
+.stockTakeShell {
+  max-width: 720px;
+}
+
+.stockTakeCountCard {
+  padding: 16px;
+}
+
+.stockTakeForm {
+  display: grid;
+  gap: 12px;
+}
+
+.stockTakeBarcodeInput {
+  font-size: 22px;
+  min-height: 52px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.stockTakeItemBox {
+  padding: 12px 14px;
+  background: #eef6f7;
+  border: 1px solid #c5d6db;
+  border-radius: 12px;
+}
+
+.stockTakeItemBox strong {
+  display: block;
+  color: #073b49;
+  font-size: 16px;
+}
+

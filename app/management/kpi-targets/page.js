@@ -208,7 +208,7 @@ export default function KpiTargetsPage() {
             <div className="moduleLoading">{t("loading")}</div>
           ) : (
             <ExportableTable filename={`kpi-targets-${month}`} sheetName="KPI Targets" className="moduleTableWrap">
-              <table className="moduleTable moduleStackedHeaderTable">
+              <table className="moduleTable moduleStackedHeaderTable moduleKpiTargetsTable">
                 <thead>
                   <tr>
                     <th rowSpan={2}>{t("salesman")}</th>
@@ -250,7 +250,7 @@ export default function KpiTargetsPage() {
                           todayIso: row.todayIso || getKsaDateString(),
                           paceShares: row.paceShares,
                         });
-                        const expectedLabel = liveKpi.expected == null
+                        const expectedLabel = liveKpi.status?.key === "no_target" || liveKpi.expected == null
                           ? ""
                           : `Expected ${formatAchievementPercent(liveKpi.expected)} by today`;
                         return (
@@ -303,10 +303,12 @@ function KpiTargetCells({ actual, achievement, status, expected, value, onChange
       <td>{actual}</td>
       <td>
         <input
-          className="moduleInput"
+          className="moduleInput moduleKpiTargetInput"
           type="number"
           min="0"
           step="1"
+          size={10}
+          inputMode="numeric"
           value={value}
           readOnly={readOnly}
           disabled={readOnly}

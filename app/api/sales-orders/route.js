@@ -534,7 +534,7 @@ export async function POST(request) {
       pricingRegion: pricedCatalog.region,
     });
 
-    if (requireGps && hasGpsCoordinates(location)) {
+    if (action !== "submit" && requireGps && hasGpsCoordinates(location)) {
       await insertGpsActivityLog(
         admin,
         user.id,

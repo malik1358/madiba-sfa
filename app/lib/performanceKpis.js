@@ -178,10 +178,13 @@ export function averageCumulativeDayShares(salesRows = []) {
 
 export function shareForDay(shares, day) {
   const goalDay = Number(day || 0);
-  if (!shares || !goalDay) return null;
+  const curve = shares?.shares && typeof shares.shares === "object" ? shares.shares : shares;
+  if (!curve || !goalDay) return null;
   for (let cursor = goalDay; cursor >= 1; cursor -= 1) {
-    const value = shares[cursor];
-    if (value != null && Number.isFinite(Number(value))) return Number(value);
+    const value = curve[cursor] ?? curve[String(cursor)];
+    if (value != null && Number.isFinite(Number(value)) && Number(value) > 0) {
+      return Number(value);
+    }
   }
   return null;
 }
@@ -189,9 +192,12 @@ export function shareForDay(shares, day) {
 export function expectedPacePercent(asOfDate, paceShares = null) {
   const date = String(asOfDate || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
+  const workday = ksaWorkdayProgressRatio(date) * 100;
   const historical = shareForDay(paceShares, Number(date.slice(8, 10)));
-  if (historical != null) return Math.min(100, Math.max(0, historical * 100));
-  return ksaWorkdayProgressRatio(date) * 100;
+  if (historical != null && historical > 0) {
+    return Math.min(100, Math.max(0, historical * 100));
+  }
+  return workday;
 }
 
 export function achievementPercent(actual, target) {

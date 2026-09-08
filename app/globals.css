@@ -4211,6 +4211,18 @@ th:has(.moduleTableColumnFilterInput) {
   vertical-align: top;
 }
 
+.moduleKpiTargetsTable .moduleKpiTargetInput {
+  min-width: 11.5rem;
+  width: 11.5rem;
+  max-width: none;
+  box-sizing: border-box;
+  font-variant-numeric: tabular-nums;
+}
+
+.moduleKpiTargetsTable .moduleKpiTargetInput::-webkit-outer-spin-button,
+.moduleKpiTargetsTable .moduleKpiTargetInput::-webkit-inner-spin-button {
+  height: 1.2em;
+}
 
 .moduleTable td {
   color: #073f4c;

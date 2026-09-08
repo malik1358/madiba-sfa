@@ -6,6 +6,7 @@ import {
   averageCumulativeDayShares,
   buildPerformanceSnapshot,
   expectedPacePercent,
+  ksaWorkdayProgressRatio,
   isMissingSchemaColumn,
   classifyBuyingCustomers,
   consolidatePerformanceSnapshots,
@@ -81,6 +82,21 @@ test("expected pace uses historical share of month sales by that date", () => {
   assert.equal(status.key, "behind");
   assert.equal(status.expected, 70);
   assert.match(status.label, /50\.0% behind pace/);
+});
+
+test("expected pace ignores a 0% historical start and uses working days instead", () => {
+  const workday = ksaWorkdayProgressRatio("2026-09-08") * 100;
+  assert.ok(workday > 0);
+  assert.equal(expectedPacePercent("2026-09-08", { 1: 0, 8: 0 }), workday);
+  const status = kpiStatus({
+    actual: 25174,
+    target: 1048916,
+    reportDate: "2026-09-01",
+    todayIso: "2026-09-08",
+    paceShares: { 1: 0, 8: 0 },
+  });
+  assert.notEqual(status.expected, 0);
+  assert.ok(status.expected > 1);
 });
 
 test("splits office supplies sales from other sales", () => {

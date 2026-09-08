@@ -14,6 +14,7 @@ import {
   resolveSubordinateUserIds,
 } from "../../lib/salesHierarchy.js";
 import { assignedSalesmanCodes } from "../../lib/customerSalesmanAssignment.js";
+import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -266,7 +267,7 @@ async function resolveScope(admin, token) {
       return profileCode === inheritedHeadCode || peerIds.has(profile.id);
     });
   } else {
-    const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile);
+    const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile, allProfiles);
 
     members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
 
@@ -276,8 +277,10 @@ async function resolveScope(admin, token) {
     }
   }
 
-  members = mergeMutualGroupProfiles(members, allProfiles, currentProfile);
-  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile);
+  const shareRows = await loadShareRowsForScope(admin, allProfiles);
+  const shareOptions = shareRows == null ? {} : { shareRows };
+  members = mergeMutualGroupProfiles(members, allProfiles, currentProfile, shareOptions);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile, shareOptions);
   const scopeMatchers = buildSalesmanScopeMatchers(members);
   const visibleSalesmanCodes = [...new Set([
     ...members.flatMap((member) => profileCodeCandidates(member)),

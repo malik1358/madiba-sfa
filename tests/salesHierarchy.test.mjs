@@ -80,6 +80,24 @@ test("resolveSubordinateUserIds finds George under Ahmed Nabil", () => {
   assert.equal(subordinates.has("other-id"), false);
 });
 
+test("resolveSubordinateUserIds walks nested subordinates for bosses", () => {
+  const soyeb = { id: "soyeb", salesman_code: "SOYEB", salesman_name: "Soyeb" };
+  const profiles = [
+    soyeb,
+    { id: "nabil", salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil" },
+    { id: "george", salesman_code: "GEORGE", salesman_name: "George" },
+  ];
+  const authUsers = [
+    { id: "soyeb", user_metadata: {} },
+    { id: "nabil", user_metadata: { head_salesman_code: "SOYEB", salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil" } },
+    { id: "george", user_metadata: { head_salesman_code: "AHMED NABIL", salesman_code: "GEORGE", salesman_name: "George" } },
+  ];
+
+  const subordinates = resolveSubordinateUserIds(authUsers, soyeb, profiles);
+  assert.equal(subordinates.has("nabil"), true);
+  assert.equal(subordinates.has("george"), true);
+});
+
 test("customerSalesmanAssignmentMatchesScope accepts subordinate salesman labels", () => {
   const scope = {
     visibleSalesmanCodes: ["AHMED NABIL", "GEORGE"],

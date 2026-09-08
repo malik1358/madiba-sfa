@@ -10,6 +10,7 @@ import {
   mergeMutualGroupProfiles,
   salesmanScopeIdentities,
 } from "../../../lib/mutualSalesmanGroups.js";
+import { loadShareRowsForScope } from "../../../lib/customerBookShares.js";
 import { pricingRegionsFromMetadata } from "../../../lib/regionalPricing.js";
 
 export const runtime = "nodejs";
@@ -142,7 +143,7 @@ export async function resolveSalesScopeForUserId(admin, userId) {
       return profileCode === inheritedHeadCode || peerIds.has(profile.id);
     });
   } else {
-    const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile);
+    const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile, allProfiles);
 
     members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
 
@@ -151,8 +152,10 @@ export async function resolveSalesScopeForUserId(admin, userId) {
     }
   }
 
-  members = mergeMutualGroupProfiles(members, allProfiles, currentProfile);
-  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile);
+  const shareRows = await loadShareRowsForScope(admin, allProfiles);
+  const shareOptions = shareRows == null ? {} : { shareRows };
+  members = mergeMutualGroupProfiles(members, allProfiles, currentProfile, shareOptions);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile, shareOptions);
 
   const visibleMembers = members.map((profile) => {
     const authUser = authMap.get(profile.id);

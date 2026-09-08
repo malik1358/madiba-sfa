@@ -18,6 +18,7 @@ export const MODULES = {
   customerMaster: { href: "/management/customer-master", label: "Customer Master" },
   outstandingNoGps: { href: "/management/outstanding-no-gps", label: "Outstanding Without GPS" },
   salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
+  customerBookShares: { href: "/management/customer-book-shares", label: "Customer Book Shares" },
   kpiTargets: { href: "/management/kpi-targets", label: "KPI Targets" },
   schemes: { href: "/management/schemes", label: "Schemes" },
   gpsMap: { href: "/management/gps-map", label: "GPS Map" },
@@ -39,7 +40,7 @@ export const NAV_GROUPS = [
   {
     key: "admin",
     label: "Admin",
-    modules: ["businessDashboard", "customerMaster", "outstandingNoGps", "userActivity", "salesmanHierarchy", "kpiTargets", "schemes", "gpsMap", "upload"],
+    modules: ["businessDashboard", "customerMaster", "outstandingNoGps", "userActivity", "salesmanHierarchy", "customerBookShares", "kpiTargets", "schemes", "gpsMap", "upload"],
   },
 ];
 
@@ -119,6 +120,7 @@ export function buildModuleAccess(context = {}) {
       customerMaster: isAdmin || isManager,
       outstandingNoGps: isAdmin || isManager,
       salesmanHierarchy: isAdmin || isManager || isInvoiceMaker,
+      customerBookShares: isAdmin || isManager,
       kpiTargets: isAdmin || isManager,
       schemes: isAdmin || isManager,
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
@@ -181,6 +183,7 @@ export const MODULE_LABELS = {
   customerMaster: { en: "Customer Master", ar: "سجل العملاء" },
   outstandingNoGps: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
   salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },
+  customerBookShares: { en: "Customer Book Shares", ar: "مشاركة دفاتر العملاء" },
   kpiTargets: { en: "KPI Targets", ar: "أهداف الأداء" },
   schemes: { en: "Schemes", ar: "العروض" },
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },

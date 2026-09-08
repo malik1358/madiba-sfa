@@ -23,6 +23,15 @@ const STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
 const STATUS_REJECTED = "Rejected by management";
 const STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
 const STATUS_INVOICE_MADE = "Invoice made";
+const QUERY_CHUNK = 150;
+
+function chunkList(items, size = QUERY_CHUNK) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -94,23 +103,31 @@ async function resolveScope(admin, token) {
 
   const authUsers = usersRes.data?.users || [];
   const allProfiles = profilesRes.data || [];
-  const subordinateIds = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role)
+  const hasAllAccess = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role);
+  const subordinateIds = hasAllAccess
     ? new Set()
     : resolveSubordinateUserIds(authUsers, profile, allProfiles);
 
   const visibleProfiles = allProfiles.filter((entry) => {
-    if (["admin", "manager"].includes(role) || isInvoiceMakerRole(role)) return true;
+    if (hasAllAccess) return true;
     return entry.id === profile.id || subordinateIds.has(entry.id);
   });
 
-  const shareRows = await loadShareRowsForScope(admin, allProfiles);
+  let shareRows = null;
+  if (!hasAllAccess) {
+    try {
+      shareRows = await loadShareRowsForScope(admin, allProfiles);
+    } catch {
+      shareRows = null;
+    }
+  }
   const shareOptions = shareRows == null ? {} : { shareRows };
   const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, profile, shareOptions);
 
   return {
     userId: user.id,
     role,
-    hasAllAccess: ["admin", "manager"].includes(role) || isInvoiceMakerRole(role),
+    hasAllAccess,
     visibleUserIds: [...new Set(visibleProfiles.map((entry) => entry.id).filter(Boolean))],
     visibleSalesmanCodes: [...new Set([
       ...visibleProfiles.map((entry) => normalizeCode(entry.salesman_code)).filter(Boolean),
@@ -123,13 +140,17 @@ async function loadOrders(admin, orderIds) {
   const ids = [...new Set((orderIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
   if (ids.length === 0) return [];
 
-  const { data, error } = await admin
-    .from("sales_orders")
-    .select("id,customer_code,created_by,salesman_code")
-    .in("id", ids);
+  const rows = [];
+  for (const chunk of chunkList(ids)) {
+    const { data, error } = await admin
+      .from("sales_orders")
+      .select("id,customer_code,created_by,salesman_code")
+      .in("id", chunk);
 
-  if (error) throw error;
-  return data || [];
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+  return rows;
 }
 
 function canSeeOrder(order, scope) {
@@ -174,21 +195,23 @@ async function readMetaMap(admin, orderIds) {
   const keys = (orderIds || []).map((id) => metaKey(id));
   if (keys.length === 0) return new Map();
 
-  const { data, error } = await admin
-    .from("system_settings")
-    .select("setting_key,setting_value")
-    .in("setting_key", keys);
-
-  if (error) throw error;
-
   const map = new Map();
-  (data || []).forEach((row) => {
-    const payload = parseJson(row.setting_value);
-    if (!payload) return;
-    const id = String(payload.orderId || "").trim();
-    if (!id) return;
-    map.set(id, payload);
-  });
+  for (const keyChunk of chunkList(keys)) {
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_key,setting_value")
+      .in("setting_key", keyChunk);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const payload = parseJson(row.setting_value);
+      if (!payload) return;
+      const id = String(payload.orderId || "").trim();
+      if (!id) return;
+      map.set(id, payload);
+    });
+  }
 
   return map;
 }
@@ -210,11 +233,15 @@ async function hydrateMetaWithComparison(admin, meta, { forceCompare = false } =
 async function withSignedUrl(admin, meta) {
   if (!meta?.invoiceFilePath) return meta;
 
-  const signed = await admin.storage.from(INVOICE_BUCKET).createSignedUrl(meta.invoiceFilePath, 60 * 60 * 24 * 30);
-  return {
-    ...meta,
-    invoiceFileUrl: signed?.data?.signedUrl || "",
-  };
+  try {
+    const signed = await admin.storage.from(INVOICE_BUCKET).createSignedUrl(meta.invoiceFilePath, 60 * 60 * 24 * 30);
+    return {
+      ...meta,
+      invoiceFileUrl: signed?.data?.signedUrl || "",
+    };
+  } catch {
+    return { ...meta, invoiceFileUrl: "" };
+  }
 }
 
 async function upsertMeta(admin, meta) {
@@ -248,7 +275,6 @@ export async function GET(request) {
     const orderIdsCsv = String(url.searchParams.get("orderIds") || "").trim();
 
     const compare = String(url.searchParams.get("compare") || "").trim() === "1";
-    const linkProspects = String(url.searchParams.get("linkProspects") || "").trim() === "1";
 
     if (singleOrderId) {
       const order = await ensureOrderVisible(admin, singleOrderId, scope);
@@ -285,21 +311,12 @@ export async function GET(request) {
       .filter(Boolean);
 
     const metaMap = await readMetaMap(admin, visibleIds);
-
-    if (linkProspects) {
-      const backfill = await backfillProspectInvoiceLinks(admin, orders.filter((order) => canSeeOrder(order, scope)), metaMap, {
-        limit: 20,
-      });
-      for (const meta of Object.values(backfill.updatedMeta)) {
-        await upsertMeta(admin, meta);
-      }
-    }
-
     const items = {};
 
+    // List views only need status metadata. Signed URLs and PDF prospect
+    // backfill run on single-order GET / upload so this request stays fast.
     for (const orderId of visibleIds) {
-      const base = metaMap.get(orderId) || { orderId };
-      items[orderId] = await withSignedUrl(admin, base);
+      items[orderId] = metaMap.get(orderId) || { orderId };
     }
 
     return NextResponse.json({ success: true, items });
@@ -392,6 +409,8 @@ export async function POST(request) {
         updated.invoiceBuildSeconds = diffSeconds;
       }
 
+      await upsertMeta(admin, updated);
+
       let enriched = updated;
       let prospectLink = null;
       try {
@@ -402,12 +421,18 @@ export async function POST(request) {
       }
 
       if (isProspectCustomerCode(order.customer_code)) {
-        const linked = await attachProspectLinkToMeta(admin, order, enriched, arrayBuffer);
-        enriched = linked.meta;
-        prospectLink = linked.prospectLink;
+        try {
+          const linked = await attachProspectLinkToMeta(admin, order, enriched, arrayBuffer);
+          enriched = linked.meta;
+          prospectLink = linked.prospectLink;
+        } catch {
+          prospectLink = null;
+        }
       }
 
-      await upsertMeta(admin, enriched);
+      if (enriched !== updated) {
+        await upsertMeta(admin, enriched);
+      }
       const hydrated = await withSignedUrl(admin, enriched);
 
       return NextResponse.json({ success: true, item: hydrated, prospectLink });

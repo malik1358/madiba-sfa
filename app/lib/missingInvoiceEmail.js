@@ -8,6 +8,10 @@ export const MISSING_INVOICE_GRACE_MS = 60 * 60 * 1000;
 export const MISSING_INVOICE_CREATED_FROM = "2026-09-01";
 export const MISSING_INVOICE_STATUS_REJECTED = "Rejected by management";
 export const MISSING_INVOICE_STATUS_NOT_UPLOADED = "Invoice not uploaded";
+export const IST_TIMEZONE = "Asia/Kolkata";
+export const MISSING_INVOICE_EMAIL_START_MINUTES = 9 * 60;
+export const MISSING_INVOICE_EMAIL_END_MINUTES = 20 * 60;
+export const MISSING_INVOICE_EMAIL_FRIDAY = 5;
 export const DEFAULT_MISSING_INVOICE_EMAIL_TO = [
   "shreyansh.sharma@noorshukran.com",
   "vinit.kulkarni@noorshukran.com",
@@ -16,6 +20,50 @@ export const DEFAULT_MISSING_INVOICE_EMAIL_TO = [
   "ranish@pinasz.com",
   "malik@pinasz.com",
 ];
+export const DEFAULT_MISSING_INVOICE_EMAIL_CC = [
+  "jenil.modi@noorshukran.com",
+];
+
+const IST_WEEKDAY_INDEX = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+export function getIstDateTimeParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: IST_TIMEZONE,
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+  return {
+    weekday: IST_WEEKDAY_INDEX[parts.weekday] ?? 0,
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second),
+  };
+}
+
+export function isWithinMissingInvoiceEmailWindow(date = new Date()) {
+  const parts = getIstDateTimeParts(date);
+  if (parts.weekday === MISSING_INVOICE_EMAIL_FRIDAY) return false;
+  const minutes = parts.hour * 60 + parts.minute;
+  return minutes >= MISSING_INVOICE_EMAIL_START_MINUTES && minutes <= MISSING_INVOICE_EMAIL_END_MINUTES;
+}
 
 export function invoiceMetaKey(orderId) {
   return `order_invoice_meta:${String(orderId || "").trim()}`;
@@ -98,12 +146,22 @@ export function formatMissingInvoiceAge(createdAt, now = new Date()) {
   return formatIdleDuration(Math.max(0, Math.round((now.getTime() - createdMs) / 60000)));
 }
 
-export function resolveMissingInvoiceEmailRecipients(env = process.env) {
-  const configured = parseEmailList(env.MISSING_INVOICE_EMAIL_TO);
-  const defaults = DEFAULT_MISSING_INVOICE_EMAIL_TO
+function mergeEmailList(defaults, extraValue) {
+  const extras = parseEmailList(extraValue);
+  const base = (defaults || [])
     .flatMap((value) => parseEmailList(value))
     .filter((email) => isLikelyEmail(email));
-  return [...new Set([...defaults, ...configured])];
+  return [...new Set([...base, ...extras])];
+}
+
+export function resolveMissingInvoiceEmailRecipients(env = process.env) {
+  return mergeEmailList(DEFAULT_MISSING_INVOICE_EMAIL_TO, env.MISSING_INVOICE_EMAIL_TO);
+}
+
+export function resolveMissingInvoiceEmailCc(env = process.env, to = []) {
+  const recipients = new Set((to || []).map((email) => String(email || "").trim().toLowerCase()));
+  return mergeEmailList(DEFAULT_MISSING_INVOICE_EMAIL_CC, env.MISSING_INVOICE_EMAIL_CC)
+    .filter((email) => !recipients.has(email));
 }
 
 function customerLabel(order) {
@@ -198,7 +256,7 @@ export function buildMissingInvoiceAlertEmail({
     </thead>
     <tbody>${bodyRows}</tbody>
   </table>
-  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">This reminder is sent every 15 minutes while any qualifying order remains.</p>
+  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">This reminder is sent every 15 minutes during India back-office hours (Saturday–Thursday, 9:00 AM–8:00 PM IST) while any qualifying order remains. Friday is a holiday.</p>
 </div>`;
 
   return { subject, text, html, orderCount: count };

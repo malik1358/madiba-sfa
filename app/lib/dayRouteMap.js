@@ -1,5 +1,6 @@
 import { hasGpsCoordinates } from "./geo.js";
 import { formatIdleDuration, formatNarrativeTime } from "./collectionDaySummary.js";
+import { calculateWorkingHoursMinutes, formatWorkingHours } from "./workdayActivity.js";
 
 const KIND_COLORS = {
   stop: "#2563eb",
@@ -177,6 +178,45 @@ export function buildWorkdayRouteStops(points = [], idleGaps = []) {
     stops.push(idlePlaceForGap(points, gap));
   });
   return stops.sort((left, right) => left.ts - right.ts);
+}
+
+function workdayEventIso(item) {
+  if (item?.savedAt) return item.savedAt;
+  if (item?.saved_at) return item.saved_at;
+  const ts = Number(item?.ts);
+  return Number.isFinite(ts) && ts > 0 ? new Date(ts).toISOString() : null;
+}
+
+function workdayEventType(item) {
+  return String(item?.transactionType || item?.transaction_type || item?.type || "").trim().toUpperCase();
+}
+
+export function extractWorkdayTimesFromRoute(source = []) {
+  const ordered = [...(source || [])]
+    .map((item) => {
+      const at = workdayEventIso(item);
+      const ts = Date.parse(String(at || ""));
+      return { type: workdayEventType(item), at, ts };
+    })
+    .filter((item) => item.at && Number.isFinite(item.ts))
+    .sort((left, right) => left.ts - right.ts);
+
+  const times = { loginAt: null, lunchOutAt: null, lunchInAt: null, logoutAt: null };
+  ordered.forEach((item) => {
+    if (item.type === "MORNING_ATTENDANCE" && !times.loginAt) times.loginAt = item.at;
+    if (item.type === "LUNCH_BREAK_OUT" && !times.lunchOutAt) times.lunchOutAt = item.at;
+    if (item.type === "LUNCH_BREAK_IN" && !times.lunchInAt) times.lunchInAt = item.at;
+    if (item.type === "END_OF_DAY") times.logoutAt = item.at;
+  });
+  return times;
+}
+
+export function resolveDayRouteWorkingHours(source = []) {
+  const minutes = calculateWorkingHoursMinutes(extractWorkdayTimesFromRoute(source));
+  return {
+    minutes,
+    value: formatWorkingHours(minutes),
+  };
 }
 
 export function buildNamedRouteStops(points = [], idleGaps = []) {

@@ -84,6 +84,7 @@ const TEXT = {
   openThisPlace: { en: "Open this place", ar: "فتح هذا المكان" },
   openLongestIdle: { en: "Open longest idle in Google Maps", ar: "فتح أطول توقف في خرائط جوجل" },
   routeStops: { en: "Login, lunch, logout, and idle", ar: "الدخول والغداء والخروج والتوقف" },
+  workingHours: { en: "Working hours", ar: "ساعات العمل" },
   visitNumber: { en: "Visit #", ar: "رقم الزيارة" },
   coordinates: { en: "Coordinates", ar: "الإحداثيات" },
   daySplitTitle: { en: "Day split", ar: "تفصيل اليوم" },
@@ -722,6 +723,8 @@ export default function DailyVisitReportPage() {
                     stopsTitle={t("routeStops")}
                     idleBubblesTitle={t("idleBubblesTitle")}
                     idleBubblesHint={t("idleBubblesHint")}
+                    entries={entryUser.entries || []}
+                    workingHoursTitle={t("workingHours")}
                   />
 
                   <div className="visitReportLegend" aria-label={t("tableLegend")}>

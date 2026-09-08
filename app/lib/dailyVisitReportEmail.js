@@ -4,6 +4,7 @@ import {
   buildDayRoutePoints,
   buildDayRouteSvg,
   buildWorkdayRouteStops,
+  resolveDayRouteWorkingHours,
 } from "./dayRouteMap.js";
 import {
   buildVisitDaySplit,
@@ -141,6 +142,10 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
     : buildDayRoutePoints(entries, idleGaps);
   const routeSvg = buildDayRouteSvg(routePoints, { idleGaps, showIdleLabels: false });
   const workdayStops = buildWorkdayRouteStops(routePoints, idleGaps);
+  const workingHoursValue = resolveDayRouteWorkingHours(entries.length ? entries : routePoints).value;
+  const workingHoursHtml = workingHoursValue !== "-"
+    ? `<p style="font-size: 12px; margin: 8px 0 0;"><strong>Working hours:</strong> ${escapeHtml(workingHoursValue)}</p>`
+    : "";
   const activitySplit = user?.activitySplit || buildVisitDaySplit(entries, user?.daySummary?.stats || {});
   const locationNotes = Array.isArray(user?.locationNotes) && user.locationNotes.length
     ? user.locationNotes
@@ -196,7 +201,8 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   const routeHtml = routeSvg
     ? `<h2 style="font-size: 16px;">Day route</h2>
       <div style="margin: 0 0 16px;">${routeSvg}</div>
-      ${workdayStops.length ? `<ul style="font-size: 12px; padding-inline-start: 18px;">${workdayStops.map((stop) => `<li>${escapeHtml(stop.label)}${stop.mapsUrl ? ` · <a href="${escapeHtml(stop.mapsUrl)}">Open this place</a>` : ""}</li>`).join("")}</ul>` : ""}`
+      ${workdayStops.length ? `<ul style="font-size: 12px; padding-inline-start: 18px; margin-bottom: 0;">${workdayStops.map((stop) => `<li>${escapeHtml(stop.label)}${stop.mapsUrl ? ` · <a href="${escapeHtml(stop.mapsUrl)}">Open this place</a>` : ""}</li>`).join("")}</ul>` : ""}
+      ${workingHoursHtml}`
     : "";
 
   const rowsHtml = entries.length

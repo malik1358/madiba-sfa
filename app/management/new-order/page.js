@@ -6,8 +6,15 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
+import { getSessionWithTimeout, withTimeout } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
-import { fetchSalesScope } from "../../lib/salesScope";
+import {
+  fetchItemsMasterCached,
+  fetchSalesScopeCached,
+  fetchVisibleCustomersCached,
+  hydrateFoundationFromCache,
+} from "../../lib/mobileDataCache";
+import { dedupeCustomerMasterRows } from "../../lib/customerMasterQuery";
 import { listLocalProspectsAsCustomers } from "../../lib/offlineProspects";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { evaluateOrderSchemes, formatSchemeDetail, lookupSchemeApplication } from "../../lib/orderSchemes";
@@ -255,12 +262,13 @@ function hasCurrentItemName(value, itemCode = "") {
 
 const MISSING_CATEGORY = "Missing Category";
 
-async function fetchItemCategoryLookup(supabase, scope) {
+async function fetchItemCategoryLookup(supabase, scope, { maxPages = 5 } = {}) {
   const pageSize = 1000;
   let from = 0;
+  let page = 0;
   const lookup = new Map();
 
-  while (true) {
+  while (page < maxPages) {
     let query = supabase
       .from("active_sales")
       .select("id,item_code,item_name,category,salesman_code,transaction_date")
@@ -297,25 +305,35 @@ async function fetchItemCategoryLookup(supabase, scope) {
 
     if (rows.length < pageSize) break;
     from += pageSize;
+    page += 1;
   }
 
   return lookup;
 }
 
-async function fetchVisibleCustomers(token) {
-  const response = await fetch("/api/customers/visible?excludeBuildingMaterial=1", {
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+function mergeOrderWorkspaceCustomers(loadedCustomers, localProspects, prefilledCustomer, editOrderId) {
+  const visibleCustomers = dedupeCustomerMasterRows(
+    (loadedCustomers || []).filter((customer) => !isExcludedNewOrderCustomer(customer)),
+  );
+  const allowPrefilled = Boolean(prefilledCustomer)
+    && (!isExcludedNewOrderCustomer(prefilledCustomer) || Boolean(editOrderId));
+  const withLocalProspects = [
+    ...(Array.isArray(localProspects) ? localProspects : []),
+    ...visibleCustomers,
+  ].filter((customer, index, rows) => {
+    const code = String(customer?.customer_code || "").trim().toUpperCase();
+    if (!code) return false;
+    return rows.findIndex((row) => String(row?.customer_code || "").trim().toUpperCase() === code) === index;
   });
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.success) {
-    throw new Error(payload.error || "Unable to load visible customers.");
+  if (
+    allowPrefilled
+    && !withLocalProspects.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
+  ) {
+    return [prefilledCustomer, ...withLocalProspects];
   }
 
-  return payload.customers || [];
+  return withLocalProspects;
 }
 
 function isRowLike(value) {
@@ -627,28 +645,6 @@ export default function NewOrderPage() {
 
   useEffect(() => {
     void preloadOrderPdfLibrary();
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const params = new URLSearchParams(window.location.search);
-    const customerCode = String(params.get("customer_code") || "").trim();
-    const customerName = String(params.get("customer_name") || "").trim();
-    const salesmanCode = String(params.get("salesman_code") || "").trim();
-    const orderId = String(params.get("order_id") || "").trim();
-
-    if (!customerCode || !customerName) {
-      setPrefilledCustomer(null);
-    } else {
-      setPrefilledCustomer({
-        customer_code: customerCode,
-        customer_name: customerName,
-        current_salesman_code: salesmanCode,
-      });
-    }
-
-    setEditOrderId(orderId);
   }, []);
 
   const mergedItemsMaster = useMemo(() => {
@@ -1364,6 +1360,27 @@ export default function NewOrderPage() {
   }, [lastSavedOrder, shareText]);
 
   useEffect(() => {
+    const LOAD_TIMEOUT_MS = 20000;
+    const SESSION_TIMEOUT_MS = 10000;
+
+    const params = typeof window === "undefined"
+      ? new URLSearchParams()
+      : new URLSearchParams(window.location.search);
+    const customerCode = String(params.get("customer_code") || "").trim();
+    const customerName = String(params.get("customer_name") || "").trim();
+    const salesmanCode = String(params.get("salesman_code") || "").trim();
+    const orderId = String(params.get("order_id") || "").trim();
+    const nextPrefilled = customerCode && customerName
+      ? {
+          customer_code: customerCode,
+          customer_name: customerName,
+          current_salesman_code: salesmanCode,
+        }
+      : null;
+
+    setPrefilledCustomer(nextPrefilled);
+    setEditOrderId(orderId);
+
     async function loadFoundation() {
       const supabase = getSupabaseClient();
       if (!supabase) {
@@ -1371,53 +1388,71 @@ export default function NewOrderPage() {
         return;
       }
 
-      setLoading(true);
       setError("");
+      let shownFromCache = false;
 
       try {
-        const accessToken = await waitForAccessToken(supabase);
+        await withTimeout((async () => {
+          const session = await getSessionWithTimeout(supabase, SESSION_TIMEOUT_MS);
+          if (!session?.access_token) {
+            throw new Error("Please login again.");
+          }
 
-        if (!accessToken) {
-          throw new Error("Please login again.");
-        }
+          const [hydrated, localProspects] = await Promise.all([
+            hydrateFoundationFromCache(session.user.id),
+            listLocalProspectsAsCustomers().catch(() => []),
+          ]);
 
-        const scope = await fetchSalesScope({ forceRefresh: true });
-        setAccessScope(scope);
+          const applyCustomers = (rows) => {
+            setCustomers(mergeOrderWorkspaceCustomers(
+              rows,
+              localProspects,
+              nextPrefilled,
+              orderId,
+            ));
+          };
+          const applyItems = (rows) => {
+            setItemsMaster((rows || []).filter((item) => !isBuildingMaterialItem(item)));
+          };
 
-        const [loadedCustomers, itemsRes, localProspects] = await Promise.all([
-          fetchVisibleCustomers(accessToken).catch(() => []),
-          supabase
-            .from("items_master")
-            .select("item_code,item_name,category")
-            .order("item_name"),
-          listLocalProspectsAsCustomers().catch(() => []),
-        ]);
+          if (hydrated?.scope) {
+            setAccessScope(hydrated.scope);
+          }
+          if (hydrated) {
+            applyCustomers(hydrated.customers);
+            applyItems(hydrated.itemsMaster);
+            if ((hydrated.customers || []).length > 0 || (hydrated.itemsMaster || []).length > 0) {
+              shownFromCache = true;
+              setLoading(false);
+            }
+          }
 
-        if (itemsRes.error) throw itemsRes.error;
+          const scopeResult = await fetchSalesScopeCached({
+            onUpdate: (freshScope) => setAccessScope(freshScope),
+          });
+          const scope = scopeResult.scope;
+          setAccessScope(scope);
 
-        const visibleCustomers = (loadedCustomers || []).filter((customer) => !isExcludedNewOrderCustomer(customer));
-        const allowPrefilled = Boolean(prefilledCustomer)
-          && (!isExcludedNewOrderCustomer(prefilledCustomer) || Boolean(editOrderId));
-        const withLocalProspects = [
-          ...(Array.isArray(localProspects) ? localProspects : []),
-          ...visibleCustomers,
-        ].filter((customer, index, rows) => {
-          const code = String(customer?.customer_code || "").trim().toUpperCase();
-          if (!code) return false;
-          return rows.findIndex((row) => String(row?.customer_code || "").trim().toUpperCase() === code) === index;
-        });
-        const mergedCustomers = allowPrefilled && !withLocalProspects.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
-          ? [prefilledCustomer, ...withLocalProspects]
-          : withLocalProspects;
+          const [customersResult, itemsResult] = await Promise.all([
+            fetchVisibleCustomersCached(session.access_token, scope, {
+              onUpdate: (freshCustomers) => applyCustomers(freshCustomers),
+            }),
+            fetchItemsMasterCached({
+              onUpdate: (freshItems) => applyItems(freshItems?.rows || []),
+            }),
+          ]);
 
-        setCustomers(mergedCustomers);
-        setItemsMaster((itemsRes.data || []).filter((item) => !isBuildingMaterialItem(item)));
+          applyCustomers(customersResult.data);
+          applyItems(itemsResult.data?.rows || []);
 
-        fetchItemCategoryLookup(supabase, scope)
-          .then((categories) => setHistoryCategoryLookup(categories || new Map()))
-          .catch(() => setHistoryCategoryLookup(new Map()));
+          fetchItemCategoryLookup(supabase, scope)
+            .then((categories) => setHistoryCategoryLookup(categories || new Map()))
+            .catch(() => setHistoryCategoryLookup(new Map()));
+        })(), LOAD_TIMEOUT_MS, "Order workspace load timed out. Please refresh the page or login again.");
       } catch (err) {
-        setError(err.message || "Unable to load new order data.");
+        if (!shownFromCache) {
+          setError(err.message || "Unable to load new order data.");
+        }
       } finally {
         setLoading(false);
       }
@@ -1439,7 +1474,7 @@ export default function NewOrderPage() {
 
     loadFoundation();
     loadPrices();
-  }, [editOrderId, prefilledCustomer]);
+  }, []);
 
   useEffect(() => {
     if (!prefilledCustomer?.customer_code) return;

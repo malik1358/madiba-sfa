@@ -35,15 +35,34 @@ export function headSalesmanMetadataMatchesLeader(metadata, leaderProfile) {
   return false;
 }
 
-export function resolveSubordinateUserIds(authUsers, leaderProfile) {
+export function resolveSubordinateUserIds(authUsers, leaderProfile, allProfiles = []) {
   const subordinateIds = new Set();
+  const profileById = new Map((allProfiles || []).map((profile) => [String(profile?.id || ""), profile]));
+  const queue = [leaderProfile].filter(Boolean);
+  const seenLeaders = new Set(
+    [leaderProfile?.id].filter(Boolean).map((id) => String(id)),
+  );
 
-  (authUsers || []).forEach((authUser) => {
-    const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-    if (headSalesmanMetadataMatchesLeader(metadata, leaderProfile)) {
-      subordinateIds.add(authUser.id);
-    }
-  });
+  while (queue.length) {
+    const currentLeader = queue.shift();
+    (authUsers || []).forEach((authUser) => {
+      const authId = String(authUser?.id || "");
+      if (!authId || subordinateIds.has(authId) || seenLeaders.has(authId)) return;
+
+      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
+      if (!headSalesmanMetadataMatchesLeader(metadata, currentLeader)) return;
+
+      subordinateIds.add(authId);
+      seenLeaders.add(authId);
+
+      const nextLeader = profileById.get(authId) || {
+        id: authId,
+        salesman_code: metadata.salesman_code || "",
+        salesman_name: metadata.salesman_name || "",
+      };
+      queue.push(nextLeader);
+    });
+  }
 
   return subordinateIds;
 }

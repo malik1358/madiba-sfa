@@ -9,6 +9,8 @@ import {
 import { attachProspectLinkToMeta, backfillProspectInvoiceLinks } from "../../lib/prospectInvoiceLink.js";
 import { isProspectCustomerCode } from "../../lib/customerCode.js";
 import { expandMutualGroupScopeIdentities } from "../../lib/mutualSalesmanGroups.js";
+import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
+import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -78,7 +80,6 @@ async function resolveScope(admin, token) {
   }
 
   const role = String(profile.role || "").toLowerCase();
-  const currentSalesmanCode = normalizeCode(profile.salesman_code);
 
   const [profilesRes, usersRes] = await Promise.all([
     admin
@@ -92,24 +93,19 @@ async function resolveScope(admin, token) {
   if (usersRes.error) throw usersRes.error;
 
   const authUsers = usersRes.data?.users || [];
-  const subordinateIds = new Set();
-
-  if (!["admin", "manager"].includes(role) && !isInvoiceMakerRole(role)) {
-    authUsers.forEach((authUser) => {
-      const metadata = authUser?.user_metadata || authUser?.app_metadata || {};
-      if (normalizeCode(metadata.head_salesman_code) === currentSalesmanCode) {
-        subordinateIds.add(authUser.id);
-      }
-    });
-  }
-
   const allProfiles = profilesRes.data || [];
+  const subordinateIds = ["admin", "manager"].includes(role) || isInvoiceMakerRole(role)
+    ? new Set()
+    : resolveSubordinateUserIds(authUsers, profile, allProfiles);
+
   const visibleProfiles = allProfiles.filter((entry) => {
     if (["admin", "manager"].includes(role) || isInvoiceMakerRole(role)) return true;
     return entry.id === profile.id || subordinateIds.has(entry.id);
   });
 
-  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, profile);
+  const shareRows = await loadShareRowsForScope(admin, allProfiles);
+  const shareOptions = shareRows == null ? {} : { shareRows };
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, profile, shareOptions);
 
   return {
     userId: user.id,

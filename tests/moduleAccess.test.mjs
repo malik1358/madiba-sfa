@@ -48,9 +48,16 @@ test("invoice-makers can access hierarchy upload and gps map", () => {
   const access = buildModuleAccess({ role: "invoice-maker" });
 
   assert.equal(access.canAccess("salesmanHierarchy"), true);
+  assert.equal(access.canAccess("customerBookShares"), false);
   assert.equal(access.canAccess("upload"), true);
   assert.equal(access.canAccess("gpsMap"), true);
   assert.equal(access.canAccess("userActivity"), false);
+});
+
+test("admins and managers can manage customer book shares", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("customerBookShares"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("customerBookShares"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("customerBookShares"), false);
 });
 
 test("listAccessibleModules returns only allowed modules", () => {

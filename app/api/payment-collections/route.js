@@ -13,6 +13,7 @@ import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { resolveMutualGroupProfiles, expandMutualGroupScopeIdentities, buildSalesmanScopeMatchers, normalizeSalesmanCode, isSoyebProfile } from "../../lib/mutualSalesmanGroups.js";
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
+import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
 import {
   OUTSTANDING_DATASET_KEY,
   buildOutstandingRowSalesmanByCode,
@@ -415,19 +416,19 @@ export async function getSalesScope(admin, userId) {
     visibleSalesmanCodes = [];
   } else {
     try {
-      const { data: allAuthUsers, error: usersError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      const [{ data: allAuthUsers, error: usersError }, { data: teamProfiles }] = await Promise.all([
+        admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+        admin.from("profiles").select("id,salesman_code,salesman_name"),
+      ]);
 
       if (!usersError && allAuthUsers?.users) {
         const subordinateCodes = [normalizedProfileCode];
-        subordinateUserIds = [...resolveSubordinateUserIds(allAuthUsers.users, profile)];
+        subordinateUserIds = [...resolveSubordinateUserIds(allAuthUsers.users, profile, teamProfiles || [])];
 
         if (subordinateUserIds.length > 0) {
-          const { data: subProfiles } = await admin
-            .from("profiles")
-            .select("id,salesman_code,salesman_name,role,email")
-            .in("id", subordinateUserIds);
+          const subProfiles = (teamProfiles || []).filter((entry) => subordinateUserIds.includes(entry.id));
 
-          (subProfiles || []).forEach((subProfile) => {
+          subProfiles.forEach((subProfile) => {
             if (subProfile?.salesman_code) {
               subordinateCodes.push(subProfile.salesman_code);
             }
@@ -439,22 +440,22 @@ export async function getSalesScope(admin, userId) {
 
         visibleSalesmanCodes = subordinateCodes;
       }
-    } catch {
-      visibleSalesmanCodes = [normalizedProfileCode];
-    }
 
-    try {
-      const { data: teamProfiles } = await admin
-        .from("profiles")
-        .select("id,salesman_code,salesman_name");
-
+      const shareRows = await loadShareRowsForScope(admin, teamProfiles || []);
+      const shareOptions = shareRows == null ? {} : { shareRows };
       const mutualProfiles = resolveMutualGroupProfiles(teamProfiles || [], profile);
-      const mutualCodes = expandMutualGroupScopeIdentities(teamProfiles || [], profile);
+      const sharedProfiles = shareRows == null
+        ? []
+        : (shareRows || [])
+          .filter((row) => String(row.viewer_salesman_id) === String(profile.id) && row.is_active !== false)
+          .map((row) => (teamProfiles || []).find((entry) => entry.id === row.source_salesman_id))
+          .filter(Boolean);
+      const mutualCodes = expandMutualGroupScopeIdentities(teamProfiles || [], profile, shareOptions);
       visibleSalesmanCodes = [...new Set([...visibleSalesmanCodes, ...mutualCodes])];
 
       const scopeCodeSet = new Set(visibleSalesmanCodes.map((code) => normalizeSalesmanCode(code)).filter(Boolean));
       const scopeProfilesByKey = new Map();
-      [profile, ...mutualProfiles].forEach((entry) => {
+      [profile, ...mutualProfiles, ...sharedProfiles].forEach((entry) => {
         if (!entry) return;
         const key = String(entry.id || entry.salesman_code || entry.salesman_name || "").trim();
         if (key) scopeProfilesByKey.set(key, entry);
@@ -472,7 +473,7 @@ export async function getSalesScope(admin, userId) {
         const match = (scopeProfiles || []).find((entry) => entry?.id === subordinateId);
         if (match) visibleSchedulerProfiles.push(match);
       });
-      mutualProfiles.forEach((entry) => {
+      [...mutualProfiles, ...sharedProfiles].forEach((entry) => {
         if (entry?.id) visibleSchedulerProfiles.push(entry);
       });
 
@@ -482,7 +483,7 @@ export async function getSalesScope(admin, userId) {
       });
       visibleSchedulerUserIds = [...schedulerIdSet];
     } catch {
-      // Keep the existing scope if team profile lookup fails.
+      visibleSalesmanCodes = [normalizedProfileCode];
     }
   }
 

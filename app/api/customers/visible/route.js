@@ -25,6 +25,7 @@ import {
   resolvePeersUnderSameHeadUserIds,
   resolveSubordinateUserIds,
 } from "../../../lib/salesHierarchy.js";
+import { loadShareRowsForScope } from "../../../lib/customerBookShares.js";
 import { dedupeCustomerMasterRows } from "../../../lib/customerMasterQuery.js";
 import { applyCustomerSalesmanScopeFilter } from "../../../lib/customerSalesmanAssignment.js";
 import { buildSalesMixByCustomer, excludeBuildingMaterialCustomers } from "../../../lib/buildingMaterialCustomerFilter.js";
@@ -188,7 +189,7 @@ async function resolveScopeForUser(admin, user) {
       return profileCode === inheritedHeadCode || peerIds.has(profile.id);
     });
   } else {
-    const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile);
+    const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile, allProfiles);
 
     members = scopedProfiles.filter((profile) => profile.id === currentProfile.id || subordinateIds.has(profile.id));
 
@@ -197,8 +198,10 @@ async function resolveScopeForUser(admin, user) {
     }
   }
 
-  const membersWithTeam = mergeMutualGroupProfiles(members, allProfiles, currentProfile);
-  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile);
+  const shareRows = await loadShareRowsForScope(admin, allProfiles);
+  const shareOptions = shareRows == null ? {} : { shareRows };
+  const membersWithTeam = mergeMutualGroupProfiles(members, allProfiles, currentProfile, shareOptions);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile, shareOptions);
   const scopeMatchers = buildSalesmanScopeMatchers(membersWithTeam);
   const outstandingSalesmanIdentities = [
     ...scopeMatchers.codes,

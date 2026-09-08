@@ -13,6 +13,23 @@ export const SHARED_CUSTOMER_BOOKS = [
       "ABADALLA.ANTHANATH",
     ],
   },
+  // One-way: Moinudin Khaja and Junaid see Mohammed Mubeen's customers on
+  // My Day, Collection, Visit without order, and New order (via sales-scope).
+  {
+    source: [
+      "MOHAMMED MUBEEN",
+      "MOHAMMAD MUBEEN",
+      "MOHAMMED.MUBEEN",
+      "MOHAMMAD.MUBEEN",
+      "MUBEEN",
+    ],
+    viewers: [
+      "MOINUDIN",
+      "MOINUDIN KHAJA",
+      "MOINUDIN.KHAJA",
+      "JUNAID",
+    ],
+  },
 ];
 
 export function normalizeSalesmanName(value) {
@@ -88,17 +105,39 @@ function profileShareIdentities(profile) {
   ].map(normalizeShareIdentity).filter(Boolean))];
 }
 
-function matchesShareIdentities(profile, identities) {
+export function matchesShareIdentities(profile, identities) {
   const wanted = new Set((identities || []).map(normalizeShareIdentity).filter(Boolean));
   if (wanted.size === 0) return false;
   return profileShareIdentities(profile).some((key) => wanted.has(key));
 }
 
-export function resolveSharedBookProfiles(allProfiles, currentProfile) {
+export function resolveSharedBookProfilesFromRows(allProfiles, currentProfile, shareRows) {
+  const viewerId = String(currentProfile?.id || "").trim();
+  if (!viewerId) return [];
+
+  const byId = new Map((allProfiles || []).map((profile) => [String(profile?.id || ""), profile]));
+  const shared = [];
+  const seen = new Set();
+
+  (shareRows || []).forEach((row) => {
+    if (String(row?.viewer_salesman_id || "") !== viewerId) return;
+    if (row?.is_active === false) return;
+    const sourceId = String(row?.source_salesman_id || "");
+    if (!sourceId || seen.has(sourceId)) return;
+    const source = byId.get(sourceId);
+    if (!source) return;
+    seen.add(sourceId);
+    shared.push(source);
+  });
+
+  return shared;
+}
+
+export function resolveSharedBookProfiles(allProfiles, currentProfile, books = SHARED_CUSTOMER_BOOKS) {
   const shared = [];
   const seenIds = new Set();
 
-  (SHARED_CUSTOMER_BOOKS || []).forEach((book) => {
+  (books || []).forEach((book) => {
     if (!matchesShareIdentities(currentProfile, book.viewers)) return;
 
     (allProfiles || []).forEach((profile) => {
@@ -114,6 +153,15 @@ export function resolveSharedBookProfiles(allProfiles, currentProfile) {
   return shared;
 }
 
+function resolveConfiguredSharedBookProfiles(allProfiles, currentProfile, options = {}) {
+  const { shareRows = null, sharedProfiles = null } = options;
+  if (Array.isArray(sharedProfiles)) return sharedProfiles;
+  if (shareRows != null) {
+    return resolveSharedBookProfilesFromRows(allProfiles, currentProfile, shareRows);
+  }
+  return resolveSharedBookProfiles(allProfiles, currentProfile);
+}
+
 export function salesmanScopeIdentities(profile) {
   return [...new Set(profileGroupKeys(profile))];
 }
@@ -125,13 +173,13 @@ export function resolveMutualGroupProfiles(allProfiles, currentProfile) {
   return (allProfiles || []).filter((profile) => matchesMutualGroup(profile, matchedGroup));
 }
 
-export function mergeMutualGroupProfiles(members, allProfiles, currentProfile) {
+export function mergeMutualGroupProfiles(members, allProfiles, currentProfile, options = {}) {
   const merged = [...(members || [])];
   const seenIds = new Set(merged.map((row) => row?.id).filter(Boolean));
 
   [
     ...resolveMutualGroupProfiles(allProfiles, currentProfile),
-    ...resolveSharedBookProfiles(allProfiles, currentProfile),
+    ...resolveConfiguredSharedBookProfiles(allProfiles, currentProfile, options),
   ].forEach((profile) => {
     if (profile?.id && seenIds.has(profile.id)) return;
     if (profile?.id) seenIds.add(profile.id);
@@ -149,11 +197,11 @@ export function resolveMutualGroupCodes(allProfiles, currentProfile) {
   )];
 }
 
-export function expandMutualGroupScopeIdentities(allProfiles, currentProfile) {
+export function expandMutualGroupScopeIdentities(allProfiles, currentProfile, options = {}) {
   return [...new Set(
     [
       ...resolveMutualGroupProfiles(allProfiles, currentProfile),
-      ...resolveSharedBookProfiles(allProfiles, currentProfile),
+      ...resolveConfiguredSharedBookProfiles(allProfiles, currentProfile, options),
     ].flatMap((profile) => salesmanScopeIdentities(profile)),
   )];
 }

@@ -7,6 +7,7 @@ import {
   resolveSubordinateUserIds,
 } from "../../lib/salesHierarchy.js";
 import { assignedSalesmanCodes } from "../../lib/customerSalesmanAssignment.js";
+import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -135,7 +136,7 @@ async function resolveScope(admin, token) {
         normalizeCode(profile.salesman_code) === inheritedHeadCode || peerIds.has(profile.id)
       ));
     } else {
-      const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile);
+      const subordinateIds = resolveSubordinateUserIds(authUsers, currentProfile, allProfiles);
       visibleProfiles = scopedProfiles.filter((profile) => (
         profile.id === currentProfile.id || subordinateIds.has(profile.id)
       ));
@@ -146,8 +147,10 @@ async function resolveScope(admin, token) {
     visibleProfiles = [currentProfile, ...visibleProfiles];
   }
 
-  visibleProfiles = mergeMutualGroupProfiles(visibleProfiles, allProfiles, currentProfile);
-  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile);
+  const shareRows = await loadShareRowsForScope(admin, allProfiles);
+  const shareOptions = shareRows == null ? {} : { shareRows };
+  visibleProfiles = mergeMutualGroupProfiles(visibleProfiles, allProfiles, currentProfile, shareOptions);
+  const mutualGroupCodes = expandMutualGroupScopeIdentities(allProfiles, currentProfile, shareOptions);
   const identitySearchPattern = normalizeCode(extractEmailLocalPart(currentAuthUser?.email)).replace(/[._-]+/g, "%");
   const scopeMatchers = buildSalesmanScopeMatchers(visibleProfiles);
 

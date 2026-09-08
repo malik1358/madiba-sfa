@@ -1,3 +1,4 @@
+import { selectMonthlyPerformanceMonths } from "./monthlyPerformanceMonths.js";
 import { monthName, numberFormat } from "../management/customer-audit/lib/format.js";
 
 const TITLE_HEIGHT = 18;
@@ -36,17 +37,24 @@ export function monthTrend(current, previous, hasPrevious = true) {
   return "same";
 }
 
-export function buildMonthlyPerformancePdfModel(analytics) {
-  const months = Array.isArray(analytics?.months) ? analytics.months : [];
-  const monthlySummary = Array.isArray(analytics?.monthlySummary) ? analytics.monthlySummary : [];
+export function buildMonthlyPerformancePdfModel(analytics, { currentMonthKey } = {}) {
+  const sourceMonths = Array.isArray(analytics?.months) ? analytics.months : [];
+  const sourceSummary = Array.isArray(analytics?.monthlySummary) ? analytics.monthlySummary : [];
+  const months = selectMonthlyPerformanceMonths(sourceMonths, currentMonthKey);
+  const summaryByMonth = new Map(sourceSummary.map((month) => [month.month, month]));
+  const monthlySummary = months.map((month) => summaryByMonth.get(month)).filter(Boolean);
   if (!months.length || monthlySummary.length !== months.length) return null;
 
-  const yearGroups = Array.isArray(analytics?.yearGroups) && analytics.yearGroups.length
-    ? analytics.yearGroups.map((group) => ({
-        year: String(group.year || ""),
-        colSpan: Array.isArray(group.months) ? group.months.length : 0,
-      })).filter((group) => group.year && group.colSpan > 0)
-    : [];
+  const yearGroups = [];
+  months.forEach((month) => {
+    const year = String(month).slice(0, 4);
+    const existing = yearGroups.find((group) => group.year === year);
+    if (existing) {
+      existing.colSpan += 1;
+    } else {
+      yearGroups.push({ year, colSpan: 1 });
+    }
+  });
 
   const salesCells = monthlySummary.map((month, index) => ({
     text: numberFormat(month.sales),

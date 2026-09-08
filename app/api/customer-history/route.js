@@ -15,6 +15,12 @@ import {
 } from "../../lib/salesHierarchy.js";
 import { assignedSalesmanCodes } from "../../lib/customerSalesmanAssignment.js";
 import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
+import {
+  HISTORIC_PERFORMANCE_MONTHS,
+  ksaMonthKey,
+  nextMonthStart,
+  selectMonthlyPerformanceMonths,
+} from "../../lib/monthlyPerformanceMonths.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -22,10 +28,9 @@ export const maxDuration = 60;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const HISTORY_MONTHS = 6;
 const HISTORY_LIMIT = 30000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 9;
+const CACHE_VERSION = 10;
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -177,6 +182,48 @@ function monthStartFromKey(key) {
   const match = String(key || "").match(/^(\d{4})-(\d{2})$/);
   if (!match) return "";
   return `${match[1]}-${match[2]}-01`;
+}
+
+const HISTORY_ROW_SELECT = "id,import_batch_id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class";
+
+async function fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate) {
+  const normalizedInput = normalizeCode(customerCode);
+  const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
+  const leadingCode = normalizeCode(leadingCodeMatch?.[1] || "");
+  const codeCandidates = [...new Set([normalizedInput, leadingCode].filter(Boolean))];
+
+  for (const codeCandidate of codeCandidates) {
+    const { data, error } = await admin
+      .from("sales_raw")
+      .select(HISTORY_ROW_SELECT)
+      .eq("customer_code", codeCandidate)
+      .gte("transaction_date", fromDate)
+      .lt("transaction_date", untilDate)
+      .order("transaction_date", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(5000);
+
+    if (error) throw error;
+    if (Array.isArray(data) && data.length) return data;
+  }
+
+  return [];
+}
+
+async function overlayCurrentMonthTransactions(admin, customerCode, transactions) {
+  const currentKey = ksaMonthKey();
+  const fromDate = monthStartFromKey(currentKey);
+  const untilDate = nextMonthStart(currentKey);
+  if (!fromDate || !untilDate) return Array.isArray(transactions) ? transactions : [];
+
+  try {
+    const live = await fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate);
+    if (!live.length) return Array.isArray(transactions) ? transactions : [];
+    const others = (transactions || []).filter((row) => monthKey(row.transaction_date) !== currentKey);
+    return mergeSalesSnapshots([...others, ...live]);
+  } catch {
+    return Array.isArray(transactions) ? transactions : [];
+  }
 }
 
 function isStaleCache(updatedAt) {
@@ -571,24 +618,29 @@ async function fetchCustomerTransactions(admin, customerCode, customerName, scop
       return Number(b.id || 0) - Number(a.id || 0);
     });
 
-  const selectedMonthKeys = [];
-  const selectedMonthSet = new Set();
+  const currentKey = ksaMonthKey();
+  const uniqueNewestFirst = [];
+  const seenMonths = new Set();
+  let historicCount = 0;
 
   for (const row of sortedRows) {
     const key = monthKey(row.transaction_date);
-    if (!key || selectedMonthSet.has(key)) continue;
+    if (!key || seenMonths.has(key)) continue;
 
-    selectedMonthSet.add(key);
-    selectedMonthKeys.push(key);
-
-    if (selectedMonthSet.size >= HISTORY_MONTHS) break;
+    seenMonths.add(key);
+    uniqueNewestFirst.push(key);
+    if (key !== currentKey && key < currentKey) historicCount += 1;
+    if (historicCount >= HISTORIC_PERFORMANCE_MONTHS) break;
   }
+
+  const selectedMonthKeys = selectMonthlyPerformanceMonths([...uniqueNewestFirst].reverse(), currentKey);
+  const selectedMonthSet = new Set(selectedMonthKeys);
 
   const filtered = sortedRows
     .filter((row) => selectedMonthSet.has(monthKey(row.transaction_date)))
     .map(({ __stamp, ...row }) => row);
 
-  const lastMonthKey = selectedMonthKeys.at(-1) || "";
+  const lastMonthKey = selectedMonthKeys[0] || "";
 
   return {
     fromDate: monthStartFromKey(lastMonthKey),
@@ -724,6 +776,8 @@ export async function GET(request) {
         void refreshCustomerCache(admin, customerCode, key, scope).catch(() => {});
       }
 
+      const transactions = await overlayCurrentMonthTransactions(admin, customerCode, cachedTransactions);
+
       return NextResponse.json({
         success: true,
         customerCode,
@@ -732,7 +786,7 @@ export async function GET(request) {
         isStale: stale,
         isRefreshing: stale,
         source: "cache",
-        transactions: cachedTransactions,
+        transactions,
         peerTransactions: Array.isArray(cached.peerTransactions) ? cached.peerTransactions : [],
       });
     }

@@ -14,7 +14,10 @@ import {
   formatKsaTime,
   formatWorkingHours,
   getKsaDateString,
+  dismissLunchInSuggestion,
+  isLunchInSuggestionPath,
   isOnLunchBreak,
+  shouldSuggestLunchIn,
   isWithinActiveWorkSession,
   ksaDayBounds,
   shouldSendLunchBreakReminder,
@@ -104,6 +107,44 @@ test("extractLunchTimes returns first lunch out and in after morning attendance"
   const lunch = extractLunchTimes(logs);
   assert.ok(lunch.lunchOutAt);
   assert.ok(lunch.lunchInAt);
+});
+
+test("suggests lunch in on transaction pages while lunch is still open", () => {
+  const lunchOutAt = "2026-09-08T09:52:00.000Z";
+  const logs = [
+    {
+      entry_type: "LUNCH_BREAK_OUT",
+      note: JSON.stringify({ captured_at: lunchOutAt }),
+      created_at: lunchOutAt,
+    },
+  ];
+  const now = Date.parse("2026-09-08T10:48:00.000Z");
+
+  assert.equal(isLunchInSuggestionPath("/management/new-order"), true);
+  assert.equal(isLunchInSuggestionPath("/management/daily-visit-report"), false);
+  assert.equal(shouldSuggestLunchIn({
+    userLogs: logs,
+    pathname: "/management/new-order",
+    now,
+  }), true);
+  assert.equal(shouldSuggestLunchIn({
+    userLogs: logs,
+    pathname: "/management/daily-visit-report",
+    now,
+  }), false);
+
+  const storage = new Map();
+  const fakeStorage = {
+    getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+    setItem: (key, value) => storage.set(key, String(value)),
+  };
+  dismissLunchInSuggestion(Date.parse(lunchOutAt), fakeStorage);
+  assert.equal(shouldSuggestLunchIn({
+    userLogs: logs,
+    pathname: "/management/new-order",
+    now,
+    dismissedLunchOutTs: Date.parse(lunchOutAt),
+  }), false);
 });
 
 test("isOnLunchBreak is true after lunch out and false after lunch in", () => {

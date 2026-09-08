@@ -15,7 +15,7 @@ import {
   hydrateFoundationFromCache,
 } from "../../lib/mobileDataCache";
 import { dedupeCustomerMasterRows } from "../../lib/customerMasterQuery";
-import { listLocalProspectsAsCustomers } from "../../lib/offlineProspects";
+import { loadOpenProspectCustomers } from "../../lib/openProspectCustomers";
 import { PRICE_CACHE_KEY } from "../../lib/priceApiConfig";
 import { evaluateOrderSchemes, formatSchemeDetail, lookupSchemeApplication } from "../../lib/orderSchemes";
 import { isBuildingMaterialItem, loadPricePayload, pickCatalogCategory } from "../../lib/pricePayload";
@@ -311,14 +311,14 @@ async function fetchItemCategoryLookup(supabase, scope, { maxPages = 5 } = {}) {
   return lookup;
 }
 
-function mergeOrderWorkspaceCustomers(loadedCustomers, localProspects, prefilledCustomer, editOrderId) {
+function mergeOrderWorkspaceCustomers(loadedCustomers, openProspects, prefilledCustomer, editOrderId) {
   const visibleCustomers = dedupeCustomerMasterRows(
-    (loadedCustomers || []).filter((customer) => !isExcludedNewOrderCustomer(customer)),
+    (loadedCustomers || []).filter((customer) => customer?.is_prospect || !isExcludedNewOrderCustomer(customer)),
   );
   const allowPrefilled = Boolean(prefilledCustomer)
-    && (!isExcludedNewOrderCustomer(prefilledCustomer) || Boolean(editOrderId));
-  const withLocalProspects = [
-    ...(Array.isArray(localProspects) ? localProspects : []),
+    && (Boolean(prefilledCustomer.is_prospect) || !isExcludedNewOrderCustomer(prefilledCustomer) || Boolean(editOrderId));
+  const withOpenProspects = [
+    ...(Array.isArray(openProspects) ? openProspects : []),
     ...visibleCustomers,
   ].filter((customer, index, rows) => {
     const code = String(customer?.customer_code || "").trim().toUpperCase();
@@ -328,12 +328,12 @@ function mergeOrderWorkspaceCustomers(loadedCustomers, localProspects, prefilled
 
   if (
     allowPrefilled
-    && !withLocalProspects.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
+    && !withOpenProspects.some((customer) => customer.customer_code === prefilledCustomer.customer_code)
   ) {
-    return [prefilledCustomer, ...withLocalProspects];
+    return [prefilledCustomer, ...withOpenProspects];
   }
 
-  return withLocalProspects;
+  return withOpenProspects;
 }
 
 function isRowLike(value) {
@@ -815,7 +815,7 @@ export default function NewOrderPage() {
   const filteredCustomers = useMemo(() => {
     const q = customerSearch.trim().toLowerCase();
     return customers.filter((customer) => {
-      if (isExcludedNewOrderCustomer(customer)) return false;
+      if (!customer?.is_prospect && isExcludedNewOrderCustomer(customer)) return false;
       if (!q) return true;
       return (
         String(customer.customer_code || "").toLowerCase().includes(q) ||
@@ -1398,15 +1398,15 @@ export default function NewOrderPage() {
             throw new Error("Please login again.");
           }
 
-          const [hydrated, localProspects] = await Promise.all([
+          const [hydrated, openProspects] = await Promise.all([
             hydrateFoundationFromCache(session.user.id),
-            listLocalProspectsAsCustomers().catch(() => []),
+            loadOpenProspectCustomers(session.access_token).catch(() => []),
           ]);
 
           const applyCustomers = (rows) => {
             setCustomers(mergeOrderWorkspaceCustomers(
               rows,
-              localProspects,
+              openProspects,
               nextPrefilled,
               orderId,
             ));
@@ -1478,7 +1478,7 @@ export default function NewOrderPage() {
 
   useEffect(() => {
     if (!prefilledCustomer?.customer_code) return;
-    if (isExcludedNewOrderCustomer(prefilledCustomer) && !editOrderId) return;
+    if (!prefilledCustomer?.is_prospect && isExcludedNewOrderCustomer(prefilledCustomer) && !editOrderId) return;
 
     setSelectedCustomerCode(prefilledCustomer.customer_code);
     setMessage(`Prospect ${prefilledCustomer.customer_name} is ready for order creation.`);
@@ -1726,7 +1726,7 @@ export default function NewOrderPage() {
                       key={`name-suggest-${customer.customer_code}`}
                       onClick={() => selectCustomer(customer.customer_code, customer.customer_name)}
                     >
-                      <strong>{customer.customer_name || "Unnamed customer"}</strong>
+                      <strong>{customer.customer_name || "Unnamed customer"}{customer.is_prospect ? " (Prospect)" : ""}</strong>
                       <span>{customer.customer_code || "-"}</span>
                     </button>
                   ))}
@@ -1741,7 +1741,7 @@ export default function NewOrderPage() {
               <option value="">Select customer</option>
               {filteredCustomers.map((customer) => (
                 <option key={customer.customer_code} value={customer.customer_code}>
-                  {customer.customer_code} - {customer.customer_name}
+                  {customer.customer_code} - {customer.customer_name}{customer.is_prospect ? " (Prospect)" : ""}
                 </option>
               ))}
             </select>

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   achievementPercent,
+  averageCumulativeDayShares,
   buildPerformanceSnapshot,
+  expectedPacePercent,
   isMissingSchemaColumn,
   classifyBuyingCustomers,
   consolidatePerformanceSnapshots,
@@ -12,6 +14,7 @@ import {
   kpiStatus,
   normalizePerformanceTargets,
   performanceUpdatedStatusLabel,
+  resolveKpiPaceDate,
   splitSalesActuals,
   TEAM_PERFORMANCE_VIEW,
 } from "../app/lib/performanceKpis.js";
@@ -38,11 +41,46 @@ test("classifies new and repeat buying customers", () => {
   );
 });
 
-test("KPI status uses monthly pace and 100% achievement", () => {
+test("KPI status compares actual/target with expected pace by today", () => {
   assert.equal(kpiStatus({ actual: 100, target: 100, reportDate: "2026-09-10" }).key, "achieved");
-  assert.equal(kpiStatus({ actual: 40, target: 100, reportDate: "2026-09-30" }).key, "behind");
-  assert.equal(kpiStatus({ actual: 20, target: 100, reportDate: "2026-09-06" }).key, "on_track");
+  assert.equal(
+    kpiStatus({ actual: 25174, target: 10, reportDate: "2026-09-01", todayIso: "2026-09-08" }).key,
+    "achieved",
+  );
+  assert.equal(
+    resolveKpiPaceDate("2026-09-01", "2026-09-08"),
+    "2026-09-08",
+  );
+  assert.equal(
+    kpiStatus({ actual: 40, target: 100, reportDate: "2026-09-30", todayIso: "2026-09-30" }).key,
+    "behind",
+  );
+  assert.match(
+    kpiStatus({ actual: 40, target: 100, reportDate: "2026-09-30", todayIso: "2026-09-30" }).label,
+    /behind pace/,
+  );
   assert.equal(kpiStatus({ actual: 10, target: 0, reportDate: "2026-09-06" }).key, "no_target");
+});
+
+test("expected pace uses historical share of month sales by that date", () => {
+  const curve = averageCumulativeDayShares([
+    { transaction_date: "2026-07-08", sales_amount: 70 },
+    { transaction_date: "2026-07-20", sales_amount: 30 },
+    { transaction_date: "2026-08-08", sales_amount: 70 },
+    { transaction_date: "2026-08-20", sales_amount: 30 },
+  ]);
+  assert.equal(curve.monthCount, 2);
+  assert.equal(expectedPacePercent("2026-09-08", curve.shares), 70);
+  const status = kpiStatus({
+    actual: 20,
+    target: 100,
+    reportDate: "2026-09-01",
+    todayIso: "2026-09-08",
+    paceShares: curve.shares,
+  });
+  assert.equal(status.key, "behind");
+  assert.equal(status.expected, 70);
+  assert.match(status.label, /50\.0% behind pace/);
 });
 
 test("splits office supplies sales from other sales", () => {

@@ -88,6 +88,29 @@ export function monthStartDate(reportDate) {
   return currentMonthDateRange(reportDate).from;
 }
 
+export function nextIsoDate(iso) {
+  const date = String(iso || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "";
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
+
+export function isKsaWorkday(iso) {
+  const date = String(iso || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return weekday !== 5 && weekday !== 6;
+}
+
+export function resolveKpiPaceDate(monthDate, todayIso) {
+  const month = currentMonthDateRange(monthDate);
+  const today = String(todayIso || monthDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) return month.from;
+  if (today < month.from) return month.from;
+  if (today > month.to) return month.to;
+  return today;
+}
+
 export function monthProgressRatio(reportDate) {
   const date = String(reportDate || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
@@ -97,25 +120,142 @@ export function monthProgressRatio(reportDate) {
   return Math.min(1, Math.max(0, day / lastDay));
 }
 
+export function ksaWorkdayProgressRatio(asOfDate) {
+  const date = String(asOfDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
+  const { from, to } = currentMonthDateRange(date);
+  let workdays = 0;
+  let elapsed = 0;
+  for (let cursor = from; cursor <= to; cursor = nextIsoDate(cursor)) {
+    if (!isKsaWorkday(cursor)) continue;
+    workdays += 1;
+    if (cursor <= date) elapsed += 1;
+  }
+  if (!workdays) return 0;
+  return Math.min(1, Math.max(0, elapsed / workdays));
+}
+
+export function averageCumulativeDayShares(salesRows = []) {
+  const months = new Map();
+  (salesRows || []).forEach((row) => {
+    const date = String(row?.transaction_date || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    const amount = Number(row?.sales_amount || 0);
+    if (!(amount > 0)) return;
+    const month = date.slice(0, 7);
+    const day = Number(date.slice(8, 10));
+    let bucket = months.get(month);
+    if (!bucket) {
+      bucket = { total: 0, days: new Map() };
+      months.set(month, bucket);
+    }
+    bucket.total += amount;
+    bucket.days.set(day, (bucket.days.get(day) || 0) + amount);
+  });
+
+  const curves = [];
+  months.forEach((bucket) => {
+    if (!(bucket.total > 0) || !bucket.days.size) return;
+    const lastDay = Math.max(...bucket.days.keys());
+    let cumulative = 0;
+    const shares = {};
+    for (let day = 1; day <= lastDay; day += 1) {
+      cumulative += bucket.days.get(day) || 0;
+      shares[day] = cumulative / bucket.total;
+    }
+    curves.push(shares);
+  });
+
+  const result = {};
+  for (let day = 1; day <= 31; day += 1) {
+    const values = curves.map((curve) => curve[day]).filter((value) => value != null);
+    if (values.length) {
+      result[day] = values.reduce((sum, value) => sum + value, 0) / values.length;
+    }
+  }
+  return { shares: result, monthCount: curves.length };
+}
+
+export function shareForDay(shares, day) {
+  const goalDay = Number(day || 0);
+  if (!shares || !goalDay) return null;
+  for (let cursor = goalDay; cursor >= 1; cursor -= 1) {
+    const value = shares[cursor];
+    if (value != null && Number.isFinite(Number(value))) return Number(value);
+  }
+  return null;
+}
+
+export function expectedPacePercent(asOfDate, paceShares = null) {
+  const date = String(asOfDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
+  const historical = shareForDay(paceShares, Number(date.slice(8, 10)));
+  if (historical != null) return Math.min(100, Math.max(0, historical * 100));
+  return ksaWorkdayProgressRatio(date) * 100;
+}
+
 export function achievementPercent(actual, target) {
   const goal = Number(target || 0);
   if (!(goal > 0)) return null;
   return (Number(actual || 0) / goal) * 100;
 }
 
-export function kpiStatus({ actual, target, reportDate }) {
+export function kpiStatus({
+  actual,
+  target,
+  reportDate,
+  todayIso,
+  paceShares = null,
+} = {}) {
   const achievement = achievementPercent(actual, target);
   if (achievement == null) {
-    return { key: "no_target", label: "No target", tone: "neutral" };
+    return {
+      key: "no_target",
+      label: "No target",
+      tone: "neutral",
+      expected: null,
+      gap: null,
+    };
   }
+
+  const paceDate = resolveKpiPaceDate(reportDate, todayIso || reportDate);
+  const expected = expectedPacePercent(paceDate, paceShares);
+  const gap = achievement - expected;
+
   if (achievement >= 100) {
-    return { key: "achieved", label: "Achieved", tone: "green" };
+    return {
+      key: "achieved",
+      label: "Achieved",
+      tone: "green",
+      expected,
+      gap,
+    };
   }
-  const expected = monthProgressRatio(reportDate) * 100;
-  if (achievement + 0.05 >= expected * 0.85) {
-    return { key: "on_track", label: "On track", tone: "orange" };
+  if (gap >= 1) {
+    return {
+      key: "ahead",
+      label: `${gap.toFixed(1)}% ahead of pace`,
+      tone: "orange",
+      expected,
+      gap,
+    };
   }
-  return { key: "behind", label: "Behind", tone: "red" };
+  if (gap > -1) {
+    return {
+      key: "on_pace",
+      label: "On pace",
+      tone: "orange",
+      expected,
+      gap,
+    };
+  }
+  return {
+    key: "behind",
+    label: `${Math.abs(gap).toFixed(1)}% behind pace`,
+    tone: "red",
+    expected,
+    gap,
+  };
 }
 
 export function emptyPerformanceActuals() {
@@ -210,15 +350,23 @@ export function sumCollectionAmount(rows = []) {
   return (rows || []).reduce((sum, row) => sum + Number(row?.amount_received || 0), 0);
 }
 
-export function buildPerformanceKpi(key, { actual = 0, target = 0, reportDate } = {}) {
+export function buildPerformanceKpi(key, {
+  actual = 0,
+  target = 0,
+  reportDate,
+  todayIso,
+  paceShares = null,
+} = {}) {
   const achievement = achievementPercent(actual, target);
-  const status = kpiStatus({ actual, target, reportDate });
+  const status = kpiStatus({ actual, target, reportDate, todayIso, paceShares });
   return {
     key,
     label: PERFORMANCE_KPI_LABELS[key] || key,
     actual: Number(actual || 0) || 0,
     target: Number(target || 0) || 0,
     achievement,
+    expected: status.expected,
+    paceGap: status.gap,
     status,
   };
 }
@@ -228,6 +376,8 @@ export const TEAM_PERFORMANCE_VIEW = "TEAM";
 export function consolidatePerformanceSnapshots(snapshots = [], {
   reportDate,
   salesmanName = "Team",
+  todayIso,
+  paceShares = null,
 } = {}) {
   const rows = (snapshots || []).filter(Boolean);
   const actuals = emptyPerformanceActuals();
@@ -256,6 +406,8 @@ export function consolidatePerformanceSnapshots(snapshots = [], {
       targets,
       updatedAt: latestUpdatedAt,
       updatedByName: latestUpdatedByName,
+      todayIso: todayIso || rows[0]?.todayIso,
+      paceShares: paceShares || rows[0]?.paceShares || null,
     }),
     isTeam: true,
     memberCount: rows.length,
@@ -270,6 +422,8 @@ export function buildPerformanceSnapshot({
   targets = emptyPerformanceTargets(),
   updatedAt = null,
   updatedByName = "",
+  todayIso,
+  paceShares = null,
 } = {}) {
   const normalizedTargets = normalizePerformanceTargets(targets);
   const normalizedActuals = withTotalSales({
@@ -280,6 +434,8 @@ export function buildPerformanceSnapshot({
     actual: normalizedActuals[key],
     target: normalizedTargets[key],
     reportDate,
+    todayIso,
+    paceShares,
   }));
   const componentScored = kpis.filter((kpi) => kpi.key !== "totalSales" && kpi.achievement != null);
   const scored = componentScored.length
@@ -302,6 +458,8 @@ export function buildPerformanceSnapshot({
     updatedAt: updatedAt || null,
     updatedByName: String(updatedByName || "").trim(),
     published: hasTargets,
+    todayIso: todayIso || null,
+    paceShares: paceShares || null,
   };
 }
 

@@ -24,7 +24,7 @@ import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { sumOrderLineValue } from "./collectionDaySummary.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
 import { buildDayRoutePoints } from "./dayRouteMap.js";
-import { assignOnSiteVisitNumbers, buildVisitDaySplit, loginLogoutLocationNotes } from "./dailyVisitReportStats.js";
+import { assignOnSiteVisitNumbers, buildVisitDaySplit, hideSupersededOrderDrafts, loginLogoutLocationNotes } from "./dailyVisitReportStats.js";
 import { filterLogsByKsaEventDate, ksaDayBounds } from "./workdayActivity.js";
 
 const ACTIVITY_ENTRY_TYPES = [
@@ -456,6 +456,9 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
     const key = entry.user_id || "unknown";
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(entry);
+  });
+  grouped.forEach((rows, key) => {
+    grouped.set(key, hideSupersededOrderDrafts(rows));
   });
 
   const users = [...grouped.entries()].map(([entryUserId, rows]) => {

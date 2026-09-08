@@ -2,13 +2,18 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import {
+  achievementPercent,
+  formatAchievementPercent,
+  formatPerformanceKpiValue,
+  PERFORMANCE_DISPLAY_KPI_KEYS,
+} from "../../lib/performanceKpis";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
-import { formatAchievementPercent, formatPerformanceKpiValue } from "../../lib/performanceKpis";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { getKsaDateString } from "../../lib/workdayActivity";
@@ -17,8 +22,8 @@ import ExportableTable from "../../components/ExportableTable";
 const TEXT = {
   title: { en: "KPI Targets", ar: "أهداف الأداء" },
   subtitle: {
-    en: "Set monthly Office supplies, Others, Collection, New customers, and Repeat customers targets. Users see achievement % and status immediately.",
-    ar: "حدد أهداف مستلزمات المكتب وغيرها والتحصيل والعملاء الجدد والمتكررين. يرى المستخدم نسبة الإنجاز والحالة فوراً.",
+    en: "Set monthly Office supplies and Others targets. Total sales is the sum of those two. Collection, New customers, and Repeat customers stay separate.",
+    ar: "حدد أهداف مستلزمات المكتب وغيرها. إجمالي المبيعات هو مجموع الاثنين. التحصيل والعملاء الجدد والمتكررون منفصلون.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   performance: { en: "My Performance", ar: "أدائي" },
@@ -29,6 +34,7 @@ const TEXT = {
   salesman: { en: "Salesman", ar: "المندوب" },
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
   otherSales: { en: "Others", ar: "أخرى" },
+  totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
   collection: { en: "Collection", ar: "التحصيل" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
@@ -48,6 +54,7 @@ function emptyDraft(snapshot) {
     salesmanName: snapshot.salesmanName,
     officeSupplies: String(snapshot.targets?.officeSupplies ?? 0),
     otherSales: String(snapshot.targets?.otherSales ?? 0),
+    totalSales: String(snapshot.targets?.totalSales ?? 0),
     collection: String(snapshot.targets?.collection ?? 0),
     newCustomers: String(snapshot.targets?.newCustomers ?? 0),
     repeatCustomers: String(snapshot.targets?.repeatCustomers ?? 0),
@@ -67,14 +74,14 @@ export default function KpiTargetsPage() {
 
   usePopupMessages({ message, error });
 
-  async function loadRows(nextMonth = month) {
+  async function loadRows(nextMonth = month, { quiet = false } = {}) {
     const supabase = getSupabaseClient();
     if (!supabase) {
       setLoading(false);
       return;
     }
 
-    setLoading(true);
+    if (!quiet) setLoading(true);
     setError("");
     try {
       const session = await resolveAuthSession(supabase);
@@ -123,11 +130,15 @@ export default function KpiTargetsPage() {
             month,
             rows: rows.map((row) => ({
               salesmanCode: row.salesmanCode,
-              office_supplies_sales_target: Number(row.officeSupplies || 0),
-              other_sales_target: Number(row.otherSales || 0),
-              collection_target: Number(row.collection || 0),
-              new_customers_target: Number(row.newCustomers || 0),
-              repeat_customers_target: Number(row.repeatCustomers || 0),
+              targets: {
+                officeSupplies: Number(row.officeSupplies || 0),
+                otherSales: Number(row.otherSales || 0),
+                totalSales: (Number(row.officeSupplies || 0) || 0) + (Number(row.otherSales || 0) || 0)
+                  || Number(row.totalSales || 0),
+                collection: Number(row.collection || 0),
+                newCustomers: Number(row.newCustomers || 0),
+                repeatCustomers: Number(row.repeatCustomers || 0),
+              },
             })),
           }),
         },
@@ -137,7 +148,7 @@ export default function KpiTargetsPage() {
         throw new Error(payload.error || "Unable to save KPI targets.");
       }
       setMessage(t("saved"));
-      await loadRows(month);
+      await loadRows(month, { quiet: true });
     } catch (err) {
       setError(err.message || "Unable to save KPI targets.");
     } finally {
@@ -146,10 +157,7 @@ export default function KpiTargetsPage() {
   }
 
   const supabaseClient = getSupabaseClient();
-  const columns = useMemo(
-    () => ["officeSupplies", "otherSales", "collection", "newCustomers", "repeatCustomers"],
-    [],
-  );
+  const columns = useMemo(() => PERFORMANCE_DISPLAY_KPI_KEYS, []);
 
   if (!supabaseClient) {
     return (
@@ -225,17 +233,33 @@ export default function KpiTargetsPage() {
                       </td>
                       {columns.map((key) => {
                         const kpi = (row.kpis || []).find((item) => item.key === key);
+                        const isTotalSales = key === "totalSales";
+                        const targetValue = isTotalSales
+                          ? String(
+                            (Number(row.officeSupplies || 0) || 0) + (Number(row.otherSales || 0) || 0)
+                            || Number(row.totalSales || 0),
+                          )
+                          : row[key];
+                        const liveAchievement = isTotalSales
+                          ? achievementPercent(kpi?.actual, targetValue)
+                          : kpi?.achievement;
                         return (
                           <KpiTargetCells
                             key={key}
                             actual={formatPerformanceKpiValue(key, kpi?.actual)}
-                            achievement={formatAchievementPercent(kpi?.achievement)}
+                            achievement={formatAchievementPercent(liveAchievement)}
                             status={kpi?.status?.label || "No target"}
-                            value={row[key]}
+                            value={targetValue}
+                            readOnly={isTotalSales}
                             onChange={(value) => {
-                              setRows((current) => current.map((item, itemIndex) => (
-                                itemIndex === index ? { ...item, [key]: value } : item
-                              )));
+                              setRows((current) => current.map((item, itemIndex) => {
+                                if (itemIndex !== index) return item;
+                                const next = { ...item, [key]: value };
+                                next.totalSales = String(
+                                  (Number(next.officeSupplies || 0) || 0) + (Number(next.otherSales || 0) || 0),
+                                );
+                                return next;
+                              }));
                             }}
                           />
                         );
@@ -262,7 +286,7 @@ function FragmentHeader({ group, actual, achievement }) {
   );
 }
 
-function KpiTargetCells({ actual, achievement, status, value, onChange }) {
+function KpiTargetCells({ actual, achievement, status, value, onChange, readOnly = false }) {
   return (
     <>
       <td>{actual}</td>
@@ -273,6 +297,8 @@ function KpiTargetCells({ actual, achievement, status, value, onChange }) {
           min="0"
           step="1"
           value={value}
+          readOnly={readOnly}
+          disabled={readOnly}
           onChange={(event) => onChange(event.target.value)}
         />
       </td>

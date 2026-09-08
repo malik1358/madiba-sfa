@@ -19,15 +19,40 @@ export const PERFORMANCE_KPI_KEYS = [
   "repeatCustomers",
 ];
 
+export const PERFORMANCE_DISPLAY_KPI_KEYS = [
+  "officeSupplies",
+  "otherSales",
+  "totalSales",
+  "collection",
+  "newCustomers",
+  "repeatCustomers",
+];
+
 export const PERFORMANCE_KPI_LABELS = {
   officeSupplies: "Sales of office supplies",
   otherSales: "Others",
+  totalSales: "Total sales",
   collection: "Collection",
   newCustomers: "New customers",
   repeatCustomers: "Repeat customers",
 };
 
-const MONEY_KPI_KEYS = new Set(["officeSupplies", "otherSales", "collection", "sales"]);
+const MONEY_KPI_KEYS = new Set(["officeSupplies", "otherSales", "totalSales", "collection", "sales"]);
+const TARGET_FIELD_ALIASES = {
+  officeSupplies: ["officeSupplies", "office_supplies_sales_target", "office_supplies_target"],
+  otherSales: ["otherSales", "other_sales_target"],
+};
+
+function firstPresentNumber(row, keys) {
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(row, key)) continue;
+    const value = row[key];
+    if (value == null || value === "") continue;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+  }
+  return null;
+}
 
 export function isOfficeSuppliesSale(row = {}) {
   const text = [row.category, row.item_name, row.item_category, row.group]
@@ -97,6 +122,7 @@ export function emptyPerformanceActuals() {
   return {
     officeSupplies: 0,
     otherSales: 0,
+    totalSales: 0,
     collection: 0,
     newCustomers: 0,
     repeatCustomers: 0,
@@ -107,29 +133,36 @@ export function emptyPerformanceTargets() {
   return {
     officeSupplies: 0,
     otherSales: 0,
+    totalSales: 0,
     collection: 0,
     newCustomers: 0,
     repeatCustomers: 0,
   };
 }
 
+export function withTotalSales(values = {}) {
+  const officeSupplies = Number(values.officeSupplies || 0) || 0;
+  const otherSales = Number(values.otherSales || 0) || 0;
+  return {
+    ...values,
+    officeSupplies,
+    otherSales,
+    totalSales: officeSupplies + otherSales,
+  };
+}
+
 export function normalizePerformanceTargets(row = {}) {
-  const officeSupplies = Number(
-    row.officeSupplies
-    ?? row.office_supplies_sales_target
-    ?? row.office_supplies_target
-    ?? 0,
-  ) || 0;
-  const otherSales = Number(
-    row.otherSales
-    ?? row.other_sales_target
-    ?? 0,
-  ) || 0;
-  const legacySales = Number(row.sales ?? row.sales_target ?? 0) || 0;
+  const splitOffice = firstPresentNumber(row, TARGET_FIELD_ALIASES.officeSupplies);
+  const splitOther = firstPresentNumber(row, TARGET_FIELD_ALIASES.otherSales);
+  const hasSplitSales = splitOffice != null || splitOther != null;
+  const officeSupplies = hasSplitSales ? (splitOffice || 0) : 0;
+  const otherSales = hasSplitSales ? (splitOther || 0) : 0;
+  const splitTotal = officeSupplies + otherSales;
 
   return {
-    officeSupplies: officeSupplies || (otherSales ? 0 : legacySales),
+    officeSupplies,
     otherSales,
+    totalSales: splitTotal > 0 ? splitTotal : (Number(row.totalSales ?? row.sales ?? row.sales_target ?? 0) || 0),
     collection: Number(row.collection ?? row.collection_target ?? 0) || 0,
     newCustomers: Number(
       row.newCustomers ?? row.new_customers_target ?? row.new_buying_customers_target ?? 0,
@@ -239,18 +272,22 @@ export function buildPerformanceSnapshot({
   updatedByName = "",
 } = {}) {
   const normalizedTargets = normalizePerformanceTargets(targets);
-  const normalizedActuals = {
+  const normalizedActuals = withTotalSales({
     ...emptyPerformanceActuals(),
     ...actuals,
-  };
-  const kpis = PERFORMANCE_KPI_KEYS.map((key) => buildPerformanceKpi(key, {
+  });
+  const kpis = PERFORMANCE_DISPLAY_KPI_KEYS.map((key) => buildPerformanceKpi(key, {
     actual: normalizedActuals[key],
     target: normalizedTargets[key],
     reportDate,
   }));
+  const componentScored = kpis.filter((kpi) => kpi.key !== "totalSales" && kpi.achievement != null);
+  const scored = componentScored.length
+    ? componentScored
+    : kpis.filter((kpi) => kpi.achievement != null);
   const hasTargets = kpis.some((kpi) => kpi.target > 0);
-  const overall = kpis.reduce((sum, kpi) => sum + Number(kpi.achievement || 0), 0)
-    / Math.max(1, kpis.filter((kpi) => kpi.achievement != null).length || 1);
+  const overall = scored.reduce((sum, kpi) => sum + Number(kpi.achievement || 0), 0)
+    / Math.max(1, scored.length || 1);
 
   return {
     reportDate,

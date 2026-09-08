@@ -13,6 +13,8 @@ import { runInactivityEmailCycle } from "../app/lib/inactivityEmailServer.js";
 import {
   INACTIVITY_EMAIL_MS,
   inactivityEmailReminderSlot,
+  inactivityReferenceTimestamp,
+  lastTransactionTimestamp,
   shouldEmailInactivity,
   shouldWarnInactivity,
 } from "../app/lib/workdayActivity.js";
@@ -119,6 +121,64 @@ test("shouldEmailInactivity skips lunch, logout, and the first 40 minutes after 
   }), true);
 });
 
+test("idle clock after lunch ignores silent order updated_at", () => {
+  const lunchInAt = "2026-09-07T13:12:00.000Z";
+  const logs = [
+    {
+      entry_type: "MORNING_ATTENDANCE",
+      note: JSON.stringify({ captured_at: "2026-09-07T06:27:00.000Z" }),
+      created_at: "2026-09-07T06:27:00.000Z",
+    },
+    {
+      entry_type: "LUNCH_BREAK_OUT",
+      note: JSON.stringify({ captured_at: "2026-09-07T10:09:00.000Z" }),
+      created_at: "2026-09-07T10:09:00.000Z",
+    },
+    {
+      entry_type: "ORDER_SUBMITTED",
+      note: JSON.stringify({ captured_at: "2026-09-07T11:27:00.000Z" }),
+      created_at: "2026-09-07T11:27:00.000Z",
+    },
+    {
+      entry_type: "LUNCH_BREAK_IN",
+      note: JSON.stringify({ captured_at: lunchInAt }),
+      created_at: lunchInAt,
+    },
+  ];
+  const silentOrderTouch = [{
+    created_at: "2026-09-07T11:27:00.000Z",
+    submitted_at: "2026-09-07T11:27:00.000Z",
+    updated_at: "2026-09-07T14:04:00.000Z",
+  }];
+
+  assert.equal(
+    lastTransactionTimestamp(logs, [], silentOrderTouch),
+    Date.parse("2026-09-07T11:27:00.000Z"),
+  );
+  assert.equal(
+    inactivityReferenceTimestamp({
+      loginAt: "2026-09-07T06:27:00.000Z",
+      userLogs: logs,
+      orders: silentOrderTouch,
+    }),
+    Date.parse(lunchInAt),
+  );
+  assert.equal(shouldEmailInactivity({
+    loginAt: "2026-09-07T06:27:00.000Z",
+    logoutAt: null,
+    userLogs: logs,
+    orders: silentOrderTouch,
+    now: new Date("2026-09-07T13:51:00.000Z"),
+  }), false);
+  assert.equal(shouldEmailInactivity({
+    loginAt: "2026-09-07T06:27:00.000Z",
+    logoutAt: null,
+    userLogs: logs,
+    orders: silentOrderTouch,
+    now: new Date("2026-09-07T13:52:00.000Z"),
+  }), true);
+});
+
 test("shouldEmailInactivity stops at 10:00 PM KSA", () => {
   const logs = [visitAt("2026-09-06T17:00:00.000Z")];
 
@@ -164,7 +224,9 @@ test("buildInactivityAlertEmail names the idle user and duration", () => {
   assert.match(message.subject, /Ahmed \(SM001\)/);
   assert.match(message.subject, /52 min/);
   assert.match(message.text, /no visit, order, or collection/);
+  assert.match(message.text, /Idle since:/);
   assert.match(message.html, /Ahmed \(SM001\)/);
+  assert.match(message.html, /Idle since/);
 });
 
 test("inactivityEmailReferenceKey is unique per idle stretch and 40-minute slot", () => {

@@ -411,6 +411,11 @@ export function shouldSendLunchBreakReminder(userLogs, now = new Date()) {
   return now.getTime() - lunchOutTs >= LUNCH_BREAK_REMINDER_MS;
 }
 
+function orderSubmissionTimestamp(row) {
+  const ts = Date.parse(String(row?.submitted_at || ""));
+  return Number.isFinite(ts) ? ts : 0;
+}
+
 export function lastTransactionTimestamp(userLogs, collections = [], orders = []) {
   let latest = 0;
 
@@ -425,8 +430,7 @@ export function lastTransactionTimestamp(userLogs, collections = [], orders = []
   }
 
   for (const row of orders || []) {
-    const ts = Date.parse(String(row?.submitted_at || row?.updated_at || row?.created_at || ""));
-    if (Number.isFinite(ts)) latest = Math.max(latest, ts);
+    latest = Math.max(latest, orderSubmissionTimestamp(row));
   }
 
   return latest || 0;

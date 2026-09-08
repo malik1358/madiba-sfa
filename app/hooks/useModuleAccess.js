@@ -27,17 +27,28 @@ export function useModuleAccess() {
           return;
         }
 
-        const { data: profile } = await supabase
+        let profileRes = await supabase
           .from("profiles")
-          .select("role,salesman_code")
+          .select("role,salesman_code,stock_take_access")
           .eq("id", session.user.id)
           .maybeSingle();
+
+        if (profileRes.error) {
+          profileRes = await supabase
+            .from("profiles")
+            .select("role,salesman_code")
+            .eq("id", session.user.id)
+            .maybeSingle();
+        }
+
+        const profile = profileRes.data;
 
         if (!cancelled) {
           setAccess(buildModuleAccess({
             role: profile?.role,
             salesmanCode: profile?.salesman_code,
             collectionOnlyMetadata: Boolean(session.user.user_metadata?.collection_only),
+            stockTakeAccess: profile?.stock_take_access === true,
           }));
         }
       } catch {

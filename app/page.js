@@ -37,6 +37,7 @@ export default function Home() {
     role: profile?.role,
     salesmanCode: profile?.salesman_code,
     collectionOnlyMetadata: Boolean(user?.user_metadata?.collection_only),
+    stockTakeAccess: profile?.stock_take_access === true,
   });
   const isCollectionOnlyAccess = moduleAccess.collectionOnly;
   const hasManagementAccess = moduleAccess.hasManagementPanel;
@@ -51,6 +52,7 @@ export default function Home() {
     "mySalesInvoices",
     "myCollections",
     "paymentCollections",
+    "stockTake",
   ]).map((module) => ({
     ...module,
     icon: {
@@ -63,6 +65,7 @@ export default function Home() {
       mySalesInvoices: "🧾",
       myCollections: "💰",
       paymentCollections: "💰",
+      stockTake: "📦",
     }[module.moduleKey] || "•",
     title: {
       myDay: ar ? "يومي" : "My Day",
@@ -74,6 +77,7 @@ export default function Home() {
       mySalesInvoices: ar ? "فواتير المبيعات" : "My Sales Invoices",
       myCollections: ar ? "التحصيلات" : "My Collections",
       paymentCollections: ar ? "التحصيلات" : "Collections",
+      stockTake: ar ? "جرد المخزون" : "Stock Take",
     }[module.moduleKey] || module.label,
     subtitle: {
       myDay: ar ? "زيارات ومتابعات اليوم" : "Today's visits & follow-ups",
@@ -85,6 +89,7 @@ export default function Home() {
       mySalesInvoices: ar ? "فواتير المبيعات والأصناف" : "Invoices, customers, and items",
       myCollections: ar ? "متابعة التحصيل والزيارات" : "Collection queue and visit tracking",
       paymentCollections: ar ? "متابعة التحصيل والزيارات" : "Collection queue and visit tracking",
+      stockTake: ar ? "مسح باركود وإدخال الكمية" : "Scan barcode and enter quantity",
     }[module.moduleKey] || "",
   }));
 

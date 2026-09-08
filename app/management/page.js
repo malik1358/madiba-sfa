@@ -94,11 +94,20 @@ export default function ManagementPage() {
           sessionUser: session.user.email || session.user.id,
         }));
 
-        const { data: profile, error: profileError } = await supabase
+        let profileRes = await supabase
           .from("profiles")
-          .select("role,salesman_code")
+          .select("role,salesman_code,stock_take_access")
           .eq("id", session.user.id)
           .single();
+        if (profileRes.error) {
+          profileRes = await supabase
+            .from("profiles")
+            .select("role,salesman_code")
+            .eq("id", session.user.id)
+            .single();
+        }
+        const profile = profileRes.data;
+        const profileError = profileRes.error;
 
         if (profileError) throw profileError;
 
@@ -110,6 +119,7 @@ export default function ManagementPage() {
           role,
           salesmanCode: profile?.salesman_code,
           collectionOnlyMetadata: collectionOnlyMetadata,
+          stockTakeAccess: profile?.stock_take_access === true,
         }));
         if (!["admin", "manager", "invoice-maker", "invoice_maker", "collector"].includes(role) && !collectionOnlyAccess) {
           setAccessDenied(true);
@@ -122,6 +132,7 @@ export default function ManagementPage() {
             role: "collector",
             salesmanCode: profile?.salesman_code,
             collectionOnlyMetadata: true,
+            stockTakeAccess: profile?.stock_take_access === true,
           }));
           setSummary({
             customers: 0,
@@ -232,6 +243,7 @@ export default function ManagementPage() {
       "mySalesInvoices",
       "myDay",
       "upload",
+      "stockTake",
     ]),
     [moduleAccess],
   );

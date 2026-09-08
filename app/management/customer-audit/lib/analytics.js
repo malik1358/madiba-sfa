@@ -1,6 +1,7 @@
+import { selectMonthlyPerformanceMonths } from '../../../lib/monthlyPerformanceMonths.js';
 import { monthKey, parseDateValue, salesUnitQty } from './format';
 
-export function buildAnalytics(transactions) {
+export function buildAnalytics(transactions, { currentMonthKey } = {}) {
   if (!transactions.length) {
     return null;
   }
@@ -35,7 +36,7 @@ export function buildAnalytics(transactions) {
     .sort((a, b) => a[1] - b[1])
     .map(([month]) => month);
 
-  const months = allMonths.slice(-6);
+  const months = selectMonthlyPerformanceMonths(allMonths, currentMonthKey);
   const monthSet = new Set(months);
 
   const monthlyMap = new Map();

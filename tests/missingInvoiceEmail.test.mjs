@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_MISSING_INVOICE_EMAIL_TO,
   MISSING_INVOICE_GRACE_MS,
+  MISSING_INVOICE_STATUS_NOT_UPLOADED,
   MISSING_INVOICE_STATUS_REJECTED,
   buildMissingInvoiceAlertEmail,
   hasUploadedInvoice,
   isCreatedFromSeptember2026,
+  isInvoiceNotUploadedStatus,
   isMissingInvoiceOverdue,
   isRejectedByManagement,
   isTestCustomerName,
@@ -96,21 +98,46 @@ test("rejected and uploaded invoices are excluded from the overdue list", () => 
   assert.deepEqual(selected, [9, 1]);
 });
 
+test("only Invoice not uploaded status is included in the overdue list", () => {
+  assert.equal(isInvoiceNotUploadedStatus({}), true);
+  assert.equal(isInvoiceNotUploadedStatus({ status: MISSING_INVOICE_STATUS_NOT_UPLOADED }), true);
+  assert.equal(isInvoiceNotUploadedStatus({ status: "Pending for credit approval" }), false);
+  assert.equal(isInvoiceNotUploadedStatus({ status: "Stock unavailable" }), false);
+  assert.equal(isInvoiceNotUploadedStatus({ status: "Waiting for credit application" }), false);
+  assert.equal(isMissingInvoiceOverdue(submittedOrder(31), { status: "Pending for credit approval" }, now), false);
+  assert.equal(isMissingInvoiceOverdue(submittedOrder(32), { status: "Stock unavailable" }, now), false);
+  assert.equal(isMissingInvoiceOverdue(submittedOrder(33), { status: MISSING_INVOICE_STATUS_NOT_UPLOADED }, now), true);
+
+  const selected = selectMissingInvoiceOrders(
+    [submittedOrder(31), submittedOrder(32), submittedOrder(33), submittedOrder(34)],
+    new Map([
+      ["31", { status: "Pending for credit approval" }],
+      ["32", { status: "Stock unavailable" }],
+      ["33", { status: MISSING_INVOICE_STATUS_NOT_UPLOADED }],
+      ["34", {}],
+    ]),
+    now,
+  ).map((order) => order.id);
+
+  assert.deepEqual(selected, [33, 34]);
+});
+
 test("buildMissingInvoiceAlertEmail lists overdue orders", () => {
   const message = buildMissingInvoiceAlertEmail({
     now,
     orders: [submittedOrder(12)],
-    metaByOrder: new Map([["12", { status: "Pending for credit approval" }]]),
+    metaByOrder: new Map([["12", { status: MISSING_INVOICE_STATUS_NOT_UPLOADED }]]),
   });
 
   assert.match(message.subject, /1 order missing invoice after 1 hour/);
   assert.match(message.html, /SO-12/);
   assert.match(message.html, /C12 — Customer 12/);
   assert.match(message.html, /Ahmed \(SM001\)/);
-  assert.match(message.html, /Pending for credit approval/);
+  assert.match(message.html, /Invoice not uploaded/);
+  assert.doesNotMatch(message.html, /Pending for credit approval|Stock unavailable/);
   assert.match(message.html, /every 15 minutes/);
   assert.match(message.text, /from September 2026 onward/);
-  assert.match(message.text, /Orders rejected by management, test-customer orders, and orders created before September 2026 are excluded/);
+  assert.match(message.text, /Orders rejected by management, pending credit approval, stock unavailable, test-customer orders, and orders created before September 2026 are excluded/);
   assert.equal(message.orderCount, 1);
 });
 

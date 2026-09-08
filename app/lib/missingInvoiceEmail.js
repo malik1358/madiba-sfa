@@ -7,6 +7,7 @@ import { formatKsaDateTime, getKsaDateString, ksaDayBounds } from "./workdayActi
 export const MISSING_INVOICE_GRACE_MS = 60 * 60 * 1000;
 export const MISSING_INVOICE_CREATED_FROM = "2026-09-01";
 export const MISSING_INVOICE_STATUS_REJECTED = "Rejected by management";
+export const MISSING_INVOICE_STATUS_NOT_UPLOADED = "Invoice not uploaded";
 export const DEFAULT_MISSING_INVOICE_EMAIL_TO = [
   "shreyansh.sharma@noorshukran.com",
   "vinit.kulkarni@noorshukran.com",
@@ -33,6 +34,16 @@ export function parseInvoiceMeta(value) {
 export function hasUploadedInvoice(meta) {
   const payload = parseInvoiceMeta(meta) || {};
   return Boolean(String(payload.invoiceFilePath || "").trim() || String(payload.invoiceUploadedAt || "").trim());
+}
+
+export function invoiceStatusLabel(meta) {
+  const status = String(parseInvoiceMeta(meta)?.status || "").trim();
+  return status || MISSING_INVOICE_STATUS_NOT_UPLOADED;
+}
+
+export function isInvoiceNotUploadedStatus(meta) {
+  const status = String(parseInvoiceMeta(meta)?.status || "").trim().toLowerCase();
+  return !status || status === MISSING_INVOICE_STATUS_NOT_UPLOADED.toLowerCase();
 }
 
 export function isRejectedByManagement(meta) {
@@ -71,6 +82,7 @@ export function isMissingInvoiceOverdue(order, meta, now = new Date()) {
   if (!isCreatedFromSeptember2026(order)) return false;
   if (now.getTime() - createdAt < MISSING_INVOICE_GRACE_MS) return false;
   if (isRejectedByManagement(meta)) return false;
+  if (!isInvoiceNotUploadedStatus(meta)) return false;
   return !hasUploadedInvoice(meta);
 }
 
@@ -112,11 +124,6 @@ function orderLabel(order) {
   return String(order?.order_number || "").trim() || String(order?.id || "").trim() || "-";
 }
 
-function invoiceStatusLabel(meta) {
-  const status = String(parseInvoiceMeta(meta)?.status || "").trim();
-  return status || "Invoice not uploaded";
-}
-
 function orderRow(order, meta, now) {
   return {
     order: orderLabel(order),
@@ -143,7 +150,7 @@ export function buildMissingInvoiceAlertEmail({
 
   const text = [
     `${count} submitted order${count === 1 ? "" : "s"} from September 2026 onward still ${count === 1 ? "has" : "have"} no invoice uploaded more than 1 hour after creation.`,
-    "Orders rejected by management, test-customer orders, and orders created before September 2026 are excluded.",
+    "Orders rejected by management, pending credit approval, stock unavailable, test-customer orders, and orders created before September 2026 are excluded.",
     `Checked at (KSA): ${formatKsaDateTime(now)}`,
     "",
     "Order | Customer | Salesman | Created (KSA) | Waiting | Value | Invoice status",
@@ -175,7 +182,7 @@ export function buildMissingInvoiceAlertEmail({
 
   const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
   <h2 style="margin: 0 0 12px; color: #0f4c81;">Invoices still missing after 1 hour</h2>
-  <p style="margin: 0 0 16px;">${count} submitted order${count === 1 ? "" : "s"} from September 2026 onward ${count === 1 ? "has" : "have"} no invoice uploaded more than 1 hour after creation. Orders rejected by management, test-customer orders, and orders created before September 2026 are excluded.</p>
+  <p style="margin: 0 0 16px;">${count} submitted order${count === 1 ? "" : "s"} from September 2026 onward ${count === 1 ? "has" : "have"} no invoice uploaded more than 1 hour after creation. Orders rejected by management, pending credit approval, stock unavailable, test-customer orders, and orders created before September 2026 are excluded.</p>
   <p style="margin: 0 0 16px; color: #52616b; font-size: 13px;">Checked at (KSA): ${escapeHtml(formatKsaDateTime(now))}</p>
   <table style="border-collapse: collapse; font-size: 13px; width: 100%;">
     <thead>

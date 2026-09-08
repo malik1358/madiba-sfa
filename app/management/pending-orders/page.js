@@ -200,18 +200,25 @@ export default function PendingOrdersPage() {
 
     try {
       const token = await getAuthToken();
-      const response = await fetch(`/api/order-invoice?orderIds=${encodeURIComponent(orderIds.join(","))}&linkProspects=1`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const uniqueIds = [...new Set(orderIds.map((id) => String(id || "").trim()).filter(Boolean))];
+      const items = {};
 
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to load invoice status.");
+      for (let index = 0; index < uniqueIds.length; index += 100) {
+        const chunk = uniqueIds.slice(index, index + 100);
+        const response = await fetch(`/api/order-invoice?orderIds=${encodeURIComponent(chunk.join(","))}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load invoice status.");
+        }
+
+        Object.assign(items, payload.items && typeof payload.items === "object" ? payload.items : {});
       }
 
-      const items = payload.items && typeof payload.items === "object" ? payload.items : {};
       setInvoiceMetaByOrder((current) => {
         const next = { ...current, ...items };
         if (userId) {
@@ -229,7 +236,7 @@ export default function PendingOrdersPage() {
         return next;
       });
     } catch (err) {
-      setError(err.message || "Unable to load invoice status.");
+      console.warn(err.message || "Unable to load invoice status.");
     }
   }
 
@@ -371,8 +378,29 @@ export default function PendingOrdersPage() {
         };
       });
 
-      if (invoiceMetaByOrder?.[orderId]?.invoiceFilePath) {
-        await refreshInvoiceComparison(orderId);
+      try {
+        if (invoiceMetaByOrder?.[orderId]?.invoiceFilePath) {
+          const metaResponse = await fetch(`/api/order-invoice?orderId=${encodeURIComponent(orderId)}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          const metaPayload = await metaResponse.json().catch(() => ({}));
+          const latestMeta = (metaResponse.ok && metaPayload.success && metaPayload.item)
+            ? metaPayload.item
+            : invoiceMetaByOrder?.[orderId];
+          if (metaResponse.ok && metaPayload.success && metaPayload.item) {
+            setInvoiceMetaByOrder((current) => ({
+              ...current,
+              [orderId]: metaPayload.item,
+            }));
+          }
+          if (!latestMeta?.comparisonCheckedAt) {
+            await refreshInvoiceComparison(orderId);
+          }
+        }
+      } catch {
+        // Keep the order open even if invoice metadata refresh fails.
       }
 
       if (isInvoiceMakerRole(userRole)) {

@@ -31,9 +31,33 @@ export function getLunchBreakReminderMessage(language = "en") {
     body: "Your lunch break has been over 3 hours. Please tap Lunch break in when you return.",
   };
 }
+
+export function getLunchInSuggestionMessage(language = "en") {
+  if (String(language || "").trim().toLowerCase() === "ar") {
+    return {
+      title: "لم يتم تسجيل العودة من الغداء",
+      body: "سجلت خروج الغداء ولم تسجل العودة. إذا انتهيت من الغداء، سجّل دخول الغداء من يومي. يمكنك المتابعة بدون ذلك.",
+    };
+  }
+
+  return {
+    title: "Lunch in not recorded",
+    body: "You punched Lunch out and have not punched Lunch in. If you are back at work, record Lunch in on My Day. You can continue without it.",
+  };
+}
 export const INACTIVITY_PROMPT_SHOWN_SNOOZE_MS = 5 * 60 * 1000;
 export const INACTIVITY_PROMPT_DISMISS_SNOOZE_MS = 15 * 60 * 1000;
 export const INACTIVITY_PROMPT_SNOOZE_STORAGE_KEY = "madiba_inactivity_prompt_snooze_until";
+export const LUNCH_IN_SUGGESTION_STORAGE_KEY = "madiba_lunch_in_suggestion_dismissed";
+
+export const LUNCH_IN_SUGGESTION_PATHS = [
+  "/management/new-order",
+  "/management/new-customer",
+  "/management/payment-collections",
+  "/management/my-collections",
+  "/management/my-day",
+  "/management/customer-audit",
+];
 export const BACKGROUND_GPS_IDLE_MS = 15 * 60 * 1000;
 export const WORKDAY_START_HOUR = 6;
 export const WORKDAY_END_HOUR = 22;
@@ -409,6 +433,45 @@ export function shouldSendLunchBreakReminder(userLogs, now = new Date()) {
   const lunchOutTs = getOpenLunchBreakOutTimestamp(userLogs, now.getTime());
   if (!lunchOutTs) return false;
   return now.getTime() - lunchOutTs >= LUNCH_BREAK_REMINDER_MS;
+}
+
+export function isLunchInSuggestionPath(pathname) {
+  const path = String(pathname || "").split("?")[0].replace(/\/+$/, "") || "/";
+  return LUNCH_IN_SUGGESTION_PATHS.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
+
+export function readLunchInSuggestionDismissedTs(storage = null) {
+  if (typeof window === "undefined" && !storage) return 0;
+  try {
+    const value = Number((storage || window.sessionStorage).getItem(LUNCH_IN_SUGGESTION_STORAGE_KEY) || 0);
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function dismissLunchInSuggestion(lunchOutTs, storage = null) {
+  const value = Number(lunchOutTs || 0);
+  if (!value) return;
+  if (typeof window === "undefined" && !storage) return;
+  try {
+    (storage || window.sessionStorage).setItem(LUNCH_IN_SUGGESTION_STORAGE_KEY, String(value));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function shouldSuggestLunchIn({
+  userLogs,
+  pathname,
+  now = Date.now(),
+  dismissedLunchOutTs = 0,
+} = {}) {
+  if (!isLunchInSuggestionPath(pathname)) return false;
+  if (!isOnLunchBreak(userLogs, now)) return false;
+  const lunchOutTs = getOpenLunchBreakOutTimestamp(userLogs, now);
+  if (!lunchOutTs) return false;
+  return Number(dismissedLunchOutTs || 0) !== lunchOutTs;
 }
 
 function orderSubmissionTimestamp(row) {

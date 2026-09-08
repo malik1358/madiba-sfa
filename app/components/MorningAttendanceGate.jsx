@@ -16,6 +16,7 @@ import { evaluateNativeAndroidApkVersion } from "../lib/androidAppVersion";
 import { isNativeAndroidPlatform } from "../lib/nativeFieldTracking";
 import AndroidApkUpdateRequired from "./AndroidApkUpdateRequired";
 import WorkdayInactivityPrompt from "./WorkdayInactivityPrompt";
+import LunchInSuggestionPrompt from "./LunchInSuggestionPrompt";
 import { buildGpsActivityNote, GPS_PERMISSION_DENIED_ERROR, GPS_POSITION_UNAVAILABLE_ERROR, GPS_UNSUPPORTED_ERROR, probeGpsLocationWithRetries, resolveGpsCapturePlatform } from "../lib/geo";
 import { hasMorningAttendanceToday, MORNING_ATTENDANCE_COMPLETE_EVENT, readGateReadyState, writeGateReadyState } from "../lib/morningAttendance";
 import { usePopupMessages } from "../hooks/usePopupMessages";
@@ -907,6 +908,7 @@ export default function MorningAttendanceGate({
     return (
       <>
         {attendanceRequired && attendanceComplete ? <WorkdayInactivityPrompt /> : null}
+        <LunchInSuggestionPrompt />
         {children}
       </>
     );

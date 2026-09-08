@@ -40,6 +40,8 @@ const TEXT = {
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
   actual: { en: "Actual", ar: "الفعلي" },
   achievement: { en: "Ach. %", ar: "الإنجاز" },
+  ofTarget: { en: "of target", ar: "من الهدف" },
+  expectedByToday: { en: "expected", ar: "المتوقع" },
   status: { en: "Status", ar: "الحالة" },
   saved: { en: "KPI targets updated. Users and the daily mail will show the new status.", ar: "تم تحديث الأهداف. سيظهر للمستخدمين وفي البريد اليومي الحالة الجديدة." },
 };
@@ -250,15 +252,18 @@ export default function KpiTargetsPage() {
                           todayIso: row.todayIso || getKsaDateString(),
                           paceShares: row.paceShares,
                         });
-                        const expectedLabel = liveKpi.status?.key === "no_target" || liveKpi.expected == null
+                        const statusKey = liveKpi.status?.key || "no_target";
+                        const expectedLabel = statusKey === "no_target" || liveKpi.expected == null
                           ? ""
-                          : `Expected ${formatAchievementPercent(liveKpi.expected)} by today`;
+                          : `${t("expectedByToday")} ${formatAchievementPercent(liveKpi.expected)}`;
                         return (
                           <KpiTargetCells
                             key={key}
                             actual={formatPerformanceKpiValue(key, kpi?.actual)}
                             achievement={formatAchievementPercent(liveKpi.achievement)}
+                            ofTarget={t("ofTarget")}
                             status={liveKpi.status?.label || "No target"}
+                            statusKey={statusKey}
                             expected={expectedLabel}
                             value={targetValue}
                             readOnly={isTotalSales}
@@ -297,7 +302,26 @@ function FragmentHeader({ group, actual, achievement }) {
   );
 }
 
-function KpiTargetCells({ actual, achievement, status, expected, value, onChange, readOnly = false }) {
+function kpiStatusClass(statusKey) {
+  if (statusKey === "achieved") return "moduleKpiStatus--achieved";
+  if (statusKey === "on_track" || statusKey === "on_pace" || statusKey === "ahead") {
+    return "moduleKpiStatus--onTrack";
+  }
+  if (statusKey === "behind") return "moduleKpiStatus--behind";
+  return "moduleKpiStatus--neutral";
+}
+
+function KpiTargetCells({
+  actual,
+  achievement,
+  ofTarget,
+  status,
+  statusKey,
+  expected,
+  value,
+  onChange,
+  readOnly = false,
+}) {
   return (
     <>
       <td>{actual}</td>
@@ -307,7 +331,7 @@ function KpiTargetCells({ actual, achievement, status, expected, value, onChange
           type="number"
           min="0"
           step="1"
-          size={10}
+          size={8}
           inputMode="numeric"
           value={value}
           readOnly={readOnly}
@@ -315,10 +339,17 @@ function KpiTargetCells({ actual, achievement, status, expected, value, onChange
           onChange={(event) => onChange(event.target.value)}
         />
       </td>
-      <td>
-        <div>{achievement}</div>
-        <div className="moduleKpiMeta">{status}</div>
-        {expected ? <div className="moduleKpiMeta">{expected}</div> : null}
+      <td className="moduleKpiAchCell">
+        {statusKey === "no_target" ? (
+          <span className={`moduleKpiStatus ${kpiStatusClass(statusKey)}`}>{status}</span>
+        ) : (
+          <>
+            <strong className="moduleKpiAchDone">{achievement}</strong>
+            <span className="moduleKpiAchHint">{ofTarget}</span>
+            <span className={`moduleKpiStatus ${kpiStatusClass(statusKey)}`}>{status}</span>
+            {expected ? <span className="moduleKpiAchExpected">{expected}</span> : null}
+          </>
+        )}
       </td>
     </>
   );

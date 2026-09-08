@@ -139,7 +139,7 @@ export async function PUT(request) {
       return {
         salesman_code: salesmanCode,
         target_month: targetMonth,
-        sales_target: targets.officeSupplies + targets.otherSales,
+        sales_target: targets.totalSales,
         office_supplies_sales_target: targets.officeSupplies,
         other_sales_target: targets.otherSales,
         collection_target: targets.collection,
@@ -153,7 +153,6 @@ export async function PUT(request) {
     const payloads = [
       rows,
       rows.map(({ collection_target, updated_by, ...rest }) => rest),
-      rows.map(({ office_supplies_sales_target, other_sales_target, collection_target, updated_by, ...rest }) => rest),
     ];
 
     let result = { error: new Error("Unable to save KPI targets.") };
@@ -165,7 +164,11 @@ export async function PUT(request) {
       if (!isMissingColumnError(result.error)) throw result.error;
     }
 
-    if (result.error) throw result.error;
+    if (result.error) {
+      throw new Error(
+        "Unable to save Office supplies / Others sales targets. Apply sql/setup_kpi_targets_collection.sql so office_supplies_sales_target and other_sales_target exist.",
+      );
+    }
 
     return NextResponse.json({
       success: true,

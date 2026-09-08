@@ -10,6 +10,7 @@ import {
   formatPerformanceKpiLine,
   isOfficeSuppliesSale,
   kpiStatus,
+  normalizePerformanceTargets,
   performanceUpdatedStatusLabel,
   splitSalesActuals,
   TEAM_PERFORMANCE_VIEW,
@@ -58,6 +59,40 @@ test("splits office supplies sales from other sales", () => {
   );
 });
 
+test("does not move Others target into office supplies after save", () => {
+  const saved = normalizePerformanceTargets({
+    salesmanCode: "SM001",
+    office_supplies_sales_target: 0,
+    other_sales_target: 250,
+    sales_target: 250,
+  });
+  assert.equal(saved.officeSupplies, 0);
+  assert.equal(saved.otherSales, 250);
+  assert.equal(saved.totalSales, 250);
+
+  const nested = normalizePerformanceTargets({
+    officeSupplies: 0,
+    otherSales: 180,
+  });
+  assert.equal(nested.officeSupplies, 0);
+  assert.equal(nested.otherSales, 180);
+  assert.equal(nested.totalSales, 180);
+});
+
+test("legacy sales_target becomes total sales, not office supplies", () => {
+  const legacy = normalizePerformanceTargets({ sales_target: 400 });
+  assert.equal(legacy.officeSupplies, 0);
+  assert.equal(legacy.otherSales, 0);
+  assert.equal(legacy.totalSales, 400);
+
+  const nestedTotal = normalizePerformanceTargets({
+    officeSupplies: 0,
+    otherSales: 0,
+    totalSales: 400,
+  });
+  assert.equal(nestedTotal.totalSales, 400);
+});
+
 test("updated status explains when admin last saved targets", () => {
   const snapshot = buildPerformanceSnapshot({
     reportDate: "2026-09-04",
@@ -68,9 +103,12 @@ test("updated status explains when admin last saved targets", () => {
     updatedByName: "Admin User",
   });
 
-  assert.equal(snapshot.kpis.length, 5);
+  assert.equal(snapshot.kpis.length, 6);
   assert.equal(snapshot.kpis[0].label, "Sales of office supplies");
   assert.equal(snapshot.kpis[1].label, "Others");
+  assert.equal(snapshot.kpis[2].label, "Total sales");
+  assert.equal(snapshot.kpis[2].actual, 55);
+  assert.equal(snapshot.kpis[2].target, 150);
   assert.match(performanceUpdatedStatusLabel(snapshot), /Admin User/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /Sales of office supplies:/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /40\.0%/);
@@ -125,6 +163,7 @@ test("daily visit email includes monthly KPI status", () => {
   assert.match(message.text, /Monthly KPI status/);
   assert.match(message.text, /Sales of office supplies:/);
   assert.match(message.text, /Others:/);
+  assert.match(message.text, /Total sales:/);
   assert.match(message.text, /Collection:/);
   assert.match(message.text, /New customers:/);
   assert.match(message.text, /Repeat customers:/);

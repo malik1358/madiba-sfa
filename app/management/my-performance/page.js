@@ -13,7 +13,7 @@ import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession"
 import {
   formatAchievementPercent,
   formatPerformanceKpiValue,
-  PERFORMANCE_KPI_KEYS,
+  PERFORMANCE_DISPLAY_KPI_KEYS,
   performanceUpdatedStatusLabel,
   TEAM_PERFORMANCE_VIEW,
 } from "../../lib/performanceKpis";
@@ -22,7 +22,7 @@ import ExportableTable from "../../components/ExportableTable";
 
 const TEXT = {
   title: { en: "My Performance", ar: "أدائي" },
-  subtitle: { en: "Office supplies, other sales, collection, and customer KPIs", ar: "مستلزمات المكتب والمبيعات الأخرى والتحصيل والعملاء" },
+  subtitle: { en: "Office supplies, other sales, total sales, collection, and customer KPIs", ar: "مستلزمات المكتب والمبيعات الأخرى وإجمالي المبيعات والتحصيل والعملاء" },
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading KPI dashboard...", ar: "جاري تحميل مؤشرات الأداء..." },
   actual: { en: "Actual", ar: "الفعلي" },
@@ -50,6 +50,7 @@ const STATUS_LABELS = {
 const KPI_LABELS = {
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
   otherSales: { en: "Others", ar: "أخرى" },
+  totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
   collection: { en: "Collection", ar: "التحصيل" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
@@ -231,7 +232,7 @@ export default function MyPerformancePage() {
                 <thead>
                   <tr>
                     <th>{t("salesman")}</th>
-                    {PERFORMANCE_KPI_KEYS.map((key) => (
+                    {PERFORMANCE_DISPLAY_KPI_KEYS.map((key) => (
                       <th key={key}>{KPI_LABELS[key]?.[language] || key}</th>
                     ))}
                   </tr>
@@ -247,7 +248,7 @@ export default function MyPerformancePage() {
                         <strong>{member.salesmanName || member.salesmanCode}</strong>
                         <div className="moduleKpiMeta">{member.salesmanCode}</div>
                       </td>
-                      {PERFORMANCE_KPI_KEYS.map((key) => {
+                      {PERFORMANCE_DISPLAY_KPI_KEYS.map((key) => {
                         const kpi = kpiByKey(member, key);
                         return (
                           <td key={key}>

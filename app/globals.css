@@ -4211,6 +4211,22 @@ th:has(.moduleTableColumnFilterInput) {
   vertical-align: top;
 }
 
+.moduleStackedHeaderTable {
+  --module-stacked-header-row1: 40px;
+}
+
+.moduleStackedHeaderTable thead tr:first-child th {
+  position: sticky;
+  top: var(--sticky-table-top);
+  z-index: 8;
+}
+
+.moduleStackedHeaderTable thead tr:nth-child(2) th {
+  position: sticky;
+  top: calc(var(--sticky-table-top) + var(--module-stacked-header-row1));
+  z-index: 7;
+}
+
 .moduleKpiTargetsTable .moduleKpiTargetInput {
   min-width: 8.25rem;
   width: 8.25rem;

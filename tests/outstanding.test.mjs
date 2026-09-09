@@ -778,6 +778,44 @@ test("hydrateOutstandingInvoices synthesizes missing invoice rows from aggregate
   assert.equal(invoices[0].pending_amount, 2805538);
 });
 
+test("different Al Tawfeer account codes do not share outstanding invoices", () => {
+  const dataset = {
+    rows: [{
+      customer_code: "1062C",
+      customer_name: "1062C  AL TAWFEER TRADING COMPANY",
+      open_invoices: 1,
+      buckets: { ">120": 2224 },
+      total_outstanding: 2224,
+    }],
+    invoices: [{
+      customer_code: "1062C",
+      customer_name: "1062C  AL TAWFEER TRADING COMPANY",
+      ref_no: "1098",
+      pending_amount: 2224,
+      overdue_days: 345,
+      invoice_day: 374,
+      salesman: "Abdul Rehman",
+    }],
+  };
+
+  const customer = findOutstandingForCustomer(
+    dataset,
+    "1251",
+    "Saqr Al-Tawfeer Trading Company",
+  );
+
+  assert.equal(customer, null);
+  assert.equal(
+    isSameOutstandingCustomer(
+      "1062C",
+      "1062C  AL TAWFEER TRADING COMPANY",
+      "1251",
+      "Saqr Al-Tawfeer Trading Company",
+    ),
+    false,
+  );
+});
+
 test("prospect customers do not inherit outstanding from similar customer names", () => {
   const dataset = {
     rows: [{

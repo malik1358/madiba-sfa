@@ -1275,37 +1275,34 @@ export function buildOutstandingRow(raw) {
   };
 }
 
+function outstandingPartyAccountCode(customerCode, customerName) {
+  return resolveOutstandingInvoiceCustomerCode({
+    customer_code: customerCode,
+    customer_name: customerName,
+  }) || resolveCustomerAccountCode(customerCode) || resolveCustomerAccountCode(customerName);
+}
+
+function outstandingPartyComparableName(customerCode, customerName) {
+  const combined = [customerName, customerCode]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  const extracted = extractLeadingCustomerCodeAndName(combined);
+  const name = extracted.customer_name || String(customerName || "").trim();
+  const stripped = extractLeadingCustomerCodeAndName(name);
+  return normalizeComparableName(stripped.customer_name || name);
+}
+
 export function findOutstandingForCustomer(dataset, customerCode, customerName) {
   if (isProspectCustomerCode(customerCode)) {
     return null;
   }
 
   const rows = Array.isArray(dataset?.rows) ? dataset.rows : [];
-  const code = normalizeCode(customerCode);
-  const name = normalizeName(customerName);
-  const cmpName = normalizeComparableName(customerName);
-
-  if (code) {
-    const byCode = rows.find((row) => (
-      customerAccountCodesMatch(row.customer_code, code)
-      || customerAccountCodesMatch(row.customer_name, code)
-    ));
-    if (byCode) return buildOutstandingRow(byCode);
-  }
-
-  if (name) {
-    const byName = rows.find((row) => {
-      const rowName = normalizeName(row.customer_name);
-      if (rowName === name) return true;
-
-      const rowCmp = normalizeComparableName(row.customer_name);
-      if (!cmpName || !rowCmp) return false;
-      return rowCmp === cmpName || rowCmp.includes(cmpName) || cmpName.includes(rowCmp);
-    });
-    if (byName) return buildOutstandingRow(byName);
-  }
-
-  return null;
+  const matched = rows.find((row) => (
+    isSameOutstandingCustomer(row.customer_code, row.customer_name, customerCode, customerName)
+  ));
+  return matched ? buildOutstandingRow(matched) : null;
 }
 
 export function isSameOutstandingCustomer(rowCustomerCode, rowCustomerName, customerCode, customerName) {
@@ -1314,25 +1311,24 @@ export function isSameOutstandingCustomer(rowCustomerCode, rowCustomerName, cust
   }
 
   const targetCode = normalizeCode(customerCode);
-  const targetName = normalizeName(customerName);
-  const targetCmpName = normalizeComparableName(customerName);
-
   if (targetCode) {
     if (customerAccountCodesMatch(rowCustomerCode, targetCode)) return true;
     if (customerAccountCodesMatch(rowCustomerName, targetCode)) return true;
   }
 
+  const rowAccount = outstandingPartyAccountCode(rowCustomerCode, rowCustomerName);
+  const targetAccount = outstandingPartyAccountCode(customerCode, customerName);
+  if (rowAccount && targetAccount && !customerAccountCodesMatch(rowAccount, targetAccount)) {
+    return false;
+  }
+
+  const targetName = normalizeName(customerName);
   const rowName = normalizeName(rowCustomerName);
   if (targetName && rowName === targetName) return true;
 
-  const rowCmpName = normalizeComparableName(rowCustomerName);
-  if (targetCmpName && rowCmpName) {
-    if (rowCmpName === targetCmpName) return true;
-    if (rowCmpName.includes(targetCmpName)) return true;
-    if (targetCmpName.includes(rowCmpName)) return true;
-  }
-
-  return false;
+  const rowCmpName = outstandingPartyComparableName(rowCustomerCode, rowCustomerName);
+  const targetCmpName = outstandingPartyComparableName(customerCode, customerName);
+  return Boolean(targetCmpName && rowCmpName && rowCmpName === targetCmpName);
 }
 
 export function laterDateOnly(...values) {

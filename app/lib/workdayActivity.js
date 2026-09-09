@@ -32,6 +32,26 @@ export function getLunchBreakReminderMessage(language = "en") {
   };
 }
 
+export function getLunchPunchNoonReminderMessage({ hasLunchOut = false } = {}) {
+  if (hasLunchOut) {
+    return {
+      title: "Punch Lunch in / سجّل العودة من الغداء",
+      body: [
+        "You punched Lunch out. Punch Lunch in on My Day without fail when you return.",
+        "سجّلت خروج الغداء. سجّل العودة من الغداء من صفحة يومي دون تأخير عند رجوعك.",
+      ].join("\n"),
+    };
+  }
+
+  return {
+    title: "Punch lunch out/in / سجّل خروج الغداء والعودة",
+    body: [
+      "It is lunch time. Punch Lunch out when you leave and Lunch in when you return — without fail.",
+      "حان وقت الغداء. سجّل خروج الغداء عند المغادرة والعودة من الغداء عند الرجوع — دون تأخير.",
+    ].join("\n"),
+  };
+}
+
 export function getLunchInSuggestionMessage(language = "en") {
   if (String(language || "").trim().toLowerCase() === "ar") {
     return {
@@ -63,6 +83,8 @@ export const WORKDAY_START_HOUR = 6;
 export const WORKDAY_END_HOUR = 22;
 export const LOGIN_REMINDER_HOUR = 11;
 export const LOGIN_REMINDER_REPEAT_MS = 30 * 60 * 1000;
+export const LUNCH_PUNCH_REMINDER_HOUR = 12;
+export const LUNCH_PUNCH_NOON_STORAGE_KEY = "madiba_lunch_punch_noon_dismissed";
 
 export const TRANSACTION_ENTRY_TYPES = new Set([
   "VISIT_REPORT",
@@ -227,6 +249,62 @@ export function shouldSendLateLoginReminder({
   if (!isKsaOrderDay(date)) return false;
   if (!isWithinKsaWorkingHours(now)) return false;
   return lateLoginReminderSlot(now) >= 0;
+}
+
+export function getLunchPunchProgress(userLogs = []) {
+  const extracted = extractLunchTimes(userLogs);
+  if (extracted.lunchOutAt) {
+    return {
+      lunchOut: true,
+      lunchIn: Boolean(extracted.lunchInAt),
+      complete: Boolean(extracted.lunchInAt),
+    };
+  }
+
+  let lunchOut = false;
+  let lunchIn = false;
+  for (const row of userLogs || []) {
+    if (row.entry_type === "LUNCH_BREAK_OUT") lunchOut = true;
+    if (row.entry_type === "LUNCH_BREAK_IN" && lunchOut) lunchIn = true;
+  }
+
+  return { lunchOut, lunchIn, complete: lunchOut && lunchIn };
+}
+
+export function shouldRemindLunchPunchNoon({
+  loginAt,
+  logoutAt,
+  userLogs = [],
+  now = new Date(),
+  dismissedDate = "",
+} = {}) {
+  if (!loginAt || logoutAt) return false;
+  const date = getKsaDateString(now);
+  if (dismissedDate && String(dismissedDate) === date) return false;
+  if (!isKsaOrderDay(date)) return false;
+  if (!isWithinKsaWorkingHours(now)) return false;
+  if (now.getTime() < ksaClockTimestamp(date, LUNCH_PUNCH_REMINDER_HOUR)) return false;
+  return !getLunchPunchProgress(userLogs).complete;
+}
+
+export function readLunchPunchNoonDismissedDate(storage = null) {
+  if (typeof window === "undefined" && !storage) return "";
+  try {
+    return String((storage || window.localStorage).getItem(LUNCH_PUNCH_NOON_STORAGE_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export function dismissLunchPunchNoonReminder(date = getKsaDateString(), storage = null) {
+  const value = String(date || "").trim();
+  if (!value) return;
+  if (typeof window === "undefined" && !storage) return;
+  try {
+    (storage || window.localStorage).setItem(LUNCH_PUNCH_NOON_STORAGE_KEY, value);
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 export function addKsaCalendarDays(dateString, days) {

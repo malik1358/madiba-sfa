@@ -15,8 +15,12 @@ import {
   formatWorkingHours,
   getKsaDateString,
   dismissLunchInSuggestion,
+  dismissLunchPunchNoonReminder,
+  getLunchPunchNoonReminderMessage,
+  getLunchPunchProgress,
   isLunchInSuggestionPath,
   isOnLunchBreak,
+  shouldRemindLunchPunchNoon,
   shouldSuggestLunchIn,
   isWithinActiveWorkSession,
   ksaDayBounds,
@@ -224,6 +228,93 @@ test("isWithinActiveWorkSession follows login-lunch-logout windows", () => {
     }),
     false,
   );
+});
+
+test("shouldRemindLunchPunchNoon starts at 12:00 KSA until lunch is fully punched", () => {
+  const loginAt = "2026-09-09T05:00:00.000Z";
+  const logs = [
+    {
+      entry_type: "MORNING_ATTENDANCE",
+      note: JSON.stringify({ captured_at: loginAt }),
+      created_at: loginAt,
+    },
+  ];
+
+  assert.equal(shouldRemindLunchPunchNoon({
+    loginAt,
+    userLogs: logs,
+    now: new Date("2026-09-09T08:59:00.000Z"),
+  }), false);
+  assert.equal(shouldRemindLunchPunchNoon({
+    loginAt,
+    userLogs: logs,
+    now: new Date("2026-09-09T09:00:00.000Z"),
+  }), true);
+  assert.equal(shouldRemindLunchPunchNoon({
+    loginAt: null,
+    userLogs: [],
+    now: new Date("2026-09-09T09:00:00.000Z"),
+  }), false);
+  assert.equal(shouldRemindLunchPunchNoon({
+    loginAt,
+    logoutAt: "2026-09-09T14:00:00.000Z",
+    userLogs: logs,
+    now: new Date("2026-09-09T09:00:00.000Z"),
+  }), false);
+  assert.equal(shouldRemindLunchPunchNoon({
+    loginAt,
+    userLogs: logs,
+    now: new Date("2026-09-11T09:00:00.000Z"),
+  }), false);
+
+  const lunchOutLogs = [
+    ...logs,
+    {
+      entry_type: "LUNCH_BREAK_OUT",
+      note: JSON.stringify({ captured_at: "2026-09-09T09:05:00.000Z" }),
+      created_at: "2026-09-09T09:05:00.000Z",
+    },
+  ];
+  assert.equal(getLunchPunchProgress(lunchOutLogs).complete, false);
+  assert.equal(shouldRemindLunchPunchNoon({
+    loginAt,
+    userLogs: lunchOutLogs,
+    now: new Date("2026-09-09T09:10:00.000Z"),
+  }), true);
+
+  const completeLogs = [
+    ...lunchOutLogs,
+    {
+      entry_type: "LUNCH_BREAK_IN",
+      note: JSON.stringify({ captured_at: "2026-09-09T09:40:00.000Z" }),
+      created_at: "2026-09-09T09:40:00.000Z",
+    },
+  ];
+  assert.equal(getLunchPunchProgress(completeLogs).complete, true);
+  assert.equal(shouldRemindLunchPunchNoon({
+    loginAt,
+    userLogs: completeLogs,
+    now: new Date("2026-09-09T09:45:00.000Z"),
+  }), false);
+
+  const storage = new Map();
+  const fakeStorage = {
+    getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+    setItem: (key, value) => storage.set(key, String(value)),
+  };
+  dismissLunchPunchNoonReminder("2026-09-09", fakeStorage);
+  assert.equal(shouldRemindLunchPunchNoon({
+    loginAt,
+    userLogs: logs,
+    now: new Date("2026-09-09T09:00:00.000Z"),
+    dismissedDate: "2026-09-09",
+  }), false);
+
+  const copy = getLunchPunchNoonReminderMessage();
+  assert.match(copy.title, /Punch lunch out\/in/);
+  assert.match(copy.title, /سجّل خروج الغداء/);
+  assert.match(copy.body, /without fail/);
+  assert.match(copy.body, /دون تأخير/);
 });
 
 test("shouldSendLunchBreakReminder is true after 3 hours on lunch", () => {

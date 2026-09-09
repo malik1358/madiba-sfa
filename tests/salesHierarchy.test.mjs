@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   customerSalesmanAssignmentMatchesScope,
+  findHeadProfile,
   headSalesmanMetadataMatchesLeader,
   resolveReportingChain,
   resolveReportingChainFromAuth,
@@ -27,6 +28,19 @@ test("headSalesmanMetadataMatchesLeader matches code and name variants", () => {
     head_salesman_code: "GEORGE",
     head_salesman_name: "",
   }, nabil), false);
+});
+
+test("findHeadProfile returns the direct boss for a salesman", () => {
+  const profiles = [
+    { id: "george", salesman_code: "GEORGE", salesman_name: "George" },
+    { id: "nabil", salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil" },
+    { id: "soyeb", salesman_code: "SOYEB", salesman_name: "Soyeb" },
+  ];
+
+  const head = findHeadProfile({ head_salesman_code: "AHMED NABIL" }, profiles);
+  assert.equal(head?.id, "nabil");
+  assert.equal(head?.salesman_name, "Ahmed Nabil");
+  assert.equal(findHeadProfile({}, profiles), null);
 });
 
 test("resolveReportingChainFromAuth walks Belal to Nabil to Soyeb", () => {

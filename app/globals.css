@@ -4231,6 +4231,22 @@ th:has(.moduleTableColumnFilterInput) {
   max-width: none;
 }
 
+.moduleKpiTargetsFilters {
+  display: grid;
+  grid-template-columns: 200px minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.moduleKpiTargetsFilterActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 22px;
+}
+
 .moduleKpiTargetsWrap {
   overflow: auto;
   max-width: 100%;
@@ -4255,22 +4271,38 @@ th:has(.moduleTableColumnFilterInput) {
   position: sticky;
   left: 0;
   inset-inline-start: 0;
-  min-width: 11.5rem;
-  max-width: 14rem;
+  min-width: 12rem;
+  width: 12rem;
+  max-width: 12rem;
   background: #ffffff;
   box-shadow: 2px 0 8px rgba(6, 47, 58, 0.12);
+  z-index: 6;
+}
+
+.moduleKpiTargetsTable .moduleKpiBossCell {
+  position: sticky;
+  left: 12rem;
+  inset-inline-start: 12rem;
+  min-width: 11rem;
+  width: 11rem;
+  max-width: 11rem;
+  background: #ffffff;
+  box-shadow: 2px 0 8px rgba(6, 47, 58, 0.08);
   z-index: 5;
 }
 
-.moduleKpiTargetsTable thead .moduleKpiSalesmanCell {
+.moduleKpiTargetsTable thead .moduleKpiSalesmanCell,
+.moduleKpiTargetsTable thead .moduleKpiBossCell {
   background: #edf4f5;
 }
 
-.moduleKpiTargetsTable thead tr:first-child .moduleKpiSalesmanCell {
+.moduleKpiTargetsTable thead tr:first-child .moduleKpiSalesmanCell,
+.moduleKpiTargetsTable thead tr:first-child .moduleKpiBossCell {
   z-index: 11;
 }
 
-.moduleKpiTargetsTable thead tr:nth-child(2) .moduleKpiSalesmanCell {
+.moduleKpiTargetsTable thead tr:nth-child(2) .moduleKpiSalesmanCell,
+.moduleKpiTargetsTable thead tr:nth-child(2) .moduleKpiBossCell {
   z-index: 10;
 }
 
@@ -4280,6 +4312,14 @@ th:has(.moduleTableColumnFilterInput) {
   inset-inline-start: auto;
   inset-inline-end: 0;
   box-shadow: -2px 0 8px rgba(6, 47, 58, 0.12);
+}
+
+[dir="rtl"] .moduleKpiTargetsTable .moduleKpiBossCell {
+  left: auto;
+  right: 12rem;
+  inset-inline-start: auto;
+  inset-inline-end: 12rem;
+  box-shadow: -2px 0 8px rgba(6, 47, 58, 0.08);
 }
 
 .moduleKpiTargetsTable .moduleKpiTargetInput {
@@ -5769,8 +5809,17 @@ th:has(.moduleTableColumnFilterInput) {
   }
 
   .moduleKpiTargetsTable.moduleTable thead th,
-  .moduleKpiTargetsTable.moduleTable .moduleKpiSalesmanCell {
+  .moduleKpiTargetsTable.moduleTable .moduleKpiSalesmanCell,
+  .moduleKpiTargetsTable.moduleTable .moduleKpiBossCell {
     position: sticky;
+  }
+
+  .moduleKpiTargetsFilters {
+    grid-template-columns: 1fr;
+  }
+
+  .moduleKpiTargetsFilterActions {
+    padding-top: 0;
   }
 
   .moduleKpiTargetsWrap {

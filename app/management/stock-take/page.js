@@ -11,7 +11,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
-import { formatStockQty, previewConvertedQty, STOCK_TAKE_UOM, uomLabel } from "../../lib/stockTake";
+import { formatStockQty, previewConvertedQty, STOCK_TAKE_UOM, uomLabel, warehouseKey } from "../../lib/stockTake";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { formatKsaDateOnly, formatKsaTime } from "../../lib/workdayActivity";
 
@@ -131,6 +131,11 @@ export default function StockTakePage() {
     event.preventDefault();
     setError("");
     setMessage("");
+    const duplicate = openSessions.find((row) => warehouseKey(row.warehouse_name) === warehouseKey(warehouseInput));
+    if (duplicate) {
+      setError("An open inventory already exists for this warehouse. Open it from the list instead of starting a new one.");
+      return;
+    }
     setLoading(true);
     try {
       const { response, payload } = await fetchJsonWithTimeout("/api/stock-take", {

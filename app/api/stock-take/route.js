@@ -7,6 +7,7 @@ import {
   attachQtyMidToLines,
   canAccessStockTakeSession,
   convertEnteredQtyToUnits,
+  duplicateOpenWarehouseMessage,
   findItemByBarcode,
   findItemByItemCode,
   hasStockTakeModuleAccess,
@@ -453,6 +454,34 @@ export async function POST(request) {
       const warehouseName = normalizeWarehouseName(body?.warehouse);
       if (!warehouseName) {
         return NextResponse.json({ success: false, error: "Enter the warehouse name before starting inventory." }, { status: 400 });
+      }
+      const key = warehouseKey(warehouseName);
+      const existingRes = await admin
+        .from("stock_take_sessions")
+        .select("id,warehouse_name,started_by,started_by_name,started_at,status")
+        .eq("status", "OPEN")
+        .eq("warehouse_key", key)
+        .order("started_at", { ascending: true })
+        .limit(1);
+      if (existingRes.error) {
+        if (missingSetup(existingRes.error)) {
+          return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
+        }
+        throw existingRes.error;
+      }
+      const existing = existingRes.data?.[0];
+      if (existing) {
+        const { ids } = await loadSharedSessionIds(admin, access.profile.id);
+        return NextResponse.json({
+          success: false,
+          error: duplicateOpenWarehouseMessage({
+            warehouseName,
+            existing,
+            userId: access.profile.id,
+            sharedSessionIds: ids,
+          }),
+          existingSession: existing,
+        }, { status: 409 });
       }
       const startedByName = access.profile.salesman_name || access.profile.salesman_code || access.user.email || "";
       const { data, error } = await admin

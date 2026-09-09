@@ -167,6 +167,16 @@ export function canAccessStockTakeSession({ session, userId, sharedSessionIds = 
   return (sharedSessionIds || []).map(String).includes(String(session.id));
 }
 
+export function duplicateOpenWarehouseMessage({ warehouseName, existing, userId, sharedSessionIds = [] } = {}) {
+  if (!existing) return "";
+  const name = existing.warehouse_name || warehouseName || "this warehouse";
+  if (canAccessStockTakeSession({ session: existing, userId, sharedSessionIds })) {
+    return `An open inventory already exists for ${name}. Open it from the list instead of starting a new one.`;
+  }
+  const owner = String(existing.started_by_name || "").trim() || "another user";
+  return `An open inventory already exists for ${name} (opened by ${owner}). Ask them to share it with you.`;
+}
+
 export function annotateOpenStockTakeSessions({ sessions = [], userId, sharedSessionIds = [] } = {}) {
   const shared = new Set((sharedSessionIds || []).map(String));
   const mine = String(userId || "");

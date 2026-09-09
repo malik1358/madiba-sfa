@@ -258,8 +258,10 @@ export default function MorningAttendanceGate({
       return true;
     }
 
-    setCheckingLocation(true);
-    setLocationError("");
+    if (!options.background) {
+      setCheckingLocation(true);
+      setLocationError("");
+    }
 
     try {
       await probeGpsLocationWithRetries({ attempts: 2, timeoutMs: 6000, retryDelayMs: 1000 });
@@ -268,6 +270,9 @@ export default function MorningAttendanceGate({
       setLocationError("");
       return true;
     } catch (err) {
+      if (options.background) {
+        return false;
+      }
       if (userId) clearGpsVerifiedForSession(userId);
       const reason = String(err?.message || "");
       if (reason === GPS_PERMISSION_DENIED_ERROR) {
@@ -305,14 +310,33 @@ export default function MorningAttendanceGate({
     }
   }
 
+  function openWorkdayGate(userId, hasAttendance) {
+    if (userId) writeGateReadyState(userId, hasAttendance);
+    setAttendanceComplete(hasAttendance);
+    setLocationReady(true);
+    setBatteryReady(true);
+    setApkVersionReady(true);
+    setReady(true);
+    setChecking(false);
+    setWarning("");
+    workdayCheckDoneRef.current = true;
+  }
+
+  function continueAccessChecksInBackground(hasActiveSession) {
+    verifyLocationAccess(hasActiveSession, { background: true }).catch(() => {});
+    verifyBatteryAccess().catch(() => {});
+    verifyApkVersion().catch(() => {});
+  }
+
   async function refreshWorkdayState(options = {}) {
     const forceRecheck = options.force === true;
+    const attendanceOnly = options.attendanceOnly === true;
     const supabase = getSupabaseClient();
     let session = null;
 
     if (supabase) {
       try {
-        session = await getSessionWithTimeout(supabase);
+        session = await getSessionWithTimeout(supabase, attendanceOnly ? 8000 : 15000);
       } catch {
         session = null;
       }
@@ -322,16 +346,46 @@ export default function MorningAttendanceGate({
     const hasActiveSession = Boolean(userId);
     const cachedGate = !forceRecheck && userId ? readGateReadyState(userId) : null;
 
-    if (cachedGate) {
-      setLocationReady(true);
-      setBatteryReady(true);
-      setApkVersionReady(true);
-      setAttendanceComplete(cachedGate.attendanceComplete);
-      setReady(true);
-      setChecking(false);
-      setWarning("");
-      workdayCheckDoneRef.current = true;
-      syncAttendanceState(userId).catch(() => {});
+    if (cachedGate?.attendanceComplete) {
+      openWorkdayGate(userId, true);
+      if (userId) {
+        syncAttendanceState(userId).catch(() => {});
+        hydrateActivityTimestamps(userId).catch(() => {});
+      }
+      if (!attendanceOnly) {
+        continueAccessChecksInBackground(hasActiveSession);
+        autoCloseForgottenWorkdays(supabase, userId).catch(() => {});
+      }
+      return;
+    }
+
+    if (userId && attendanceRequired) {
+      try {
+        const hasAttendance = await withTimeout(
+          hasMorningAttendanceToday(supabase, userId),
+          8000,
+          "ATTENDANCE_CHECK_TIMEOUT",
+        );
+        if (hasAttendance) {
+          openWorkdayGate(userId, true);
+          hydrateActivityTimestamps(userId).catch(() => {});
+          if (!attendanceOnly) {
+            continueAccessChecksInBackground(hasActiveSession);
+            autoCloseForgottenWorkdays(supabase, userId).catch(() => {});
+          }
+          return;
+        }
+      } catch (err) {
+        const message = String(err?.message || "");
+        if (message === "ATTENDANCE_CHECK_TIMEOUT" && cachedGate) {
+          openWorkdayGate(userId, Boolean(cachedGate.attendanceComplete));
+          syncAttendanceState(userId).catch(() => {});
+          return;
+        }
+      }
+    }
+
+    if (attendanceOnly) {
       return;
     }
 
@@ -396,14 +450,8 @@ export default function MorningAttendanceGate({
         return;
       }
 
-      const hasAttendance = await withTimeout(
-        hasMorningAttendanceToday(supabase, session.user.id),
-        15000,
-        "ATTENDANCE_CHECK_TIMEOUT",
-      );
-      setAttendanceComplete(hasAttendance);
-      writeGateReadyState(session.user.id, hasAttendance);
-      hydrateActivityTimestamps(session.user.id).catch(() => {});
+      setAttendanceComplete(false);
+      writeGateReadyState(session.user.id, false);
       setReady(true);
       setWarning("");
       workdayCheckDoneRef.current = true;
@@ -572,7 +620,20 @@ export default function MorningAttendanceGate({
 
   useEffect(() => {
     if (accessLoading) {
-      return undefined;
+      refreshWorkdayState({ attendanceOnly: true });
+
+      const safetyTimer = window.setTimeout(() => {
+        if (workdayCheckDoneRef.current) return;
+        setReady(true);
+        setChecking(false);
+        setLocationReady(true);
+        setBatteryReady(true);
+        workdayCheckDoneRef.current = true;
+      }, 12000);
+
+      return () => {
+        window.clearTimeout(safetyTimer);
+      };
     }
 
     if (!attendanceRequired) {

@@ -7,6 +7,7 @@ import {
   canAccessWithoutMorningAttendance,
   hasMorningAttendanceToday,
   isMorningAttendanceRequiredForRole,
+  readGateReadyState,
 } from "../lib/morningAttendance";
 import { getSupabaseClient } from "../lib/supabase";
 import { useAppPopup } from "./AppPopupProvider";
@@ -65,6 +66,12 @@ export default function MorningAttendanceRedirect() {
         if (!cancelled) setRequired(needsAttendance);
 
         if (!needsAttendance) {
+          if (!cancelled) setAttendanceComplete(true);
+          return;
+        }
+
+        const cached = userId ? readGateReadyState(userId) : null;
+        if (cached?.attendanceComplete) {
           if (!cancelled) setAttendanceComplete(true);
           return;
         }

@@ -26,6 +26,7 @@ export const SNAPSHOT_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
 export const COLLECTION_QUEUES_READY_EVENT = "madiba-collection-queues-ready";
 const MOBILE_SNAPSHOT_META_KEY = "mobileSnapshot:meta:v1";
 const COLLECTION_QUEUE_HYDRATE_WAIT_MS = 45000;
+let snapshotHydrateInFlight = null;
 
 export const CACHE_TTL = {
   scopeMs: 15 * 60 * 1000,
@@ -146,6 +147,7 @@ function pendingOrdersInvoiceMetaCacheKey(userId) {
 async function fetchMobileSnapshotNetwork(accessToken) {
   const response = await fetch("/api/mobile-snapshot", {
     cache: "no-store",
+    priority: "low",
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
@@ -659,36 +661,44 @@ export async function hydrateFromMobileSnapshot(snapshot, userId) {
 }
 
 export async function fetchAndHydrateMobileSnapshot(options = {}) {
-  const manageJob = options.manageJob !== false;
-  const supabase = getSupabaseClient();
-  if (!supabase) throw new Error("Supabase is not configured.");
+  if (snapshotHydrateInFlight) return snapshotHydrateInFlight;
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token || !session?.user?.id) {
-    throw new Error("Please login again.");
-  }
+  snapshotHydrateInFlight = (async () => {
+    const manageJob = options.manageJob !== false;
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
 
-  if (manageJob) {
-    startDataRefreshJob("device-data", snapshotRefreshSteps(false));
-  }
-
-  try {
-    markDataRefreshStep("download", "running");
-    const snapshot = await fetchMobileSnapshotNetwork(session.access_token);
-    await hydrateFromMobileSnapshot(snapshot, session.user.id);
-    if (manageJob) {
-      finishDataRefreshJob({
-        lastBuiltAt: snapshot.builtAt,
-        lastSavedAt: Date.now(),
-      });
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token || !session?.user?.id) {
+      throw new Error("Please login again.");
     }
-    return { snapshot, userId: session.user.id };
-  } catch (error) {
+
     if (manageJob) {
-      finishDataRefreshJob({ error: error.message || "Unable to refresh device data." });
+      startDataRefreshJob("device-data", snapshotRefreshSteps(false));
     }
-    throw error;
-  }
+
+    try {
+      markDataRefreshStep("download", "running");
+      const snapshot = await fetchMobileSnapshotNetwork(session.access_token);
+      await hydrateFromMobileSnapshot(snapshot, session.user.id);
+      if (manageJob) {
+        finishDataRefreshJob({
+          lastBuiltAt: snapshot.builtAt,
+          lastSavedAt: Date.now(),
+        });
+      }
+      return { snapshot, userId: session.user.id };
+    } catch (error) {
+      if (manageJob) {
+        finishDataRefreshJob({ error: error.message || "Unable to refresh device data." });
+      }
+      throw error;
+    }
+  })().finally(() => {
+    snapshotHydrateInFlight = null;
+  });
+
+  return snapshotHydrateInFlight;
 }
 
 export async function ensureMobileSnapshotFresh(options = {}) {

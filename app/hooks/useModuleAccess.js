@@ -41,11 +41,17 @@ export function useModuleAccess() {
           setLoading(false);
         }
 
-        let profileRes = await supabase
+        const profileQuery = supabase
           .from("profiles")
           .select("role,salesman_code,stock_take_access")
           .eq("id", session.user.id)
           .maybeSingle();
+        let profileRes = await Promise.race([
+          profileQuery,
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("PROFILE_TIMEOUT")), 8000);
+          }),
+        ]);
 
         if (profileRes.error) {
           profileRes = await supabase
@@ -75,8 +81,15 @@ export function useModuleAccess() {
       }
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!cancelled) loadAccess(data?.session);
+    Promise.race([
+      supabase.auth.getSession(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("SESSION_TIMEOUT")), 8000);
+      }),
+    ]).then((result) => {
+      if (!cancelled) loadAccess(result?.data?.session);
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
     });
 
     const {

@@ -8,6 +8,9 @@ import {
   refreshOfflineDeviceData,
 } from "../lib/offlineDataRefresh";
 import { getSupabaseClient } from "../lib/supabase";
+import { WORKDAY_GATE_READY_EVENT } from "../lib/morningAttendance";
+
+const BACKGROUND_DATA_START_DELAY_MS = 2500;
 
 async function hydrateMobileSnapshotIfMissing() {
   try {
@@ -38,27 +41,46 @@ export default function PwaShell() {
   }, []);
 
   useEffect(() => {
-    hydrateMobileSnapshotIfMissing();
+    let started = false;
+    let fallbackTimer = 0;
+
+    function startBackgroundHydrate() {
+      if (started) return;
+      started = true;
+      window.clearTimeout(fallbackTimer);
+      hydrateMobileSnapshotIfMissing();
+    }
+
+    fallbackTimer = window.setTimeout(startBackgroundHydrate, BACKGROUND_DATA_START_DELAY_MS);
+    window.addEventListener(WORKDAY_GATE_READY_EVENT, startBackgroundHydrate);
 
     const supabase = getSupabaseClient();
     if (!supabase) {
-      const onOnline = () => hydrateMobileSnapshotIfMissing();
+      const onOnline = () => startBackgroundHydrate();
       window.addEventListener("online", onOnline);
-      return () => window.removeEventListener("online", onOnline);
+      return () => {
+        window.clearTimeout(fallbackTimer);
+        window.removeEventListener(WORKDAY_GATE_READY_EVENT, startBackgroundHydrate);
+        window.removeEventListener("online", onOnline);
+      };
     }
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.access_token && (event === "SIGNED_IN" || event === "INITIAL_SESSION")) {
+      if (session?.access_token && (event === "SIGNED_IN" || event === "INITIAL_SESSION") && started) {
         hydrateMobileSnapshotIfMissing();
       }
     });
 
-    const onOnline = () => hydrateMobileSnapshotIfMissing();
+    const onOnline = () => {
+      if (started) hydrateMobileSnapshotIfMissing();
+    };
     window.addEventListener("online", onOnline);
 
     return () => {
+      window.clearTimeout(fallbackTimer);
+      window.removeEventListener(WORKDAY_GATE_READY_EVENT, startBackgroundHydrate);
       subscription.unsubscribe();
       window.removeEventListener("online", onOnline);
     };
@@ -121,6 +143,9 @@ export default function PwaShell() {
     const supabase = getSupabaseClient();
     let cancelled = false;
     let channel = null;
+    let timer = 0;
+    let started = false;
+    let fallbackTimer = 0;
 
     async function pollVersion() {
       try {
@@ -139,8 +164,16 @@ export default function PwaShell() {
       }
     }
 
-    pollVersion();
-    const timer = window.setInterval(pollVersion, 30 * 1000);
+    function startVersionPolling() {
+      if (started) return;
+      started = true;
+      window.clearTimeout(fallbackTimer);
+      pollVersion();
+      timer = window.setInterval(pollVersion, 30 * 1000);
+    }
+
+    window.addEventListener(WORKDAY_GATE_READY_EVENT, startVersionPolling);
+    fallbackTimer = window.setTimeout(startVersionPolling, BACKGROUND_DATA_START_DELAY_MS);
 
     if (supabase) {
       channel = supabase
@@ -167,8 +200,11 @@ export default function PwaShell() {
 
     return () => {
       cancelled = true;
+      started = true;
+      window.clearTimeout(fallbackTimer);
       window.clearInterval(timer);
       window.removeEventListener(OFFLINE_DATA_REFRESH_EVENT, onRefresh);
+      window.removeEventListener(WORKDAY_GATE_READY_EVENT, startVersionPolling);
       if (channel) supabase.removeChannel(channel);
     };
   }, []);

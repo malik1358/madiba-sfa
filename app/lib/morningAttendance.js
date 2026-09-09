@@ -29,13 +29,34 @@ export function todayDateKey(referenceDate = new Date()) {
   return getKsaDateString(referenceDate);
 }
 
+function gateReadyStorageKey(userId) {
+  return `${GATE_READY_STORAGE_PREFIX}${userId}`;
+}
+
+function readStorageRaw(storage, key) {
+  try {
+    return storage?.getItem(key) || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageRaw(storage, key, value) {
+  try {
+    storage?.setItem(key, value);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 export function readGateReadyState(userId, referenceDate = new Date()) {
   if (typeof window === "undefined" || !userId) return null;
 
-  try {
-    const raw = window.sessionStorage.getItem(`${GATE_READY_STORAGE_PREFIX}${userId}`);
-    if (!raw) return null;
+  const key = gateReadyStorageKey(userId);
+  const raw = readStorageRaw(window.localStorage, key) || readStorageRaw(window.sessionStorage, key);
+  if (!raw) return null;
 
+  try {
     const parsed = JSON.parse(raw);
     if (parsed?.day !== todayDateKey(referenceDate)) return null;
 
@@ -50,17 +71,13 @@ export function readGateReadyState(userId, referenceDate = new Date()) {
 export function writeGateReadyState(userId, attendanceComplete, referenceDate = new Date()) {
   if (typeof window === "undefined" || !userId) return;
 
-  try {
-    window.sessionStorage.setItem(
-      `${GATE_READY_STORAGE_PREFIX}${userId}`,
-      JSON.stringify({
-        day: todayDateKey(referenceDate),
-        attendanceComplete: Boolean(attendanceComplete),
-      }),
-    );
-  } catch {
-    // Ignore storage failures.
-  }
+  const payload = JSON.stringify({
+    day: todayDateKey(referenceDate),
+    attendanceComplete: Boolean(attendanceComplete),
+  });
+  const key = gateReadyStorageKey(userId);
+  writeStorageRaw(window.localStorage, key, payload);
+  writeStorageRaw(window.sessionStorage, key, payload);
 }
 
 export async function hasMorningAttendanceToday(supabase, userId) {

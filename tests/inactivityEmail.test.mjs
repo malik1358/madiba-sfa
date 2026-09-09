@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   INACTIVITY_EMAIL_MINUTES,
+  attachInactivityEmailSendGaps,
   buildDailyVisitReportPageUrl,
   buildInactivityAlertEmail,
   buildLateLoginReminderEmail,
@@ -10,10 +11,12 @@ import {
   lateLoginEmailReferenceKey,
   resolveAppOrigin,
   resolveInactivityEmailRecipients,
+  shouldRecordInactivityEmailCheck,
 } from "../app/lib/inactivityEmail.js";
-import { runInactivityEmailCycle } from "../app/lib/inactivityEmailServer.js";
+import { loadInactivityEmailLog, runInactivityEmailCycle } from "../app/lib/inactivityEmailServer.js";
 import {
   INACTIVITY_EMAIL_MS,
+  describeInactivityEmailState,
   inactivityEmailReminderSlot,
   inactivityReferenceTimestamp,
   lastTransactionTimestamp,
@@ -294,34 +297,85 @@ test("buildLateLoginReminderEmail names the user and 11:00 cutoff", () => {
   assert.match(message.html, /every 30 minutes/);
 });
 
-function createLogTable(existingKeys = []) {
-  const rows = existingKeys.map((reference_key) => ({ reference_key }));
+function createCycleTable(rows = []) {
   return {
+    insert(row) {
+      rows.push(row);
+      return Promise.resolve({ error: null });
+    },
     select() {
       return {
-        eq(_column, value) {
-          const matches = rows.filter((row) => row.reference_key === value);
+        eq() {
           return {
-            then(resolve) {
-              return Promise.resolve({ count: matches.length, error: null }).then(resolve);
+            order() {
+              return Promise.resolve({ data: rows, error: null });
             },
           };
         },
+        order() {
+          return Promise.resolve({ data: rows, error: null });
+        },
       };
+    },
+  };
+}
+
+function createLogTable(existingKeys = []) {
+  const rows = existingKeys.map((reference_key) => ({ reference_key }));
+  const api = {
+    select() {
+      api.filterUserId = undefined;
+      return api;
+    },
+    in() {
+      return api;
+    },
+    gte() {
+      return api;
+    },
+    lte() {
+      return api;
+    },
+    eq(column, value) {
+      if (column === "reference_key") {
+        const matches = rows.filter((row) => row.reference_key === value);
+        return {
+          then(resolve) {
+            return Promise.resolve({ count: matches.length, error: null, data: matches }).then(resolve);
+          },
+        };
+      }
+      api.filterUserId = value;
+      return api;
+    },
+    order() {
+      return api;
     },
     insert(row) {
       rows.push(row);
       return Promise.resolve({ error: null });
     },
+    then(resolve, reject) {
+      const data = api.filterUserId
+        ? rows.filter((row) => row.user_id === api.filterUserId)
+        : rows;
+      return Promise.resolve({ data, error: null }).then(resolve, reject);
+    },
+    get rows() {
+      return rows;
+    },
   };
+  return api;
 }
 
 test("runInactivityEmailCycle emails the user and bosses, then repeats every 40 minutes", async () => {
   const sent = [];
   const logTable = createLogTable();
+  const cycleRows = [];
   const admin = {
     from(table) {
       if (table === "push_notification_log") return logTable;
+      if (table === "inactivity_email_cycle_log") return createCycleTable(cycleRows);
       if (table === "profiles") {
         return {
           select() {
@@ -411,6 +465,11 @@ test("runInactivityEmailCycle emails the user and bosses, then repeats every 40 
   assert.equal(nextSlot.sent, 1);
   assert.equal(sent.length, 2);
   assert.match(sent[1].text, /every 40 minutes/);
+  assert.equal(cycleRows.length, 3);
+  assert.equal(cycleRows[0].sent, 1);
+  assert.equal(cycleRows[1].sent, 0);
+  assert.equal(cycleRows[1].details[0].reason, "already_sent");
+  assert.equal(cycleRows[2].sent, 1);
 });
 
 test("runInactivityEmailCycle skips when email is not configured", async () => {
@@ -428,9 +487,11 @@ test("runInactivityEmailCycle skips when email is not configured", async () => {
 test("runInactivityEmailCycle reminds every 30 minutes when a field user has not logged in by 11:00", async () => {
   const sent = [];
   const logTable = createLogTable();
+  const cycleRows = [];
   const admin = {
     from(table) {
       if (table === "push_notification_log") return logTable;
+      if (table === "inactivity_email_cycle_log") return createCycleTable(cycleRows);
       if (table === "profiles") {
         return {
           select() {
@@ -488,3 +549,104 @@ test("runInactivityEmailCycle reminds every 30 minutes when a field user has not
   assert.equal(nextSlot.loginRemindersSent, 1);
   assert.equal(sent.length, 2);
 });
+
+test("attachInactivityEmailSendGaps measures minutes between emails for the same user", () => {
+  const rows = attachInactivityEmailSendGaps([
+    { userId: "u1", sentAt: "2026-09-09T07:05:00.000Z" },
+    { userId: "u1", sentAt: "2026-09-09T07:45:00.000Z" },
+    { userId: "u2", sentAt: "2026-09-09T07:50:00.000Z" },
+  ]);
+  assert.equal(rows[0].gapMinutes, null);
+  assert.equal(rows[1].gapMinutes, 40);
+  assert.equal(rows[2].gapMinutes, null);
+});
+
+test("describeInactivityEmailState names lunch and the 40-minute idle wait", () => {
+  const lunchState = describeInactivityEmailState({
+    loginAt,
+    logoutAt: null,
+    userLogs: lunchLogs().slice(0, 2),
+    now: new Date("2026-09-06T09:20:00.000Z"),
+  });
+  assert.equal(lunchState.eligible, false);
+  assert.equal(lunchState.reason, "lunch_break");
+  assert.equal(shouldRecordInactivityEmailCheck(lunchState), true);
+
+  const waiting = describeInactivityEmailState({
+    loginAt,
+    logoutAt: null,
+    userLogs: [visitAt("2026-09-06T05:10:00.000Z")],
+    now: new Date("2026-09-06T05:40:00.000Z"),
+  });
+  assert.equal(waiting.reason, "idle_under_40_minutes");
+  assert.equal(shouldRecordInactivityEmailCheck(waiting), false);
+});
+
+test("loadInactivityEmailLog returns sent emails with 40-minute gaps", async () => {
+  const sendRows = [
+    {
+      id: "s1",
+      user_id: "u1",
+      notification_type: "inactivity_email",
+      title: "No activity for 40m",
+      body: "",
+      success_count: 1,
+      failure_count: 0,
+      sent_at: "2026-09-06T07:05:00.000Z",
+      reference_key: "inactivity_email:u1:2026-09-06:1:1",
+    },
+    {
+      id: "s2",
+      user_id: "u1",
+      notification_type: "inactivity_email",
+      title: "No activity for 1h 20m",
+      body: "",
+      success_count: 1,
+      failure_count: 0,
+      sent_at: "2026-09-06T07:45:00.000Z",
+      reference_key: "inactivity_email:u1:2026-09-06:1:2",
+    },
+  ];
+  const cycleRows = [
+    {
+      id: "c1",
+      ran_at: "2026-09-06T07:10:00.000Z",
+      report_date: "2026-09-06",
+      checked: 1,
+      sent: 0,
+      login_reminders_sent: 0,
+      skipped: false,
+      skip_reason: null,
+      details: [{ userId: "u1", kind: "inactivity", status: "skipped", reason: "already_sent", slot: 1, idleMinutes: 50 }],
+    },
+  ];
+  const logTable = createLogTable();
+  sendRows.forEach((row) => logTable.rows.push(row));
+  const admin = {
+    from(table) {
+      if (table === "push_notification_log") return logTable;
+      if (table === "inactivity_email_cycle_log") return createCycleTable(cycleRows);
+      if (table === "profiles") {
+        return {
+          select() {
+            return {
+              in() {
+                return Promise.resolve({
+                  data: [{ id: "u1", salesman_name: "Ahmed", salesman_code: "SM001", email: "ahmed@company.com" }],
+                  error: null,
+                });
+              },
+            };
+          },
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
+    },
+  };
+
+  const log = await loadInactivityEmailLog(admin, { reportDate: "2026-09-06", userId: "u1" });
+  assert.equal(log.sends.length, 2);
+  assert.equal(log.sends[1].gapMinutes, 40);
+  assert.equal(log.checks[0].reason, "already_sent");
+});
+

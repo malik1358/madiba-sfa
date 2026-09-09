@@ -697,12 +697,63 @@ export function shouldWarnInactivity(args = {}) {
   });
 }
 
-export function shouldEmailInactivity(args = {}) {
-  if (!isWithinKsaWorkingHours(args.now || new Date())) return false;
-  return shouldFlagInactivity({
-    ...args,
-    thresholdMs: INACTIVITY_EMAIL_MS,
+export function describeInactivityEmailState({
+  loginAt,
+  logoutAt,
+  userLogs = [],
+  collections = [],
+  orders = [],
+  now = new Date(),
+} = {}) {
+  const idleSinceTs = inactivityReferenceTimestamp({
+    loginAt,
+    userLogs,
+    collections,
+    orders,
   });
+  const idleMinutes = idleSinceTs
+    ? Math.max(0, Math.round((now.getTime() - idleSinceTs) / 60000))
+    : 0;
+  const slot = inactivityEmailReminderSlot(idleSinceTs, now);
+  const base = {
+    eligible: false,
+    idleSinceTs: idleSinceTs || 0,
+    idleMinutes,
+    slot,
+  };
+
+  if (!isWithinKsaWorkingHours(now)) {
+    return { ...base, reason: "outside_hours" };
+  }
+  if (!loginAt) {
+    return { ...base, reason: "not_logged_in" };
+  }
+  if (logoutAt) {
+    return { ...base, reason: "logged_out" };
+  }
+  if (isOnLunchBreak(userLogs, now.getTime())) {
+    return { ...base, reason: "lunch_break" };
+  }
+  if (!isWithinActiveWorkSession({
+    loginAt,
+    logoutAt,
+    userLogs,
+    now,
+  })) {
+    return { ...base, reason: "not_in_work_session" };
+  }
+  if (!idleSinceTs) {
+    return { ...base, reason: "no_idle_reference" };
+  }
+  if (now.getTime() - idleSinceTs < INACTIVITY_EMAIL_MS) {
+    return { ...base, reason: "idle_under_40_minutes" };
+  }
+
+  return { ...base, eligible: true, reason: "idle" };
+}
+
+export function shouldEmailInactivity(args = {}) {
+  return describeInactivityEmailState(args).eligible;
 }
 
 export function readInactivityPromptSnoozeUntil(storage = null) {

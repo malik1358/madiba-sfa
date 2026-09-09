@@ -6,6 +6,7 @@ import {
   buildPerformanceKpi,
   formatAchievementPercent,
   formatPerformanceKpiValue,
+  normalizeSalesmanCode,
   PERFORMANCE_DISPLAY_KPI_KEYS,
 } from "../../lib/performanceKpis";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
@@ -32,6 +33,15 @@ const TEXT = {
   save: { en: "Save targets", ar: "حفظ الأهداف" },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
   salesman: { en: "Salesman", ar: "المندوب" },
+  boss: { en: "Boss", ar: "المدير" },
+  filterSalesman: { en: "Filter salesman", ar: "تصفية المندوب" },
+  filterBoss: { en: "Filter boss", ar: "تصفية المدير" },
+  selectAll: { en: "Select all", ar: "تحديد الكل" },
+  searchList: { en: "Search", ar: "بحث" },
+  noBoss: { en: "No boss", ar: "بدون مدير" },
+  shownCount: { en: "shown", ar: "ظاهر" },
+  clearFilters: { en: "Clear filters", ar: "مسح التصفية" },
+  noMatches: { en: "No salesmen match the selected filters.", ar: "لا يوجد مندوبون مطابقون للتصفية المحددة." },
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
   otherSales: { en: "Others", ar: "أخرى" },
   totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
@@ -50,10 +60,27 @@ function monthInputValue(date) {
   return String(date || getKsaDateString()).slice(0, 7);
 }
 
+const NO_BOSS_KEY = "__NO_BOSS__";
+
+function salesmanFilterKey(row) {
+  return normalizeSalesmanCode(row?.salesmanCode);
+}
+
+function bossFilterKey(row) {
+  return normalizeSalesmanCode(row?.bossCode) || NO_BOSS_KEY;
+}
+
+function matchesSelectedKeys(selectedKeys, actualKey) {
+  if (!Array.isArray(selectedKeys) || selectedKeys.length === 0) return true;
+  return selectedKeys.includes(String(actualKey || "").trim());
+}
+
 function emptyDraft(snapshot) {
   return {
     salesmanCode: snapshot.salesmanCode,
     salesmanName: snapshot.salesmanName,
+    bossCode: normalizeSalesmanCode(snapshot.bossCode),
+    bossName: String(snapshot.bossName || "").trim(),
     officeSupplies: String(snapshot.targets?.officeSupplies ?? 0),
     otherSales: String(snapshot.targets?.otherSales ?? 0),
     totalSales: String(snapshot.targets?.totalSales ?? 0),
@@ -76,6 +103,8 @@ export default function KpiTargetsPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [rows, setRows] = useState([]);
+  const [selectedSalesmen, setSelectedSalesmen] = useState([]);
+  const [selectedBosses, setSelectedBosses] = useState([]);
 
   usePopupMessages({ message, error });
 
@@ -164,6 +193,71 @@ export default function KpiTargetsPage() {
   const supabaseClient = getSupabaseClient();
   const columns = useMemo(() => PERFORMANCE_DISPLAY_KPI_KEYS, []);
 
+  const salesmanOptions = useMemo(() => {
+    const seen = new Set();
+    return rows
+      .map((row) => ({
+        key: salesmanFilterKey(row),
+        label: row.salesmanName || row.salesmanCode,
+      }))
+      .filter((option) => {
+        if (!option.key || seen.has(option.key)) return false;
+        seen.add(option.key);
+        return true;
+      })
+      .sort((left, right) => left.label.localeCompare(right.label));
+  }, [rows]);
+
+  const bossOptions = useMemo(() => {
+    const seen = new Set();
+    return rows
+      .map((row) => ({
+        key: bossFilterKey(row),
+        label: row.bossName || row.bossCode || t("noBoss"),
+      }))
+      .filter((option) => {
+        if (!option.key || seen.has(option.key)) return false;
+        seen.add(option.key);
+        return true;
+      })
+      .sort((left, right) => {
+        if (left.key === NO_BOSS_KEY) return 1;
+        if (right.key === NO_BOSS_KEY) return -1;
+        return left.label.localeCompare(right.label);
+      });
+  }, [rows, t]);
+
+  const visibleRows = useMemo(
+    () => rows.filter((row) => (
+      matchesSelectedKeys(selectedSalesmen, salesmanFilterKey(row))
+      && matchesSelectedKeys(selectedBosses, bossFilterKey(row))
+    )),
+    [rows, selectedBosses, selectedSalesmen],
+  );
+
+  useEffect(() => {
+    const salesmanKeys = new Set(rows.map(salesmanFilterKey).filter(Boolean));
+    const bossKeys = new Set(rows.map(bossFilterKey).filter(Boolean));
+    setSelectedSalesmen((current) => {
+      const next = current.filter((key) => salesmanKeys.has(key));
+      return next.length === current.length ? current : next;
+    });
+    setSelectedBosses((current) => {
+      const next = current.filter((key) => bossKeys.has(key));
+      return next.length === current.length ? current : next;
+    });
+  }, [rows]);
+
+  const filtersActive = selectedSalesmen.length > 0 || selectedBosses.length > 0;
+
+  function toggleFilterValue(setter, key) {
+    setter((current) => (
+      current.includes(key)
+        ? current.filter((entry) => entry !== key)
+        : [...current, key]
+    ));
+  }
+
   if (!supabaseClient) {
     return (
       <SupabaseUnavailable
@@ -191,7 +285,7 @@ export default function KpiTargetsPage() {
             </div>
           </div>
 
-          <div className="moduleFilterRow" style={{ gridTemplateColumns: "200px auto", alignItems: "end", marginBottom: "16px" }}>
+          <div className="moduleKpiTargetsFilters">
             <label className="moduleField">
               {t("month")}
               <input
@@ -201,9 +295,48 @@ export default function KpiTargetsPage() {
                 onChange={(event) => setMonth(event.target.value)}
               />
             </label>
-            <button type="button" className="moduleInlineButton moduleActionButton" onClick={saveTargets} disabled={saving || loading}>
-              {saving ? t("saving") : t("save")}
-            </button>
+            <CheckboxFilterList
+              label={t("filterSalesman")}
+              searchLabel={t("searchList")}
+              selectAllLabel={t("selectAll")}
+              options={salesmanOptions}
+              selected={selectedSalesmen}
+              onToggle={(key) => toggleFilterValue(setSelectedSalesmen, key)}
+              onSelectAll={() => setSelectedSalesmen(salesmanOptions.map((option) => option.key))}
+              onClear={() => setSelectedSalesmen([])}
+            />
+            <CheckboxFilterList
+              label={t("filterBoss")}
+              searchLabel={t("searchList")}
+              selectAllLabel={t("selectAll")}
+              options={bossOptions}
+              selected={selectedBosses}
+              onToggle={(key) => toggleFilterValue(setSelectedBosses, key)}
+              onSelectAll={() => setSelectedBosses(bossOptions.map((option) => option.key))}
+              onClear={() => setSelectedBosses([])}
+            />
+            <div className="moduleKpiTargetsFilterActions">
+              <button type="button" className="moduleInlineButton moduleActionButton" onClick={saveTargets} disabled={saving || loading}>
+                {saving ? t("saving") : t("save")}
+              </button>
+              {filtersActive ? (
+                <button
+                  type="button"
+                  className="moduleInlineButton"
+                  onClick={() => {
+                    setSelectedSalesmen([]);
+                    setSelectedBosses([]);
+                  }}
+                >
+                  {t("clearFilters")}
+                </button>
+              ) : null}
+              {!loading ? (
+                <span className="moduleHint">
+                  {visibleRows.length} / {rows.length} {t("shownCount")}
+                </span>
+              ) : null}
+            </div>
           </div>
 
           {loading ? (
@@ -214,12 +347,14 @@ export default function KpiTargetsPage() {
                 <thead>
                   <tr>
                     <th className="moduleKpiSalesmanCell">{t("salesman")}</th>
+                    <th className="moduleKpiBossCell">{t("boss")}</th>
                     {columns.map((key) => (
                       <th key={key} colSpan={3}>{t(key)}</th>
                     ))}
                   </tr>
                   <tr>
                     <th className="moduleKpiSalesmanCell" data-column-filter-label={t("salesman")}></th>
+                    <th className="moduleKpiBossCell" data-column-filter-label={t("boss")}></th>
                     {columns.map((key) => (
                       <FragmentHeader
                         key={key}
@@ -231,11 +366,21 @@ export default function KpiTargetsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row, index) => (
+                  {visibleRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={2 + columns.length * 3} className="moduleHint">
+                        {t("noMatches")}
+                      </td>
+                    </tr>
+                  ) : visibleRows.map((row) => (
                     <tr key={row.salesmanCode}>
                       <td className="moduleKpiSalesmanCell">
                         <strong>{row.salesmanName || row.salesmanCode}</strong>
                         <div className="moduleKpiMeta">{row.salesmanCode}</div>
+                      </td>
+                      <td className="moduleKpiBossCell">
+                        <strong>{row.bossName || t("noBoss")}</strong>
+                        {row.bossCode ? <div className="moduleKpiMeta">{row.bossCode}</div> : null}
                       </td>
                       {columns.map((key) => {
                         const kpi = (row.kpis || []).find((item) => item.key === key);
@@ -269,8 +414,8 @@ export default function KpiTargetsPage() {
                             value={targetValue}
                             readOnly={isTotalSales}
                             onChange={(value) => {
-                              setRows((current) => current.map((item, itemIndex) => {
-                                if (itemIndex !== index) return item;
+                              setRows((current) => current.map((item) => {
+                                if (item.salesmanCode !== row.salesmanCode) return item;
                                 const next = { ...item, [key]: value };
                                 next.totalSales = String(
                                   (Number(next.officeSupplies || 0) || 0) + (Number(next.otherSales || 0) || 0),
@@ -290,6 +435,61 @@ export default function KpiTargetsPage() {
         </div>
       </main>
     </MorningAttendanceGate>
+  );
+}
+
+function CheckboxFilterList({
+  label,
+  searchLabel,
+  selectAllLabel,
+  options,
+  selected,
+  onToggle,
+  onSelectAll,
+  onClear,
+}) {
+  const [query, setQuery] = useState("");
+  const filteredOptions = options.filter((option) => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    return `${option.label} ${option.key}`.toLowerCase().includes(needle);
+  });
+  const allSelected = options.length > 0 && selected.length === options.length;
+
+  return (
+    <div className="moduleField">
+      {label}
+      <input
+        className="moduleInput"
+        type="search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder={searchLabel}
+        aria-label={`${searchLabel} ${label}`}
+      />
+      <div className="moduleCollectorCheckboxList" role="group" aria-label={label}>
+        {options.length === 0 ? null : (
+          <label className="moduleCollectorCheckbox moduleCollectorCheckboxSelectAll">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() => (allSelected ? onClear() : onSelectAll())}
+            />
+            <span>{selectAllLabel}</span>
+          </label>
+        )}
+        {filteredOptions.map((option) => (
+          <label key={option.key} className="moduleCollectorCheckbox">
+            <input
+              type="checkbox"
+              checked={selected.includes(option.key)}
+              onChange={() => onToggle(option.key)}
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+      </div>
+    </div>
   );
 }
 

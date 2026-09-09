@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess } from "../../../lib/moduleAccess.js";
 import { isMissingSchemaColumn, monthStartDate, normalizePerformanceTargets, normalizeSalesmanCode } from "../../../lib/performanceKpis.js";
 import { loadPerformanceSnapshotsForSalesmen } from "../../../lib/performanceKpisServer.js";
+import { findHeadProfile } from "../../../lib/salesHierarchy.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
@@ -72,6 +73,30 @@ async function listFieldSalesmen(admin) {
   });
 }
 
+async function attachBosses(admin, salesmen) {
+  const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (usersRes.error) throw usersRes.error;
+
+  const authById = new Map((usersRes.data?.users || []).map((user) => [user.id, user]));
+  const { data: profiles, error } = await admin
+    .from("profiles")
+    .select("id,salesman_code,salesman_name");
+  if (error) throw error;
+
+  return (salesmen || []).map((row) => {
+    const auth = authById.get(row.id);
+    const metadata = auth?.user_metadata || auth?.app_metadata || {};
+    const head = findHeadProfile(metadata, profiles || []);
+    const bossCode = normalizeSalesmanCode(head?.salesman_code || metadata.head_salesman_code);
+    const bossName = String(head?.salesman_name || metadata.head_salesman_name || "").trim();
+    return {
+      ...row,
+      bossCode,
+      bossName: bossName || bossCode || "",
+    };
+  });
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -86,7 +111,7 @@ export async function GET(request) {
 
     const url = new URL(request.url);
     const reportDate = parseReportDate(url.searchParams.get("month") || url.searchParams.get("date"));
-    const salesmen = await listFieldSalesmen(admin);
+    const salesmen = await attachBosses(admin, await listFieldSalesmen(admin));
     const snapshots = await loadPerformanceSnapshotsForSalesmen(admin, {
       salesmen: salesmen.map((row) => ({
         salesmanCode: row.salesman_code,
@@ -94,12 +119,22 @@ export async function GET(request) {
       })),
       reportDate,
     });
+    const bossByCode = new Map(
+      salesmen.map((row) => [normalizeSalesmanCode(row.salesman_code), row]),
+    );
 
     return NextResponse.json({
       success: true,
       month: monthStartDate(reportDate),
       reportDate,
-      rows: snapshots,
+      rows: snapshots.map((snapshot) => {
+        const boss = bossByCode.get(normalizeSalesmanCode(snapshot.salesmanCode));
+        return {
+          ...snapshot,
+          bossCode: boss?.bossCode || "",
+          bossName: boss?.bossName || "",
+        };
+      }),
     });
   } catch (error) {
     return NextResponse.json(

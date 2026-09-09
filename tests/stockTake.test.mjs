@@ -251,7 +251,7 @@ test("share list includes inactive users who have stock take access", () => {
   assert.equal(targets.find((row) => row.id === "vilayath").name, "VILYATH (inactive)");
 });
 
-test("report consolidates qty per warehouse and item, keeping scan details", () => {
+test("report consolidates qty per item across warehouses, keeping scan details", () => {
   const groups = consolidateStockTakeReportLines([
     {
       id: "1",
@@ -301,16 +301,13 @@ test("report consolidates qty per warehouse and item, keeping scan details", () 
     },
   ]);
 
-  assert.equal(groups.length, 2);
-  const testWh = groups.find((group) => group.warehouse_name === "Test");
-  assert.equal(testWh.scanCount, 2);
-  assert.equal(testWh.qty_base, 2710);
-  assert.equal(testWh.qtyEnteredLabel, null);
-  assert.equal(testWh.barcodeLabel, "Multiple");
-  assert.equal(testWh.palletLabel, "Multiple");
-  assert.equal(testWh.lines[0].id, "2");
-  const otherWh = groups.find((group) => group.warehouse_name === "WH2 9th sept");
-  assert.equal(otherWh.scanCount, 1);
-  assert.equal(otherWh.qty_base, 240);
-  assert.equal(otherWh.qtyEnteredLabel, 10);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].scanCount, 3);
+  assert.equal(groups[0].qty_base, 2950);
+  assert.equal(groups[0].qty_master, 112 + 22 / 24 + 10);
+  assert.equal(groups[0].qtyEnteredLabel, null);
+  assert.equal(groups[0].warehouseLabel, "Multiple");
+  assert.equal(groups[0].barcodeLabel, "Multiple");
+  assert.equal(groups[0].palletLabel, "Multiple");
+  assert.equal(groups[0].lines[0].id, "3");
 });

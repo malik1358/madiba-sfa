@@ -22,9 +22,10 @@ import { formatKsaDateTime } from "../../../lib/workdayActivity";
 const TEXT = {
   title: { en: "Stock Take Report", ar: "تقرير الجرد" },
   subtitle: {
-    en: "One row per item and warehouse with summed qty. Click + to see each scan.",
-    ar: "صف واحد لكل صنف ومستودع بالكميات المجمّعة. اضغط + لعرض كل مسح.",
+    en: "One row per item with summed qty. Click + to see each scan and warehouse.",
+    ar: "صف واحد لكل صنف بالكميات المجمّعة. اضغط + لعرض كل مسح ومستودع.",
   },
+  scan: { en: "scan", ar: "مسح" },
   scans: { en: "scans", ar: "مسح" },
   lastScan: { en: "Last", ar: "آخر" },
   expand: { en: "Show scans", ar: "عرض المسوحات" },
@@ -315,10 +316,10 @@ export default function StockTakeReportPage() {
                         </td>
                         <td>
                           {group.last_scanned_at ? `${t("lastScan")} ${formatKsaDateTime(group.last_scanned_at)}` : "—"}
-                          <div className="moduleCode">{group.scanCount} {t("scans")}</div>
+                          <div className="moduleCode">{group.scanCount} {group.scanCount === 1 ? t("scan") : t("scans")}</div>
                         </td>
                         <td>{group.userLabel}</td>
-                        <td>{group.warehouse_name}</td>
+                        <td>{group.warehouseLabel}</td>
                         <td>
                           <strong>{group.item_name}</strong>
                           <div className="moduleCode">{group.item_code}</div>

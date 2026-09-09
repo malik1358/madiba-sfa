@@ -316,7 +316,7 @@ export function consolidateStockTakeReportLines(lines = []) {
   (lines || []).forEach((line) => {
     const warehouseName = String(line.warehouse_name || "").trim() || "—";
     const itemCode = normalizeStockTakeCode(line.item_code) || String(line.item_code || "").trim();
-    const key = `${warehouseKey(warehouseName)}::${itemCode || "UNKNOWN"}`;
+    const key = itemCode || "UNKNOWN";
     if (!groups.has(key)) {
       groups.set(key, {
         key,
@@ -354,6 +354,7 @@ export function consolidateStockTakeReportLines(lines = []) {
         ...group,
         lines: detail,
         scanCount: detail.length,
+        warehouseLabel: uniqueLabels(detail.map((line) => line.warehouse_name)),
         userLabel: uniqueLabels(detail.map((line) => line.scanned_by_name || line.scanned_by)),
         barcodeLabel: uniqueLabels(detail.map((line) => line.barcode)),
         unitLabel: uniqueLabels(detail.map((line) => line.scanned_uom_label || line.scanned_uom)),

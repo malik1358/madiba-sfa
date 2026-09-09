@@ -12,6 +12,10 @@ import { fetchJsonWithTimeout, resolveAuthSession } from "../../../lib/authSessi
 import { getSupabaseClient } from "../../../lib/supabase";
 import { usePopupMessages } from "../../../hooks/usePopupMessages";
 import { formatStockQty } from "../../../lib/stockTake";
+import {
+  stockTakeMasterTemplateMatrix,
+  stockTakeSystemTemplateMatrix,
+} from "../../../lib/stockTakeMasterImport";
 import { useModuleAccess } from "../../../hooks/useModuleAccess";
 import { formatKsaDateTime } from "../../../lib/workdayActivity";
 
@@ -24,6 +28,8 @@ const TEXT = {
   refresh: { en: "Refresh", ar: "تحديث" },
   master: { en: "Upload item master", ar: "رفع أصناف الجرد" },
   system: { en: "Upload system inventory (base unit)", ar: "رفع مخزون النظام (وحدة الأساس)" },
+  downloadMasterTemplate: { en: "Download item master template", ar: "تنزيل قالب أصناف الجرد" },
+  downloadSystemTemplate: { en: "Download system inventory template", ar: "تنزيل قالب مخزون النظام" },
   uploading: { en: "Uploading...", ar: "جاري الرفع..." },
   denied: { en: "Stock Take is not enabled for your user.", ar: "الجرد غير مفعّل لحسابك." },
   user: { en: "User", ar: "المستخدم" },
@@ -118,6 +124,25 @@ export default function StockTakeReportPage() {
     }
   }
 
+  async function downloadTemplate(kind) {
+    setError("");
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.utils.book_new();
+      if (kind === "master") {
+        const sheet = XLSX.utils.aoa_to_sheet(stockTakeMasterTemplateMatrix());
+        XLSX.utils.book_append_sheet(workbook, sheet, "Master");
+        XLSX.writeFile(workbook, "stock-take-item-master-template.xlsx");
+        return;
+      }
+      const sheet = XLSX.utils.aoa_to_sheet(stockTakeSystemTemplateMatrix());
+      XLSX.utils.book_append_sheet(workbook, sheet, "System");
+      XLSX.writeFile(workbook, "stock-take-system-inventory-template.xlsx");
+    } catch (err) {
+      setError(err.message || "Unable to download template.");
+    }
+  }
+
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
     return <SupabaseUnavailable title="Stock Take unavailable" message="Set Supabase keys to use stock take." />;
@@ -193,6 +218,11 @@ export default function StockTakeReportPage() {
               <h2>{t("master")}</h2>
             </div>
             <p className="moduleHint">{t("masterHint")}</p>
+            <div className="stockTakeSessionActions" style={{ justifyContent: "flex-start", marginBottom: 12 }}>
+              <button type="button" className="moduleInlineButton" onClick={() => downloadTemplate("master")}>
+                {t("downloadMasterTemplate")}
+              </button>
+            </div>
             <input
               type="file"
               accept=".xlsx,.xls"
@@ -209,6 +239,11 @@ export default function StockTakeReportPage() {
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>{t("system")}</h2>
+            </div>
+            <div className="stockTakeSessionActions" style={{ justifyContent: "flex-start", marginBottom: 12 }}>
+              <button type="button" className="moduleInlineButton" onClick={() => downloadTemplate("system")}>
+                {t("downloadSystemTemplate")}
+              </button>
             </div>
             <input
               type="file"

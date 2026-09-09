@@ -25,6 +25,8 @@ import {
   parseStockTakeMasterRows,
   parseSystemInventoryRows,
   rowsFromSheetMatrix,
+  stockTakeMasterTemplateMatrix,
+  stockTakeSystemTemplateMatrix,
 } from "../app/lib/stockTakeMasterImport.js";
 
 const item = {
@@ -168,6 +170,16 @@ test("header row can sit below a title row", () => {
   ]);
   assert.equal(rows[0]["Product Code"], "A1");
   assert.equal(rows[0]["Base UOM Pack Size"], "24");
+});
+
+test("upload templates parse with the same headers the importer expects", () => {
+  const master = parseStockTakeMasterRows(rowsFromSheetMatrix(stockTakeMasterTemplateMatrix()));
+  assert.equal(master.items[0].item_code, "A004107");
+  assert.equal(master.items[0].barcode_master, "6287050672036");
+  assert.equal(master.items[0].base_uom_pack_size, 24);
+  const system = parseSystemInventoryRows(rowsFromSheetMatrix(stockTakeSystemTemplateMatrix()));
+  assert.equal(system[0].item_code, "A004107");
+  assert.equal(system[0].qty_base, 120);
 });
 
 test("system inventory upload is keyed by item in base qty", () => {

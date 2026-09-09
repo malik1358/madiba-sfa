@@ -56,6 +56,27 @@ function toAmount(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function lineHasCashDiscount(line) {
+  return toAmount(line?.cashDiscountAmount) > 0;
+}
+
+function lineHasValueDiscount(line) {
+  return toAmount(line?.valueDiscountAmount) > 0;
+}
+
+function lineHasSchemeDiscount(line) {
+  return toAmount(line?.schemeDiscountAmount) > 0;
+}
+
+export function resolveOrderPdfDiscountVisibility(lines = [], totals = {}) {
+  const rows = Array.isArray(lines) ? lines : [];
+  return {
+    cash: rows.some(lineHasCashDiscount) || toAmount(totals.cashDiscountTotal) > 0,
+    value: rows.some(lineHasValueDiscount) || toAmount(totals.valueDiscountTotal) > 0,
+    scheme: rows.some(lineHasSchemeDiscount) || toAmount(totals.schemeDiscountTotal) > 0,
+  };
+}
+
 export function formatHistoryChange(change) {
   if (!change) return "";
 
@@ -460,14 +481,15 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const vatAmount = Number(pdfTotals.vatAmount || subtotal * VAT_RATE);
   const totalWithVat = Number(pdfTotals.amountInclVat || subtotal + vatAmount);
 
+  const discountVisibility = resolveOrderPdfDiscountVisibility(snapshot.lines || [], pdfTotals);
   const columns = [
     { key: "item_code", label: "Code", width: 48, align: "left" },
     { key: "item_name", label: "Item", width: 0, align: "left" },
     { key: "quantity", label: "Qty", width: 28, align: "right" },
     { key: "rate", label: "Rate", width: 46, align: "right" },
-    { key: "cashDiscount", label: "Cash Disc", width: 52, align: "right" },
-    { key: "valueDiscount", label: "Value Disc", width: 52, align: "right" },
-    { key: "schemeDiscount", label: "Scheme", width: 44, align: "right" },
+    ...(discountVisibility.cash ? [{ key: "cashDiscount", label: "Cash Disc", width: 52, align: "right" }] : []),
+    ...(discountVisibility.value ? [{ key: "valueDiscount", label: "Value Disc", width: 52, align: "right" }] : []),
+    ...(discountVisibility.scheme ? [{ key: "schemeDiscount", label: "Scheme", width: 44, align: "right" }] : []),
     { key: "exclVat", label: "Excl. VAT", width: 54, align: "right" },
     { key: "vat", label: "VAT 15%", width: 48, align: "right" },
     { key: "inclVat", label: "Incl. VAT", width: 54, align: "right" },
@@ -625,7 +647,6 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   });
 
   const summaryBoxWidth = 260;
-  const summaryBoxHeight = 144;
   const summaryX = pageWidth - marginX - summaryBoxWidth;
   const bottomMargin = 52;
   let cursorY = y + 16;
@@ -655,6 +676,16 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     ? 14 + 10 + bucketRows.length * 18
     : 0;
   const hasOutstandingBuckets = bucketRows.length > 0;
+  const hasAnyDiscount = discountVisibility.cash || discountVisibility.value || discountVisibility.scheme;
+  const summaryRows = [
+    ...(hasAnyDiscount ? [["Before discount", formatMoneyAmount(pdfTotals.wholesaleTotal)]] : []),
+    ...(discountVisibility.cash ? [["Cash discount", formatMoneyAmount(pdfTotals.cashDiscountTotal)]] : []),
+    ...(discountVisibility.value ? [["Value discount", formatMoneyAmount(pdfTotals.valueDiscountTotal)]] : []),
+    ...(discountVisibility.scheme ? [["Scheme discount", formatMoneyAmount(pdfTotals.schemeDiscountTotal)]] : []),
+    ["Amount without VAT", formatMoneyAmount(subtotal)],
+    ["VAT 15%", formatMoneyAmount(vatAmount)],
+  ];
+  const summaryBoxHeight = 16 + summaryRows.length * 16 + 28;
   const combinedSectionHeight = hasOutstandingBuckets
     ? outstandingBlockHeight + 12 + summaryBoxHeight
     : summaryBoxHeight;
@@ -694,14 +725,6 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   doc.roundedRect(summaryX, summaryY, summaryBoxWidth, summaryBoxHeight, 4, 4);
   doc.setFont(undefined, "normal");
   doc.setFontSize(9);
-  const summaryRows = [
-    ["Before discount", formatMoneyAmount(pdfTotals.wholesaleTotal)],
-    ["Cash discount", pdfTotals.cashDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.cashDiscountTotal) : "None"],
-    ["Value discount", pdfTotals.valueDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.valueDiscountTotal) : "None"],
-    ["Scheme discount", pdfTotals.schemeDiscountTotal > 0 ? formatMoneyAmount(pdfTotals.schemeDiscountTotal) : "None"],
-    ["Amount without VAT", formatMoneyAmount(subtotal)],
-    ["VAT 15%", formatMoneyAmount(vatAmount)],
-  ];
   summaryRows.forEach((row, index) => {
     doc.text(row[0], summaryX + 10, summaryY + 16 + index * 16);
     doc.text(row[1], summaryX + summaryBoxWidth - 10, summaryY + 16 + index * 16, { align: "right" });
@@ -827,9 +850,16 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   });
 
   doc.setFontSize(9);
-  ensureSpace(20);
+  ensureSpace(hasAnyDiscount ? 20 : 12);
   doc.text("Note: Item rates are exclusive of VAT. VAT is applied at 15% on subtotal.", marginX, pageHeight - 36);
-  doc.text("Cash Disc is the sheet cash scheme. Value Disc applies when the SKU value exceeds 5,000 SAR. Scheme is the mix carton offer on that line.", marginX, pageHeight - 24);
+  if (hasAnyDiscount) {
+    const discountNotes = [
+      discountVisibility.cash ? "Cash Disc is the sheet cash scheme." : "",
+      discountVisibility.value ? "Value Disc applies when the SKU value exceeds 5,000 SAR." : "",
+      discountVisibility.scheme ? "Scheme is the mix carton offer on that line." : "",
+    ].filter(Boolean);
+    doc.text(discountNotes.join(" "), marginX, pageHeight - 24);
+  }
   addPdfBuildFooter(doc);
   return doc;
 }

@@ -10,6 +10,7 @@ import {
   hasStockTakeModuleAccess,
   annotateOpenStockTakeSessions,
   canAccessStockTakeSession,
+  duplicateOpenWarehouseMessage,
   stockTakeShareTargets,
   resolveScannedUom,
   STOCK_TAKE_UOM,
@@ -36,6 +37,18 @@ const item = {
 
 test("warehouse key ignores case and extra spaces", () => {
   assert.equal(warehouseKey("  Riyadh  DC "), "RIYADH DC");
+});
+
+test("starting a second open inventory for the same warehouse is blocked", () => {
+  const existing = { id: "s1", warehouse_name: "WH2 9th sept", started_by: "u1", started_by_name: "Administrator" };
+  assert.match(
+    duplicateOpenWarehouseMessage({ warehouseName: "WH2 9th sept", existing, userId: "u1" }),
+    /Open it from the list/,
+  );
+  assert.match(
+    duplicateOpenWarehouseMessage({ warehouseName: "WH2 9th sept", existing, userId: "u2" }),
+    /opened by Administrator/,
+  );
 });
 
 test("item code lookup finds the item without locking unit", () => {

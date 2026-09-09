@@ -26,6 +26,13 @@ import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js
 import { buildDayRoutePoints } from "./dayRouteMap.js";
 import { assignOnSiteVisitNumbers, buildVisitDaySplit, hideSupersededOrderDrafts, loginLogoutLocationNotes } from "./dailyVisitReportStats.js";
 import { filterLogsByKsaEventDate, ksaDayBounds } from "./workdayActivity.js";
+import {
+  isPlaceholderProspectName,
+  parseOfflineProspectIdFromCustomerCode,
+  parseProspectIdFromCustomerCode,
+  prospectCustomerCodes,
+  prospectDisplayName,
+} from "./prospects.js";
 
 const ACTIVITY_ENTRY_TYPES = [
   "VISIT_REPORT",
@@ -118,6 +125,92 @@ export function countFarFromCustomerEntries(entries) {
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
+}
+
+export function resolveVisitCustomerName(customer, entry) {
+  const code = normalizeCode(entry?.customer_code || entry?.customerCode || customer?.customer_code);
+  const candidates = [
+    customer?.customer_name,
+    entry?.meta?.customerName,
+    entry?.customer_name,
+    entry?.customerName,
+  ];
+  for (const candidate of candidates) {
+    const name = String(candidate || "").trim();
+    if (name && !isPlaceholderProspectName(name, code)) return name;
+  }
+  return code || "";
+}
+
+export function mergeProspectsIntoCustomerMap(customerMap, prospects = []) {
+  (prospects || []).forEach((prospect) => {
+    const name = prospectDisplayName(prospect);
+    prospectCustomerCodes(prospect).forEach((code) => {
+      const existing = customerMap.get(code) || {};
+      const existingName = String(existing.customer_name || "").trim();
+      const keepExistingName = existingName && !isPlaceholderProspectName(existingName, code);
+      customerMap.set(code, {
+        ...existing,
+        customer_code: existing.customer_code || code,
+        customer_name: keepExistingName ? existingName : (name || existingName || code),
+        latitude: existing.latitude ?? prospect.latitude ?? null,
+        longitude: existing.longitude ?? prospect.longitude ?? null,
+        area: existing.area || prospect.area || prospect.city || "",
+      });
+    });
+  });
+  return customerMap;
+}
+
+function prospectCodesNeedingLookup(customerCodes, customerMap) {
+  return (customerCodes || []).filter((code) => {
+    if (!parseProspectIdFromCustomerCode(code) && !parseOfflineProspectIdFromCustomerCode(code)) {
+      return false;
+    }
+    const existingName = String(customerMap.get(code)?.customer_name || "").trim();
+    return !existingName || isPlaceholderProspectName(existingName, code);
+  });
+}
+
+async function loadProspectsForCustomerCodes(admin, customerCodes) {
+  const ids = [...new Set(
+    (customerCodes || []).map((code) => parseProspectIdFromCustomerCode(code)).filter(Boolean),
+  )];
+  const offlineIds = [...new Set(
+    (customerCodes || []).map((code) => parseOfflineProspectIdFromCustomerCode(code)).filter(Boolean),
+  )];
+  if (!ids.length && !offlineIds.length) return [];
+
+  const rows = [];
+
+  async function load(column, values, selects) {
+    if (!values.length) return;
+    let lastError = null;
+    for (const select of selects) {
+      const result = await admin.from("prospects").select(select).in(column, values);
+      if (!result.error) {
+        rows.push(...(result.data || []));
+        return;
+      }
+      lastError = result.error;
+      if (isMissingTableError(result.error)) return;
+      if (!isMissingColumnError(result.error) && !isMissingSchemaColumn(result.error)) {
+        throw result.error;
+      }
+    }
+    if (column === "offline_id") return;
+    if (lastError) throw lastError;
+  }
+
+  await load("id", ids, [
+    "id,company_name,remarks,latitude,longitude,city,area",
+    "id,company_name,remarks,city,area",
+  ]);
+  await load("offline_id", offlineIds, [
+    "id,company_name,offline_id,remarks,latitude,longitude,city,area",
+    "id,company_name,offline_id,remarks",
+  ]);
+  return rows;
 }
 
 function isMissingTableError(error) {
@@ -248,6 +341,7 @@ async function loadActivityLogEntries(admin, startIso, endIso, userIdFilter, rep
         outcome: parsed.outcome || null,
         activityNote: row.note,
         autoClosed: Boolean(parsed.autoClosed),
+        customerName: parsed.customer_name || parsed.customerName || "",
       },
     });
   });
@@ -343,7 +437,7 @@ function enrichEntries(entries, customerMap, profileMap) {
       userId: entry.user_id,
       userName: formatCollectorDisplayName(profile),
       customerCode: entry.customer_code,
-      customerName: customer.customer_name || entry.customer_code || "",
+      customerName: resolveVisitCustomerName(customer, entry),
       transactionType: entry.transaction_type,
       transactionLabel: TRANSACTION_LABELS[entry.transaction_type] || entry.transaction_type,
       visitOutcome: entry.meta?.visitOutcome || entry.meta?.outcome || null,
@@ -450,6 +544,13 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
 
   const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
   const customerMap = new Map((customers || []).map((row) => [normalizeCode(row.customer_code), row]));
+  const prospectLookupCodes = prospectCodesNeedingLookup(customerCodes, customerMap);
+  if (prospectLookupCodes.length) {
+    mergeProspectsIntoCustomerMap(
+      customerMap,
+      await loadProspectsForCustomerCodes(admin, prospectLookupCodes),
+    );
+  }
 
   const grouped = new Map();
   rawEntries.forEach((entry) => {

@@ -41,6 +41,7 @@ import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
 import { useAppPopup } from "../../components/AppPopupProvider";
 import { postJsonResilient } from "../../lib/offlineApi";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
+import { requestLoginFirstCustomerHintCheck } from "../../lib/loginFirstCustomerHint";
 import { copyTextToClipboard, openWhatsappDirect } from "../../lib/whatsappShare";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
@@ -1311,6 +1312,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
           outcome: visitForm.outcome,
         });
       }
+
+      requestLoginFirstCustomerHintCheck();
 
       const summaryText = buildFieldVisitWhatsappSummary({
         customer,

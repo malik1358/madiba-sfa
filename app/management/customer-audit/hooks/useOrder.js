@@ -13,6 +13,7 @@ import { getPrice } from '../lib/helpers';
 import { normalizePaymentType } from '../../../lib/regionalPricing';
 import { priceOrderLines } from '../../../lib/orderPricing';
 import { claimUnsavedEntry } from '../../../lib/unsavedEntryGuard';
+import { requestLoginFirstCustomerHintCheck } from '../../../lib/loginFirstCustomerHint';
 
 function isPendingOrderId(orderId) {
   return String(orderId || '').startsWith('pending:');
@@ -340,6 +341,7 @@ export function useOrder({
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('madiba-pending-orders-changed'));
         }
+        requestLoginFirstCustomerHintCheck();
         if (!options.silent) {
           setMessage(saveResult.message || 'Draft saved on device. It will sync automatically when you are back online.');
         }
@@ -354,6 +356,7 @@ export function useOrder({
       setDraftOrderId(payload.orderId);
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'DRAFT').toUpperCase());
+      requestLoginFirstCustomerHintCheck();
       if (!options.silent) {
         setMessage('Draft order saved successfully.');
       }
@@ -460,6 +463,7 @@ export function useOrder({
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('madiba-pending-orders-changed'));
         }
+        requestLoginFirstCustomerHintCheck();
         if (!options.silent) {
           setMessage(saveResult.message || 'Order saved on device. It will submit automatically when you are back online.');
         }
@@ -476,6 +480,7 @@ export function useOrder({
       setDraftOrderId(payload.orderId);
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'SUBMITTED').toUpperCase());
+      requestLoginFirstCustomerHintCheck();
       if (!options.silent) {
         setMessage(`Order #${payload.orderNumber || payload.orderId} submitted successfully.`);
       }

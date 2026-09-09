@@ -43,6 +43,7 @@ import {
 } from "../../lib/mobileDataCache";
 import { getDataRefreshStatus } from "../../lib/dataRefreshStatus";
 import { resolveAuthSession } from "../../lib/authSession";
+import { requestLoginFirstCustomerHintCheck } from "../../lib/loginFirstCustomerHint";
 import {
   isCashOnlyQueueCustomer,
   isCashQueueCustomer,
@@ -1797,6 +1798,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       });
 
       setTodayVisitCount(visitNumberForDay);
+      requestLoginFirstCustomerHintCheck();
       await refreshPendingSyncCount();
 
       if (!saveResult.queued) {

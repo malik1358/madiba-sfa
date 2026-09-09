@@ -24,6 +24,12 @@ import { detectTable } from "../../lib/schemaGuards";
 import { looksLikeCustomerCodeSearch } from "../../lib/customerMasterQuery";
 import { isProspectCustomerCode } from "../../lib/customerCode";
 import { loadOpenProspectCustomers } from "../../lib/openProspectCustomers";
+import {
+  applyLatestVisitFromLogRow,
+  MY_DAY_ATTENDANCE_ENTRY_TYPES,
+  MY_DAY_VISIT_REPORT_LIMIT,
+  visitReportsSinceIso,
+} from "../../lib/myDayPlannerLoad";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { resolveVisitLastInvoiceDate } from "../../lib/outstanding";
@@ -59,7 +65,7 @@ import {
   nextVisitDateInputValue,
   validateNextVisitDate,
 } from "../../lib/nextVisitDate";
-import { formatKsaDateTime, formatKsaTime } from "../../lib/workdayActivity";
+import { formatKsaDateTime, formatKsaTime, getKsaDateString } from "../../lib/workdayActivity";
 
 const PAGE_TEXT = {
   title: { en: "My Day", ar: "يومي" },
@@ -544,22 +550,22 @@ export default function MyDayPage({ mode = "default" } = {}) {
           await waitForMobileSnapshotHydration(session.user.id);
         }
 
-        const scope = await fetchSalesScope();
-        setAccessScope(scope);
-
-        const { data: profileData, error: profileError } = await supabase
-          .from("profiles")
-          .select("id,salesman_code,salesman_name,role")
-          .eq("id", session.user.id)
-          .single();
-
-        if (profileError) throw profileError;
-        setProfile(profileData);
-
-        const [logsCheck, prospectsCheck] = await Promise.all([
+        const [scope, profileRes, logsCheck, prospectsCheck] = await Promise.all([
+          fetchSalesScope(),
+          supabase
+            .from("profiles")
+            .select("id,salesman_code,salesman_name,role")
+            .eq("id", session.user.id)
+            .single(),
           detectTable(supabase, "daily_activity_logs"),
           detectTable(supabase, "prospects"),
         ]);
+
+        setAccessScope(scope);
+
+        const { data: profileData, error: profileError } = profileRes;
+        if (profileError) throw profileError;
+        setProfile(profileData);
 
         setLogsEnabled(logsCheck.available);
         setProspectsEnabled(prospectsCheck.available);
@@ -609,6 +615,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
           todaySalesQuery = todaySalesQuery.in("salesman_code", scope.visibleSalesmanCodes);
           routeQuery = applyCustomerSalesmanScopeFilter(routeQuery, scope.visibleSalesmanCodes);
           todayOrdersQuery = todayOrdersQuery.in("salesman_code", scope.visibleSalesmanCodes);
+          pendingOrdersQuery = pendingOrdersQuery.in("salesman_code", scope.visibleSalesmanCodes);
+          submittedOrdersQuery = submittedOrdersQuery.in("salesman_code", scope.visibleSalesmanCodes);
         }
 
         const [
@@ -646,81 +654,106 @@ export default function MyDayPage({ mode = "default" } = {}) {
         )];
 
         const salesmanNameByCode = new Map();
-        if (visibleSalesmanCodes.length > 0) {
-          const { data: salesmanProfiles, error: salesmanProfilesError } = await supabase
-            .from("profiles")
-            .select("salesman_code,salesman_name")
-            .in("salesman_code", visibleSalesmanCodes);
+        const { startIso, endIso } = todayAttendanceBounds();
+        const logUserIds = [...new Set([session.user.id, ...(scope.visibleUserIds || [])].filter(Boolean))];
 
-          if (!salesmanProfilesError) {
-            (salesmanProfiles || []).forEach((profileRow) => {
-              const code = String(profileRow.salesman_code || "").trim().toUpperCase();
-              const name = String(profileRow.salesman_name || "").trim();
-              if (code) salesmanNameByCode.set(code, name);
-            });
-          }
-        }
+        let salesmanProfilesQuery = visibleSalesmanCodes.length > 0
+          ? supabase.from("profiles").select("salesman_code,salesman_name").in("salesman_code", visibleSalesmanCodes)
+          : Promise.resolve({ data: [], error: null });
 
-        let loadedProspectScheduleRows = [];
-
-        let newProspectsCount = 0;
+        let newProspectsQuery = Promise.resolve({ data: [], error: null });
+        let scheduledProspectsQuery = Promise.resolve({ data: [], error: null });
         if (prospectsCheck.available) {
-          let prospectsQuery = supabase
+          newProspectsQuery = supabase
             .from("prospects")
             .select("id")
             .gte("created_at", `${today}T00:00:00`);
-
-          if (!scope.hasAllAccess) {
-            prospectsQuery = prospectsQuery.in("salesman_code", scope.visibleSalesmanCodes);
-          }
-
-          const { data: newProspectsData, error: newProspectsError } = await prospectsQuery;
-
-          if (!newProspectsError) {
-            newProspectsCount = (newProspectsData || []).length;
-          }
-
-          let scheduledProspectsQuery = supabase
+          scheduledProspectsQuery = supabase
             .from("prospects")
             .select("id,company_name,city,area,follow_up_date,salesman_code")
             .eq("status", "FOLLOW_UP")
             .not("follow_up_date", "is", null);
-
           if (!scope.hasAllAccess) {
+            newProspectsQuery = newProspectsQuery.in("salesman_code", scope.visibleSalesmanCodes);
             scheduledProspectsQuery = scheduledProspectsQuery.in("salesman_code", scope.visibleSalesmanCodes);
           }
+        }
 
-          const { data: scheduledProspectsData, error: scheduledProspectsError } = await scheduledProspectsQuery;
-          if (!scheduledProspectsError) {
-            loadedProspectScheduleRows = buildProspectScheduleRows(scheduledProspectsData);
+        let logsQuery = Promise.resolve({ data: [], error: null });
+        let visitReportsQuery = Promise.resolve({ data: [], error: null });
+        let fallbackReportsQuery = Promise.resolve({ data: [], error: null });
+        if (logsCheck.available) {
+          logsQuery = supabase
+            .from("daily_activity_logs")
+            .select("id,user_id,entry_type,note,created_at")
+            .in("entry_type", MY_DAY_ATTENDANCE_ENTRY_TYPES)
+            .gte("created_at", startIso)
+            .lte("created_at", endIso);
+          visitReportsQuery = supabase
+            .from("daily_activity_logs")
+            .select("user_id,note,created_at")
+            .eq("entry_type", "VISIT_REPORT")
+            .gte("created_at", visitReportsSinceIso())
+            .order("created_at", { ascending: false })
+            .limit(MY_DAY_VISIT_REPORT_LIMIT);
+          if (!scope.hasAllAccess) {
+            logsQuery = logsQuery.in("user_id", logUserIds);
+            visitReportsQuery = visitReportsQuery.in("user_id", scope.visibleUserIds);
+          }
+        } else {
+          const settingKeys = scopedCustomerRows
+            .map((row) => String(row.customer_code || "").trim().toUpperCase())
+            .filter(Boolean)
+            .slice(0, 200)
+            .map((code) => `visit_report_latest:${code}`);
+          if (settingKeys.length > 0) {
+            fallbackReportsQuery = supabase
+              .from("system_settings")
+              .select("setting_key,setting_value")
+              .in("setting_key", settingKeys);
+          }
+        }
+
+        const [
+          salesmanProfilesRes,
+          newProspectsRes,
+          scheduledProspectsRes,
+          logsRes,
+          visitReportsRes,
+          fallbackReportsRes,
+        ] = await Promise.all([
+          salesmanProfilesQuery,
+          newProspectsQuery,
+          scheduledProspectsQuery,
+          logsQuery,
+          visitReportsQuery,
+          fallbackReportsQuery,
+        ]);
+
+        if (!salesmanProfilesRes.error) {
+          (salesmanProfilesRes.data || []).forEach((profileRow) => {
+            const code = String(profileRow.salesman_code || "").trim().toUpperCase();
+            const name = String(profileRow.salesman_name || "").trim();
+            if (code) salesmanNameByCode.set(code, name);
+          });
+        }
+
+        let loadedProspectScheduleRows = [];
+        let newProspectsCount = 0;
+        if (prospectsCheck.available) {
+          if (!newProspectsRes.error) {
+            newProspectsCount = (newProspectsRes.data || []).length;
+          }
+          if (!scheduledProspectsRes.error) {
+            loadedProspectScheduleRows = buildProspectScheduleRows(scheduledProspectsRes.data);
             setProspectScheduleRows(loadedProspectScheduleRows);
           }
         } else {
-          loadedProspectScheduleRows = [];
           setProspectScheduleRows([]);
         }
 
-        if (logsCheck.available) {
-          const { startIso, endIso } = todayAttendanceBounds();
-          const logUserIds = [...new Set([session.user.id, ...(scope.visibleUserIds || [])].filter(Boolean))];
-          let logsQuery = supabase
-            .from("daily_activity_logs")
-            .select("id,user_id,entry_type,note,created_at")
-            .gte("created_at", startIso)
-            .lte("created_at", endIso);
-
-          if (!scope.hasAllAccess) {
-            logsQuery = logsQuery.in("user_id", logUserIds);
-          }
-
-          const { data: logsData, error: logsError } = await logsQuery;
-
-          if (!logsError) {
-            const rows = (logsData || []).filter((row) => isGpsLog(row.entry_type));
-            setTodayLogs(rows);
-          } else {
-            setTodayLogs([]);
-          }
+        if (!logsRes.error) {
+          setTodayLogs((logsRes.data || []).filter((row) => isGpsLog(row.entry_type)));
         } else {
           setTodayLogs([]);
         }
@@ -757,80 +790,33 @@ export default function MyDayPage({ mode = "default" } = {}) {
         const nextVisitByCustomer = new Map();
 
         if (logsCheck.available) {
-          let visitReportsQuery = supabase
-            .from("daily_activity_logs")
-            .select("user_id,note,created_at")
-            .eq("entry_type", "VISIT_REPORT")
-            .order("created_at", { ascending: false })
-            .limit(5000);
-
-          if (!scope.hasAllAccess) {
-            visitReportsQuery = visitReportsQuery.in("user_id", scope.visibleUserIds);
-          }
-
-          const { data: visitReportsData, error: visitReportsError } = await visitReportsQuery;
-          if (!visitReportsError) {
-            (visitReportsData || []).forEach((row) => {
-              if (!row?.note) return;
-
-              try {
-                const parsed = JSON.parse(row.note);
-                const customerCode = String(parsed?.customer_code || "").trim().toUpperCase();
-                if (!customerCode) return;
-
-                const visitAt = parsed?.captured_at || row.created_at;
-                const current = latestVisitByCustomer.get(customerCode);
-                if (!current || getSortTimestamp(visitAt) > getSortTimestamp(current)) {
-                  latestVisitByCustomer.set(customerCode, visitAt);
-                }
-
-                if (!nextVisitByCustomer.has(customerCode)) {
-                  nextVisitByCustomer.set(customerCode, parsed?.next_visit_at ? String(parsed.next_visit_at) : null);
-                }
-              } catch {
-                // Ignore malformed notes.
-              }
-            });
-          }
+          (visitReportsRes.data || []).forEach((row) => {
+            applyLatestVisitFromLogRow(latestVisitByCustomer, nextVisitByCustomer, row, getSortTimestamp);
+          });
         } else {
-          const customerCodes = scopedCustomerRows
-            .map((row) => String(row.customer_code || "").trim().toUpperCase())
-            .filter(Boolean);
-
-          if (customerCodes.length > 0) {
-            const settingKeys = customerCodes.map((code) => `visit_report_latest:${code}`);
-            const { data: fallbackReports, error: fallbackReportsError } = await supabase
-              .from("system_settings")
-              .select("setting_key,setting_value")
-              .in("setting_key", settingKeys);
-
-            if (!fallbackReportsError) {
-              (fallbackReports || []).forEach((row) => {
-                if (!row?.setting_value) return;
-
-                try {
-                  const parsed = JSON.parse(String(row.setting_value));
-                  const customerCode = String(parsed?.customer_code || "").trim().toUpperCase();
-                  if (!customerCode) return;
-
-                  const visitAt = parsed?.captured_at || parsed?.saved_at || null;
-                  if (!visitAt) return;
-
-                  const current = latestVisitByCustomer.get(customerCode);
-                  if (!current || getSortTimestamp(visitAt) > getSortTimestamp(current)) {
-                    latestVisitByCustomer.set(customerCode, visitAt);
-                  }
-
-                  if (!nextVisitByCustomer.has(customerCode)) {
-                    nextVisitByCustomer.set(customerCode, parsed?.next_visit_at ? String(parsed.next_visit_at) : null);
-                  }
-                } catch {
-                  // Ignore malformed fallback records.
-                }
-              });
+          (fallbackReportsRes.data || []).forEach((row) => {
+            if (!row?.setting_value) return;
+            try {
+              const parsed = JSON.parse(String(row.setting_value));
+              applyLatestVisitFromLogRow(
+                latestVisitByCustomer,
+                nextVisitByCustomer,
+                { note: JSON.stringify(parsed), created_at: parsed?.captured_at || parsed?.saved_at || null },
+                getSortTimestamp,
+              );
+            } catch {
+              // Ignore malformed fallback records.
             }
-          }
+          });
         }
+
+        latestVisitByCustomer.forEach((visitAt, customerCode) => {
+          const ts = Date.parse(visitAt);
+          if (!Number.isFinite(ts)) return;
+          if (getKsaDateString(new Date(ts)) === getTodayDateKey()) {
+            todayCustomers.add(customerCode);
+          }
+        });
 
         const overdueRows = scopedCustomerRows.filter((row) => daysBetween(visitLastInvoiceDate(row)) > 21);
         const followUpRows = scopedCustomerRows.filter((row) => daysBetween(visitLastInvoiceDate(row)) > 10);
@@ -917,7 +903,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
           })
         );
 
-        await writeMyDaySnapshot(session.user.id, today, {
+        void writeMyDaySnapshot(session.user.id, today, {
           summary: {
             visitsToday: todayCustomers.size,
             followUps: followUpRows.length,

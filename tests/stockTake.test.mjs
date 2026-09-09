@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   attachSystemQtyToLines,
+  applyStockTakeLineEdit,
+  attachStockTakeLineChanges,
   consolidateStockTakeReportLines,
   convertEnteredQtyToUnits,
   findItemByBarcode,
@@ -20,6 +22,7 @@ import {
   buildLocalStockTakeLine,
   resolveScannedUom,
   STOCK_TAKE_UOM,
+  summarizeStockTakeLineChange,
   warehouseKey,
 } from "../app/lib/stockTake.js";
 import {
@@ -311,3 +314,50 @@ test("report consolidates qty per item across warehouses, keeping scan details",
   assert.equal(groups[0].palletLabel, "Multiple");
   assert.equal(groups[0].lines[0].id, "3");
 });
+
+test("editing a scan recalculates qty and describes who changed what", () => {
+  const line = {
+    id: "1",
+    item_code: "A004409",
+    item_name: "Twin blade",
+    scanned_uom: "MASTER",
+    scanned_uom_label: "CTN",
+    qty_entered: 2,
+    qty_base: 672,
+    qty_master: 2,
+    pallet_ref: "P1",
+    location_ref: "B-B3-037",
+  };
+  const next = applyStockTakeLineEdit(line, {
+    qty: 3,
+    scannedUom: "MASTER",
+    pallet: "P1",
+    location: "B-B3-038",
+    item,
+  });
+  assert.equal(next.qty_entered, 3);
+  assert.equal(next.qty_base, 1008);
+  assert.equal(next.qty_master, 3);
+  assert.equal(next.location_ref, "B-B3-038");
+  const summary = summarizeStockTakeLineChange({
+    action: "UPDATE",
+    before: line,
+    after: next,
+    actorName: "SOYEB",
+  });
+  assert.match(summary, /SOYEB changed Twin blade/);
+  assert.match(summary, /Qty entered 2 → 3/);
+  assert.match(summary, /Location B-B3-037 → B-B3-038/);
+  assert.match(
+    summarizeStockTakeLineChange({ action: "DELETE", before: line, actorName: "Administrator" }),
+    /Administrator deleted Twin blade \(2 CTN\)/,
+  );
+  const attached = attachStockTakeLineChanges([line], [{
+    id: "c1",
+    line_id: "1",
+    summary,
+    changed_at: "2026-09-09T12:00:00.000Z",
+  }]);
+  assert.equal(attached[0].changes.length, 1);
+});
+

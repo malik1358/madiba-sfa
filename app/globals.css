@@ -6441,3 +6441,57 @@ th:has(.moduleTableColumnFilterInput) {
   padding-inline-start: 18px;
 }
 
+.stockTakeLineActions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 72px;
+}
+
+.stockTakeLineActionBtn {
+  border: 1px solid #8aa8b0;
+  border-radius: 8px;
+  background: #fff;
+  color: #073b49;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 5px 6px;
+  cursor: pointer;
+}
+
+.stockTakeLineActionBtn:hover,
+.stockTakeLineActionBtn:focus-visible {
+  background: #eef6f7;
+  outline: 2px solid #0d5a6b;
+  outline-offset: 1px;
+}
+
+.stockTakeLineActionBtnDanger {
+  color: #8a1f1f;
+  border-color: #d7a3a3;
+}
+
+.stockTakeLineActionBtnDanger:hover,
+.stockTakeLineActionBtnDanger:focus-visible {
+  background: #fdeeee;
+  outline-color: #8a1f1f;
+}
+
+.stockTakeChangeLog {
+  margin: 0;
+  padding-inline-start: 16px;
+  color: #35545c;
+  font-size: 12px;
+}
+
+.stockTakeChangeLog li + li {
+  margin-top: 4px;
+}
+
+.stockTakeReportHistoryRow td {
+  background: #eef4f6;
+  font-size: 12px;
+}
+

@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { buildModuleAccess } from "../lib/moduleAccess";
+import { readCacheEntry, writeCacheEntry } from "../lib/localDataStore";
 import { getSupabaseClient } from "../lib/supabase";
+
+const ACCESS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function accessCacheKey(userId) {
+  return `moduleAccess:v1:${String(userId || "").trim()}`;
+}
 
 export function useModuleAccess() {
   const [access, setAccess] = useState(() => buildModuleAccess({}));
@@ -27,6 +34,13 @@ export function useModuleAccess() {
           return;
         }
 
+        const cacheKey = accessCacheKey(session.user.id);
+        const cached = await readCacheEntry(cacheKey);
+        if (cached?.value && !cancelled) {
+          setAccess(buildModuleAccess(cached.value));
+          setLoading(false);
+        }
+
         let profileRes = await supabase
           .from("profiles")
           .select("role,salesman_code,stock_take_access")
@@ -41,20 +55,21 @@ export function useModuleAccess() {
             .maybeSingle();
         }
 
-        const profile = profileRes.data;
+        if (profileRes.error) throw profileRes.error;
 
+        const profile = profileRes.data;
+        const context = {
+          role: profile?.role,
+          salesmanCode: profile?.salesman_code,
+          collectionOnlyMetadata: Boolean(session.user.user_metadata?.collection_only),
+          stockTakeAccess: profile?.stock_take_access === true,
+        };
         if (!cancelled) {
-          setAccess(buildModuleAccess({
-            role: profile?.role,
-            salesmanCode: profile?.salesman_code,
-            collectionOnlyMetadata: Boolean(session.user.user_metadata?.collection_only),
-            stockTakeAccess: profile?.stock_take_access === true,
-          }));
+          setAccess(buildModuleAccess(context));
         }
+        await writeCacheEntry(cacheKey, context, { ttlMs: ACCESS_TTL_MS });
       } catch {
-        if (!cancelled) {
-          setAccess(buildModuleAccess({}));
-        }
+        // Keep cached access when the live profile request fails offline.
       } finally {
         if (!cancelled) setLoading(false);
       }

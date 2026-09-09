@@ -8,10 +8,28 @@ import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
-import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
+import { resolveAuthSession } from "../../lib/authSession";
+import { postJsonResilient } from "../../lib/offlineApi";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
-import { availableStockTakeUnits, focusStockTakeAfterLookup, formatStockQty, previewConvertedQty, uomLabel, warehouseKey } from "../../lib/stockTake";
+import {
+  availableStockTakeUnits,
+  buildLocalStockTakeLine,
+  focusStockTakeAfterLookup,
+  formatStockQty,
+  lookupStockTakeItem,
+  normalizeWarehouseName,
+  previewConvertedQty,
+  uomLabel,
+  warehouseKey,
+} from "../../lib/stockTake";
+import {
+  fetchStockTakeItemsCached,
+  fetchStockTakeLinesCached,
+  fetchStockTakeSessionsCached,
+  writeStockTakeLinesCache,
+  writeStockTakeSessionsCache,
+} from "../../lib/stockTakeCache";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { formatKsaDateOnly, formatKsaTime } from "../../lib/workdayActivity";
 
@@ -60,6 +78,7 @@ const TEXT = {
   date: { en: "Date", ar: "التاريخ" },
   time: { en: "Time", ar: "الوقت" },
   warehouseHint: { en: "Start a new count by typing the warehouse name.", ar: "ابدأ جردًا جديدًا بكتابة اسم المستودع." },
+  offlineBanner: { en: "Working from this device. Counts save here and sync when the connection improves. Open this page once while online to download the item master.", ar: "العمل من هذا الجهاز. تُحفظ الجردات هنا وتُزامَن عند تحسّن الاتصال. افتح الصفحة مرة واحدة وأنت متصل لتنزيل بيانات الأصناف." },
 };
 
 export default function StockTakePage() {
@@ -90,6 +109,9 @@ export default function StockTakePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [masterItems, setMasterItems] = useState([]);
+  const [userId, setUserId] = useState("");
+  const [offlineHint, setOfflineHint] = useState(false);
 
   usePopupMessages({ message, error });
 
@@ -117,6 +139,24 @@ export default function StockTakePage() {
     return undefined;
   }, [session?.id]);
 
+  useEffect(() => {
+    function onOnline() {
+      setOfflineHint(false);
+      if (canUseStockTake) loadOpenSessions();
+      if (session?.id) loadSessionLines(session.id);
+    }
+    function onOffline() {
+      setOfflineHint(true);
+    }
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    if (typeof navigator !== "undefined" && navigator.onLine === false) setOfflineHint(true);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, [canUseStockTake, session?.id]);
+
   async function authHeaders() {
     const supabase = getSupabaseClient();
     const sessionAuth = await resolveAuthSession(supabase);
@@ -131,25 +171,67 @@ export default function StockTakePage() {
     setUnitLocked(false);
   }
 
+  async function currentUserId() {
+    if (userId) return userId;
+    const supabase = getSupabaseClient();
+    const sessionAuth = await resolveAuthSession(supabase);
+    const id = sessionAuth?.user?.id || "";
+    if (id) setUserId(id);
+    return id;
+  }
+
+  async function persistSessions(nextSessions, nextShareUsers = shareUsers) {
+    setOpenSessions(nextSessions);
+    setShareUsers(nextShareUsers);
+    const id = userId || await currentUserId();
+    if (id) {
+      await writeStockTakeSessionsCache(id, {
+        sessions: nextSessions,
+        shareUsers: nextShareUsers,
+        sharesAvailable: true,
+      });
+    }
+  }
+
+  async function persistLines(sessionId, nextLines) {
+    setLines(nextLines);
+    await writeStockTakeLinesCache(sessionId, nextLines);
+  }
+
   async function startSession(event) {
     event.preventDefault();
     setError("");
     setMessage("");
-    const duplicate = openSessions.find((row) => warehouseKey(row.warehouse_name) === warehouseKey(warehouseInput));
+    const warehouseName = normalizeWarehouseName(warehouseInput);
+    const duplicate = openSessions.find((row) => warehouseKey(row.warehouse_name) === warehouseKey(warehouseName));
     if (duplicate) {
       setError("An open inventory already exists for this warehouse. Open it from the list instead of starting a new one.");
       return;
     }
     setLoading(true);
     try {
-      const { response, payload } = await fetchJsonWithTimeout("/api/stock-take", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-        body: JSON.stringify({ mode: "start-session", warehouse: warehouseInput }),
+      const headers = await authHeaders();
+      const clientSessionId = crypto.randomUUID();
+      const result = await postJsonResilient({
+        url: "/api/stock-take",
+        jsonBody: { mode: "start-session", warehouse: warehouseName, clientSessionId },
+        headers,
+        metadata: { type: "stock_take_session", sessionId: clientSessionId },
       });
-      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to start inventory.");
-      setSession(payload.session);
-      setMessage(`Counting ${payload.session.warehouse_name}`);
+      const nextSession = result.queued
+        ? {
+          id: clientSessionId,
+          warehouse_name: warehouseName,
+          started_by_name: "Me",
+          started_at: new Date().toISOString(),
+          status: "OPEN",
+          accessKind: "mine",
+          pending: true,
+        }
+        : result.payload?.session;
+      if (!nextSession?.id) throw new Error("Unable to start inventory.");
+      await persistSessions([nextSession, ...openSessions.filter((row) => row.id !== nextSession.id)]);
+      setSession(nextSession);
       setTimeout(() => barcodeRef.current?.focus(), 50);
     } catch (err) {
       setError(err.message || "Unable to start inventory.");
@@ -161,15 +243,30 @@ export default function StockTakePage() {
   async function loadOpenSessions() {
     setLoadingSessions(true);
     try {
-      const { response, payload } = await fetchJsonWithTimeout(
-        "/api/stock-take?action=open-sessions",
-        { headers: await authHeaders() },
-      );
-      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to load inventories.");
-      setOpenSessions(payload.sessions || []);
-      setShareUsers(payload.shareUsers || []);
+      const headers = await authHeaders();
+      const id = await currentUserId();
+      const [itemsResult, sessionsResult] = await Promise.all([
+        fetchStockTakeItemsCached({
+          headers,
+          onUpdate: (items) => setMasterItems(items || []),
+        }),
+        fetchStockTakeSessionsCached({
+          headers,
+          userId: id,
+          onUpdate: (payload) => {
+            setOpenSessions(payload.sessions || []);
+            setShareUsers(payload.shareUsers || []);
+          },
+        }),
+      ]);
+      setMasterItems(itemsResult.data || []);
+      setOpenSessions(sessionsResult.data?.sessions || []);
+      setShareUsers(sessionsResult.data?.shareUsers || []);
+      setOfflineHint(Boolean(itemsResult.offline || sessionsResult.offline));
+      if (!(itemsResult.data || []).length && (itemsResult.offline || itemsResult.fromCache)) {
+        setError("Item master is not on this device yet. Open Stock Take once while online to download it.");
+      }
     } catch (err) {
-      setOpenSessions([]);
       setError(err.message || "Unable to load inventories.");
     } finally {
       setLoadingSessions(false);
@@ -178,11 +275,14 @@ export default function StockTakePage() {
 
   async function loadSessionLines(sessionId) {
     try {
-      const { response, payload } = await fetchJsonWithTimeout(
-        `/api/stock-take?action=session-lines&sessionId=${encodeURIComponent(sessionId)}`,
-        { headers: await authHeaders() },
-      );
-      if (response.ok && payload.success) setLines(payload.lines || []);
+      const headers = await authHeaders();
+      const result = await fetchStockTakeLinesCached({
+        headers,
+        sessionId,
+        onUpdate: (nextLines) => setLines(nextLines || []),
+      });
+      setLines(result.data || []);
+      setOfflineHint((current) => current || Boolean(result.offline));
     } catch {
       // Keep counting usable if recent lines fail to refresh.
     }
@@ -194,14 +294,14 @@ export default function StockTakePage() {
     if (!barcodeValue && !itemCodeValue) return;
     setError("");
     try {
-      const params = new URLSearchParams({ action: "lookup" });
-      if (barcodeValue) params.set("barcode", barcodeValue);
-      else params.set("itemCode", itemCodeValue);
-      const { response, payload } = await fetchJsonWithTimeout(
-        `/api/stock-take?${params.toString()}`,
-        { headers: await authHeaders() },
-      );
-      if (!response.ok || !payload.success) throw new Error(payload.error || "Item not found.");
+      if (!masterItems.length) {
+        throw new Error("Item master is not on this device yet. Open Stock Take once while online to download it.");
+      }
+      const payload = lookupStockTakeItem({
+        items: masterItems,
+        barcode: barcodeValue,
+        itemCode: itemCodeValue,
+      });
       setItem(payload.item);
       setLookupMode(payload.lookupMode || "");
       setItemCodeInput(payload.item.item_code || itemCodeValue);
@@ -249,28 +349,42 @@ export default function StockTakePage() {
 
   async function saveLine(event) {
     event.preventDefault();
-    if (!session?.id) return;
+    if (!session?.id || !item) return;
     setSaving(true);
     setError("");
     setMessage("");
     try {
-      const { response, payload } = await fetchJsonWithTimeout("/api/stock-take", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-        body: JSON.stringify({
+      const headers = await authHeaders();
+      const localLine = buildLocalStockTakeLine({
+        id: typeof crypto !== "undefined" && crypto.randomUUID ? `local:${crypto.randomUUID()}` : `local:${Date.now()}`,
+        item,
+        qty,
+        scannedUom,
+        barcode,
+        pallet,
+        location,
+        scannedByName: session.started_by_name || "",
+      });
+      const result = await postJsonResilient({
+        url: "/api/stock-take",
+        jsonBody: {
           mode: "save-line",
           sessionId: session.id,
           warehouse: session.warehouse_name,
           barcode,
-          itemCode: item?.item_code || itemCodeInput,
+          itemCode: item.item_code || itemCodeInput,
           qty,
           scannedUom,
           pallet,
           location,
-        }),
+        },
+        headers,
+        metadata: { type: "stock_take_line", sessionId: session.id, localLineId: localLine.id },
       });
-      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to save line.");
-      setLines((current) => [payload.line, ...current].slice(0, 500));
+      const savedLine = result.queued ? localLine : (result.payload?.line || localLine);
+      const nextLines = [savedLine, ...lines.filter((row) => row.id !== savedLine.id)].slice(0, 500);
+      await persistLines(session.id, nextLines);
+      if (result.queued || result.offline) setOfflineHint(true);
       setBarcode("");
       setItemCodeInput("");
       setQty("");
@@ -292,8 +406,8 @@ export default function StockTakePage() {
   }
 
   async function shareSession(sessionId) {
-    const userId = shareUserBySession[sessionId];
-    if (!userId) {
+    const shareWithId = shareUserBySession[sessionId];
+    if (!shareWithId) {
       setError("Select a user to share with.");
       return;
     }
@@ -301,13 +415,13 @@ export default function StockTakePage() {
     setError("");
     setMessage("");
     try {
-      const { response, payload } = await fetchJsonWithTimeout("/api/stock-take", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-        body: JSON.stringify({ mode: "share-session", sessionId, userId }),
+      const result = await postJsonResilient({
+        url: "/api/stock-take",
+        jsonBody: { mode: "share-session", sessionId, userId: shareWithId },
+        headers: await authHeaders(),
+        metadata: { type: "stock_take_share", sessionId },
       });
-      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to share inventory.");
-      setMessage("Inventory shared.");
+      if (!result.success) throw new Error("Unable to share inventory.");
       await loadOpenSessions();
     } catch (err) {
       setError(err.message || "Unable to share inventory.");
@@ -322,18 +436,19 @@ export default function StockTakePage() {
     setError("");
     setMessage("");
     try {
-      const { response, payload } = await fetchJsonWithTimeout("/api/stock-take", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-        body: JSON.stringify({ mode: "archive-session", sessionId: row.id }),
+      const result = await postJsonResilient({
+        url: "/api/stock-take",
+        jsonBody: { mode: "archive-session", sessionId: row.id },
+        headers: await authHeaders(),
+        metadata: { type: "stock_take_archive", sessionId: row.id },
       });
-      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to archive inventory.");
+      if (!result.success) throw new Error("Unable to archive inventory.");
       if (session?.id === row.id) {
         setSession(null);
         setLines([]);
       }
-      setMessage(`${row.warehouse_name} archived.`);
-      await loadOpenSessions();
+      const nextSessions = openSessions.filter((itemRow) => itemRow.id !== row.id);
+      await persistSessions(nextSessions);
     } catch (err) {
       setError(err.message || "Unable to archive inventory.");
     } finally {
@@ -402,6 +517,7 @@ export default function StockTakePage() {
               <Link href="/" className="moduleBackLink">{t("back")}</Link>
             </div>
           </div>
+          {offlineHint ? <p className="moduleHint">{t("offlineBanner")}</p> : null}
 
           {!session ? (
             <>

@@ -382,3 +382,139 @@ export function attachSystemQtyToLines(lines, systemRows = []) {
     };
   });
 }
+
+export function isLocalStockTakeLineId(id) {
+  return String(id || "").startsWith("local:");
+}
+
+export const STOCK_TAKE_LINE_DIFF_FIELDS = [
+  { key: "qty_entered", label: "Qty entered", kind: "qty" },
+  { key: "scanned_uom_label", label: "Unit", kind: "text" },
+  { key: "qty_base", label: "Qty base", kind: "qty" },
+  { key: "qty_master", label: "Qty master", kind: "qty" },
+  { key: "pallet_ref", label: "Pallet", kind: "text" },
+  { key: "location_ref", label: "Location", kind: "text" },
+];
+
+function displayStockTakeDiffValue(field, value) {
+  if (field.kind === "qty") {
+    const text = formatStockQty(value);
+    return text === "" ? "—" : text;
+  }
+  const text = String(value || "").trim();
+  return text || "—";
+}
+
+export function stockTakeLineSnapshot(line = {}) {
+  return {
+    id: line.id || null,
+    session_id: line.session_id || null,
+    warehouse_name: line.warehouse_name || "",
+    warehouse_key: line.warehouse_key || warehouseKey(line.warehouse_name),
+    item_code: line.item_code || "",
+    item_name: line.item_name || "",
+    barcode: line.barcode || "",
+    scanned_uom: String(line.scanned_uom || "").toUpperCase(),
+    scanned_uom_label: line.scanned_uom_label || "",
+    qty_entered: Number(line.qty_entered),
+    qty_base: Number(line.qty_base),
+    qty_master: Number(line.qty_master),
+    pallet_ref: String(line.pallet_ref || "").trim(),
+    location_ref: String(line.location_ref || "").trim(),
+  };
+}
+
+export function applyStockTakeLineEdit(line, {
+  qty,
+  scannedUom,
+  pallet,
+  location,
+  item,
+} = {}) {
+  if (!line) throw new Error("Scan not found.");
+  const nextUom = String(scannedUom || line.scanned_uom || "").toUpperCase();
+  const qtyProvided = qty != null && String(qty).trim() !== "";
+  const nextQty = qtyProvided ? qty : line.qty_entered;
+  const qtyChanged = Number(nextQty) !== Number(line.qty_entered);
+  const uomChanged = nextUom !== String(line.scanned_uom || "").toUpperCase();
+
+  let converted = {
+    qtyEntered: Number(line.qty_entered),
+    qtyBase: Number(line.qty_base),
+    qtyMid: line.qty_mid ?? null,
+    qtyMaster: Number(line.qty_master),
+    scannedUom: nextUom,
+  };
+
+  if (qtyChanged || uomChanged) {
+    if (!item) throw new Error("Item master is required to change quantity or unit.");
+    converted = convertEnteredQtyToUnits({
+      qtyEntered: nextQty,
+      scannedUom: nextUom,
+      baseUomPackSize: item.base_uom_pack_size,
+      midUomPackSize: item.mid_uom_pack_size,
+    });
+  }
+
+  return {
+    ...line,
+    scanned_uom: converted.scannedUom,
+    scanned_uom_label: item ? uomLabel(item, converted.scannedUom) : (line.scanned_uom_label || converted.scannedUom),
+    qty_entered: converted.qtyEntered,
+    qty_base: converted.qtyBase,
+    qty_master: converted.qtyMaster,
+    qty_mid: converted.qtyMid ?? null,
+    pallet_ref: pallet == null ? (line.pallet_ref || null) : (String(pallet).trim() || null),
+    location_ref: location == null ? (line.location_ref || null) : (String(location).trim() || null),
+  };
+}
+
+export function diffStockTakeLineSnapshots(before, after) {
+  const left = stockTakeLineSnapshot(before);
+  const right = stockTakeLineSnapshot(after);
+  return STOCK_TAKE_LINE_DIFF_FIELDS
+    .map((field) => {
+      const from = displayStockTakeDiffValue(field, left[field.key]);
+      const to = displayStockTakeDiffValue(field, right[field.key]);
+      if (from === to) return null;
+      return { field: field.key, label: field.label, from, to };
+    })
+    .filter(Boolean);
+}
+
+export function summarizeStockTakeLineChange({ action, before, after, actorName } = {}) {
+  const actor = String(actorName || "User").trim() || "User";
+  const item = String(before?.item_name || after?.item_name || before?.item_code || after?.item_code || "item").trim();
+  if (String(action || "").toUpperCase() === "DELETE") {
+    const qty = formatStockQty(before?.qty_entered) || "—";
+    const unit = String(before?.scanned_uom_label || before?.scanned_uom || "").trim();
+    return unit ? `${actor} deleted ${item} (${qty} ${unit})` : `${actor} deleted ${item} (${qty})`;
+  }
+  const diffs = diffStockTakeLineSnapshots(before, after);
+  if (!diffs.length) return "";
+  return `${actor} changed ${item}: ${diffs.map((diff) => `${diff.label} ${diff.from} → ${diff.to}`).join("; ")}`;
+}
+
+export function groupStockTakeLineChanges(changes = []) {
+  const byLine = new Map();
+  (changes || []).forEach((row) => {
+    const lineId = String(row?.line_id || "").trim();
+    if (!lineId) return;
+    const list = byLine.get(lineId) || [];
+    list.push(row);
+    byLine.set(lineId, list);
+  });
+  byLine.forEach((list, lineId) => {
+    list.sort((left, right) => String(right.changed_at || "").localeCompare(String(left.changed_at || "")));
+    byLine.set(lineId, list);
+  });
+  return byLine;
+}
+
+export function attachStockTakeLineChanges(lines = [], changes = []) {
+  const byLine = groupStockTakeLineChanges(changes);
+  return (lines || []).map((line) => ({
+    ...line,
+    changes: byLine.get(String(line.id || "")) || [],
+  }));
+}

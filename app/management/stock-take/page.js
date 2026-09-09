@@ -13,10 +13,13 @@ import { postJsonResilient } from "../../lib/offlineApi";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import {
+  applyStockTakeLineEdit,
   availableStockTakeUnits,
   buildLocalStockTakeLine,
+  findItemByItemCode,
   focusStockTakeAfterLookup,
   formatStockQty,
+  isLocalStockTakeLineId,
   lookupStockTakeItem,
   normalizeWarehouseName,
   previewConvertedQty,
@@ -33,6 +36,7 @@ import {
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
 import { formatKsaDateOnly, formatKsaTime } from "../../lib/workdayActivity";
+import StockTakeLineEditModal from "./StockTakeLineEditModal";
 
 const TEXT = {
   title: { en: "Stock Take", ar: "جرد المخزون" },
@@ -78,6 +82,15 @@ const TEXT = {
   converted: { en: "Converted quantity", ar: "الكمية المحوّلة" },
   date: { en: "Date", ar: "التاريخ" },
   time: { en: "Time", ar: "الوقت" },
+  edit: { en: "Edit", ar: "تعديل" },
+  delete: { en: "Delete", ar: "حذف" },
+  editTitle: { en: "Edit scan", ar: "تعديل المسح" },
+  saveEdit: { en: "Save changes", ar: "حفظ التغييرات" },
+  cancel: { en: "Cancel", ar: "إلغاء" },
+  deleteConfirm: {
+    en: "Delete this scan? Who deleted it and what was counted stay in the change log.",
+    ar: "حذف هذا المسح؟ يبقى في السجل من حذفه وما الذي كان معدودًا.",
+  },
   warehouseHint: { en: "Start a new count by typing the warehouse name.", ar: "ابدأ جردًا جديدًا بكتابة اسم المستودع." },
   offlineBanner: { en: "Working from this device. Counts save here and sync when the connection improves. Open this page once while online to download the item master.", ar: "العمل من هذا الجهاز. تُحفظ الجردات هنا وتُزامَن عند تحسّن الاتصال. افتح الصفحة مرة واحدة وأنت متصل لتنزيل بيانات الأصناف." },
 };
@@ -113,6 +126,7 @@ export default function StockTakePage() {
   const [masterItems, setMasterItems] = useState([]);
   const [userId, setUserId] = useState("");
   const [offlineHint, setOfflineHint] = useState(false);
+  const [editingLine, setEditingLine] = useState(null);
 
   usePopupMessages({ message, error });
   const stockTakeLineOpen = Boolean(
@@ -398,6 +412,73 @@ export default function StockTakePage() {
       setTimeout(() => barcodeRef.current?.focus(), 50);
     } catch (err) {
       setError(err.message || "Unable to save line.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveEdit({ qty, scannedUom, pallet, location }) {
+    if (!editingLine?.id || !session?.id) return;
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const item = findItemByItemCode(masterItems, editingLine.item_code);
+      if (isLocalStockTakeLineId(editingLine.id)) {
+        const next = applyStockTakeLineEdit(editingLine, { qty, scannedUom, pallet, location, item });
+        await persistLines(session.id, lines.map((row) => (row.id === editingLine.id ? next : row)));
+        setMessage("Scan updated on this device.");
+        setEditingLine(null);
+        return;
+      }
+      const result = await postJsonResilient({
+        url: "/api/stock-take",
+        jsonBody: {
+          mode: "update-line",
+          lineId: editingLine.id,
+          qty,
+          scannedUom,
+          pallet,
+          location,
+        },
+        headers: await authHeaders(),
+        metadata: { type: "stock_take_update_line", sessionId: session.id, lineId: editingLine.id },
+      });
+      if (!result.success && !result.queued) throw new Error(result.payload?.error || "Unable to update scan.");
+      const saved = result.payload?.line || applyStockTakeLineEdit(editingLine, { qty, scannedUom, pallet, location, item });
+      await persistLines(session.id, lines.map((row) => (row.id === editingLine.id ? saved : row)));
+      setMessage(result.queued ? "Edit queued until the connection improves." : (result.payload?.message || "Scan updated."));
+      setEditingLine(null);
+    } catch (err) {
+      setError(err.message || "Unable to update scan.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteLine(line) {
+    if (!line?.id || !session?.id) return;
+    if (!window.confirm(t("deleteConfirm"))) return;
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      if (isLocalStockTakeLineId(line.id)) {
+        await persistLines(session.id, lines.filter((row) => row.id !== line.id));
+        setMessage("Scan removed from this device.");
+        return;
+      }
+      const result = await postJsonResilient({
+        url: "/api/stock-take",
+        jsonBody: { mode: "delete-line", lineId: line.id },
+        headers: await authHeaders(),
+        metadata: { type: "stock_take_delete_line", sessionId: session.id, lineId: line.id },
+      });
+      if (!result.success && !result.queued) throw new Error(result.payload?.error || "Unable to delete scan.");
+      await persistLines(session.id, lines.filter((row) => row.id !== line.id));
+      setMessage(result.queued ? "Delete queued until the connection improves." : (result.payload?.message || "Scan deleted."));
+    } catch (err) {
+      setError(err.message || "Unable to delete scan.");
     } finally {
       setSaving(false);
     }
@@ -814,6 +895,7 @@ export default function StockTakePage() {
                   <table className="moduleTable">
                     <thead>
                       <tr>
+                        <th>{t("edit")}</th>
                         <th>{t("date")}</th>
                         <th>{t("time")}</th>
                         <th>{t("item")}</th>
@@ -827,6 +909,16 @@ export default function StockTakePage() {
                     <tbody>
                       {lines.map((line) => (
                         <tr key={line.id}>
+                          <td>
+                            <div className="stockTakeLineActions">
+                              <button type="button" className="stockTakeLineActionBtn" onClick={() => setEditingLine(line)} disabled={saving}>
+                                {t("edit")}
+                              </button>
+                              <button type="button" className="stockTakeLineActionBtn stockTakeLineActionBtnDanger" onClick={() => deleteLine(line)} disabled={saving}>
+                                {t("delete")}
+                              </button>
+                            </div>
+                          </td>
                           <td>{formatKsaDateOnly(line.scanned_at)}</td>
                           <td>{formatKsaTime(line.scanned_at)}</td>
                           <td>
@@ -834,6 +926,9 @@ export default function StockTakePage() {
                             <div className="moduleCode">{line.item_code}</div>
                             {(line.pallet_ref || line.location_ref) ? (
                               <div className="moduleHint">{[line.pallet_ref, line.location_ref].filter(Boolean).join(" · ")}</div>
+                            ) : null}
+                            {(line.changes || [])[0]?.summary ? (
+                              <div className="moduleHint">{line.changes[0].summary}</div>
                             ) : null}
                           </td>
                           <td>{line.scanned_uom_label || line.scanned_uom}</td>
@@ -844,7 +939,7 @@ export default function StockTakePage() {
                         </tr>
                       ))}
                       {lines.length === 0 ? (
-                        <tr><td colSpan={8}>No lines yet.</td></tr>
+                        <tr><td colSpan={9}>No lines yet.</td></tr>
                       ) : null}
                     </tbody>
                   </table>
@@ -853,6 +948,17 @@ export default function StockTakePage() {
             </>
           )}
         </div>
+        {editingLine ? (
+          <StockTakeLineEditModal
+            line={editingLine}
+            items={masterItems}
+            t={t}
+            dir={dir}
+            saving={saving}
+            onClose={() => setEditingLine(null)}
+            onSave={saveEdit}
+          />
+        ) : null}
       </main>
     </MorningAttendanceGate>
   );

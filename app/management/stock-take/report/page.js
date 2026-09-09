@@ -18,6 +18,7 @@ import {
 } from "../../../lib/stockTakeMasterImport";
 import { useModuleAccess } from "../../../hooks/useModuleAccess";
 import { formatKsaDateTime } from "../../../lib/workdayActivity";
+import StockTakeLineEditModal from "../StockTakeLineEditModal";
 
 const TEXT = {
   title: { en: "Stock Take Report", ar: "تقرير الجرد" },
@@ -51,6 +52,21 @@ const TEXT = {
   pallet: { en: "Pallet", ar: "الباليت" },
   location: { en: "Location", ar: "الموقع" },
   time: { en: "Time", ar: "الوقت" },
+  edit: { en: "Edit", ar: "تعديل" },
+  delete: { en: "Delete", ar: "حذف" },
+  history: { en: "Log", ar: "السجل" },
+  hideHistory: { en: "Hide log", ar: "إخفاء السجل" },
+  editTitle: { en: "Edit scan", ar: "تعديل المسح" },
+  saveEdit: { en: "Save changes", ar: "حفظ التغييرات" },
+  cancel: { en: "Cancel", ar: "إلغاء" },
+  saving: { en: "Saving...", ar: "جاري الحفظ..." },
+  deleteConfirm: {
+    en: "Delete this scan? The qty will leave the report. Who deleted it and what was counted stay in the change log.",
+    ar: "حذف هذا المسح؟ تخرج الكمية من التقرير ويبقى في السجل من حذفه وما الذي كان معدودًا.",
+  },
+  changeLog: { en: "Change log", ar: "سجل التغييرات" },
+  deletedScans: { en: "Deleted scans", ar: "المسوحات المحذوفة" },
+  noChanges: { en: "No edits yet.", ar: "لا توجد تعديلات بعد." },
   masterHint: {
     en: "Excel columns: Product Code, Item Name, Base UOM, MID UOM, Master UOM, Base UOM Pack Size (base units in 1 master), MID UOM Pack Size (base units in 1 mid), Base Barcode, MID Barcode, Master Barcode. Sheet named Master is preferred.",
     ar: "أعمدة الإكسل: رمز المنتج، الاسم، وحدات الأساس/الأوسط/الكرتون، أحجام التعبئة، والباركود لكل وحدة. يُفضّل ورقة Master.",
@@ -63,12 +79,17 @@ export default function StockTakeReportPage() {
   const { access, loading: accessLoading } = useModuleAccess();
   const [warehouse, setWarehouse] = useState("");
   const [lines, setLines] = useState([]);
+  const [deletedLog, setDeletedLog] = useState([]);
+  const [masterItems, setMasterItems] = useState([]);
   const [systemItemCount, setSystemItemCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
+  const [historyKeys, setHistoryKeys] = useState(() => new Set());
+  const [editingLine, setEditingLine] = useState(null);
   const groups = useMemo(() => consolidateStockTakeReportLines(lines), [lines]);
 
   usePopupMessages({ message, error });
@@ -93,6 +114,7 @@ export default function StockTakeReportPage() {
       );
       if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to load report.");
       setLines(payload.lines || []);
+      setDeletedLog(payload.deletedLog || []);
       setSystemItemCount(payload.systemItemCount || 0);
     } catch (err) {
       setError(err.message || "Unable to load report.");
@@ -141,6 +163,89 @@ export default function StockTakeReportPage() {
       else next.add(key);
       return next;
     });
+  }
+
+  function toggleHistory(lineId) {
+    setHistoryKeys((current) => {
+      const next = new Set(current);
+      if (next.has(lineId)) next.delete(lineId);
+      else next.add(lineId);
+      return next;
+    });
+  }
+
+  async function loadMasterItems() {
+    if (masterItems.length) return masterItems;
+    const { response, payload } = await fetchJsonWithTimeout(
+      "/api/stock-take?action=master",
+      { headers: await authHeaders() },
+      60000,
+    );
+    if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to load item master.");
+    const items = payload.items || [];
+    setMasterItems(items);
+    return items;
+  }
+
+  async function openEdit(line) {
+    setError("");
+    try {
+      await loadMasterItems();
+      setEditingLine(line);
+    } catch (err) {
+      setError(err.message || "Unable to edit scan.");
+    }
+  }
+
+  async function saveEdit({ qty, scannedUom, pallet, location }) {
+    if (!editingLine?.id) return;
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const { response, payload } = await fetchJsonWithTimeout("/api/stock-take", {
+        method: "POST",
+        headers: { ...(await authHeaders()), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "update-line",
+          lineId: editingLine.id,
+          qty,
+          scannedUom,
+          pallet,
+          location,
+        }),
+      }, 60000);
+      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to update scan.");
+      setMessage(payload.message || "Scan updated.");
+      setEditingLine(null);
+      await loadReport(warehouse);
+    } catch (err) {
+      setError(err.message || "Unable to update scan.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteLine(line) {
+    if (!line?.id) return;
+    if (!window.confirm(t("deleteConfirm"))) return;
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const { response, payload } = await fetchJsonWithTimeout("/api/stock-take", {
+        method: "POST",
+        headers: { ...(await authHeaders()), "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "delete-line", lineId: line.id }),
+      }, 60000);
+      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to delete scan.");
+      setMessage(payload.message || "Scan deleted.");
+      await loadReport(warehouse);
+    } catch (err) {
+      setError(err.message || "Unable to delete scan.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function downloadTemplate(kind) {
@@ -337,26 +442,72 @@ export default function StockTakeReportPage() {
                     if (!expanded) return [summary];
                     return [
                       summary,
-                      ...group.lines.map((line) => (
-                        <tr key={`${group.key}-${line.id}`} className="stockTakeReportDetailRow">
-                          <td />
-                          <td>{formatKsaDateTime(line.scanned_at)}</td>
-                          <td>{line.scanned_by_name || line.scanned_by}</td>
-                          <td>{line.warehouse_name}</td>
-                          <td>
-                            <strong>{line.item_name}</strong>
-                            <div className="moduleCode">{line.item_code}</div>
-                          </td>
-                          <td>{line.barcode}</td>
-                          <td>{line.scanned_uom_label || line.scanned_uom}</td>
-                          <td>{formatStockQty(line.qty_entered)}</td>
-                          <td>{formatStockQty(line.qty_base)}</td>
-                          <td>{formatStockQty(line.qty_master)}</td>
-                          <td>{line.system_qty_base == null ? "—" : formatStockQty(line.system_qty_base)}</td>
-                          <td>{line.pallet_ref || "—"}</td>
-                          <td>{line.location_ref || "—"}</td>
-                        </tr>
-                      )),
+                      ...group.lines.flatMap((line) => {
+                        const changes = line.changes || [];
+                        const historyOpen = historyKeys.has(line.id);
+                        const lastChange = changes[0];
+                        const rows = [(
+                          <tr key={`${group.key}-${line.id}`} className="stockTakeReportDetailRow">
+                            <td>
+                              <div className="stockTakeLineActions">
+                                <button type="button" className="stockTakeLineActionBtn" onClick={() => openEdit(line)} disabled={saving}>
+                                  {t("edit")}
+                                </button>
+                                <button type="button" className="stockTakeLineActionBtn stockTakeLineActionBtnDanger" onClick={() => deleteLine(line)} disabled={saving}>
+                                  {t("delete")}
+                                </button>
+                                {changes.length ? (
+                                  <button type="button" className="stockTakeLineActionBtn" onClick={() => toggleHistory(line.id)}>
+                                    {historyOpen ? t("hideHistory") : t("history")}
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td>
+                              {formatKsaDateTime(line.scanned_at)}
+                              {lastChange ? (
+                                <div className="moduleHint">{lastChange.summary || `${lastChange.changed_by_name || ""} ${formatKsaDateTime(lastChange.changed_at)}`.trim()}</div>
+                              ) : null}
+                            </td>
+                            <td>{line.scanned_by_name || line.scanned_by}</td>
+                            <td>{line.warehouse_name}</td>
+                            <td>
+                              <strong>{line.item_name}</strong>
+                              <div className="moduleCode">{line.item_code}</div>
+                            </td>
+                            <td>{line.barcode}</td>
+                            <td>{line.scanned_uom_label || line.scanned_uom}</td>
+                            <td>{formatStockQty(line.qty_entered)}</td>
+                            <td>{formatStockQty(line.qty_base)}</td>
+                            <td>{formatStockQty(line.qty_master)}</td>
+                            <td>{line.system_qty_base == null ? "—" : formatStockQty(line.system_qty_base)}</td>
+                            <td>{line.pallet_ref || "—"}</td>
+                            <td>{line.location_ref || "—"}</td>
+                          </tr>
+                        )];
+                        if (historyOpen) {
+                          rows.push(
+                            <tr key={`${group.key}-${line.id}-history`} className="stockTakeReportHistoryRow">
+                              <td />
+                              <td colSpan={12}>
+                                <strong>{t("changeLog")}</strong>
+                                {changes.length ? (
+                                  <ul className="stockTakeChangeLog">
+                                    {changes.map((change) => (
+                                      <li key={change.id}>
+                                        {formatKsaDateTime(change.changed_at)} — {change.summary || change.changed_by_name}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <div className="moduleHint">{t("noChanges")}</div>
+                                )}
+                              </td>
+                            </tr>,
+                          );
+                        }
+                        return rows;
+                      }),
                     ];
                   })}
                   {groups.length === 0 ? (
@@ -366,7 +517,33 @@ export default function StockTakeReportPage() {
               </table>
             </ExportableTable>
           </section>
+
+          {deletedLog.length ? (
+            <section className="moduleSection">
+              <div className="moduleSectionHeader">
+                <h2>{t("deletedScans")}</h2>
+              </div>
+              <ul className="stockTakeChangeLog">
+                {deletedLog.map((change) => (
+                  <li key={change.id}>
+                    {formatKsaDateTime(change.changed_at)} — {change.summary || `${change.changed_by_name} deleted ${change.item_name || change.item_code}`}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </div>
+        {editingLine ? (
+          <StockTakeLineEditModal
+            line={editingLine}
+            items={masterItems}
+            t={t}
+            dir={dir}
+            saving={saving}
+            onClose={() => setEditingLine(null)}
+            onSave={saveEdit}
+          />
+        ) : null}
       </main>
     </MorningAttendanceGate>
   );

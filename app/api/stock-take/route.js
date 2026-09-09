@@ -4,9 +4,12 @@ import * as XLSX from "xlsx";
 import { isMissingSchemaColumn } from "../../lib/performanceKpis.js";
 import {
   annotateOpenStockTakeSessions,
+  applyStockTakeLineEdit,
   attachQtyMidToLines,
+  attachStockTakeLineChanges,
   canAccessStockTakeSession,
   convertEnteredQtyToUnits,
+  diffStockTakeLineSnapshots,
   duplicateOpenWarehouseMessage,
   findItemByBarcode,
   findItemByItemCode,
@@ -17,7 +20,9 @@ import {
   normalizeStockTakeCode,
   normalizeWarehouseName,
   resolveScannedUom,
+  stockTakeLineSnapshot,
   stockTakeShareTargets,
+  summarizeStockTakeLineChange,
   uomLabel,
   warehouseKey,
 } from "../../lib/stockTake.js";
@@ -52,6 +57,65 @@ function setupMessage() {
 function missingSharesTable(error) {
   const message = String(error?.message || "").toLowerCase();
   return message.includes("stock_take_session_shares");
+}
+
+function missingChangesTable(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("stock_take_line_changes");
+}
+
+function lineChangeSetupMessage() {
+  return "Run sql/setup_stock_take.sql in Supabase to enable stock take change logging.";
+}
+
+async function loadChangesForLineIds(admin, lineIds) {
+  const ids = [...new Set((lineIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!ids.length) return [];
+  const rows = [];
+  for (let index = 0; index < ids.length; index += 150) {
+    const chunk = ids.slice(index, index + 150);
+    const { data, error } = await admin
+      .from("stock_take_line_changes")
+      .select("id,line_id,action,changed_by_name,changed_at,summary,diffs")
+      .in("line_id", chunk)
+      .order("changed_at", { ascending: false });
+    if (error) {
+      if (missingChangesTable(error) || missingSetup(error)) return [];
+      throw error;
+    }
+    rows.push(...(data || []));
+  }
+  return rows;
+}
+
+async function loadDeletedLineChanges(admin, warehouseName) {
+  let query = admin
+    .from("stock_take_line_changes")
+    .select("id,line_id,action,changed_by_name,changed_at,summary,diffs,warehouse_name,item_code,item_name,before_snapshot")
+    .eq("action", "DELETE")
+    .order("changed_at", { ascending: false })
+    .limit(80);
+  if (warehouseName) query = query.eq("warehouse_key", warehouseKey(warehouseName));
+  const { data, error } = await query;
+  if (error) {
+    if (missingChangesTable(error) || missingSetup(error)) return [];
+    throw error;
+  }
+  return data || [];
+}
+
+async function recordStockTakeLineChange(admin, row) {
+  const { error } = await admin.from("stock_take_line_changes").insert(row);
+  if (error) {
+    if (missingChangesTable(error) || missingSetup(error)) {
+      throw new Error(lineChangeSetupMessage());
+    }
+    throw error;
+  }
+}
+
+function lineSelectColumns() {
+  return "id,session_id,warehouse_name,item_code,item_name,barcode,scanned_uom,scanned_uom_label,qty_entered,qty_base,qty_master,pallet_ref,location_ref,scanned_by,scanned_by_name,scanned_at,updated_at,updated_by_name";
 }
 
 function isUuid(value) {
@@ -303,34 +367,56 @@ export async function GET(request) {
       }
       const accessCheck = await loadSessionAccess(admin, sessionId, access.profile.id);
       if (accessCheck.error) return accessCheck.error;
-      const { data, error } = await admin
+      let linesRes = await admin
         .from("stock_take_lines")
-        .select("id,item_code,item_name,barcode,scanned_uom,scanned_uom_label,qty_entered,qty_base,qty_master,pallet_ref,location_ref,scanned_by_name,scanned_at")
+        .select("id,item_code,item_name,barcode,scanned_uom,scanned_uom_label,qty_entered,qty_base,qty_master,pallet_ref,location_ref,scanned_by_name,scanned_at,updated_at,updated_by_name")
         .eq("session_id", sessionId)
         .order("scanned_at", { ascending: false })
         .limit(500);
-      if (error) {
-        if (missingSetup(error)) {
+      if (linesRes.error && isMissingSchemaColumn(linesRes.error)) {
+        linesRes = await admin
+          .from("stock_take_lines")
+          .select("id,item_code,item_name,barcode,scanned_uom,scanned_uom_label,qty_entered,qty_base,qty_master,pallet_ref,location_ref,scanned_by_name,scanned_at")
+          .eq("session_id", sessionId)
+          .order("scanned_at", { ascending: false })
+          .limit(500);
+      }
+      if (linesRes.error) {
+        if (missingSetup(linesRes.error)) {
           return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
         }
-        throw error;
+        throw linesRes.error;
       }
       const items = await loadAllItems(admin).catch(() => []);
-      return NextResponse.json({ success: true, lines: attachQtyMidToLines(data || [], items) });
+      const withQty = attachQtyMidToLines(linesRes.data || [], items);
+      const changes = await loadChangesForLineIds(admin, withQty.map((line) => line.id));
+      return NextResponse.json({ success: true, lines: attachStockTakeLineChanges(withQty, changes) });
     }
 
     const warehouse = normalizeWarehouseName(url.searchParams.get("warehouse"));
     const userId = String(url.searchParams.get("userId") || "").trim();
     let query = admin
       .from("stock_take_lines")
-      .select("id,session_id,warehouse_name,item_code,item_name,barcode,scanned_uom,scanned_uom_label,qty_entered,qty_base,qty_master,pallet_ref,location_ref,scanned_by,scanned_by_name,scanned_at")
+      .select(lineSelectColumns())
       .order("scanned_at", { ascending: false })
       .limit(3000);
 
     if (warehouse) query = query.eq("warehouse_key", warehouseKey(warehouse));
     if (userId) query = query.eq("scanned_by", userId);
 
-    const { data: lines, error } = await query;
+    let { data: lines, error } = await query;
+    if (error && isMissingSchemaColumn(error)) {
+      query = admin
+        .from("stock_take_lines")
+        .select("id,session_id,warehouse_name,item_code,item_name,barcode,scanned_uom,scanned_uom_label,qty_entered,qty_base,qty_master,pallet_ref,location_ref,scanned_by,scanned_by_name,scanned_at")
+        .order("scanned_at", { ascending: false })
+        .limit(3000);
+      if (warehouse) query = query.eq("warehouse_key", warehouseKey(warehouse));
+      if (userId) query = query.eq("scanned_by", userId);
+      const fallback = await query;
+      lines = fallback.data;
+      error = fallback.error;
+    }
     if (error) {
       if (missingSetup(error)) {
         return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
@@ -347,17 +433,23 @@ export async function GET(request) {
       if (!systemRes.error) systemRows = systemRes.data || [];
     }
 
-    const reportLines = (lines || []).map((line) => {
-      const system = systemRows.find((row) => String(row.item_code).toUpperCase() === String(line.item_code).toUpperCase());
-      return {
-        ...line,
-        system_qty_base: system ? Number(system.qty_base) : null,
-      };
-    });
+    const changeRows = await loadChangesForLineIds(admin, (lines || []).map((line) => line.id));
+    const deletedLog = await loadDeletedLineChanges(admin, warehouse);
+    const reportLines = attachStockTakeLineChanges(
+      (lines || []).map((line) => {
+        const system = systemRows.find((row) => String(row.item_code).toUpperCase() === String(line.item_code).toUpperCase());
+        return {
+          ...line,
+          system_qty_base: system ? Number(system.qty_base) : null,
+        };
+      }),
+      changeRows,
+    );
 
     return NextResponse.json({
       success: true,
       lines: reportLines,
+      deletedLog,
       systemItemCount: systemRows.length,
       systemUploadedAt: systemRows[0]?.uploaded_at || null,
     });
@@ -601,6 +693,148 @@ export async function POST(request) {
         throw error;
       }
       return NextResponse.json({ success: true, sessionId });
+    }
+
+    if (mode === "update-line") {
+      const lineId = String(body?.lineId || "").trim();
+      if (!lineId) {
+        return NextResponse.json({ success: false, error: "Choose a scan to edit." }, { status: 400 });
+      }
+      const { data: line, error: lineError } = await admin
+        .from("stock_take_lines")
+        .select("*")
+        .eq("id", lineId)
+        .maybeSingle();
+      if (lineError) {
+        if (missingSetup(lineError)) {
+          return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
+        }
+        throw lineError;
+      }
+      if (!line) {
+        return NextResponse.json({ success: false, error: "Scan not found." }, { status: 404 });
+      }
+
+      const items = await loadAllItems(admin);
+      const item = findItemByItemCode(items, line.item_code);
+      const next = applyStockTakeLineEdit(line, {
+        qty: body?.qty,
+        scannedUom: body?.scannedUom,
+        pallet: body?.pallet,
+        location: body?.location,
+        item,
+      });
+      const diffs = diffStockTakeLineSnapshots(line, next);
+      if (!diffs.length) {
+        return NextResponse.json({ success: false, error: "No changes to save." }, { status: 400 });
+      }
+
+      const actorName = personLabel(access.profile) || access.user.email || "";
+      await recordStockTakeLineChange(admin, {
+        line_id: line.id,
+        session_id: line.session_id || null,
+        warehouse_name: line.warehouse_name,
+        warehouse_key: line.warehouse_key || warehouseKey(line.warehouse_name),
+        item_code: line.item_code,
+        item_name: line.item_name,
+        action: "UPDATE",
+        changed_by: access.profile.id,
+        changed_by_name: actorName,
+        summary: summarizeStockTakeLineChange({ action: "UPDATE", before: line, after: next, actorName }),
+        diffs,
+        before_snapshot: stockTakeLineSnapshot(line),
+        after_snapshot: stockTakeLineSnapshot(next),
+      });
+
+      const updatePayload = {
+        scanned_uom: next.scanned_uom,
+        scanned_uom_label: next.scanned_uom_label,
+        qty_entered: next.qty_entered,
+        qty_base: next.qty_base,
+        qty_master: next.qty_master,
+        pallet_ref: next.pallet_ref,
+        location_ref: next.location_ref,
+        updated_at: new Date().toISOString(),
+        updated_by: access.profile.id,
+        updated_by_name: actorName,
+      };
+      let updateRes = await admin
+        .from("stock_take_lines")
+        .update(updatePayload)
+        .eq("id", lineId)
+        .select("id,session_id,item_code,item_name,barcode,scanned_uom,scanned_uom_label,qty_entered,qty_base,qty_master,pallet_ref,location_ref,scanned_by_name,scanned_at,updated_at,updated_by_name")
+        .single();
+      if (updateRes.error && isMissingSchemaColumn(updateRes.error)) {
+        delete updatePayload.updated_at;
+        delete updatePayload.updated_by;
+        delete updatePayload.updated_by_name;
+        updateRes = await admin
+          .from("stock_take_lines")
+          .update(updatePayload)
+          .eq("id", lineId)
+          .select("id,session_id,item_code,item_name,barcode,scanned_uom,scanned_uom_label,qty_entered,qty_base,qty_master,pallet_ref,location_ref,scanned_by_name,scanned_at")
+          .single();
+      }
+      if (updateRes.error) {
+        if (missingSetup(updateRes.error)) {
+          return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
+        }
+        throw updateRes.error;
+      }
+
+      const lineChanges = await loadChangesForLineIds(admin, [lineId]);
+      return NextResponse.json({
+        success: true,
+        line: attachStockTakeLineChanges(attachQtyMidToLines([updateRes.data], item ? [item] : []), lineChanges)[0],
+        message: "Scan updated.",
+      });
+    }
+
+    if (mode === "delete-line") {
+      const lineId = String(body?.lineId || "").trim();
+      if (!lineId) {
+        return NextResponse.json({ success: false, error: "Choose a scan to delete." }, { status: 400 });
+      }
+      const { data: line, error: lineError } = await admin
+        .from("stock_take_lines")
+        .select("*")
+        .eq("id", lineId)
+        .maybeSingle();
+      if (lineError) {
+        if (missingSetup(lineError)) {
+          return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
+        }
+        throw lineError;
+      }
+      if (!line) {
+        return NextResponse.json({ success: false, error: "Scan not found." }, { status: 404 });
+      }
+
+      const actorName = personLabel(access.profile) || access.user.email || "";
+      await recordStockTakeLineChange(admin, {
+        line_id: line.id,
+        session_id: line.session_id || null,
+        warehouse_name: line.warehouse_name,
+        warehouse_key: line.warehouse_key || warehouseKey(line.warehouse_name),
+        item_code: line.item_code,
+        item_name: line.item_name,
+        action: "DELETE",
+        changed_by: access.profile.id,
+        changed_by_name: actorName,
+        summary: summarizeStockTakeLineChange({ action: "DELETE", before: line, actorName }),
+        diffs: [],
+        before_snapshot: stockTakeLineSnapshot(line),
+        after_snapshot: null,
+      });
+
+      const { error: deleteError } = await admin.from("stock_take_lines").delete().eq("id", lineId);
+      if (deleteError) {
+        if (missingSetup(deleteError)) {
+          return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
+        }
+        throw deleteError;
+      }
+      return NextResponse.json({ success: true, lineId, message: "Scan deleted." });
     }
 
     if (mode === "save-line") {

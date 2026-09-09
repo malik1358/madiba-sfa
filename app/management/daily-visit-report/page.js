@@ -754,7 +754,7 @@ export default function DailyVisitReportPage() {
                         ))}
                     </tbody>
                   </table>
-                </div>
+                </ExportableTable>
               )}
             </section>
           ) : null}

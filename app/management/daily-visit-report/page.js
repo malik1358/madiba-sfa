@@ -685,7 +685,7 @@ export default function DailyVisitReportPage() {
               {(inactivityLog.sends || []).length === 0 ? (
                 <p className="moduleHint">{t("inactivityNoSends")}</p>
               ) : (
-                <div className="moduleTableWrap">
+                <ExportableTable filename="inactivity-emails" sheetName="Inactivity Emails" className="moduleTableWrap">
                   <table className="moduleTable">
                     <thead>
                       <tr>
@@ -712,13 +712,13 @@ export default function DailyVisitReportPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </ExportableTable>
               )}
               <h3 style={{ marginTop: "16px", fontSize: "15px" }}>{t("inactivityChecks")}</h3>
               {(inactivityLog.checks || []).length === 0 && (inactivityLog.cycles || []).length === 0 ? (
                 <p className="moduleHint">{t("inactivityNoChecks")}</p>
               ) : (
-                <div className="moduleTableWrap">
+                <ExportableTable filename="inactivity-checks" sheetName="Inactivity Checks" className="moduleTableWrap">
                   <table className="moduleTable">
                     <thead>
                       <tr>
@@ -754,7 +754,7 @@ export default function DailyVisitReportPage() {
                         ))}
                     </tbody>
                   </table>
-                </div>
+                </ExportableTable>
               )}
             </section>
           ) : null}

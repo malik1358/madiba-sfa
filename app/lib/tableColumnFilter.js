@@ -39,6 +39,18 @@ function isCustomHeaderFilterControl(element) {
   );
 }
 
+export function isInjectedColumnFilterRow(row) {
+  return Boolean(row?.classList?.contains("moduleTableColumnFilterRow"));
+}
+
+export function getHeaderLabelRows(table) {
+  if (!table) return [];
+  return [...table.querySelectorAll(":scope > thead > tr")].filter((row) => {
+    if (isInjectedColumnFilterRow(row)) return false;
+    return ![...row.querySelectorAll("input, select")].some((element) => isCustomHeaderFilterControl(element));
+  });
+}
+
 export function tableHasCustomHeaderFilters(table) {
   if (!table) return false;
   return [...table.querySelectorAll(":scope > thead input, :scope > thead select")]
@@ -61,10 +73,7 @@ export function headerCellLabel(cell) {
 
 export function getFilterableHeaderCells(table) {
   if (!table) return [];
-  const rows = [...table.querySelectorAll(":scope > thead > tr")];
-  const labelRows = rows.filter((row) => (
-    ![...row.querySelectorAll("input, select")].some((element) => isCustomHeaderFilterControl(element))
-  ));
+  const labelRows = getHeaderLabelRows(table);
   if (labelRows.length === 0) return [];
 
   if (labelRows.length === 1) {
@@ -152,8 +161,11 @@ function setRowFilteredOut(row, hidden) {
 
 export function syncStackedHeaderSticky(table) {
   if (!table) return false;
-  const firstRow = table.querySelector(":scope > thead > tr");
-  const secondRow = table.querySelector(":scope > thead > tr:nth-child(2)");
+  const labelRows = getHeaderLabelRows(table);
+  const filterRow = [...(table.querySelectorAll(":scope > thead > tr") || [])]
+    .find((row) => isInjectedColumnFilterRow(row));
+  const firstRow = labelRows[0] || null;
+  const secondRow = labelRows[1] || (labelRows.length === 1 ? filterRow : null);
   if (!firstRow || !secondRow) {
     table.classList.remove("moduleStackedHeaderTable");
     table.style.removeProperty("--module-stacked-header-row1");

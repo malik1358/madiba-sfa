@@ -7,6 +7,7 @@ import {
   applyColumnFiltersToTable,
   columnFiltersAreActive,
   getFilterableHeaderCells,
+  getHeaderLabelRows,
   tableHasCustomHeaderFilters,
 } from "../lib/tableColumnFilter";
 
@@ -16,6 +17,23 @@ const TEXT = {
   shown: { en: "shown", ar: "ظاهر" },
 };
 
+function renderFilterInput(column, value, placeholder, onChange) {
+  return (
+    <input
+      key={`${column.index}-${column.label}`}
+      className="moduleTableColumnFilterInput"
+      type="search"
+      value={value}
+      placeholder={placeholder}
+      aria-label={`${placeholder} ${column.label}`}
+      autoComplete="off"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onChange={(event) => onChange(column.index, event.target.value)}
+    />
+  );
+}
+
 export default function TableColumnFilters({ tableHostRef, enabled = true }) {
   const { language } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -23,6 +41,7 @@ export default function TableColumnFilters({ tableHostRef, enabled = true }) {
   const [filters, setFilters] = useState([]);
   const [shownCount, setShownCount] = useState(null);
   const [hasCustomFilters, setHasCustomFilters] = useState(false);
+  const [useFilterRow, setUseFilterRow] = useState(false);
 
   useLayoutEffect(() => {
     if (!enabled) return undefined;
@@ -34,11 +53,14 @@ export default function TableColumnFilters({ tableHostRef, enabled = true }) {
       if (!table || tableHasCustomHeaderFilters(table)) {
         setHasCustomFilters(Boolean(table && tableHasCustomHeaderFilters(table)));
         setHeaderCells([]);
+        setUseFilterRow(false);
         return;
       }
 
       setHasCustomFilters(false);
       const cells = getFilterableHeaderCells(table);
+      const labelRows = getHeaderLabelRows(table);
+      setUseFilterRow(labelRows.length === 1);
       setHeaderCells((current) => {
         if (
           current.length === cells.length
@@ -75,7 +97,18 @@ export default function TableColumnFilters({ tableHostRef, enabled = true }) {
     [filters, headerCells],
   );
 
+  function updateFilter(index, value) {
+    setFilters((current) => {
+      const next = headerCells.map((_, columnIndex) => current[columnIndex] || "");
+      next[index] = value;
+      return next;
+    });
+  }
+
   if (!enabled || hasCustomFilters || headerCells.length === 0) return null;
+
+  const table = tableHostRef.current?.querySelector("table");
+  const thead = table?.querySelector(":scope > thead");
 
   return (
     <>
@@ -93,31 +126,25 @@ export default function TableColumnFilters({ tableHostRef, enabled = true }) {
           </>
         ) : null}
       </div>
-      {headerCells.map((column) => (
-        column.cell
-          ? createPortal(
-            <input
-              key={`${column.index}-${column.label}`}
-              className="moduleTableColumnFilterInput"
-              type="search"
-              value={filterValues[column.index]}
-              placeholder={t("filter")}
-              aria-label={`${t("filter")} ${column.label}`}
-              onClick={(event) => event.stopPropagation()}
-              onPointerDown={(event) => event.stopPropagation()}
-              onChange={(event) => {
-                const value = event.target.value;
-                setFilters((current) => {
-                  const next = headerCells.map((_, index) => current[index] || "");
-                  next[column.index] = value;
-                  return next;
-                });
-              }}
-            />,
-            column.cell,
-          )
-          : null
-      ))}
+      {useFilterRow && thead
+        ? createPortal(
+          <tr className="moduleTableColumnFilterRow">
+            {headerCells.map((column) => (
+              <th key={`${column.index}-${column.label}`} data-column-filter-label={column.label}>
+                {renderFilterInput(column, filterValues[column.index], t("filter"), updateFilter)}
+              </th>
+            ))}
+          </tr>,
+          thead,
+        )
+        : headerCells.map((column) => (
+          column.cell
+            ? createPortal(
+              renderFilterInput(column, filterValues[column.index], t("filter"), updateFilter),
+              column.cell,
+            )
+            : null
+        ))}
     </>
   );
 }

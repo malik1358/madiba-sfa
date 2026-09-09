@@ -616,7 +616,7 @@ export default function StockTakePage() {
                 {loadingSessions ? (
                   <div className="moduleHint">{t("loading")}</div>
                 ) : (
-                  <div className="moduleTableWrap">
+                  <ExportableTable filename="stock-take-open-inventories" sheetName="Open Inventories" className="moduleTableWrap">
                     <table className="moduleTable">
                       <thead>
                         <tr>
@@ -689,7 +689,7 @@ export default function StockTakePage() {
                         ) : null}
                       </tbody>
                     </table>
-                  </div>
+                  </ExportableTable>
                 )}
               </section>
               <section className="moduleSection">

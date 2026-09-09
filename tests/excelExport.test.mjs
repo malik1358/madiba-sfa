@@ -37,7 +37,7 @@ test("uniqueExcelHeader keeps duplicate column titles distinct", () => {
 
 test("isExcelFilterHeaderRow skips collector filter rows and custom header controls", () => {
   assert.equal(isExcelFilterHeaderRow({
-    classList: { contains: (name) => name === "moduleCollectorFilterRow" },
+    classList: { contains: (name) => name === "moduleTableColumnFilterRow" },
     querySelectorAll: () => [],
   }), true);
   assert.equal(isExcelFilterHeaderRow({

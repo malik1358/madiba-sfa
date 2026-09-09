@@ -66,6 +66,7 @@ import {
   nextVisitDateInputValue,
   validateNextVisitDate,
 } from "../../lib/nextVisitDate";
+import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
 
 const TEXT = {
   title: { en: "Payment Collections", ar: "التحصيلات" },
@@ -872,6 +873,14 @@ function buildInitialForm(row) {
   };
 }
 
+function collectionFormIsDirty(form, row) {
+  if (!row || !form) return false;
+  const initial = buildInitialForm(row);
+  const keys = ["visitOutcome", "amountReceived", "receiptMode", "nextVisitAt", "remarkArabic", "remarkEnglish", "legalNote"];
+  if (keys.some((key) => String(form[key] || "") !== String(initial[key] || ""))) return true;
+  return Boolean(form.paymentCopy || form.receiptCopy);
+}
+
 export default function PaymentCollectionsView({ view = "due" }) {
   const { language, dir, setLanguage } = useAppLanguage();
   const { access } = useModuleAccess();
@@ -1010,6 +1019,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const activeRow = useMemo(() => {
     return [...dueCustomers, ...notDueCustomers, ...legalCustomers].find((row) => rowKey(row) === activeRowKey) || null;
   }, [activeRowKey, dueCustomers, legalCustomers, notDueCustomers]);
+  const collectionEntryOpen = Boolean(savingCustomerCode) || (Boolean(activeRowKey) && collectionFormIsDirty(form, activeRow));
+  useUnsavedEntryGuard(collectionEntryOpen);
 
   useEffect(() => {
     if (activeRow) {
@@ -2765,7 +2776,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                 </table>
                               </ExportableTable>
 
-                              <div className="moduleSection" style={{ marginTop: "8px" }}>
+                              <div className="moduleSection" style={{ marginTop: "8px" }} data-entry-form={collectionEntryOpen ? "open" : undefined}>
                                 <div className="moduleSectionHeader">
                                   <h2>{row.customer_name}</h2>
                                   <span>{t("visitForm")}</span>

@@ -12,6 +12,7 @@ import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, i
 import { getPrice } from '../lib/helpers';
 import { normalizePaymentType } from '../../../lib/regionalPricing';
 import { priceOrderLines } from '../../../lib/orderPricing';
+import { claimUnsavedEntry } from '../../../lib/unsavedEntryGuard';
 
 function isPendingOrderId(orderId) {
   return String(orderId || '').startsWith('pending:');
@@ -102,6 +103,12 @@ export function useOrder({
     () => Object.values(orderQuantities || {}).filter((qty) => Number(qty) > 0).length,
     [orderQuantities]
   );
+
+  useEffect(() => {
+    const orderEntryOpen = selectedQuantityCount > 0 || showOrderReview || savingOrder || submittingOrder;
+    if (!orderEntryOpen) return undefined;
+    return claimUnsavedEntry();
+  }, [savingOrder, selectedQuantityCount, showOrderReview, submittingOrder]);
 
   const orderItems = useMemo(
     () => buildOrderItems(orderQuantities, analytics, quickOrderAllItems, catalogItems),

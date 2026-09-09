@@ -17,6 +17,7 @@ import { detectTable } from "../../lib/schemaGuards";
 import { insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
 import { resolveAuthSession } from "../../lib/authSession";
 import ExportableTable from "../../components/ExportableTable";
 import {
@@ -260,6 +261,12 @@ export default function NewCustomerPage() {
   const [loadingProspects, setLoadingProspects] = useState(false);
   const [visibleCustomers, setVisibleCustomers] = useState([]);
   const [existingCustomerMatch, setExistingCustomerMatch] = useState(null);
+  const prospectFormDirty = Object.entries(form).some(([key, value]) => {
+    if (key === "customer_type") return String(value || "") !== "Retail";
+    if (key === "salesman_code") return false;
+    return String(value || "").trim() !== "";
+  }) || documents.length > 0 || Boolean(linkProspect) || showFollowUpDate || Boolean(followUpDate);
+  useUnsavedEntryGuard(prospectFormDirty);
 
   async function loadProspectsList(accessToken) {
     setLoadingProspects(true);
@@ -1065,7 +1072,7 @@ export default function NewCustomerPage() {
             <h2>Prospect Form</h2>
           </div>
 
-          <form className="moduleFormGrid notranslate" translate="no" onSubmit={handleSubmit}>
+          <form className="moduleFormGrid notranslate" translate="no" onSubmit={handleSubmit} data-entry-form={prospectFormDirty ? "open" : undefined}>
             <label>
               Customer Name (English)
               <input

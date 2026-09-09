@@ -31,6 +31,7 @@ import {
   writeStockTakeSessionsCache,
 } from "../../lib/stockTakeCache";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
+import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
 import { formatKsaDateOnly, formatKsaTime } from "../../lib/workdayActivity";
 
 const TEXT = {
@@ -114,6 +115,11 @@ export default function StockTakePage() {
   const [offlineHint, setOfflineHint] = useState(false);
 
   usePopupMessages({ message, error });
+  const stockTakeLineOpen = Boolean(
+    session
+    && (item || String(barcode || "").trim() || String(qty || "").trim() || String(itemCodeInput || "").trim())
+  );
+  useUnsavedEntryGuard(stockTakeLineOpen);
 
   const converted = useMemo(() => {
     if (!item || !scannedUom) return null;
@@ -667,7 +673,7 @@ export default function StockTakePage() {
                     <button type="button" className="moduleInlineButton" onClick={resetWarehouse}>{t("changeWarehouse")}</button>
                   </div>
                 </div>
-                <form className="stockTakeForm" onSubmit={saveLine}>
+                <form className="stockTakeForm" onSubmit={saveLine} data-entry-form={stockTakeLineOpen ? "open" : undefined}>
                   <label>
                     {t("barcode")}
                     <input

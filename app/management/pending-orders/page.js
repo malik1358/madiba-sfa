@@ -26,6 +26,7 @@ import { sortBucketLabels } from "../../lib/outstanding";
 import { evaluateCreditApproval } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
 import {
   buildOrderPdfSnapshotFromSavedOrder,
@@ -171,6 +172,7 @@ export default function PendingOrdersPage() {
   const [outstandingInfoByOrder, setOutstandingInfoByOrder] = useState({});
   const [creditApprovalByOrder, setCreditApprovalByOrder] = useState({});
   const [columnFilters, setColumnFilters] = useState(EMPTY_FILTERS);
+  useUnsavedEntryGuard(Boolean(selectedInvoiceFile) || Object.values(statusDraftByOrder || {}).some((value) => String(value || "").trim()));
 
   const startOfTodayIso = useMemo(() => {
     const start = new Date();

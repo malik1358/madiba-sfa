@@ -1,4 +1,7 @@
+import { requestLoginFirstCustomerHintCheck } from "./loginFirstCustomerHint";
+
 export function queueTransactionAlert(accessToken, payload) {
+  requestLoginFirstCustomerHintCheck();
   if (!accessToken || !payload?.transactionType) return;
 
   fetch("/api/transaction-alert", {

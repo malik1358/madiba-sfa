@@ -6200,7 +6200,7 @@ th:has(.moduleTableColumnFilterInput) {
 }
 
 .stockTakeShell {
-  max-width: 720px;
+  max-width: 1100px;
 }
 
 .stockTakeCountCard {
@@ -6230,5 +6230,31 @@ th:has(.moduleTableColumnFilterInput) {
   display: block;
   color: #073b49;
   font-size: 16px;
+}
+
+.stockTakeConverted {
+  padding: 12px 14px;
+  background: #eef6f7;
+  border: 1px solid #c5d6db;
+  border-radius: 12px;
+}
+
+.stockTakeConvertedLabel {
+  margin-bottom: 8px;
+  color: #0d5a6b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.stockTakeConvertedGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .stockTakeConvertedGrid {
+    grid-template-columns: 1fr;
+  }
 }
 

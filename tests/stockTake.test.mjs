@@ -5,6 +5,7 @@ import {
   attachSystemQtyToLines,
   convertEnteredQtyToUnits,
   findItemByBarcode,
+  findItemByItemCode,
   formatStockQty,
   hasStockTakeModuleAccess,
   resolveScannedUom,
@@ -34,6 +35,11 @@ test("warehouse key ignores case and extra spaces", () => {
   assert.equal(warehouseKey("  Riyadh  DC "), "RIYADH DC");
 });
 
+test("item code lookup finds the item without locking unit", () => {
+  assert.equal(findItemByItemCode([item], "a004409")?.item_code, "A004409");
+  assert.equal(findItemByItemCode([item], "missing"), null);
+});
+
 test("scanned barcode selects the matching UOM", () => {
   assert.equal(resolveScannedUom(item, "111").kind, STOCK_TAKE_UOM.BASE);
   assert.equal(resolveScannedUom(item, "222").kind, STOCK_TAKE_UOM.MID);
@@ -49,7 +55,7 @@ test("qty converts to base first then back to master", () => {
       baseUomPackSize: 336,
       midUomPackSize: 14,
     }),
-    { qtyEntered: 2, qtyBase: 672, qtyMaster: 2, scannedUom: "MASTER" },
+    { qtyEntered: 2, qtyBase: 672, qtyMid: 48, qtyMaster: 2, scannedUom: "MASTER" },
   );
 
   const mid = convertEnteredQtyToUnits({
@@ -105,6 +111,20 @@ test("master excel columns map pack sizes and barcodes", () => {
   assert.equal(parsed.items[0].base_uom_pack_size, 336);
   assert.equal(parsed.items[0].mid_uom_pack_size, 14);
   assert.equal(parsed.items[0].barcode_master, "333");
+});
+
+test("inventory module excel keeps master barcode when the header is shifted one column", () => {
+  const rows = rowsFromSheetMatrix([
+    ["Product Code", "Item Name", "Base UOM Pack Size", "BASE UOM", "MID UOM Pack Size", "MID UOM", "Master UOM", "BARCODE Mid", "BARCODE Master ", ""],
+    ["A004035", "Cotton swabs", "240", "PC", "12", "PACK", "CTN", "6287050670979", "", "6287050670740"],
+  ]);
+  const parsed = parseStockTakeMasterRows(rows);
+  assert.equal(parsed.items[0].item_code, "A004035");
+  assert.equal(parsed.items[0].base_uom, "PC");
+  assert.equal(parsed.items[0].base_uom_pack_size, 240);
+  assert.equal(parsed.items[0].mid_uom_pack_size, 12);
+  assert.equal(parsed.items[0].barcode_mid, "6287050670979");
+  assert.equal(parsed.items[0].barcode_master, "6287050670740");
 });
 
 test("header row can sit below a title row", () => {

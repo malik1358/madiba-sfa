@@ -3,10 +3,13 @@ import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import { isMissingSchemaColumn } from "../../lib/performanceKpis.js";
 import {
+  attachQtyMidToLines,
   convertEnteredQtyToUnits,
   findItemByBarcode,
+  findItemByItemCode,
   hasStockTakeModuleAccess,
   normalizeBarcode,
+  normalizeStockTakeCode,
   normalizeWarehouseName,
   resolveScannedUom,
   uomLabel,
@@ -117,21 +120,41 @@ export async function GET(request) {
 
     if (action === "lookup") {
       const barcode = normalizeBarcode(url.searchParams.get("barcode"));
-      if (!barcode) {
-        return NextResponse.json({ success: false, error: "Scan a barcode." }, { status: 400 });
+      const itemCode = normalizeStockTakeCode(url.searchParams.get("itemCode"));
+      if (!barcode && !itemCode) {
+        return NextResponse.json({ success: false, error: "Enter a barcode or item code." }, { status: 400 });
       }
       const items = await loadAllItems(admin);
+      if (itemCode) {
+        const item = findItemByItemCode(items, itemCode);
+        if (!item) {
+          return NextResponse.json({ success: false, error: "Item code not found in stock take master." }, { status: 404 });
+        }
+        return NextResponse.json({
+          success: true,
+          item,
+          lookupMode: "itemCode",
+          scannedUom: "",
+          scannedUomLabel: "",
+          needsUom: true,
+          unitLocked: false,
+        });
+      }
+
       const item = findItemByBarcode(items, barcode);
       if (!item) {
         return NextResponse.json({ success: false, error: "Barcode not found in stock take master." }, { status: 404 });
       }
       const resolved = resolveScannedUom(item, barcode);
+      const unitLocked = Boolean(resolved.kind) && !resolved.ambiguous;
       return NextResponse.json({
         success: true,
         item,
-        scannedUom: resolved.kind,
-        scannedUomLabel: resolved.kind ? uomLabel(item, resolved.kind) : "",
-        needsUom: !resolved.kind || resolved.ambiguous,
+        lookupMode: unitLocked ? "barcode" : "itemCode",
+        scannedUom: unitLocked ? resolved.kind : "",
+        scannedUomLabel: unitLocked ? uomLabel(item, resolved.kind) : "",
+        needsUom: !unitLocked,
+        unitLocked,
       });
     }
 
@@ -145,14 +168,15 @@ export async function GET(request) {
         .select("id,item_code,item_name,barcode,scanned_uom,scanned_uom_label,qty_entered,qty_base,qty_master,pallet_ref,location_ref,scanned_by_name,scanned_at")
         .eq("session_id", sessionId)
         .order("scanned_at", { ascending: false })
-        .limit(30);
+        .limit(500);
       if (error) {
         if (missingSetup(error)) {
           return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
         }
         throw error;
       }
-      return NextResponse.json({ success: true, lines: data || [] });
+      const items = await loadAllItems(admin).catch(() => []);
+      return NextResponse.json({ success: true, lines: attachQtyMidToLines(data || [], items) });
     }
 
     const warehouse = normalizeWarehouseName(url.searchParams.get("warehouse"));
@@ -327,6 +351,7 @@ export async function POST(request) {
       const warehouseName = normalizeWarehouseName(body?.warehouse);
       const sessionId = String(body?.sessionId || "").trim();
       const barcode = normalizeBarcode(body?.barcode);
+      const requestedItemCode = normalizeStockTakeCode(body?.itemCode);
       const qtyEntered = body?.qty;
       if (!warehouseName) {
         return NextResponse.json({ success: false, error: "Enter the warehouse name before counting." }, { status: 400 });
@@ -334,17 +359,22 @@ export async function POST(request) {
       if (!sessionId) {
         return NextResponse.json({ success: false, error: "Start the warehouse session first." }, { status: 400 });
       }
-      if (!barcode) {
-        return NextResponse.json({ success: false, error: "Scan a barcode." }, { status: 400 });
+      if (!barcode && !requestedItemCode) {
+        return NextResponse.json({ success: false, error: "Enter a barcode or item code." }, { status: 400 });
       }
 
       const items = await loadAllItems(admin);
-      const item = findItemByBarcode(items, barcode);
+      const item = requestedItemCode
+        ? findItemByItemCode(items, requestedItemCode)
+        : findItemByBarcode(items, barcode);
       if (!item) {
-        return NextResponse.json({ success: false, error: "Barcode not found in stock take master." }, { status: 404 });
+        return NextResponse.json({
+          success: false,
+          error: requestedItemCode ? "Item code not found in stock take master." : "Barcode not found in stock take master.",
+        }, { status: 404 });
       }
 
-      const resolved = resolveScannedUom(item, barcode);
+      const resolved = barcode ? resolveScannedUom(item, barcode) : { kind: null };
       const scannedUom = String(body?.scannedUom || resolved.kind || "").toUpperCase();
       const converted = convertEnteredQtyToUnits({
         qtyEntered,
@@ -362,7 +392,7 @@ export async function POST(request) {
           warehouse_key: warehouseKey(warehouseName),
           item_code: item.item_code,
           item_name: item.item_name,
-          barcode,
+          barcode: barcode || item.item_code,
           scanned_uom: converted.scannedUom,
           scanned_uom_label: uomLabel(item, converted.scannedUom),
           qty_entered: converted.qtyEntered,
@@ -383,7 +413,10 @@ export async function POST(request) {
         throw error;
       }
 
-      return NextResponse.json({ success: true, line: data });
+      return NextResponse.json({
+        success: true,
+        line: attachQtyMidToLines([data], [item])[0],
+      });
     }
 
     return NextResponse.json({ success: false, error: "Unsupported action." }, { status: 400 });

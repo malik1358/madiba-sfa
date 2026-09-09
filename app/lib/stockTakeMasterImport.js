@@ -39,16 +39,29 @@ function pickBestHeaderRow(matrix) {
   return best?.score >= 5 ? best.index : 0;
 }
 
+function leftoverBarcodes(row, taken = []) {
+  const used = new Set((taken || []).filter(Boolean).map(normalizeBarcode));
+  const extras = [];
+  Object.values(row || {}).forEach((value) => {
+    const code = normalizeBarcode(value);
+    if (!/^\d{8,18}$/.test(code) || used.has(code)) return;
+    extras.push(code);
+    used.add(code);
+  });
+  return extras;
+}
+
 export function rowsFromSheetMatrix(matrix) {
   const rows = Array.isArray(matrix) ? matrix.filter((row) => Array.isArray(row)) : [];
   if (!rows.length) return [];
   const headerIndex = pickBestHeaderRow(rows);
-  const headers = rows[headerIndex] || [];
+  const headers = [...(rows[headerIndex] || [])];
+  const width = Math.max(headers.length, ...rows.map((row) => row.length));
+  while (headers.length < width) headers.push("");
   return rows.slice(headerIndex + 1).map((row) => {
     const object = {};
     headers.forEach((header, index) => {
-      const key = String(header || "").trim();
-      if (!key) return;
+      const key = String(header || "").trim() || `__col_${index}`;
       object[key] = row[index];
     });
     return object;
@@ -81,7 +94,7 @@ export function parseStockTakeMasterRow(row) {
     "midpack",
   ]));
 
-  const barcodeBase = normalizeBarcode(firstValue(row, [
+  let barcodeBase = normalizeBarcode(firstValue(row, [
     "base barcode",
     "barcode base",
     "unit barcode",
@@ -94,13 +107,16 @@ export function parseStockTakeMasterRow(row) {
     "middle barcode",
     "2nd unit barcode",
   ]));
-  const barcodeMaster = normalizeBarcode(firstValue(row, [
+  let barcodeMaster = normalizeBarcode(firstValue(row, [
     "master barcode",
     "barcode master",
     "carton barcode",
     "ctn barcode",
     "3rd unit barcode",
   ]));
+  const extras = leftoverBarcodes(row, [barcodeBase, barcodeMid, barcodeMaster]);
+  if (!barcodeMaster && extras.length) barcodeMaster = extras[extras.length - 1];
+  if (!barcodeBase && extras.length > 1) barcodeBase = extras[0];
 
   return {
     item_code: itemCode,

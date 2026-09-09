@@ -22,8 +22,8 @@ import ExportableTable from "../../components/ExportableTable";
 const TEXT = {
   title: { en: "KPI Targets", ar: "أهداف الأداء" },
   subtitle: {
-    en: "Ach. % is actual vs the full month target. The line under it is vs typical sales by this date from the last 6 months, or working days if history is thin.",
-    ar: "نسبة الإنجاز هي الفعلي مقابل هدف الشهر. السطر تحتها يقارن بالمبيعات المعتادة حتى هذا التاريخ من آخر 6 أشهر، أو بأيام العمل إن قلّ التاريخ.",
+    en: "Ach. % is actual vs the full month target. Expected pace is that salesman's own average share of monthly sales by this date over the last 6 months, or working days if he has no history.",
+    ar: "نسبة الإنجاز هي الفعلي مقابل هدف الشهر. المسار المتوقع هو متوسط حصة المندوب نفسه من مبيعات الشهر حتى هذا التاريخ خلال آخر 6 أشهر، أو أيام العمل إن لم يوجد تاريخ.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   performance: { en: "My Performance", ar: "أدائي" },

@@ -181,8 +181,9 @@ test("renderOrderPdfDocument draws the new order layout", () => {
   renderOrderPdfDocument(doc, snapshot);
 
   assert.ok(doc.texts.includes("Order Number  296"));
-  assert.ok(doc.texts.includes("Cash Disc"));
-  assert.ok(doc.texts.includes("Scheme"));
+  assert.equal(doc.texts.includes("Cash Disc"), false);
+  assert.equal(doc.texts.includes("Value Disc"), false);
+  assert.equal(doc.texts.includes("Scheme"), false);
   assert.ok(doc.texts.includes("Outstanding Details"));
   assert.ok(doc.texts.includes("Amount after VAT"));
   assert.equal(doc.texts.includes("Item Code"), false);
@@ -316,8 +317,84 @@ test("renderOrderPdfDocument hides cash and value percents when they are not app
 
   assert.equal(doc.texts.includes("3%"), false);
   assert.equal(doc.texts.includes("2%"), false);
+  assert.equal(doc.texts.includes("Cash Disc"), false);
+  assert.equal(doc.texts.includes("Value Disc"), false);
+  assert.equal(doc.texts.includes("Scheme"), false);
+  assert.equal(doc.texts.includes("Cash discount"), false);
+  assert.equal(doc.texts.includes("Value discount"), false);
+  assert.equal(doc.texts.includes("Scheme discount"), false);
   assert.equal(doc.texts.some((text) => text.includes("3% applied")), false);
   assert.equal(doc.texts.some((text) => text.includes("2% applied")), false);
+});
+
+test("renderOrderPdfDocument hides catalog cash percent when the line was not reduced", () => {
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, {
+    orderId: "PROSPECT-OFF-2ab058da299843ac",
+    orderNumber: "PROSPECT-OFF-2ab058da299843ac",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-09-09T16:00:00.000Z",
+    customerCode: "PROSPECT-OFF-2ab058da299843ac",
+    customerName: "Fan Al Ihtiraf Perfume Wholsae",
+    salesmanCode: "ADMIN",
+    paymentType: "credit",
+    pricingRegion: "riyadh",
+    itemCount: 3,
+    totalQuantity: 3,
+    grandTotal: 240,
+    totals: {
+      wholesaleTotal: 240,
+      cashDiscountTotal: 0,
+      valueDiscountTotal: 0,
+      schemeDiscountTotal: 0,
+      amountExclVat: 240,
+      vatAmount: 36,
+      amountInclVat: 276,
+    },
+    lines: [
+      {
+        item_code: "A004210",
+        item_name: "A004210_MADIBA FOR MEN NO GAS FRAGRANCE BODY SPRAY 120ML X 24 - DYNAMIC",
+        quantity: 1,
+        wholesaleRate: 80,
+        rate: 80,
+        cashDiscount: 0.08,
+        valueDiscount: 0,
+        cashApplied: true,
+        valueApplied: false,
+        cashDiscountAmount: 0,
+        valueDiscountAmount: 0,
+        schemeDiscountAmount: 0,
+        lineValue: 80,
+        vatAmount: 12,
+        lineTotalInclVat: 92,
+      },
+      {
+        item_code: "A004211",
+        item_name: "A004211_MADIBA FOR MEN NO GAS FRAGRANCE BODY SPRAY 120ML X 24 - BRONZE",
+        quantity: 1,
+        wholesaleRate: 80,
+        rate: 80,
+        cashDiscount: 0.08,
+        valueDiscount: 0,
+        cashApplied: false,
+        valueApplied: false,
+        cashDiscountAmount: 0,
+        schemeDiscountAmount: 0,
+        lineValue: 80,
+        vatAmount: 12,
+        lineTotalInclVat: 92,
+      },
+    ],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+
+  assert.equal(doc.texts.includes("Cash Disc"), false);
+  assert.equal(doc.texts.includes("Value Disc"), false);
+  assert.equal(doc.texts.includes("Scheme"), false);
+  assert.equal(doc.texts.includes("8%"), false);
+  assert.equal(doc.texts.includes("Cash discount"), false);
 });
 
 test("renderOrderPdfDocument wraps applied cash and value discounts onto two lines", () => {
@@ -366,6 +443,10 @@ test("renderOrderPdfDocument wraps applied cash and value discounts onto two lin
   });
 
   assert.ok(doc.texts.includes("PROSPECT-308 - AL NOOR STATIONERY"));
+  assert.ok(doc.texts.includes("Cash Disc"));
+  assert.ok(doc.texts.includes("Cash discount"));
+  assert.equal(doc.texts.includes("Value Disc"), false);
+  assert.equal(doc.texts.includes("Scheme"), false);
   assert.ok(doc.texts.includes("3%"));
   assert.ok(doc.texts.includes("41.40"));
   assert.equal(doc.texts.some((text) => /\d+% applied/.test(text)), false);
@@ -469,6 +550,9 @@ test("renderOrderPdfDocument shows scheme discount on the item row", () => {
   });
 
   assert.ok(doc.texts.includes("Scheme"));
+  assert.ok(doc.texts.includes("Scheme discount"));
+  assert.equal(doc.texts.includes("Cash Disc"), false);
+  assert.equal(doc.texts.includes("Value Disc"), false);
   assert.ok(doc.texts.filter((text) => text === "73.20").length >= 2);
 });
 

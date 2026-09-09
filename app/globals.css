@@ -4227,6 +4227,30 @@ th:has(.moduleTableColumnFilterInput) {
   z-index: 7;
 }
 
+.moduleKpiTargetsPage .moduleShell {
+  max-width: none;
+}
+
+.moduleKpiTargetsWrap {
+  overflow: auto;
+  max-width: 100%;
+  max-height: calc(100dvh - var(--sticky-table-top) - 8.5rem);
+  -webkit-overflow-scrolling: touch;
+}
+
+.moduleKpiTargetsTable {
+  width: max-content;
+  min-width: 100%;
+}
+
+.moduleKpiTargetsTable.moduleStackedHeaderTable thead tr:first-child th {
+  top: 0;
+}
+
+.moduleKpiTargetsTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
+  top: var(--module-stacked-header-row1);
+}
+
 .moduleKpiTargetsTable .moduleKpiSalesmanCell {
   position: sticky;
   left: 0;
@@ -4253,7 +4277,8 @@ th:has(.moduleTableColumnFilterInput) {
 [dir="rtl"] .moduleKpiTargetsTable .moduleKpiSalesmanCell {
   left: auto;
   right: 0;
-  inset-inline-start: 0;
+  inset-inline-start: auto;
+  inset-inline-end: 0;
   box-shadow: -2px 0 8px rgba(6, 47, 58, 0.12);
 }
 
@@ -5741,6 +5766,15 @@ th:has(.moduleTableColumnFilterInput) {
   .moduleTable th {
     position: static;
     box-shadow: none;
+  }
+
+  .moduleKpiTargetsTable.moduleTable thead th,
+  .moduleKpiTargetsTable.moduleTable .moduleKpiSalesmanCell {
+    position: sticky;
+  }
+
+  .moduleKpiTargetsWrap {
+    overflow: auto;
   }
 
   .dashboardHeaderActions,

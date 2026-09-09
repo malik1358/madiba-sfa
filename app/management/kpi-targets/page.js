@@ -175,7 +175,7 @@ export default function KpiTargetsPage() {
 
   return (
     <MorningAttendanceGate>
-      <main className="modulePage" dir={dir}>
+      <main className="modulePage moduleKpiTargetsPage" dir={dir}>
         <div className="moduleShell">
           <div className="moduleHeader">
             <div>
@@ -209,7 +209,7 @@ export default function KpiTargetsPage() {
           {loading ? (
             <div className="moduleLoading">{t("loading")}</div>
           ) : (
-            <ExportableTable filename={`kpi-targets-${month}`} sheetName="KPI Targets" className="moduleTableWrap">
+            <ExportableTable filename={`kpi-targets-${month}`} sheetName="KPI Targets" className="moduleTableWrap moduleKpiTargetsWrap">
               <table className="moduleTable moduleStackedHeaderTable moduleKpiTargetsTable">
                 <thead>
                   <tr>

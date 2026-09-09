@@ -184,3 +184,49 @@ export function parseSystemInventoryRows(rows) {
   });
   return [...byCode.values()];
 }
+
+export const STOCK_TAKE_MASTER_TEMPLATE_HEADERS = [
+  "Product Code",
+  "Item Name",
+  "Base UOM",
+  "MID UOM",
+  "Master UOM",
+  "Base UOM Pack Size",
+  "MID UOM Pack Size",
+  "Base Barcode",
+  "MID Barcode",
+  "Master Barcode",
+];
+
+export const STOCK_TAKE_MASTER_TEMPLATE_SAMPLE = [
+  "A004107",
+  "Sample item",
+  "PCS",
+  "PACK",
+  "CTN",
+  "24",
+  "8",
+  "6287050672034",
+  "6287050672035",
+  "6287050672036",
+];
+
+export const STOCK_TAKE_SYSTEM_TEMPLATE_HEADERS = [
+  "Item Code",
+  "Item Name",
+  "Qty Base",
+];
+
+export const STOCK_TAKE_SYSTEM_TEMPLATE_SAMPLE = [
+  "A004107",
+  "Sample item",
+  "120",
+];
+
+export function stockTakeMasterTemplateMatrix() {
+  return [STOCK_TAKE_MASTER_TEMPLATE_HEADERS, STOCK_TAKE_MASTER_TEMPLATE_SAMPLE];
+}
+
+export function stockTakeSystemTemplateMatrix() {
+  return [STOCK_TAKE_SYSTEM_TEMPLATE_HEADERS, STOCK_TAKE_SYSTEM_TEMPLATE_SAMPLE];
+}

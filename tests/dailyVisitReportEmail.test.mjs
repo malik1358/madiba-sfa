@@ -169,6 +169,30 @@ test("buildUserVisitReportEmail appends working hours after the day route", () =
   assert.match(message.html, /Working hours:<\/strong> 7h 9m/);
 });
 
+test("buildUserVisitReportEmail shows collection outcome when nothing was collected", () => {
+  const message = buildUserVisitReportEmail({
+    date: "2026-09-09",
+    user: {
+      userName: "collector (SM001)",
+      entries: [
+        {
+          visitSequence: 6,
+          savedAt: "2026-09-09T08:49:00.000Z",
+          customerName: "NAJDLINKS TRADING COMPANY",
+          customerCode: "1198",
+          transactionLabel: "Collection visit",
+          transactionType: "COLLECTION_VISIT",
+          visitOutcome: "ASKED_COME_LATER",
+          amountReceived: 0,
+        },
+      ],
+    },
+  });
+
+  assert.match(message.html, /Asked to come later/);
+  assert.match(message.text, /Asked to come later/);
+});
+
 test("buildUserVisitReportEmail shows posted order values", () => {
   const message = buildUserVisitReportEmail({
     date: "2026-09-05",
@@ -195,7 +219,8 @@ test("buildUserVisitReportEmail shows posted order values", () => {
   });
 
   assert.match(message.html, /New-customer orders<\/td><td>3<\/td><td>15,380\.6/);
-  assert.match(message.html, /Order submitted · 5,380\.6 SAR/);
+  assert.match(message.html, /<th>Outcome<\/th>/);
+  assert.match(message.html, /Order submitted<\/td>\s*<td>Order 5,380\.6 SAR/);
 });
 
 test("isEmailConfigured requires from plus SMTP or Resend", () => {

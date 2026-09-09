@@ -1,4 +1,5 @@
 import { isSuccessfulCollection } from "./collectionDaySummary.js";
+import { formatFieldVisitOutcome } from "./fieldVisitWhatsapp.js";
 import { haversineDistanceKm, hasGpsCoordinates } from "./geo.js";
 
 const ON_SITE_VISIT_TYPES = new Set([
@@ -179,4 +180,69 @@ export function entryDisplayAmount(entry) {
   const order = Number(entry?.orderValue ?? entry?.order_value ?? 0);
   if (Number.isFinite(order) && order > 0) return order;
   return 0;
+}
+
+const COLLECTION_OUTCOME_LABELS = {
+  FUNDS_RECEIVED: { en: "Funds received", ar: "تم استلام مبلغ" },
+  ASKED_COME_LATER: { en: "Asked to come later", ar: "طلب الحضور لاحقاً" },
+  RESPONSIBLE_NOT_AVAILABLE: { en: "Responsible not available", ar: "المسؤول غير متاح" },
+  WRONG_CREDIT_DAYS: { en: "Wrong credit days", ar: "أيام ائتمان خاطئة" },
+  NO_DUE_AS_PER_CUSTOMER: { en: "No due according to customer", ar: "لا توجد استحقاقات حسب العميل" },
+  TRANSFER_TO_LEGAL: { en: "Transfer to legal", ar: "تحويل إلى القانوني" },
+  PAID: { en: "Paid", ar: "مدفوع" },
+  PARTIAL: { en: "Partial", ar: "جزئي" },
+  NOT_PAID: { en: "Not Paid", ar: "غير مدفوع" },
+  PROMISED: { en: "Promised To Pay", ar: "وعد بالدفع" },
+};
+
+function entryOutcomeCode(entry) {
+  return String(
+    entry?.visitOutcome
+    || entry?.visit_outcome
+    || entry?.paymentStatus
+    || entry?.payment_status
+    || entry?.meta?.visitOutcome
+    || entry?.meta?.outcome
+    || "",
+  ).trim();
+}
+
+function collectionOutcomeLabel(outcome, language = "en") {
+  const key = String(outcome || "").trim().toUpperCase();
+  if (!key) return "";
+  const labels = COLLECTION_OUTCOME_LABELS[key];
+  if (!labels) return String(outcome);
+  return language === "ar" ? labels.ar : labels.en;
+}
+
+export function formatVisitEntryOutcome(entry, language = "en") {
+  const type = visitEntryType(entry);
+  const isAr = language === "ar";
+  const collected = Number(entry?.amountReceived ?? entry?.amount_received ?? 0);
+  const order = Number(entry?.orderValue ?? entry?.order_value ?? 0);
+  const outcome = entryOutcomeCode(entry);
+
+  if (type === "COLLECTION_VISIT") {
+    if (Number.isFinite(collected) && collected > 0) {
+      return isAr
+        ? `تم التحصيل ${formatSplitMoney(collected)} ر.س`
+        : `Collected ${formatSplitMoney(collected)} SAR`;
+    }
+    return collectionOutcomeLabel(outcome, language) || "-";
+  }
+
+  if (type === "ORDER_SUBMITTED") {
+    if (Number.isFinite(order) && order > 0) {
+      return isAr
+        ? `طلب ${formatSplitMoney(order)} ر.س`
+        : `Order ${formatSplitMoney(order)} SAR`;
+    }
+    return isAr ? "طلب مقدّم" : "Order submitted";
+  }
+
+  if (type === "VISIT_REPORT") {
+    return formatFieldVisitOutcome(outcome, language);
+  }
+
+  return "-";
 }

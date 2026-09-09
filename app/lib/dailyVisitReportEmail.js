@@ -8,9 +8,9 @@ import {
 } from "./dayRouteMap.js";
 import {
   buildVisitDaySplit,
-  entryDisplayAmount,
   formatEntryCoordinates,
   formatSplitMoney,
+  formatVisitEntryOutcome,
   loginLogoutLocationNotes,
 } from "./dailyVisitReportStats.js";
 import {
@@ -83,10 +83,6 @@ function distanceFromCustomerLabel(entry) {
 
 function transactionLabel(entry) {
   const parts = [entry?.transactionLabel || entry?.transactionType || "-"];
-  const amount = entryDisplayAmount(entry);
-  if (amount > 0) {
-    parts.push(`${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR`);
-  }
   if (entry?.logoutAutoClosed) parts.push("Auto-closed");
   if (entry?.isFarFromCustomer) parts.push("Far");
   return parts.join(" · ");
@@ -171,6 +167,7 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
       return [
         `${entry.visitSequence || "-"} ${formatReportTime(entry.savedAt)}`,
         transactionLabel(entry),
+        formatVisitEntryOutcome(entry),
         customerLabel(entry),
         `From customer: ${distanceFromCustomerLabel(entry)}`,
         `From previous: ${entry.distanceFromPreviousKm == null ? "-" : formatKm(entry.distanceFromPreviousKm)}`,
@@ -220,6 +217,7 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
         <td>${escapeHtml(formatReportTime(entry.savedAt))}</td>
         <td>${escapeHtml(customerLabel(entry))}</td>
         <td>${escapeHtml(transactionLabel(entry))}</td>
+        <td>${escapeHtml(formatVisitEntryOutcome(entry))}</td>
         <td>${escapeHtml(distanceFromCustomerLabel(entry))}</td>
         <td>${escapeHtml(entry.distanceFromPreviousKm == null ? "-" : formatKm(entry.distanceFromPreviousKm))}</td>
         <td>${escapeHtml(formatEntryCoordinates(entry))}</td>
@@ -257,7 +255,7 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%;">
     <thead style="background: #f4f7fb;">
       <tr>
-        <th>#</th><th>Visit #</th><th>Time</th><th>Customer</th><th>Transaction</th>
+        <th>#</th><th>Visit #</th><th>Time</th><th>Customer</th><th>Transaction</th><th>Outcome</th>
         <th>Distance from customer</th><th>Distance from previous</th>
         <th>Coordinates</th>
         <th>Area</th><th>Street</th><th>Speed</th><th>Est. waiting</th>

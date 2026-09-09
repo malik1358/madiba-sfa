@@ -133,6 +133,25 @@ const TEXT = {
     ar: "تم إرسال {sent} من {total} تقارير لـ {date}.",
   },
   tableLegend: { en: "Row colors", ar: "ألوان الصفوف" },
+  inactivityLogTitle: { en: "Inactivity email log", ar: "سجل بريد عدم النشاط" },
+  inactivityLogHint: {
+    en: "Cron checks about every 10 minutes. A new email is due every 40 minutes of idle time. Lunch is skipped. Gap shows minutes since the previous email for that user.",
+    ar: "يتحقق الكرون كل 10 دقائق تقريباً. يُستحق بريد جديد كل 40 دقيقة من التوقف. يُستثنى الغداء. الفجوة هي الدقائق منذ البريد السابق لنفس المستخدم.",
+  },
+  inactivitySent: { en: "Emails sent", ar: "رسائل أُرسلت" },
+  inactivityChecks: { en: "Cron checks", ar: "فحوصات الكرون" },
+  inactivityGap: { en: "Gap", ar: "الفجوة" },
+  inactivityStatus: { en: "Status", ar: "الحالة" },
+  inactivityReason: { en: "Reason", ar: "السبب" },
+  inactivitySlot: { en: "Slot", ar: "الفترة" },
+  inactivityIdle: { en: "Idle", ar: "التوقف" },
+  inactivityNoSends: { en: "No inactivity emails logged for this date.", ar: "لا يوجد بريد عدم نشاط لهذا التاريخ." },
+  inactivityNoChecks: {
+    en: "No cron check rows yet. After the next inactivity job, skipped and sent attempts appear here.",
+    ar: "لا توجد فحوصات كرون بعد. بعد مهمة عدم النشاط التالية تظهر هنا المحاولات المرسلة والمتخطاة.",
+  },
+  inactivityTypeInactivity: { en: "Inactivity", ar: "عدم نشاط" },
+  inactivityTypeLateLogin: { en: "Late login", ar: "تأخر الدخول" },
 };
 
 function formatNumber(value, digits = 2) {
@@ -153,6 +172,31 @@ function formatTime(value) {
   return formatKsaTime(value);
 }
 
+const INACTIVITY_REASON_LABELS = {
+  sent: { en: "Sent", ar: "أُرسل" },
+  already_sent: { en: "Already sent this 40-minute slot", ar: "أُرسل في فترة الـ 40 دقيقة هذه" },
+  no_recipients: { en: "No recipient emails", ar: "لا يوجد بريد للمستلمين" },
+  lunch_break: { en: "Lunch break", ar: "استراحة الغداء" },
+  logged_out: { en: "Logged out", ar: "تم تسجيل الخروج" },
+  not_in_work_session: { en: "Between lunch out and lunch in", ar: "بين خروج الغداء ودخول الغداء" },
+  idle_under_40_minutes: { en: "Idle under 40 minutes", ar: "التوقف أقل من 40 دقيقة" },
+  outside_hours: { en: "Outside working hours", ar: "خارج ساعات العمل" },
+  not_logged_in: { en: "Not logged in", ar: "لم يسجل الدخول" },
+  failed: { en: "Send failed", ar: "فشل الإرسال" },
+  email_not_configured: { en: "Email not configured", ar: "البريد غير مضبوط" },
+};
+
+function inactivityReasonLabel(reason, language) {
+  const labels = INACTIVITY_REASON_LABELS[String(reason || "")];
+  if (!labels) return reason || "-";
+  return language === "ar" ? labels.ar : labels.en;
+}
+
+function formatGapMinutes(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  return `${Number(value)}m`;
+}
+
 export default function DailyVisitReportPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -167,6 +211,7 @@ export default function DailyVisitReportPage() {
   const [reportEmails, setReportEmails] = useState({});
   const [emailBusy, setEmailBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [inactivityLog, setInactivityLog] = useState(null);
 
   usePopupMessages({ error, message });
 
@@ -266,6 +311,7 @@ export default function DailyVisitReportPage() {
 
       setLoading(true);
       setError("");
+      setInactivityLog(null);
 
       try {
         const session = await resolveAuthSession(supabase, 12000);
@@ -295,6 +341,27 @@ export default function DailyVisitReportPage() {
         }
 
         setReport(payload);
+
+        try {
+          const logParams = new URLSearchParams({ date: reportDate });
+          if (userId) logParams.set("userId", userId);
+          const logResult = await fetchJsonWithTimeout(
+            `/api/inactivity-email-log?${logParams.toString()}`,
+            {
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+              },
+            },
+            20000,
+          );
+          if (!cancelled && logResult.response.ok && logResult.payload?.success) {
+            setInactivityLog(logResult.payload);
+          } else if (!cancelled) {
+            setInactivityLog(null);
+          }
+        } catch {
+          if (!cancelled) setInactivityLog(null);
+        }
       } catch (err) {
         if (cancelled) return;
         const message = String(err.message || "");
@@ -607,6 +674,90 @@ export default function DailyVisitReportPage() {
               </div>
             ) : null}
           </section>
+
+          {inactivityLog ? (
+            <section className="moduleSection">
+              <div className="moduleSectionHeader">
+                <h2>{t("inactivityLogTitle")}</h2>
+              </div>
+              <p className="moduleHint">{t("inactivityLogHint")}</p>
+              <h3 style={{ marginTop: "12px", fontSize: "15px" }}>{t("inactivitySent")}</h3>
+              {(inactivityLog.sends || []).length === 0 ? (
+                <p className="moduleHint">{t("inactivityNoSends")}</p>
+              ) : (
+                <div className="moduleTableWrap">
+                  <table className="moduleTable">
+                    <thead>
+                      <tr>
+                        <th>{t("time")}</th>
+                        <th>{t("userName")}</th>
+                        <th>{t("transaction")}</th>
+                        <th>{t("inactivityGap")}</th>
+                        <th>{t("inactivityStatus")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inactivityLog.sends.map((row) => (
+                        <tr key={row.id}>
+                          <td>{formatTime(row.sentAt)}</td>
+                          <td>{row.userName}</td>
+                          <td>
+                            {row.type === "late_login_email"
+                              ? t("inactivityTypeLateLogin")
+                              : t("inactivityTypeInactivity")}
+                          </td>
+                          <td>{formatGapMinutes(row.gapMinutes)}</td>
+                          <td>{row.title}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <h3 style={{ marginTop: "16px", fontSize: "15px" }}>{t("inactivityChecks")}</h3>
+              {(inactivityLog.checks || []).length === 0 && (inactivityLog.cycles || []).length === 0 ? (
+                <p className="moduleHint">{t("inactivityNoChecks")}</p>
+              ) : (
+                <div className="moduleTableWrap">
+                  <table className="moduleTable">
+                    <thead>
+                      <tr>
+                        <th>{t("time")}</th>
+                        <th>{t("userName")}</th>
+                        <th>{t("inactivityStatus")}</th>
+                        <th>{t("inactivityReason")}</th>
+                        <th>{t("inactivitySlot")}</th>
+                        <th>{t("inactivityIdle")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(inactivityLog.checks || []).length
+                        ? inactivityLog.checks.map((row, index) => (
+                          <tr key={`${row.ranAt}-${row.userId}-${index}`}>
+                            <td>{formatTime(row.ranAt)}</td>
+                            <td>{row.userName}</td>
+                            <td>{row.status}</td>
+                            <td>{inactivityReasonLabel(row.reason, language)}</td>
+                            <td>{row.slot ?? "—"}</td>
+                            <td>{row.idleMinutes != null ? `${row.idleMinutes}m` : "—"}</td>
+                          </tr>
+                        ))
+                        : (inactivityLog.cycles || []).map((row) => (
+                          <tr key={row.id}>
+                            <td>{formatTime(row.ranAt)}</td>
+                            <td>—</td>
+                            <td>{row.skipped ? "skipped" : `checked ${row.checked}`}</td>
+                            <td>{inactivityReasonLabel(row.skipReason, language)}</td>
+                            <td>—</td>
+                            <td>—</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          ) : null}
 
           {error && error.includes("login") ? (
             <div className="moduleActionRow" style={{ marginBottom: "12px" }}>

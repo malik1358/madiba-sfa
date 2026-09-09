@@ -64,6 +64,27 @@ export function inactivityEmailReferenceKey({ userId, reportDate, idleSinceTs, s
   return `inactivity_email:${String(userId || "").trim()}:${String(reportDate || "").trim()}:${Number(idleSinceTs) || 0}:${Number(slot) || 0}`;
 }
 
+export function attachInactivityEmailSendGaps(sends = []) {
+  const lastByUser = new Map();
+  return (sends || []).map((row) => {
+    const userId = String(row?.userId || "").trim();
+    const sentTs = Date.parse(String(row?.sentAt || ""));
+    const previous = lastByUser.get(userId);
+    const previousTs = Date.parse(String(previous?.sentAt || ""));
+    const gapMinutes = userId && Number.isFinite(sentTs) && Number.isFinite(previousTs)
+      ? Math.round((sentTs - previousTs) / 60000)
+      : null;
+    if (userId && Number.isFinite(sentTs)) lastByUser.set(userId, row);
+    return { ...row, gapMinutes };
+  });
+}
+
+export function shouldRecordInactivityEmailCheck(state = {}) {
+  if (state?.eligible) return true;
+  if (Number(state?.idleMinutes || 0) >= INACTIVITY_EMAIL_MINUTES) return true;
+  return ["lunch_break", "already_sent", "no_recipients", "failed"].includes(String(state?.reason || ""));
+}
+
 export function lateLoginEmailReferenceKey({ userId, reportDate, slot } = {}) {
   return `late_login_email:${String(userId || "").trim()}:${String(reportDate || "").trim()}:${Number(slot) || 0}`;
 }

@@ -2,6 +2,7 @@ import { resolveReportingChain } from "./salesHierarchy.js";
 import {
   INACTIVITY_EMAIL_TYPE,
   LATE_LOGIN_EMAIL_TYPE,
+  attachInactivityEmailSendGaps,
   buildInactivityAlertEmail,
   buildLateLoginReminderEmail,
   inactivityEmailDisplayName,
@@ -9,6 +10,7 @@ import {
   lateLoginEmailReferenceKey,
   resolveAppOrigin,
   resolveInactivityEmailRecipients,
+  shouldRecordInactivityEmailCheck,
 } from "./inactivityEmail.js";
 import {
   loadActiveFieldUsers,
@@ -17,15 +19,15 @@ import {
 } from "./workdayActivityLoaders.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
+import { isMissingRelationError } from "./schemaGuards.js";
 import { resolveUserReportEmail } from "./dailyVisitReportEmail.js";
 import {
+  describeInactivityEmailState,
   getKsaDateString,
   inactivityEmailReminderSlot,
-  inactivityReferenceTimestamp,
   ksaDayBounds,
   lateLoginReminderSlot,
   logEventTimestamp,
-  shouldEmailInactivity,
   shouldSendLateLoginReminder,
 } from "./workdayActivity.js";
 
@@ -85,6 +87,139 @@ async function logInactivityEmail(admin, {
   });
 
   if (error) throw error;
+}
+
+function compactInactivityCheck(row) {
+  return {
+    userId: row.userId,
+    kind: row.kind || "inactivity",
+    status: row.status,
+    reason: row.reason || null,
+    slot: Number.isFinite(Number(row.slot)) ? Number(row.slot) : null,
+    idleMinutes: Number.isFinite(Number(row.idleMinutes)) ? Number(row.idleMinutes) : null,
+    idleSince: row.idleSince || null,
+    to: Array.isArray(row.to) ? row.to : [],
+    error: row.error || null,
+  };
+}
+
+async function persistInactivityEmailCycleLog(admin, {
+  now,
+  reportDate,
+  checked = 0,
+  sent = 0,
+  loginRemindersSent = 0,
+  skipped = false,
+  reason = null,
+  details = [],
+}) {
+  if (!admin?.from) return;
+
+  const { error } = await admin.from("inactivity_email_cycle_log").insert({
+    ran_at: now instanceof Date ? now.toISOString() : new Date().toISOString(),
+    report_date: reportDate,
+    checked,
+    sent,
+    login_reminders_sent: loginRemindersSent,
+    skipped,
+    skip_reason: reason || null,
+    details: (details || []).map(compactInactivityCheck),
+  });
+
+  if (error && !isMissingRelationError(error)) throw error;
+}
+
+export async function loadInactivityEmailLog(admin, {
+  reportDate,
+  userId = "",
+} = {}) {
+  const date = String(reportDate || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error("Invalid report date. Use YYYY-MM-DD.");
+  }
+
+  const filterUserId = String(userId || "").trim();
+  const { startIso, endIso } = ksaDayBounds(date);
+
+  let sendQuery = admin
+    .from("push_notification_log")
+    .select("id,user_id,notification_type,title,body,success_count,failure_count,sent_at,reference_key")
+    .in("notification_type", [INACTIVITY_EMAIL_TYPE, LATE_LOGIN_EMAIL_TYPE])
+    .gte("sent_at", startIso)
+    .lte("sent_at", endIso)
+    .order("sent_at", { ascending: true });
+
+  if (filterUserId) sendQuery = sendQuery.eq("user_id", filterUserId);
+
+  const sendResult = await sendQuery;
+  if (sendResult.error && !isMissingRelationError(sendResult.error)) throw sendResult.error;
+
+  const cycleResult = await admin
+    .from("inactivity_email_cycle_log")
+    .select("id,ran_at,report_date,checked,sent,login_reminders_sent,skipped,skip_reason,details")
+    .eq("report_date", date)
+    .order("ran_at", { ascending: true });
+
+  if (cycleResult.error && !isMissingRelationError(cycleResult.error)) throw cycleResult.error;
+
+  const sendRows = sendResult.data || [];
+  const userIds = [...new Set([
+    ...sendRows.map((row) => row.user_id),
+    ...(cycleResult.data || []).flatMap((row) => (row.details || []).map((item) => item.userId)),
+  ].filter(Boolean))];
+  const profileById = await loadProfilesById(admin, userIds);
+
+  const sends = attachInactivityEmailSendGaps(sendRows.map((row) => {
+    const profile = profileById.get(row.user_id) || {};
+    return {
+      id: row.id,
+      userId: row.user_id,
+      userName: inactivityEmailDisplayName({
+        salesmanName: profile.salesman_name,
+        salesmanCode: profile.salesman_code,
+      }),
+      type: row.notification_type,
+      title: row.title || "",
+      sentAt: row.sent_at,
+      successCount: Number(row.success_count || 0),
+      failureCount: Number(row.failure_count || 0),
+      referenceKey: row.reference_key || "",
+    };
+  }));
+
+  const cycles = (cycleResult.data || []).map((row) => {
+    const details = (row.details || [])
+      .filter((item) => !filterUserId || item.userId === filterUserId)
+      .map((item) => {
+        const profile = profileById.get(item.userId) || {};
+        return {
+          ...compactInactivityCheck(item),
+          ranAt: row.ran_at,
+          userName: inactivityEmailDisplayName({
+            salesmanName: profile.salesman_name,
+            salesmanCode: profile.salesman_code,
+          }),
+        };
+      });
+    return {
+      id: row.id,
+      ranAt: row.ran_at,
+      reportDate: row.report_date,
+      checked: Number(row.checked || 0),
+      sent: Number(row.sent || 0),
+      loginRemindersSent: Number(row.login_reminders_sent || 0),
+      skipped: Boolean(row.skipped),
+      skipReason: row.skip_reason || null,
+      details,
+    };
+  });
+
+  return {
+    reportDate: date,
+    sends,
+    cycles,
+    checks: cycles.flatMap((cycle) => cycle.details),
+  };
 }
 
 async function sendHierarchyAlert({
@@ -153,17 +288,23 @@ export async function runInactivityEmailCycle(admin, {
   loadActivity = loadUserActivity,
   loadPendingLoginUsers = loadUsersPendingMorningLogin,
 } = {}) {
+  const reportDate = getKsaDateString(now);
+
   if (!isEmailConfigured(getMailerConfig(env))) {
-    return {
+    const skippedResult = {
       ok: true,
       skipped: true,
       reason: "email_not_configured",
       checked: 0,
       sent: 0,
+      loginRemindersSent: 0,
+      reportDate,
+      details: [],
     };
+    await persistInactivityEmailCycleLog(admin, { now, ...skippedResult });
+    return skippedResult;
   }
 
-  const reportDate = getKsaDateString(now);
   const appOrigin = resolveAppOrigin(env);
   const { startIso, endIso } = ksaDayBounds(reportDate);
   const activeUsers = await loadActiveUsers(admin, reportDate);
@@ -218,35 +359,41 @@ export async function runInactivityEmailCycle(admin, {
       ? new Date(logEventTimestamp(logoutLog) || logoutLog.created_at).toISOString()
       : null;
 
-    if (!shouldEmailInactivity({
+    const state = describeInactivityEmailState({
       loginAt,
       logoutAt,
       userLogs: logs,
       collections,
       orders,
       now,
-    })) {
+    });
+
+    if (!state.eligible) {
+      if (shouldRecordInactivityEmailCheck(state)) {
+        details.push({
+          userId,
+          kind: "inactivity",
+          status: "skipped",
+          reason: state.reason,
+          slot: state.slot,
+          idleMinutes: state.idleMinutes,
+          idleSince: state.idleSinceTs ? new Date(state.idleSinceTs).toISOString() : null,
+        });
+      }
       continue;
     }
 
-    const idleSinceTs = inactivityReferenceTimestamp({
-      loginAt,
-      userLogs: logs,
-      collections,
-      orders,
-    });
     const profileById = await loadProfilesById(admin, [userId]);
     const userProfile = profileById.get(userId) || {};
     const userName = inactivityEmailDisplayName({
       salesmanName: userProfile.salesman_name,
       salesmanCode: userProfile.salesman_code,
     });
-    const idleMinutes = Math.round((now.getTime() - idleSinceTs) / 60000);
     const message = buildInactivityAlertEmail({
       date: reportDate,
       userName,
-      idleMinutes,
-      lastActivityAt: new Date(idleSinceTs).toISOString(),
+      idleMinutes: state.idleMinutes,
+      lastActivityAt: new Date(state.idleSinceTs).toISOString(),
       loginAt,
       userId,
       origin: appOrigin,
@@ -259,18 +406,25 @@ export async function runInactivityEmailCycle(admin, {
       referenceKey: inactivityEmailReferenceKey({
         userId,
         reportDate,
-        idleSinceTs,
-        slot: inactivityEmailReminderSlot(idleSinceTs, now),
+        idleSinceTs: state.idleSinceTs,
+        slot: inactivityEmailReminderSlot(state.idleSinceTs, now),
       }),
       notificationType: INACTIVITY_EMAIL_TYPE,
       send,
       env,
     });
-    details.push({ ...outcome, kind: "inactivity" });
+    details.push({
+      ...outcome,
+      kind: "inactivity",
+      slot: state.slot,
+      idleMinutes: state.idleMinutes,
+      idleSince: new Date(state.idleSinceTs).toISOString(),
+      reason: outcome.reason || (outcome.status === "sent" ? "sent" : null),
+    });
     if (outcome.status === "sent") sent += 1;
   }
 
-  return {
+  const result = {
     ok: true,
     skipped: false,
     checked,
@@ -279,4 +433,6 @@ export async function runInactivityEmailCycle(admin, {
     reportDate,
     details,
   };
+  await persistInactivityEmailCycleLog(admin, { now, ...result });
+  return result;
 }

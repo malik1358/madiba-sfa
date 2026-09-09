@@ -25,6 +25,22 @@ async function handleRequest(request) {
     });
 
     const email = await runInactivityEmailCycle(admin);
+    console.info("inactivity-email-cycle", JSON.stringify({
+      reportDate: email?.reportDate || null,
+      skipped: Boolean(email?.skipped),
+      reason: email?.reason || null,
+      checked: Number(email?.checked || 0),
+      sent: Number(email?.sent || 0),
+      loginRemindersSent: Number(email?.loginRemindersSent || 0),
+      details: (email?.details || []).map((row) => ({
+        userId: row.userId,
+        kind: row.kind,
+        status: row.status,
+        reason: row.reason || null,
+        slot: row.slot ?? null,
+        idleMinutes: row.idleMinutes ?? null,
+      })),
+    }));
 
     let push;
     try {

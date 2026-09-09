@@ -112,6 +112,12 @@ export function formatDiscountDetail(rate, applied, amount) {
   return `${label} applied · ${formatMoneyAmount(amount)}`;
 }
 
+export function formatPdfDiscountDetail(rate, applied, amount) {
+  const label = formatDiscountPercent(rate);
+  if (label === "—" || !applied) return "—";
+  return `${label}\n${formatMoneyAmount(amount)}`;
+}
+
 export function lookupDiscountRate(discountMap, itemCode) {
   const code = String(itemCode || "").trim().toUpperCase();
   if (!code) return 0;

@@ -8,6 +8,7 @@ import {
   formatProspectOrderLabel,
   hiddenProspectCustomerCodes,
   isOpenProspectForOrderScreens,
+  isPlaceholderProspectName,
   mapProspectOrderNumbers,
   mergeUniqueCustomersByCode,
   prospectDisplayName,
@@ -21,6 +22,15 @@ test("buildProspectCustomerCode formats prospect order customer codes", () => {
   assert.equal(buildOfflineProspectCustomerCode("abc123"), "PROSPECT-OFF-abc123");
   assert.equal(resolveProspectCustomerCode({ offline_id: "abc123", id: 9 }), "PROSPECT-9");
   assert.equal(resolveProspectCustomerCode({ offline_id: "abc123" }), "PROSPECT-OFF-abc123");
+});
+
+test("prospectDisplayName prefers company then shop then customer name", () => {
+  assert.equal(prospectDisplayName({ company_name: "AL NOOR STATIONERY" }), "AL NOOR STATIONERY");
+  assert.equal(prospectDisplayName({ shop_name: "Noor Shop" }), "Noor Shop");
+  assert.equal(isPlaceholderProspectName("", "PROSPECT-308"), true);
+  assert.equal(isPlaceholderProspectName("PROSPECT-308", "PROSPECT-308"), true);
+  assert.equal(isPlaceholderProspectName("Prospect 308", "PROSPECT-308"), true);
+  assert.equal(isPlaceholderProspectName("AL NOOR STATIONERY", "PROSPECT-308"), false);
 });
 
 test("formatProspectOrderLabel prefers order_number then falls back to id", () => {
@@ -72,11 +82,6 @@ test("mapProspectOrderNumbers includes offline prospect customer codes", () => {
   assert.equal(grouped.get("PROSPECT-OFF-ABC123")?.[0]?.order_number, "SO-OFF");
 });
 
-test("prospectDisplayName prefers company then shop then customer name", () => {
-  assert.equal(prospectDisplayName({ company_name: "AL NOOR STATIONERY" }), "AL NOOR STATIONERY");
-  assert.equal(prospectDisplayName({ shop_name: "Noor Shop" }), "Noor Shop");
-});
-
 test("open prospect helpers keep unordered prospects and hide ordered or converted ones", () => {
   const openProspect = { id: 11, company_name: "New Shop" };
   const orderedProspect = {
@@ -103,3 +108,4 @@ test("open prospect helpers keep unordered prospects and hide ordered or convert
     [{ customer_code: "prospect-11", customer_name: "Duplicate" }, { customer_code: "1173C", customer_name: "Real" }],
   ).map((row) => row.customer_code).join(","), "PROSPECT-11,1173C");
 });
+

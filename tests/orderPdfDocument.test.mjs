@@ -13,6 +13,7 @@ import {
 
 function createMockDoc() {
   const texts = [];
+  let fontSize = 10;
   return {
     texts,
     internal: {
@@ -25,14 +26,31 @@ function createMockDoc() {
     setDrawColor() {},
     setLineWidth() {},
     setFont() {},
-    setFontSize() {},
+    setFontSize(size) { fontSize = Number(size) || fontSize; },
+    getFontSize() { return fontSize; },
+    getTextWidth(text) { return String(text ?? "").length * fontSize * 0.5; },
     setTextColor() {},
     setPage() {},
     getNumberOfPages() { return 1; },
     addPage() {},
     rect() {},
     roundedRect() {},
-    splitTextToSize(text) { return [String(text)]; },
+    splitTextToSize(text, maxWidth) {
+      const value = String(text ?? "");
+      const charWidth = fontSize * 0.5;
+      const perLine = Math.max(1, Math.floor(Number(maxWidth || 0) / charWidth) || value.length || 1);
+      const lines = [];
+      value.split(/\n/).forEach((part) => {
+        if (!part) {
+          lines.push("");
+          return;
+        }
+        for (let index = 0; index < part.length; index += perLine) {
+          lines.push(part.slice(index, index + perLine));
+        }
+      });
+      return lines.length ? lines : [value];
+    },
     text(value) { texts.push(String(value)); },
   };
 }
@@ -302,6 +320,111 @@ test("renderOrderPdfDocument hides cash and value percents when they are not app
   assert.equal(doc.texts.some((text) => text.includes("2% applied")), false);
 });
 
+test("renderOrderPdfDocument wraps applied cash and value discounts onto two lines", () => {
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, {
+    orderId: 349,
+    orderNumber: "349",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-09-08T07:23:15.000Z",
+    customerCode: "PROSPECT-308",
+    customerName: "AL NOOR STATIONERY",
+    salesmanCode: "ADMIN",
+    paymentType: "cash",
+    pricingRegion: "riyadh",
+    itemCount: 1,
+    totalQuantity: 20,
+    grandTotal: 1341.6,
+    totals: {
+      wholesaleTotal: 1380,
+      cashDiscountTotal: 41.4,
+      valueDiscountTotal: 0,
+      schemeDiscountTotal: 0,
+      amountExclVat: 1338.6,
+      vatAmount: 200.79,
+      amountInclVat: 1539.39,
+    },
+    lines: [{
+      item_code: "A004075",
+      item_name: "THERMAL POS ROLL 5 ROLLS X 10 Shrink",
+      quantity: 20,
+      wholesaleRate: 69,
+      rate: 66.93,
+      cashDiscount: 0.03,
+      valueDiscount: 0.02,
+      cashApplied: true,
+      valueApplied: false,
+      cashDiscountAmount: 41.4,
+      valueDiscountAmount: 0,
+      schemeDiscountAmount: 0,
+      lineValue: 1338.6,
+      vatAmount: 200.79,
+      lineTotalInclVat: 1539.39,
+    }],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+
+  assert.ok(doc.texts.includes("PROSPECT-308 - AL NOOR STATIONERY"));
+  assert.ok(doc.texts.includes("3%"));
+  assert.ok(doc.texts.includes("41.40"));
+  assert.equal(doc.texts.some((text) => /\d+% applied/.test(text)), false);
+});
+
+test("renderOrderPdfDocument keeps cash discount and long item names inside their cells", () => {
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, {
+    orderId: 370,
+    orderNumber: "370",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-09-09T06:10:00.000Z",
+    customerCode: "PROSPECT-OFF-928e50006f234652",
+    customerName: "ARKAN AL AJHIZAH TRADING CO",
+    salesmanCode: "SM002",
+    paymentType: "cash",
+    pricingRegion: "riyadh",
+    itemCount: 1,
+    totalQuantity: 200,
+    grandTotal: 167972,
+    totals: {
+      wholesaleTotal: 171400,
+      cashDiscountTotal: 3428,
+      valueDiscountTotal: 0,
+      schemeDiscountTotal: 0,
+      amountExclVat: 167972,
+      vatAmount: 25195.8,
+      amountInclVat: 193167.8,
+    },
+    lines: [{
+      item_code: "A005355",
+      item_name: "A005355_Westpoint Window AC 18K COOL ONLY",
+      quantity: 200,
+      wholesaleRate: 857,
+      rate: 839.86,
+      cashDiscount: 0.02,
+      valueDiscount: 0,
+      cashApplied: true,
+      valueApplied: false,
+      cashDiscountAmount: 3428,
+      valueDiscountAmount: 0,
+      schemeDiscountAmount: 0,
+      lineValue: 167972,
+      vatAmount: 25195.8,
+      lineTotalInclVat: 193167.8,
+    }],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+
+  assert.ok(doc.texts.includes("2%"));
+  assert.ok(doc.texts.includes("3,428.00"));
+  assert.equal(doc.texts.some((text) => text.includes("2% applied")), false);
+  assert.equal(doc.texts.some((text) => text.includes("Westp") && !text.includes("Westpoint")), false);
+  assert.ok(doc.texts.some((text) => text.includes("Westpoint")));
+  assert.ok(doc.texts.some((text) => text.includes("Window")));
+  assert.ok(doc.texts.some((text) => text.includes("COOL")));
+});
+
 test("renderOrderPdfDocument shows scheme discount on the item row", () => {
   const doc = createMockDoc();
   renderOrderPdfDocument(doc, {
@@ -458,6 +581,54 @@ test("enrichOrderPdfLiveData replaces offline prospect codes with the live PROSP
 
     assert.equal(snapshot.orderNumber, "325");
     assert.equal(snapshot.customerCode, "PROSPECT-412");
+    assert.equal(snapshot.customerName, "test");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("enrichOrderPdfLiveData fills the shop name for a live PROSPECT id", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/api/sales-orders")) {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          found: true,
+          orderId: 349,
+          orderNumber: "349",
+          customerCode: "PROSPECT-308",
+          customerName: "",
+        }),
+      };
+    }
+    if (href.includes("/api/prospects?id=308")) {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          found: true,
+          customerCode: "PROSPECT-308",
+          customerName: "AL NOOR STATIONERY",
+        }),
+      };
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  try {
+    const { snapshot } = await enrichOrderPdfLiveData({
+      orderId: 349,
+      customerCode: "PROSPECT-308",
+      customerName: "",
+      lines: [],
+      outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+    }, { accessToken: "token" });
+
+    assert.equal(snapshot.customerCode, "PROSPECT-308");
+    assert.equal(snapshot.customerName, "AL NOOR STATIONERY");
   } finally {
     global.fetch = originalFetch;
   }

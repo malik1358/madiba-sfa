@@ -151,6 +151,62 @@ export async function removeCacheEntry(key) {
   removeFromLocalStorage(key);
 }
 
+export function cacheKeyHasPrefix(key, prefix) {
+  if (!prefix) return Boolean(key);
+  return String(key || "").startsWith(String(prefix));
+}
+
+async function listIndexedDbKeys(prefix = "") {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, "readonly");
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.getAllKeys();
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const keys = (request.result || [])
+        .map((key) => String(key || ""))
+        .filter((key) => cacheKeyHasPrefix(key, prefix));
+      resolve(keys);
+    };
+  });
+}
+
+function listLocalStorageCacheKeys(prefix = "") {
+  if (typeof window === "undefined") return [];
+
+  const keys = [];
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const storageKey = window.localStorage.key(index) || "";
+      if (!storageKey.startsWith(LOCAL_STORAGE_PREFIX)) continue;
+      const key = storageKey.slice(LOCAL_STORAGE_PREFIX.length);
+      if (cacheKeyHasPrefix(key, prefix)) keys.push(key);
+    }
+  } catch {
+    return keys;
+  }
+  return keys;
+}
+
+export async function listCacheKeys(prefix = "") {
+  let indexedKeys = [];
+  try {
+    indexedKeys = await listIndexedDbKeys(prefix);
+  } catch {
+    indexedKeys = [];
+  }
+
+  return [...new Set([...indexedKeys, ...listLocalStorageCacheKeys(prefix)])];
+}
+
+export async function removeCacheEntriesByPrefix(prefix) {
+  if (!prefix) return 0;
+  const keys = await listCacheKeys(prefix);
+  await Promise.all(keys.map((key) => removeCacheEntry(key)));
+  return keys.length;
+}
+
 export async function fetchWithLocalCache(key, ttlMs, fetcher, options = {}) {
   const cached = await readCacheEntry(key);
   const onUpdate = typeof options.onUpdate === "function" ? options.onUpdate : null;

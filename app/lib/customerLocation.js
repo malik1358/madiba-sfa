@@ -258,28 +258,37 @@ export async function evaluateCustomerLocationUpdatePrompt({
   entryLocation,
   accessToken,
   language = "en",
+  customer: knownCustomer = null,
+  skipReverseGeocode = false,
 }) {
   if (isProspectCustomerCode(customerCode)) {
     return null;
   }
 
-  const customer = await fetchCustomerLocation(accessToken, customerCode);
-  if (!customer) return null;
-
-  const displayName = customerName || customer?.customer_name || customerCode;
-
   if (!hasGpsCoordinates(entryLocation)) {
     return null;
   }
 
-  const geocoded = await reverseGeocodeCoordinates(entryLocation.latitude, entryLocation.longitude);
-  const detectedArea = String(geocoded.area || "").trim();
-  const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
-
-  if (detectedArea && !customerHasArea(customer)) {
-    await updateCustomerLocation(accessToken, customerCode, updatePayload);
-    applyCustomerLocation(customer, updatePayload);
+  let customer = knownCustomer && typeof knownCustomer === "object" ? knownCustomer : null;
+  if (!customer) {
+    customer = await fetchCustomerLocation(accessToken, customerCode);
   }
+  if (!customer) return null;
+
+  const displayName = customerName || customer?.customer_name || customerCode;
+
+  let geocoded = { area: "", street: "", city: "" };
+  if (!skipReverseGeocode && !customerHasArea(customer)) {
+    geocoded = await reverseGeocodeCoordinates(entryLocation.latitude, entryLocation.longitude);
+    const detectedArea = String(geocoded.area || "").trim();
+    const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
+    if (detectedArea) {
+      await updateCustomerLocation(accessToken, customerCode, updatePayload);
+      applyCustomerLocation(customer, updatePayload);
+    }
+  }
+
+  const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
 
   const needsPrompt = !customerHasSavedLocation(customer)
     || isFarFromCustomer(entryLocation, customer);
@@ -322,6 +331,8 @@ export async function maybePromptCustomerLocationUpdate({
   accessToken,
   language = "en",
   promptChoice,
+  customer = null,
+  skipReverseGeocode = false,
 }) {
   const promptDetails = await evaluateCustomerLocationUpdatePrompt({
     customerCode,
@@ -329,6 +340,8 @@ export async function maybePromptCustomerLocationUpdate({
     entryLocation,
     accessToken,
     language,
+    customer,
+    skipReverseGeocode,
   });
   if (!promptDetails) return;
 

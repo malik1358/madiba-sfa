@@ -54,6 +54,10 @@ function missingSharesTable(error) {
   return message.includes("stock_take_session_shares");
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
+}
+
 function personLabel(profile) {
   return String(profile?.salesman_name || profile?.salesman_code || profile?.id || "").trim();
 }
@@ -179,6 +183,11 @@ export async function GET(request) {
 
     const url = new URL(request.url);
     const action = String(url.searchParams.get("action") || "report").trim();
+
+    if (action === "master") {
+      const items = await loadAllItems(admin);
+      return NextResponse.json({ success: true, items });
+    }
 
     if (action === "open-sessions") {
       const userId = access.profile.id;
@@ -474,6 +483,16 @@ export async function POST(request) {
       const existing = existingRes.data?.[0];
       if (existing) {
         const { ids } = await loadSharedSessionIds(admin, access.profile.id);
+        if (canAccessStockTakeSession({ session: existing, userId: access.profile.id, sharedSessionIds: ids })) {
+          return NextResponse.json({
+            success: true,
+            adopted: true,
+            session: {
+              ...existing,
+              accessKind: String(existing.started_by) === String(access.profile.id) ? "mine" : "shared",
+            },
+          });
+        }
         return NextResponse.json({
           success: false,
           error: duplicateOpenWarehouseMessage({
@@ -486,15 +505,18 @@ export async function POST(request) {
         }, { status: 409 });
       }
       const startedByName = access.profile.salesman_name || access.profile.salesman_code || access.user.email || "";
+      const insertRow = {
+        warehouse_name: warehouseName,
+        warehouse_key: warehouseKey(warehouseName),
+        started_by: access.profile.id,
+        started_by_name: startedByName,
+        status: "OPEN",
+      };
+      const clientSessionId = String(body?.clientSessionId || "").trim();
+      if (isUuid(clientSessionId)) insertRow.id = clientSessionId;
       const { data, error } = await admin
         .from("stock_take_sessions")
-        .insert({
-          warehouse_name: warehouseName,
-          warehouse_key: warehouseKey(warehouseName),
-          started_by: access.profile.id,
-          started_by_name: startedByName,
-          status: "OPEN",
-        })
+        .insert(insertRow)
         .select("id,warehouse_name,started_by,started_by_name,started_at,status")
         .single();
       if (error) {

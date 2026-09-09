@@ -173,6 +173,72 @@ export function findItemByBarcode(items, barcode) {
   return (items || []).find((item) => itemMatchesBarcode(item, scanned)) || null;
 }
 
+export function lookupStockTakeItem({ items = [], barcode, itemCode } = {}) {
+  const barcodeValue = normalizeBarcode(barcode);
+  const itemCodeValue = normalizeStockTakeCode(itemCode);
+  if (itemCodeValue && !barcodeValue) {
+    const item = findItemByItemCode(items, itemCodeValue);
+    if (!item) throw new Error("Item code not found in stock take master.");
+    return {
+      item,
+      lookupMode: "itemCode",
+      scannedUom: "",
+      scannedUomLabel: "",
+      needsUom: true,
+      unitLocked: false,
+    };
+  }
+
+  const item = findItemByBarcode(items, barcodeValue);
+  if (!item) throw new Error("Barcode not found in stock take master.");
+  const resolved = resolveScannedUom(item, barcodeValue);
+  const unitLocked = Boolean(resolved.kind) && !resolved.ambiguous;
+  return {
+    item,
+    lookupMode: unitLocked ? "barcode" : "itemCode",
+    scannedUom: unitLocked ? resolved.kind : "",
+    scannedUomLabel: unitLocked ? uomLabel(item, resolved.kind) : "",
+    needsUom: !unitLocked,
+    unitLocked,
+  };
+}
+
+export function buildLocalStockTakeLine({
+  id,
+  item,
+  qty,
+  scannedUom,
+  barcode,
+  pallet,
+  location,
+  scannedByName,
+  scannedAt,
+} = {}) {
+  const converted = convertEnteredQtyToUnits({
+    qtyEntered: qty,
+    scannedUom,
+    baseUomPackSize: item?.base_uom_pack_size,
+    midUomPackSize: item?.mid_uom_pack_size,
+  });
+  return {
+    id: id || `local:${Date.now()}`,
+    item_code: item.item_code,
+    item_name: item.item_name,
+    barcode: normalizeBarcode(barcode) || item.item_code,
+    scanned_uom: converted.scannedUom,
+    scanned_uom_label: uomLabel(item, converted.scannedUom),
+    qty_entered: converted.qtyEntered,
+    qty_base: converted.qtyBase,
+    qty_mid: converted.qtyMid,
+    qty_master: converted.qtyMaster,
+    pallet_ref: String(pallet || "").trim() || null,
+    location_ref: String(location || "").trim() || null,
+    scanned_by_name: scannedByName || "",
+    scanned_at: scannedAt || new Date().toISOString(),
+    pending: true,
+  };
+}
+
 export function hasStockTakeModuleAccess({ role, stockTakeAccess = false } = {}) {
   const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
   if (normalized === "admin") return true;

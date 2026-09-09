@@ -15,6 +15,8 @@ import {
   stockTakeShareTargets,
   availableStockTakeUnits,
   focusStockTakeAfterLookup,
+  lookupStockTakeItem,
+  buildLocalStockTakeLine,
   resolveScannedUom,
   STOCK_TAKE_UOM,
   warehouseKey,
@@ -180,6 +182,26 @@ test("system inventory upload is keyed by item in base qty", () => {
 test("barcode lookup finds the item", () => {
   assert.equal(findItemByBarcode([item], "222")?.item_code, "A004409");
   assert.equal(formatStockQty(10.5), "10.5");
+});
+
+test("local stock take lookup and line build work without the server", () => {
+  const barcodeHit = lookupStockTakeItem({ items: [item], barcode: "333" });
+  assert.equal(barcodeHit.item.item_code, "A004409");
+  assert.equal(barcodeHit.lookupMode, "barcode");
+  assert.equal(barcodeHit.unitLocked, true);
+  const codeHit = lookupStockTakeItem({ items: [item], itemCode: "A004409" });
+  assert.equal(codeHit.lookupMode, "itemCode");
+  assert.equal(codeHit.unitLocked, false);
+  const line = buildLocalStockTakeLine({
+    id: "local:1",
+    item,
+    qty: 2,
+    scannedUom: STOCK_TAKE_UOM.MASTER,
+    barcode: "333",
+  });
+  assert.equal(line.qty_base, 672);
+  assert.equal(line.qty_mid, 48);
+  assert.equal(line.pending, true);
 });
 
 test("open inventories are only those started by the user or shared with them", () => {

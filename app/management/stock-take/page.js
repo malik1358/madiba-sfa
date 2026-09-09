@@ -271,7 +271,6 @@ export default function StockTakePage() {
       });
       if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to save line.");
       setLines((current) => [payload.line, ...current].slice(0, 500));
-      setMessage(`${payload.line.item_name} · ${formatStockQty(payload.line.qty_base)} base / ${formatStockQty(payload.line.qty_mid)} mid / ${formatStockQty(payload.line.qty_master)} master`);
       setBarcode("");
       setItemCodeInput("");
       setQty("");

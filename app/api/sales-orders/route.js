@@ -10,6 +10,7 @@ import {
   parseOfflineProspectIdFromCustomerCode,
   resolveProspectCustomerCode,
 } from "../../lib/prospects.js";
+import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -204,16 +205,30 @@ async function getAuthUser(admin, token) {
   return user;
 }
 
+function canAccessOrder(order, scope, userId) {
+  if (!order) return false;
+  if (scope?.hasAllAccess) return true;
+  if (order.created_by === userId) return true;
+  if ((scope?.visibleUserIds || []).includes(order.created_by)) return true;
+
+  const salesmanCode = normalizeCode(order.salesman_code);
+  return Boolean(salesmanCode) && (scope?.visibleSalesmanCodes || []).includes(salesmanCode);
+}
+
 async function ensureOrderAccess(admin, orderId, userId) {
   const { data: order, error } = await admin
     .from("sales_orders")
-    .select("id,created_by,status,customer_code")
+    .select("id,created_by,salesman_code,status,customer_code")
     .eq("id", orderId)
     .maybeSingle();
 
   if (error) throw error;
   if (!order) throw new Error("Order not found.");
-  if (order.created_by !== userId) throw new Error("You do not have access to edit this order.");
+
+  const scope = await resolveSalesScopeForUserId(admin, userId);
+  if (!canAccessOrder(order, scope, userId)) {
+    throw new Error("You do not have access to edit this order.");
+  }
   return order;
 }
 
@@ -382,7 +397,7 @@ export async function GET(request) {
 
       const { data, error } = await admin
         .from("sales_orders")
-        .select("id,order_number,status,customer_code,customer_name,created_by,updated_at")
+        .select("id,order_number,status,customer_code,customer_name,created_by,salesman_code,updated_at")
         .eq("id", numericId)
         .maybeSingle();
       if (error) throw error;
@@ -408,7 +423,8 @@ export async function GET(request) {
       return NextResponse.json({ success: true, found: false });
     }
 
-    if (order.created_by !== user.id) {
+    const scope = await resolveSalesScopeForUserId(admin, user.id);
+    if (!canAccessOrder(order, scope, user.id)) {
       return NextResponse.json({ success: false, error: "You do not have access to this order." }, { status: 403 });
     }
 

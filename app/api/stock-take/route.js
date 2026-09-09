@@ -3,7 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import { isMissingSchemaColumn } from "../../lib/performanceKpis.js";
 import {
+  annotateOpenStockTakeSessions,
   attachQtyMidToLines,
+  canAccessStockTakeSession,
   convertEnteredQtyToUnits,
   findItemByBarcode,
   findItemByItemCode,
@@ -41,6 +43,74 @@ function missingSetup(error) {
 
 function setupMessage() {
   return "Run sql/setup_stock_take.sql in Supabase to enable Stock Take.";
+}
+
+function missingSharesTable(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("stock_take_session_shares");
+}
+
+function personLabel(profile) {
+  return String(profile?.salesman_name || profile?.salesman_code || profile?.id || "").trim();
+}
+
+async function loadSharedSessionIds(admin, userId) {
+  const { data, error } = await admin
+    .from("stock_take_session_shares")
+    .select("session_id")
+    .eq("shared_with", userId);
+  if (error) {
+    if (missingSharesTable(error)) return { ids: [], sharesAvailable: false };
+    throw error;
+  }
+  return { ids: (data || []).map((row) => row.session_id).filter(Boolean), sharesAvailable: true };
+}
+
+async function loadSessionAccess(admin, sessionId, userId) {
+  const { data: session, error } = await admin
+    .from("stock_take_sessions")
+    .select("id,warehouse_name,warehouse_key,started_by,started_by_name,started_at,status")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!session) {
+    return { error: NextResponse.json({ success: false, error: "Inventory not found." }, { status: 404 }) };
+  }
+  const { ids } = await loadSharedSessionIds(admin, userId);
+  if (!canAccessStockTakeSession({ session, userId, sharedSessionIds: ids })) {
+    return { error: NextResponse.json({ success: false, error: "This inventory is not shared with you." }, { status: 403 }) };
+  }
+  return { session };
+}
+
+async function loadShareUsers(admin, currentUserId) {
+  let profileRes = await admin
+    .from("profiles")
+    .select("id,salesman_name,salesman_code,role,is_active,stock_take_access")
+    .eq("is_active", true);
+  if (profileRes.error && isMissingSchemaColumn(profileRes.error)) {
+    profileRes = await admin
+      .from("profiles")
+      .select("id,salesman_name,salesman_code,role,stock_take_access");
+  }
+  if (profileRes.error && isMissingSchemaColumn(profileRes.error)) {
+    profileRes = await admin
+      .from("profiles")
+      .select("id,salesman_name,salesman_code,role");
+  }
+  if (profileRes.error) throw profileRes.error;
+  return (profileRes.data || [])
+    .filter((profile) => profile.is_active !== false)
+    .filter((profile) => String(profile.id) !== String(currentUserId))
+    .filter((profile) => hasStockTakeModuleAccess({
+      role: profile.role,
+      stockTakeAccess: profile.stock_take_access === true,
+    }))
+    .map((profile) => ({
+      id: profile.id,
+      name: personLabel(profile) || profile.id,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function requireStockTakeUser(admin, request) {
@@ -118,6 +188,73 @@ export async function GET(request) {
     const url = new URL(request.url);
     const action = String(url.searchParams.get("action") || "report").trim();
 
+    if (action === "open-sessions") {
+      const userId = access.profile.id;
+      const { ids: sharedIds, sharesAvailable } = await loadSharedSessionIds(admin, userId);
+      const ownedRes = await admin
+        .from("stock_take_sessions")
+        .select("id,warehouse_name,started_by,started_by_name,started_at,status")
+        .eq("status", "OPEN")
+        .eq("started_by", userId)
+        .order("started_at", { ascending: false })
+        .limit(200);
+      if (ownedRes.error) {
+        if (missingSetup(ownedRes.error)) {
+          return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
+        }
+        throw ownedRes.error;
+      }
+
+      let sharedSessions = [];
+      if (sharedIds.length) {
+        const sharedRes = await admin
+          .from("stock_take_sessions")
+          .select("id,warehouse_name,started_by,started_by_name,started_at,status")
+          .eq("status", "OPEN")
+          .in("id", sharedIds)
+          .order("started_at", { ascending: false })
+          .limit(200);
+        if (sharedRes.error) throw sharedRes.error;
+        sharedSessions = sharedRes.data || [];
+      }
+
+      const byId = new Map();
+      [...(ownedRes.data || []), ...sharedSessions].forEach((row) => byId.set(row.id, row));
+      const sessions = annotateOpenStockTakeSessions({
+        sessions: [...byId.values()],
+        userId,
+        sharedSessionIds: sharedIds,
+      });
+
+      const shareBySession = new Map();
+      const shareUsers = sharesAvailable ? await loadShareUsers(admin, userId).catch(() => []) : [];
+      if (sharesAvailable && sessions.some((row) => row.accessKind === "mine")) {
+        const ownedIds = sessions.filter((row) => row.accessKind === "mine").map((row) => row.id);
+        const shareRes = await admin
+          .from("stock_take_session_shares")
+          .select("session_id,shared_with")
+          .in("session_id", ownedIds);
+        if (!shareRes.error) {
+          const nameById = new Map(shareUsers.map((person) => [person.id, person.name]));
+          (shareRes.data || []).forEach((row) => {
+            const list = shareBySession.get(row.session_id) || [];
+            list.push(nameById.get(row.shared_with) || row.shared_with);
+            shareBySession.set(row.session_id, list);
+          });
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        sharesAvailable,
+        shareUsers,
+        sessions: sessions.map((session) => ({
+          ...session,
+          sharedWithNames: shareBySession.get(session.id) || [],
+        })),
+      });
+    }
+
     if (action === "lookup") {
       const barcode = normalizeBarcode(url.searchParams.get("barcode"));
       const itemCode = normalizeStockTakeCode(url.searchParams.get("itemCode"));
@@ -163,6 +300,8 @@ export async function GET(request) {
       if (!sessionId) {
         return NextResponse.json({ success: false, error: "Missing session." }, { status: 400 });
       }
+      const accessCheck = await loadSessionAccess(admin, sessionId, access.profile.id);
+      if (accessCheck.error) return accessCheck.error;
       const { data, error } = await admin
         .from("stock_take_lines")
         .select("id,item_code,item_name,barcode,scanned_uom,scanned_uom_label,qty_entered,qty_base,qty_master,pallet_ref,location_ref,scanned_by_name,scanned_at")
@@ -336,7 +475,7 @@ export async function POST(request) {
           started_by_name: startedByName,
           status: "OPEN",
         })
-        .select("id,warehouse_name,started_at")
+        .select("id,warehouse_name,started_by,started_by_name,started_at,status")
         .single();
       if (error) {
         if (missingSetup(error)) {
@@ -344,7 +483,49 @@ export async function POST(request) {
         }
         throw error;
       }
-      return NextResponse.json({ success: true, session: data });
+      return NextResponse.json({ success: true, session: { ...data, accessKind: "mine" } });
+    }
+
+    if (mode === "share-session") {
+      const sessionId = String(body?.sessionId || "").trim();
+      const sharedWith = String(body?.userId || "").trim();
+      if (!sessionId || !sharedWith) {
+        return NextResponse.json({ success: false, error: "Choose an inventory and a user to share with." }, { status: 400 });
+      }
+      if (sharedWith === access.profile.id) {
+        return NextResponse.json({ success: false, error: "You already own this inventory." }, { status: 400 });
+      }
+      const { data: session, error: sessionError } = await admin
+        .from("stock_take_sessions")
+        .select("id,started_by,status")
+        .eq("id", sessionId)
+        .maybeSingle();
+      if (sessionError) throw sessionError;
+      if (!session) {
+        return NextResponse.json({ success: false, error: "Inventory not found." }, { status: 404 });
+      }
+      if (String(session.started_by) !== String(access.profile.id)) {
+        return NextResponse.json({ success: false, error: "Only the user who opened this inventory can share it." }, { status: 403 });
+      }
+      const shareUsers = await loadShareUsers(admin, access.profile.id);
+      if (!shareUsers.some((person) => person.id === sharedWith)) {
+        return NextResponse.json({ success: false, error: "That user does not have Stock Take access." }, { status: 400 });
+      }
+      const { error } = await admin
+        .from("stock_take_session_shares")
+        .upsert({
+          session_id: sessionId,
+          shared_with: sharedWith,
+          shared_by: access.profile.id,
+          shared_by_name: personLabel(access.profile),
+        }, { onConflict: "session_id,shared_with" });
+      if (error) {
+        if (missingSharesTable(error) || missingSetup(error)) {
+          return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
+        }
+        throw error;
+      }
+      return NextResponse.json({ success: true });
     }
 
     if (mode === "save-line") {
@@ -359,6 +540,8 @@ export async function POST(request) {
       if (!sessionId) {
         return NextResponse.json({ success: false, error: "Start the warehouse session first." }, { status: 400 });
       }
+      const accessCheck = await loadSessionAccess(admin, sessionId, access.profile.id);
+      if (accessCheck.error) return accessCheck.error;
       if (!barcode && !requestedItemCode) {
         return NextResponse.json({ success: false, error: "Enter a barcode or item code." }, { status: 400 });
       }

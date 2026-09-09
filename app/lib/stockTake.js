@@ -161,6 +161,25 @@ export function hasStockTakeModuleAccess({ role, stockTakeAccess = false } = {})
   return Boolean(stockTakeAccess);
 }
 
+export function canAccessStockTakeSession({ session, userId, sharedSessionIds = [] } = {}) {
+  if (!session || !userId) return false;
+  if (String(session.started_by || "") === String(userId)) return true;
+  return (sharedSessionIds || []).map(String).includes(String(session.id));
+}
+
+export function annotateOpenStockTakeSessions({ sessions = [], userId, sharedSessionIds = [] } = {}) {
+  const shared = new Set((sharedSessionIds || []).map(String));
+  const mine = String(userId || "");
+  return (sessions || [])
+    .filter((session) => String(session.status || "OPEN").toUpperCase() === "OPEN")
+    .filter((session) => String(session.started_by || "") === mine || shared.has(String(session.id)))
+    .map((session) => ({
+      ...session,
+      accessKind: String(session.started_by || "") === mine ? "mine" : "shared",
+    }))
+    .sort((a, b) => String(b.started_at || "").localeCompare(String(a.started_at || "")));
+}
+
 export function attachSystemQtyToLines(lines, systemRows = []) {
   const byItem = new Map(
     (systemRows || []).map((row) => [normalizeStockTakeCode(row.item_code), Number(row.qty_base) || 0]),

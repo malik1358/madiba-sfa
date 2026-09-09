@@ -8,6 +8,8 @@ import {
   findItemByItemCode,
   formatStockQty,
   hasStockTakeModuleAccess,
+  annotateOpenStockTakeSessions,
+  canAccessStockTakeSession,
   resolveScannedUom,
   STOCK_TAKE_UOM,
   warehouseKey,
@@ -149,4 +151,23 @@ test("system inventory upload is keyed by item in base qty", () => {
 test("barcode lookup finds the item", () => {
   assert.equal(findItemByBarcode([item], "222")?.item_code, "A004409");
   assert.equal(formatStockQty(10.5), "10.5");
+});
+
+test("open inventories are only those started by the user or shared with them", () => {
+  const sessions = [
+    { id: "s1", status: "OPEN", started_by: "u1", started_at: "2026-09-09T08:00:00Z" },
+    { id: "s2", status: "OPEN", started_by: "u2", started_at: "2026-09-09T09:00:00Z" },
+    { id: "s3", status: "OPEN", started_by: "u3", started_at: "2026-09-09T10:00:00Z" },
+    { id: "s4", status: "CLOSED", started_by: "u1", started_at: "2026-09-09T11:00:00Z" },
+  ];
+  const visible = annotateOpenStockTakeSessions({
+    sessions,
+    userId: "u1",
+    sharedSessionIds: ["s2"],
+  });
+  assert.deepEqual(visible.map((row) => row.id), ["s2", "s1"]);
+  assert.equal(visible[0].accessKind, "shared");
+  assert.equal(visible[1].accessKind, "mine");
+  assert.equal(canAccessStockTakeSession({ session: sessions[2], userId: "u1", sharedSessionIds: ["s2"] }), false);
+  assert.equal(canAccessStockTakeSession({ session: sessions[1], userId: "u1", sharedSessionIds: ["s2"] }), true);
 });

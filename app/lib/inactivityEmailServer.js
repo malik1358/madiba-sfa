@@ -7,6 +7,7 @@ import {
   inactivityEmailDisplayName,
   inactivityEmailReferenceKey,
   lateLoginEmailReferenceKey,
+  resolveAppOrigin,
   resolveInactivityEmailRecipients,
 } from "./inactivityEmail.js";
 import {
@@ -163,6 +164,7 @@ export async function runInactivityEmailCycle(admin, {
   }
 
   const reportDate = getKsaDateString(now);
+  const appOrigin = resolveAppOrigin(env);
   const { startIso, endIso } = ksaDayBounds(reportDate);
   const activeUsers = await loadActiveUsers(admin, reportDate);
 
@@ -186,6 +188,8 @@ export async function runInactivityEmailCycle(admin, {
       date: reportDate,
       userName,
       reminderTime: now,
+      userId,
+      origin: appOrigin,
     });
     const outcome = await sendHierarchyAlert({
       admin,
@@ -244,6 +248,8 @@ export async function runInactivityEmailCycle(admin, {
       idleMinutes,
       lastActivityAt: new Date(idleSinceTs).toISOString(),
       loginAt,
+      userId,
+      origin: appOrigin,
     });
     const outcome = await sendHierarchyAlert({
       admin,

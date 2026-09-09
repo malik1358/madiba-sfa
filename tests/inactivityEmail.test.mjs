@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   INACTIVITY_EMAIL_MINUTES,
+  buildDailyVisitReportPageUrl,
   buildInactivityAlertEmail,
   buildLateLoginReminderEmail,
   inactivityEmailReferenceKey,
   lateLoginEmailReferenceKey,
+  resolveAppOrigin,
   resolveInactivityEmailRecipients,
 } from "../app/lib/inactivityEmail.js";
 import { runInactivityEmailCycle } from "../app/lib/inactivityEmailServer.js";
@@ -219,6 +221,8 @@ test("buildInactivityAlertEmail names the idle user and duration", () => {
     idleMinutes: 52,
     lastActivityAt: "2026-09-06T05:10:00.000Z",
     loginAt,
+    userId: "u1",
+    origin: "https://madiba-sfa.vercel.app",
   });
 
   assert.match(message.subject, /Ahmed \(SM001\)/);
@@ -227,6 +231,28 @@ test("buildInactivityAlertEmail names the idle user and duration", () => {
   assert.match(message.text, /Idle since:/);
   assert.match(message.html, /Ahmed \(SM001\)/);
   assert.match(message.html, /Idle since/);
+  assert.equal(
+    message.reportUrl,
+    "https://madiba-sfa.vercel.app/management/daily-visit-report?date=2026-09-06&userId=u1",
+  );
+  assert.match(message.html, /Open Daily Visit Report/);
+  assert.match(message.html, /userId=u1/);
+});
+
+test("buildDailyVisitReportPageUrl points at that salesman and date", () => {
+  assert.equal(
+    buildDailyVisitReportPageUrl({
+      date: "2026-09-09",
+      userId: "sales-1",
+      origin: "https://madiba-sfa.vercel.app/",
+    }),
+    "https://madiba-sfa.vercel.app/management/daily-visit-report?date=2026-09-09&userId=sales-1",
+  );
+  assert.equal(resolveAppOrigin({}), "https://madiba-sfa.vercel.app");
+  assert.equal(
+    resolveAppOrigin({ VERCEL_URL: "madiba-sfa-staging.vercel.app" }),
+    "https://madiba-sfa-staging.vercel.app",
+  );
 });
 
 test("inactivityEmailReferenceKey is unique per idle stretch and 40-minute slot", () => {
@@ -339,6 +365,8 @@ test("runInactivityEmailCycle emails the user and bosses, then repeats every 40 
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0].to, ["ahmed@company.com", "boss@madiba.com"]);
   assert.match(sent[0].subject, /Ahmed \(SM001\)/);
+  assert.match(sent[0].html, /Open Daily Visit Report/);
+  assert.match(sent[0].html, /daily-visit-report\?date=2026-09-06&amp;userId=u1/);
 
   const second = await runInactivityEmailCycle(admin, {
     now: new Date("2026-09-06T06:10:00.000Z"),
@@ -443,6 +471,8 @@ test("runInactivityEmailCycle reminds every 30 minutes when a field user has not
   assert.equal(first.loginRemindersSent, 1);
   assert.deepEqual(sent[0].to, ["ahmed@company.com", "boss@madiba.com"]);
   assert.match(sent[0].subject, /Not logged in by 11:00/);
+  assert.match(sent[0].html, /Open Daily Visit Report/);
+  assert.match(sent[0].html, /userId=u1/);
 
   const sameSlot = await runInactivityEmailCycle(admin, {
     ...options,

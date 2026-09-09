@@ -6,6 +6,34 @@ import { INACTIVITY_EMAIL_MS } from "./workdayActivity.js";
 export const INACTIVITY_EMAIL_TYPE = "inactivity_email";
 export const LATE_LOGIN_EMAIL_TYPE = "late_login_email";
 export const INACTIVITY_EMAIL_MINUTES = Math.round(INACTIVITY_EMAIL_MS / 60000);
+export const DEFAULT_APP_ORIGIN = "https://madiba-sfa.vercel.app";
+
+export function resolveAppOrigin(env = process.env) {
+  const configured = String(
+    env.APP_ORIGIN || env.NEXT_PUBLIC_APP_ORIGIN || env.NEXT_PUBLIC_APP_URL || "",
+  )
+    .trim()
+    .replace(/\/+$/, "");
+  if (configured) {
+    return /^https?:\/\//i.test(configured) ? configured : `https://${configured}`;
+  }
+
+  const vercel = String(env.VERCEL_URL || "").trim().replace(/\/+$/, "");
+  if (vercel) {
+    return /^https?:\/\//i.test(vercel) ? vercel : `https://${vercel}`;
+  }
+
+  return DEFAULT_APP_ORIGIN;
+}
+
+export function buildDailyVisitReportPageUrl({ date, userId, origin } = {}) {
+  const base = String(origin || DEFAULT_APP_ORIGIN).replace(/\/+$/, "");
+  const params = new URLSearchParams();
+  if (date) params.set("date", String(date));
+  if (userId) params.set("userId", String(userId));
+  const query = params.toString();
+  return `${base}/management/daily-visit-report${query ? `?${query}` : ""}`;
+}
 
 export function inactivityEmailDisplayName({ salesmanName = "", salesmanCode = "" } = {}) {
   const name = String(salesmanName || "").trim() || "Field user";
@@ -46,6 +74,8 @@ export function buildInactivityAlertEmail({
   idleMinutes,
   lastActivityAt,
   loginAt,
+  userId,
+  origin,
 } = {}) {
   const who = inactivityEmailDisplayName({ salesmanName: userName });
   const minutes = Math.max(
@@ -56,6 +86,9 @@ export function buildInactivityAlertEmail({
   const lastActivity = formatReportTime(lastActivityAt);
   const loginTime = formatReportTime(loginAt);
   const subject = `No activity for ${idleLabel} — ${who} — ${date}`;
+  const reportUrl = userId
+    ? buildDailyVisitReportPageUrl({ date, userId, origin })
+    : "";
 
   const text = [
     `${who} has no visit, order, or collection logged for ${idleLabel}.`,
@@ -64,7 +97,8 @@ export function buildInactivityAlertEmail({
     `Idle since: ${lastActivity}`,
     `Idle time starts at login or lunch in, then resets only on a visit, submitted order, or collection. Background order updates are ignored.`,
     `This alert is sent every ${INACTIVITY_EMAIL_MINUTES} minutes until 10:00 PM KSA or the next visit, order, or collection, and is skipped during lunch break.`,
-  ].join("\n");
+    reportUrl ? `Daily Visit Report: ${reportUrl}` : "",
+  ].filter(Boolean).join("\n");
 
   const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
   <h2 style="margin: 0 0 12px;">No activity logged</h2>
@@ -75,26 +109,33 @@ export function buildInactivityAlertEmail({
     <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Idle since</td><td>${escapeHtml(lastActivity)}</td></tr>
   </table>
   <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">An email is sent every ${INACTIVITY_EMAIL_MINUTES} minutes until 10:00 PM KSA to the user and bosses in the reporting hierarchy until the next visit, order, or collection. Lunch break is excluded.</p>
+  ${reportUrl ? `<p style="margin: 16px 0 0;"><a href="${escapeHtml(reportUrl)}" style="color: #0b5cab; font-weight: 600;">Open Daily Visit Report</a></p>` : ""}
 </div>`;
 
-  return { subject, text, html };
+  return { subject, text, html, reportUrl };
 }
 
 export function buildLateLoginReminderEmail({
   date,
   userName,
   reminderTime,
+  userId,
+  origin,
 } = {}) {
   const who = inactivityEmailDisplayName({ salesmanName: userName });
   const checkedAt = formatReportTime(reminderTime);
   const subject = `Not logged in by 11:00 — ${who} — ${date}`;
+  const reportUrl = userId
+    ? buildDailyVisitReportPageUrl({ date, userId, origin })
+    : "";
 
   const text = [
     `${who} has not logged morning attendance by 11:00 KSA.`,
     `Date (KSA): ${date}`,
     `Checked at: ${checkedAt}`,
     "This reminder is sent every 30 minutes until the user logs in, to the user and bosses in the reporting hierarchy.",
-  ].join("\n");
+    reportUrl ? `Daily Visit Report: ${reportUrl}` : "",
+  ].filter(Boolean).join("\n");
 
   const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
   <h2 style="margin: 0 0 12px;">Not logged in by 11:00</h2>
@@ -104,7 +145,8 @@ export function buildLateLoginReminderEmail({
     <tr><td style="padding: 4px 12px 4px 0; color: #52616b;">Checked at</td><td>${escapeHtml(checkedAt)}</td></tr>
   </table>
   <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">A reminder is sent every 30 minutes until login, to the user and bosses in the reporting hierarchy.</p>
+  ${reportUrl ? `<p style="margin: 16px 0 0;"><a href="${escapeHtml(reportUrl)}" style="color: #0b5cab; font-weight: 600;">Open Daily Visit Report</a></p>` : ""}
 </div>`;
 
-  return { subject, text, html };
+  return { subject, text, html, reportUrl };
 }

@@ -4,8 +4,11 @@ import {
   getKsaDateString,
   getInactivityAlertMessage,
   getLunchBreakReminderMessage,
+  getLunchPunchNoonReminderMessage,
+  getLunchPunchProgress,
   ksaDayBounds,
   logEventTimestamp,
+  shouldRemindLunchPunchNoon,
   shouldSendLunchBreakReminder,
   shouldWarnInactivity,
   getOpenLunchBreakOutTimestamp,
@@ -16,6 +19,7 @@ export { loadActiveFieldUsers, loadUserActivity };
 
 export const INACTIVITY_PUSH_TYPE = "inactivity";
 export const LUNCH_BREAK_REMINDER_PUSH_TYPE = "lunch_break_reminder";
+export const LUNCH_PUNCH_NOON_PUSH_TYPE = "lunch_punch_noon";
 
 async function loadRecentPushSentAt(admin, userId, notificationType) {
   const cutoff = new Date(Date.now() - INACTIVITY_ALERT_REPEAT_MS).toISOString();
@@ -86,6 +90,7 @@ export async function runInactivityPushCycle(admin, now = new Date()) {
   let checked = 0;
   let sent = 0;
   let lunchRemindersSent = 0;
+  let lunchPunchNoonRemindersSent = 0;
   const details = [];
 
   for (const { userId, loginLog, preferredLanguage } of activeUsers) {
@@ -100,6 +105,43 @@ export async function runInactivityPushCycle(admin, now = new Date()) {
     const logoutAt = logoutLog
       ? new Date(logEventTimestamp(logoutLog) || logoutLog.created_at).toISOString()
       : null;
+
+    if (shouldRemindLunchPunchNoon({
+      loginAt,
+      logoutAt,
+      userLogs: logs,
+      now,
+    })) {
+      const noonReferenceKey = `lunch_punch_noon:${userId}:${reportDate}`;
+
+      if (!await hasSentPushReference(admin, noonReferenceKey)) {
+        const { title, body } = getLunchPunchNoonReminderMessage({
+          hasLunchOut: getLunchPunchProgress(logs).lunchOut,
+        });
+        const noonResult = await sendPushToUser(admin, userId, {
+          title,
+          body,
+          data: {
+            type: LUNCH_PUNCH_NOON_PUSH_TYPE,
+            reportDate,
+          },
+        });
+
+        await logPushAttempt(admin, {
+          userId,
+          notificationType: LUNCH_PUNCH_NOON_PUSH_TYPE,
+          title,
+          body,
+          successCount: noonResult.successCount,
+          failureCount: noonResult.failureCount,
+          referenceKey: noonReferenceKey,
+        });
+
+        if (noonResult.successCount > 0) {
+          lunchPunchNoonRemindersSent += 1;
+        }
+      }
+    }
 
     if (shouldSendLunchBreakReminder(logs, now)) {
       const lunchOutTs = getOpenLunchBreakOutTimestamp(logs, now.getTime());
@@ -184,6 +226,7 @@ export async function runInactivityPushCycle(admin, now = new Date()) {
     checked,
     sent,
     lunchRemindersSent,
+    lunchPunchNoonRemindersSent,
     reportDate,
     details,
   };

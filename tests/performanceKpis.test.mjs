@@ -15,6 +15,7 @@ import {
   kpiStatus,
   normalizePerformanceTargets,
   performanceUpdatedStatusLabel,
+  pickSalesmanPaceShares,
   resolveKpiPaceDate,
   splitSalesActuals,
   TEAM_PERFORMANCE_VIEW,
@@ -97,6 +98,20 @@ test("expected pace ignores a 0% historical start and uses working days instead"
   });
   assert.notEqual(status.expected, 0);
   assert.ok(status.expected > 1);
+});
+
+test("pace shares use that salesman only, not the company average", () => {
+  const abdul = { 9: 0.12 };
+  const pace = {
+    company: { 9: 0.45 },
+    bySalesman: new Map([
+      ["ABDUL", abdul],
+    ]),
+  };
+  assert.deepEqual(pickSalesmanPaceShares(pace, "abdul"), abdul);
+  assert.equal(pickSalesmanPaceShares(pace, "ABADALLA"), null);
+  assert.equal(expectedPacePercent("2026-09-09", pickSalesmanPaceShares(pace, "ABDUL")), 12);
+  assert.equal(expectedPacePercent("2026-09-09", pickSalesmanPaceShares(pace, "NEWGUY")), ksaWorkdayProgressRatio("2026-09-09") * 100);
 });
 
 test("splits office supplies sales from other sales", () => {

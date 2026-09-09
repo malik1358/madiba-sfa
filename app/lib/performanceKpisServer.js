@@ -9,6 +9,7 @@ import {
   normalizePerformanceTargets,
   normalizeSalesmanCode,
   averageCumulativeDayShares,
+  pickSalesmanPaceShares,
   splitSalesActuals,
   sumCollectionAmount,
 } from "./performanceKpis.js";
@@ -161,7 +162,6 @@ export async function loadSalesPaceShares(admin, { reportDate } = {}) {
     return { company: null, bySalesman: new Map() };
   }
 
-  const company = averageCumulativeDayShares(rows);
   const bySalesman = new Map();
   const grouped = new Map();
   (rows || []).forEach((row) => {
@@ -173,18 +173,17 @@ export async function loadSalesPaceShares(admin, { reportDate } = {}) {
   });
   grouped.forEach((list, code) => {
     const curve = averageCumulativeDayShares(list);
-    if (curve.monthCount >= 2) bySalesman.set(code, curve.shares);
+    if (curve.monthCount >= 1) bySalesman.set(code, curve.shares);
   });
 
   return {
-    company: company.monthCount >= 2 ? company.shares : null,
+    company: null,
     bySalesman,
   };
 }
 
 export function paceSharesForSalesman(pace, salesmanCode) {
-  const code = normalizeSalesmanCode(salesmanCode);
-  return pace?.bySalesman?.get(code) || pace?.company || null;
+  return pickSalesmanPaceShares(pace, salesmanCode);
 }
 
 export async function loadCollectionActual(admin, { salesmanCode, reportDate }) {

@@ -189,6 +189,16 @@ export function shareForDay(shares, day) {
   return null;
 }
 
+export function pickSalesmanPaceShares(pace, salesmanCode) {
+  const code = normalizeSalesmanCode(salesmanCode);
+  if (!code || !pace) return null;
+  const personal = pace.bySalesman instanceof Map
+    ? pace.bySalesman.get(code)
+    : pace.bySalesman?.[code];
+  if (!personal || typeof personal !== "object") return null;
+  return personal.shares && typeof personal.shares === "object" ? personal.shares : personal;
+}
+
 export function expectedPacePercent(asOfDate, paceShares = null) {
   const date = String(asOfDate || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;

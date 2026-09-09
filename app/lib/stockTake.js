@@ -180,6 +180,25 @@ export function annotateOpenStockTakeSessions({ sessions = [], userId, sharedSes
     .sort((a, b) => String(b.started_at || "").localeCompare(String(a.started_at || "")));
 }
 
+export function stockTakeShareTargets(profiles = [], currentUserId) {
+  return (profiles || [])
+    .filter((profile) => String(profile.id) !== String(currentUserId))
+    .filter((profile) => hasStockTakeModuleAccess({
+      role: profile.role,
+      stockTakeAccess: profile.stock_take_access === true,
+    }))
+    .map((profile) => {
+      const inactive = profile.is_active === false;
+      const baseName = String(profile.salesman_name || profile.salesman_code || profile.id || "").trim() || String(profile.id);
+      return {
+        id: profile.id,
+        name: inactive ? `${baseName} (inactive)` : baseName,
+        inactive,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function attachSystemQtyToLines(lines, systemRows = []) {
   const byItem = new Map(
     (systemRows || []).map((row) => [normalizeStockTakeCode(row.item_code), Number(row.qty_base) || 0]),

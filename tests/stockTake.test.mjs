@@ -10,6 +10,7 @@ import {
   hasStockTakeModuleAccess,
   annotateOpenStockTakeSessions,
   canAccessStockTakeSession,
+  stockTakeShareTargets,
   resolveScannedUom,
   STOCK_TAKE_UOM,
   warehouseKey,
@@ -170,4 +171,15 @@ test("open inventories are only those started by the user or shared with them", 
   assert.equal(visible[1].accessKind, "mine");
   assert.equal(canAccessStockTakeSession({ session: sessions[2], userId: "u1", sharedSessionIds: ["s2"] }), false);
   assert.equal(canAccessStockTakeSession({ session: sessions[1], userId: "u1", sharedSessionIds: ["s2"] }), true);
+});
+
+test("share list includes inactive users who have stock take access", () => {
+  const targets = stockTakeShareTargets([
+    { id: "admin", salesman_name: "Administrator", role: "admin", is_active: true },
+    { id: "soyeb", salesman_name: "SOYEB", role: "salesman", is_active: true, stock_take_access: true },
+    { id: "vilayath", salesman_name: "VILYATH", salesman_code: "VILYATH", role: "salesman", is_active: false, stock_take_access: true },
+    { id: "thamer", salesman_name: "Thamer", role: "salesman", is_active: true, stock_take_access: false },
+  ], "admin");
+  assert.deepEqual(targets.map((row) => row.id), ["soyeb", "vilayath"]);
+  assert.equal(targets.find((row) => row.id === "vilayath").name, "VILYATH (inactive)");
 });

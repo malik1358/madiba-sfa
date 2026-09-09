@@ -14,6 +14,7 @@ import {
   normalizeStockTakeCode,
   normalizeWarehouseName,
   resolveScannedUom,
+  stockTakeShareTargets,
   uomLabel,
   warehouseKey,
 } from "../../lib/stockTake.js";
@@ -86,8 +87,7 @@ async function loadSessionAccess(admin, sessionId, userId) {
 async function loadShareUsers(admin, currentUserId) {
   let profileRes = await admin
     .from("profiles")
-    .select("id,salesman_name,salesman_code,role,is_active,stock_take_access")
-    .eq("is_active", true);
+    .select("id,salesman_name,salesman_code,role,is_active,stock_take_access");
   if (profileRes.error && isMissingSchemaColumn(profileRes.error)) {
     profileRes = await admin
       .from("profiles")
@@ -99,18 +99,7 @@ async function loadShareUsers(admin, currentUserId) {
       .select("id,salesman_name,salesman_code,role");
   }
   if (profileRes.error) throw profileRes.error;
-  return (profileRes.data || [])
-    .filter((profile) => profile.is_active !== false)
-    .filter((profile) => String(profile.id) !== String(currentUserId))
-    .filter((profile) => hasStockTakeModuleAccess({
-      role: profile.role,
-      stockTakeAccess: profile.stock_take_access === true,
-    }))
-    .map((profile) => ({
-      id: profile.id,
-      name: personLabel(profile) || profile.id,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return stockTakeShareTargets(profileRes.data || [], currentUserId);
 }
 
 async function requireStockTakeUser(admin, request) {

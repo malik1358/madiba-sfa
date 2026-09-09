@@ -4227,6 +4227,36 @@ th:has(.moduleTableColumnFilterInput) {
   z-index: 7;
 }
 
+.moduleKpiTargetsTable .moduleKpiSalesmanCell {
+  position: sticky;
+  left: 0;
+  inset-inline-start: 0;
+  min-width: 11.5rem;
+  max-width: 14rem;
+  background: #ffffff;
+  box-shadow: 2px 0 8px rgba(6, 47, 58, 0.12);
+  z-index: 5;
+}
+
+.moduleKpiTargetsTable thead .moduleKpiSalesmanCell {
+  background: #edf4f5;
+}
+
+.moduleKpiTargetsTable thead tr:first-child .moduleKpiSalesmanCell {
+  z-index: 11;
+}
+
+.moduleKpiTargetsTable thead tr:nth-child(2) .moduleKpiSalesmanCell {
+  z-index: 10;
+}
+
+[dir="rtl"] .moduleKpiTargetsTable .moduleKpiSalesmanCell {
+  left: auto;
+  right: 0;
+  inset-inline-start: 0;
+  box-shadow: -2px 0 8px rgba(6, 47, 58, 0.12);
+}
+
 .moduleKpiTargetsTable .moduleKpiTargetInput {
   box-sizing: border-box;
   width: 4.125rem;

@@ -5,6 +5,7 @@ import {
   assignOnSiteVisitNumbers,
   buildVisitDaySplit,
   entryDisplayAmount,
+  formatVisitEntryOutcome,
   hideSupersededOrderDrafts,
   loginLogoutLocationNotes,
 } from "../app/lib/dailyVisitReportStats.js";
@@ -106,6 +107,26 @@ test("entryDisplayAmount uses order value when collection amount is empty", () =
   assert.equal(entryDisplayAmount({ transactionType: "ORDER_SUBMITTED", orderValue: 5380.6 }), 5380.6);
   assert.equal(entryDisplayAmount({ transactionType: "COLLECTION_VISIT", amountReceived: 11000 }), 11000);
   assert.equal(entryDisplayAmount({ transactionType: "ORDER_DRAFT" }), 0);
+});
+
+test("formatVisitEntryOutcome shows collected amount, non-pay reason, or order value", () => {
+  assert.equal(
+    formatVisitEntryOutcome({ transactionType: "COLLECTION_VISIT", amountReceived: 11000, visitOutcome: "FUNDS_RECEIVED" }),
+    "Collected 11,000 SAR",
+  );
+  assert.equal(
+    formatVisitEntryOutcome({ transactionType: "COLLECTION_VISIT", amountReceived: 0, visitOutcome: "ASKED_COME_LATER" }),
+    "Asked to come later",
+  );
+  assert.equal(
+    formatVisitEntryOutcome({ transactionType: "ORDER_SUBMITTED", orderValue: 5380.6 }),
+    "Order 5,380.6 SAR",
+  );
+  assert.equal(
+    formatVisitEntryOutcome({ transactionType: "VISIT_REPORT", visitOutcome: "STOCKS_AVAILABLE" }),
+    "Stocks available",
+  );
+  assert.equal(formatVisitEntryOutcome({ transactionType: "GPS_PING" }), "-");
 });
 
 test("login logout coaching fires when GPS is away from first and last customer", () => {

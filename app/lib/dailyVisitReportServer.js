@@ -259,7 +259,7 @@ function buildEntryBase({
 async function loadCollectionVisitEntries(admin, startIso, endIso, userIdFilter) {
   let query = admin
     .from("collection_visits")
-    .select("id,customer_code,visit_outcome,amount_received,saved_at,latitude,longitude,created_by")
+    .select("id,customer_code,visit_outcome,payment_status,amount_received,saved_at,latitude,longitude,created_by")
     .gte("saved_at", startIso)
     .lte("saved_at", endIso)
     .order("saved_at", { ascending: true });
@@ -290,7 +290,7 @@ async function loadCollectionVisitEntries(admin, startIso, endIso, userIdFilter)
     latitude: row.latitude,
     longitude: row.longitude,
     meta: {
-      visitOutcome: row.visit_outcome,
+      visitOutcome: row.visit_outcome || row.payment_status,
       amountReceived: Number(row.amount_received || 0),
     },
   }));

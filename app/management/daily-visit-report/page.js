@@ -26,7 +26,7 @@ import { addKsaCalendarDays, formatKsaTime, getKsaDateString, getKsaWeekdayIndex
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { visitReportRowClassName, VISIT_REPORT_ROW_LEGEND } from "../../lib/visitReportRowColors";
-import { entryDisplayAmount, formatEntryCoordinates, formatSplitMoney } from "../../lib/dailyVisitReportStats";
+import { formatEntryCoordinates, formatSplitMoney, formatVisitEntryOutcome } from "../../lib/dailyVisitReportStats";
 
 const TEXT = {
   title: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومي" },
@@ -53,6 +53,7 @@ const TEXT = {
   userName: { en: "User name", ar: "اسم المستخدم" },
   customer: { en: "Customer", ar: "العميل" },
   transaction: { en: "Transaction", ar: "المعاملة" },
+  outcome: { en: "Outcome", ar: "النتيجة" },
   distanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
   distanceFromPrevious: { en: "Distance from previous", ar: "المسافة من السابق" },
   area: { en: "Area", ar: "المنطقة" },
@@ -895,6 +896,7 @@ export default function DailyVisitReportPage() {
                           <th>{t("userName")}</th>
                           <th>{t("customer")}</th>
                           <th>{t("transaction")}</th>
+                          <th>{t("outcome")}</th>
                           <th>{t("distanceFromCustomer")}</th>
                           <th>{t("distanceFromPrevious")}</th>
                           <th>{t("coordinates")}</th>
@@ -925,11 +927,6 @@ export default function DailyVisitReportPage() {
                             </td>
                             <td>
                               {entry.transactionLabel}
-                              {entryDisplayAmount(entry) > 0 ? (
-                                <div className="moduleCode">
-                                  {entryDisplayAmount(entry).toLocaleString("en-US", { maximumFractionDigits: 2 })} SAR
-                                </div>
-                              ) : null}
                               {entry.logoutAutoClosed ? (
                                 <div className="moduleCode">{t("autoClosed")}</div>
                               ) : null}
@@ -937,6 +934,7 @@ export default function DailyVisitReportPage() {
                                 <div className="moduleCode">{t("farBadge")}</div>
                               ) : null}
                             </td>
+                            <td>{formatVisitEntryOutcome(entry, language)}</td>
                             <td>
                               {!entry.hasEntryGps
                                 ? t("noEntryGps")
@@ -984,7 +982,7 @@ export default function DailyVisitReportPage() {
                         ))}
                         {(entryUser.entries || []).length === 0 && (
                           <tr>
-                            <td colSpan={13}>{t("noEntries")}</td>
+                            <td colSpan={16}>{t("noEntries")}</td>
                           </tr>
                         )}
                       </tbody>

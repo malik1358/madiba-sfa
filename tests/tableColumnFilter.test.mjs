@@ -27,7 +27,25 @@ test("stacked header sticky helper ignores tables without two header rows", () =
   assert.equal(syncStackedHeaderSticky(null), false);
 });
 
+function makeHeaderRow({ filterRow = false, height = 41.2 } = {}) {
+  return {
+    classList: {
+      contains(name) {
+        return filterRow && name === "moduleTableColumnFilterRow";
+      },
+    },
+    querySelectorAll() {
+      return [];
+    },
+    getBoundingClientRect() {
+      return { height };
+    },
+  };
+}
+
 test("stacked header sticky helper records the first header row height", () => {
+  const firstRow = makeHeaderRow();
+  const secondRow = makeHeaderRow({ height: 30 });
   const table = {
     classList: {
       added: [],
@@ -40,19 +58,39 @@ test("stacked header sticky helper records the first header row height", () => {
       setProperty(name, value) { this.values[name] = value; },
       removeProperty(name) { delete this.values[name]; },
     },
-    querySelector(selector) {
-      if (selector === ":scope > thead > tr") {
-        return { getBoundingClientRect: () => ({ height: 41.2 }) };
-      }
-      if (selector === ":scope > thead > tr:nth-child(2)") {
-        return {};
-      }
-      return null;
+    querySelectorAll(selector) {
+      if (selector === ":scope > thead > tr") return [firstRow, secondRow];
+      return [];
     },
   };
 
   assert.equal(syncStackedHeaderSticky(table), true);
   assert.deepEqual(table.classList.added, ["moduleStackedHeaderTable"]);
+  assert.equal(table.style.values["--module-stacked-header-row1"], "42px");
+});
+
+test("stacked header sticky helper treats an injected filter row as the second header", () => {
+  const firstRow = makeHeaderRow();
+  const filterRow = makeHeaderRow({ filterRow: true, height: 34 });
+  const table = {
+    classList: {
+      added: [],
+      removed: [],
+      add(name) { this.added.push(name); },
+      remove(name) { this.removed.push(name); },
+    },
+    style: {
+      values: {},
+      setProperty(name, value) { this.values[name] = value; },
+      removeProperty(name) { delete this.values[name]; },
+    },
+    querySelectorAll(selector) {
+      if (selector === ":scope > thead > tr") return [firstRow, filterRow];
+      return [];
+    },
+  };
+
+  assert.equal(syncStackedHeaderSticky(table), true);
   assert.equal(table.style.values["--module-stacked-header-row1"], "42px");
 });
 

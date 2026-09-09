@@ -4157,10 +4157,11 @@ table.auditMatrix td.auditTrendSame {
   display: block;
   width: 100%;
   margin-top: 6px;
-  min-width: 0;
+  min-width: 72px;
+  min-height: 30px;
   box-sizing: border-box;
   padding: 5px 7px;
-  border: 1px solid #b7c9cd;
+  border: 1px solid #8fb4bc;
   border-radius: 6px;
   background: #ffffff;
   color: #073f4c;
@@ -4173,6 +4174,19 @@ table.auditMatrix td.auditTrendSame {
 
 th:has(.moduleTableColumnFilterInput) {
   vertical-align: top;
+}
+
+.moduleTableColumnFilterRow th {
+  padding-top: 4px;
+  padding-bottom: 8px;
+  background: #f4fafb;
+  font-weight: 600;
+  text-transform: none;
+  vertical-align: top;
+}
+
+.moduleTableColumnFilterRow .moduleTableColumnFilterInput {
+  margin-top: 0;
 }
 
 .moduleTableWrap {
@@ -4209,6 +4223,15 @@ th:has(.moduleTableColumnFilterInput) {
   font-weight: 800;
   text-transform: uppercase;
   vertical-align: top;
+}
+
+.moduleTable thead tr.moduleTableColumnFilterRow th {
+  background: #f4fafb;
+  font-weight: 600;
+  text-transform: none;
+  vertical-align: top;
+  padding-top: 4px;
+  padding-bottom: 8px;
 }
 
 .moduleStackedHeaderTable {

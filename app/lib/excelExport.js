@@ -47,6 +47,7 @@ function isGenericColumnFilterInput(element) {
 export function isExcelFilterHeaderRow(row) {
   if (!row) return false;
   if (row.classList?.contains?.("moduleCollectorFilterRow")) return true;
+  if (row.classList?.contains?.("moduleTableColumnFilterRow")) return true;
   const controls = typeof row.querySelectorAll === "function"
     ? [...row.querySelectorAll("input, select")]
     : [];

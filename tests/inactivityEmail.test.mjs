@@ -256,6 +256,26 @@ test("buildDailyVisitReportPageUrl points at that salesman and date", () => {
     resolveAppOrigin({ VERCEL_URL: "madiba-sfa-staging.vercel.app" }),
     "https://madiba-sfa-staging.vercel.app",
   );
+  assert.equal(
+    resolveAppOrigin({
+      VERCEL_URL: "madiba-orgalroyz-maliks-projects-c6b39514.vercel.app",
+    }),
+    "https://madiba-sfa.vercel.app",
+  );
+  assert.equal(
+    resolveAppOrigin({
+      VERCEL_URL: "madiba-orgalroyz-maliks-projects-c6b39514.vercel.app",
+      VERCEL_PROJECT_PRODUCTION_URL: "madiba-sfa.vercel.app",
+    }),
+    "https://madiba-sfa.vercel.app",
+  );
+  assert.equal(
+    resolveAppOrigin({
+      NEXT_PUBLIC_APP_ENV: "staging",
+      VERCEL_URL: "madiba-abc123xy-maliks-projects-c6b39514.vercel.app",
+    }),
+    "https://madiba-sfa-staging.vercel.app",
+  );
 });
 
 test("inactivityEmailReferenceKey is unique per idle stretch and 40-minute slot", () => {

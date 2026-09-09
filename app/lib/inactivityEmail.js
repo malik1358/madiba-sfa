@@ -7,20 +7,43 @@ export const INACTIVITY_EMAIL_TYPE = "inactivity_email";
 export const LATE_LOGIN_EMAIL_TYPE = "late_login_email";
 export const INACTIVITY_EMAIL_MINUTES = Math.round(INACTIVITY_EMAIL_MS / 60000);
 export const DEFAULT_APP_ORIGIN = "https://madiba-sfa.vercel.app";
+export const STAGING_APP_ORIGIN = "https://madiba-sfa-staging.vercel.app";
+
+function normalizeOrigin(value) {
+  const raw = String(value || "").trim().replace(/\/+$/, "");
+  if (!raw) return "";
+  return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+}
+
+export function isStableAppOrigin(value) {
+  const host = normalizeOrigin(value).replace(/^https?:\/\//i, "").split("/")[0].toLowerCase();
+  if (!host) return false;
+  // Unique Vercel deployment hosts, e.g. madiba-orgalroyz-maliks-projects-c6b39514.vercel.app
+  if (/-projects-[a-z0-9]+\.vercel\.app$/i.test(host)) return false;
+  if (host.includes("-git-") && host.endsWith(".vercel.app")) return false;
+  return true;
+}
 
 export function resolveAppOrigin(env = process.env) {
-  const configured = String(
+  const configured = normalizeOrigin(
     env.APP_ORIGIN || env.NEXT_PUBLIC_APP_ORIGIN || env.NEXT_PUBLIC_APP_URL || "",
-  )
-    .trim()
-    .replace(/\/+$/, "");
-  if (configured) {
-    return /^https?:\/\//i.test(configured) ? configured : `https://${configured}`;
+  );
+  if (configured && isStableAppOrigin(configured)) {
+    return configured;
   }
 
-  const vercel = String(env.VERCEL_URL || "").trim().replace(/\/+$/, "");
-  if (vercel) {
-    return /^https?:\/\//i.test(vercel) ? vercel : `https://${vercel}`;
+  const productionAlias = normalizeOrigin(env.VERCEL_PROJECT_PRODUCTION_URL || "");
+  if (productionAlias && isStableAppOrigin(productionAlias)) {
+    return productionAlias;
+  }
+
+  const vercel = normalizeOrigin(env.VERCEL_URL || "");
+  if (vercel && isStableAppOrigin(vercel)) {
+    return vercel;
+  }
+
+  if (String(env.NEXT_PUBLIC_APP_ENV || "").trim().toLowerCase() === "staging") {
+    return STAGING_APP_ORIGIN;
   }
 
   return DEFAULT_APP_ORIGIN;

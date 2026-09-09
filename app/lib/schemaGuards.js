@@ -13,7 +13,7 @@ export function isMissingRelationError(error) {
 }
 
 export async function detectTable(supabase, tableName) {
-  const { error } = await supabase.from(tableName).select("*").limit(1);
+  const { error } = await supabase.from(tableName).select("*", { head: true, count: "exact" }).limit(1);
 
   if (!error) {
     return {

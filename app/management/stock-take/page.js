@@ -11,7 +11,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
-import { formatStockQty, previewConvertedQty, STOCK_TAKE_UOM, uomLabel, warehouseKey } from "../../lib/stockTake";
+import { availableStockTakeUnits, focusStockTakeAfterLookup, formatStockQty, previewConvertedQty, uomLabel, warehouseKey } from "../../lib/stockTake";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { formatKsaDateOnly, formatKsaTime } from "../../lib/workdayActivity";
 
@@ -201,14 +201,46 @@ export default function StockTakePage() {
       setItem(payload.item);
       setLookupMode(payload.lookupMode || "");
       setItemCodeInput(payload.item.item_code || itemCodeValue);
-      setScannedUom(payload.scannedUom || "");
-      setUnitLocked(Boolean(payload.unitLocked));
-      return payload;
+      const units = availableStockTakeUnits(payload.item);
+      const locked = Boolean(payload.unitLocked);
+      const nextUom = locked
+        ? (payload.scannedUom || "")
+        : (units.length === 1 ? units[0].kind : (payload.scannedUom || ""));
+      setScannedUom(nextUom);
+      setUnitLocked(locked);
+      return { ...payload, scannedUom: nextUom, unitCount: units.length };
     } catch (err) {
       clearLookup();
       setError(err.message || "Item not found.");
       return null;
     }
+  }
+
+  function openUnitPicker() {
+    const unitEl = document.getElementById("stock-take-unit");
+    if (!unitEl) return;
+    unitEl.focus();
+    if (typeof unitEl.showPicker === "function") {
+      try {
+        unitEl.showPicker();
+      } catch {
+        // Native picker can throw when the call is not tied to a user gesture.
+      }
+    }
+  }
+
+  function advanceAfterLookup(payload) {
+    if (!payload) return;
+    const units = availableStockTakeUnits(payload.item);
+    const target = focusStockTakeAfterLookup({
+      lookupMode: payload.lookupMode,
+      unitLocked: payload.unitLocked,
+      unitCount: units.length,
+    });
+    window.setTimeout(() => {
+      if (target === "qty") document.getElementById("stock-take-qty")?.focus();
+      else openUnitPicker();
+    }, 0);
   }
 
   async function saveLine(event) {
@@ -485,13 +517,21 @@ export default function StockTakePage() {
                         setItemCodeInput("");
                         clearLookup();
                       }}
-                      onBlur={() => lookup({ nextBarcode: barcode })}
+                      onBlur={(event) => {
+                        if (!barcode.trim()) return;
+                        const next = event.relatedTarget;
+                        lookup({ nextBarcode: barcode }).then((found) => {
+                          if (!found) return;
+                          if (next === itemCodeRef.current) return;
+                          if (next?.id === "stock-take-qty" || next?.id === "stock-take-unit") return;
+                          advanceAfterLookup(found);
+                        });
+                      }}
                       onKeyDown={async (event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
                           const found = await lookup({ nextBarcode: barcode });
-                          if (found?.unitLocked) document.getElementById("stock-take-qty")?.focus();
-                          else if (found) document.getElementById("stock-take-unit")?.focus();
+                          advanceAfterLookup(found);
                         }
                       }}
                     />
@@ -509,14 +549,20 @@ export default function StockTakePage() {
                         setBarcode("");
                         clearLookup();
                       }}
-                      onBlur={() => {
-                        if (!barcode.trim()) lookup({ nextItemCode: itemCodeInput });
+                      onBlur={(event) => {
+                        if (barcode.trim()) return;
+                        const next = event.relatedTarget;
+                        lookup({ nextItemCode: itemCodeInput }).then((found) => {
+                          if (!found) return;
+                          if (next?.id === "stock-take-qty" || next?.id === "stock-take-unit") return;
+                          advanceAfterLookup(found);
+                        });
                       }}
                       onKeyDown={async (event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
                           const found = await lookup({ nextItemCode: itemCodeInput });
-                          if (found) document.getElementById("stock-take-unit")?.focus();
+                          advanceAfterLookup(found);
                         }
                       }}
                     />
@@ -535,13 +581,16 @@ export default function StockTakePage() {
                         className="moduleInput"
                         required={Boolean(item)}
                         value={scannedUom}
-                        onChange={(event) => setScannedUom(event.target.value)}
+                        onChange={(event) => {
+                          setScannedUom(event.target.value);
+                          if (event.target.value) document.getElementById("stock-take-qty")?.focus();
+                        }}
                         disabled={!item}
                       >
                         <option value="">Select unit</option>
-                        <option value={STOCK_TAKE_UOM.BASE}>{item?.base_uom || "Base"}</option>
-                        <option value={STOCK_TAKE_UOM.MID}>{item?.mid_uom || "MID"}</option>
-                        <option value={STOCK_TAKE_UOM.MASTER}>{item?.master_uom || "Master"}</option>
+                        {availableStockTakeUnits(item).map((unit) => (
+                          <option key={unit.kind} value={unit.kind}>{unit.label}</option>
+                        ))}
                       </select>
                     )}
                   </label>

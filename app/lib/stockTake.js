@@ -74,6 +74,24 @@ export function uomLabel(item, kind) {
   return String(item?.base_uom || "BASE").trim() || "BASE";
 }
 
+export function availableStockTakeUnits(item) {
+  if (!item) return [];
+  const units = [{ kind: STOCK_TAKE_UOM.BASE, label: uomLabel(item, STOCK_TAKE_UOM.BASE) }];
+  if (parsePackSize(item.mid_uom_pack_size) > 0) {
+    units.push({ kind: STOCK_TAKE_UOM.MID, label: uomLabel(item, STOCK_TAKE_UOM.MID) });
+  }
+  if (parsePackSize(item.base_uom_pack_size) > 0) {
+    units.push({ kind: STOCK_TAKE_UOM.MASTER, label: uomLabel(item, STOCK_TAKE_UOM.MASTER) });
+  }
+  return units;
+}
+
+export function focusStockTakeAfterLookup({ lookupMode, unitLocked, unitCount }) {
+  if (lookupMode === "barcode" || unitLocked) return "qty";
+  if (Number(unitCount) <= 1) return "qty";
+  return "unit";
+}
+
 export function convertEnteredQtyToUnits({ qtyEntered, scannedUom, baseUomPackSize, midUomPackSize }) {
   const qty = parseQtyEntered(qtyEntered);
   const masterSize = parsePackSize(baseUomPackSize);

@@ -22,13 +22,20 @@ import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess";
 import { detectTable } from "../../lib/schemaGuards";
 import { looksLikeCustomerCodeSearch } from "../../lib/customerMasterQuery";
+import { isProspectCustomerCode } from "../../lib/customerCode";
 import { loadOpenProspectCustomers } from "../../lib/openProspectCustomers";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { resolveVisitLastInvoiceDate } from "../../lib/outstanding";
 import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
-import { promptCustomerMobileUpdateIfMissing } from "../../lib/customerContact";
+import {
+  CUSTOMER_MOBILE_REQUIRED_ERROR,
+  customerHasMobile,
+  normalizeKsaMobile,
+  updateCustomerMobile,
+} from "../../lib/customerContact";
 import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
+import { slimVisitStockChecks } from "../../lib/visitReportSave";
 import { buildGpsActivityNote, formatCollectorDisplayName, resolveGpsCapturePlatform } from "../../lib/geo";
 import {
   isMorningAttendanceRequiredForRole,
@@ -53,8 +60,6 @@ import {
   validateNextVisitDate,
 } from "../../lib/nextVisitDate";
 import { formatKsaDateTime, formatKsaTime } from "../../lib/workdayActivity";
-
-const CUSTOMER_HISTORY_API = "/api/customer-history";
 
 const PAGE_TEXT = {
   title: { en: "My Day", ar: "يومي" },
@@ -155,6 +160,11 @@ const PAGE_TEXT = {
   loadingItems: { en: "Loading bought items...", ar: "جاري تحميل الأصناف المشتراة..." },
   noBoughtItems: { en: "No bought items found for this customer.", ar: "لا توجد أصناف مشتراة لهذا العميل." },
   saveVisitReport: { en: "Save Visit Report", ar: "حفظ تقرير الزيارة" },
+  customerMobile: { en: "Customer mobile", ar: "جوال العميل" },
+  customerMobileRequired: {
+    en: "Enter a KSA mobile (05xxxxxxxx) for this customer before saving the visit.",
+    ar: "أدخل رقم جوال سعودي (05xxxxxxxx) لهذا العميل قبل حفظ الزيارة.",
+  },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
   paymentFollowup: { en: "Payment follow-up", ar: "متابعة دفع" },
   comeBackLater: { en: "Asked to come back later", ar: "طلب العودة لاحقاً" },
@@ -381,6 +391,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     outcome: "PAYMENT_FOLLOWUP",
     nextVisitAt: "",
     note: "",
+    customerMobile: "",
     stockChecks: [],
   });
   useUnsavedEntryGuard(Boolean(activeVisitCustomerCode));
@@ -857,6 +868,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
             salesman_name: salesmanNameByCode.get(salesmanCode) || salesmanCode,
             last_invoice_date: row.latest_transaction_date || null,
             latest_transaction_date: row.latest_transaction_date || null,
+            mobile: row.mobile || "",
             last_visit_date: latestVisitByCustomer.get(customerCode) || null,
             days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(customerCode) || null),
             next_visit_at: nextVisitByCustomer.get(customerCode) || null,
@@ -977,6 +989,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
         entryLocation: location,
         accessToken,
         language,
+        customer,
+        skipReverseGeocode: true,
       });
     } catch (locationError) {
       console.warn("Customer location update skipped", locationError);
@@ -1094,6 +1108,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
         outcome: "PAYMENT_FOLLOWUP",
         nextVisitAt: "",
         note: "",
+        customerMobile: "",
         stockChecks: [],
       });
       return;
@@ -1104,6 +1119,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       outcome: "PAYMENT_FOLLOWUP",
       nextVisitAt: nextVisitDateInputValue(customer?.next_visit_at),
       note: "",
+      customerMobile: customer?.mobile || "",
       stockChecks: [],
     });
 
@@ -1113,16 +1129,12 @@ export default function MyDayPage({ mode = "default" } = {}) {
         throw new Error("Supabase is not configured.");
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const accessToken = session?.access_token || "";
-
       let itemsQuery = supabase
         .from("active_sales")
         .select("item_code,item_name,transaction_date,salesman_code")
         .eq("customer_code", customer.customer_code)
-          .order("transaction_date", { ascending: false });
+        .order("transaction_date", { ascending: false })
+        .limit(400);
 
       if (!accessScope?.hasAllAccess) {
         itemsQuery = itemsQuery.in("salesman_code", accessScope?.visibleSalesmanCodes || []);
@@ -1161,31 +1173,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
         }
       }
 
-      if (uniqueItems.length === 0 && accessToken) {
-        const response = await fetch(
-          `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(customer.customer_code)}&customerName=${encodeURIComponent(customer.customer_name || "")}`,
-          {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          }
-        );
-
-        if (response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          uniqueItems = buildUniqueStockChecks(Array.isArray(payload.transactions) ? payload.transactions : []);
-        } else {
-          const payload = await response.json().catch(() => ({}));
-          const message = String(payload?.error || "").trim();
-          if (message) {
-            setError(message);
-          }
-        }
-      }
-
       setVisitForm((current) => ({
         ...current,
-        stockChecks: uniqueItems,
+        stockChecks: uniqueItems.slice(0, 80),
       }));
     } catch (err) {
       setError(err.message || "Unable to load bought items for this customer.");
@@ -1226,6 +1216,13 @@ export default function MyDayPage({ mode = "default" } = {}) {
       return;
     }
 
+    const enteredMobile = visitForm.customerMobile || customer?.mobile || "";
+    const requiresMobile = !isProspectCustomerCode(customer?.customer_code) && !customer?.is_prospect;
+    if (requiresMobile && !customerHasMobile({ mobile: enteredMobile })) {
+      setError(t("customerMobileRequired"));
+      return;
+    }
+
     setVisitSaving(true);
     setError("");
     setMessage("");
@@ -1239,31 +1236,27 @@ export default function MyDayPage({ mode = "default" } = {}) {
         throw new Error("Please login again.");
       }
 
+      if (requiresMobile && !customerHasMobile(customer) && session.access_token) {
+        await updateCustomerMobile(session.access_token, customer.customer_code, normalizeKsaMobile(enteredMobile));
+        customer.mobile = normalizeKsaMobile(enteredMobile);
+      }
+
       const location = await captureLocation();
       await promptCustomerGpsIfFar(customer, location, session.access_token);
-      await promptCustomerMobileUpdateIfMissing({
-        language,
-        customer,
-        customerCode: customer.customer_code,
-        customerName: customer.customer_name,
-        accessToken: session.access_token,
-      });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
-      let saveResult = null;
+      const stockChecks = slimVisitStockChecks(visitForm.stockChecks);
 
-      // Always go through /api/visit-reports so past next-visit dates are blocked
-      // for Visit Without Order even when activity-log mode is enabled.
-      saveResult = await postJsonResilient({
+      const saveResult = await postJsonResilient({
         url: "/api/visit-reports",
-        queueFirst: true,
+        timeoutMs: 20000,
         jsonBody: {
           customerCode: customer.customer_code,
           customerName: customer.customer_name,
           outcome: visitForm.outcome,
           nextVisitAt: visitForm.nextVisitAt || null,
           note: visitForm.note || null,
-          stockChecks: visitForm.stockChecks,
+          stockChecks,
           capturedAt,
           location,
           platform,
@@ -1285,33 +1278,13 @@ export default function MyDayPage({ mode = "default" } = {}) {
         throw new Error(apiError || "Unable to save visit report.");
       }
 
-      if (logsEnabled) {
-        const payload = {
-          user_id: session.user.id,
-          entry_type: "VISIT_REPORT",
-          note: buildGpsActivityNote("VISIT_REPORT", location, {
-            customer_code: customer.customer_code,
-            customer_name: customer.customer_name,
-            outcome: visitForm.outcome,
-            next_visit_at: visitForm.nextVisitAt || null,
-            note: visitForm.note || null,
-            stock_checks: visitForm.stockChecks,
-            captured_at: capturedAt,
-            platform,
-          }),
-        };
-
-        const { error: insertError } = await supabase.from("daily_activity_logs").insert(payload);
-        if (insertError) throw insertError;
-
-        queueTransactionAlert(session.access_token, {
-          transactionType: "VISIT_REPORT",
-          referenceKey: `visit:${customer.customer_code}:${capturedAt}`,
-          customerCode: customer.customer_code,
-          customerName: customer.customer_name,
-          outcome: visitForm.outcome,
-        });
-      }
+      queueTransactionAlert(session.access_token, {
+        transactionType: "VISIT_REPORT",
+        referenceKey: `visit:${customer.customer_code}:${capturedAt}`,
+        customerCode: customer.customer_code,
+        customerName: customer.customer_name,
+        outcome: visitForm.outcome,
+      });
 
       requestLoginFirstCustomerHintCheck();
 
@@ -1323,13 +1296,14 @@ export default function MyDayPage({ mode = "default" } = {}) {
         language,
       });
 
-      await copyTextToClipboard(summaryText);
+      void copyTextToClipboard(summaryText);
 
       setVisitStatusRows((current) =>
         current.map((row) => {
           if (row.customer_code !== customer.customer_code) return row;
           return {
             ...row,
+            mobile: customer.mobile || row.mobile || "",
             last_visit_date: capturedAt,
             days_since_last_visit: 0,
             status: "Visited",
@@ -1342,13 +1316,18 @@ export default function MyDayPage({ mode = "default" } = {}) {
         outcome: "PAYMENT_FOLLOWUP",
         nextVisitAt: "",
         note: "",
+        customerMobile: "",
         stockChecks: [],
       });
 
       openWhatsappDirect(summaryText);
     } catch (err) {
       const message = String(err?.message || "Unable to save visit report.");
-      setError(message.toLowerCase().includes("past") ? t("nextVisitPast") : message);
+      if (message === CUSTOMER_MOBILE_REQUIRED_ERROR || message.toLowerCase().includes("05xxxxxxxx")) {
+        setError(t("customerMobileRequired"));
+      } else {
+        setError(message.toLowerCase().includes("past") ? t("nextVisitPast") : message);
+      }
     } finally {
       setVisitSaving(false);
     }
@@ -1889,6 +1868,19 @@ export default function MyDayPage({ mode = "default" } = {}) {
               }}
             />
           </label>
+          {!customerHasMobile(row) && !row.is_prospect && !isProspectCustomerCode(row.customer_code) ? (
+            <label>
+              {t("customerMobile")} *
+              <input
+                className="moduleInput"
+                type="tel"
+                inputMode="numeric"
+                placeholder="05xxxxxxxx"
+                value={visitForm.customerMobile}
+                onChange={(event) => setVisitForm((current) => ({ ...current, customerMobile: event.target.value }))}
+              />
+            </label>
+          ) : null}
           <label className="moduleFieldFull">
             {t("visitNotes")}
             <textarea className="moduleTextArea" rows={3} value={visitForm.note} onChange={(event) => setVisitForm((current) => ({ ...current, note: event.target.value }))} />

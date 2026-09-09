@@ -29,11 +29,26 @@ test("customerHasSavedLocation requires both coordinates", () => {
   assert.equal(CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM, 0.5);
 });
 
-test("customerHasArea requires a non-empty area value", async () => {
-  const { customerHasArea } = await import("../app/lib/customerLocation.js");
-  assert.equal(customerHasArea({ area: "Al Olaya" }), true);
-  assert.equal(customerHasArea({ area: "  " }), false);
-  assert.equal(customerHasArea({}), false);
+test("evaluateCustomerLocationUpdatePrompt uses the supplied customer and skips network", async () => {
+  const { evaluateCustomerLocationUpdatePrompt } = await import("../app/lib/customerLocation.js");
+  const nearby = {
+    customer_code: "1234",
+    customer_name: "Nearby Shop",
+    latitude: 24.7136,
+    longitude: 46.6753,
+    area: "Olaya",
+  };
+
+  const prompt = await evaluateCustomerLocationUpdatePrompt({
+    customerCode: "1234",
+    customerName: "Nearby Shop",
+    entryLocation: { latitude: 24.7137, longitude: 46.6754 },
+    accessToken: "token",
+    customer: nearby,
+    skipReverseGeocode: true,
+  });
+
+  assert.equal(prompt, null);
 });
 
 test("withSalesScopeMatchers lets a team lead match subordinate customer assignments", async () => {

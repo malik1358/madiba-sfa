@@ -144,7 +144,12 @@ export async function copyTextToClipboard(text) {
 
   try {
     if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
+      await Promise.race([
+        navigator.clipboard.writeText(value),
+        new Promise((_, reject) => {
+          window.setTimeout(() => reject(new Error("clipboard timeout")), 1500);
+        }),
+      ]);
       return true;
     }
   } catch {

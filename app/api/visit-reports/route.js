@@ -5,6 +5,7 @@ import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
+import { slimVisitStockChecks } from "../../lib/visitReportSave.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 
 export const runtime = "nodejs";
@@ -205,25 +206,51 @@ export async function POST(request) {
 
     const nextVisitAt = validateNextVisitDate(body?.nextVisitAt, { required: true });
 
+    const stockChecks = slimVisitStockChecks(body?.stockChecks);
     const value = {
       customer_code: customerCode,
       customer_name: String(body?.customerName || "").trim(),
       outcome: String(body?.outcome || "").trim(),
       next_visit_at: nextVisitAt,
       note: body?.note ? String(body.note) : null,
-      stock_checks: Array.isArray(body?.stockChecks)
-        ? body.stockChecks.map((item) => ({
-            itemCode: String(item?.itemCode || "").trim(),
-            itemName: String(item?.itemName || "").trim(),
-            status: String(item?.status || "").trim(),
-          }))
-        : [],
+      stock_checks: stockChecks,
       captured_at: body?.capturedAt ? String(body.capturedAt) : new Date().toISOString(),
       location: body?.location || null,
       saved_by_user_id: scope.userId,
       saved_at: new Date().toISOString(),
       source: "system_settings_fallback",
     };
+
+    const activityNote = buildGpsActivityNote("VISIT_REPORT", Number.isFinite(visitLatitude) && Number.isFinite(visitLongitude)
+      ? {
+        latitude: visitLatitude,
+        longitude: visitLongitude,
+        accuracy: Number(visitLocation.accuracy) || null,
+      }
+      : value.location,
+    {
+      customer_code: customerCode,
+      customer_name: value.customer_name,
+      outcome: value.outcome,
+      next_visit_at: nextVisitAt,
+      note: value.note,
+      stock_checks: stockChecks,
+      captured_at: value.captured_at,
+      platform: normalizeGpsCapturePlatform(body?.platform),
+    });
+
+    const { error: visitLogError } = await admin.from("daily_activity_logs").insert({
+      user_id: scope.userId,
+      entry_type: "VISIT_REPORT",
+      note: activityNote,
+    });
+
+    if (visitLogError) {
+      const message = String(visitLogError.message || "").toLowerCase();
+      if (!message.includes("does not exist") && visitLogError.code !== "42P01") {
+        throw visitLogError;
+      }
+    }
 
     const { error: upsertLatestError } = await admin
       .from("system_settings")
@@ -260,7 +287,7 @@ export async function POST(request) {
       },
     });
 
-    return NextResponse.json({ success: true, customerCode, value });
+    return NextResponse.json({ success: true, customerCode, value, logged: !visitLogError });
   } catch (error) {
     const message = error.message || "Unable to save visit report.";
     const status = /access|session|customer not found/i.test(message)

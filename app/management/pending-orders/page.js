@@ -663,7 +663,7 @@ export default function PendingOrdersPage() {
         "Invoice Status": invoiceStatusText(invoiceMetaByOrder?.[order.id]),
         "Invoice Uploaded At": formatDateTime(invoiceMetaByOrder?.[order.id]?.invoiceUploadedAt),
         "Invoice Build Time": formatDuration(invoiceMetaByOrder?.[order.id]?.invoiceBuildSeconds),
-        Created: formatDateTime(order.created_at),
+        "Order created": formatDateTime(order.created_at),
         "Last Updated": formatDateTime(order.updated_at),
         "Age (days)": daysOld(order.updated_at || order.created_at),
       }));
@@ -845,7 +845,7 @@ export default function PendingOrdersPage() {
                     <th>Invoice Status</th>
                     <th>Uploaded At</th>
                     <th>Time to Make</th>
-                    <th>Created</th>
+                    <th>Order created</th>
                     <th>Last Updated</th>
                     <th>Age (days)</th>
                     <th>Action</th>
@@ -923,7 +923,11 @@ export default function PendingOrdersPage() {
                               <div style={{ marginTop: "8px", marginBottom: "8px" }}>
                                 <div className="moduleSectionHeader">
                                   <h2>Order #{formatSalesOrderNumber(order) || order.id} Details</h2>
-                                  <span>{loadingLines ? "Loading..." : `${orderLines.length} line(s)`}</span>
+                                  <span>
+                                    {loadingLines
+                                      ? "Loading..."
+                                      : `${orderLines.length} line(s) | Created ${formatDateTime(order.created_at)}`}
+                                  </span>
                                 </div>
 
                                 <ExportableTable filename={`pending-order-lines-${order.id}`} sheetName="Order Lines" className="moduleTableWrap">
@@ -972,7 +976,8 @@ export default function PendingOrdersPage() {
                                 ) : null}
 
                                 <div className="moduleHint" style={{ marginTop: "10px" }}>
-                                  <strong>Invoice status:</strong> {invoiceStatusText(meta)}
+                                  <strong>Order created:</strong> {formatDateTime(order.created_at)}
+                                  <span> | <strong>Invoice status:</strong> {invoiceStatusText(meta)}</span>
                                   {meta?.invoiceFileUrl ? (
                                     <span> | <a href={meta.invoiceFileUrl} target="_blank" rel="noreferrer">View uploaded invoice</a></span>
                                   ) : null}

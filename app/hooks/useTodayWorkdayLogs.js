@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { WORKDAY_TIMES_UPDATED_EVENT } from "../lib/morningAttendance";
+import { WORKDAY_TIMES_UPDATED_EVENT, writeGateReadyState } from "../lib/morningAttendance";
 import { getSupabaseClient } from "../lib/supabase";
 import {
   extractLunchTimes,
@@ -60,6 +60,7 @@ export function useTodayWorkdayLogs() {
       const loginLog = rows.find((row) => row.entry_type === "MORNING_ATTENDANCE");
       const { lunchOutAt: lunchOut, lunchInAt: lunchIn } = extractLunchTimes(rows);
 
+      if (loginLog) writeGateReadyState(userId, true);
       setLoginAt(loginLog ? logEventIso(loginLog) : null);
       setLunchOutAt(lunchOut);
       setLunchInAt(lunchIn);

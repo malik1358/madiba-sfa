@@ -1,6 +1,6 @@
 import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import { loadPricePayload } from "./pricePayload.js";
-import { fetchAndHydrateMobileSnapshot } from "./mobileDataCache.js";
+import { fetchAndHydrateMobileSnapshot, invalidateOutstandingCache } from "./mobileDataCache.js";
 import {
   finishDataRefreshJob,
   markDataRefreshStep,
@@ -78,6 +78,9 @@ export async function refreshOfflineDeviceData(detail = {}) {
 
     try {
       if (needsSnapshot) {
+        if (kinds.length === 0 || kinds.includes("outstanding")) {
+          await invalidateOutstandingCache();
+        }
         await fetchAndHydrateMobileSnapshot({ manageJob: false });
       }
 

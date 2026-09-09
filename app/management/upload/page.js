@@ -9,6 +9,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
+import { invalidateOutstandingCache } from "../../lib/mobileDataCache";
 
 const TEXT = {
   title: { en: "Upload Sales Data", ar: "رفع بيانات المبيعات" },
@@ -231,6 +232,7 @@ export default function UploadSalesPage() {
       }
 
       setOutstandingResult(data);
+      await invalidateOutstandingCache();
       await loadLastUploadInfo();
     } catch (err) {
       setOutstandingError(err.message || "Outstanding upload failed.");

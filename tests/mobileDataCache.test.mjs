@@ -30,10 +30,33 @@ test("shouldUseLocalCacheOnly prefers saved data even when online", () => {
   assert.equal(shouldUseLocalCacheOnly(null), false);
 });
 
+test("outstanding cache is dropped after an outstanding upload refresh", async () => {
+  const source = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")
+  ));
+  const uploadSource = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/management/upload/page.js", import.meta.url), "utf8")
+  ));
+  const refreshSource = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/lib/offlineDataRefresh.js", import.meta.url), "utf8")
+  ));
+  assert.match(source, /export async function invalidateOutstandingCache/);
+  assert.match(uploadSource, /await invalidateOutstandingCache\(\)/);
+  assert.match(refreshSource, /await invalidateOutstandingCache\(\)/);
+});
+
 test("collection queue cache key version is v5 so empty v4 caches are discarded", async () => {
   const source = await import("node:fs").then((fs) => (
     fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")
   ));
   assert.match(source, /collectionQueues:v5:/);
   assert.doesNotMatch(source, /collectionQueues:v4:/);
+});
+
+test("outstanding cache key version is v2 so stale v1 customer rows are ignored", async () => {
+  const source = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")
+  ));
+  assert.match(source, /outstanding:v2:/);
+  assert.doesNotMatch(source, /outstanding:v1:/);
 });

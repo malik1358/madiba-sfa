@@ -1,4 +1,10 @@
-import { fetchWithLocalCache, fetchWithLocalCacheResilient, readCacheEntry, writeCacheEntry } from "./localDataStore.js";
+import {
+  fetchWithLocalCache,
+  fetchWithLocalCacheResilient,
+  readCacheEntry,
+  removeCacheEntriesByPrefix,
+  writeCacheEntry,
+} from "./localDataStore.js";
 import {
   finishDataRefreshJob,
   markDataRefreshStep,
@@ -51,8 +57,57 @@ function itemsMasterCacheKey() {
   return "items:master:v1";
 }
 
+export const OUTSTANDING_CACHE_PREFIX = "outstanding:v2:";
+export const OUTSTANDING_CACHE_CLEARED_EVENT = "madiba-outstanding-cache-cleared";
+const OUTSTANDING_CACHE_CHANNEL = "madiba-outstanding-cache";
+
 function outstandingCacheKey(customerCode, customerName) {
-  return `outstanding:v1:${String(customerCode || "").trim().toUpperCase()}:${String(customerName || "").trim().toUpperCase()}`;
+  return `${OUTSTANDING_CACHE_PREFIX}${String(customerCode || "").trim().toUpperCase()}:${String(customerName || "").trim().toUpperCase()}`;
+}
+
+function notifyOutstandingCacheCleared() {
+  if (typeof window === "undefined") return;
+
+  window.dispatchEvent(new CustomEvent(OUTSTANDING_CACHE_CLEARED_EVENT));
+  try {
+    const channel = new BroadcastChannel(OUTSTANDING_CACHE_CHANNEL);
+    channel.postMessage({ type: "cleared" });
+    channel.close();
+  } catch {
+    // BroadcastChannel is optional; same-tab listeners still get the window event.
+  }
+}
+
+export async function invalidateOutstandingCache() {
+  const removed = await removeCacheEntriesByPrefix(OUTSTANDING_CACHE_PREFIX);
+  notifyOutstandingCacheCleared();
+  return removed;
+}
+
+export function subscribeOutstandingCacheCleared(handler) {
+  if (typeof window === "undefined" || typeof handler !== "function") {
+    return () => {};
+  }
+
+  const onEvent = () => handler();
+  window.addEventListener(OUTSTANDING_CACHE_CLEARED_EVENT, onEvent);
+
+  let channel = null;
+  try {
+    channel = new BroadcastChannel(OUTSTANDING_CACHE_CHANNEL);
+    channel.onmessage = onEvent;
+  } catch {
+    channel = null;
+  }
+
+  return () => {
+    window.removeEventListener(OUTSTANDING_CACHE_CLEARED_EVENT, onEvent);
+    try {
+      channel?.close();
+    } catch {
+      // Ignore channel close failures.
+    }
+  };
 }
 
 function collectionQueuesCacheKey(scope) {
@@ -177,6 +232,7 @@ async function fetchOutstandingNetwork(accessToken, customerCode, customerName) 
   const response = await fetch(
     `/api/outstanding?customerCode=${encodeURIComponent(customerCode || "")}&customerName=${encodeURIComponent(customerName || "")}`,
     {
+      cache: "no-store",
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -299,7 +355,10 @@ export async function fetchOutstandingCached(accessToken, customerCode, customer
     outstandingCacheKey(customerCode, customerName),
     CACHE_TTL.outstandingMs,
     () => fetchOutstandingNetwork(accessToken, customerCode, customerName),
-    { onUpdate: options.onUpdate },
+    {
+      onUpdate: options.onUpdate,
+      forceRefresh: Boolean(options.forceRefresh),
+    },
   );
 }
 

@@ -33,7 +33,7 @@ import {
   resolveOrderPricingRegion,
 } from "../../lib/regionalPricing";
 import { DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, resolveOverdueDaysFromDueDate, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
-import { fetchOutstandingCached } from "../../lib/mobileDataCache";
+import { fetchOutstandingCached, subscribeOutstandingCacheCleared } from "../../lib/mobileDataCache";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 
 import { shortDate } from "./lib/format";
@@ -89,6 +89,7 @@ function CustomerAuditPageContent() {
   const [priceSheetItems, setPriceSheetItems] = useState([]);
   const [requestedCustomerCode, setRequestedCustomerCode] = useState("");
   const [outstandingLoading, setOutstandingLoading] = useState(false);
+  const [outstandingRefreshToken, setOutstandingRefreshToken] = useState(0);
   const [outstandingInfo, setOutstandingInfo] = useState({
     uploadedAt: "",
     fileName: "",
@@ -207,6 +208,12 @@ function CustomerAuditPageContent() {
   );
 
   useEffect(() => {
+    return subscribeOutstandingCacheCleared(() => {
+      setOutstandingRefreshToken((value) => value + 1);
+    });
+  }, []);
+
+  useEffect(() => {
     async function loadOutstanding() {
       if (!selectedCustomer) {
         setOutstandingInfo({ uploadedAt: "", fileName: "", bucketLabels: [], customer: null, customerInvoices: [], needsInvoiceRowsReupload: false });
@@ -229,6 +236,7 @@ function CustomerAuditPageContent() {
           selectedCustomer.customer_code,
           selectedCustomer.customer_name,
           {
+            forceRefresh: outstandingRefreshToken > 0,
             onUpdate: (fresh) => {
               setOutstandingInfo({
                 uploadedAt: String(fresh.uploadedAt || ""),
@@ -260,7 +268,7 @@ function CustomerAuditPageContent() {
     }
 
     loadOutstanding();
-  }, [selectedCustomer, setError]);
+  }, [outstandingRefreshToken, selectedCustomer, setError]);
 
   const visibleOutstandingBuckets = useMemo(() => {
     const resolved = resolveOutstandingBucketLabels(

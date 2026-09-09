@@ -15,17 +15,17 @@ const fullAccess = {
   modules: {
     visitWithoutOrder: true,
     newOrder: true,
-    myCollections: true,
+    paymentCollections: true,
   },
 };
 
-test("salesman sees visit, new order, and my-collections links", () => {
+test("salesman sees visit, new order, and payment-collections links", () => {
   const actions = buildNearestCustomerActionLinks(customer, fullAccess);
 
   assert.deepEqual(actions.map((action) => action.key), ["visit", "order", "collection"]);
   assert.equal(actions[0].href, "/management/visit-without-order?customer_code=C100&customer_name=Al+Madina&salesman_code=S12");
   assert.equal(actions[1].href, "/management/new-order?customer_code=C100&customer_name=Al+Madina&salesman_code=S12");
-  assert.equal(actions[2].href, "/management/my-collections?customer=C100");
+  assert.equal(actions[2].href, "/management/payment-collections?customer=C100");
 });
 
 test("manager sees payment-collections instead of my-collections", () => {
@@ -34,6 +34,14 @@ test("manager sees payment-collections instead of my-collections", () => {
   });
 
   assert.equal(actions.at(-1).href, "/management/payment-collections?customer=C100");
+});
+
+test("legacy myCollections access still links to my-collections", () => {
+  const actions = buildNearestCustomerActionLinks(customer, {
+    canAccess: (key) => key === "myCollections",
+  });
+
+  assert.equal(actions.at(-1).href, "/management/my-collections?customer=C100");
 });
 
 test("skips modules the user cannot access", () => {
@@ -57,7 +65,7 @@ test("replaces visit link with onClick when a visit handler is provided", () => 
   assert.equal(actions[0].href, undefined);
   assert.equal(typeof actions[0].onClick, "function");
   assert.equal(actions[1].href, "/management/new-order?customer_code=C100&customer_name=Al+Madina&salesman_code=S12");
-  assert.equal(actions[2].href, "/management/my-collections?customer=C100");
+  assert.equal(actions[2].href, "/management/payment-collections?customer=C100");
 
   actions[0].onClick();
   assert.deepEqual(selected, ["C100"]);

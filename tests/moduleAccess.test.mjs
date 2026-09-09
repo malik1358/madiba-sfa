@@ -30,13 +30,16 @@ test("collector-only users only see collection modules", () => {
   assert.equal(access.canAccess("upload"), false);
 });
 
-test("salesmen see field modules but not admin tools", () => {
+test("salesmen see field modules and payment collections", () => {
   const access = buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" });
 
   assert.equal(access.canAccess("myDay"), true);
   assert.equal(access.canAccess("newOrder"), true);
   assert.equal(access.canAccess("visitWithoutOrder"), true);
-  assert.equal(access.canAccess("myCollections"), true);
+  assert.equal(access.canAccess("myCollections"), false);
+  assert.equal(access.canAccess("paymentCollections"), true);
+  assert.equal(access.canAccessPath("/management/my-collections"), true);
+  assert.equal(access.canAccessPath("/management/payment-collections"), true);
   assert.equal(access.canAccess("mySalesInvoices"), true);
   assert.equal(access.canAccess("dailyVisitReport"), true);
   assert.equal(access.canAccess("gpsMap"), false);
@@ -71,6 +74,14 @@ test("listAccessibleModules returns only allowed modules", () => {
   assert.deepEqual(
     modules.map((module) => module.moduleKey),
     ["upload", "gpsMap"],
+  );
+});
+
+test("salesmen can open payment collections but not the legacy myCollections module key", () => {
+  const access = buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" });
+  assert.deepEqual(
+    listAccessibleModules(access, ["myCollections", "paymentCollections"]).map((module) => module.moduleKey),
+    ["paymentCollections"],
   );
 });
 
@@ -142,13 +153,13 @@ test("admin shortcut buttons stay the same set on every page", () => {
   assert.equal(pathMatchesModuleHref("/management/customer-audit", "/"), false);
 });
 
-test("salesman shortcut buttons include field work not admin imports", () => {
+test("salesman shortcut buttons include payment collections", () => {
   const access = buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" });
   assert.deepEqual(pinnedModuleKeysForAccess(access), [
     "myDay",
     "customerAudit",
     "newOrder",
-    "myCollections",
+    "paymentCollections",
   ]);
 });
 

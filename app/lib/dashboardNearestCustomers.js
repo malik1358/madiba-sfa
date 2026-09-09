@@ -37,17 +37,14 @@ export function buildNearestCustomerActionLinks(customer, access, labels = {}) {
     });
   }
 
-  if (canAccessModule(access, "myCollections")) {
+  if (canAccessModule(access, "paymentCollections") || canAccessModule(access, "myCollections")) {
+    const collectionHref = canAccessModule(access, "paymentCollections")
+      ? `/management/payment-collections?customer=${encodeURIComponent(code)}`
+      : `/management/my-collections?customer=${encodeURIComponent(code)}`;
     actions.push({
       key: "collection",
       label: labels.collection || "Collection",
-      href: `/management/my-collections?customer=${encodeURIComponent(code)}`,
-    });
-  } else if (canAccessModule(access, "paymentCollections")) {
-    actions.push({
-      key: "collection",
-      label: labels.collection || "Collection",
-      href: `/management/payment-collections?customer=${encodeURIComponent(code)}`,
+      href: collectionHref,
     });
   }
 

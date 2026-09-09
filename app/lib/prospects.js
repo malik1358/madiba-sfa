@@ -152,42 +152,31 @@ export function prospectDisplayName(prospect) {
   ).trim();
 }
 
-export function prospectHasOrders(prospect) {
-  if (Number(prospect?.latest_order_id) > 0) return true;
-  if (Array.isArray(prospect?.orders) && prospect.orders.length > 0) return true;
-  if (Array.isArray(prospect?.order_numbers) && prospect.order_numbers.some(Boolean)) return true;
+export function isPlaceholderProspectName(name, customerCode) {
+  const current = String(name || "").trim();
+  if (!current) return true;
+
+  const code = String(customerCode || "").trim();
+  if (code && current.toUpperCase() === code.toUpperCase()) return true;
+
+  const prospectId = parseProspectIdFromCustomerCode(customerCode);
+  if (prospectId && new RegExp(`^prospect\\s*${prospectId}$`, "i").test(current)) return true;
+
   return false;
 }
 
-export function prospectIsConverted(prospect) {
-  return Boolean(String(prospect?.converted_customer_code || "").trim());
-}
+export async function findProspectById(admin, prospectId) {
+  const id = Number(prospectId);
+  if (!Number.isFinite(id) || id <= 0) return null;
 
-export function isOpenProspectForOrderScreens(prospect) {
-  return Boolean(prospect) && !prospectHasOrders(prospect) && !prospectIsConverted(prospect);
-}
+  const { data, error } = await admin
+    .from("prospects")
+    .select("id,salesman_code,company_name,shop_name,customer_name,remarks,status,offline_id")
+    .eq("id", id)
+    .maybeSingle();
 
-export function hiddenProspectCustomerCodes(prospects) {
-  const codes = new Set();
-  (prospects || []).forEach((prospect) => {
-    if (isOpenProspectForOrderScreens(prospect)) return;
-    prospectCustomerCodes(prospect).forEach((code) => codes.add(code));
-  });
-  return codes;
-}
-
-export function mergeUniqueCustomersByCode(...lists) {
-  const seen = new Set();
-  const merged = [];
-
-  lists.flat().forEach((customer) => {
-    const code = String(customer?.customer_code || "").trim().toUpperCase();
-    if (!code || seen.has(code)) return;
-    seen.add(code);
-    merged.push(customer);
-  });
-
-  return merged;
+  if (error) throw error;
+  return data || null;
 }
 
 export function formatProspectOrderLabel(order) {
@@ -224,6 +213,44 @@ export function mapProspectOrderNumbers(orders) {
   });
 
   return byCustomerCode;
+}
+
+export function prospectHasOrders(prospect) {
+  if (Number(prospect?.latest_order_id) > 0) return true;
+  if (Array.isArray(prospect?.orders) && prospect.orders.length > 0) return true;
+  if (Array.isArray(prospect?.order_numbers) && prospect.order_numbers.some(Boolean)) return true;
+  return false;
+}
+
+export function prospectIsConverted(prospect) {
+  return Boolean(String(prospect?.converted_customer_code || "").trim());
+}
+
+export function isOpenProspectForOrderScreens(prospect) {
+  return Boolean(prospect) && !prospectHasOrders(prospect) && !prospectIsConverted(prospect);
+}
+
+export function hiddenProspectCustomerCodes(prospects) {
+  const codes = new Set();
+  (prospects || []).forEach((prospect) => {
+    if (isOpenProspectForOrderScreens(prospect)) return;
+    prospectCustomerCodes(prospect).forEach((code) => codes.add(code));
+  });
+  return codes;
+}
+
+export function mergeUniqueCustomersByCode(...lists) {
+  const seen = new Set();
+  const merged = [];
+
+  lists.flat().forEach((customer) => {
+    const code = String(customer?.customer_code || "").trim().toUpperCase();
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    merged.push(customer);
+  });
+
+  return merged;
 }
 
 export function enrichProspectsWithOrders(prospects, orders) {

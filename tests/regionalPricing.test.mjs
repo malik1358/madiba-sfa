@@ -5,6 +5,7 @@ import {
   buildEffectivePriceList,
   formatAppliedDiscount,
   formatDiscountDetail,
+  formatPdfDiscountDetail,
   formatDiscountPercent,
   getPricedOrderLine,
   lookupDiscountRate,
@@ -116,6 +117,7 @@ test("A004190 credit line over 5000 applies value only; cash stacks both", () =>
   assert.equal(Number(totals.amountExclVat.toFixed(2)), Number(credit.lineValue.toFixed(2)));
   assert.equal(Number(totals.vatAmount.toFixed(2)), Number((credit.lineValue * 0.15).toFixed(2)));
   assert.equal(formatDiscountDetail(0.04, true, 262.16), "4% applied · 262.16");
+  assert.equal(formatPdfDiscountDetail(0.03, true, 41.4), "3%\n41.40");
   assert.equal(formatDiscountDetail(0.03, false, 0), "—");
   assert.equal(formatDiscountDetail(0.02, false, 0), "—");
   assert.equal(cash.applied.value, true);

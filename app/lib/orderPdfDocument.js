@@ -12,7 +12,7 @@ import {
   DEFAULT_PAYMENT_TYPE,
   DEFAULT_PRICING_REGION,
   VAT_RATE,
-  formatDiscountDetail,
+  formatPdfDiscountDetail,
   formatMoneyAmount,
   getPricedOrderLine,
   lookupDiscountRate,
@@ -27,7 +27,11 @@ import { loadPricePayload } from "./pricePayload.js";
 import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import { formatSalesOrderNumber, salesOrderNumberNeedsLiveLookup } from "./salesOrderNumber.js";
 import { isQueuedPendingOrderId } from "./queuedSalesOrders.js";
-import { parseOfflineProspectIdFromCustomerCode } from "./prospects.js";
+import {
+  isPlaceholderProspectName,
+  parseOfflineProspectIdFromCustomerCode,
+  parseProspectIdFromCustomerCode,
+} from "./prospects.js";
 import { formatKsaDateTime } from "./workdayActivity.js";
 
 export const ORDER_PDF_OUTSTANDING_API = "/api/outstanding";
@@ -267,16 +271,27 @@ export async function enrichOrderPdfLiveData(snapshot, {
     }
 
     try {
-      const offlineId = parseOfflineProspectIdFromCustomerCode(next.customerCode || snapshot?.customerCode);
-      if (offlineId) {
-        const prospectResponse = await fetch(`${prospectsApi}?offlineId=${encodeURIComponent(offlineId)}`, {
+      const customerCode = next.customerCode || snapshot?.customerCode;
+      const offlineId = parseOfflineProspectIdFromCustomerCode(customerCode);
+      const prospectId = parseProspectIdFromCustomerCode(customerCode);
+      const prospectQuery = offlineId
+        ? `offlineId=${encodeURIComponent(offlineId)}`
+        : (prospectId ? `id=${encodeURIComponent(String(prospectId))}` : "");
+
+      if (prospectQuery) {
+        const prospectResponse = await fetch(`${prospectsApi}?${prospectQuery}`, {
           headers: authHeaders,
           cache: "no-store",
         });
         const prospectPayload = await prospectResponse.json().catch(() => ({}));
-        if (prospectResponse.ok && prospectPayload.success && prospectPayload.found !== false && prospectPayload.customerCode) {
-          next.customerCode = prospectPayload.customerCode;
-          if (prospectPayload.customerName) next.customerName = prospectPayload.customerName;
+        if (prospectResponse.ok && prospectPayload.success && prospectPayload.found !== false) {
+          if (prospectPayload.customerCode) next.customerCode = prospectPayload.customerCode;
+          if (
+            prospectPayload.customerName
+            && isPlaceholderProspectName(next.customerName, next.customerCode || customerCode)
+          ) {
+            next.customerName = prospectPayload.customerName;
+          }
         }
       }
     } catch {
@@ -393,10 +408,50 @@ export async function resolveLiveOrderPdfSnapshot(snapshot, options = {}, {
   return { snapshot: current, analytics };
 }
 
+function measurePdfTextWidth(doc, text) {
+  const value = String(text ?? "");
+  if (typeof doc.getTextWidth === "function") {
+    const width = Number(doc.getTextWidth(value));
+    if (Number.isFinite(width) && width > 0) return width;
+  }
+  const fontSize = typeof doc.getFontSize === "function" ? Number(doc.getFontSize()) : 8;
+  return value.length * Math.max(4, fontSize * 0.5);
+}
+
+function hardWrapPdfText(doc, text, maxWidth) {
+  const remainingLimit = Math.max(8, Number(maxWidth || 0));
+  let remaining = String(text ?? "");
+  const lines = [];
+  while (remaining) {
+    if (measurePdfTextWidth(doc, remaining) <= remainingLimit) {
+      lines.push(remaining);
+      break;
+    }
+    let lo = 1;
+    let hi = remaining.length;
+    let fit = 1;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (measurePdfTextWidth(doc, remaining.slice(0, mid)) <= remainingLimit) {
+        fit = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    const slice = remaining.slice(0, fit);
+    const breakAt = Math.max(slice.lastIndexOf(" "), slice.lastIndexOf("_"), slice.lastIndexOf("-"));
+    const take = breakAt >= 8 ? breakAt + 1 : fit;
+    lines.push(remaining.slice(0, take).trimEnd());
+    remaining = remaining.slice(take).trimStart();
+  }
+  return lines.length ? lines : [""];
+}
+
 export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {}) {
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const marginX = 40;
+  const marginX = 28;
   const marginTop = 38;
   const contentWidth = pageWidth - marginX * 2;
   const tableStartX = marginX;
@@ -406,17 +461,20 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const totalWithVat = Number(pdfTotals.amountInclVat || subtotal + vatAmount);
 
   const columns = [
-    { key: "item_code", label: "Code", width: 46, align: "left" },
-    { key: "item_name", label: "Item", width: 78, align: "left" },
-    { key: "quantity", label: "Qty", width: 26, align: "right" },
-    { key: "rate", label: "Rate", width: 40, align: "right" },
-    { key: "cashDiscount", label: "Cash Disc", width: 50, align: "right" },
-    { key: "valueDiscount", label: "Value Disc", width: 50, align: "right" },
-    { key: "schemeDiscount", label: "Scheme", width: 48, align: "right" },
-    { key: "exclVat", label: "Excl. VAT", width: 52, align: "right" },
-    { key: "vat", label: "VAT 15%", width: 46, align: "right" },
-    { key: "inclVat", label: "Incl. VAT", width: 79, align: "right" },
+    { key: "item_code", label: "Code", width: 48, align: "left" },
+    { key: "item_name", label: "Item", width: 0, align: "left" },
+    { key: "quantity", label: "Qty", width: 28, align: "right" },
+    { key: "rate", label: "Rate", width: 46, align: "right" },
+    { key: "cashDiscount", label: "Cash Disc", width: 52, align: "right" },
+    { key: "valueDiscount", label: "Value Disc", width: 52, align: "right" },
+    { key: "schemeDiscount", label: "Scheme", width: 44, align: "right" },
+    { key: "exclVat", label: "Excl. VAT", width: 54, align: "right" },
+    { key: "vat", label: "VAT 15%", width: 48, align: "right" },
+    { key: "inclVat", label: "Incl. VAT", width: 54, align: "right" },
   ];
+  const reservedWidth = columns.reduce((sum, column) => sum + (column.key === "item_name" ? 0 : column.width), 0);
+  const itemColumn = columns.find((column) => column.key === "item_name");
+  itemColumn.width = Math.max(8, contentWidth - reservedWidth);
 
   const orderSummaryColumns = [
     { label: "Items", value: String(snapshot.itemCount ?? (snapshot.lines || []).length), align: "left" },
@@ -426,12 +484,23 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     { label: "After VAT", value: formatMoneyAmount(totalWithVat), align: "left" },
   ];
 
+  function wrapCellLines(text, width) {
+    const maxWidth = Math.max(8, Number(width || 0) - 10);
+    const lines = [];
+    String(text ?? "").split(/\n/).forEach((part) => {
+      hardWrapPdfText(doc, part, maxWidth).forEach((line) => lines.push(line));
+    });
+    return lines.length ? lines : [""];
+  }
+
   function drawCellText(text, x, y, width, align = "left") {
+    const value = String(text ?? "");
+    const maxWidth = Math.max(8, Number(width || 0) - 10);
     if (align === "right") {
-      doc.text(text, x + width - 6, y, { align: "right" });
+      doc.text(value, x + width - 5, y, { align: "right", maxWidth });
       return;
     }
-    doc.text(text, x + 6, y);
+    doc.text(value, x + 5, y, { maxWidth });
   }
 
   function drawTableHeader(startY) {
@@ -483,7 +552,9 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   doc.setFont(undefined, "bold");
   doc.text("Customer", marginX + 12, marginTop + 140);
   doc.setFont(undefined, "normal");
-  const customerText = `${snapshot.customerCode} - ${snapshot.customerName}`;
+  const customerCode = String(snapshot.customerCode || "").trim();
+  const customerName = String(snapshot.customerName || "").trim();
+  const customerText = customerName ? `${customerCode} - ${customerName}` : customerCode;
   const customerLines = doc.splitTextToSize(customerText, contentWidth - 24);
   const customerLine1 = Array.isArray(customerLines) ? customerLines[0] : customerText;
   const customerLine2 = Array.isArray(customerLines) && customerLines.length > 1 ? customerLines[1] : "";
@@ -508,7 +579,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   });
 
   let y = drawTableHeader(marginTop + 242);
-  doc.setFontSize(9);
+  doc.setFontSize(8);
 
   (snapshot.lines || []).forEach((line) => {
     const rowValues = {
@@ -516,8 +587,8 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
       item_name: String(line.item_name || "-"),
       quantity: String(line.quantity),
       rate: formatMoneyAmount(line.wholesaleRate || line.rate),
-      cashDiscount: formatDiscountDetail(line.cashDiscount, line.cashApplied, line.cashDiscountAmount),
-      valueDiscount: formatDiscountDetail(line.valueDiscount, line.valueApplied, line.valueDiscountAmount),
+      cashDiscount: formatPdfDiscountDetail(line.cashDiscount, line.cashApplied, line.cashDiscountAmount),
+      valueDiscount: formatPdfDiscountDetail(line.valueDiscount, line.valueApplied, line.valueDiscountAmount),
       schemeDiscount: Number(line.schemeDiscountAmount || 0) > 0
         ? formatMoneyAmount(line.schemeDiscountAmount)
         : "—",
@@ -526,28 +597,27 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
       inclVat: formatMoneyAmount(line.lineTotalInclVat),
     };
 
-    const itemNameCol = columns.find((column) => column.key === "item_name");
-    const wrappedName = doc.splitTextToSize(rowValues.item_name, (itemNameCol?.width || 200) - 12);
-    const wrappedLines = Array.isArray(wrappedName) ? wrappedName : [rowValues.item_name];
-    const rowHeight = Math.max(24, wrappedLines.length * 12 + 8);
+    const wrappedByKey = {};
+    let maxLines = 1;
+    columns.forEach((column) => {
+      const wrapped = wrapCellLines(rowValues[column.key], column.width);
+      wrappedByKey[column.key] = wrapped;
+      maxLines = Math.max(maxLines, wrapped.length);
+    });
+    const rowHeight = Math.max(24, maxLines * 10 + 8);
 
     if (y + rowHeight > pageHeight - 110) {
       doc.addPage();
       y = drawTableHeader(marginTop);
+      doc.setFontSize(8);
     }
 
     let colX = tableStartX;
     columns.forEach((column) => {
       doc.rect(colX, y, column.width, rowHeight);
-
-      if (column.key === "item_name") {
-        wrappedLines.forEach((nameLine, index) => {
-          drawCellText(nameLine, colX, y + 14 + index * 12, column.width, column.align);
-        });
-      } else {
-        drawCellText(rowValues[column.key], colX, y + 15, column.width, column.align);
-      }
-
+      wrappedByKey[column.key].forEach((cellLine, index) => {
+        drawCellText(cellLine, colX, y + 13 + index * 10, column.width, column.align);
+      });
       colX += column.width;
     });
 

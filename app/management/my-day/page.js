@@ -37,6 +37,7 @@ import {
   todayAttendanceBounds,
 } from "../../lib/morningAttendance";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
 import { useAppPopup } from "../../components/AppPopupProvider";
 import { postJsonResilient } from "../../lib/offlineApi";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
@@ -381,6 +382,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     note: "",
     stockChecks: [],
   });
+  useUnsavedEntryGuard(Boolean(activeVisitCustomerCode));
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -1840,7 +1842,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   function renderVisitReportForm(row, { showClose = false } = {}) {
     if (!row) return null;
     return (
-      <div id="visit-report-panel" className="moduleVisitPanel">
+      <div id="visit-report-panel" className="moduleVisitPanel" data-entry-form="open">
         <div className="moduleSectionHeader">
           <h2>{t("visitReport")}</h2>
           <div className="moduleInlineStack">

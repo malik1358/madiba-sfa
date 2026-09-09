@@ -2,20 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { buildCacheBustingReloadUrl, getClientBuildId } from "../lib/buildInfo";
+import { hasOpenUnsavedEntry, UNSAVED_ENTRY_EVENT } from "../lib/unsavedEntryGuard";
 
 const POLL_MS = 60 * 1000;
 const RETRY_MS = 15 * 1000;
-const BUSY_MAX_WAIT_MS = 2 * 60 * 1000;
-
-function userIsBusy() {
-  const active = document.activeElement;
-  if (!active) return false;
-
-  const tag = String(active.tagName || "").toUpperCase();
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-  if (active.isContentEditable) return true;
-  return false;
-}
 
 function reloadForBuild(serverBuild) {
   const nextUrl = buildCacheBustingReloadUrl(serverBuild, window.location.href);
@@ -25,30 +15,37 @@ function reloadForBuild(serverBuild) {
 export default function BuildUpdateWatcher() {
   const clientBuildRef = useRef("");
   const pendingReloadRef = useRef(false);
-  const reloadRequestedAtRef = useRef(0);
   const targetBuildRef = useRef("");
+  const retryTimerRef = useRef(0);
 
   useEffect(() => {
     clientBuildRef.current = getClientBuildId();
     if (clientBuildRef.current === "local") return undefined;
 
+    function clearRetry() {
+      if (retryTimerRef.current) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = 0;
+      }
+    }
+
+    function attemptReload() {
+      if (!pendingReloadRef.current) return;
+      if (hasOpenUnsavedEntry(document)) {
+        clearRetry();
+        retryTimerRef.current = window.setTimeout(attemptReload, RETRY_MS);
+        return;
+      }
+      clearRetry();
+      reloadForBuild(targetBuildRef.current);
+    }
+
     function scheduleReload(serverBuild) {
-      if (pendingReloadRef.current) return;
-      pendingReloadRef.current = true;
-      reloadRequestedAtRef.current = Date.now();
       targetBuildRef.current = serverBuild;
-
-      const attempt = () => {
-        const waitedMs = Date.now() - reloadRequestedAtRef.current;
-        const shouldWaitForUser = (document.hidden || userIsBusy()) && waitedMs < BUSY_MAX_WAIT_MS;
-        if (shouldWaitForUser) {
-          window.setTimeout(attempt, RETRY_MS);
-          return;
-        }
-        reloadForBuild(targetBuildRef.current);
-      };
-
-      attempt();
+      if (!pendingReloadRef.current) {
+        pendingReloadRef.current = true;
+      }
+      attemptReload();
     }
 
     async function checkForUpdate() {
@@ -84,20 +81,35 @@ export default function BuildUpdateWatcher() {
       if (!document.hidden) checkForUpdate();
     };
     const onControllerChange = () => {
-      if (pendingReloadRef.current) return;
+      if (pendingReloadRef.current) {
+        attemptReload();
+        return;
+      }
       checkForUpdate();
     };
+    const onEntryStateChange = () => attemptReload();
 
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
+    document.addEventListener("focusin", onEntryStateChange);
+    document.addEventListener("focusout", onEntryStateChange);
+    document.addEventListener("input", onEntryStateChange);
+    document.addEventListener("change", onEntryStateChange);
+    window.addEventListener(UNSAVED_ENTRY_EVENT, onEntryStateChange);
     if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
       navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
     }
 
     return () => {
       window.clearInterval(timer);
+      clearRetry();
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("focusin", onEntryStateChange);
+      document.removeEventListener("focusout", onEntryStateChange);
+      document.removeEventListener("input", onEntryStateChange);
+      document.removeEventListener("change", onEntryStateChange);
+      window.removeEventListener(UNSAVED_ENTRY_EVENT, onEntryStateChange);
       if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
         navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
       }

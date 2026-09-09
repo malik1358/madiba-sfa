@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../../components/MostVisitedPages";
@@ -11,7 +11,7 @@ import { translate, useAppLanguage } from "../../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../../lib/authSession";
 import { getSupabaseClient } from "../../../lib/supabase";
 import { usePopupMessages } from "../../../hooks/usePopupMessages";
-import { formatStockQty } from "../../../lib/stockTake";
+import { consolidateStockTakeReportLines, formatStockQty } from "../../../lib/stockTake";
 import {
   stockTakeMasterTemplateMatrix,
   stockTakeSystemTemplateMatrix,
@@ -21,7 +21,14 @@ import { formatKsaDateTime } from "../../../lib/workdayActivity";
 
 const TEXT = {
   title: { en: "Stock Take Report", ar: "تقرير الجرد" },
-  subtitle: { en: "Every scan: item, why it converted, who counted it, optional pallet/location.", ar: "كل مسح: الصنف، التحويل، من جرده، والباليت/الموقع إن وُجد." },
+  subtitle: {
+    en: "One row per item and warehouse with summed qty. Click + to see each scan.",
+    ar: "صف واحد لكل صنف ومستودع بالكميات المجمّعة. اضغط + لعرض كل مسح.",
+  },
+  scans: { en: "scans", ar: "مسح" },
+  lastScan: { en: "Last", ar: "آخر" },
+  expand: { en: "Show scans", ar: "عرض المسوحات" },
+  collapse: { en: "Hide scans", ar: "إخفاء المسوحات" },
   back: { en: "← Count", ar: "← الجرد" },
   loading: { en: "Loading report...", ar: "جاري تحميل التقرير..." },
   warehouse: { en: "Warehouse", ar: "المستودع" },
@@ -60,6 +67,8 @@ export default function StockTakeReportPage() {
   const [uploading, setUploading] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [expandedKeys, setExpandedKeys] = useState(() => new Set());
+  const groups = useMemo(() => consolidateStockTakeReportLines(lines), [lines]);
 
   usePopupMessages({ message, error });
 
@@ -122,6 +131,15 @@ export default function StockTakeReportPage() {
     } finally {
       setUploading("");
     }
+  }
+
+  function toggleGroup(key) {
+    setExpandedKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   async function downloadTemplate(kind) {
@@ -264,6 +282,7 @@ export default function StockTakeReportPage() {
               <table className="moduleTable">
                 <thead>
                   <tr>
+                    <th aria-label={t("expand")} />
                     <th>{t("time")}</th>
                     <th>{t("user")}</th>
                     <th>{t("warehouse")}</th>
@@ -279,27 +298,68 @@ export default function StockTakeReportPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map((line) => (
-                    <tr key={line.id}>
-                      <td>{formatKsaDateTime(line.scanned_at)}</td>
-                      <td>{line.scanned_by_name || line.scanned_by}</td>
-                      <td>{line.warehouse_name}</td>
-                      <td>
-                        <strong>{line.item_name}</strong>
-                        <div className="moduleCode">{line.item_code}</div>
-                      </td>
-                      <td>{line.barcode}</td>
-                      <td>{line.scanned_uom_label || line.scanned_uom}</td>
-                      <td>{formatStockQty(line.qty_entered)}</td>
-                      <td>{formatStockQty(line.qty_base)}</td>
-                      <td>{formatStockQty(line.qty_master)}</td>
-                      <td>{line.system_qty_base == null ? "—" : formatStockQty(line.system_qty_base)}</td>
-                      <td>{line.pallet_ref || "—"}</td>
-                      <td>{line.location_ref || "—"}</td>
-                    </tr>
-                  ))}
-                  {lines.length === 0 ? (
-                    <tr><td colSpan={12}>No scans yet.</td></tr>
+                  {groups.flatMap((group) => {
+                    const expanded = expandedKeys.has(group.key);
+                    const summary = (
+                      <tr key={group.key} className="stockTakeReportSummaryRow">
+                        <td>
+                          <button
+                            type="button"
+                            className="stockTakeReportExpandBtn"
+                            aria-expanded={expanded}
+                            aria-label={expanded ? t("collapse") : t("expand")}
+                            onClick={() => toggleGroup(group.key)}
+                          >
+                            {expanded ? "−" : "+"}
+                          </button>
+                        </td>
+                        <td>
+                          {group.last_scanned_at ? `${t("lastScan")} ${formatKsaDateTime(group.last_scanned_at)}` : "—"}
+                          <div className="moduleCode">{group.scanCount} {t("scans")}</div>
+                        </td>
+                        <td>{group.userLabel}</td>
+                        <td>{group.warehouse_name}</td>
+                        <td>
+                          <strong>{group.item_name}</strong>
+                          <div className="moduleCode">{group.item_code}</div>
+                        </td>
+                        <td>{group.barcodeLabel}</td>
+                        <td>{group.unitLabel}</td>
+                        <td>{group.qtyEnteredLabel == null ? "—" : formatStockQty(group.qtyEnteredLabel)}</td>
+                        <td>{formatStockQty(group.qty_base)}</td>
+                        <td>{formatStockQty(group.qty_master)}</td>
+                        <td>{group.system_qty_base == null ? "—" : formatStockQty(group.system_qty_base)}</td>
+                        <td>{group.palletLabel}</td>
+                        <td>{group.locationLabel}</td>
+                      </tr>
+                    );
+                    if (!expanded) return [summary];
+                    return [
+                      summary,
+                      ...group.lines.map((line) => (
+                        <tr key={`${group.key}-${line.id}`} className="stockTakeReportDetailRow">
+                          <td />
+                          <td>{formatKsaDateTime(line.scanned_at)}</td>
+                          <td>{line.scanned_by_name || line.scanned_by}</td>
+                          <td>{line.warehouse_name}</td>
+                          <td>
+                            <strong>{line.item_name}</strong>
+                            <div className="moduleCode">{line.item_code}</div>
+                          </td>
+                          <td>{line.barcode}</td>
+                          <td>{line.scanned_uom_label || line.scanned_uom}</td>
+                          <td>{formatStockQty(line.qty_entered)}</td>
+                          <td>{formatStockQty(line.qty_base)}</td>
+                          <td>{formatStockQty(line.qty_master)}</td>
+                          <td>{line.system_qty_base == null ? "—" : formatStockQty(line.system_qty_base)}</td>
+                          <td>{line.pallet_ref || "—"}</td>
+                          <td>{line.location_ref || "—"}</td>
+                        </tr>
+                      )),
+                    ];
+                  })}
+                  {groups.length === 0 ? (
+                    <tr><td colSpan={13}>No scans yet.</td></tr>
                   ) : null}
                 </tbody>
               </table>

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   attachSystemQtyToLines,
+  consolidateStockTakeReportLines,
   convertEnteredQtyToUnits,
   findItemByBarcode,
   findItemByItemCode,
@@ -248,4 +249,68 @@ test("share list includes inactive users who have stock take access", () => {
   ], "admin");
   assert.deepEqual(targets.map((row) => row.id), ["soyeb", "vilayath"]);
   assert.equal(targets.find((row) => row.id === "vilayath").name, "VILYATH (inactive)");
+});
+
+test("report consolidates qty per warehouse and item, keeping scan details", () => {
+  const groups = consolidateStockTakeReportLines([
+    {
+      id: "1",
+      warehouse_name: "Test",
+      item_code: "A004107",
+      item_name: "Notebook",
+      barcode: "A004107",
+      scanned_uom: "MASTER",
+      scanned_uom_label: "CTN",
+      qty_entered: 112,
+      qty_base: 2688,
+      qty_master: 112,
+      scanned_by_name: "Administrator",
+      scanned_at: "2026-09-09T08:59:00.000Z",
+      pallet_ref: "test",
+      location_ref: "test",
+    },
+    {
+      id: "2",
+      warehouse_name: "Test",
+      item_code: "A004107",
+      item_name: "Notebook",
+      barcode: "6287050672010",
+      scanned_uom: "BASE",
+      scanned_uom_label: "PC",
+      qty_entered: 22,
+      qty_base: 22,
+      qty_master: 22 / 24,
+      scanned_by_name: "Administrator",
+      scanned_at: "2026-09-09T09:01:00.000Z",
+      pallet_ref: "pallet",
+      location_ref: "location test",
+    },
+    {
+      id: "3",
+      warehouse_name: "WH2 9th sept",
+      item_code: "A004107",
+      item_name: "Notebook",
+      barcode: "A004107",
+      scanned_uom: "MASTER",
+      scanned_uom_label: "CTN",
+      qty_entered: 10,
+      qty_base: 240,
+      qty_master: 10,
+      scanned_by_name: "Administrator",
+      scanned_at: "2026-09-09T09:05:00.000Z",
+    },
+  ]);
+
+  assert.equal(groups.length, 2);
+  const testWh = groups.find((group) => group.warehouse_name === "Test");
+  assert.equal(testWh.scanCount, 2);
+  assert.equal(testWh.qty_base, 2710);
+  assert.equal(testWh.qtyEnteredLabel, null);
+  assert.equal(testWh.barcodeLabel, "Multiple");
+  assert.equal(testWh.palletLabel, "Multiple");
+  assert.equal(testWh.lines[0].id, "2");
+  const otherWh = groups.find((group) => group.warehouse_name === "WH2 9th sept");
+  assert.equal(otherWh.scanCount, 1);
+  assert.equal(otherWh.qty_base, 240);
+  assert.equal(otherWh.qtyEnteredLabel, 10);
 });

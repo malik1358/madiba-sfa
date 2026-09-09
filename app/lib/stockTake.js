@@ -303,6 +303,68 @@ export function stockTakeShareTargets(profiles = [], currentUserId) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export function consolidateStockTakeReportLines(lines = []) {
+  const groups = new Map();
+
+  function uniqueLabels(values) {
+    const list = [...new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean))];
+    if (list.length === 0) return "—";
+    if (list.length === 1) return list[0];
+    return "Multiple";
+  }
+
+  (lines || []).forEach((line) => {
+    const warehouseName = String(line.warehouse_name || "").trim() || "—";
+    const itemCode = normalizeStockTakeCode(line.item_code) || String(line.item_code || "").trim();
+    const key = `${warehouseKey(warehouseName)}::${itemCode || "UNKNOWN"}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        warehouse_name: warehouseName,
+        item_code: line.item_code,
+        item_name: line.item_name,
+        qty_base: 0,
+        qty_master: 0,
+        qty_entered: 0,
+        system_qty_base: line.system_qty_base ?? null,
+        last_scanned_at: line.scanned_at || "",
+        lines: [],
+      });
+    }
+    const group = groups.get(key);
+    group.lines.push(line);
+    group.qty_base += Number(line.qty_base) || 0;
+    group.qty_master += Number(line.qty_master) || 0;
+    group.qty_entered += Number(line.qty_entered) || 0;
+    if (group.system_qty_base == null && line.system_qty_base != null) {
+      group.system_qty_base = line.system_qty_base;
+    }
+    if (String(line.scanned_at || "") > String(group.last_scanned_at || "")) {
+      group.last_scanned_at = line.scanned_at;
+      group.item_name = line.item_name || group.item_name;
+      group.item_code = line.item_code || group.item_code;
+    }
+  });
+
+  return [...groups.values()]
+    .map((group) => {
+      const detail = [...group.lines].sort((left, right) => String(right.scanned_at || "").localeCompare(String(left.scanned_at || "")));
+      const units = [...new Set(detail.map((line) => String(line.scanned_uom || "").toUpperCase()).filter(Boolean))];
+      return {
+        ...group,
+        lines: detail,
+        scanCount: detail.length,
+        userLabel: uniqueLabels(detail.map((line) => line.scanned_by_name || line.scanned_by)),
+        barcodeLabel: uniqueLabels(detail.map((line) => line.barcode)),
+        unitLabel: uniqueLabels(detail.map((line) => line.scanned_uom_label || line.scanned_uom)),
+        qtyEnteredLabel: units.length === 1 ? group.qty_entered : null,
+        palletLabel: uniqueLabels(detail.map((line) => line.pallet_ref)),
+        locationLabel: uniqueLabels(detail.map((line) => line.location_ref)),
+      };
+    })
+    .sort((left, right) => String(right.last_scanned_at || "").localeCompare(String(left.last_scanned_at || "")));
+}
+
 export function attachSystemQtyToLines(lines, systemRows = []) {
   const byItem = new Map(
     (systemRows || []).map((row) => [normalizeStockTakeCode(row.item_code), Number(row.qty_base) || 0]),

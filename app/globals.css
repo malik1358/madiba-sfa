@@ -6322,3 +6322,39 @@ th:has(.moduleTableColumnFilterInput) {
   }
 }
 
+.stockTakeReportExpandBtn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #8aa8b0;
+  border-radius: 8px;
+  background: #fff;
+  color: #073b49;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.stockTakeReportExpandBtn:hover,
+.stockTakeReportExpandBtn:focus-visible {
+  background: #eef6f7;
+  outline: 2px solid #0d5a6b;
+  outline-offset: 1px;
+}
+
+.stockTakeReportSummaryRow td:first-child {
+  width: 44px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.stockTakeReportDetailRow td {
+  background: #f4f8f9;
+  color: #35545c;
+}
+
+.stockTakeReportDetailRow td:nth-child(2) {
+  padding-inline-start: 18px;
+}
+

@@ -104,9 +104,39 @@ export function convertEnteredQtyToUnits({ qtyEntered, scannedUom, baseUomPackSi
   return {
     qtyEntered: qty,
     qtyBase,
+    qtyMid: midSize > 0 ? qtyBase / midSize : null,
     qtyMaster: qtyBase / masterSize,
     scannedUom: kind,
   };
+}
+
+export function previewConvertedQty(args) {
+  try {
+    return convertEnteredQtyToUnits(args);
+  } catch {
+    return null;
+  }
+}
+
+export function findItemByItemCode(items, itemCode) {
+  const code = normalizeStockTakeCode(itemCode);
+  if (!code) return null;
+  return (items || []).find((item) => normalizeStockTakeCode(item.item_code) === code) || null;
+}
+
+export function attachQtyMidToLines(lines, items = []) {
+  const byCode = new Map(
+    (items || []).map((item) => [normalizeStockTakeCode(item.item_code), item]),
+  );
+  return (lines || []).map((line) => {
+    const item = byCode.get(normalizeStockTakeCode(line.item_code));
+    const midSize = parsePackSize(item?.mid_uom_pack_size);
+    const qtyBase = Number(line.qty_base);
+    return {
+      ...line,
+      qty_mid: midSize > 0 && Number.isFinite(qtyBase) ? qtyBase / midSize : null,
+    };
+  });
 }
 
 export function itemMatchesBarcode(item, barcode) {

@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
+import ExportableTable from "../../components/ExportableTable";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -10,18 +11,21 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
-import { formatStockQty, STOCK_TAKE_UOM } from "../../lib/stockTake";
+import { formatStockQty, previewConvertedQty, STOCK_TAKE_UOM, uomLabel } from "../../lib/stockTake";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
+import { formatKsaDateOnly, formatKsaTime } from "../../lib/workdayActivity";
 
 const TEXT = {
   title: { en: "Stock Take", ar: "جرد المخزون" },
-  subtitle: { en: "Scan barcode, confirm item and unit, enter qty, save.", ar: "امسح الباركود، تأكد من الصنف والوحدة، أدخل الكمية واحفظ." },
+  subtitle: { en: "Enter barcode or item code, confirm name and unit, enter qty, save.", ar: "أدخل الباركود أو رمز الصنف، تأكد من الاسم والوحدة، أدخل الكمية واحفظ." },
   back: { en: "← Dashboard", ar: "← الرئيسية" },
   report: { en: "Report", ar: "التقرير" },
   warehouse: { en: "Warehouse name", ar: "اسم المستودع" },
   start: { en: "Start inventory", ar: "بدء الجرد" },
   changeWarehouse: { en: "Change warehouse", ar: "تغيير المستودع" },
   barcode: { en: "Barcode", ar: "الباركود" },
+  itemCode: { en: "Item code", ar: "رمز الصنف" },
+  itemName: { en: "Name", ar: "الاسم" },
   qty: { en: "Quantity", ar: "الكمية" },
   unit: { en: "Unit", ar: "الوحدة" },
   item: { en: "Item", ar: "الصنف" },
@@ -34,7 +38,11 @@ const TEXT = {
   denied: { en: "Stock Take is not enabled for your user. Ask an admin to tick Stock Take on Salesman Hierarchy.", ar: "الجرد غير مفعّل لحسابك. اطلب من المدير تحديد الجرد في هيكل المندوبين." },
   recent: { en: "Saved on this count", ar: "المحفوظ في هذا الجرد" },
   qtyBase: { en: "Base qty", ar: "كمية الأساس" },
+  qtyMid: { en: "MID qty", ar: "كمية الأوسط" },
   qtyMaster: { en: "Master qty", ar: "كمية الكرتون" },
+  converted: { en: "Converted quantity", ar: "الكمية المحوّلة" },
+  date: { en: "Date", ar: "التاريخ" },
+  time: { en: "Time", ar: "الوقت" },
   warehouseHint: { en: "Required before scanning. Type the warehouse you are counting.", ar: "مطلوب قبل المسح. اكتب المستودع الذي تجرده." },
 };
 
@@ -55,12 +63,15 @@ export default function StockTakePage() {
   const t = translate(language, TEXT);
   const { access, loading: accessLoading } = useModuleAccess();
   const barcodeRef = useRef(null);
+  const itemCodeRef = useRef(null);
   const [warehouseInput, setWarehouseInput] = useState("");
   const [session, setSession] = useState(null);
   const [barcode, setBarcode] = useState("");
+  const [itemCodeInput, setItemCodeInput] = useState("");
   const [item, setItem] = useState(null);
+  const [lookupMode, setLookupMode] = useState("");
   const [scannedUom, setScannedUom] = useState("");
-  const [needsUom, setNeedsUom] = useState(false);
+  const [unitLocked, setUnitLocked] = useState(false);
   const [qty, setQty] = useState("");
   const [pallet, setPallet] = useState("");
   const [location, setLocation] = useState("");
@@ -71,6 +82,16 @@ export default function StockTakePage() {
   const [message, setMessage] = useState("");
 
   usePopupMessages({ message, error });
+
+  const converted = useMemo(() => {
+    if (!item || !scannedUom) return null;
+    return previewConvertedQty({
+      qtyEntered: qty,
+      scannedUom,
+      baseUomPackSize: item.base_uom_pack_size,
+      midUomPackSize: item.mid_uom_pack_size,
+    });
+  }, [item, qty, scannedUom]);
 
   useEffect(() => {
     const saved = readSavedSession();
@@ -91,6 +112,13 @@ export default function StockTakePage() {
     const sessionAuth = await resolveAuthSession(supabase);
     if (!sessionAuth?.access_token) throw new Error("Please login again.");
     return { Authorization: `Bearer ${sessionAuth.access_token}` };
+  }
+
+  function clearLookup() {
+    setItem(null);
+    setLookupMode("");
+    setScannedUom("");
+    setUnitLocked(false);
   }
 
   async function startSession(event) {
@@ -128,24 +156,30 @@ export default function StockTakePage() {
     }
   }
 
-  async function lookupBarcode(nextBarcode) {
-    const code = String(nextBarcode || "").trim();
-    if (!code) return;
+  async function lookup({ nextBarcode, nextItemCode }) {
+    const barcodeValue = String(nextBarcode || "").trim();
+    const itemCodeValue = String(nextItemCode || "").trim();
+    if (!barcodeValue && !itemCodeValue) return;
     setError("");
     try {
+      const params = new URLSearchParams({ action: "lookup" });
+      if (barcodeValue) params.set("barcode", barcodeValue);
+      else params.set("itemCode", itemCodeValue);
       const { response, payload } = await fetchJsonWithTimeout(
-        `/api/stock-take?action=lookup&barcode=${encodeURIComponent(code)}`,
+        `/api/stock-take?${params.toString()}`,
         { headers: await authHeaders() },
       );
-      if (!response.ok || !payload.success) throw new Error(payload.error || "Barcode not found.");
+      if (!response.ok || !payload.success) throw new Error(payload.error || "Item not found.");
       setItem(payload.item);
+      setLookupMode(payload.lookupMode || "");
+      setItemCodeInput(payload.item.item_code || itemCodeValue);
       setScannedUom(payload.scannedUom || "");
-      setNeedsUom(Boolean(payload.needsUom));
+      setUnitLocked(Boolean(payload.unitLocked));
+      return payload;
     } catch (err) {
-      setItem(null);
-      setScannedUom("");
-      setNeedsUom(false);
-      setError(err.message || "Barcode not found.");
+      clearLookup();
+      setError(err.message || "Item not found.");
+      return null;
     }
   }
 
@@ -164,6 +198,7 @@ export default function StockTakePage() {
           sessionId: session.id,
           warehouse: session.warehouse_name,
           barcode,
+          itemCode: item?.item_code || itemCodeInput,
           qty,
           scannedUom,
           pallet,
@@ -171,13 +206,12 @@ export default function StockTakePage() {
         }),
       });
       if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to save line.");
-      setLines((current) => [payload.line, ...current].slice(0, 30));
-      setMessage(`${payload.line.item_name} · ${formatStockQty(payload.line.qty_base)} base / ${formatStockQty(payload.line.qty_master)} master`);
+      setLines((current) => [payload.line, ...current].slice(0, 500));
+      setMessage(`${payload.line.item_name} · ${formatStockQty(payload.line.qty_base)} base / ${formatStockQty(payload.line.qty_mid)} mid / ${formatStockQty(payload.line.qty_master)} master`);
       setBarcode("");
+      setItemCodeInput("");
       setQty("");
-      setItem(null);
-      setScannedUom("");
-      setNeedsUom(false);
+      clearLookup();
       setTimeout(() => barcodeRef.current?.focus(), 50);
     } catch (err) {
       setError(err.message || "Unable to save line.");
@@ -192,6 +226,7 @@ export default function StockTakePage() {
     window.sessionStorage.removeItem(SESSION_KEY);
   }
 
+  const lockedUnitLabel = item && scannedUom ? uomLabel(item, scannedUom) : "";
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
     return <SupabaseUnavailable title="Stock Take unavailable" message="Set Supabase keys to use stock take." />;
@@ -288,48 +323,69 @@ export default function StockTakePage() {
                       value={barcode}
                       onChange={(event) => {
                         setBarcode(event.target.value);
-                        setItem(null);
+                        setItemCodeInput("");
+                        clearLookup();
                       }}
-                      onBlur={() => lookupBarcode(barcode)}
-                      onKeyDown={(event) => {
+                      onBlur={() => lookup({ nextBarcode: barcode })}
+                      onKeyDown={async (event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
-                          lookupBarcode(barcode);
-                          document.getElementById("stock-take-qty")?.focus();
+                          const found = await lookup({ nextBarcode: barcode });
+                          if (found?.unitLocked) document.getElementById("stock-take-qty")?.focus();
+                          else if (found) document.getElementById("stock-take-unit")?.focus();
                         }
                       }}
                     />
                   </label>
-
-                  {item ? (
-                    <div className="stockTakeItemBox">
-                      <strong>{item.item_name}</strong>
-                      <div className="moduleCode">{item.item_code}</div>
-                      <div className="moduleHint">
-                        {t("unit")}: {needsUom && !scannedUom ? "—" : (item && scannedUom === STOCK_TAKE_UOM.MID ? item.mid_uom : scannedUom === STOCK_TAKE_UOM.MASTER ? item.master_uom : item.base_uom)}
-                        {" · "}1 {item.master_uom} = {formatStockQty(item.base_uom_pack_size)} {item.base_uom}
-                        {Number(item.mid_uom_pack_size) > 0 ? ` · 1 ${item.mid_uom} = ${formatStockQty(item.mid_uom_pack_size)} ${item.base_uom}` : ""}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {needsUom ? (
-                    <label>
-                      {t("unit")}
+                  <label>
+                    {t("itemCode")}
+                    <input
+                      ref={itemCodeRef}
+                      className="moduleInput"
+                      autoComplete="off"
+                      readOnly={lookupMode === "barcode"}
+                      value={itemCodeInput}
+                      onChange={(event) => {
+                        setItemCodeInput(event.target.value);
+                        setBarcode("");
+                        clearLookup();
+                      }}
+                      onBlur={() => {
+                        if (!barcode.trim()) lookup({ nextItemCode: itemCodeInput });
+                      }}
+                      onKeyDown={async (event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          const found = await lookup({ nextItemCode: itemCodeInput });
+                          if (found) document.getElementById("stock-take-unit")?.focus();
+                        }
+                      }}
+                    />
+                  </label>
+                  <label>
+                    {t("itemName")}
+                    <input className="moduleInput" readOnly value={item?.item_name || ""} />
+                  </label>
+                  <label>
+                    {t("unit")}
+                    {unitLocked || lookupMode === "barcode" ? (
+                      <input className="moduleInput" readOnly value={lockedUnitLabel} />
+                    ) : (
                       <select
+                        id="stock-take-unit"
                         className="moduleInput"
-                        required
+                        required={Boolean(item)}
                         value={scannedUom}
                         onChange={(event) => setScannedUom(event.target.value)}
+                        disabled={!item}
                       >
                         <option value="">Select unit</option>
                         <option value={STOCK_TAKE_UOM.BASE}>{item?.base_uom || "Base"}</option>
                         <option value={STOCK_TAKE_UOM.MID}>{item?.mid_uom || "MID"}</option>
                         <option value={STOCK_TAKE_UOM.MASTER}>{item?.master_uom || "Master"}</option>
                       </select>
-                    </label>
-                  ) : null}
-
+                    )}
+                  </label>
                   <label>
                     {t("qty")}
                     <input
@@ -341,6 +397,23 @@ export default function StockTakePage() {
                       required
                     />
                   </label>
+                  <div className="stockTakeConverted">
+                    <div className="stockTakeConvertedLabel">{t("converted")}</div>
+                    <div className="stockTakeConvertedGrid">
+                      <label>
+                        {t("qtyBase")}
+                        <input className="moduleInput" readOnly value={converted ? formatStockQty(converted.qtyBase) : ""} />
+                      </label>
+                      <label>
+                        {t("qtyMid")}
+                        <input className="moduleInput" readOnly value={converted?.qtyMid == null ? "" : formatStockQty(converted.qtyMid)} />
+                      </label>
+                      <label>
+                        {t("qtyMaster")}
+                        <input className="moduleInput" readOnly value={converted ? formatStockQty(converted.qtyMaster) : ""} />
+                      </label>
+                    </div>
+                  </div>
                   <label>
                     {t("pallet")}
                     <input className="moduleInput" value={pallet} onChange={(event) => setPallet(event.target.value)} />
@@ -349,7 +422,7 @@ export default function StockTakePage() {
                     {t("location")}
                     <input className="moduleInput" value={location} onChange={(event) => setLocation(event.target.value)} />
                   </label>
-                  <button className="modulePrimaryButton" type="submit" disabled={saving || !item}>
+                  <button className="modulePrimaryButton" type="submit" disabled={saving || !item || !scannedUom}>
                     {saving ? t("saving") : t("save")}
                   </button>
                 </form>
@@ -359,20 +432,25 @@ export default function StockTakePage() {
                 <div className="moduleSectionHeader">
                   <h2>{t("recent")}</h2>
                 </div>
-                <div className="moduleTableWrap">
+                <ExportableTable filename="stock-take-count" sheetName="Count" className="moduleTableWrap">
                   <table className="moduleTable">
                     <thead>
                       <tr>
+                        <th>{t("date")}</th>
+                        <th>{t("time")}</th>
                         <th>{t("item")}</th>
                         <th>{t("unit")}</th>
                         <th>{t("qty")}</th>
                         <th>{t("qtyBase")}</th>
+                        <th>{t("qtyMid")}</th>
                         <th>{t("qtyMaster")}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {lines.map((line) => (
                         <tr key={line.id}>
+                          <td>{formatKsaDateOnly(line.scanned_at)}</td>
+                          <td>{formatKsaTime(line.scanned_at)}</td>
                           <td>
                             <strong>{line.item_name}</strong>
                             <div className="moduleCode">{line.item_code}</div>
@@ -383,15 +461,16 @@ export default function StockTakePage() {
                           <td>{line.scanned_uom_label || line.scanned_uom}</td>
                           <td>{formatStockQty(line.qty_entered)}</td>
                           <td>{formatStockQty(line.qty_base)}</td>
+                          <td>{line.qty_mid == null ? "—" : formatStockQty(line.qty_mid)}</td>
                           <td>{formatStockQty(line.qty_master)}</td>
                         </tr>
                       ))}
                       {lines.length === 0 ? (
-                        <tr><td colSpan={5}>No lines yet.</td></tr>
+                        <tr><td colSpan={8}>No lines yet.</td></tr>
                       ) : null}
                     </tbody>
                   </table>
-                </div>
+                </ExportableTable>
               </section>
             </>
           )}

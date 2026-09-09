@@ -12,6 +12,8 @@ import {
   canAccessStockTakeSession,
   duplicateOpenWarehouseMessage,
   stockTakeShareTargets,
+  availableStockTakeUnits,
+  focusStockTakeAfterLookup,
   resolveScannedUom,
   STOCK_TAKE_UOM,
   warehouseKey,
@@ -61,6 +63,18 @@ test("scanned barcode selects the matching UOM", () => {
   assert.equal(resolveScannedUom(item, "222").kind, STOCK_TAKE_UOM.MID);
   assert.equal(resolveScannedUom(item, "333").kind, STOCK_TAKE_UOM.MASTER);
   assert.equal(resolveScannedUom(item, "A004409").ambiguous, true);
+});
+
+test("after lookup, barcode goes to qty and item code opens unit when several exist", () => {
+  assert.equal(availableStockTakeUnits(item).length, 3);
+  assert.equal(focusStockTakeAfterLookup({ lookupMode: "barcode", unitLocked: true, unitCount: 3 }), "qty");
+  assert.equal(focusStockTakeAfterLookup({ lookupMode: "itemCode", unitLocked: false, unitCount: 3 }), "unit");
+  assert.equal(focusStockTakeAfterLookup({ lookupMode: "itemCode", unitLocked: false, unitCount: 1 }), "qty");
+  assert.equal(availableStockTakeUnits({
+    ...item,
+    mid_uom_pack_size: 0,
+    base_uom_pack_size: 0,
+  }).length, 1);
 });
 
 test("qty converts to base first then back to master", () => {

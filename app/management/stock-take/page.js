@@ -22,7 +22,20 @@ const TEXT = {
   report: { en: "Report", ar: "التقرير" },
   warehouse: { en: "Warehouse name", ar: "اسم المستودع" },
   start: { en: "Start inventory", ar: "بدء الجرد" },
-  changeWarehouse: { en: "Change warehouse", ar: "تغيير المستودع" },
+  changeWarehouse: { en: "Inventories", ar: "الجردات" },
+  openInventories: { en: "Open inventories", ar: "الجردات المفتوحة" },
+  openInventoriesHint: { en: "Select an inventory you opened, or one shared with you. Start a new one below if needed.", ar: "اختر جردًا فتحته أنت أو جردًا شاركه معك مستخدم آخر. يمكنك بدء جرد جديد بالأسفل." },
+  noneOpen: { en: "No open inventories yet.", ar: "لا توجد جردات مفتوحة." },
+  openedBy: { en: "Opened by", ar: "فتحه" },
+  access: { en: "Access", ar: "الصلاحية" },
+  mine: { en: "Opened by me", ar: "فتحته أنا" },
+  sharedWithMe: { en: "Shared with me", ar: "مشارك معي" },
+  sharedWith: { en: "Shared with", ar: "مشارك مع" },
+  openCount: { en: "Open", ar: "فتح" },
+  share: { en: "Share", ar: "مشاركة" },
+  sharing: { en: "Sharing...", ar: "جاري المشاركة..." },
+  shareUser: { en: "Share with user", ar: "مشاركة مع مستخدم" },
+  selectUser: { en: "Select user", ar: "اختر المستخدم" },
   barcode: { en: "Barcode", ar: "الباركود" },
   itemCode: { en: "Item code", ar: "رمز الصنف" },
   itemName: { en: "Name", ar: "الاسم" },
@@ -43,20 +56,8 @@ const TEXT = {
   converted: { en: "Converted quantity", ar: "الكمية المحوّلة" },
   date: { en: "Date", ar: "التاريخ" },
   time: { en: "Time", ar: "الوقت" },
-  warehouseHint: { en: "Required before scanning. Type the warehouse you are counting.", ar: "مطلوب قبل المسح. اكتب المستودع الذي تجرده." },
+  warehouseHint: { en: "Start a new count by typing the warehouse name.", ar: "ابدأ جردًا جديدًا بكتابة اسم المستودع." },
 };
-
-const SESSION_KEY = "madiba-sfa:stock-take-session";
-
-function readSavedSession() {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
 
 export default function StockTakePage() {
   const { language, dir, setLanguage } = useAppLanguage();
@@ -66,6 +67,11 @@ export default function StockTakePage() {
   const itemCodeRef = useRef(null);
   const [warehouseInput, setWarehouseInput] = useState("");
   const [session, setSession] = useState(null);
+  const [openSessions, setOpenSessions] = useState([]);
+  const [shareUsers, setShareUsers] = useState([]);
+  const [shareUserBySession, setShareUserBySession] = useState({});
+  const [sharingId, setSharingId] = useState("");
+  const [loadingSessions, setLoadingSessions] = useState(true);
   const [barcode, setBarcode] = useState("");
   const [itemCodeInput, setItemCodeInput] = useState("");
   const [item, setItem] = useState(null);
@@ -93,13 +99,13 @@ export default function StockTakePage() {
     });
   }, [item, qty, scannedUom]);
 
+  const canUseStockTake = access.canAccess("stockTake");
+
   useEffect(() => {
-    const saved = readSavedSession();
-    if (saved?.id && saved?.warehouse_name) {
-      setSession(saved);
-      setWarehouseInput(saved.warehouse_name);
-    }
-  }, []);
+    if (session?.id || accessLoading || !canUseStockTake) return undefined;
+    loadOpenSessions();
+    return undefined;
+  }, [session?.id, accessLoading, canUseStockTake]);
 
   useEffect(() => {
     if (!session?.id) return undefined;
@@ -134,13 +140,30 @@ export default function StockTakePage() {
       });
       if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to start inventory.");
       setSession(payload.session);
-      window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(payload.session));
       setMessage(`Counting ${payload.session.warehouse_name}`);
       setTimeout(() => barcodeRef.current?.focus(), 50);
     } catch (err) {
       setError(err.message || "Unable to start inventory.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadOpenSessions() {
+    setLoadingSessions(true);
+    try {
+      const { response, payload } = await fetchJsonWithTimeout(
+        "/api/stock-take?action=open-sessions",
+        { headers: await authHeaders() },
+      );
+      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to load inventories.");
+      setOpenSessions(payload.sessions || []);
+      setShareUsers(payload.shareUsers || []);
+    } catch (err) {
+      setOpenSessions([]);
+      setError(err.message || "Unable to load inventories.");
+    } finally {
+      setLoadingSessions(false);
     }
   }
 
@@ -220,10 +243,42 @@ export default function StockTakePage() {
     }
   }
 
+  function openSelectedSession(nextSession) {
+    setError("");
+    setMessage("");
+    setSession(nextSession);
+    setWarehouseInput(nextSession.warehouse_name || "");
+    setTimeout(() => barcodeRef.current?.focus(), 50);
+  }
+
+  async function shareSession(sessionId) {
+    const userId = shareUserBySession[sessionId];
+    if (!userId) {
+      setError("Select a user to share with.");
+      return;
+    }
+    setSharingId(sessionId);
+    setError("");
+    setMessage("");
+    try {
+      const { response, payload } = await fetchJsonWithTimeout("/api/stock-take", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+        body: JSON.stringify({ mode: "share-session", sessionId, userId }),
+      });
+      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to share inventory.");
+      setMessage("Inventory shared.");
+      await loadOpenSessions();
+    } catch (err) {
+      setError(err.message || "Unable to share inventory.");
+    } finally {
+      setSharingId("");
+    }
+  }
+
   function resetWarehouse() {
     setSession(null);
     setLines([]);
-    window.sessionStorage.removeItem(SESSION_KEY);
   }
 
   const lockedUnitLabel = item && scannedUom ? uomLabel(item, scannedUom) : "";
@@ -284,33 +339,132 @@ export default function StockTakePage() {
           </div>
 
           {!session ? (
-            <section className="moduleSection">
-              <p className="moduleHint">{t("warehouseHint")}</p>
-              <form className="moduleFormGrid" onSubmit={startSession}>
-                <label>
-                  {t("warehouse")}
-                  <input
-                    className="moduleInput stockTakeBarcodeInput"
-                    required
-                    autoFocus
-                    value={warehouseInput}
-                    onChange={(event) => setWarehouseInput(event.target.value)}
-                    placeholder="Riyadh DC"
-                  />
-                </label>
-                <div className="moduleFieldFull">
-                  <button className="modulePrimaryButton" type="submit" disabled={loading}>
-                    {loading ? t("starting") : t("start")}
-                  </button>
+            <>
+              <section className="moduleSection">
+                <div className="moduleSectionHeader">
+                  <h2>{t("openInventories")}</h2>
                 </div>
-              </form>
-            </section>
+                <p className="moduleHint">{t("openInventoriesHint")}</p>
+                {loadingSessions ? (
+                  <div className="moduleHint">{t("loading")}</div>
+                ) : (
+                  <div className="moduleTableWrap">
+                    <table className="moduleTable">
+                      <thead>
+                        <tr>
+                          <th>{t("warehouse")}</th>
+                          <th>{t("openedBy")}</th>
+                          <th>{t("date")}</th>
+                          <th>{t("time")}</th>
+                          <th>{t("access")}</th>
+                          <th>{t("share")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {openSessions.map((row) => (
+                          <tr key={row.id}>
+                            <td>
+                              <strong>{row.warehouse_name}</strong>
+                            </td>
+                            <td>{row.started_by_name || "—"}</td>
+                            <td>{formatKsaDateOnly(row.started_at)}</td>
+                            <td>{formatKsaTime(row.started_at)}</td>
+                            <td>
+                              {row.accessKind === "mine" ? t("mine") : t("sharedWithMe")}
+                              {row.sharedWithNames?.length ? (
+                                <div className="moduleHint">{t("sharedWith")}: {row.sharedWithNames.join(", ")}</div>
+                              ) : null}
+                            </td>
+                            <td>
+                              <div className="stockTakeSessionActions">
+                                <button type="button" className="modulePrimaryButton" onClick={() => openSelectedSession(row)}>
+                                  {t("openCount")}
+                                </button>
+                                {row.accessKind === "mine" ? (
+                                  <>
+                                    <select
+                                      className="moduleInput"
+                                      value={shareUserBySession[row.id] || ""}
+                                      onChange={(event) => setShareUserBySession((current) => ({ ...current, [row.id]: event.target.value }))}
+                                    >
+                                      <option value="">{t("selectUser")}</option>
+                                      {shareUsers.map((person) => (
+                                        <option key={person.id} value={person.id}>{person.name}</option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      className="moduleInlineButton"
+                                      disabled={!shareUserBySession[row.id] || sharingId === row.id}
+                                      onClick={() => shareSession(row.id)}
+                                    >
+                                      {sharingId === row.id ? t("sharing") : t("share")}
+                                    </button>
+                                  </>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {openSessions.length === 0 ? (
+                          <tr><td colSpan={6}>{t("noneOpen")}</td></tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+              <section className="moduleSection">
+                <p className="moduleHint">{t("warehouseHint")}</p>
+                <form className="moduleFormGrid" onSubmit={startSession}>
+                  <label>
+                    {t("warehouse")}
+                    <input
+                      className="moduleInput stockTakeBarcodeInput"
+                      required
+                      value={warehouseInput}
+                      onChange={(event) => setWarehouseInput(event.target.value)}
+                      placeholder="Riyadh DC"
+                    />
+                  </label>
+                  <div className="moduleFieldFull">
+                    <button className="modulePrimaryButton" type="submit" disabled={loading}>
+                      {loading ? t("starting") : t("start")}
+                    </button>
+                  </div>
+                </form>
+              </section>
+            </>
           ) : (
             <>
               <section className="moduleSection stockTakeCountCard">
                 <div className="moduleSectionHeader">
                   <h2>{session.warehouse_name}</h2>
-                  <button type="button" className="moduleInlineButton" onClick={resetWarehouse}>{t("changeWarehouse")}</button>
+                  <div className="stockTakeSessionActions">
+                    {session.accessKind !== "shared" ? (
+                      <>
+                        <select
+                          className="moduleInput"
+                          value={shareUserBySession[session.id] || ""}
+                          onChange={(event) => setShareUserBySession((current) => ({ ...current, [session.id]: event.target.value }))}
+                        >
+                          <option value="">{t("shareUser")}</option>
+                          {shareUsers.map((person) => (
+                            <option key={person.id} value={person.id}>{person.name}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="moduleInlineButton"
+                          disabled={!shareUserBySession[session.id] || sharingId === session.id}
+                          onClick={() => shareSession(session.id)}
+                        >
+                          {sharingId === session.id ? t("sharing") : t("share")}
+                        </button>
+                      </>
+                    ) : null}
+                    <button type="button" className="moduleInlineButton" onClick={resetWarehouse}>{t("changeWarehouse")}</button>
+                  </div>
                 </div>
                 <form className="stockTakeForm" onSubmit={saveLine}>
                   <label>

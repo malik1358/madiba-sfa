@@ -185,6 +185,16 @@ export function canAccessStockTakeSession({ session, userId, sharedSessionIds = 
   return (sharedSessionIds || []).map(String).includes(String(session.id));
 }
 
+export function isOpenStockTakeSession(session) {
+  return String(session?.status || "OPEN").toUpperCase() === "OPEN";
+}
+
+export function canArchiveStockTakeSession({ session, userId, role } = {}) {
+  if (!session || !userId || !isOpenStockTakeSession(session)) return false;
+  if (String(session.started_by || "") === String(userId)) return true;
+  return String(role || "").trim().toLowerCase().replace(/_/g, "-") === "admin";
+}
+
 export function duplicateOpenWarehouseMessage({ warehouseName, existing, userId, sharedSessionIds = [] } = {}) {
   if (!existing) return "";
   const name = existing.warehouse_name || warehouseName || "this warehouse";

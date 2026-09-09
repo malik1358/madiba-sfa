@@ -11,6 +11,8 @@ import {
   findItemByBarcode,
   findItemByItemCode,
   hasStockTakeModuleAccess,
+  isOpenStockTakeSession,
+  canArchiveStockTakeSession,
   normalizeBarcode,
   normalizeStockTakeCode,
   normalizeWarehouseName,
@@ -525,6 +527,9 @@ export async function POST(request) {
       if (String(session.started_by) !== String(access.profile.id)) {
         return NextResponse.json({ success: false, error: "Only the user who opened this inventory can share it." }, { status: 403 });
       }
+      if (!isOpenStockTakeSession(session)) {
+        return NextResponse.json({ success: false, error: "Archived inventories cannot be shared." }, { status: 400 });
+      }
       const shareUsers = await loadShareUsers(admin, access.profile.id);
       if (!shareUsers.some((person) => person.id === sharedWith)) {
         return NextResponse.json({ success: false, error: "That user does not have Stock Take access." }, { status: 400 });
@@ -546,6 +551,36 @@ export async function POST(request) {
       return NextResponse.json({ success: true });
     }
 
+    if (mode === "archive-session") {
+      const sessionId = String(body?.sessionId || "").trim();
+      if (!sessionId) {
+        return NextResponse.json({ success: false, error: "Choose an inventory to archive." }, { status: 400 });
+      }
+      const { data: session, error: sessionError } = await admin
+        .from("stock_take_sessions")
+        .select("id,warehouse_name,started_by,status")
+        .eq("id", sessionId)
+        .maybeSingle();
+      if (sessionError) throw sessionError;
+      if (!session) {
+        return NextResponse.json({ success: false, error: "Inventory not found." }, { status: 404 });
+      }
+      if (!canArchiveStockTakeSession({ session, userId: access.profile.id, role: access.profile.role })) {
+        return NextResponse.json({ success: false, error: "Only the user who opened this inventory can archive it." }, { status: 403 });
+      }
+      const { error } = await admin
+        .from("stock_take_sessions")
+        .update({ status: "ARCHIVED" })
+        .eq("id", sessionId);
+      if (error) {
+        if (missingSetup(error)) {
+          return NextResponse.json({ success: false, error: setupMessage() }, { status: 400 });
+        }
+        throw error;
+      }
+      return NextResponse.json({ success: true, sessionId });
+    }
+
     if (mode === "save-line") {
       const warehouseName = normalizeWarehouseName(body?.warehouse);
       const sessionId = String(body?.sessionId || "").trim();
@@ -560,6 +595,9 @@ export async function POST(request) {
       }
       const accessCheck = await loadSessionAccess(admin, sessionId, access.profile.id);
       if (accessCheck.error) return accessCheck.error;
+      if (!isOpenStockTakeSession(accessCheck.session)) {
+        return NextResponse.json({ success: false, error: "This inventory is archived. Open or start an active count." }, { status: 400 });
+      }
       if (!barcode && !requestedItemCode) {
         return NextResponse.json({ success: false, error: "Enter a barcode or item code." }, { status: 400 });
       }

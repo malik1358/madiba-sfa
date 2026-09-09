@@ -24,7 +24,7 @@ const TEXT = {
   start: { en: "Start inventory", ar: "بدء الجرد" },
   changeWarehouse: { en: "Inventories", ar: "الجردات" },
   openInventories: { en: "Open inventories", ar: "الجردات المفتوحة" },
-  openInventoriesHint: { en: "Select an inventory you opened, or one shared with you. Start a new one below if needed.", ar: "اختر جردًا فتحته أنت أو جردًا شاركه معك مستخدم آخر. يمكنك بدء جرد جديد بالأسفل." },
+  openInventoriesHint: { en: "Select an inventory you opened, or one shared with you. Archive old counts so the same warehouse can be started again.", ar: "اختر جردًا فتحته أنت أو جردًا شاركه معك مستخدم آخر. أرشف الجردات القديمة حتى يمكن بدء نفس المستودع من جديد." },
   noneOpen: { en: "No open inventories yet.", ar: "لا توجد جردات مفتوحة." },
   openedBy: { en: "Opened by", ar: "فتحه" },
   access: { en: "Access", ar: "الصلاحية" },
@@ -36,6 +36,9 @@ const TEXT = {
   sharing: { en: "Sharing...", ar: "جاري المشاركة..." },
   shareUser: { en: "Share with user", ar: "مشاركة مع مستخدم" },
   selectUser: { en: "Select user", ar: "اختر المستخدم" },
+  archive: { en: "Archive", ar: "أرشفة" },
+  archiving: { en: "Archiving...", ar: "جاري الأرشفة..." },
+  archiveConfirm: { en: "Archive this inventory? It will leave the open list. Counted lines stay on the report.", ar: "أرشفة هذا الجرد؟ سيخرج من القائمة المفتوحة وتبقى الأسطر في التقرير." },
   barcode: { en: "Barcode", ar: "الباركود" },
   itemCode: { en: "Item code", ar: "رمز الصنف" },
   itemName: { en: "Name", ar: "الاسم" },
@@ -71,6 +74,7 @@ export default function StockTakePage() {
   const [shareUsers, setShareUsers] = useState([]);
   const [shareUserBySession, setShareUserBySession] = useState({});
   const [sharingId, setSharingId] = useState("");
+  const [archivingId, setArchivingId] = useState("");
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [barcode, setBarcode] = useState("");
   const [itemCodeInput, setItemCodeInput] = useState("");
@@ -313,6 +317,31 @@ export default function StockTakePage() {
     }
   }
 
+  async function archiveSession(row) {
+    if (!window.confirm(t("archiveConfirm"))) return;
+    setArchivingId(row.id);
+    setError("");
+    setMessage("");
+    try {
+      const { response, payload } = await fetchJsonWithTimeout("/api/stock-take", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+        body: JSON.stringify({ mode: "archive-session", sessionId: row.id }),
+      });
+      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to archive inventory.");
+      if (session?.id === row.id) {
+        setSession(null);
+        setLines([]);
+      }
+      setMessage(`${row.warehouse_name} archived.`);
+      await loadOpenSessions();
+    } catch (err) {
+      setError(err.message || "Unable to archive inventory.");
+    } finally {
+      setArchivingId("");
+    }
+  }
+
   function resetWarehouse() {
     setSession(null);
     setLines([]);
@@ -439,6 +468,16 @@ export default function StockTakePage() {
                                     </button>
                                   </>
                                 ) : null}
+                                {row.accessKind === "mine" || access.role === "admin" ? (
+                                  <button
+                                    type="button"
+                                    className="moduleInlineButton"
+                                    disabled={archivingId === row.id}
+                                    onClick={() => archiveSession(row)}
+                                  >
+                                    {archivingId === row.id ? t("archiving") : t("archive")}
+                                  </button>
+                                ) : null}
                               </div>
                             </td>
                           </tr>
@@ -499,6 +538,16 @@ export default function StockTakePage() {
                           {sharingId === session.id ? t("sharing") : t("share")}
                         </button>
                       </>
+                    ) : null}
+                    {session.accessKind !== "shared" || access.role === "admin" ? (
+                      <button
+                        type="button"
+                        className="moduleInlineButton"
+                        disabled={archivingId === session.id}
+                        onClick={() => archiveSession(session)}
+                      >
+                        {archivingId === session.id ? t("archiving") : t("archive")}
+                      </button>
                     ) : null}
                     <button type="button" className="moduleInlineButton" onClick={resetWarehouse}>{t("changeWarehouse")}</button>
                   </div>

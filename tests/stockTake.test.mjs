@@ -10,6 +10,7 @@ import {
   hasStockTakeModuleAccess,
   annotateOpenStockTakeSessions,
   canAccessStockTakeSession,
+  canArchiveStockTakeSession,
   duplicateOpenWarehouseMessage,
   stockTakeShareTargets,
   availableStockTakeUnits,
@@ -186,7 +187,7 @@ test("open inventories are only those started by the user or shared with them", 
     { id: "s1", status: "OPEN", started_by: "u1", started_at: "2026-09-09T08:00:00Z" },
     { id: "s2", status: "OPEN", started_by: "u2", started_at: "2026-09-09T09:00:00Z" },
     { id: "s3", status: "OPEN", started_by: "u3", started_at: "2026-09-09T10:00:00Z" },
-    { id: "s4", status: "CLOSED", started_by: "u1", started_at: "2026-09-09T11:00:00Z" },
+    { id: "s4", status: "ARCHIVED", started_by: "u1", started_at: "2026-09-09T11:00:00Z" },
   ];
   const visible = annotateOpenStockTakeSessions({
     sessions,
@@ -198,6 +199,10 @@ test("open inventories are only those started by the user or shared with them", 
   assert.equal(visible[1].accessKind, "mine");
   assert.equal(canAccessStockTakeSession({ session: sessions[2], userId: "u1", sharedSessionIds: ["s2"] }), false);
   assert.equal(canAccessStockTakeSession({ session: sessions[1], userId: "u1", sharedSessionIds: ["s2"] }), true);
+  assert.equal(canArchiveStockTakeSession({ session: sessions[0], userId: "u1" }), true);
+  assert.equal(canArchiveStockTakeSession({ session: sessions[0], userId: "u2" }), false);
+  assert.equal(canArchiveStockTakeSession({ session: sessions[0], userId: "u2", role: "admin" }), true);
+  assert.equal(canArchiveStockTakeSession({ session: sessions[3], userId: "u1" }), false);
 });
 
 test("share list includes inactive users who have stock take access", () => {

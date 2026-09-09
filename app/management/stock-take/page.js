@@ -571,13 +571,12 @@ export default function StockTakePage() {
                         const next = event.relatedTarget;
                         lookup({ nextBarcode: barcode }).then((found) => {
                           if (!found) return;
-                          if (next === itemCodeRef.current) return;
-                          if (next?.id === "stock-take-qty" || next?.id === "stock-take-unit") return;
+                          if (next?.id === "stock-take-qty") return;
                           advanceAfterLookup(found);
                         });
                       }}
                       onKeyDown={async (event) => {
-                        if (event.key === "Enter") {
+                        if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey && barcode.trim())) {
                           event.preventDefault();
                           const found = await lookup({ nextBarcode: barcode });
                           advanceAfterLookup(found);
@@ -592,6 +591,7 @@ export default function StockTakePage() {
                       className="moduleInput"
                       autoComplete="off"
                       readOnly={lookupMode === "barcode"}
+                      tabIndex={lookupMode === "barcode" ? -1 : 0}
                       value={itemCodeInput}
                       onChange={(event) => {
                         setItemCodeInput(event.target.value);
@@ -608,7 +608,7 @@ export default function StockTakePage() {
                         });
                       }}
                       onKeyDown={async (event) => {
-                        if (event.key === "Enter") {
+                        if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey && itemCodeInput.trim())) {
                           event.preventDefault();
                           const found = await lookup({ nextItemCode: itemCodeInput });
                           advanceAfterLookup(found);
@@ -618,12 +618,12 @@ export default function StockTakePage() {
                   </label>
                   <label>
                     {t("itemName")}
-                    <input className="moduleInput" readOnly value={item?.item_name || ""} />
+                    <input className="moduleInput" readOnly tabIndex={-1} value={item?.item_name || ""} />
                   </label>
                   <label>
                     {t("unit")}
                     {unitLocked || lookupMode === "barcode" ? (
-                      <input className="moduleInput" readOnly value={lockedUnitLabel} />
+                      <input className="moduleInput" readOnly tabIndex={-1} value={lockedUnitLabel} />
                     ) : (
                       <select
                         id="stock-take-unit"
@@ -659,15 +659,15 @@ export default function StockTakePage() {
                     <div className="stockTakeConvertedGrid">
                       <label>
                         {t("qtyBase")}
-                        <input className="moduleInput" readOnly value={converted ? formatStockQty(converted.qtyBase) : ""} />
+                        <input className="moduleInput" readOnly tabIndex={-1} value={converted ? formatStockQty(converted.qtyBase) : ""} />
                       </label>
                       <label>
                         {t("qtyMid")}
-                        <input className="moduleInput" readOnly value={converted?.qtyMid == null ? "" : formatStockQty(converted.qtyMid)} />
+                        <input className="moduleInput" readOnly tabIndex={-1} value={converted?.qtyMid == null ? "" : formatStockQty(converted.qtyMid)} />
                       </label>
                       <label>
                         {t("qtyMaster")}
-                        <input className="moduleInput" readOnly value={converted ? formatStockQty(converted.qtyMaster) : ""} />
+                        <input className="moduleInput" readOnly tabIndex={-1} value={converted ? formatStockQty(converted.qtyMaster) : ""} />
                       </label>
                     </div>
                   </div>

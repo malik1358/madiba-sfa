@@ -213,12 +213,13 @@ export default function KpiTargetsPage() {
               <table className="moduleTable moduleStackedHeaderTable moduleKpiTargetsTable">
                 <thead>
                   <tr>
-                    <th rowSpan={2}>{t("salesman")}</th>
+                    <th>{t("salesman")}</th>
                     {columns.map((key) => (
                       <th key={key} colSpan={3}>{t(key)}</th>
                     ))}
                   </tr>
                   <tr>
+                    <th data-column-filter-label={t("salesman")}></th>
                     {columns.map((key) => (
                       <FragmentHeader
                         key={key}

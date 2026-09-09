@@ -29,10 +29,12 @@ export default function ExportableTable({
     sync();
     const observer = new MutationObserver(sync);
     observer.observe(host, { childList: true, subtree: true });
+    const header = host.querySelector("table thead");
     const firstRow = host.querySelector("table thead tr");
-    const resizeObserver = firstRow && typeof ResizeObserver !== "undefined"
+    const resizeObserver = typeof ResizeObserver !== "undefined"
       ? new ResizeObserver(sync)
       : null;
+    if (header) resizeObserver?.observe(header);
     if (firstRow) resizeObserver?.observe(firstRow);
 
     return () => {

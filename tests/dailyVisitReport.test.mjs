@@ -6,6 +6,8 @@ import {
   countFarFromCustomerEntries,
   countsTowardDailyVisitEntryStats,
   buildFieldVisitStats,
+  mergeProspectsIntoCustomerMap,
+  resolveVisitCustomerName,
 } from "../app/lib/dailyVisitReportServer.js";
 
 test("daily visit entry stats skip idle GPS pings and visit reports", () => {
@@ -37,4 +39,29 @@ test("buildFieldVisitStats counts unique customers and collection amounts", () =
   assert.equal(stats.uniqueCustomers, 3);
   assert.equal(stats.customers.find((row) => row.customerCode === "1497").amountCollected, 575.75);
   assert.equal(stats.customers.find((row) => row.customerCode === "1084C").amountCollected, 0);
+});
+
+test("resolveVisitCustomerName prefers prospect company name over PROSPECT code", () => {
+  assert.equal(
+    resolveVisitCustomerName(
+      { customer_code: "PROSPECT-320", customer_name: "Al Mashaeel Trading" },
+      { customer_code: "PROSPECT-320", meta: { customerName: "PROSPECT-320" } },
+    ),
+    "Al Mashaeel Trading",
+  );
+  assert.equal(
+    resolveVisitCustomerName({}, { customer_code: "PROSPECT-325", meta: { customerName: "PROSPECT-325" } }),
+    "PROSPECT-325",
+  );
+});
+
+test("mergeProspectsIntoCustomerMap fills prospect names for visit report rows", () => {
+  const customerMap = new Map();
+  mergeProspectsIntoCustomerMap(customerMap, [
+    { id: 320, company_name: "Al Mashaeel Trading", area: "Al Mashael District" },
+    { id: 325, shop_name: "Gulf Stationery", city: "Riyadh" },
+  ]);
+
+  assert.equal(customerMap.get("PROSPECT-320").customer_name, "Al Mashaeel Trading");
+  assert.equal(customerMap.get("PROSPECT-325").customer_name, "Gulf Stationery");
 });

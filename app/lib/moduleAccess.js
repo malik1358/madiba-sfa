@@ -59,6 +59,11 @@ export function isInvoiceMakerRole(role) {
   return normalized === "invoice-maker";
 }
 
+export function canManageOrderInvoice(role) {
+  const normalized = normalizeAccessRole(role);
+  return isInvoiceMakerRole(normalized) || normalized === "admin" || normalized === "manager";
+}
+
 export function shouldRequireTransactionGps(role) {
   return !isInvoiceMakerRole(role);
 }

@@ -35,6 +35,7 @@ import {
 } from "../../lib/orderPdfDocument";
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
+import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -100,11 +101,6 @@ function daysOld(fromDate) {
   const then = new Date(fromDate).getTime();
   const now = Date.now();
   return Math.max(0, Math.floor((now - then) / (1000 * 60 * 60 * 24)));
-}
-
-function isInvoiceMakerRole(role) {
-  const normalized = String(role || "").toLowerCase();
-  return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
 function invoiceStatusText(meta, order = null) {
@@ -405,7 +401,7 @@ export default function PendingOrdersPage() {
         // Keep the order open even if invoice metadata refresh fails.
       }
 
-      if (isInvoiceMakerRole(userRole)) {
+      if (canManageOrderInvoice(userRole)) {
         setOpenStartedAtByOrder((current) => {
           if (current[orderId]) return current;
           return { ...current, [orderId]: new Date().toISOString() };
@@ -801,6 +797,7 @@ export default function PendingOrdersPage() {
   }
 
   const isInvoiceMaker = isInvoiceMakerRole(userRole);
+  const canManageInvoice = canManageOrderInvoice(userRole);
 
   return (
     <MorningAttendanceGate>
@@ -995,7 +992,7 @@ export default function PendingOrdersPage() {
 
                                 <InvoiceComparisonPanel meta={meta} />
 
-                                {isInvoiceMaker && (
+                                {canManageInvoice && (
                                   <div style={{ marginTop: "12px" }}>
                                     <div className="moduleFormGrid">
                                       <label>

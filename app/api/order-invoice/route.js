@@ -11,6 +11,7 @@ import { isProspectCustomerCode } from "../../lib/customerCode.js";
 import { expandMutualGroupScopeIdentities } from "../../lib/mutualSalesmanGroups.js";
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
+import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -35,11 +36,6 @@ function chunkList(items, size = QUERY_CHUNK) {
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
-}
-
-function isInvoiceMakerRole(role) {
-  const normalized = String(role || "").trim().toLowerCase();
-  return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
 function metaKey(orderId) {
@@ -344,8 +340,8 @@ export async function POST(request) {
     const contentType = request.headers.get("content-type") || "";
 
     if (contentType.toLowerCase().includes("multipart/form-data")) {
-      if (!isInvoiceMakerRole(scope.role)) {
-        return NextResponse.json({ success: false, error: "Only invoice maker can upload invoices." }, { status: 403 });
+      if (!canManageOrderInvoice(scope.role)) {
+        return NextResponse.json({ success: false, error: "Only admin, manager, or invoice maker can upload invoices." }, { status: 403 });
       }
 
       const form = await request.formData();
@@ -530,8 +526,8 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Unsupported action." }, { status: 400 });
     }
 
-    if (!isInvoiceMakerRole(scope.role)) {
-      return NextResponse.json({ success: false, error: "Only invoice maker can set invoice status." }, { status: 403 });
+    if (!canManageOrderInvoice(scope.role)) {
+      return NextResponse.json({ success: false, error: "Only admin, manager, or invoice maker can set invoice status." }, { status: 403 });
     }
 
     const orderId = String(body?.orderId || "").trim();

@@ -4,6 +4,8 @@ import {
   excelFilterButtonLabel,
   filterExcelColumnOptions,
   matchesExcelColumnFilter,
+  pruneExcelFilterSelection,
+  rowMatchesOtherExcelFilters,
   toggleExcelFilterValue,
   toggleVisibleExcelFilterValues,
 } from "../app/lib/excelColumnFilter.js";
@@ -29,4 +31,25 @@ test("select all applies only to the visible typed options", () => {
   assert.deepEqual(toggleVisibleExcelFilterValues(visible, visible), []);
   assert.equal(excelFilterButtonLabel([]), "All");
   assert.equal(excelFilterButtonLabel(["Parvez", "Belal"]), "2 selected");
+});
+
+test("filter lists keep only values still available after other columns", () => {
+  assert.deepEqual(
+    pruneExcelFilterSelection(["Parvez", "Belal", "Osama"], ["Belal"]),
+    ["Belal"],
+  );
+  assert.deepEqual(
+    pruneExcelFilterSelection(["Parvez", "Osama"], ["Trusted Car Company"]),
+    [],
+  );
+  assert.equal(
+    rowMatchesOtherExcelFilters(
+      { customer: "Trusted Car Company", status: "SUBMITTED" },
+      { customer: ["Parvez"], status: ["SUBMITTED"] },
+      "customer",
+      ["customer", "status"],
+      matchesExcelColumnFilter,
+    ),
+    true,
+  );
 });

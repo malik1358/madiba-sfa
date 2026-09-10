@@ -37,7 +37,7 @@ import {
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess";
-import { matchesExcelColumnFilter } from "../../lib/excelColumnFilter";
+import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
 import {
   formatPendingDuration,
   pendingOrderTimeToMakeBucket,
@@ -130,6 +130,7 @@ const HEADING_FILTERS = [
   { key: "lastUpdated", label: "Last Updated" },
   { key: "age", label: "Age (days)" },
 ];
+const HEADING_FILTER_KEYS = HEADING_FILTERS.map(({ key }) => key);
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -622,20 +623,32 @@ export default function PendingOrdersPage() {
 
   const columnFilterOptions = useMemo(() => {
     const options = {};
-    HEADING_FILTERS.forEach(({ key }) => {
+    HEADING_FILTER_KEYS.forEach((key) => {
+      const matching = orders.filter((order) => {
+        const values = pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null);
+        return rowMatchesOtherExcelFilters(values, columnFilters, key, HEADING_FILTER_KEYS, matchesColumnFilter);
+      });
       options[key] = uniqueColumnValues(
-        orders.map((order) => pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null)[key]),
+        matching.map((order) => pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null)[key]),
       );
     });
     return options;
-  }, [invoiceMetaByOrder, orders]);
+  }, [columnFilters, invoiceMetaByOrder, orders]);
+
+  const effectiveColumnFilters = useMemo(() => {
+    const next = { ...columnFilters };
+    HEADING_FILTER_KEYS.forEach((key) => {
+      next[key] = pruneExcelFilterSelection(columnFilters[key], columnFilterOptions[key] || []);
+    });
+    return next;
+  }, [columnFilterOptions, columnFilters]);
 
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
       const values = pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null);
-      return HEADING_FILTERS.every(({ key }) => matchesColumnFilter(values[key], columnFilters[key]));
+      return HEADING_FILTER_KEYS.every((key) => matchesColumnFilter(values[key], effectiveColumnFilters[key]));
     });
-  }, [columnFilters, invoiceMetaByOrder, orders]);
+  }, [effectiveColumnFilters, invoiceMetaByOrder, orders]);
 
   async function regenerateOrderPdf() {
     if (!activeOrder) {
@@ -926,7 +939,7 @@ export default function PendingOrdersPage() {
                           <ExcelColumnFilter
                             label={label}
                             options={columnFilterOptions[key] || []}
-                            selected={columnFilters[key]}
+                            selected={effectiveColumnFilters[key]}
                             onChange={(next) => setColumnFilters((current) => ({
                               ...current,
                               [key]: next,

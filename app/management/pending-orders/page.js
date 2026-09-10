@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -36,6 +36,12 @@ import {
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess";
+import {
+  formatPendingDuration,
+  isPendingOrderTimeFrozen,
+  pendingOrderTimeToMakeBucket,
+  pendingOrderTimeToMakeSeconds,
+} from "../../lib/pendingOrderTimeToMake";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -102,7 +108,7 @@ function pendingOrderFilterValues(order, meta) {
     status: displayOrDash(order.status),
     invoiceStatus: displayOrDash(invoiceStatusText(meta, order)),
     uploadedAt: displayOrDash(formatDateTime(meta?.invoiceUploadedAt)),
-    timeToMake: displayOrDash(formatDuration(meta?.invoiceBuildSeconds)),
+    timeToMake: pendingOrderTimeToMakeBucket(pendingOrderTimeToMakeSeconds(order, meta)),
     created: displayOrDash(formatDateTime(order.created_at)),
     lastUpdated: displayOrDash(formatDateTime(order.updated_at)),
     age: String(daysOld(order.updated_at || order.created_at)),
@@ -130,17 +136,38 @@ function formatDateTime(value) {
   return formatKsaDateTime(value);
 }
 
-function formatDuration(secondsValue) {
-  const seconds = Number(secondsValue || 0);
-  if (!Number.isFinite(seconds) || seconds <= 0) return "-";
+const durationTick = {
+  now: Date.now(),
+  listeners: new Set(),
+  timer: null,
+};
 
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainingSeconds = seconds % 60;
+function subscribeDurationTick(listener) {
+  durationTick.listeners.add(listener);
+  if (!durationTick.timer) {
+    durationTick.now = Date.now();
+    durationTick.timer = setInterval(() => {
+      durationTick.now = Date.now();
+      durationTick.listeners.forEach((fn) => fn());
+    }, 1000);
+  }
+  return () => {
+    durationTick.listeners.delete(listener);
+    if (durationTick.listeners.size === 0 && durationTick.timer) {
+      clearInterval(durationTick.timer);
+      durationTick.timer = null;
+    }
+  };
+}
 
-  if (hours > 0) return `${hours}h ${minutes}m ${remainingSeconds}s`;
-  if (minutes > 0) return `${minutes}m ${remainingSeconds}s`;
-  return `${remainingSeconds}s`;
+function TimeToMakeClock({ order, meta }) {
+  const frozen = isPendingOrderTimeFrozen(meta);
+  const nowMs = useSyncExternalStore(
+    frozen ? () => () => {} : subscribeDurationTick,
+    () => (frozen ? 0 : durationTick.now),
+    () => 0,
+  );
+  return formatPendingDuration(pendingOrderTimeToMakeSeconds(order, meta, frozen ? nowMs : durationTick.now));
 }
 
 function daysOld(fromDate) {
@@ -704,7 +731,7 @@ export default function PendingOrdersPage() {
         Status: order.status || "-",
         "Invoice Status": invoiceStatusText(invoiceMetaByOrder?.[order.id]),
         "Invoice Uploaded At": formatDateTime(invoiceMetaByOrder?.[order.id]?.invoiceUploadedAt),
-        "Invoice Build Time": formatDuration(invoiceMetaByOrder?.[order.id]?.invoiceBuildSeconds),
+        "Invoice Build Time": formatPendingDuration(pendingOrderTimeToMakeSeconds(order, invoiceMetaByOrder?.[order.id])),
         "Order created": formatDateTime(order.created_at),
         "Last Updated": formatDateTime(order.updated_at),
         "Age (days)": daysOld(order.updated_at || order.created_at),
@@ -930,7 +957,7 @@ export default function PendingOrdersPage() {
                           <td>{order.status || "-"}</td>
                           <td>{invoiceStatusText(meta, order)}</td>
                           <td>{formatDateTime(meta?.invoiceUploadedAt)}</td>
-                          <td>{formatDuration(meta?.invoiceBuildSeconds)}</td>
+                          <td><TimeToMakeClock order={order} meta={meta} /></td>
                           <td>{formatDateTime(order.created_at)}</td>
                           <td>{formatDateTime(order.updated_at)}</td>
                           <td>{age}</td>
@@ -1011,7 +1038,7 @@ export default function PendingOrdersPage() {
                                     <span> | <a href={meta.invoiceFileUrl} target="_blank" rel="noreferrer">View uploaded invoice</a></span>
                                   ) : null}
                                   <span> | <strong>Uploaded at:</strong> {formatDateTime(meta?.invoiceUploadedAt)}</span>
-                                  <span> | <strong>Time to make:</strong> {formatDuration(meta?.invoiceBuildSeconds)}</span>
+                                  <span> | <strong>Time to make:</strong> <TimeToMakeClock order={order} meta={meta} /></span>
                                 </div>
 
                                 {meta?.prospectLinkedCustomerCode ? (

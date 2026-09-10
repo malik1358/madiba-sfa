@@ -5,6 +5,8 @@ import { isLikelyEmail, parseEmailList } from "./mailer.js";
 import { formatKsaDateTime, getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
 export const MISSING_INVOICE_GRACE_MS = 60 * 60 * 1000;
+export const MISSING_INVOICE_EMAIL_MIN_INTERVAL_MS = 12 * 60 * 1000;
+export const MISSING_INVOICE_EMAIL_LAST_SENT_KEY = "missing_invoice_email_last_sent_at";
 export const MISSING_INVOICE_CREATED_FROM = "2026-09-01";
 export const MISSING_INVOICE_STATUS_REJECTED = "Rejected by management";
 export const MISSING_INVOICE_STATUS_NOT_UPLOADED = "Invoice not uploaded";
@@ -63,6 +65,20 @@ export function isWithinMissingInvoiceEmailWindow(date = new Date()) {
   if (parts.weekday === MISSING_INVOICE_EMAIL_FRIDAY) return false;
   const minutes = parts.hour * 60 + parts.minute;
   return minutes >= MISSING_INVOICE_EMAIL_START_MINUTES && minutes <= MISSING_INVOICE_EMAIL_END_MINUTES;
+}
+
+export function parseLastSentAt(value) {
+  const raw = value && typeof value === "object" && !Array.isArray(value)
+    ? String(value.lastSentAt || value.last_sent_at || "")
+    : String(value || "");
+  const ts = Date.parse(raw.trim());
+  return Number.isFinite(ts) ? ts : null;
+}
+
+export function wasMissingInvoiceEmailSentRecently(lastSentAt, now = new Date(), minIntervalMs = MISSING_INVOICE_EMAIL_MIN_INTERVAL_MS) {
+  const sentAt = typeof lastSentAt === "number" ? lastSentAt : parseLastSentAt(lastSentAt);
+  if (!sentAt) return false;
+  return now.getTime() - sentAt < minIntervalMs;
 }
 
 export function invoiceMetaKey(orderId) {

@@ -66,6 +66,7 @@ import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSug
 import { buildNearestCustomerActions } from "../../lib/dashboardNearestCustomers";
 import { getScheduleTodayKey, groupScheduleRowsByDisplayDate, PAST_SCHEDULE_GROUP_KEY } from "../../lib/scheduleDateWindow";
 import {
+  activeScheduledVisitDate,
   getTodayDateKey,
   nextVisitDateInputValue,
   validateNextVisitDate,
@@ -330,7 +331,7 @@ function visitRowFromCustomerRecord(customer, extras = {}) {
     last_invoice_date: customer.latest_transaction_date || customer.last_invoice_date || null,
     latest_transaction_date: customer.latest_transaction_date || null,
     last_visit_date: customer.last_visit_date || null,
-    next_visit_at: customer.next_visit_at || null,
+    next_visit_at: activeScheduledVisitDate(customer.next_visit_at, customer.last_visit_date) || null,
     recent_sales_value: Number(customer.recent_sales_value || 0),
     average_monthly_purchase: Number(customer.average_monthly_purchase || 0),
     highest_monthly_sales: Number(customer.highest_monthly_sales || 0),
@@ -867,7 +868,10 @@ export default function MyDayPage({ mode = "default" } = {}) {
             mobile: row.mobile || "",
             last_visit_date: latestVisitByCustomer.get(customerCode) || null,
             days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(customerCode) || null),
-            next_visit_at: nextVisitByCustomer.get(customerCode) || null,
+            next_visit_at: activeScheduledVisitDate(
+              nextVisitByCustomer.get(customerCode),
+              latestVisitByCustomer.get(customerCode),
+            ) || null,
             recent_sales_value: Number(row.recent_sales_value || 0),
             average_monthly_purchase: Number(row.average_monthly_purchase || 0),
             highest_monthly_sales: Number(row.highest_monthly_sales || 0),
@@ -1347,7 +1351,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
             last_visit_date: capturedAt,
             days_since_last_visit: 0,
             status: "Visited",
-            next_visit_at: visitForm.nextVisitAt || null,
+            next_visit_at: activeScheduledVisitDate(visitForm.nextVisitAt, capturedAt) || null,
           };
         })
       );
@@ -1790,7 +1794,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   const plannedVisitRows = useMemo(
     () =>
       [...visitStatusRows, ...prospectScheduleRows]
-        .filter((row) => row.next_visit_at)
+        .filter((row) => activeScheduledVisitDate(row.next_visit_at, row.last_visit_date))
         .sort((a, b) => {
           const bySchedule = getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at);
           if (bySchedule !== 0) return bySchedule;

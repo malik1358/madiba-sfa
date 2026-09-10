@@ -1,5 +1,5 @@
-import { buildUserVisitReportEmail, resolveUserReportEmail, resolveVisitReportRecipients } from "./dailyVisitReportEmail.js";
-import { resolveReportingChainFromAuth } from "./salesHierarchy.js";
+import { buildTeamVisitReportEmail, buildUserVisitReportEmail, resolveUserReportEmail, resolveVisitReportRecipients } from "./dailyVisitReportEmail.js";
+import { resolveReportingChainFromAuth, resolveSubordinateUserIds } from "./salesHierarchy.js";
 import {
   buildDailyVisitReport,
   loadProfilesForVisitReportEmails,
@@ -7,9 +7,10 @@ import {
 } from "./dailyVisitReportServer.js";
 import { formatCollectorDisplayName } from "./geo.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
-import { loadPerformanceSnapshotsForSalesmen } from "./performanceKpisServer.js";
+import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from "./performanceKpisServer.js";
 import { getMailerConfig, isEmailConfigured, parseEmailList, sendEmail } from "./mailer.js";
-import { isMissingSchemaColumn } from "./performanceKpis.js";
+import { consolidatePerformanceSnapshots, isMissingSchemaColumn, normalizeSalesmanCode } from "./performanceKpis.js";
+import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import {
   addKsaCalendarDays,
   getKsaWeekdayIndex,
@@ -109,6 +110,83 @@ export function resolveVisitReportChainEmails(chain = []) {
     .filter(Boolean);
 }
 
+function snapshotHasKpis(snapshot) {
+  return Array.isArray(snapshot?.kpis) && snapshot.kpis.length > 0;
+}
+
+function leaderTeamTargetCodes(bossCode) {
+  const code = normalizeSalesmanCode(bossCode);
+  if (!code) return [];
+  return [`TEAM::${code}`, `TEAM:${code}`, `${code}::TEAM`];
+}
+
+function teamTargetsForLeader(map, bossCode) {
+  for (const key of leaderTeamTargetCodes(bossCode)) {
+    const row = map.get(key);
+    if (row) return row;
+  }
+  return null;
+}
+
+export function collectVisitReportTeamLeaders({ recipients = [], profiles = [], authUsers = [] } = {}) {
+  const leaders = new Map();
+
+  recipients.forEach(({ user }) => {
+    resolveReportingChainFromAuth({
+      actorUserId: user?.userId,
+      profiles,
+      authUsers,
+    }).forEach((boss) => {
+      if (boss?.id && !leaders.has(boss.id)) leaders.set(boss.id, boss);
+    });
+  });
+
+  profiles.forEach((profile) => {
+    if (leaders.has(profile.id)) return;
+    const role = String(profile?.role || "").toLowerCase();
+    if (role !== "admin" && role !== "manager") return;
+    const subIds = resolveSubordinateUserIds(authUsers, profile, profiles);
+    const hasTeam = recipients.some(({ user }) => subIds.has(user.userId));
+    if (hasTeam) leaders.set(profile.id, profile);
+  });
+
+  return [...leaders.values()];
+}
+
+export function teamKpiSnapshotsForLeader({
+  leader,
+  recipients = [],
+  profiles = [],
+  authUsers = [],
+  kpiByUserId = new Map(),
+} = {}) {
+  const subIds = resolveSubordinateUserIds(authUsers, leader, profiles);
+  const snapshots = [];
+  const seen = new Set();
+
+  recipients.forEach(({ profile, user }) => {
+    const isSelf = user.userId === leader?.id;
+    if (!isSelf && !subIds.has(user.userId)) return;
+    if (isCollectionOnlyAccess({
+      role: profile?.role,
+      salesmanCode: profile?.salesman_code || user?.salesmanCode,
+    })) return;
+    const snapshot = kpiByUserId.get(user.userId);
+    if (!snapshotHasKpis(snapshot)) return;
+    const code = String(snapshot.salesmanCode || profile?.salesman_code || "").trim();
+    if (code && seen.has(code)) return;
+    if (code) seen.add(code);
+    snapshots.push(snapshot);
+  });
+
+  snapshots.sort((left, right) => (
+    String(left.salesmanName || left.salesmanCode || "").localeCompare(
+      String(right.salesmanName || right.salesmanCode || ""),
+    )
+  ));
+  return snapshots;
+}
+
 async function loadAuthUsersForReportingChain(admin) {
   if (typeof admin?.auth?.admin?.listUsers !== "function") return [];
   const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
@@ -140,6 +218,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   loadAuthUsers = loadAuthUsersForReportingChain,
   loadSummary = loadCollectionDaySummaryForUser,
   loadKpis = loadPerformanceSnapshotsForSalesmen,
+  loadTeamTargets = loadKpiTargetsBySalesman,
 } = {}) {
   const schedule = resolveDailyVisitReportEmailSchedule(date, now);
   const reportDate = schedule.date;
@@ -292,6 +371,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
         userName: userReport.userName,
         status: "sent",
         to,
+        kind: "user",
         provider: sent?.provider || null,
       });
     } catch (error) {
@@ -300,9 +380,123 @@ export async function runDailyVisitReportEmailCycle(admin, {
         userName: userReport.userName,
         status: "failed",
         to,
+        kind: "user",
         error: error.message || "Unable to send email",
       });
     }
+  }
+
+  const leaders = collectVisitReportTeamLeaders({ recipients, profiles, authUsers });
+  let teamTargetByCode = new Map();
+  try {
+    const teamCodes = [...new Set(
+      leaders.flatMap((leader) => leaderTeamTargetCodes(leader.salesman_code)),
+    )];
+    if (teamCodes.length) {
+      teamTargetByCode = await loadTeamTargets(admin, { salesmanCodes: teamCodes, reportDate }) || new Map();
+    }
+  } catch {
+    teamTargetByCode = new Map();
+  }
+
+  async function sendTeamKpiEmail({ userId, userName, to, message }) {
+    if (!to.length) {
+      results.push({
+        userId,
+        userName,
+        status: "skipped",
+        reason: "no_recipients",
+        kind: "team_kpi",
+      });
+      return [];
+    }
+    try {
+      const sent = await send({ ...message, to }, env);
+      results.push({
+        userId,
+        userName,
+        status: "sent",
+        to,
+        kind: "team_kpi",
+        provider: sent?.provider || null,
+      });
+      return to;
+    } catch (error) {
+      results.push({
+        userId,
+        userName,
+        status: "failed",
+        to,
+        kind: "team_kpi",
+        error: error.message || "Unable to send email",
+      });
+      return [];
+    }
+  }
+
+  const coveredCompanyEmails = new Set();
+  const allKpiSnapshots = [...kpiByUserId.values()].filter(snapshotHasKpis);
+
+  for (const leader of leaders) {
+    const subIds = resolveSubordinateUserIds(authUsers, leader, profiles);
+    const hasSubordinate = recipients.some(({ user }) => subIds.has(user.userId));
+    if (!hasSubordinate) continue;
+
+    const memberSnapshots = teamKpiSnapshotsForLeader({
+      leader,
+      recipients,
+      profiles,
+      authUsers,
+      kpiByUserId,
+    });
+    if (!memberSnapshots.length) continue;
+
+    const team = consolidatePerformanceSnapshots(memberSnapshots, {
+      reportDate,
+      salesmanName: `${leader.salesman_name || leader.salesman_code || "Team"} — team`,
+      teamTargets: teamTargetsForLeader(teamTargetByCode, leader.salesman_code)?.targets || null,
+    });
+    const inbox = resolveUserReportEmail({
+      reportEmail: leader.report_email,
+      email: leader.email,
+    });
+    const delivered = await sendTeamKpiEmail({
+      userId: leader.id,
+      userName: reportDisplayName(leader),
+      to: inbox ? [inbox] : [],
+      message: buildTeamVisitReportEmail({
+        date: reportDate,
+        bossName: leader.salesman_name || leader.salesman_code || "Team",
+        team,
+        members: memberSnapshots,
+      }),
+    });
+    if (delivered.length && memberSnapshots.length >= allKpiSnapshots.length) {
+      delivered.forEach((email) => coveredCompanyEmails.add(email));
+    }
+  }
+
+  const companyTo = managerEmails.filter((email) => !coveredCompanyEmails.has(email));
+  if (allKpiSnapshots.length && companyTo.length) {
+    const companySnapshots = [...allKpiSnapshots].sort((left, right) => (
+      String(left.salesmanName || left.salesmanCode || "").localeCompare(
+        String(right.salesmanName || right.salesmanCode || ""),
+      )
+    ));
+    await sendTeamKpiEmail({
+      userId: "all-teams",
+      userName: "All teams",
+      to: companyTo,
+      message: buildTeamVisitReportEmail({
+        date: reportDate,
+        bossName: "All teams",
+        team: consolidatePerformanceSnapshots(companySnapshots, {
+          reportDate,
+          salesmanName: "All teams",
+        }),
+        members: companySnapshots,
+      }),
+    });
   }
 
   const sentCount = results.filter((row) => row.status === "sent").length;

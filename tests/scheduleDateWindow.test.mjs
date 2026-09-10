@@ -4,6 +4,7 @@ import {
   addDaysToDateKey,
   filterScheduleDateGroups,
   getScheduleWindowEndDateKey,
+  groupScheduleRowsByDisplayDate,
   isScheduleDateInWindow,
 } from "../app/lib/scheduleDateWindow.js";
 
@@ -15,6 +16,21 @@ test("schedule window includes past, today, and tomorrow only", () => {
   assert.equal(isScheduleDateInWindow("2026-09-04", today), true);
   assert.equal(isScheduleDateInWindow("2026-09-05", today), false);
   assert.equal(isScheduleDateInWindow("2026-12-01", today), false);
+});
+
+test("groupScheduleRowsByDisplayDate keeps one past group plus today and tomorrow", () => {
+  const groups = groupScheduleRowsByDisplayDate([
+    { id: "aug", date: "2026-08-07" },
+    { id: "sep2", date: "2026-09-02" },
+    { id: "today", date: "2026-09-03" },
+    { id: "tomorrow", date: "2026-09-04T00:00:00" },
+    { id: "later", date: "2026-09-12" },
+  ], (row) => row.date, "2026-09-03");
+
+  assert.deepEqual(groups.map((group) => group.dateKey), ["past", "2026-09-03", "2026-09-04"]);
+  assert.deepEqual(groups[0].rows.map((row) => row.id), ["aug", "sep2"]);
+  assert.equal(groups[1].rows[0].id, "today");
+  assert.equal(groups[2].rows[0].id, "tomorrow");
 });
 
 test("addDaysToDateKey crosses month and year boundaries", () => {

@@ -63,7 +63,7 @@ import { copyTextToClipboard } from "../../lib/whatsappShare";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import { buildNearestCustomerActions } from "../../lib/dashboardNearestCustomers";
-import { getScheduleTodayKey, isScheduleDateInWindow } from "../../lib/scheduleDateWindow";
+import { getScheduleTodayKey, groupScheduleRowsByDisplayDate, PAST_SCHEDULE_GROUP_KEY } from "../../lib/scheduleDateWindow";
 import {
   getTodayDateKey,
   nextVisitDateInputValue,
@@ -102,11 +102,12 @@ const PAGE_TEXT = {
   visitSchedule: { en: "Visit Schedule", ar: "جدول الزيارات" },
   plannedVisitsCount: { en: "scheduled visits", ar: "زيارات مجدولة" },
   scheduleWindowHint: {
-    en: "Showing past visits, today, and tomorrow. Tap a date to open it.",
-    ar: "يتم عرض الزيارات السابقة واليوم وغدًا. اضغط على التاريخ لفتحه.",
+    en: "Showing one Past dates group, today, and tomorrow only. Later dates are hidden.",
+    ar: "يُعرض مجموعة التواريخ السابقة واليوم وغدًا فقط. التواريخ الأبعد مخفية.",
   },
   createOrder: { en: "Create Order", ar: "إنشاء طلب" },
   noPlannedVisits: { en: "No planned visits for past dates, today, or tomorrow.", ar: "لا توجد زيارات مجدولة للأيام السابقة أو اليوم أو غدًا." },
+  pastScheduledVisits: { en: "Past dates", ar: "التواريخ السابقة" },
   calendarDate: { en: "Date", ar: "التاريخ" },
   calendarTime: { en: "Time", ar: "الوقت" },
   unscheduledVisits: { en: "Unscheduled visits", ar: "زيارات بدون موعد" },
@@ -960,21 +961,35 @@ export default function MyDayPage({ mode = "default" } = {}) {
     }
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        callback(value);
+      };
+      const timer = window.setTimeout(() => {
+        finish(reject, new Error("Unable to read GPS location."));
+      }, 12000);
+
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          resolve({
+          window.clearTimeout(timer);
+          finish(resolve, {
             latitude: Number(position.coords.latitude.toFixed(6)),
             longitude: Number(position.coords.longitude.toFixed(6)),
             accuracy: Number(position.coords.accuracy.toFixed(1)),
           });
         },
-        () => reject(new Error("Unable to read GPS location.")),
-        { enableHighAccuracy: true, timeout: 10000 }
+        () => {
+          window.clearTimeout(timer);
+          finish(reject, new Error("Unable to read GPS location."));
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
       );
     });
   }
 
-  async function promptCustomerGpsIfFar(customer, location, accessToken, whatsappText = "") {
+  async function promptCustomerGpsIfFar(customer, location, accessToken) {
     if (!location || !accessToken || !customer?.customer_code) return;
     try {
       await maybePromptCustomerLocationUpdate({
@@ -990,7 +1005,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
             title: t("locationUpdateTitle"),
             message: promptDetails.message,
             variant: "warning",
-            whatsappText: String(whatsappText || "").trim(),
             choices: [
               { id: "yes", label: t("yes") },
               { id: "no", label: t("no") },
@@ -1270,7 +1284,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
         language,
       });
       void copyTextToClipboard(summaryText);
-      await promptCustomerGpsIfFar(customer, location, session.access_token, summaryText);
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
       const stockChecks = slimVisitStockChecks(visitForm.stockChecks);
@@ -1778,9 +1791,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
   );
 
   const visitCalendar = useMemo(() => {
-    const dayMap = new Map();
-    const unscheduled = [];
     const todayKey = getScheduleTodayKey();
+    const unscheduled = [];
+    const datedRows = [];
 
     plannedVisitRows.forEach((row) => {
       const time = getSortTimestamp(row.next_visit_at);
@@ -1788,33 +1801,28 @@ export default function MyDayPage({ mode = "default" } = {}) {
         unscheduled.push(row);
         return;
       }
-
-      const dateKey = row.schedule_date
-        || (/^\d{4}-\d{2}-\d{2}/.test(String(row.next_visit_at || ""))
-          ? String(row.next_visit_at).slice(0, 10)
-          : new Date(time).toISOString().slice(0, 10));
-      if (!isScheduleDateInWindow(dateKey, todayKey)) return;
-
-      const current = dayMap.get(dateKey) || [];
-      current.push(row);
-      dayMap.set(dateKey, current);
+      datedRows.push(row);
     });
 
-    const days = Array.from(dayMap.entries())
-      .map(([dateKey, rows]) => ({
-        dateKey,
-        label: new Date(`${dateKey}T00:00:00`).toLocaleDateString("en-GB", {
+    const days = groupScheduleRowsByDisplayDate(
+      datedRows,
+      (row) => row.schedule_date || row.next_visit_at,
+      todayKey,
+    ).map((group) => ({
+      dateKey: group.dateKey,
+      label: group.dateKey === PAST_SCHEDULE_GROUP_KEY
+        ? t("pastScheduledVisits")
+        : new Date(`${group.dateKey}T00:00:00`).toLocaleDateString("en-GB", {
           weekday: "short",
           day: "2-digit",
           month: "short",
           year: "numeric",
         }),
-        rows: rows.sort((a, b) => getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at)),
-      }))
-      .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+      rows: group.rows.sort((a, b) => getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at)),
+    }));
 
     return { days, unscheduled };
-  }, [plannedVisitRows]);
+  }, [plannedVisitRows, language]);
 
   const activeVisitRow = useMemo(() => {
     const code = String(activeVisitCustomerCode || "").trim();

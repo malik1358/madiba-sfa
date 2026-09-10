@@ -4187,6 +4187,27 @@ th:has(.moduleTableColumnFilterInput) {
   vertical-align: top;
 }
 
+.moduleTableHeadingFilter {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 108px;
+}
+
+.moduleTableHeadingFilter span {
+  line-height: 1.2;
+}
+
+.moduleTableHeadingFilter select.moduleInput {
+  width: 100%;
+  min-width: 0;
+  max-width: 180px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .moduleTableColumnFilterRow th {
   padding-top: 4px;
   padding-bottom: 8px;

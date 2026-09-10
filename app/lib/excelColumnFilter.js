@@ -42,6 +42,23 @@ export function toggleExcelFilterValue(selected, value) {
     : [...current, text];
 }
 
+export function pruneExcelFilterSelection(selected, availableOptions) {
+  const chosen = selectedExcelFilterValues(selected);
+  if (chosen.length === 0) return [];
+  const availableKeys = new Set(
+    (Array.isArray(availableOptions) ? availableOptions : [])
+      .map((item) => normalizeExcelFilterValue(item).toLowerCase())
+      .filter(Boolean),
+  );
+  return chosen.filter((item) => availableKeys.has(item.toLowerCase()));
+}
+
+export function rowMatchesOtherExcelFilters(values, filters, currentKey, filterKeys, matches) {
+  return (Array.isArray(filterKeys) ? filterKeys : []).every((key) => (
+    key === currentKey || matches(values?.[key], filters?.[key])
+  ));
+}
+
 export function toggleVisibleExcelFilterValues(selected, visibleOptions) {
   const current = selectedExcelFilterValues(selected);
   const visible = (Array.isArray(visibleOptions) ? visibleOptions : [])

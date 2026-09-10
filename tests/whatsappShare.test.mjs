@@ -20,6 +20,12 @@ test("buildWhatsappAppUrl opens the WhatsApp app share composer", () => {
   assert.ok(url.includes("Customer%3A%20Test"));
 });
 
+test("visit summaries share through the WhatsApp composer without a preset number", () => {
+  const url = buildWhatsappShareUrl("Field visit report");
+  assert.equal(url.startsWith("https://api.whatsapp.com/send?text="), true);
+  assert.equal(url.includes("wa.me/"), false);
+});
+
 test("toWhatsappShareFile names unnamed blobs for WhatsApp attachments", () => {
   assert.equal(toWhatsappShareFile(null), null);
   const blob = new Blob(["photo"], { type: "image/jpeg" });

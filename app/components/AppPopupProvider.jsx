@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useAppLanguage } from "../lib/appLanguage";
 import {
   copyTextToClipboard,
+  openWhatsappDirect,
   shareTextAndFilesOnWhatsapp,
   shareTextOnWhatsapp,
 } from "../lib/whatsappShare";
@@ -122,6 +123,12 @@ export function AppPopupProvider({ children }) {
         if (popup.whatsappText) {
           await copyTextToClipboard(popup.whatsappText);
         }
+        const text = String(popup.whatsappText || "").trim();
+        const files = Array.isArray(popup.whatsappFiles) ? popup.whatsappFiles.filter(isShareableFile) : [];
+        if (text && files.length === 0) {
+          openWhatsappDirect(text, { shareComposerOnly: true });
+          return;
+        }
         await shareWhatsappPayload(popup);
       })();
     }, 50);
@@ -131,6 +138,13 @@ export function AppPopupProvider({ children }) {
 
   const shareWhatsappFromPopup = useCallback(async () => {
     if (!popup) return;
+
+    const text = String(popup.whatsappText || "").trim();
+    const files = Array.isArray(popup.whatsappFiles) ? popup.whatsappFiles.filter(isShareableFile) : [];
+    if (text && files.length === 0) {
+      openWhatsappDirect(text, { shareComposerOnly: true });
+      return;
+    }
 
     const result = await shareWhatsappPayload(popup);
 
@@ -201,20 +215,35 @@ export function AppPopupProvider({ children }) {
             <h2 id="app-popup-title">{popup.title}</h2>
             <p id="app-popup-message">{popup.message}</p>
             {popup.choices?.length ? (
-              <div className="appPopupActions appPopupChoices">
-                {popup.choices.map((choice) => (
-                  <button
-                    key={choice.id}
-                    type="button"
-                    className={choice.id === "yes" || choice.id === "ok"
-                      ? "modulePrimaryButton"
-                      : "moduleInlineButton moduleActionButton appPopupOkButton"}
-                    onClick={() => closePopup(choice.id)}
-                  >
-                    {choice.label}
-                  </button>
-                ))}
-              </div>
+              <>
+                {popup.whatsappText ? (
+                  <p className="appPopupWhatsappHint">
+                    {language === "ar"
+                      ? "نعم أو لا سيفتح واتساب بنص الزيارة."
+                      : "Yes or No will open WhatsApp with the visit text."}
+                  </p>
+                ) : null}
+                <div className="appPopupActions appPopupChoices">
+                  {popup.choices.map((choice) => (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      className={choice.id === "yes" || choice.id === "ok"
+                        ? "modulePrimaryButton"
+                        : "moduleInlineButton moduleActionButton appPopupOkButton"}
+                      onClick={() => {
+                        const text = String(popup.whatsappText || "").trim();
+                        if (text) {
+                          openWhatsappDirect(text, { shareComposerOnly: true });
+                        }
+                        closePopup(choice.id);
+                      }}
+                    >
+                      {choice.label}
+                    </button>
+                  ))}
+                </div>
+              </>
             ) : popup.whatsappText || hasWhatsappFiles ? (
               <>
                 <p className="appPopupWhatsappHint">{whatsappHint}</p>

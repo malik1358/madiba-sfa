@@ -29,6 +29,32 @@ test("customerHasSavedLocation requires both coordinates", () => {
   assert.equal(CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM, 0.5);
 });
 
+test("evaluateCustomerLocationUpdatePrompt asks for a prospect with no saved GPS", async () => {
+  const { evaluateCustomerLocationUpdatePrompt } = await import("../app/lib/customerLocation.js");
+  const prompt = await evaluateCustomerLocationUpdatePrompt({
+    customerCode: "PROSPECT-64",
+    customerName: "Gana al araice",
+    entryLocation: { latitude: 24.7136, longitude: 46.6753 },
+    accessToken: "token",
+    customer: {
+      customer_code: "PROSPECT-64",
+      customer_name: "Gana al araice",
+      is_prospect: true,
+    },
+    skipReverseGeocode: true,
+  });
+
+  assert.equal(Boolean(prompt?.message), true);
+  assert.match(prompt.message, /No saved location/);
+});
+
+test("shouldSkipCustomerLocationWrite covers live and offline prospect codes", async () => {
+  const { shouldSkipCustomerLocationWrite } = await import("../app/lib/customerLocation.js");
+  assert.equal(shouldSkipCustomerLocationWrite("PROSPECT-64", {}), true);
+  assert.equal(shouldSkipCustomerLocationWrite("PROSPECT-OFF-abc", { is_prospect: true }), true);
+  assert.equal(shouldSkipCustomerLocationWrite("1173C", {}), false);
+});
+
 test("evaluateCustomerLocationUpdatePrompt uses the supplied customer and skips network", async () => {
   const { evaluateCustomerLocationUpdatePrompt } = await import("../app/lib/customerLocation.js");
   const nearby = {

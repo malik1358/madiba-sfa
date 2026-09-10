@@ -3689,6 +3689,17 @@ table.auditMatrix td.auditTrendSame {
   align-items: stretch;
 }
 
+.appPopupChoices {
+  flex-direction: row;
+  justify-content: center;
+  align-items: stretch;
+}
+
+.appPopupChoices .modulePrimaryButton,
+.appPopupChoices .appPopupOkButton {
+  min-width: 96px;
+}
+
 .appPopupDialogSuccess h2 {
   color: #116843;
 }

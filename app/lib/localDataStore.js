@@ -1,7 +1,10 @@
+import { withTimeout } from "./authSession.js";
+
 const DB_NAME = "madiba-sfa-local";
 const DB_VERSION = 1;
 const STORE_NAME = "cache_entries";
 const LOCAL_STORAGE_PREFIX = "madiba.cache.";
+const INDEXED_DB_TIMEOUT_MS = 2500;
 
 let dbPromise = null;
 
@@ -109,7 +112,11 @@ export async function readCacheEntry(key) {
   if (!key) return null;
 
   try {
-    const indexedEntry = await readFromIndexedDb(key);
+    const indexedEntry = await withTimeout(
+      readFromIndexedDb(key),
+      INDEXED_DB_TIMEOUT_MS,
+      "INDEXED_DB_TIMEOUT",
+    );
     if (indexedEntry) return indexedEntry;
   } catch {
     // Fall back to localStorage below.
@@ -132,7 +139,7 @@ export async function writeCacheEntry(key, value, options = {}) {
   };
 
   try {
-    await writeToIndexedDb(entry);
+    await withTimeout(writeToIndexedDb(entry), INDEXED_DB_TIMEOUT_MS, "INDEXED_DB_TIMEOUT");
     return true;
   } catch {
     return writeToLocalStorage(key, entry);

@@ -115,6 +115,7 @@ function readCapturedAt(note, fallbackDate) {
 }
 
 const BACKGROUND_GPS_CHECK_MS = 5 * 60 * 1000;
+const ACCESS_LOADING_MAX_MS = 4000;
 
 function backgroundGpsStorageKey(userId, suffix) {
   return `madiba-sfa:bg-gps:${userId}:${suffix}`;
@@ -173,6 +174,7 @@ export default function MorningAttendanceGate({
   const batteryCheckRequired = shouldRequireGpsAccessGate(access.role);
   const locationCheckRequired = shouldRequireGpsAccessGate(access.role);
   const [checking, setChecking] = useState(requireMorningAttendance);
+  const [accessLoadTimedOut, setAccessLoadTimedOut] = useState(false);
   const [ready, setReady] = useState(!requireMorningAttendance);
   const [attendanceComplete, setAttendanceComplete] = useState(!requireMorningAttendance);
   const [batteryReady, setBatteryReady] = useState(false);
@@ -191,6 +193,7 @@ export default function MorningAttendanceGate({
   const lastGpsPingAtRef = useRef(0);
   const lastActivityAtRef = useRef(0);
   const workdayCheckDoneRef = useRef(false);
+  const accessPending = accessLoading && !accessLoadTimedOut;
 
   async function syncAttendanceState(userId) {
     const supabase = getSupabaseClient();
@@ -598,7 +601,22 @@ export default function MorningAttendanceGate({
   }, []);
 
   useEffect(() => {
-    if (accessLoading) return undefined;
+    if (!accessLoading) {
+      setAccessLoadTimedOut(false);
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setAccessLoadTimedOut(true);
+    }, ACCESS_LOADING_MAX_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [accessLoading]);
+
+  useEffect(() => {
+    if (accessPending) return undefined;
 
     if (!batteryCheckRequired) {
       setBatteryReady(true);
@@ -607,10 +625,10 @@ export default function MorningAttendanceGate({
 
     verifyBatteryAccess();
     return undefined;
-  }, [accessLoading, batteryCheckRequired]);
+  }, [accessPending, batteryCheckRequired]);
 
   useEffect(() => {
-    if (accessLoading) return undefined;
+    if (accessPending) return undefined;
 
     if (!locationCheckRequired) {
       setLocationReady(true);
@@ -618,10 +636,10 @@ export default function MorningAttendanceGate({
     }
 
     return undefined;
-  }, [accessLoading, locationCheckRequired]);
+  }, [accessPending, locationCheckRequired]);
 
   useEffect(() => {
-    if (accessLoading) {
+    if (accessPending) {
       refreshWorkdayState({ attendanceOnly: true });
 
       const safetyTimer = window.setTimeout(() => {
@@ -735,8 +753,8 @@ export default function MorningAttendanceGate({
       };
     }
 
-    refreshWorkdayState();
     workdayCheckDoneRef.current = false;
+    refreshWorkdayState();
 
     const safetyTimer = window.setTimeout(() => {
       if (workdayCheckDoneRef.current) return;
@@ -761,7 +779,7 @@ export default function MorningAttendanceGate({
       window.clearTimeout(safetyTimer);
       window.removeEventListener(MORNING_ATTENDANCE_COMPLETE_EVENT, handleAttendanceComplete);
     };
-  }, [attendanceRequired, accessLoading, batteryCheckRequired]);
+  }, [attendanceRequired, accessPending, batteryCheckRequired]);
 
   useEffect(() => {
     if (!nativeAndroidApp || apkVersionReady) return undefined;
@@ -797,7 +815,7 @@ export default function MorningAttendanceGate({
   }, [nativeAndroidApp, apkVersionReady]);
 
   useEffect(() => {
-    if (!locationCheckRequired || locationReady || accessLoading) return undefined;
+    if (!locationCheckRequired || locationReady || accessPending) return undefined;
 
     let cancelled = false;
 
@@ -827,10 +845,10 @@ export default function MorningAttendanceGate({
         window.removeEventListener("focus", handleResume);
       }
     };
-  }, [locationCheckRequired, locationReady, accessLoading]);
+  }, [locationCheckRequired, locationReady, accessPending]);
 
   useEffect(() => {
-    if (!batteryCheckRequired || batteryReady || accessLoading) return undefined;
+    if (!batteryCheckRequired || batteryReady || accessPending) return undefined;
 
     let cancelled = false;
 
@@ -860,7 +878,7 @@ export default function MorningAttendanceGate({
         window.removeEventListener("focus", handleResume);
       }
     };
-  }, [batteryCheckRequired, batteryReady, accessLoading]);
+  }, [batteryCheckRequired, batteryReady, accessPending]);
 
   useEffect(() => {
     if (!backgroundGpsEnabled) return undefined;
@@ -953,7 +971,7 @@ export default function MorningAttendanceGate({
   const locationGateReady = !locationCheckRequired || locationReady;
   const accessGateReady = ready && batteryGateReady && apkVersionReady && locationGateReady;
 
-  if (accessLoading && requireMorningAttendance) {
+  if (accessPending && requireMorningAttendance) {
     return (
       <main className="modulePage" dir={dir}>
         <div className="moduleShell">

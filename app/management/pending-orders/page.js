@@ -60,6 +60,7 @@ const TEXT = {
 const PENDING_STATUSES = PENDING_ORDER_STATUSES;
 const INVOICE_STATUS_PENDING_CREDIT = "Pending for credit approval";
 const INVOICE_STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
+const INVOICE_STATUS_QUOTATION_WAITING_PAYMENT = "Quotation submitted waiting for the payment";
 const INVOICE_STATUS_REJECTED = "Rejected by management";
 const INVOICE_STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
 const INVOICE_STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
@@ -1069,6 +1070,7 @@ export default function PendingOrdersPage() {
                                           <option value="">Select status</option>
                                           <option value={INVOICE_STATUS_PENDING_CREDIT}>{INVOICE_STATUS_PENDING_CREDIT}</option>
                                           <option value={INVOICE_STATUS_WAITING_CREDIT_APPLICATION}>{INVOICE_STATUS_WAITING_CREDIT_APPLICATION}</option>
+                                          <option value={INVOICE_STATUS_QUOTATION_WAITING_PAYMENT}>{INVOICE_STATUS_QUOTATION_WAITING_PAYMENT}</option>
                                           <option value={INVOICE_STATUS_REJECTED}>{INVOICE_STATUS_REJECTED}</option>
                                           <option value={INVOICE_STATUS_STOCK_UNAVAILABLE}>{INVOICE_STATUS_STOCK_UNAVAILABLE}</option>
                                           <option value={INVOICE_STATUS_WAITING_STOCK_TRANSFER}>{INVOICE_STATUS_WAITING_STOCK_TRANSFER}</option>

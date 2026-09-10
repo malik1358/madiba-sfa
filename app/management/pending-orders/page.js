@@ -7,6 +7,7 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
 import ExportableTable from "../../components/ExportableTable";
+import ExcelColumnFilter from "../../components/ExcelColumnFilter";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import {
@@ -36,11 +37,12 @@ import {
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess";
+import { matchesExcelColumnFilter } from "../../lib/excelColumnFilter";
 import {
   formatPendingDuration,
-  isPendingOrderTimeFrozen,
   pendingOrderTimeToMakeBucket,
   pendingOrderTimeToMakeSeconds,
+  shouldRunTimeToMakeClock,
 } from "../../lib/pendingOrderTimeToMake";
 
 const TEXT = {
@@ -64,16 +66,16 @@ const INVOICE_STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
 const INVOICE_STATUS_MADE = "Invoice made";
 const OUTSTANDING_API = "/api/outstanding";
 const EMPTY_FILTERS = {
-  orderId: "",
-  customer: "",
-  salesman: "",
-  status: "",
-  invoiceStatus: "",
-  uploadedAt: "",
-  timeToMake: "",
-  created: "",
-  lastUpdated: "",
-  age: "",
+  orderId: [],
+  customer: [],
+  salesman: [],
+  status: [],
+  invoiceStatus: [],
+  uploadedAt: [],
+  timeToMake: [],
+  created: [],
+  lastUpdated: [],
+  age: [],
 };
 
 function displayOrDash(value) {
@@ -95,9 +97,7 @@ function uniqueColumnValues(values) {
 }
 
 function matchesColumnFilter(value, filter) {
-  const query = String(filter || "").trim().toLowerCase();
-  if (!query) return true;
-  return displayOrDash(value).toLowerCase() === query;
+  return matchesExcelColumnFilter(value, filter);
 }
 
 function pendingOrderFilterValues(order, meta) {
@@ -108,7 +108,9 @@ function pendingOrderFilterValues(order, meta) {
     status: displayOrDash(order.status),
     invoiceStatus: displayOrDash(invoiceStatusText(meta, order)),
     uploadedAt: displayOrDash(formatDateTime(meta?.invoiceUploadedAt)),
-    timeToMake: pendingOrderTimeToMakeBucket(pendingOrderTimeToMakeSeconds(order, meta)),
+    timeToMake: pendingOrderTimeToMakeBucket(
+      pendingOrderTimeToMakeSeconds(order, meta, Date.now(), invoiceStatusText(meta, order)),
+    ),
     created: displayOrDash(formatDateTime(order.created_at)),
     lastUpdated: displayOrDash(formatDateTime(order.updated_at)),
     age: String(daysOld(order.updated_at || order.created_at)),
@@ -161,13 +163,16 @@ function subscribeDurationTick(listener) {
 }
 
 function TimeToMakeClock({ order, meta }) {
-  const frozen = isPendingOrderTimeFrozen(meta);
+  const invoiceStatus = invoiceStatusText(meta, order);
+  const live = shouldRunTimeToMakeClock(invoiceStatus);
   const nowMs = useSyncExternalStore(
-    frozen ? () => () => {} : subscribeDurationTick,
-    () => (frozen ? 0 : durationTick.now),
+    live ? subscribeDurationTick : () => () => {},
+    () => (live ? durationTick.now : 0),
     () => 0,
   );
-  return formatPendingDuration(pendingOrderTimeToMakeSeconds(order, meta, frozen ? nowMs : durationTick.now));
+  return formatPendingDuration(
+    pendingOrderTimeToMakeSeconds(order, meta, live ? durationTick.now : nowMs, invoiceStatus),
+  );
 }
 
 function daysOld(fromDate) {
@@ -731,7 +736,12 @@ export default function PendingOrdersPage() {
         Status: order.status || "-",
         "Invoice Status": invoiceStatusText(invoiceMetaByOrder?.[order.id]),
         "Invoice Uploaded At": formatDateTime(invoiceMetaByOrder?.[order.id]?.invoiceUploadedAt),
-        "Invoice Build Time": formatPendingDuration(pendingOrderTimeToMakeSeconds(order, invoiceMetaByOrder?.[order.id])),
+        "Invoice Build Time": formatPendingDuration(pendingOrderTimeToMakeSeconds(
+          order,
+          invoiceMetaByOrder?.[order.id],
+          Date.now(),
+          invoiceStatusText(invoiceMetaByOrder?.[order.id], order),
+        )),
         "Order created": formatDateTime(order.created_at),
         "Last Updated": formatDateTime(order.updated_at),
         "Age (days)": daysOld(order.updated_at || order.created_at),
@@ -912,20 +922,15 @@ export default function PendingOrdersPage() {
                       <th key={key} data-column-filter-label={label}>
                         <div className="moduleTableHeadingFilter">
                           <span>{label}</span>
-                          <select
-                            className="moduleInput"
-                            value={columnFilters[key]}
-                            aria-label={`Filter ${label}`}
-                            onChange={(event) => setColumnFilters((current) => ({
+                          <ExcelColumnFilter
+                            label={label}
+                            options={columnFilterOptions[key] || []}
+                            selected={columnFilters[key]}
+                            onChange={(next) => setColumnFilters((current) => ({
                               ...current,
-                              [key]: event.target.value,
+                              [key]: next,
                             }))}
-                          >
-                            <option value="">All</option>
-                            {(columnFilterOptions[key] || []).map((option) => (
-                              <option key={`${key}-${option}`} value={option}>{option}</option>
-                            ))}
-                          </select>
+                          />
                         </div>
                       </th>
                     ))}

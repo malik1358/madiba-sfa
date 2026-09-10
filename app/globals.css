@@ -4208,6 +4208,92 @@ th:has(.moduleTableColumnFilterInput) {
   letter-spacing: 0;
 }
 
+.moduleExcelColumnFilter {
+  position: relative;
+  min-width: 108px;
+}
+
+.moduleExcelColumnFilterButton {
+  display: block;
+  width: 100%;
+  max-width: 180px;
+  min-height: 34px;
+  padding: 5px 24px 5px 8px;
+  border: 1px solid #8fb4bc;
+  border-radius: 6px;
+  background: #ffffff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23073f4c' d='M1 1l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 8px center;
+  color: #073f4c;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moduleExcelColumnFilterButton.isActive {
+  border-color: #0b6173;
+  background-color: #e8f4f6;
+}
+
+.moduleExcelColumnFilterPanel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: min(280px, 72vw);
+  max-height: 320px;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #8fb4bc;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(7, 63, 76, 0.18);
+}
+
+.moduleExcelColumnFilterSearch {
+  margin-bottom: 6px;
+  text-transform: none;
+}
+
+.moduleExcelColumnFilterList {
+  overflow: auto;
+  min-height: 0;
+}
+
+.moduleExcelColumnFilterOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 4px;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.moduleExcelColumnFilterOption.isSelectAll {
+  border-bottom: 1px solid #d5e1e4;
+  margin-bottom: 4px;
+}
+
+.moduleExcelColumnFilterOption input {
+  margin-top: 2px;
+}
+
+.moduleExcelColumnFilterEmpty {
+  padding: 10px 4px;
+  color: #5b7b82;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+}
+
 .moduleTableColumnFilterRow th {
   padding-top: 4px;
   padding-bottom: 8px;

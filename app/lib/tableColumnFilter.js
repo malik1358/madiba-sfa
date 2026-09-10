@@ -53,6 +53,7 @@ export function getHeaderLabelRows(table) {
 
 export function tableHasCustomHeaderFilters(table) {
   if (!table) return false;
+  if (table.querySelector(":scope > thead .moduleExcelColumnFilter")) return true;
   return [...table.querySelectorAll(":scope > thead input, :scope > thead select")]
     .some((element) => isCustomHeaderFilterControl(element));
 }

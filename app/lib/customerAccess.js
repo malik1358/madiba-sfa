@@ -5,6 +5,11 @@ import {
 } from "./outstanding.js";
 import { buildSalesmanScopeMatchers } from "./mutualSalesmanGroups.js";
 import { findCustomerByCode } from "./prospectCustomerLink.js";
+import {
+  canAccessProspectSalesmanCode,
+  findProspectForCustomerCode,
+  visibleCustomerFromProspect,
+} from "./prospects.js";
 import { customerSalesmanAssignmentMatchesScope } from "./salesHierarchy.js";
 import { assignedSalesmanCodes } from "./customerSalesmanAssignment.js";
 
@@ -70,13 +75,27 @@ export async function customerHasOutstandingAccess(admin, customerCode, scope) {
   }
 }
 
+async function ensureProspectVisibleToScope(admin, customerCode, scope) {
+  const prospect = await findProspectForCustomerCode(admin, customerCode);
+  const customer = visibleCustomerFromProspect(prospect, customerCode);
+  if (!customer) {
+    throw new Error("Customer not found.");
+  }
+
+  if (!canAccessProspectSalesmanCode(scope, prospect.salesman_code)) {
+    throw new Error("You do not have access to this customer.");
+  }
+
+  return customer;
+}
+
 export async function ensureCustomerVisibleToScope(admin, customerCode, scope) {
   const matchedScope = withSalesScopeMatchers(scope);
   const normalizedCode = normalizeCode(customerCode);
 
   const customer = await findCustomerByCode(admin, normalizedCode || customerCode);
   if (!customer) {
-    throw new Error("Customer not found.");
+    return ensureProspectVisibleToScope(admin, normalizedCode || customerCode, matchedScope);
   }
 
   if (matchedScope.hasAllAccess) return customer;

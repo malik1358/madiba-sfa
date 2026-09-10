@@ -179,6 +179,40 @@ export async function findProspectById(admin, prospectId) {
   return data || null;
 }
 
+export async function findProspectForCustomerCode(admin, customerCode) {
+  const prospectId = parseProspectIdFromCustomerCode(customerCode);
+  if (prospectId) return findProspectById(admin, prospectId);
+
+  const offlineId = parseOfflineProspectIdFromCustomerCode(customerCode);
+  if (offlineId) return findProspectByOfflineId(admin, offlineId);
+
+  return null;
+}
+
+export function visibleCustomerFromProspect(prospect, fallbackCode = "") {
+  if (!prospect) return null;
+
+  const customerCode = resolveProspectCustomerCode(prospect)
+    || String(fallbackCode || "").trim().toUpperCase();
+  if (!customerCode) return null;
+
+  return {
+    customer_code: customerCode,
+    customer_name: prospectDisplayName(prospect),
+    current_salesman_code: prospect.salesman_code || "",
+    previous_salesman_code: "",
+    latest_transaction_date: null,
+    customer_type: "PROSPECT",
+    city: prospect.city || "",
+    area: prospect.area || "",
+    mobile: prospect.mobile || "",
+    latitude: prospect.latitude,
+    longitude: prospect.longitude,
+    is_active: true,
+    is_prospect: true,
+  };
+}
+
 export function formatProspectOrderLabel(order) {
   const orderNumber = String(order?.order_number || "").trim();
   if (orderNumber) return orderNumber;

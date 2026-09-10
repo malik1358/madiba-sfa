@@ -59,7 +59,7 @@ import { useAppPopup } from "../../components/AppPopupProvider";
 import { postJsonResilient } from "../../lib/offlineApi";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { requestLoginFirstCustomerHintCheck } from "../../lib/loginFirstCustomerHint";
-import { copyTextToClipboard, openWhatsappDirect } from "../../lib/whatsappShare";
+import { copyTextToClipboard } from "../../lib/whatsappShare";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import { buildNearestCustomerActions } from "../../lib/dashboardNearestCustomers";
@@ -179,6 +179,7 @@ const PAGE_TEXT = {
   yes: { en: "Yes", ar: "نعم" },
   no: { en: "No", ar: "لا" },
   locationUpdateTitle: { en: "Update customer location?", ar: "تحديث موقع العميل؟" },
+  visitSaved: { en: "Visit saved. Share the summary on WhatsApp.", ar: "تم حفظ الزيارة. شارك الملخص على واتساب." },
   paymentFollowup: { en: "Payment follow-up", ar: "متابعة دفع" },
   comeBackLater: { en: "Asked to come back later", ar: "طلب العودة لاحقاً" },
   purchaseManagerUnavailable: { en: "Purchase manager not available", ar: "مدير المشتريات غير موجود" },
@@ -973,7 +974,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     });
   }
 
-  async function promptCustomerGpsIfFar(customer, location, accessToken) {
+  async function promptCustomerGpsIfFar(customer, location, accessToken, whatsappText = "") {
     if (!location || !accessToken || !customer?.customer_code) return;
     try {
       await maybePromptCustomerLocationUpdate({
@@ -989,6 +990,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
             title: t("locationUpdateTitle"),
             message: promptDetails.message,
             variant: "warning",
+            whatsappText: String(whatsappText || "").trim(),
             choices: [
               { id: "yes", label: t("yes") },
               { id: "no", label: t("no") },
@@ -1000,6 +1002,18 @@ export default function MyDayPage({ mode = "default" } = {}) {
     } catch (locationError) {
       console.warn("Customer location update skipped", locationError);
     }
+  }
+
+  function presentVisitWhatsappSummary(summary, { saved = true, errorMessage = "" } = {}) {
+    const text = String(summary || "").trim();
+    if (!text) return;
+    void copyTextToClipboard(text);
+    showPopup({
+      message: errorMessage || t("visitSaved"),
+      variant: saved ? "success" : "error",
+      whatsappText: text,
+      autoShareWhatsapp: true,
+    });
   }
 
   async function addLog(entryType) {
@@ -1248,10 +1262,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
-      await promptCustomerGpsIfFar(customer, location, session.access_token);
-      const capturedAt = new Date().toISOString();
-      const platform = await resolveGpsCapturePlatform();
-      const stockChecks = slimVisitStockChecks(visitForm.stockChecks);
       summaryText = buildFieldVisitWhatsappSummary({
         customer,
         visitForm,
@@ -1260,6 +1270,10 @@ export default function MyDayPage({ mode = "default" } = {}) {
         language,
       });
       void copyTextToClipboard(summaryText);
+      await promptCustomerGpsIfFar(customer, location, session.access_token, summaryText);
+      const capturedAt = new Date().toISOString();
+      const platform = await resolveGpsCapturePlatform();
+      const stockChecks = slimVisitStockChecks(visitForm.stockChecks);
 
       const saveResult = await postJsonResilient({
         url: "/api/visit-reports",
@@ -1324,16 +1338,16 @@ export default function MyDayPage({ mode = "default" } = {}) {
         stockChecks: [],
       });
 
-      openWhatsappDirect(summaryText);
+      presentVisitWhatsappSummary(summaryText, { saved: true });
     } catch (err) {
       const message = String(err?.message || "Unable to save visit report.");
-      if (message === CUSTOMER_MOBILE_REQUIRED_ERROR || message.toLowerCase().includes("05xxxxxxxx")) {
-        setError(t("customerMobileRequired"));
-      } else {
-        setError(message.toLowerCase().includes("past") ? t("nextVisitPast") : message);
-      }
+      const errorMessage = message === CUSTOMER_MOBILE_REQUIRED_ERROR || message.toLowerCase().includes("05xxxxxxxx")
+        ? t("customerMobileRequired")
+        : (message.toLowerCase().includes("past") ? t("nextVisitPast") : message);
       if (summaryText) {
-        openWhatsappDirect(summaryText);
+        presentVisitWhatsappSummary(summaryText, { saved: false, errorMessage });
+      } else {
+        setError(errorMessage);
       }
     } finally {
       setVisitSaving(false);

@@ -25,22 +25,23 @@ function openUrlWithoutLeaving(url) {
   }
 
   try {
-    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    const opened = window.open(url, "_blank");
     if (opened) {
       return { success: true, method: "whatsapp-url" };
     }
   } catch {
-    // Fall through to a hidden launch that does not replace MADIBA.
+    // Fall through to an anchor click, which iOS allows from a tap.
   }
 
   try {
-    const iframe = document.createElement("iframe");
-    iframe.setAttribute("hidden", "");
-    iframe.src = url;
-    document.body.appendChild(iframe);
-    window.setTimeout(() => {
-      iframe.remove();
-    }, 1500);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
     return { success: true, method: "whatsapp-url" };
   } catch {
     return { success: false, reason: "unavailable" };
@@ -56,7 +57,9 @@ export function openWhatsappDirect(text, options = {}) {
     return { success: false, reason: "unavailable" };
   }
 
-  const phoneNumber = String(options.phoneNumber || process.env.NEXT_PUBLIC_COLLECTION_WHATSAPP_NUMBER || "").trim();
+  const phoneNumber = options.shareComposerOnly
+    ? ""
+    : String(options.phoneNumber || process.env.NEXT_PUBLIC_COLLECTION_WHATSAPP_NUMBER || "").trim();
   const appUrl = buildWhatsappAppUrl(message);
   const webUrl = buildWhatsappShareUrl(message, phoneNumber);
   const launched = openUrlWithoutLeaving(appUrl);

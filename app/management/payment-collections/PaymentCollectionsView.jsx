@@ -57,6 +57,7 @@ import {
 } from "../../lib/collectionQueueSearch";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
+import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { getSupabaseClient } from "../../lib/supabase";
 import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
@@ -300,6 +301,9 @@ const TEXT = {
   summaryReceiptMode: { en: "Receipt mode", ar: "طريقة الاستلام" },
   summaryNextVisit: { en: "Next visit", ar: "الزيارة القادمة" },
   summaryVisitNumber: { en: "Visit number today", ar: "رقم الزيارة لليوم" },
+  summaryDistanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
+  summaryDistanceFromPrevious: { en: "Distance from previous", ar: "المسافة من السابق" },
+  summaryEstWaiting: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
   summaryOutstanding: { en: "Outstanding", ar: "المديونية" },
   summaryNotSpecified: { en: "not specified", ar: "غير محدد" },
   viewPaymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
@@ -441,6 +445,11 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   lines.push(`${t("bucket61to90")}: ${formatMoney(row.outstanding_61_90)}`);
   lines.push(`${t("bucket91to120")}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${t("bucket120plus")}: ${formatMoney(row.outstanding_above_120)}`);
+  lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
+    distanceFromCustomer: t("summaryDistanceFromCustomer"),
+    distanceFromPrevious: t("summaryDistanceFromPrevious"),
+    estWaiting: t("summaryEstWaiting"),
+  }));
   return lines.join("\n");
 }
 
@@ -1707,6 +1716,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
         || cashQueuePriorityByKey.get(rowKey(row))
         || 0;
 
+      const visitDistance = await loadVisitDistanceMetrics({
+        supabase,
+        userId: session.user.id,
+        location: gps,
+        customer: row,
+        savedAt: new Date().toISOString(),
+      });
+
       const summaryText = buildVisitSummary(
         row,
         { ...form, visitOutcome: selectedOutcome },
@@ -1715,6 +1732,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         {
           visitNumberForDay,
           queuePriority: resolvedQueuePriority,
+          visitDistance,
         },
       );
 

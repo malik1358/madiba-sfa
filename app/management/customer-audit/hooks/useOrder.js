@@ -8,6 +8,7 @@ import { upsertLocalPendingOrder } from '../../../lib/mobileDataCache';
 import { promptCustomerMobileUpdateIfMissing } from '../../../lib/customerContact';
 import { buildQueuedPendingOrderId } from '../../../lib/queuedSalesOrders';
 import { resolveGpsCapturePlatform } from '../../../lib/geo';
+import { loadVisitDistanceMetrics } from '../../../lib/visitDistanceWhatsapp';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
 import { getPrice } from '../lib/helpers';
 import { normalizePaymentType } from '../../../lib/regionalPricing';
@@ -291,6 +292,13 @@ export function useOrder({
       });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
+      const visitDistance = await loadVisitDistanceMetrics({
+        supabase,
+        userId: session.user.id,
+        location,
+        customer: selectedCustomer,
+        savedAt: capturedAt,
+      });
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -345,7 +353,7 @@ export function useOrder({
         if (!options.silent) {
           setMessage(saveResult.message || 'Draft saved on device. It will sync automatically when you are back online.');
         }
-        return { orderId: pendingOrderId, orderNumber: "" };
+        return { orderId: pendingOrderId, orderNumber: "", visitDistance };
       }
 
       const payload = saveResult.payload || {};
@@ -363,6 +371,7 @@ export function useOrder({
       return {
         orderId: payload.orderId,
         orderNumber: payload.orderNumber || String(payload.orderId),
+        visitDistance,
       };
     } catch (err) {
       setError(err.message || 'Unable to save draft order.');
@@ -413,6 +422,13 @@ export function useOrder({
       });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
+      const visitDistance = await loadVisitDistanceMetrics({
+        supabase,
+        userId: session.user.id,
+        location,
+        customer: selectedCustomer,
+        savedAt: capturedAt,
+      });
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -469,7 +485,7 @@ export function useOrder({
         }
         setShowOrderReview(false);
         setLoadedOrderStatus('SUBMITTED');
-        return { orderId: pendingOrderId, orderNumber: "" };
+        return { orderId: pendingOrderId, orderNumber: "", visitDistance };
       }
 
       const payload = saveResult.payload || {};
@@ -488,6 +504,7 @@ export function useOrder({
       return {
         orderId: payload.orderId,
         orderNumber: payload.orderNumber || String(payload.orderId),
+        visitDistance,
       };
     } catch (err) {
       setError(err.message || 'Unable to submit order.');

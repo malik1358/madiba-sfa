@@ -1,4 +1,5 @@
 import { formatSalesOrderNumber } from "./salesOrderNumber.js";
+import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -52,5 +53,6 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
     `${labels.vat}: ${formatMoney(vatAmount)}`,
     `${labels.totalInclVat}: ${formatMoney(totalWithVat)}`,
     labels.pdfAttached,
+    ...formatVisitDistanceWhatsappLines(snapshot.visitDistance),
   ].join("\n");
 }

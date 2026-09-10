@@ -42,6 +42,8 @@ test("buildCollectionVisitSummary includes queue priority and outstanding bucket
   assert.match(summary, /Customer: Acme Trading/);
   assert.match(summary, /0-30: 1,000/);
   assert.match(summary, /Visit number today: 2/);
+  assert.match(summary, />120: 0\n\nDistance from customer: -/);
+  assert.match(summary, /Est. waiting: -/);
 });
 
 test("patchCollectionVisitSummaryVisitNumber replaces stale visit numbers in stored summaries", () => {

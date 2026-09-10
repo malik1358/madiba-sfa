@@ -23,6 +23,7 @@ const STATUS_PENDING_CREDIT = "Pending for credit approval";
 const STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
 const STATUS_REJECTED = "Rejected by management";
 const STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
+const STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
 const STATUS_INVOICE_MADE = "Invoice made";
 const QUERY_CHUNK = 150;
 
@@ -537,7 +538,7 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
     }
 
-    if (![STATUS_PENDING_CREDIT, STATUS_WAITING_CREDIT_APPLICATION, STATUS_REJECTED, STATUS_STOCK_UNAVAILABLE, STATUS_INVOICE_MADE].includes(status)) {
+    if (![STATUS_PENDING_CREDIT, STATUS_WAITING_CREDIT_APPLICATION, STATUS_REJECTED, STATUS_STOCK_UNAVAILABLE, STATUS_WAITING_STOCK_TRANSFER, STATUS_INVOICE_MADE].includes(status)) {
       return NextResponse.json({ success: false, error: "Unsupported status value." }, { status: 400 });
     }
 

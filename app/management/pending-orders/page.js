@@ -54,6 +54,7 @@ const INVOICE_STATUS_PENDING_CREDIT = "Pending for credit approval";
 const INVOICE_STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
 const INVOICE_STATUS_REJECTED = "Rejected by management";
 const INVOICE_STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
+const INVOICE_STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
 const INVOICE_STATUS_MADE = "Invoice made";
 const OUTSTANDING_API = "/api/outstanding";
 const EMPTY_FILTERS = {
@@ -1007,6 +1008,7 @@ export default function PendingOrdersPage() {
                                           <option value={INVOICE_STATUS_WAITING_CREDIT_APPLICATION}>{INVOICE_STATUS_WAITING_CREDIT_APPLICATION}</option>
                                           <option value={INVOICE_STATUS_REJECTED}>{INVOICE_STATUS_REJECTED}</option>
                                           <option value={INVOICE_STATUS_STOCK_UNAVAILABLE}>{INVOICE_STATUS_STOCK_UNAVAILABLE}</option>
+                                          <option value={INVOICE_STATUS_WAITING_STOCK_TRANSFER}>{INVOICE_STATUS_WAITING_STOCK_TRANSFER}</option>
                                           <option value={INVOICE_STATUS_MADE} disabled={!meta?.invoiceFilePath}>{INVOICE_STATUS_MADE}</option>
                                         </select>
                                       </label>

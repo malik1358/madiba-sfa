@@ -45,6 +45,7 @@ import {
   updateCustomerMobile,
 } from "../../lib/customerContact";
 import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
+import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { slimVisitStockChecks } from "../../lib/visitReportSave";
 import { buildGpsActivityNote, formatCollectorDisplayName, resolveGpsCapturePlatform } from "../../lib/geo";
 import {
@@ -1276,15 +1277,23 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
+      const capturedAt = new Date().toISOString();
+      const visitDistance = await loadVisitDistanceMetrics({
+        supabase,
+        userId: session.user.id,
+        location,
+        customer,
+        savedAt: capturedAt,
+      });
       summaryText = buildFieldVisitWhatsappSummary({
         customer,
         visitForm,
         salesmanName: formatCollectorDisplayName(profile || {}),
         salesmanCode: profile?.salesman_code || "",
         language,
+        visitDistance,
       });
       void copyTextToClipboard(summaryText);
-      const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
       const stockChecks = slimVisitStockChecks(visitForm.stockChecks);
 

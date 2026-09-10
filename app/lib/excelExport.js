@@ -87,7 +87,7 @@ export function rowsFromHtmlTable(table) {
     ...leadingHeaders,
     ...lastHeaderCells.map((cell, index) => excelHeaderTextFromCell(cell, index)),
   ];
-  const bodyRows = [...table.querySelectorAll(":scope > tbody > tr")].map((row) => {
+  const bodyRows = [...table.querySelectorAll(":scope > tbody > tr, :scope > tfoot > tr")].map((row) => {
     if (row.hidden || row.classList?.contains?.("moduleTableRowFilteredOut")) return null;
     const cells = [...row.querySelectorAll(":scope > th, :scope > td")];
     if (cells.length === 1 && Number(cells[0].colSpan || 1) > 1) return null;

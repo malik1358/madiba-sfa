@@ -33,7 +33,11 @@ import {
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { resolveVisitLastInvoiceDate } from "../../lib/outstanding";
-import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
+import {
+  CUSTOMER_LOCATION_UPDATE_SKIP,
+  CUSTOMER_LOCATION_UPDATE_UPDATE,
+  maybePromptCustomerLocationUpdate,
+} from "../../lib/customerLocation";
 import {
   CUSTOMER_MOBILE_REQUIRED_ERROR,
   customerHasMobile,
@@ -172,6 +176,9 @@ const PAGE_TEXT = {
     ar: "أدخل رقم جوال سعودي (05xxxxxxxx) لهذا العميل قبل حفظ الزيارة.",
   },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
+  yes: { en: "Yes", ar: "نعم" },
+  no: { en: "No", ar: "لا" },
+  locationUpdateTitle: { en: "Update customer location?", ar: "تحديث موقع العميل؟" },
   paymentFollowup: { en: "Payment follow-up", ar: "متابعة دفع" },
   comeBackLater: { en: "Asked to come back later", ar: "طلب العودة لاحقاً" },
   purchaseManagerUnavailable: { en: "Purchase manager not available", ar: "مدير المشتريات غير موجود" },
@@ -977,6 +984,18 @@ export default function MyDayPage({ mode = "default" } = {}) {
         language,
         customer,
         skipReverseGeocode: true,
+        promptChoice: async (promptDetails) => {
+          const choice = await showPopup({
+            title: t("locationUpdateTitle"),
+            message: promptDetails.message,
+            variant: "warning",
+            choices: [
+              { id: "yes", label: t("yes") },
+              { id: "no", label: t("no") },
+            ],
+          });
+          return choice === "yes" ? CUSTOMER_LOCATION_UPDATE_UPDATE : CUSTOMER_LOCATION_UPDATE_SKIP;
+        },
       });
     } catch (locationError) {
       console.warn("Customer location update skipped", locationError);
@@ -1213,6 +1232,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     setError("");
     setMessage("");
 
+    let summaryText = "";
     try {
       const {
         data: { session },
@@ -1232,6 +1252,14 @@ export default function MyDayPage({ mode = "default" } = {}) {
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
       const stockChecks = slimVisitStockChecks(visitForm.stockChecks);
+      summaryText = buildFieldVisitWhatsappSummary({
+        customer,
+        visitForm,
+        salesmanName: formatCollectorDisplayName(profile || {}),
+        salesmanCode: profile?.salesman_code || "",
+        language,
+      });
+      void copyTextToClipboard(summaryText);
 
       const saveResult = await postJsonResilient({
         url: "/api/visit-reports",
@@ -1274,16 +1302,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
       requestLoginFirstCustomerHintCheck();
 
-      const summaryText = buildFieldVisitWhatsappSummary({
-        customer,
-        visitForm,
-        salesmanName: formatCollectorDisplayName(profile || {}),
-        salesmanCode: profile?.salesman_code || "",
-        language,
-      });
-
-      void copyTextToClipboard(summaryText);
-
       setVisitStatusRows((current) =>
         current.map((row) => {
           if (row.customer_code !== customer.customer_code) return row;
@@ -1313,6 +1331,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
         setError(t("customerMobileRequired"));
       } else {
         setError(message.toLowerCase().includes("past") ? t("nextVisitPast") : message);
+      }
+      if (summaryText) {
+        openWhatsappDirect(summaryText);
       }
     } finally {
       setVisitSaving(false);

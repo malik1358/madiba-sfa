@@ -252,6 +252,12 @@ function buildCustomerLocationUpdateMessage({
     : `You are ${distanceKm.toFixed(2)} km from ${displayName}'s saved location. Update customer location to your current GPS?`;
 }
 
+export function shouldSkipCustomerLocationWrite(customerCode, customer) {
+  return isProspectCustomerCode(customerCode)
+    || Boolean(customer?.is_prospect)
+    || /^PROSPECT-/i.test(String(customerCode || "").trim());
+}
+
 export async function evaluateCustomerLocationUpdatePrompt({
   customerCode,
   customerName = "",
@@ -261,16 +267,13 @@ export async function evaluateCustomerLocationUpdatePrompt({
   customer: knownCustomer = null,
   skipReverseGeocode = false,
 }) {
-  if (isProspectCustomerCode(customerCode)) {
-    return null;
-  }
-
   if (!hasGpsCoordinates(entryLocation)) {
     return null;
   }
 
+  const skipLocationWrite = shouldSkipCustomerLocationWrite(customerCode, knownCustomer);
   let customer = knownCustomer && typeof knownCustomer === "object" ? knownCustomer : null;
-  if (!customer) {
+  if (!customer && !skipLocationWrite) {
     customer = await fetchCustomerLocation(accessToken, customerCode);
   }
   if (!customer) return null;
@@ -278,7 +281,7 @@ export async function evaluateCustomerLocationUpdatePrompt({
   const displayName = customerName || customer?.customer_name || customerCode;
 
   let geocoded = { area: "", street: "", city: "" };
-  if (!skipReverseGeocode && !customerHasArea(customer)) {
+  if (!skipReverseGeocode && !skipLocationWrite && !customerHasArea(customer)) {
     geocoded = await reverseGeocodeCoordinates(entryLocation.latitude, entryLocation.longitude);
     const detectedArea = String(geocoded.area || "").trim();
     const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
@@ -347,7 +350,7 @@ export async function maybePromptCustomerLocationUpdate({
 
   const resolveChoice = promptChoice || defaultLegacyLocationUpdatePrompt;
   const choice = await resolveChoice(promptDetails);
-  if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE) {
+  if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE && !shouldSkipCustomerLocationWrite(customerCode, customer)) {
     await applyCustomerLocationUpdateFromPrompt(promptDetails);
   }
 }

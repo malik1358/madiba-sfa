@@ -39,22 +39,47 @@ export function AppPopupProvider({ children }) {
   const { language, dir } = useAppLanguage();
   const [popup, setPopup] = useState(null);
 
-  const closePopup = useCallback(() => {
-    setPopup(null);
+  const closePopup = useCallback((choice = "ok") => {
+    setPopup((current) => {
+      if (current?.resolveChoice) {
+        const resolve = current.resolveChoice;
+        queueMicrotask(() => resolve(choice));
+      }
+      return null;
+    });
   }, []);
 
   const showPopup = useCallback((input) => {
     const payload = typeof input === "string" ? { message: input } : (input || {});
     const message = String(payload.message || "").trim();
-    if (!message) return;
+    if (!message) return Promise.resolve("ok");
 
-    setPopup({
-      title: String(payload.title || VARIANT_LABELS[payload.variant || "info"]?.[language] || VARIANT_LABELS.info[language]).trim(),
-      message,
-      variant: payload.variant || "info",
-      whatsappText: String(payload.whatsappText || "").trim(),
-      whatsappFiles: normalizeWhatsappFiles(payload),
-      autoShareWhatsapp: Boolean(payload.autoShareWhatsapp),
+    const choices = Array.isArray(payload.choices)
+      ? payload.choices
+        .map((choice) => ({
+          id: String(choice?.id || "").trim(),
+          label: String(choice?.label || "").trim(),
+        }))
+        .filter((choice) => choice.id && choice.label)
+      : [];
+
+    return new Promise((resolve) => {
+      setPopup((current) => {
+        if (current?.resolveChoice) {
+          const previous = current.resolveChoice;
+          queueMicrotask(() => previous("ok"));
+        }
+        return {
+          title: String(payload.title || VARIANT_LABELS[payload.variant || "info"]?.[language] || VARIANT_LABELS.info[language]).trim(),
+          message,
+          variant: payload.variant || "info",
+          whatsappText: String(payload.whatsappText || "").trim(),
+          whatsappFiles: normalizeWhatsappFiles(payload),
+          autoShareWhatsapp: Boolean(payload.autoShareWhatsapp),
+          choices,
+          resolveChoice: resolve,
+        };
+      });
     });
   }, [language]);
 
@@ -164,7 +189,7 @@ export function AppPopupProvider({ children }) {
     <AppPopupContext.Provider value={value}>
       {children}
       {popup ? (
-        <div className="appPopupOverlay" dir={dir} role="presentation" onClick={closePopup}>
+        <div className="appPopupOverlay" dir={dir} role="presentation" onClick={() => closePopup(popup.choices?.length ? "no" : "ok")}>
           <div
             className={`appPopupDialog appPopupDialog${String(popup.variant || "info").charAt(0).toUpperCase()}${String(popup.variant || "info").slice(1)}`}
             role="alertdialog"
@@ -175,7 +200,22 @@ export function AppPopupProvider({ children }) {
           >
             <h2 id="app-popup-title">{popup.title}</h2>
             <p id="app-popup-message">{popup.message}</p>
-            {popup.whatsappText || hasWhatsappFiles ? (
+            {popup.choices?.length ? (
+              <div className="appPopupActions appPopupChoices">
+                {popup.choices.map((choice) => (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    className={choice.id === "yes" || choice.id === "ok"
+                      ? "modulePrimaryButton"
+                      : "moduleInlineButton moduleActionButton appPopupOkButton"}
+                    onClick={() => closePopup(choice.id)}
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+            ) : popup.whatsappText || hasWhatsappFiles ? (
               <>
                 <p className="appPopupWhatsappHint">{whatsappHint}</p>
                 {popup.whatsappText ? (
@@ -190,13 +230,13 @@ export function AppPopupProvider({ children }) {
                   <button type="button" className="modulePrimaryButton" onClick={() => { void shareWhatsappFromPopup(); }}>
                     {whatsappButtonLabel}
                   </button>
-                  <button type="button" className="moduleInlineButton moduleActionButton appPopupOkButton" onClick={closePopup}>
+                  <button type="button" className="moduleInlineButton moduleActionButton appPopupOkButton" onClick={() => closePopup("ok")}>
                     {language === "ar" ? "حسناً" : "OK"}
                   </button>
                 </div>
               </>
             ) : (
-              <button type="button" className="modulePrimaryButton appPopupOkButton" onClick={closePopup}>
+              <button type="button" className="modulePrimaryButton appPopupOkButton" onClick={() => closePopup("ok")}>
                 {language === "ar" ? "حسناً" : "OK"}
               </button>
             )}

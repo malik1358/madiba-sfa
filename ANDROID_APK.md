@@ -57,6 +57,8 @@ After deploy, MADIBA automatically sends **45-minute inactivity push alerts**, r
 
 Submitted orders from **September 2026 onward** with **no invoice uploaded after 1 hour** are emailed every **15 minutes** during **India back-office hours (Saturday–Thursday, 9:00 AM–8:00 PM IST)** via `/api/cron/missing-invoice-email`. Supabase `pg_cron` is the primary trigger; the GitHub Actions workflow **Missing Invoice Email** remains a backup. Digests are suppressed for **12 minutes** after a successful send so the two schedulers cannot double-mail. Recipients are the invoice-ops list, with **jenil.modi@noorshukran.com** on CC. Friday is a holiday. Credit-approval, stock-unavailable, test-customer, and **Rejected by management** orders are excluded.
 
+At **00:20 KSA**, `/api/cron/daily-supplier-order-email` (GitHub Actions workflow **Daily Supplier Order Email**) sends the previous KSA day's submitted orders: each salesman receives the orders they raised, and invoice-ops receive the combined digest. The table includes order status, invoice status, **order value without VAT**, and **invoice made value without VAT** (read from the attached invoice PDF), with a **total row**. Test-customer orders are excluded. Friday follows the visit-report holiday skip.
+
 Every field transaction (visit, order, collection, prospect, attendance, etc.) also sends **push alerts up the reporting chain** — each boss in **Salesman Hierarchy** receives the alert, and if that boss also has a head, the alert continues to the top.
 
 Admins can also send a manual push:

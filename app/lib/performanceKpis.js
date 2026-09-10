@@ -394,6 +394,7 @@ export function consolidatePerformanceSnapshots(snapshots = [], {
   salesmanName = "Team",
   todayIso,
   paceShares = null,
+  teamTargets = null,
 } = {}) {
   const rows = (snapshots || []).filter(Boolean);
   const actuals = emptyPerformanceActuals();
@@ -413,13 +414,16 @@ export function consolidatePerformanceSnapshots(snapshots = [], {
     }
   });
 
+  const explicitTargets = normalizePerformanceTargets(teamTargets || {});
+  const usesTeamTarget = PERFORMANCE_DISPLAY_KPI_KEYS.some((key) => Number(explicitTargets[key] || 0) > 0);
+
   return {
     ...buildPerformanceSnapshot({
       reportDate: reportDate || rows[0]?.reportDate,
       salesmanCode: TEAM_PERFORMANCE_VIEW,
       salesmanName,
       actuals,
-      targets,
+      targets: usesTeamTarget ? explicitTargets : targets,
       updatedAt: latestUpdatedAt,
       updatedByName: latestUpdatedByName,
       todayIso: todayIso || rows[0]?.todayIso,
@@ -427,6 +431,7 @@ export function consolidatePerformanceSnapshots(snapshots = [], {
     }),
     isTeam: true,
     memberCount: rows.length,
+    usesTeamTarget,
   };
 }
 

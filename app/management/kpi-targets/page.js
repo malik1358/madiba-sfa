@@ -9,6 +9,14 @@ import {
   normalizeSalesmanCode,
   PERFORMANCE_DISPLAY_KPI_KEYS,
 } from "../../lib/performanceKpis";
+import {
+  filterKpiTargetRows,
+  NO_BOSS_KEY,
+  sumFilteredKpiColumns,
+  sumKpiActuals,
+  teamMemberRows,
+  teamRowLabel,
+} from "../../lib/kpiTargetsTable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import MostVisitedPages from "../../components/MostVisitedPages";
@@ -42,6 +50,9 @@ const TEXT = {
   shownCount: { en: "shown", ar: "ظاهر" },
   clearFilters: { en: "Clear filters", ar: "مسح التصفية" },
   noMatches: { en: "No salesmen match the selected filters.", ar: "لا يوجد مندوبون مطابقون للتصفية المحددة." },
+  team: { en: "team", ar: "فريق" },
+  teamHint: { en: "Team target", ar: "هدف الفريق" },
+  totals: { en: "Total (filtered)", ar: "الإجمالي (المصفى)" },
   officeSupplies: { en: "Sales of office supplies", ar: "مبيعات مستلزمات المكتب" },
   otherSales: { en: "Others", ar: "أخرى" },
   totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
@@ -60,8 +71,6 @@ function monthInputValue(date) {
   return String(date || getKsaDateString()).slice(0, 7);
 }
 
-const NO_BOSS_KEY = "__NO_BOSS__";
-
 function salesmanFilterKey(row) {
   return normalizeSalesmanCode(row?.salesmanCode);
 }
@@ -70,17 +79,13 @@ function bossFilterKey(row) {
   return normalizeSalesmanCode(row?.bossCode) || NO_BOSS_KEY;
 }
 
-function matchesSelectedKeys(selectedKeys, actualKey) {
-  if (!Array.isArray(selectedKeys) || selectedKeys.length === 0) return true;
-  return selectedKeys.includes(String(actualKey || "").trim());
-}
-
 function emptyDraft(snapshot) {
   return {
     salesmanCode: snapshot.salesmanCode,
     salesmanName: snapshot.salesmanName,
     bossCode: normalizeSalesmanCode(snapshot.bossCode),
     bossName: String(snapshot.bossName || "").trim(),
+    isTeam: Boolean(snapshot.isTeam),
     officeSupplies: String(snapshot.targets?.officeSupplies ?? 0),
     otherSales: String(snapshot.targets?.otherSales ?? 0),
     totalSales: String(snapshot.targets?.totalSales ?? 0),
@@ -92,6 +97,20 @@ function emptyDraft(snapshot) {
     todayIso: snapshot.todayIso || null,
     reportDate: snapshot.reportDate || null,
   };
+}
+
+function withLiveTeamActuals(rows) {
+  return (rows || []).map((row) => {
+    if (!row.isTeam) return row;
+    const actuals = sumKpiActuals(teamMemberRows(rows, row.bossCode));
+    return {
+      ...row,
+      kpis: PERFORMANCE_DISPLAY_KPI_KEYS.map((key) => ({
+        key,
+        actual: actuals[key] || 0,
+      })),
+    };
+  });
 }
 
 export default function KpiTargetsPage() {
@@ -129,7 +148,19 @@ export default function KpiTargetsPage() {
       if (!response.ok || !payload.success) {
         throw new Error(payload.error || "Unable to load KPI targets.");
       }
-      setRows((payload.rows || []).map(emptyDraft));
+      const people = (payload.rows || []).map(emptyDraft);
+      const teams = (payload.teamTargets || []).map((team) => emptyDraft({
+        salesmanCode: team.salesmanCode,
+        salesmanName: teamRowLabel(team.bossName, "team"),
+        bossCode: team.bossCode,
+        bossName: team.bossName,
+        isTeam: true,
+        targets: team.targets,
+        kpis: [],
+        reportDate: payload.reportDate,
+        todayIso: getKsaDateString(),
+      }));
+      setRows(withLiveTeamActuals([...people, ...teams]));
     } catch (err) {
       setError(err.message || "Unable to load KPI targets.");
     } finally {
@@ -196,6 +227,7 @@ export default function KpiTargetsPage() {
   const salesmanOptions = useMemo(() => {
     const seen = new Set();
     return rows
+      .filter((row) => !row.isTeam)
       .map((row) => ({
         key: salesmanFilterKey(row),
         label: row.salesmanName || row.salesmanCode,
@@ -211,6 +243,7 @@ export default function KpiTargetsPage() {
   const bossOptions = useMemo(() => {
     const seen = new Set();
     return rows
+      .filter((row) => !row.isTeam)
       .map((row) => ({
         key: bossFilterKey(row),
         label: row.bossName || row.bossCode || t("noBoss"),
@@ -227,17 +260,27 @@ export default function KpiTargetsPage() {
       });
   }, [rows, t]);
 
-  const visibleRows = useMemo(
-    () => rows.filter((row) => (
-      matchesSelectedKeys(selectedSalesmen, salesmanFilterKey(row))
-      && matchesSelectedKeys(selectedBosses, bossFilterKey(row))
-    )),
-    [rows, selectedBosses, selectedSalesmen],
+  const liveRows = useMemo(() => withLiveTeamActuals(rows), [rows]);
+
+  const visibleRows = useMemo(() => {
+    const matched = filterKpiTargetRows(liveRows, { selectedSalesmen, selectedBosses });
+    return [...matched].sort((left, right) => {
+      if (Boolean(left.isTeam) !== Boolean(right.isTeam)) return left.isTeam ? -1 : 1;
+      return String(left.salesmanName || left.salesmanCode)
+        .localeCompare(String(right.salesmanName || right.salesmanCode));
+    });
+  }, [liveRows, selectedBosses, selectedSalesmen]);
+
+  const filteredTotals = useMemo(
+    () => sumFilteredKpiColumns(visibleRows, columns),
+    [columns, visibleRows],
   );
 
+  const individualVisibleCount = visibleRows.filter((row) => !row.isTeam).length;
+
   useEffect(() => {
-    const salesmanKeys = new Set(rows.map(salesmanFilterKey).filter(Boolean));
-    const bossKeys = new Set(rows.map(bossFilterKey).filter(Boolean));
+    const salesmanKeys = new Set(rows.filter((row) => !row.isTeam).map(salesmanFilterKey).filter(Boolean));
+    const bossKeys = new Set(rows.filter((row) => !row.isTeam).map(bossFilterKey).filter(Boolean));
     setSelectedSalesmen((current) => {
       const next = current.filter((key) => salesmanKeys.has(key));
       return next.length === current.length ? current : next;
@@ -333,7 +376,7 @@ export default function KpiTargetsPage() {
               ) : null}
               {!loading ? (
                 <span className="moduleHint">
-                  {visibleRows.length} / {rows.length} {t("shownCount")}
+                  {individualVisibleCount} / {rows.filter((row) => !row.isTeam).length} {t("shownCount")}
                 </span>
               ) : null}
             </div>
@@ -373,10 +416,10 @@ export default function KpiTargetsPage() {
                       </td>
                     </tr>
                   ) : visibleRows.map((row) => (
-                    <tr key={row.salesmanCode}>
+                    <tr key={row.salesmanCode} className={row.isTeam ? "moduleKpiTeamRow" : undefined}>
                       <td className="moduleKpiSalesmanCell">
-                        <strong>{row.salesmanName || row.salesmanCode}</strong>
-                        <div className="moduleKpiMeta">{row.salesmanCode}</div>
+                        <strong>{row.isTeam ? teamRowLabel(row.bossName || row.salesmanName, t("team")) : (row.salesmanName || row.salesmanCode)}</strong>
+                        <div className="moduleKpiMeta">{row.isTeam ? t("teamHint") : row.salesmanCode}</div>
                       </td>
                       <td className="moduleKpiBossCell">
                         <strong>{row.bossName || t("noBoss")}</strong>
@@ -429,6 +472,41 @@ export default function KpiTargetsPage() {
                     </tr>
                   ))}
                 </tbody>
+                {individualVisibleCount > 0 ? (
+                  <tfoot>
+                    <tr className="moduleKpiTotalsRow">
+                      <td className="moduleKpiSalesmanCell">
+                        <strong>{t("totals")}</strong>
+                        <div className="moduleKpiMeta">{individualVisibleCount} {t("salesman")}</div>
+                      </td>
+                      <td className="moduleKpiBossCell"></td>
+                      {columns.map((key) => {
+                        const column = filteredTotals[key] || { actual: 0, target: 0, achievement: null };
+                        const liveKpi = buildPerformanceKpi(key, {
+                          actual: column.actual,
+                          target: column.target,
+                          reportDate: `${month}-01`,
+                          todayIso: getKsaDateString(),
+                        });
+                        const statusKey = liveKpi.status?.key || "no_target";
+                        return (
+                          <KpiTargetCells
+                            key={key}
+                            actual={formatPerformanceKpiValue(key, column.actual)}
+                            achievement={formatAchievementPercent(column.achievement)}
+                            ofTarget={t("ofTarget")}
+                            status={liveKpi.status?.label || "No target"}
+                            statusKey={statusKey}
+                            expected=""
+                            value={String(Math.round(column.target || 0))}
+                            readOnly
+                            onChange={() => {}}
+                          />
+                        );
+                      })}
+                    </tr>
+                  </tfoot>
+                ) : null}
               </table>
             </ExportableTable>
           )}

@@ -4400,6 +4400,40 @@ th:has(.moduleTableColumnFilterInput) {
   white-space: nowrap;
 }
 
+.moduleKpiTargetsTable .moduleKpiTeamRow td {
+  background: #eef6f4;
+}
+
+.moduleKpiTargetsTable .moduleKpiTeamRow .moduleKpiSalesmanCell,
+.moduleKpiTargetsTable .moduleKpiTeamRow .moduleKpiBossCell {
+  background: #eef6f4;
+}
+
+.moduleKpiTargetsTable .moduleKpiTotalsRow td {
+  background: #e7eef0;
+  font-weight: 700;
+}
+
+.moduleKpiTargetsTable .moduleKpiTotalsRow .moduleKpiSalesmanCell,
+.moduleKpiTargetsTable .moduleKpiTotalsRow .moduleKpiBossCell {
+  background: #e7eef0;
+}
+
+.moduleKpiTargetsTable tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  box-shadow: 0 -2px 8px rgba(6, 47, 58, 0.08);
+}
+
+.moduleKpiTargetsTable tfoot .moduleKpiSalesmanCell {
+  z-index: 8;
+}
+
+.moduleKpiTargetsTable tfoot .moduleKpiBossCell {
+  z-index: 7;
+}
+
 .moduleTable td {
   color: #073f4c;
   font-size: 12px;

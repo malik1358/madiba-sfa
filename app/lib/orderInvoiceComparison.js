@@ -1,3 +1,4 @@
+import { resolveInvoiceAmountExclVat } from "./invoiceAmountFromPdf.js";
 import { compareOrderLinesWithInvoiceText } from "./invoiceOrderCompare.js";
 import { extractPdfText } from "./extractPdfText.js";
 
@@ -18,11 +19,17 @@ export async function compareInvoiceBufferWithOrder(admin, orderId, pdfBuffer) {
   const orderLines = await loadOrderLines(admin, orderId);
   const pdfText = await extractPdfText(pdfBuffer);
   const comparisonDiffs = compareOrderLinesWithInvoiceText(orderLines, pdfText);
+  const invoiceAmountExclVat = resolveInvoiceAmountExclVat({
+    pdfText,
+    orderLines,
+    diffs: comparisonDiffs,
+  });
 
   return {
     comparisonDiffs,
     comparisonCheckedAt: new Date().toISOString(),
     comparisonMatch: comparisonDiffs.length === 0,
+    invoiceAmountExclVat,
   };
 }
 
@@ -35,10 +42,17 @@ export async function compareStoredInvoiceWithOrder(admin, orderId, invoiceFileP
 }
 
 export function attachComparisonToMeta(meta, comparison) {
+  const invoiceAmountExclVat = Number(comparison?.invoiceAmountExclVat);
   return {
     ...meta,
     comparisonDiffs: comparison.comparisonDiffs,
     comparisonCheckedAt: comparison.comparisonCheckedAt,
     comparisonMatch: comparison.comparisonMatch,
+    ...(Number.isFinite(invoiceAmountExclVat) && invoiceAmountExclVat > 0
+      ? {
+        invoiceAmountExclVat,
+        invoiceAmountExtractedAt: comparison.comparisonCheckedAt || new Date().toISOString(),
+      }
+      : {}),
   };
 }

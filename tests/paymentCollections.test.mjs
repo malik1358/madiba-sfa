@@ -15,6 +15,7 @@ import {
   filterCollectionQueueInvoices,
   findLegalTransferCustomerCode,
   findLegalTransferForCustomer,
+  formatLatestCollectionVisitRemark,
   hasCollectionVisit,
   invoiceHasCashRef,
   isCashOnlyQueueCustomer,
@@ -982,4 +983,17 @@ test("redactCollectionVisitScheduleForViewer removes next visit date for unautho
 
   assert.equal(redacted.next_visit_at, null);
   assert.equal(redacted.payment_status, "PROMISED");
+});
+
+test("formatLatestCollectionVisitRemark joins Arabic and English remarks", () => {
+  assert.equal(formatLatestCollectionVisitRemark(null), "");
+  assert.equal(formatLatestCollectionVisitRemark({ remark_arabic: "غداً" }), "غداً");
+  assert.equal(formatLatestCollectionVisitRemark({
+    remark_arabic: "غداً",
+    remark_english: "Tomorrow",
+  }), "غداً / Tomorrow");
+  assert.equal(formatLatestCollectionVisitRemark({
+    remark_arabic: "Tomorrow",
+    remark_english: "Tomorrow",
+  }), "Tomorrow");
 });

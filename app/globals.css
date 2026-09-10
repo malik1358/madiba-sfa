@@ -5392,9 +5392,9 @@ th:has(.moduleTableColumnFilterInput) {
   }
 }
 
-/* The queue has 17 columns, so let it scroll instead of crushing cells to nothing. */
+/* The queue has 18 columns, so let it scroll instead of crushing cells to nothing. */
 .moduleCollectorTable {
-  min-width: 1180px;
+  min-width: 1320px;
 }
 
 .moduleCollectorTableWrap .moduleTable th {

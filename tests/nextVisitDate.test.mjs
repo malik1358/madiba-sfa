@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   NEXT_VISIT_PAST_ERROR,
   NEXT_VISIT_REQUIRED_ERROR,
+  activeScheduledVisitDate,
   normalizeDateOnly,
   nextVisitDateInputValue,
   validateNextVisitDate,
@@ -19,6 +20,14 @@ test("nextVisitDateInputValue clears overdue dates for new scheduling", () => {
   assert.equal(nextVisitDateInputValue("2026-08-25", "2026-09-05"), "");
   assert.equal(nextVisitDateInputValue("2026-09-05", "2026-09-05"), "2026-09-05");
   assert.equal(nextVisitDateInputValue("2026-09-10", "2026-09-05"), "2026-09-10");
+});
+
+test("activeScheduledVisitDate drops a schedule once a later visit is logged", () => {
+  assert.equal(activeScheduledVisitDate("2026-08-25", "2026-09-05T08:00:00Z"), "");
+  assert.equal(activeScheduledVisitDate("2026-08-25", "2026-08-25T08:00:00Z"), "");
+  assert.equal(activeScheduledVisitDate("2026-09-10", "2026-09-05T08:00:00Z"), "2026-09-10");
+  assert.equal(activeScheduledVisitDate("2026-08-25", "2026-08-20T08:00:00Z"), "2026-08-25");
+  assert.equal(activeScheduledVisitDate("", "2026-09-05T08:00:00Z"), "");
 });
 
 test("validateNextVisitDate rejects past dates and empty when required", () => {

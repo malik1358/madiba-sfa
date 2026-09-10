@@ -16,6 +16,30 @@ export function getTodayDateKey(now = new Date()) {
   return getKsaDateString(now);
 }
 
+/** Calendar day for a visit or schedule value, using KSA when a timestamp is present. */
+export function visitCalendarDateKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/T|\d{2}:\d{2}/.test(raw)) {
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) return getKsaDateString(parsed);
+  }
+  return normalizeDateOnly(raw);
+}
+
+/**
+ * Keep a next-visit date only while it is still after the latest visit.
+ * A visit on or after the scheduled day fulfills that booking.
+ */
+export function activeScheduledVisitDate(nextVisitAt, lastVisitAt) {
+  const next = visitCalendarDateKey(nextVisitAt);
+  if (!next) return "";
+  const last = visitCalendarDateKey(lastVisitAt);
+  if (last && last >= next) return "";
+  return next;
+}
+
 /**
  * Returns a date-input value for scheduling, clearing dates before today
  * so overdue revisit dates are not re-saved by accident.

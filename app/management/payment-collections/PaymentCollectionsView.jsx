@@ -49,6 +49,7 @@ import {
   isCashQueueCustomer,
   isScheduledRevisitQueueCustomer,
   canViewerSeeScheduledRevisit,
+  scheduledRevisitDate,
   sortCashQueueCustomers,
 } from "../../lib/paymentCollections";
 import {
@@ -1312,8 +1313,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
       .filter((row) => isScheduledRevisitQueueCustomer(row, queueToday))
       .filter((row) => !viewer || canViewerSeeScheduledRevisit(row?.latest_collection, null, viewer))
       .sort((left, right) => (
-        toDateInputValue(left?.latest_collection?.next_visit_at)
-          .localeCompare(toDateInputValue(right?.latest_collection?.next_visit_at))
+        toDateInputValue(scheduledRevisitDate(left))
+          .localeCompare(toDateInputValue(scheduledRevisitDate(right)))
       ));
   }, [customerFilter, dueCustomers, notDueCustomers, queueToday, schedulerScope, selectedSalesmen, view]);
 
@@ -1355,7 +1356,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     const todayKey = getScheduleTodayKey();
 
     scheduledRevisitRows.forEach((row) => {
-      const dateKey = toDateInputValue(row?.latest_collection?.next_visit_at);
+      const dateKey = toDateInputValue(scheduledRevisitDate(row));
       if (!isScheduleDateInWindow(dateKey, todayKey)) return;
 
       if (!groups.has(dateKey)) {

@@ -70,11 +70,57 @@ const EMPTY_FILTERS = {
   age: "",
 };
 
-function includesFilter(value, filter) {
+function displayOrDash(value) {
+  const text = String(value ?? "").trim();
+  return text || "-";
+}
+
+function uniqueColumnValues(values) {
+  const seen = new Set();
+  const unique = [];
+  values.forEach((value) => {
+    const text = displayOrDash(value);
+    const key = text.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(text);
+  });
+  return unique.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function matchesColumnFilter(value, filter) {
   const query = String(filter || "").trim().toLowerCase();
   if (!query) return true;
-  return String(value ?? "").toLowerCase().includes(query);
+  return displayOrDash(value).toLowerCase() === query;
 }
+
+function pendingOrderFilterValues(order, meta) {
+  return {
+    orderId: displayOrDash(formatSalesOrderNumber(order) || order.id),
+    customer: displayOrDash(order.customer_name || order.customer_code),
+    salesman: displayOrDash(order.salesman_code),
+    status: displayOrDash(order.status),
+    invoiceStatus: displayOrDash(invoiceStatusText(meta, order)),
+    uploadedAt: displayOrDash(formatDateTime(meta?.invoiceUploadedAt)),
+    timeToMake: displayOrDash(formatDuration(meta?.invoiceBuildSeconds)),
+    created: displayOrDash(formatDateTime(order.created_at)),
+    lastUpdated: displayOrDash(formatDateTime(order.updated_at)),
+    age: String(daysOld(order.updated_at || order.created_at)),
+  };
+}
+
+const HEADING_FILTERS = [
+  { key: "orderId", label: "Order Number" },
+  { key: "customer", label: "Customer" },
+  { key: "salesman", label: "Salesman" },
+  { key: "status", label: "Status" },
+  { key: "invoiceStatus", label: "Invoice Status" },
+  { key: "uploadedAt", label: "Uploaded At" },
+  { key: "timeToMake", label: "Time to Make" },
+  { key: "created", label: "Order created" },
+  { key: "lastUpdated", label: "Last Updated" },
+  { key: "age", label: "Age (days)" },
+];
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -541,21 +587,20 @@ export default function PendingOrdersPage() {
     [orders, activeOrderId]
   );
 
+  const columnFilterOptions = useMemo(() => {
+    const options = {};
+    HEADING_FILTERS.forEach(({ key }) => {
+      options[key] = uniqueColumnValues(
+        orders.map((order) => pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null)[key]),
+      );
+    });
+    return options;
+  }, [invoiceMetaByOrder, orders]);
+
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
-      const meta = invoiceMetaByOrder?.[order.id] || null;
-      const age = daysOld(order.updated_at || order.created_at);
-
-      return includesFilter(order.id, columnFilters.orderId)
-        && includesFilter(order.customer_name || order.customer_code, columnFilters.customer)
-        && includesFilter(order.salesman_code, columnFilters.salesman)
-        && includesFilter(order.status, columnFilters.status)
-        && includesFilter(invoiceStatusText(meta, order), columnFilters.invoiceStatus)
-        && includesFilter(formatDateTime(meta?.invoiceUploadedAt), columnFilters.uploadedAt)
-        && includesFilter(formatDuration(meta?.invoiceBuildSeconds), columnFilters.timeToMake)
-        && includesFilter(formatDateTime(order.created_at), columnFilters.created)
-        && includesFilter(formatDateTime(order.updated_at), columnFilters.lastUpdated)
-        && includesFilter(age, columnFilters.age);
+      const values = pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null);
+      return HEADING_FILTERS.every(({ key }) => matchesColumnFilter(values[key], columnFilters[key]));
     });
   }, [columnFilters, invoiceMetaByOrder, orders]);
 
@@ -836,52 +881,38 @@ export default function PendingOrdersPage() {
               <table className="moduleTable">
                 <thead>
                   <tr>
-                    <th>Order Number</th>
-                    <th>Customer</th>
-                    <th>Salesman</th>
-                    <th>Status</th>
-                    <th>Invoice Status</th>
-                    <th>Uploaded At</th>
-                    <th>Time to Make</th>
-                    <th>Order created</th>
-                    <th>Last Updated</th>
-                    <th>Age (days)</th>
-                    <th>Action</th>
-                  </tr>
-                  <tr>
-                    {[
-                      ["orderId", "Filter ID"],
-                      ["customer", "Filter customer"],
-                      ["salesman", "Filter salesman"],
-                      ["status", "Filter status"],
-                      ["invoiceStatus", "Filter invoice status"],
-                      ["uploadedAt", "Filter uploaded"],
-                      ["timeToMake", "Filter time"],
-                      ["created", "Filter created"],
-                      ["lastUpdated", "Filter updated"],
-                      ["age", "Filter age"],
-                    ].map(([key, placeholder]) => (
-                      <th key={key}>
-                        <input
-                          className="moduleInput"
-                          type="text"
-                          value={columnFilters[key]}
-                          placeholder={placeholder}
-                          onChange={(event) => setColumnFilters((current) => ({
-                            ...current,
-                            [key]: event.target.value,
-                          }))}
-                        />
+                    {HEADING_FILTERS.map(({ key, label }) => (
+                      <th key={key} data-column-filter-label={label}>
+                        <div className="moduleTableHeadingFilter">
+                          <span>{label}</span>
+                          <select
+                            className="moduleInput"
+                            value={columnFilters[key]}
+                            aria-label={`Filter ${label}`}
+                            onChange={(event) => setColumnFilters((current) => ({
+                              ...current,
+                              [key]: event.target.value,
+                            }))}
+                          >
+                            <option value="">All</option>
+                            {(columnFilterOptions[key] || []).map((option) => (
+                              <option key={`${key}-${option}`} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        </div>
                       </th>
                     ))}
-                    <th>
-                      <button
-                        type="button"
-                        className="moduleInlineButton"
-                        onClick={() => setColumnFilters(EMPTY_FILTERS)}
-                      >
-                        Clear
-                      </button>
+                    <th data-column-filter-label="Action">
+                      <div className="moduleTableHeadingFilter">
+                        <span>Action</span>
+                        <button
+                          type="button"
+                          className="moduleInlineButton"
+                          onClick={() => setColumnFilters(EMPTY_FILTERS)}
+                        >
+                          Clear
+                        </button>
+                      </div>
                     </th>
                   </tr>
                 </thead>

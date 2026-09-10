@@ -48,4 +48,13 @@ test("isExcelFilterHeaderRow skips collector filter rows and custom header contr
     classList: { contains: () => false },
     querySelectorAll: () => [{ classList: { contains: (name) => name === "moduleTableColumnFilterInput" } }],
   }), false);
+  assert.equal(isExcelFilterHeaderRow({
+    classList: { contains: () => false },
+    querySelectorAll: (selector) => {
+      if (selector === ":scope > th, :scope > td") {
+        return [{ dataset: { columnFilterLabel: "Customer" } }];
+      }
+      return [{ classList: { contains: () => false } }];
+    },
+  }), false);
 });

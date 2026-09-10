@@ -48,6 +48,14 @@ export function isExcelFilterHeaderRow(row) {
   if (!row) return false;
   if (row.classList?.contains?.("moduleCollectorFilterRow")) return true;
   if (row.classList?.contains?.("moduleTableColumnFilterRow")) return true;
+
+  const cells = typeof row.querySelectorAll === "function"
+    ? [...row.querySelectorAll(":scope > th, :scope > td")]
+    : [];
+  if (cells.some((cell) => String(cell?.dataset?.columnFilterLabel || "").trim())) {
+    return false;
+  }
+
   const controls = typeof row.querySelectorAll === "function"
     ? [...row.querySelectorAll("input, select")]
     : [];

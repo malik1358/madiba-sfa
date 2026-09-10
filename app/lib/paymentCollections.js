@@ -185,6 +185,13 @@ export function hasCollectionVisit(record) {
   return Boolean(dateOnly(record?.latest_collection?.saved_at));
 }
 
+export function formatLatestCollectionVisitRemark(latestCollection) {
+  const arabic = String(latestCollection?.remark_arabic || "").trim();
+  const english = String(latestCollection?.remark_english || "").trim();
+  if (arabic && english && arabic !== english) return `${arabic} / ${english}`;
+  return arabic || english;
+}
+
 function scheduledRevisitTier(record, today) {
   const revisitAt = scheduledRevisitDate(record);
   if (revisitAt && revisitAt > today) return 1;

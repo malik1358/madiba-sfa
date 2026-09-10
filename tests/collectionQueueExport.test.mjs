@@ -22,6 +22,11 @@ test("buildDueCollectionQueueExport includes customer summary and invoice rows f
       max_overdue_days: 51,
       due_invoice_count: 1,
       probability_label: "High",
+      latest_collection: {
+        visit_outcome: "ASKED_COME_LATER",
+        remark_arabic: "سيسدد الأسبوع القادم",
+        remark_english: "Will pay next week",
+      },
       invoices: [{
         ref_no: "NFD/986",
         invoice_date: "2026-07-13",
@@ -40,6 +45,7 @@ test("buildDueCollectionQueueExport includes customer summary and invoice rows f
   assert.equal(summaryRows[0].Party, "1468_Bahr Al-Takhfid Trading Company");
   assert.equal(summaryRows[0]["Priority #"], 12);
   assert.equal(summaryRows[0]["Due Amount"], 19315);
+  assert.equal(summaryRows[0]["Last Visit Remark"], "سيسدد الأسبوع القادم / Will pay next week");
 
   assert.equal(invoiceRows.length, 1);
   assert.equal(invoiceRows[0]["Ref No"], "NFD/986");

@@ -1,5 +1,5 @@
 import { resolveInvoiceAgingDays } from "./outstanding.js";
-import { isCashQueueCustomer } from "./paymentCollections.js";
+import { formatLatestCollectionVisitRemark, isCashQueueCustomer } from "./paymentCollections.js";
 
 function roundAmount(value) {
   const num = Number(value || 0);
@@ -39,6 +39,7 @@ function buildCustomerSummaryRow(row, section, priorityByCode) {
     "Due Invoices": Number(isNotDue ? row.not_due_invoice_count : row.due_invoice_count) || 0,
     "Payment Probability": isNotDue ? "N/A" : String(row.probability_label || "").trim() || "N/A",
     "Last Outcome": String(row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status || "").trim(),
+    "Last Visit Remark": formatLatestCollectionVisitRemark(row?.latest_collection),
     "Last Update": row?.latest_collection?.saved_at ? String(row.latest_collection.saved_at) : "",
     "In Legal": row?.legal_transfer?.is_transferred ? "Yes" : "No",
   };

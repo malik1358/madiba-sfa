@@ -1,8 +1,17 @@
-export function isPendingOrderTimeFrozen(meta) {
+export function isUnsetInvoiceStatus(invoiceStatus) {
+  return String(invoiceStatus ?? "").trim() === "-" || String(invoiceStatus ?? "").trim() === "";
+}
+
+export function shouldRunTimeToMakeClock(invoiceStatus) {
+  return isUnsetInvoiceStatus(invoiceStatus);
+}
+
+export function isPendingOrderTimeFrozen(meta, invoiceStatus) {
+  if (!shouldRunTimeToMakeClock(invoiceStatus)) return true;
   return Boolean(meta?.invoiceUploadedAt) || Number(meta?.invoiceBuildSeconds) > 0;
 }
 
-export function pendingOrderTimeToMakeSeconds(order, meta, nowMs = Date.now()) {
+export function pendingOrderTimeToMakeSeconds(order, meta, nowMs = Date.now(), invoiceStatus = "-") {
   const createdMs = Date.parse(order?.created_at || "");
   const uploadedMs = Date.parse(meta?.invoiceUploadedAt || "");
   const stored = Number(meta?.invoiceBuildSeconds);
@@ -13,6 +22,7 @@ export function pendingOrderTimeToMakeSeconds(order, meta, nowMs = Date.now()) {
   if (Number.isFinite(createdMs) && Number.isFinite(uploadedMs)) {
     return Math.max(0, Math.round((uploadedMs - createdMs) / 1000));
   }
+  if (!shouldRunTimeToMakeClock(invoiceStatus)) return null;
   if (!Number.isFinite(createdMs)) return null;
   return Math.max(0, Math.floor((Number(nowMs) - createdMs) / 1000));
 }

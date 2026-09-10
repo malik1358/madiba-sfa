@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildModuleAccess,
+  canManageOrderInvoice,
   isCollectionOnlyAccess,
   listAccessibleModules,
   localizedModuleLabel,
@@ -42,6 +43,14 @@ test("salesmen see field modules but not admin tools", () => {
   assert.equal(access.canAccess("gpsMap"), false);
   assert.equal(access.canAccess("salesmanHierarchy"), false);
   assert.equal(access.canAccess("upload"), false);
+});
+
+test("admin manager and invoice-maker can set pending order invoice status", () => {
+  assert.equal(canManageOrderInvoice("admin"), true);
+  assert.equal(canManageOrderInvoice("manager"), true);
+  assert.equal(canManageOrderInvoice("invoice-maker"), true);
+  assert.equal(canManageOrderInvoice("invoice_maker"), true);
+  assert.equal(canManageOrderInvoice("salesman"), false);
 });
 
 test("invoice-makers can access hierarchy upload and gps map", () => {

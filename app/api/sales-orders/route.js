@@ -344,6 +344,23 @@ async function persistDraftOrder(admin, {
     if (lineError) throw lineError;
   }
 
+  const totalQuantity = normalizedLines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+  const totalValue = normalizedLines.reduce((sum, line) => {
+    const lineValue = Number(line.line_value);
+    if (Number.isFinite(lineValue) && lineValue > 0) return sum + lineValue;
+    const fallback = Number(line.quantity || 0) * Number(line.rate || 0);
+    return sum + (Number.isFinite(fallback) ? fallback : 0);
+  }, 0);
+  const { error: totalsError } = await admin
+    .from("sales_orders")
+    .update({
+      total_items: normalizedLines.length,
+      total_quantity: totalQuantity,
+      total_value: Math.round(totalValue * 100) / 100,
+    })
+    .eq("id", resolvedOrderId);
+  if (totalsError) throw totalsError;
+
   const changeSet = buildChangeSet(
     existingLines,
     normalizedLines.map((line) => ({

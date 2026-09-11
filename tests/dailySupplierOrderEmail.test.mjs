@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  amountInclVat,
   extractInvoiceAmountExclVat,
   invoiceAmountExclVatFromLines,
   parseMoneyAmount,
@@ -13,6 +14,7 @@ import {
   resolveDailySupplierOrderDigestCc,
   resolveDailySupplierOrderDigestRecipients,
   selectDailySupplierOrders,
+  shouldIncludeInSupplierOrderReport,
 } from "../app/lib/dailySupplierOrderEmail.js";
 import { DEFAULT_MISSING_INVOICE_EMAIL_CC, DEFAULT_MISSING_INVOICE_EMAIL_TO } from "../app/lib/missingInvoiceEmail.js";
 import { runDailySupplierOrderEmailCycle } from "../app/lib/dailySupplierOrderEmailServer.js";
@@ -52,13 +54,36 @@ test("resolveInvoiceAmountExclVat uses PDF total before line fallback", () => {
   }), 200);
 });
 
+test("amountInclVat adds 15 percent", () => {
+  assert.equal(amountInclVat(1000), 1150);
+});
+
 test("selectDailySupplierOrders drops drafts and test customers", () => {
   const selected = selectDailySupplierOrders([
-    { id: 1, status: "SUBMITTED", customer_name: "Dhawi Trading", salesman_code: "AR", order_number: "378" },
-    { id: 2, status: "DRAFT", customer_name: "Dhawi Trading", salesman_code: "AR", order_number: "379" },
-    { id: 3, status: "SUBMITTED", customer_name: "TEST CUSTOMER", salesman_code: "AR", order_number: "380" },
-  ]);
+    { id: 1, status: "SUBMITTED", customer_name: "Dhawi Trading", salesman_code: "AR", order_number: "378", created_at: "2026-09-09T10:00:00.000Z" },
+    { id: 2, status: "DRAFT", customer_name: "Dhawi Trading", salesman_code: "AR", order_number: "379", created_at: "2026-09-09T10:00:00.000Z" },
+    { id: 3, status: "SUBMITTED", customer_name: "TEST CUSTOMER", salesman_code: "AR", order_number: "380", created_at: "2026-09-09T10:00:00.000Z" },
+  ], new Map(), {
+    sinceIso: "2026-09-01T00:00:00.000Z",
+    asOfIso: "2026-09-10T12:00:00.000Z",
+  });
   assert.deepEqual(selected.map((order) => order.id), [1]);
+});
+
+test("shouldIncludeInSupplierOrderReport keeps awaiting-billing orders after the watermark", () => {
+  const order = {
+    id: 50,
+    status: "SUBMITTED",
+    customer_name: "Old Shop",
+    created_at: "2026-09-05T08:00:00.000Z",
+    submitted_at: "2026-09-05T08:00:00.000Z",
+    updated_at: "2026-09-05T08:00:00.000Z",
+  };
+  const sinceMs = Date.parse("2026-09-09T00:00:00.000Z");
+  const asOfMs = Date.parse("2026-09-10T12:00:00.000Z");
+  assert.equal(shouldIncludeInSupplierOrderReport(order, null, sinceMs, asOfMs), true);
+  assert.equal(shouldIncludeInSupplierOrderReport(order, { status: "Invoice made", invoiceUploadedAt: "2026-09-06T10:00:00.000Z" }, sinceMs, asOfMs), false);
+  assert.equal(shouldIncludeInSupplierOrderReport(order, { status: "Invoice made", statusUpdatedAt: "2026-09-09T18:00:00.000Z" }, sinceMs, asOfMs), true);
 });
 
 test("groupDailySupplierOrders splits by salesman and attaches profile", () => {
@@ -76,7 +101,7 @@ test("groupDailySupplierOrders splits by salesman and attaches profile", () => {
   assert.equal(groups[0].profile.email, "abdul@madiba.com");
 });
 
-test("buildDailySupplierOrderEmail includes values without VAT and a total row", () => {
+test("buildDailySupplierOrderEmail includes values with VAT and a total row", () => {
   const message = buildDailySupplierOrderEmail({
     date: "2026-09-10",
     salesmanName: "ABDUL REHMAN (AR)",
@@ -88,8 +113,8 @@ test("buildDailySupplierOrderEmail includes values without VAT and a total row",
         orderStatus: "SUBMITTED",
         invoiceStatus: "Invoice made",
         createdAt: "10/09/2026, 09:43",
-        orderValue: 1000,
-        invoiceValue: 980,
+        orderValue: 1150,
+        invoiceValue: 1127,
       },
       {
         order: "377",
@@ -98,23 +123,23 @@ test("buildDailySupplierOrderEmail includes values without VAT and a total row",
         orderStatus: "SUBMITTED",
         invoiceStatus: "Invoice made",
         createdAt: "10/09/2026, 09:14",
-        orderValue: 500,
-        invoiceValue: 500,
+        orderValue: 575,
+        invoiceValue: 575,
       },
     ],
   });
 
   assert.match(message.subject, /ABDUL REHMAN/);
-  assert.match(message.html, /Order value \(excl\. VAT\)/);
-  assert.match(message.html, /Invoice made \(excl\. VAT\)/);
-  assert.match(message.html, /1,000.00/);
-  assert.match(message.html, /980.00/);
+  assert.match(message.html, /Order value \(incl\. VAT\)/);
+  assert.match(message.html, /Invoice made \(incl\. VAT\)/);
+  assert.match(message.html, /1,150.00/);
+  assert.match(message.html, /1,127.00/);
   assert.match(message.html, /Total \(2 orders\)/);
-  assert.match(message.html, /1,500.00/);
-  assert.match(message.html, /1,480.00/);
+  assert.match(message.html, /1,725.00/);
+  assert.match(message.html, /1,702.00/);
   assert.equal(message.orderCount, 2);
-  assert.equal(message.totals.orderValue, 1500);
-  assert.equal(message.totals.invoiceValue, 1480);
+  assert.equal(message.totals.orderValue, 1725);
+  assert.equal(message.totals.invoiceValue, 1702);
 });
 
 test("resolveDailySupplierOrderDigestRecipients uses the invoice-ops list", () => {
@@ -122,11 +147,12 @@ test("resolveDailySupplierOrderDigestRecipients uses the invoice-ops list", () =
   assert.deepEqual(resolveDailySupplierOrderDigestCc({}), DEFAULT_MISSING_INVOICE_EMAIL_CC);
 });
 
-test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest", async () => {
+test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest after sales upload", async () => {
   const sent = [];
+  const saved = [];
   const result = await runDailySupplierOrderEmailCycle({}, {
-    date: "2026-09-09",
-    now: new Date("2026-09-10T00:20:00+03:00"),
+    trigger: "sales-upload",
+    now: new Date("2026-09-10T12:00:00+03:00"),
     env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
     send: async (message) => {
       sent.push(message);
@@ -143,6 +169,8 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
         status: "SUBMITTED",
         created_by: "u1",
         created_at: "2026-09-09T06:43:00.000Z",
+        submitted_at: "2026-09-09T06:43:00.000Z",
+        updated_at: "2026-09-09T06:43:00.000Z",
       },
     ]),
     loadProfiles: async () => ([
@@ -157,15 +185,17 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
       },
     ]),
     loadMeta: async () => new Map([
-      ["378", { status: "Invoice made", invoiceFilePath: "C1/378/file.pdf", invoiceAmountExclVat: 980 }],
+      ["378", { status: "Invoice made", invoiceFilePath: "C1/378/file.pdf", invoiceAmountExclVat: 980, statusUpdatedAt: "2026-09-09T10:00:00.000Z" }],
     ]),
     loadValues: async () => ({
       values: new Map([["378", 1000]]),
       linesByOrder: new Map([["378", [{ item_code: "A1", quantity: 10, rate: 100, line_value: 1000 }]]]),
     }),
     loadInvoiceValues: async () => new Map([["378", 980]]),
-    loadLastSentDate: async () => "",
-    saveLastSentDate: async () => {},
+    loadLastSentMarker: async () => ({ date: "", lastSentAt: "2026-09-08T00:00:00.000Z" }),
+    saveLastSentMarker: async (_admin, marker) => {
+      saved.push(marker);
+    },
     listAuthUsers: async () => [],
   });
 
@@ -173,21 +203,25 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
   assert.equal(result.sentCount, 2);
   assert.equal(result.orderCount, 1);
   assert.equal(sent[0].to[0], "abdul.report@madiba.com");
-  assert.match(sent[0].html, /980.00/);
+  assert.match(sent[0].html, /1,127.00/);
   assert.match(sent[0].html, /Invoice made/);
+  assert.match(sent[0].html, /incl\. VAT/);
   assert.deepEqual(sent[1].to, DEFAULT_MISSING_INVOICE_EMAIL_TO);
   assert.match(sent[1].html, /ABDUL REHMAN/);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].trigger, "sales-upload");
 });
 
-test("runDailySupplierOrderEmailCycle skips when already sent for the report date", async () => {
+test("runDailySupplierOrderEmailCycle skips cron when already sent for the report date", async () => {
   const result = await runDailySupplierOrderEmailCycle({}, {
+    trigger: "cron",
     date: "2026-09-09",
-    now: new Date("2026-09-10T00:20:00+03:00"),
+    now: new Date("2026-09-09T21:00:00+03:00"),
     env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
     send: async () => {
       throw new Error("should not send");
     },
-    loadLastSentDate: async () => "2026-09-09",
+    loadLastSentMarker: async () => ({ date: "2026-09-09", lastSentAt: "2026-09-09T12:00:00.000Z" }),
   });
   assert.equal(result.skipped, true);
   assert.equal(result.reason, "already_sent");

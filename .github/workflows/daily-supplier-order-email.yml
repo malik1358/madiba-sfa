@@ -1,10 +1,7 @@
 name: Daily Supplier Order Email
 
 on:
-  schedule:
-    # 21:20 UTC = 00:20 KSA — previous KSA day's orders raised + invoice status.
-    # Same weekday skip as daily visit report (Friday holiday).
-    - cron: "20 21 * * 0-3,5,6"
+  # Primary trigger is sales Excel upload (/api/import-sales). Keep this for manual/backfill runs.
   workflow_dispatch:
 
 jobs:
@@ -40,7 +37,7 @@ jobs:
             curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
               -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
               -H "Content-Type: application/json" \
-              --data '{}'
+              --data '{"force":true}'
           }
 
           status_code="$(post_report "$DAILY_SUPPLIER_ORDER_EMAIL_URL_EFFECTIVE")"

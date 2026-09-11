@@ -48,6 +48,13 @@ function exclVatFromIncl(incl, vatRate = VAT_RATE) {
   return roundMoney(total / (1 + rate));
 }
 
+export function amountInclVat(excl, vatRate = VAT_RATE) {
+  const amount = Number(excl);
+  const rate = Number(vatRate);
+  if (!Number.isFinite(amount) || amount < 0 || !Number.isFinite(rate) || rate < 0) return null;
+  return roundMoney(amount * (1 + rate));
+}
+
 export function invoiceAmountExclVatFromLines(orderLines = [], diffs = []) {
   const diffByCode = new Map();
   (diffs || []).forEach((diff) => {

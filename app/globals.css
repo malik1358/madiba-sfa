@@ -4330,6 +4330,12 @@ th:has(.moduleTableColumnFilterInput) {
   vertical-align: middle;
 }
 
+.modulePendingOrdersTotalRow td {
+  background: #0f4c81;
+  color: #ffffff;
+  font-weight: 800;
+}
+
 .moduleTable th {
   position: sticky;
   top: var(--sticky-table-top);

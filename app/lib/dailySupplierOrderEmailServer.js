@@ -31,6 +31,7 @@ import {
   getKsaWeekdayIndex,
   getPreviousKsaDateString,
   isKsaOrderDay,
+  ksaDayBounds,
 } from "./workdayActivity.js";
 
 const ORDERS_SELECT = "id,order_number,customer_code,customer_name,salesman_code,salesman_name,status,created_by,created_at,updated_at,submitted_at,total_value";
@@ -320,9 +321,12 @@ export async function runDailySupplierOrderEmailCycle(admin, {
 } = {}) {
   const force = envFlagEnabled(env.DAILY_SUPPLIER_ORDER_EMAIL_FORCE, false);
   const normalizedTrigger = String(trigger || "manual").trim().toLowerCase() || "manual";
+  const testTo = parseEmailList(env.DAILY_SUPPLIER_ORDER_EMAIL_TEST_TO);
+  const isTestSend = testTo.length > 0;
   const asOf = now instanceof Date ? now : new Date(now);
-  const asOfIso = asOf.toISOString();
+  let asOfIso = asOf.toISOString();
   const reportDate = parseSupplierOrderReportDate(date, asOf);
+  const explicitDate = Boolean(String(date || "").trim());
 
   // Midnight cron keeps Friday skip; sales-upload always runs when data lands.
   if (normalizedTrigger === "cron" && !force) {
@@ -344,12 +348,20 @@ export async function runDailySupplierOrderEmailCycle(admin, {
     : loadLastSentMarker;
 
   const marker = await resolveLastSent(admin);
-  const sinceIso = marker.lastSentAt || defaultSupplierOrderSinceIso();
+  let sinceIso = marker.lastSentAt || defaultSupplierOrderSinceIso();
+
+  // Test/backfill for an explicit KSA day: use that day's window so "yesterday" is reproducible.
+  if (isTestSend && explicitDate) {
+    const bounds = ksaDayBounds(reportDate);
+    sinceIso = bounds.startIso;
+    asOfIso = bounds.endIso;
+  }
 
   // Upload-driven sends advance the watermark; only block exact duplicate cron runs for the same KSA date.
   if (
     normalizedTrigger === "cron"
     && !force
+    && !isTestSend
     && marker.date === reportDate
     && marker.lastSentAt
   ) {
@@ -380,9 +392,11 @@ export async function runDailySupplierOrderEmailCycle(admin, {
   const { values: orderValues, linesByOrder } = await loadValues(admin, orders);
   const invoiceValues = await loadInvoiceValues(admin, orders, metaByOrder, linesByOrder);
   const groups = groupDailySupplierOrders(orders, profiles);
-  const sendToUsers = envFlagEnabled(env.DAILY_SUPPLIER_ORDER_EMAIL_SEND_TO_USERS, true);
-  const digestTo = resolveDailySupplierOrderDigestRecipients(env);
-  const digestCc = resolveDailySupplierOrderDigestCc(env, digestTo);
+  const sendToUsers = isTestSend
+    ? false
+    : envFlagEnabled(env.DAILY_SUPPLIER_ORDER_EMAIL_SEND_TO_USERS, true);
+  const digestTo = isTestSend ? testTo : resolveDailySupplierOrderDigestRecipients(env);
+  const digestCc = isTestSend ? [] : resolveDailySupplierOrderDigestCc(env, digestTo);
   const asOfLabel = formatKsaDateTime(asOfIso);
 
   const results = [];
@@ -478,7 +492,7 @@ export async function runDailySupplierOrderEmailCycle(admin, {
     }
   }
 
-  if (sentCount > 0 && failedCount === 0) {
+  if (sentCount > 0 && failedCount === 0 && !isTestSend) {
     try {
       if (saveLastSentDate) {
         await saveLastSentDate(admin, reportDate);

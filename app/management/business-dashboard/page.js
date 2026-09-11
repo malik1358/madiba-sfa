@@ -15,6 +15,7 @@ import { usePopupMessages } from "../../hooks/usePopupMessages";
 import CategoryGrowthReport from "./CategoryGrowthReport";
 import SalesmanMomReport, { emptySalesmanMomFilters } from "./SalesmanMomReport";
 import { emptyGrowthFilters } from "../../lib/categoryGrowth";
+import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart } from "./GrowthCharts";
 
 const TEXT = {
   title: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
@@ -38,6 +39,9 @@ const TEXT = {
   customersDue: { en: "Customers with due", ar: "عملاء بمستحقات" },
   quickLinks: { en: "Quick reports", ar: "تقارير سريعة" },
   takeAction: { en: "Take action", ar: "اتخاذ إجراء" },
+  alertMix: { en: "Alert mix", ar: "مزيج التنبيهات" },
+  moneyChart: { en: "Sales and collections", ar: "المبيعات والتحصيل" },
+  activityChart: { en: "Field activity", ar: "نشاط الميدان" },
 };
 
 function kpiClass(status) {
@@ -446,6 +450,25 @@ export default function BusinessDashboardPage() {
                   <strong>{dashboard.meta?.customersWithOutstanding || 0}</strong>
                 </section>
               </div>
+              <div className="moduleBiChartGrid">
+                <GrowthChartPanel title={t("alertMix")}>
+                  <GrowthSignalChart
+                    counts={{
+                      red: Number(dashboard.meta?.redAlerts || 0),
+                      orange: Number(dashboard.meta?.orangeAlerts || 0),
+                    }}
+                    labels={{ red: t("redAlerts"), orange: t("warnings") }}
+                  />
+                </GrowthChartPanel>
+                <GrowthChartPanel title={t("activityChart")}>
+                  <GrowthBarChart
+                    items={[
+                      { key: "attendance", label: t("attendance"), value: Number(dashboard.meta?.attendanceRate || 0), display: `${dashboard.meta?.attendanceRate || 0}%` },
+                      { key: "due", label: t("customersDue"), value: Number(dashboard.meta?.customersWithOutstanding || 0) },
+                    ]}
+                  />
+                </GrowthChartPanel>
+              </div>
 
               <section className="moduleSection">
                 <div className="moduleSectionHeader">
@@ -512,6 +535,32 @@ export default function BusinessDashboardPage() {
                     </section>
                   ))}
                 </div>
+                <GrowthChartPanel title={t("moneyChart")}>
+                  <GrowthBarChart
+                    items={(dashboard.kpis || [])
+                      .filter((kpi) => ["sales_today", "sales_mtd", "collected_today", "collected_mtd", "outstanding_total", "outstanding_90plus"].includes(kpi.key))
+                      .map((kpi) => ({
+                        key: kpi.key,
+                        label: kpi.label,
+                        value: kpi.value,
+                        display: kpi.display,
+                        status: kpi.status,
+                      }))}
+                  />
+                </GrowthChartPanel>
+                <GrowthChartPanel title={t("activityChart")}>
+                  <GrowthBarChart
+                    items={(dashboard.kpis || [])
+                      .filter((kpi) => !["sales_today", "sales_mtd", "collected_today", "collected_mtd", "outstanding_total", "outstanding_90plus"].includes(kpi.key))
+                      .map((kpi) => ({
+                        key: kpi.key,
+                        label: kpi.label,
+                        value: kpi.value,
+                        display: kpi.display,
+                        status: kpi.status,
+                      }))}
+                  />
+                </GrowthChartPanel>
                 {dashboard.meta?.outstandingUploadedAt ? (
                   <div className="moduleHint">
                     {t("outstandingFile")}: {dashboard.meta.outstandingFileName || "-"} ({String(dashboard.meta.outstandingUploadedAt).slice(0, 10)})

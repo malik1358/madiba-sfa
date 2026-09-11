@@ -61,6 +61,13 @@ export function isAwaitingBillingUpdate(meta) {
   return isInvoiceNotUploadedStatus(meta) && !hasUploadedInvoice(meta);
 }
 
+export function orderRaisedAtMs(order = {}) {
+  const candidates = [order?.submitted_at, order?.created_at]
+    .map((value) => Date.parse(String(value || "")))
+    .filter((value) => Number.isFinite(value));
+  return candidates.length ? Math.min(...candidates) : null;
+}
+
 export function orderActivityAtMs(order = {}) {
   const candidates = [order?.updated_at, order?.submitted_at, order?.created_at]
     .map((value) => Date.parse(String(value || "")))
@@ -84,15 +91,18 @@ export function shouldIncludeInSupplierOrderReport(order, meta = null, sinceMs =
   if (String(order?.status || "").trim().toUpperCase() !== "SUBMITTED") return false;
   if (isTestCustomerOrder(order)) return false;
 
-  const orderMs = orderActivityAtMs(order);
-  if (Number.isFinite(orderMs) && orderMs > asOfMs) return false;
+  const raisedMs = orderRaisedAtMs(order);
+  if (Number.isFinite(raisedMs) && raisedMs > asOfMs) return false;
 
-  const invoiceMs = invoiceActivityAtMs(meta);
-  const activityMs = Math.max(orderMs || 0, invoiceMs || 0);
-  if (activityMs > sinceMs && activityMs <= asOfMs) return true;
+  // Every order raised in the report window — Invoice made, pending, or not uploaded.
+  if (Number.isFinite(raisedMs) && raisedMs >= sinceMs && raisedMs <= asOfMs) return true;
 
-  // Keep listing until billing sets a status or uploads an invoice.
+  // Older orders still waiting on billing keep appearing every day.
   if (isAwaitingBillingUpdate(meta)) return true;
+
+  // Billing updates during the window for older orders.
+  const invoiceMs = invoiceActivityAtMs(meta);
+  if (Number.isFinite(invoiceMs) && invoiceMs >= sinceMs && invoiceMs <= asOfMs) return true;
 
   return false;
 }
@@ -341,8 +351,8 @@ export function buildDailySupplierOrderEmail({
     : `Orders raised ${date} — all salesmen (${totals.orders})`;
   const cutoff = String(asOfLabel || "").trim();
   const intro = who
-    ? `Submitted orders for ${date} (KSA)${cutoff ? ` as of sales upload ${cutoff}` : ""}. Includes new/changed orders since the last email, plus any still waiting on billing. Values include VAT for order vs invoice comparison.`
-    : `Submitted orders for ${date} (KSA)${cutoff ? ` as of sales upload ${cutoff}` : ""}, grouped by salesman. Includes new/changed orders since the last email, plus any still waiting on billing. Values include VAT for order vs invoice comparison.`;
+    ? `All submitted orders you raised for ${date} (KSA)${cutoff ? ` as of ${cutoff}` : ""}, plus any older orders still waiting on billing. Every invoice status is included for comparison. Values include VAT.`
+    : `All submitted orders raised for ${date} (KSA)${cutoff ? ` as of ${cutoff}` : ""}, grouped by salesman, plus any older orders still waiting on billing. Every invoice status is included. Values include VAT.`;
 
   const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #0f172a; line-height: 1.5; background:#f8fafc; padding:16px;">
   <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #99f6e4;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,118,110,0.12);">
@@ -356,7 +366,7 @@ export function buildDailySupplierOrderEmail({
       ${who ? `<p style="margin:0 0 16px;"><span style="display:inline-block;padding:6px 12px;border-radius:999px;background:#ecfeff;border:1px solid #67e8f9;color:#0e7490;font-weight:800;">${escapeHtml(who)}</span></p>` : ""}
       ${summaryCards(totals)}
       ${renderTable(rows, { includeSalesman })}
-      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">Totals include VAT. Invoice made is taken from the attached invoice PDF; blank means no invoice yet or the total could not be read. Orders without a billing update stay on this list until billing acts. Hierarchy bosses are copied on each salesman email.</p>
+      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">This list includes every submitted order raised that day (Invoice made, pending, or not uploaded), plus older orders still waiting on billing. Totals include VAT. Invoice made is taken from the attached invoice PDF when available. Hierarchy bosses are copied on each salesman email.</p>
     </div>
   </div>
 </div>`;

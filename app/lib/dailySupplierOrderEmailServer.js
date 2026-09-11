@@ -352,13 +352,20 @@ export async function runDailySupplierOrderEmailCycle(admin, {
     : loadLastSentMarker;
 
   const marker = await resolveLastSent(admin);
-  let sinceIso = marker.lastSentAt || defaultSupplierOrderSinceIso();
 
-  // Test/backfill for an explicit KSA day: use that day's window so "yesterday" is reproducible.
-  if (isTestSend && explicitDate) {
-    const bounds = ksaDayBounds(reportDate);
-    sinceIso = bounds.startIso;
-    asOfIso = bounds.endIso;
+  // Always cover the full report KSA day (start → asOf), so Invoice made and
+  // unbilled orders raised that day both appear. Older unbilled rows still carry forward.
+  const dayBounds = ksaDayBounds(reportDate);
+  let sinceIso = dayBounds.startIso;
+  if (explicitDate && (isTestSend || normalizedTrigger === "manual" || force)) {
+    asOfIso = dayBounds.endIso;
+  } else {
+    // Sales upload / live run: up to now, but not before day start.
+    const dayEndMs = Date.parse(dayBounds.endIso);
+    const asOfMs = Date.parse(asOfIso);
+    if (Number.isFinite(dayEndMs) && Number.isFinite(asOfMs) && asOfMs > dayEndMs) {
+      asOfIso = dayBounds.endIso;
+    }
   }
 
   // Upload-driven sends advance the watermark; only block exact duplicate cron runs for the same KSA date.

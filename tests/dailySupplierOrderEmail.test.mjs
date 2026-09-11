@@ -70,20 +70,32 @@ test("selectDailySupplierOrders drops drafts and test customers", () => {
   assert.deepEqual(selected.map((order) => order.id), [1]);
 });
 
-test("shouldIncludeInSupplierOrderReport keeps awaiting-billing orders after the watermark", () => {
-  const order = {
+test("shouldIncludeInSupplierOrderReport includes all statuses raised in the window", () => {
+  const sinceMs = Date.parse("2026-09-09T21:00:00.000Z"); // KSA day start-ish
+  const asOfMs = Date.parse("2026-09-10T20:59:59.999Z");
+  const raisedToday = {
     id: 50,
+    status: "SUBMITTED",
+    customer_name: "Today Shop",
+    created_at: "2026-09-10T08:00:00.000Z",
+    submitted_at: "2026-09-10T08:00:00.000Z",
+    updated_at: "2026-09-10T08:00:00.000Z",
+  };
+  assert.equal(shouldIncludeInSupplierOrderReport(raisedToday, null, sinceMs, asOfMs), true);
+  assert.equal(shouldIncludeInSupplierOrderReport(raisedToday, { status: "Invoice made", invoiceUploadedAt: "2026-09-10T09:00:00.000Z" }, sinceMs, asOfMs), true);
+  assert.equal(shouldIncludeInSupplierOrderReport(raisedToday, { status: "Pending for credit approval" }, sinceMs, asOfMs), true);
+
+  const oldInvoiced = {
+    id: 51,
     status: "SUBMITTED",
     customer_name: "Old Shop",
     created_at: "2026-09-05T08:00:00.000Z",
     submitted_at: "2026-09-05T08:00:00.000Z",
     updated_at: "2026-09-05T08:00:00.000Z",
   };
-  const sinceMs = Date.parse("2026-09-09T00:00:00.000Z");
-  const asOfMs = Date.parse("2026-09-10T12:00:00.000Z");
-  assert.equal(shouldIncludeInSupplierOrderReport(order, null, sinceMs, asOfMs), true);
-  assert.equal(shouldIncludeInSupplierOrderReport(order, { status: "Invoice made", invoiceUploadedAt: "2026-09-06T10:00:00.000Z" }, sinceMs, asOfMs), false);
-  assert.equal(shouldIncludeInSupplierOrderReport(order, { status: "Invoice made", statusUpdatedAt: "2026-09-09T18:00:00.000Z" }, sinceMs, asOfMs), true);
+  assert.equal(shouldIncludeInSupplierOrderReport(oldInvoiced, { status: "Invoice made", invoiceUploadedAt: "2026-09-06T10:00:00.000Z" }, sinceMs, asOfMs), false);
+  assert.equal(shouldIncludeInSupplierOrderReport(oldInvoiced, null, sinceMs, asOfMs), true);
+  assert.equal(shouldIncludeInSupplierOrderReport(oldInvoiced, { status: "Invoice made", statusUpdatedAt: "2026-09-10T12:00:00.000Z" }, sinceMs, asOfMs), true);
 });
 
 test("groupDailySupplierOrders splits by salesman and attaches profile", () => {

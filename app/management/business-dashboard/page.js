@@ -13,17 +13,19 @@ import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import CategoryGrowthReport from "./CategoryGrowthReport";
+import SalesmanMomReport, { emptySalesmanMomFilters } from "./SalesmanMomReport";
 import { emptyGrowthFilters } from "../../lib/categoryGrowth";
 
 const TEXT = {
   title: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
   subtitle: {
-    en: "Sales-based indicators, category growth since inception, and operational red lights",
-    ar: "مؤشرات من المبيعات، نمو الفئات منذ البداية، وتنبيهات التشغيل الحمراء",
+    en: "Sales-based indicators, category growth, salesman month-on-month performance, and operational red lights",
+    ar: "مؤشرات من المبيعات، نمو الفئات، أداء المندوب شهراً بعد شهر، وتنبيهات التشغيل الحمراء",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading business dashboard...", ar: "جاري تحميل لوحة الأعمال..." },
   categoryGrowth: { en: "Category growth", ar: "نمو الفئات" },
+  salesmanMom: { en: "Salesman MoM", ar: "المندوب شهرياً" },
   operations: { en: "Daily operations", ar: "التشغيل اليومي" },
   date: { en: "Report date", ar: "تاريخ التقرير" },
   redAlerts: { en: "Red alerts", ar: "تنبيهات حمراء" },
@@ -65,6 +67,12 @@ export default function BusinessDashboardPage() {
   const [growthCatalogs, setGrowthCatalogs] = useState({});
   const [growthSearch, setGrowthSearch] = useState("");
   const [growthStatusFilter, setGrowthStatusFilter] = useState([]);
+  const [salesmanLoading, setSalesmanLoading] = useState(true);
+  const [salesmanReport, setSalesmanReport] = useState(null);
+  const [salesmanDraft, setSalesmanDraft] = useState(() => emptySalesmanMomFilters());
+  const [salesmanApplied, setSalesmanApplied] = useState(() => emptySalesmanMomFilters());
+  const [salesmanSearch, setSalesmanSearch] = useState("");
+  const [salesmanStatusFilter, setSalesmanStatusFilter] = useState([]);
 
   usePopupMessages({ error });
 
@@ -205,6 +213,78 @@ export default function BusinessDashboardPage() {
     };
   }, [view, growthApplied]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const stopSafetyTimer = startReportSafetyTimer(() => {
+      if (cancelled) return;
+      setSalesmanLoading(false);
+      setError((current) => current || "Salesman performance timed out. Please refresh.");
+    });
+
+    async function loadSalesmen() {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        stopSafetyTimer();
+        setSalesmanLoading(false);
+        return;
+      }
+
+      setSalesmanLoading(true);
+      setError("");
+
+      try {
+        const session = await resolveAuthSession(supabase, 12000);
+        if (cancelled) return;
+        if (!session?.access_token) throw new Error("Please login again.");
+
+        const { response, payload } = await fetchJsonWithTimeout(
+          "/api/business-dashboard/category-growth",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ filters: salesmanApplied }),
+          },
+          60000,
+        );
+
+        if (cancelled) return;
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load salesman performance.");
+        }
+
+        setSalesmanReport(payload);
+        if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.message || "Unable to load salesman performance.");
+        setSalesmanReport(null);
+      } finally {
+        stopSafetyTimer();
+        if (!cancelled) setSalesmanLoading(false);
+      }
+    }
+
+    if (view !== "salesman-mom") {
+      stopSafetyTimer();
+      setSalesmanLoading(false);
+      return () => {
+        cancelled = true;
+        stopSafetyTimer();
+      };
+    }
+
+    loadSalesmen();
+
+    return () => {
+      cancelled = true;
+      stopSafetyTimer();
+    };
+  }, [view, salesmanApplied]);
+
   const redAlerts = useMemo(
     () => (dashboard?.alerts || []).filter((row) => row.severity === "red"),
     [dashboard],
@@ -260,6 +340,15 @@ export default function BusinessDashboardPage() {
               <button
                 type="button"
                 role="tab"
+                aria-selected={view === "salesman-mom"}
+                className={`moduleBiTab${view === "salesman-mom" ? " isActive" : ""}`}
+                onClick={() => setView("salesman-mom")}
+              >
+                {t("salesmanMom")}
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={view === "operations"}
                 className={`moduleBiTab${view === "operations" ? " isActive" : ""}`}
                 onClick={() => setView("operations")}
@@ -293,6 +382,30 @@ export default function BusinessDashboardPage() {
                 setGrowthApplied(empty);
                 setGrowthSearch("");
                 setGrowthStatusFilter([]);
+              }}
+            />
+          ) : null}
+
+          {view === "salesman-mom" ? (
+            <SalesmanMomReport
+              language={language}
+              loading={salesmanLoading}
+              report={salesmanReport}
+              draft={salesmanDraft}
+              catalogs={growthCatalogs}
+              applied={salesmanApplied}
+              search={salesmanSearch}
+              statusFilter={salesmanStatusFilter}
+              onSearchChange={setSalesmanSearch}
+              onStatusFilterChange={setSalesmanStatusFilter}
+              onDraftChange={setSalesmanDraft}
+              onApply={() => setSalesmanApplied({ ...salesmanDraft, groupBy: "salesman" })}
+              onClear={() => {
+                const empty = emptySalesmanMomFilters();
+                setSalesmanDraft(empty);
+                setSalesmanApplied(empty);
+                setSalesmanSearch("");
+                setSalesmanStatusFilter([]);
               }}
             />
           ) : null}

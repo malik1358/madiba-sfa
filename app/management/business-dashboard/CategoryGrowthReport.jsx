@@ -3,11 +3,44 @@
 import { useMemo } from "react";
 import ExportableTable from "../../components/ExportableTable";
 import CategoryGrowthFilters, { filterGrowthRows } from "./CategoryGrowthFilters";
-import { formatGrowthPercent, formatMoneyAmount, formatSharePercent, growthDimensionLabel, monthChangeTone, previousMonthKey } from "../../lib/categoryGrowth";
+import GrowthPeriodGrid from "./GrowthPeriodGrid";
+import {
+  formatGrowthPercent,
+  formatMoneyAmount,
+  formatSharePercent,
+  growthDimensionLabel,
+  monthChangeTone,
+  monthGridTotals,
+  previousMonthKey,
+  previousQuarterKey,
+  quarterGridTotals,
+  quarterLabel,
+} from "../../lib/categoryGrowth";
 import { translate } from "../../lib/appLanguage";
 
+function formatPreparedAt(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 const TEXT = {
-  loading: { en: "Loading category growth from uploaded sales...", ar: "جاري تحميل نمو الفئات من المبيعات المرفوعة..." },
+  loading: { en: "Opening the prepared sales model...", ar: "جاري فتح نموذج المبيعات الجاهز..." },
+  readyModel: {
+    en: "Ready from the last sales upload",
+    ar: "جاهز من آخر رفع مبيعات",
+  },
+  staleModel: {
+    en: "A newer sales file was uploaded. Showing the last ready model while it refreshes.",
+    ar: "تم رفع ملف مبيعات أحدث. يتم عرض آخر نموذج جاهز أثناء التحديث.",
+  },
   empty: {
     en: "No uploaded sales found. Import a sales file first, then open this report.",
     ar: "لا توجد مبيعات مرفوعة. استورد ملف المبيعات أولاً ثم افتح هذا التقرير.",
@@ -35,10 +68,20 @@ const TEXT = {
   redAlerts: { en: "Categories needing attention", ar: "فئات تحتاج متابعة" },
   noAlerts: { en: "No category red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على الفئات من المبيعات المرفوعة." },
   yearly: { en: "Sales by year since inception", ar: "المبيعات حسب السنة منذ البداية" },
+  yearlyHint: {
+    en: "Green is higher than the previous year. Red is lower. The current year is year-to-date only.",
+    ar: "الأخضر أعلى من السنة السابقة. الأحمر أقل. السنة الحالية حتى اليوم فقط.",
+  },
   monthly: { en: "Last 12 months", ar: "آخر 12 شهراً" },
+  quarterly: { en: "Last 8 quarters", ar: "آخر 8 أرباع" },
+  total: { en: "Total", ar: "الإجمالي" },
   monthlyHint: {
     en: "Green is higher than the previous month. Red is lower. The current month is month-to-date only.",
     ar: "الأخضر أعلى من الشهر السابق. الأحمر أقل. الشهر الحالي حتى اليوم فقط.",
+  },
+  quarterlyHint: {
+    en: "Green is higher than the previous quarter. Red is lower. The current quarter is quarter-to-date only.",
+    ar: "الأخضر أعلى من الربع السابق. الأحمر أقل. الربع الحالي حتى اليوم فقط.",
   },
   category: { en: "Category", ar: "الفئة" },
   firstSale: { en: "First sale", ar: "أول بيع" },
@@ -57,12 +100,23 @@ function statusClass(status) {
   return "moduleKpiStatus moduleKpiStatus--neutral";
 }
 
+function percentTone(value) {
+  if (value == null || !Number.isFinite(value) || value === 0) return "";
+  return value > 0 ? "up" : "down";
+}
+
 function trendClass(value) {
-  if (value == null || !Number.isFinite(value)) return "";
-  if (value <= -15) return "moduleBiTrend--downHard";
-  if (value < 0) return "moduleBiTrend--down";
-  if (value >= 5) return "moduleBiTrend--up";
+  const tone = percentTone(value);
+  if (tone === "up") return "moduleBiTrend--up";
+  if (tone === "down") return value <= -15 ? "moduleBiTrend--downHard" : "moduleBiTrend--down";
   return "";
+}
+
+function periodCellClass(tone, isCurrent = false) {
+  return [
+    tone ? `moduleBiMonthCell--${tone}` : "",
+    isCurrent ? "moduleBiMonthCell--current" : "",
+  ].filter(Boolean).join(" ");
 }
 
 function monthLabel(month, currentMonth) {
@@ -98,8 +152,19 @@ export default function CategoryGrowthReport({
     [allRows, search, statusFilter],
   );
   const years = report?.years || [];
+  const currentYear = (report?.currentMonth || report?.lastDate || "").slice(0, 4);
   const recentMonths = report?.recentMonths || [];
   const currentMonth = report?.currentMonth || "";
+  const recentQuarters = report?.recentQuarters || [];
+  const currentQuarter = report?.currentQuarter || "";
+  const monthTotals = useMemo(
+    () => monthGridTotals(categories, recentMonths),
+    [categories, recentMonths],
+  );
+  const quarterTotals = useMemo(
+    () => quarterGridTotals(categories, recentQuarters),
+    [categories, recentQuarters],
+  );
 
   const hasData = allRows.length > 0;
 
@@ -160,6 +225,11 @@ export default function CategoryGrowthReport({
           <h2>{t("summary")}</h2>
         </div>
         <p className="moduleHint">{t("summaryHint")}</p>
+        {report.meta?.preparedAt ? (
+          <p className="moduleHint">
+            {report.meta.stale ? t("staleModel") : `${t("readyModel")}: ${formatPreparedAt(report.meta.preparedAt)}`}
+          </p>
+        ) : null}
         <div className="moduleMetricGrid">
           <section className="moduleMetricCard">
             <span>{groupLabel}</span>
@@ -213,6 +283,7 @@ export default function CategoryGrowthReport({
         <div className="moduleSectionHeader">
           <h2>{t("yearly")}</h2>
         </div>
+        <p className="moduleHint">{t("yearlyHint")}</p>
         {categories.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
@@ -230,7 +301,9 @@ export default function CategoryGrowthReport({
                 <th>{t("mom")}</th>
                 <th>{t("status")}</th>
                 {years.map((year) => (
-                  <th key={year}>{year}</th>
+                  <th key={year} className={year === currentYear ? "moduleBiMonthHead--current" : ""}>
+                    {year === currentYear ? `${year} YTD` : year}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -242,20 +315,52 @@ export default function CategoryGrowthReport({
                   <td>{row.lastDate}</td>
                   <td>{formatMoneyAmount(row.lifetime)}</td>
                   <td>{formatSharePercent(row.sharePercent)}</td>
-                  <td className={trendClass(row.cagrPercent)}>{formatGrowthPercent(row.cagrPercent)}</td>
-                  <td className={trendClass(row.yoyPercent)}>{formatGrowthPercent(row.yoyPercent)}</td>
-                  <td className={trendClass(row.momPercent)}>{formatGrowthPercent(row.momPercent)}</td>
+                  <td className={periodCellClass(percentTone(row.cagrPercent))}>{formatGrowthPercent(row.cagrPercent)}</td>
+                  <td className={periodCellClass(percentTone(row.yoyPercent))}>{formatGrowthPercent(row.yoyPercent)}</td>
+                  <td className={periodCellClass(percentTone(row.momPercent))}>{formatGrowthPercent(row.momPercent)}</td>
                   <td>
                     <span className={statusClass(row.status)}>{row.statusLabel}</span>
                   </td>
-                  {years.map((year) => (
-                    <td key={year}>{row.yearValues?.[year] ? formatMoneyAmount(row.yearValues[year]) : "—"}</td>
-                  ))}
+                  {years.map((year, index) => {
+                    const amount = Number(row.yearValues?.[year] || 0);
+                    const previousYear = index > 0 ? years[index - 1] : "";
+                    const previous = previousYear ? Number(row.yearValues?.[previousYear] || 0) : 0;
+                    const tone = monthChangeTone(amount, previous, Boolean(previousYear));
+                    return (
+                      <td key={year} className={periodCellClass(tone, year === currentYear)}>
+                        {amount ? formatMoneyAmount(amount) : "—"}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
           </table>
         </ExportableTable>
+        )}
+      </section>
+
+      <section className="moduleSection">
+        <div className="moduleSectionHeader">
+          <h2>{t("quarterly")}</h2>
+        </div>
+        <p className="moduleHint">{t("quarterlyHint")}</p>
+        {categories.length === 0 ? (
+          <div className="moduleHint">{t("emptySlice")}</div>
+        ) : (
+          <GrowthPeriodGrid
+            filename={`sales-growth-${groupBy}-quarters`}
+            sheetName="Last 8 Quarters"
+            rowHeader={groupLabel}
+            rows={categories}
+            periods={recentQuarters}
+            currentPeriod={currentQuarter}
+            periodLabel={quarterLabel}
+            valuesOf={(row) => row.quarterValues}
+            previousKeyOf={(period, index, periods) => (index > 0 ? periods[index - 1] : previousQuarterKey(period))}
+            totals={quarterTotals}
+            totalLabel={t("total")}
+          />
         )}
       </section>
 
@@ -267,45 +372,18 @@ export default function CategoryGrowthReport({
         {categories.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
-        <ExportableTable filename={`sales-growth-${groupBy}-months`} sheetName="Last 12 Months" className="moduleTableWrap moduleBiTableWrap">
-          <table className="moduleTable moduleBiTable">
-            <thead>
-              <tr>
-                <th>{groupLabel}</th>
-                {recentMonths.map((month) => (
-                  <th key={month} className={month === currentMonth ? "moduleBiMonthHead--current" : ""}>
-                    {monthLabel(month, currentMonth)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {categories.map((row) => (
-                <tr key={`month-${row.label || row.category}`}>
-                  <td>{row.label || row.category}</td>
-                  {recentMonths.map((month, index) => {
-                    const amount = Number(row.monthValues?.[month] || 0);
-                    const previousKey = index > 0 ? recentMonths[index - 1] : previousMonthKey(month);
-                    const previous = Number(row.monthValues?.[previousKey] || 0);
-                    const tone = monthChangeTone(amount, previous, Boolean(previousKey));
-                    const isCurrent = month === currentMonth;
-                    return (
-                      <td
-                        key={month}
-                        className={[
-                          tone ? `moduleBiMonthCell--${tone}` : "",
-                          isCurrent ? "moduleBiMonthCell--current" : "",
-                        ].filter(Boolean).join(" ")}
-                      >
-                        {amount ? formatMoneyAmount(amount) : "—"}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </ExportableTable>
+          <GrowthPeriodGrid
+            filename={`sales-growth-${groupBy}-months`}
+            sheetName="Last 12 Months"
+            rowHeader={groupLabel}
+            rows={categories}
+            periods={recentMonths}
+            currentPeriod={currentMonth}
+            periodLabel={monthLabel}
+            previousKeyOf={(period, index, periods) => (index > 0 ? periods[index - 1] : previousMonthKey(period))}
+            totals={monthTotals}
+            totalLabel={t("total")}
+          />
         )}
       </section>
     </>

@@ -200,6 +200,83 @@ export function enumerateMonths(startMonth, endMonth) {
   return months;
 }
 
+export function quarterKeyFromMonthKey(monthKey) {
+  const match = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  const quarter = Math.ceil(Number(match[2]) / 3);
+  if (!(quarter >= 1 && quarter <= 4)) return "";
+  return `${match[1]}-Q${quarter}`;
+}
+
+export function previousQuarterKey(quarterKey) {
+  const match = String(quarterKey || "").match(/^(\d{4})-Q([1-4])$/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const quarter = Number(match[2]);
+  return quarter === 1 ? `${year - 1}-Q4` : `${year}-Q${quarter - 1}`;
+}
+
+export function nextQuarterKey(quarterKey) {
+  const match = String(quarterKey || "").match(/^(\d{4})-Q([1-4])$/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const quarter = Number(match[2]);
+  return quarter === 4 ? `${year + 1}-Q1` : `${year}-Q${quarter + 1}`;
+}
+
+export function enumerateQuarters(startQuarter, endQuarter) {
+  const start = String(startQuarter || "");
+  const end = String(endQuarter || "");
+  if (!/^\d{4}-Q[1-4]$/.test(start) || !/^\d{4}-Q[1-4]$/.test(end) || start > end) return [];
+  const quarters = [];
+  let cursor = start;
+  while (cursor && cursor <= end) {
+    quarters.push(cursor);
+    cursor = nextQuarterKey(cursor);
+  }
+  return quarters;
+}
+
+export function monthsInQuarter(quarterKey, throughMonth = "") {
+  const match = String(quarterKey || "").match(/^(\d{4})-Q([1-4])$/);
+  if (!match) return [];
+  const startMonth = ((Number(match[2]) - 1) * 3) + 1;
+  const start = `${match[1]}-${String(startMonth).padStart(2, "0")}`;
+  const end = `${match[1]}-${String(startMonth + 2).padStart(2, "0")}`;
+  const months = enumerateMonths(start, end);
+  const limit = String(throughMonth || "").slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(limit)) return months;
+  return months.filter((month) => month <= limit);
+}
+
+export function selectRecentGrowthQuarters({ firstMonth = "", lastDataMonth = "", asOfMonth = "" } = {}) {
+  const endMonth = [lastDataMonth, asOfMonth]
+    .filter((month) => /^\d{4}-\d{2}$/.test(month))
+    .sort()
+    .at(-1) || "";
+  const end = quarterKeyFromMonthKey(endMonth);
+  const startBound = quarterKeyFromMonthKey(firstMonth);
+  if (!end) return [];
+  const history = enumerateQuarters(startBound && startBound < end ? startBound : end, end);
+  const start = history.slice(-8)[0] || end;
+  return enumerateQuarters(start, end);
+}
+
+function buildQuarterSeries(byMonth, quarters, throughMonth) {
+  const series = {};
+  (quarters || []).forEach((quarter) => {
+    series[quarter] = sumMonths(byMonth, monthsInQuarter(quarter, throughMonth));
+  });
+  return series;
+}
+
+export function quarterLabel(quarterKey, currentQuarter) {
+  const match = String(quarterKey || "").match(/^(\d{4})-Q([1-4])$/);
+  if (!match) return quarterKey || "—";
+  const label = `Q${match[2]} ${match[1].slice(2)}`;
+  return quarterKey === currentQuarter ? `${label} QTD` : label;
+}
+
 export function enumerateYears(startYear, endYear) {
   const start = Number(String(startYear || "").slice(0, 4));
   const end = Number(String(endYear || "").slice(0, 4));
@@ -404,6 +481,26 @@ export function monthChangeTone(current, previous, hasPrevious = true) {
   return "";
 }
 
+export function periodGridTotals(rows = [], periods = [], valuesOf = (row) => row?.monthValues) {
+  const rowTotals = (rows || []).map((row) => {
+    const values = valuesOf(row) || {};
+    return (periods || []).reduce((sum, period) => sum + Number(values[period] || 0), 0);
+  });
+  const columnTotals = (periods || []).map((period) => (
+    (rows || []).reduce((sum, row) => sum + Number((valuesOf(row) || {})[period] || 0), 0)
+  ));
+  const grandTotal = columnTotals.reduce((sum, value) => sum + value, 0);
+  return { rowTotals, columnTotals, grandTotal };
+}
+
+export function monthGridTotals(rows = [], months = []) {
+  return periodGridTotals(rows, months, (row) => row?.monthValues);
+}
+
+export function quarterGridTotals(rows = [], quarters = []) {
+  return periodGridTotals(rows, quarters, (row) => row?.quarterValues);
+}
+
 export function selectRecentGrowthMonths({ firstMonth = "", lastDataMonth = "", asOfMonth = "" } = {}) {
   const end = [lastDataMonth, asOfMonth]
     .filter((month) => /^\d{4}-\d{2}$/.test(month))
@@ -434,9 +531,18 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
     lastDataMonth,
     asOfMonth: currentMonth,
   });
+  const currentQuarter = quarterKeyFromMonthKey(currentMonth);
+  const recentQuarters = selectRecentGrowthQuarters({
+    firstMonth,
+    lastDataMonth,
+    asOfMonth: currentMonth,
+  });
   const monthValueKeys = recentMonths[0]
     ? [previousMonthKey(recentMonths[0]), ...recentMonths].filter(Boolean)
     : recentMonths;
+  const quarterValueKeys = recentQuarters[0]
+    ? [previousQuarterKey(recentQuarters[0]), ...recentQuarters].filter(Boolean)
+    : recentQuarters;
 
   const lifetimeTotal = sumMonths(acc.companyByMonth, enumerateMonths(firstMonth, lastDataMonth));
   const currentYtdMonths = latestYear ? monthsInYearThrough(latestYear, lastDataMonth) : [];
@@ -447,6 +553,7 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
     const lifetime = sumMonths(entry.byMonth, enumerateMonths(entry.firstDate.slice(0, 7), lastDataMonth));
     const yearValues = buildYearSeries(entry.byMonth, years, lastDataMonth);
     const monthValues = buildMonthSeries(entry.byMonth, monthValueKeys);
+    const quarterValues = buildQuarterSeries(entry.byMonth, quarterValueKeys, currentMonth);
     const currentYtd = sumMonths(entry.byMonth, currentYtdMonths);
     const priorYtd = sumMonths(entry.byMonth, priorYtdMonths);
     const latestMonthAmount = Number(entry.byMonth.get(latestCompleteMonth) || 0);
@@ -490,6 +597,7 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
       ),
       yearValues,
       monthValues,
+      quarterValues,
       status: status.status,
       statusCode: status.code,
       statusLabel: status.label,
@@ -517,6 +625,8 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
     years,
     recentMonths,
     currentMonth,
+    recentQuarters,
+    currentQuarter,
     latestCompleteMonth,
     latestMonthIsPartial,
     lifetimeTotal,

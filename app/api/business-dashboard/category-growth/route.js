@@ -1,5 +1,6 @@
+import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { loadCategoryGrowthReport } from "../../../lib/categoryGrowthServer.js";
+import { loadCategoryGrowthReport, rebuildSalesBiCube } from "../../../lib/categoryGrowthServer.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
@@ -58,6 +59,16 @@ async function buildResponse(request, filters) {
 
   const asOfDate = getKsaDateString();
   const report = await loadCategoryGrowthReport(admin, { asOfDate, filters });
+
+  if (report?.meta?.stale) {
+    after(async () => {
+      try {
+        await rebuildSalesBiCube(admin);
+      } catch (error) {
+        console.error("Refreshing stale sales BI cube failed:", error);
+      }
+    });
+  }
 
   return Response.json({
     success: true,

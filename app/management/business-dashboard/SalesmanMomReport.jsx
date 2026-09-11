@@ -7,14 +7,40 @@ import {
   emptyGrowthFilters,
   formatGrowthPercent,
   formatMoneyAmount,
-  monthChangeTone,
+  monthGridTotals,
   previousMonthKey,
+  previousQuarterKey,
+  quarterGridTotals,
+  quarterLabel,
 } from "../../lib/categoryGrowth";
-import { buildSalesmanMomRows, summarizeSalesmanMom } from "../../lib/salesmanMom";
+import { buildSalesmanMomRows, resolveMomComparisonMonths, summarizeSalesmanMom } from "../../lib/salesmanMom";
+import { buildTeamMomRows } from "../../lib/salesmanTeamMom";
 import { translate } from "../../lib/appLanguage";
+import GrowthPeriodGrid from "./GrowthPeriodGrid";
+
+function formatPreparedAt(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 const TEXT = {
-  loading: { en: "Measuring salesman month-on-month performance...", ar: "جاري قياس أداء المندوبين شهراً بعد شهر..." },
+  loading: { en: "Opening the prepared sales model...", ar: "جاري فتح نموذج المبيعات الجاهز..." },
+  readyModel: {
+    en: "Ready from the last sales upload",
+    ar: "جاهز من آخر رفع مبيعات",
+  },
+  staleModel: {
+    en: "A newer sales file was uploaded. Showing the last ready model while it refreshes.",
+    ar: "تم رفع ملف مبيعات أحدث. يتم عرض آخر نموذج جاهز أثناء التحديث.",
+  },
   empty: {
     en: "No uploaded sales found. Import a sales file first, then open this report.",
     ar: "لا توجد مبيعات مرفوعة. استورد ملف المبيعات أولاً ثم افتح هذا التقرير.",
@@ -37,6 +63,19 @@ const TEXT = {
     ar: "صفّ بطاقة المندوبين بأي حقل مبيعات ثم اضغط تطبيق.",
   },
   salesmen: { en: "Salesmen", ar: "المندوبون" },
+  teams: { en: "Teams", ar: "الفرق" },
+  teamSummary: { en: "Team month-on-month performance", ar: "أداء الفريق شهراً بعد شهر" },
+  teamSummaryHint: {
+    en: "Each team is the first-level leader plus the salesmen who report to that leader. Green and red follow the same month-on-month rules as the salesman scorecard.",
+    ar: "كل فريق هو القائد من المستوى الأول والمندوبون التابعون له. الأخضر والأحمر بنفس قواعد المندوب شهراً بعد شهر.",
+  },
+  teamScorecard: { en: "Team month-on-month scorecard", ar: "بطاقة الفريق شهراً بعد شهر" },
+  team: { en: "Team", ar: "الفريق" },
+  people: { en: "People", ar: "الأفراد" },
+  teamMonthly: { en: "Team last 12 months", ar: "الفريق آخر 12 شهراً" },
+  teamQuarterly: { en: "Team last 8 quarters", ar: "الفريق آخر 8 أرباع" },
+  teamAlerts: { en: "Teams not improving", ar: "فرق لا تتحسن" },
+  noTeamAlerts: { en: "No team is flagged as not improving.", ar: "لا يوجد فريق مُعلَّم بأنه لا يتحسن." },
   improving: { en: "Improving", ar: "يتحسن" },
   slipping: { en: "Slipping / flat", ar: "يتراجع / ثابت" },
   notImproving: { en: "Not improving", ar: "لا يتحسن" },
@@ -54,9 +93,15 @@ const TEXT = {
   mtd: { en: "Current MTD", ar: "الحالي حتى اليوم" },
   signal: { en: "Measure", ar: "القياس" },
   monthly: { en: "Last 12 months", ar: "آخر 12 شهراً" },
+  quarterly: { en: "Last 8 quarters", ar: "آخر 8 أرباع" },
+  total: { en: "Total", ar: "الإجمالي" },
   monthlyHint: {
     en: "Green is higher than the previous month. Red is lower. The current month is month-to-date only.",
     ar: "الأخضر أعلى من الشهر السابق. الأحمر أقل. الشهر الحالي حتى اليوم فقط.",
+  },
+  quarterlyHint: {
+    en: "Green is higher than the previous quarter. Red is lower. The current quarter is quarter-to-date only.",
+    ar: "الأخضر أعلى من الربع السابق. الأحمر أقل. الربع الحالي حتى اليوم فقط.",
   },
 };
 
@@ -98,6 +143,65 @@ function streakLabel(row) {
   return "—";
 }
 
+function MomScorecardTable({
+  filename,
+  sheetName,
+  nameHeader,
+  rows,
+  latestCompleteMonth,
+  priorCompleteMonth,
+  showPeople = false,
+  peopleHeader = "People",
+  t,
+}) {
+  const lastMonthHeader = latestCompleteMonth
+    ? `${t("lastMonth")} (${monthLabel(latestCompleteMonth, "")})`
+    : t("lastMonth");
+  const priorMonthHeader = priorCompleteMonth
+    ? `${t("priorMonth")} (${monthLabel(priorCompleteMonth, "")})`
+    : t("priorMonth");
+  return (
+    <ExportableTable filename={filename} sheetName={sheetName} className="moduleTableWrap moduleBiTableWrap">
+      <table className="moduleTable moduleBiTable">
+        <thead>
+          <tr>
+            <th>{nameHeader}</th>
+            {showPeople ? <th>{peopleHeader}</th> : null}
+            <th>{lastMonthHeader}</th>
+            <th>{priorMonthHeader}</th>
+            <th>{t("mom")}</th>
+            <th>{t("avgMom")}</th>
+            <th>{t("upMonths")}</th>
+            <th>{t("downMonths")}</th>
+            <th>{t("streak")}</th>
+            <th>{t("mtd")}</th>
+            <th>{t("signal")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label}>
+              <td>{row.label}</td>
+              {showPeople ? <td>{row.memberCount || 0}</td> : null}
+              <td>{row.latestCompleteAmount ? formatMoneyAmount(row.latestCompleteAmount) : "—"}</td>
+              <td>{row.priorMonthAmount ? formatMoneyAmount(row.priorMonthAmount) : "—"}</td>
+              <td className={trendClass(row.momPercent)}>{formatGrowthPercent(row.momPercent)}</td>
+              <td className={trendClass(row.avgMomPercent)}>{formatGrowthPercent(row.avgMomPercent)}</td>
+              <td>{row.upMonths}</td>
+              <td>{row.downMonths}</td>
+              <td>{streakLabel(row)}</td>
+              <td>{row.mtdAmount ? formatMoneyAmount(row.mtdAmount) : "—"}</td>
+              <td>
+                <span className={statusClass(row.trajectory.status)}>{row.trajectory.label}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </ExportableTable>
+  );
+}
+
 export default function SalesmanMomReport({
   language,
   loading,
@@ -115,6 +219,7 @@ export default function SalesmanMomReport({
 }) {
   const t = translate(language, TEXT);
   const allRows = useMemo(() => buildSalesmanMomRows(report || {}), [report]);
+  const teamRows = useMemo(() => buildTeamMomRows(report || {}), [report]);
   const visibleRows = useMemo(
     () => filterGrowthRows(allRows, {
       search,
@@ -123,11 +228,37 @@ export default function SalesmanMomReport({
     }),
     [allRows, search, statusFilter],
   );
+  const visibleTeamRows = useMemo(
+    () => filterGrowthRows(teamRows, {
+      search,
+      statusFilter,
+      statusOf: (row) => row.trajectory?.status,
+    }),
+    [teamRows, search, statusFilter],
+  );
   const summary = useMemo(() => summarizeSalesmanMom(allRows), [allRows]);
+  const teamSummary = useMemo(() => summarizeSalesmanMom(teamRows), [teamRows]);
   const recentMonths = report?.recentMonths || [];
   const currentMonth = report?.currentMonth || "";
-  const latestCompleteMonth = report?.latestCompleteMonth || "";
-  const priorCompleteMonth = previousMonthKey(latestCompleteMonth);
+  const recentQuarters = report?.recentQuarters || [];
+  const currentQuarter = report?.currentQuarter || "";
+  const monthTotals = useMemo(
+    () => monthGridTotals(visibleRows, recentMonths),
+    [visibleRows, recentMonths],
+  );
+  const quarterTotals = useMemo(
+    () => quarterGridTotals(visibleRows, recentQuarters),
+    [visibleRows, recentQuarters],
+  );
+  const teamMonthTotals = useMemo(
+    () => monthGridTotals(visibleTeamRows, recentMonths),
+    [visibleTeamRows, recentMonths],
+  );
+  const teamQuarterTotals = useMemo(
+    () => quarterGridTotals(visibleTeamRows, recentQuarters),
+    [visibleTeamRows, recentQuarters],
+  );
+  const { latestCompleteMonth, priorCompleteMonth } = resolveMomComparisonMonths(report || {});
 
   const filters = (
     <CategoryGrowthFilters
@@ -184,6 +315,11 @@ export default function SalesmanMomReport({
           <h2>{t("summary")}</h2>
         </div>
         <p className="moduleHint">{t("summaryHint")}</p>
+        {report.meta?.preparedAt ? (
+          <p className="moduleHint">
+            {report.meta.stale ? t("staleModel") : `${t("readyModel")}: ${formatPreparedAt(report.meta.preparedAt)}`}
+          </p>
+        ) : null}
         <div className="moduleMetricGrid">
           <section className="moduleMetricCard">
             <span>{t("salesmen")}</span>
@@ -231,42 +367,40 @@ export default function SalesmanMomReport({
         {visibleRows.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
-          <ExportableTable filename="salesman-month-on-month" sheetName="Salesman MoM" className="moduleTableWrap moduleBiTableWrap">
-            <table className="moduleTable moduleBiTable">
-              <thead>
-                <tr>
-                  <th>{t("salesman")}</th>
-                  <th>{t("lastMonth")}</th>
-                  <th>{t("priorMonth")}</th>
-                  <th>{t("mom")}</th>
-                  <th>{t("avgMom")}</th>
-                  <th>{t("upMonths")}</th>
-                  <th>{t("downMonths")}</th>
-                  <th>{t("streak")}</th>
-                  <th>{t("mtd")}</th>
-                  <th>{t("signal")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleRows.map((row) => (
-                  <tr key={row.label}>
-                    <td>{row.label}</td>
-                    <td>{row.latestCompleteAmount ? formatMoneyAmount(row.latestCompleteAmount) : "—"}</td>
-                    <td>{row.monthValues?.[priorCompleteMonth] ? formatMoneyAmount(row.monthValues[priorCompleteMonth]) : "—"}</td>
-                    <td className={trendClass(row.momPercent)}>{formatGrowthPercent(row.momPercent)}</td>
-                    <td className={trendClass(row.avgMomPercent)}>{formatGrowthPercent(row.avgMomPercent)}</td>
-                    <td>{row.upMonths}</td>
-                    <td>{row.downMonths}</td>
-                    <td>{streakLabel(row)}</td>
-                    <td>{row.mtdAmount ? formatMoneyAmount(row.mtdAmount) : "—"}</td>
-                    <td>
-                      <span className={statusClass(row.trajectory.status)}>{row.trajectory.label}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </ExportableTable>
+          <MomScorecardTable
+            filename="salesman-month-on-month"
+            sheetName="Salesman MoM"
+            nameHeader={t("salesman")}
+            rows={visibleRows}
+            latestCompleteMonth={latestCompleteMonth}
+            priorCompleteMonth={priorCompleteMonth}
+            t={t}
+          />
+        )}
+      </section>
+
+      <section className="moduleSection">
+        <div className="moduleSectionHeader">
+          <h2>{t("quarterly")}</h2>
+        </div>
+        <p className="moduleHint">{t("quarterlyHint")}</p>
+        {visibleRows.length === 0 ? (
+          <div className="moduleHint">{t("emptySlice")}</div>
+        ) : (
+          <GrowthPeriodGrid
+            filename="salesman-month-on-month-quarters"
+            sheetName="Last 8 Quarters"
+            rowHeader={t("salesman")}
+            rows={visibleRows}
+            periods={recentQuarters}
+            currentPeriod={currentQuarter}
+            periodLabel={quarterLabel}
+            valuesOf={(row) => row.quarterValues}
+            previousKeyOf={(period, index, periods) => (index > 0 ? periods[index - 1] : previousQuarterKey(period))}
+            totals={quarterTotals}
+            totalLabel={t("total")}
+            rowKeyOf={(row) => row.label}
+          />
         )}
       </section>
 
@@ -278,45 +412,134 @@ export default function SalesmanMomReport({
         {visibleRows.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
-          <ExportableTable filename="salesman-month-on-month-months" sheetName="Last 12 Months" className="moduleTableWrap moduleBiTableWrap">
-            <table className="moduleTable moduleBiTable">
-              <thead>
-                <tr>
-                  <th>{t("salesman")}</th>
-                  {recentMonths.map((month) => (
-                    <th key={month} className={month === currentMonth ? "moduleBiMonthHead--current" : ""}>
-                      {monthLabel(month, currentMonth)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {visibleRows.map((row) => (
-                  <tr key={`month-${row.label}`}>
-                    <td>{row.label}</td>
-                    {recentMonths.map((month, index) => {
-                      const amount = Number(row.monthValues?.[month] || 0);
-                      const previousKey = index > 0 ? recentMonths[index - 1] : previousMonthKey(month);
-                      const previous = Number(row.monthValues?.[previousKey] || 0);
-                      const tone = monthChangeTone(amount, previous, Boolean(previousKey));
-                      const isCurrent = month === currentMonth;
-                      return (
-                        <td
-                          key={month}
-                          className={[
-                            tone ? `moduleBiMonthCell--${tone}` : "",
-                            isCurrent ? "moduleBiMonthCell--current" : "",
-                          ].filter(Boolean).join(" ")}
-                        >
-                          {amount ? formatMoneyAmount(amount) : "—"}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </ExportableTable>
+          <GrowthPeriodGrid
+            filename="salesman-month-on-month-months"
+            sheetName="Last 12 Months"
+            rowHeader={t("salesman")}
+            rows={visibleRows}
+            periods={recentMonths}
+            currentPeriod={currentMonth}
+            periodLabel={monthLabel}
+            previousKeyOf={(period, index, periods) => (index > 0 ? periods[index - 1] : previousMonthKey(period))}
+            totals={monthTotals}
+            totalLabel={t("total")}
+            rowKeyOf={(row) => row.label}
+          />
+        )}
+      </section>
+
+      <section className="moduleSection">
+        <div className="moduleSectionHeader">
+          <h2>{t("teamSummary")}</h2>
+        </div>
+        <p className="moduleHint">{t("teamSummaryHint")}</p>
+        <div className="moduleMetricGrid">
+          <section className="moduleMetricCard">
+            <span>{t("teams")}</span>
+            <strong>{teamSummary.salesmanCount}</strong>
+          </section>
+          <section className="moduleMetricCard moduleBusinessKpi--green">
+            <span>{t("improving")}</span>
+            <strong>{teamSummary.improvingCount}</strong>
+          </section>
+          <section className="moduleMetricCard moduleBusinessKpi--orange">
+            <span>{t("slipping")}</span>
+            <strong>{teamSummary.slippingCount}</strong>
+          </section>
+          <section className="moduleMetricCard moduleBusinessKpi--red">
+            <span>{t("notImproving")}</span>
+            <strong>{teamSummary.notImprovingCount}</strong>
+          </section>
+        </div>
+      </section>
+
+      <section className="moduleSection">
+        <div className="moduleSectionHeader">
+          <h2>{t("teamAlerts")}</h2>
+        </div>
+        {teamSummary.alerts.length === 0 ? (
+          <div className="moduleHint">{t("noTeamAlerts")}</div>
+        ) : (
+          <div className="moduleBusinessAlertList">
+            {teamSummary.alerts.map((alert) => (
+              <article key={alert.code} className="moduleBusinessAlert moduleBusinessAlert--red">
+                <div className="moduleBusinessAlertBody">
+                  <strong>{alert.title}</strong>
+                  <p>{alert.detail}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="moduleSection">
+        <div className="moduleSectionHeader">
+          <h2>{t("teamScorecard")}</h2>
+        </div>
+        {visibleTeamRows.length === 0 ? (
+          <div className="moduleHint">{t("emptySlice")}</div>
+        ) : (
+          <MomScorecardTable
+            filename="team-month-on-month"
+            sheetName="Team MoM"
+            nameHeader={t("team")}
+            rows={visibleTeamRows}
+            latestCompleteMonth={latestCompleteMonth}
+            priorCompleteMonth={priorCompleteMonth}
+            showPeople
+            peopleHeader={t("people")}
+            t={t}
+          />
+        )}
+      </section>
+
+      <section className="moduleSection">
+        <div className="moduleSectionHeader">
+          <h2>{t("teamQuarterly")}</h2>
+        </div>
+        <p className="moduleHint">{t("quarterlyHint")}</p>
+        {visibleTeamRows.length === 0 ? (
+          <div className="moduleHint">{t("emptySlice")}</div>
+        ) : (
+          <GrowthPeriodGrid
+            filename="team-month-on-month-quarters"
+            sheetName="Team Last 8 Quarters"
+            rowHeader={t("team")}
+            rows={visibleTeamRows}
+            periods={recentQuarters}
+            currentPeriod={currentQuarter}
+            periodLabel={quarterLabel}
+            valuesOf={(row) => row.quarterValues}
+            previousKeyOf={(period, index, periods) => (index > 0 ? periods[index - 1] : previousQuarterKey(period))}
+            totals={teamQuarterTotals}
+            totalLabel={t("total")}
+            rowKeyOf={(row) => row.label}
+          />
+        )}
+      </section>
+
+      <section className="moduleSection">
+        <div className="moduleSectionHeader">
+          <h2>{t("teamMonthly")}</h2>
+        </div>
+        <p className="moduleHint">{t("monthlyHint")}</p>
+        {visibleTeamRows.length === 0 ? (
+          <div className="moduleHint">{t("emptySlice")}</div>
+        ) : (
+          <GrowthPeriodGrid
+            filename="team-month-on-month-months"
+            sheetName="Team Last 12 Months"
+            rowHeader={t("team")}
+            rows={visibleTeamRows}
+            periods={recentMonths}
+            currentPeriod={currentMonth}
+            periodLabel={monthLabel}
+            previousKeyOf={(period, index, periods) => (index > 0 ? periods[index - 1] : previousMonthKey(period))}
+            totals={teamMonthTotals}
+            totalLabel={t("total")}
+            rowKeyOf={(row) => row.label}
+          />
         )}
       </section>
     </>

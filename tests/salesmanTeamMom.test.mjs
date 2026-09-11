@@ -1,0 +1,80 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { buildSalesmanScopeMatchers } from "../app/lib/mutualSalesmanGroups.js";
+import {
+  assignSalesmanRowToTeam,
+  buildTeamDirectoryMembers,
+  buildTeamMomRows,
+  rollupTeamGrowthGroups,
+  teamMomLabel,
+} from "../app/lib/salesmanTeamMom.js";
+
+test("team labels use the first-level leader name", () => {
+  assert.equal(teamMomLabel({
+    teamLeaderName: "Junaid",
+    teamLeaderCode: "JUNAID",
+  }), "Team — Junaid");
+});
+
+test("sales rows match a team member by code or name", () => {
+  const members = [{
+    teamKey: "leader-1",
+    teamLabel: "Team — Junaid",
+    matchers: buildSalesmanScopeMatchers([{ salesman_code: "PARVEZ", salesman_name: "Parvez" }]),
+  }];
+  assert.equal(assignSalesmanRowToTeam({ label: "Parvez · PARVEZ" }, members).teamKey, "leader-1");
+  assert.equal(assignSalesmanRowToTeam({ label: "Ali · A01" }, members), null);
+});
+
+test("team MoM rolls salesman months together and keeps the same trajectory rules", () => {
+  const members = buildTeamDirectoryMembers([
+    { id: "p1", salesman_code: "ALI", salesman_name: "Ali" },
+    { id: "p2", salesman_code: "OMAR", salesman_name: "Omar" },
+  ], (profile) => ({
+    teamKey: "leader-1",
+    teamLeaderUserId: "leader-1",
+    teamLeaderCode: "JUNAID",
+    teamLeaderName: "Junaid",
+  }));
+
+  const groups = rollupTeamGrowthGroups(
+    [
+      {
+        label: "Ali · ALI",
+        lifetime: 250,
+        monthValues: { "2026-07": 100, "2026-08": 150 },
+        quarterValues: { "2026-Q3": 250 },
+      },
+      {
+        label: "Omar · OMAR",
+        lifetime: 130,
+        monthValues: { "2026-07": 80, "2026-08": 50 },
+        quarterValues: { "2026-Q3": 130 },
+      },
+      {
+        label: "RAHID · RAHID",
+        lifetime: 40,
+        monthValues: { "2026-08": 40 },
+      },
+    ],
+    members,
+    { latestCompleteMonth: "2026-08" },
+  );
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].label, "Team — Junaid");
+  assert.equal(groups[0].memberCount, 2);
+  assert.equal(groups[0].monthValues["2026-07"], 180);
+  assert.equal(groups[0].monthValues["2026-08"], 200);
+  assert.equal(Math.round(groups[0].momPercent * 10) / 10, 11.1);
+
+  const rows = buildTeamMomRows({
+    currentMonth: "2026-09",
+    latestCompleteMonth: "2026-08",
+    recentMonths: ["2026-07", "2026-08", "2026-09"],
+    teamGroups: groups,
+  });
+  assert.equal(rows[0].trajectory.status, "green");
+  assert.equal(rows[0].latestCompleteAmount, 200);
+});

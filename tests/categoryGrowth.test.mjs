@@ -13,8 +13,14 @@ import {
   growthPercent,
   ingestCategoryGrowthRows,
   monthChangeTone,
+  monthGridTotals,
+  monthsInQuarter,
   normalizeCategoryName,
+  quarterGridTotals,
+  quarterKeyFromMonthKey,
+  quarterLabel,
   selectRecentGrowthMonths,
+  selectRecentGrowthQuarters,
   silentMonthCount,
 } from "../app/lib/categoryGrowth.js";
 
@@ -158,4 +164,55 @@ test("month cells compare to the previous month and keep the current month in vi
   assert.equal(report.currentMonth, "2026-09");
   assert.equal(report.recentMonths.at(-1), "2026-09");
   assert.equal(report.categories[0].monthValues["2026-09"], 0);
+});
+
+test("month grid totals add a row total, month totals, and grand total", () => {
+  const totals = monthGridTotals(
+    [
+      { monthValues: { "2026-07": 100, "2026-08": 80 } },
+      { monthValues: { "2026-07": 20, "2026-08": 40 } },
+    ],
+    ["2026-07", "2026-08", "2026-09"],
+  );
+  assert.deepEqual(totals.rowTotals, [180, 60]);
+  assert.deepEqual(totals.columnTotals, [120, 120, 0]);
+  assert.equal(totals.grandTotal, 240);
+});
+
+test("quarters roll months together and keep the current quarter as QTD", () => {
+  assert.equal(quarterKeyFromMonthKey("2026-09"), "2026-Q3");
+  assert.deepEqual(monthsInQuarter("2026-Q3"), ["2026-07", "2026-08", "2026-09"]);
+  assert.deepEqual(monthsInQuarter("2026-Q3", "2026-08"), ["2026-07", "2026-08"]);
+  assert.equal(quarterLabel("2026-Q3", "2026-Q3"), "Q3 26 QTD");
+  assert.deepEqual(
+    selectRecentGrowthQuarters({ firstMonth: "2024-02", asOfMonth: "2026-09" }),
+    ["2024-Q4", "2025-Q1", "2025-Q2", "2025-Q3", "2025-Q4", "2026-Q1", "2026-Q2", "2026-Q3"],
+  );
+
+  const acc = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(acc, [
+    { transaction_date: "2026-01-10", category: "Fridge", sales_amount: 40 },
+    { transaction_date: "2026-02-10", category: "Fridge", sales_amount: 60 },
+    { transaction_date: "2026-04-10", category: "Fridge", sales_amount: 90 },
+    { transaction_date: "2026-07-10", category: "Fridge", sales_amount: 25 },
+    { transaction_date: "2026-08-10", category: "Fridge", sales_amount: 15 },
+  ]);
+  const report = buildCategoryGrowthReport(acc, { asOfDate: "2026-09-11" });
+  const fridge = report.categories.find((row) => row.category === "Fridge");
+  assert.equal(report.currentQuarter, "2026-Q3");
+  assert.equal(report.recentQuarters.at(-1), "2026-Q3");
+  assert.equal(fridge.quarterValues["2026-Q1"], 100);
+  assert.equal(fridge.quarterValues["2026-Q2"], 90);
+  assert.equal(fridge.quarterValues["2026-Q3"], 40);
+
+  const totals = quarterGridTotals(
+    [
+      { quarterValues: { "2026-Q1": 100, "2026-Q2": 90 } },
+      { quarterValues: { "2026-Q1": 20, "2026-Q2": 10 } },
+    ],
+    ["2026-Q1", "2026-Q2", "2026-Q3"],
+  );
+  assert.deepEqual(totals.rowTotals, [190, 30]);
+  assert.deepEqual(totals.columnTotals, [120, 100, 0]);
+  assert.equal(totals.grandTotal, 220);
 });

@@ -22,6 +22,29 @@ test("month-on-month series skips the current partial month", () => {
   assert.equal(series[2].percent, -25);
 });
 
+test("scorecard last complete month is the month before MTD, not two months back", () => {
+  const rows = buildSalesmanMomRows({
+    currentMonth: "2026-09",
+    latestCompleteMonth: "2026-08",
+    recentMonths: ["2026-06", "2026-07", "2026-08", "2026-09"],
+    groups: [{
+      label: "Ali · A01",
+      lifetime: 400,
+      monthValues: {
+        "2026-06": 100,
+        "2026-07": 120,
+        "2026-08": 150,
+        "2026-09": 30,
+      },
+    }],
+  });
+  assert.equal(rows[0].latestCompleteMonth, "2026-08");
+  assert.equal(rows[0].priorCompleteMonth, "2026-07");
+  assert.equal(rows[0].latestCompleteAmount, 150);
+  assert.equal(rows[0].priorMonthAmount, 120);
+  assert.equal(rows[0].mtdAmount, 30);
+});
+
 test("improving and not-improving trajectories follow streaks and latest month", () => {
   assert.equal(trailingToneStreak([
     { tone: "up" },
@@ -62,6 +85,26 @@ test("salesman scorecard ranks people who are not improving first", () => {
   assert.equal(rows[0].label, "Omar");
   assert.equal(rows[0].trajectory.code, "not_improving");
   assert.equal(rows[0].decliningStreak, 2);
+  assert.equal(rows[0].latestCompleteAmount, 48);
+  assert.equal(rows[0].priorMonthAmount, 80);
+  assert.equal(rows[0].priorCompleteMonth, "2026-07");
   assert.equal(rows[1].trajectory.code, "improving");
   assert.equal(rows[1].improvingStreak, 2);
+  assert.equal(rows[1].latestCompleteAmount, 150);
+  assert.equal(rows[1].priorMonthAmount, 120);
+});
+
+test("scorecard drops placeholder and duplicated salesman names", () => {
+  const rows = buildSalesmanMomRows({
+    currentMonth: "2026-09",
+    latestCompleteMonth: "2026-08",
+    recentMonths: ["2026-08", "2026-09"],
+    groups: [
+      { label: "Ali · A01", lifetime: 200, momPercent: 10, monthValues: { "2026-08": 100 } },
+      { label: "RAHID · RAHID", lifetime: 80, momPercent: -20, monthValues: { "2026-08": 40 } },
+      { label: "NOT ADDED IN VOUCHER · NOT ADDED IN VOUCHER", lifetime: 50, momPercent: -30, monthValues: { "2026-08": 20 } },
+      { label: "NOON · NOON", lifetime: 10, momPercent: 5, monthValues: { "2026-08": 10 } },
+    ],
+  });
+  assert.deepEqual(rows.map((row) => row.label), ["Ali · A01"]);
 });

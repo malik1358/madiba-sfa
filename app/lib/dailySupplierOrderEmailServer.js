@@ -26,9 +26,11 @@ import { INVOICE_BUCKET } from "./orderInvoiceComparison.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { resolveReportingChainFromAuth } from "./salesHierarchy.js";
 import {
+  addKsaCalendarDays,
   formatKsaDateTime,
   getKsaDateString,
   getKsaWeekdayIndex,
+  getKsaWeekdayIndexForDateString,
   getPreviousKsaDateString,
   isKsaOrderDay,
   ksaDayBounds,
@@ -67,16 +69,24 @@ export function resolveDailySupplierOrderEmailSchedule(date, now = new Date()) {
     return { date: parseSupplierOrderReportDate(explicit, now), skipped: false, reason: "" };
   }
 
+  const previousDate = getPreviousKsaDateString(now);
+  const previousWeekday = getKsaWeekdayIndexForDateString(previousDate);
+
+  // Friday is the KSA holiday. Thursday's report goes out at Friday midnight
+  // (Saturday 00:20 KSA), not at the start of Friday.
+  if (previousWeekday === 5) {
+    return { date: addKsaCalendarDays(previousDate, -1), skipped: false, reason: "" };
+  }
+
   if (getKsaWeekdayIndex(now) === 5) {
-    return { date: getKsaDateString(now), skipped: true, reason: "friday_holiday" };
+    return { date: previousDate, skipped: true, reason: "friday_holiday" };
   }
 
-  const reportDate = getKsaDateString(now);
-  if (!isKsaOrderDay(reportDate) && !isKsaOrderDay(getPreviousKsaDateString(now))) {
-    return { date: reportDate, skipped: true, reason: "not_order_day" };
+  if (!isKsaOrderDay(previousDate)) {
+    return { date: previousDate, skipped: true, reason: "not_order_day" };
   }
 
-  return { date: reportDate, skipped: false, reason: "" };
+  return { date: previousDate, skipped: false, reason: "" };
 }
 
 function salesmanOrderRecipients({ reportEmail, email, chainEmails = [] } = {}) {
@@ -329,15 +339,20 @@ export async function runDailySupplierOrderEmailCycle(admin, {
   const isTestSend = testTo.length > 0;
   const asOf = now instanceof Date ? now : new Date(now);
   let asOfIso = asOf.toISOString();
-  const reportDate = parseSupplierOrderReportDate(date, asOf);
   const explicitDate = Boolean(String(date || "").trim());
 
-  // Midnight cron keeps Friday skip; sales-upload always runs when data lands.
-  if (normalizedTrigger === "cron" && !force) {
+  let reportDate = "";
+  if (explicitDate) {
+    reportDate = parseSupplierOrderReportDate(date, asOf);
+  } else if (normalizedTrigger === "cron") {
     const schedule = resolveDailySupplierOrderEmailSchedule("", asOf);
-    if (schedule.skipped) {
+    if (schedule.skipped && !force) {
       return { date: schedule.date, skipped: true, reason: schedule.reason, sentCount: 0, orderCount: 0 };
     }
+    reportDate = schedule.date || getPreviousKsaDateString(asOf);
+  } else {
+    // Sales-upload / manual without date: report the current KSA day so far.
+    reportDate = getKsaDateString(asOf);
   }
 
   if (!isEmailConfigured(getMailerConfig(env))) {
@@ -353,14 +368,13 @@ export async function runDailySupplierOrderEmailCycle(admin, {
 
   const marker = await resolveLastSent(admin);
 
-  // Always cover the full report KSA day (start → asOf), so Invoice made and
-  // unbilled orders raised that day both appear. Older unbilled rows still carry forward.
+  // Cover the full report KSA day so Invoice made and unbilled orders both appear.
+  // Older unbilled rows still carry forward via selection rules.
   const dayBounds = ksaDayBounds(reportDate);
   let sinceIso = dayBounds.startIso;
-  if (explicitDate && (isTestSend || normalizedTrigger === "manual" || force)) {
+  if (normalizedTrigger === "cron" || explicitDate) {
     asOfIso = dayBounds.endIso;
   } else {
-    // Sales upload / live run: up to now, but not before day start.
     const dayEndMs = Date.parse(dayBounds.endIso);
     const asOfMs = Date.parse(asOfIso);
     if (Number.isFinite(dayEndMs) && Number.isFinite(asOfMs) && asOfMs > dayEndMs) {
@@ -368,7 +382,6 @@ export async function runDailySupplierOrderEmailCycle(admin, {
     }
   }
 
-  // Upload-driven sends advance the watermark; only block exact duplicate cron runs for the same KSA date.
   if (
     normalizedTrigger === "cron"
     && !force

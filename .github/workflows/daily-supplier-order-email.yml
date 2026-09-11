@@ -1,11 +1,14 @@
 name: Daily Supplier Order Email
 
 on:
-  # Primary trigger is sales Excel upload (/api/import-sales). Keep this for manual/backfill runs.
+  schedule:
+    # 21:20 UTC = 00:20 KSA — previous KSA day's orders to each salesman (bosses on CC).
+    # Skips Friday holiday the same way as daily visit report (Sun–Thu + Sat).
+    - cron: "20 21 * * 0-3,5,6"
   workflow_dispatch:
     inputs:
       date:
-        description: "Report date YYYY-MM-DD (KSA). Empty = today."
+        description: "Report date YYYY-MM-DD (KSA). Empty = previous KSA day for cron logic."
         required: false
         default: ""
       to:
@@ -25,6 +28,7 @@ jobs:
         env:
           DAILY_SUPPLIER_ORDER_EMAIL_URL: ${{ secrets.DAILY_SUPPLIER_ORDER_EMAIL_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          EVENT_NAME: ${{ github.event_name }}
           INPUT_DATE: ${{ github.event.inputs.date }}
           INPUT_TO: ${{ github.event.inputs.to }}
           INPUT_FORCE: ${{ github.event.inputs.force }}
@@ -48,15 +52,22 @@ jobs:
 
           CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
-          export FORCE_VALUE="${INPUT_FORCE:-true}"
+          export EVENT_NAME
+          export FORCE_VALUE="${INPUT_FORCE:-}"
           export DATE_VALUE="$(printf '%s' "$INPUT_DATE" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           export TO_VALUE="$(printf '%s' "$INPUT_TO" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
           python3 - <<'PY' > payload.json
           import json, os
-          payload = {
-            "force": os.environ.get("FORCE_VALUE", "true").strip().lower() not in ("0", "false", "no", ""),
-          }
+          event_name = os.environ.get("EVENT_NAME", "").strip()
+          force_raw = os.environ.get("FORCE_VALUE", "").strip().lower()
+          if event_name == "schedule":
+            force = False
+          elif force_raw:
+            force = force_raw not in ("0", "false", "no")
+          else:
+            force = True
+          payload = {"force": force}
           date = os.environ.get("DATE_VALUE", "").strip()
           to = os.environ.get("TO_VALUE", "").strip()
           if date:

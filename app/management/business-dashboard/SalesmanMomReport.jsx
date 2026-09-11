@@ -17,6 +17,8 @@ import { buildSalesmanMomRows, resolveMomComparisonMonths, summarizeSalesmanMom 
 import { buildTeamMomRows } from "../../lib/salesmanTeamMom";
 import { translate } from "../../lib/appLanguage";
 import GrowthPeriodGrid from "./GrowthPeriodGrid";
+import { GrowthChartPanel, GrowthCompareChart, GrowthSignalChart, GrowthTrendChart } from "./GrowthCharts";
+import { buildCompareChartItems, buildPeriodChartModel, buildSignalMix } from "../../lib/growthCharts";
 
 function formatPreparedAt(value) {
   if (!value) return "";
@@ -103,6 +105,13 @@ const TEXT = {
     en: "Green is higher than the previous quarter. Red is lower. The current quarter is quarter-to-date only.",
     ar: "الأخضر أعلى من الربع السابق. الأحمر أقل. الربع الحالي حتى اليوم فقط.",
   },
+  chartHint: {
+    en: "Hover a period for amounts. Click a name to hide or show that line. Charts follow the current filters.",
+    ar: "مرّر على الفترة لمشاهدة المبالغ. انقر اسماً لإخفاء الخط أو إظهاره. الرسوم تتبع التصفية الحالية.",
+  },
+  compareChart: { en: "Last complete month vs month before", ar: "آخر شهر مكتمل مقابل الشهر السابق" },
+  signalChart: { en: "Measure mix", ar: "مزيج القياس" },
+  trendChart: { en: "Trend", ar: "الاتجاه" },
 };
 
 const STATUS_OPTIONS = [
@@ -259,6 +268,44 @@ export default function SalesmanMomReport({
     [visibleTeamRows, recentQuarters],
   );
   const { latestCompleteMonth, priorCompleteMonth } = resolveMomComparisonMonths(report || {});
+  const salesmanMonthChart = useMemo(
+    () => buildPeriodChartModel(visibleRows, recentMonths),
+    [visibleRows, recentMonths],
+  );
+  const salesmanQuarterChart = useMemo(
+    () => buildPeriodChartModel(visibleRows, recentQuarters, (row) => row.quarterValues),
+    [visibleRows, recentQuarters],
+  );
+  const salesmanCompare = useMemo(() => buildCompareChartItems(visibleRows), [visibleRows]);
+  const salesmanSignals = useMemo(
+    () => buildSignalMix(visibleRows, (row) => row.trajectory?.status),
+    [visibleRows],
+  );
+  const teamMonthChart = useMemo(
+    () => buildPeriodChartModel(visibleTeamRows, recentMonths),
+    [visibleTeamRows, recentMonths],
+  );
+  const teamQuarterChart = useMemo(
+    () => buildPeriodChartModel(visibleTeamRows, recentQuarters, (row) => row.quarterValues),
+    [visibleTeamRows, recentQuarters],
+  );
+  const teamCompare = useMemo(() => buildCompareChartItems(visibleTeamRows), [visibleTeamRows]);
+  const teamSignals = useMemo(
+    () => buildSignalMix(visibleTeamRows, (row) => row.trajectory?.status),
+    [visibleTeamRows],
+  );
+  const lastMonthHeader = latestCompleteMonth
+    ? `${t("lastMonth")} (${monthLabel(latestCompleteMonth, "")})`
+    : t("lastMonth");
+  const priorMonthHeader = priorCompleteMonth
+    ? `${t("priorMonth")} (${monthLabel(priorCompleteMonth, "")})`
+    : t("priorMonth");
+  const signalLabels = {
+    green: t("improving"),
+    orange: t("slipping"),
+    red: t("notImproving"),
+    neutral: language === "ar" ? STATUS_OPTIONS[3].ar : STATUS_OPTIONS[3].en,
+  };
 
   const filters = (
     <CategoryGrowthFilters
@@ -338,6 +385,21 @@ export default function SalesmanMomReport({
             <strong>{summary.notImprovingCount}</strong>
           </section>
         </div>
+        {visibleRows.length > 0 ? (
+          <div className="moduleBiChartGrid">
+            <GrowthChartPanel title={t("signalChart")}>
+              <GrowthSignalChart counts={salesmanSignals} labels={signalLabels} />
+            </GrowthChartPanel>
+            <GrowthChartPanel title={t("compareChart")}>
+              <GrowthCompareChart
+                items={salesmanCompare}
+                latestLabel={lastMonthHeader}
+                priorLabel={priorMonthHeader}
+                formatValue={formatMoneyAmount}
+              />
+            </GrowthChartPanel>
+          </div>
+        ) : null}
       </section>
 
       <section className="moduleSection">
@@ -384,6 +446,16 @@ export default function SalesmanMomReport({
           <h2>{t("quarterly")}</h2>
         </div>
         <p className="moduleHint">{t("quarterlyHint")}</p>
+        {visibleRows.length > 0 ? (
+          <GrowthChartPanel title={t("trendChart")} hint={t("chartHint")}>
+            <GrowthTrendChart
+              periods={salesmanQuarterChart.periods}
+              series={salesmanQuarterChart.series}
+              periodLabel={quarterLabel}
+              formatValue={formatMoneyAmount}
+            />
+          </GrowthChartPanel>
+        ) : null}
         {visibleRows.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
@@ -409,6 +481,16 @@ export default function SalesmanMomReport({
           <h2>{t("monthly")}</h2>
         </div>
         <p className="moduleHint">{t("monthlyHint")}</p>
+        {visibleRows.length > 0 ? (
+          <GrowthChartPanel title={t("trendChart")} hint={t("chartHint")}>
+            <GrowthTrendChart
+              periods={salesmanMonthChart.periods}
+              series={salesmanMonthChart.series}
+              periodLabel={(month) => monthLabel(month, currentMonth)}
+              formatValue={formatMoneyAmount}
+            />
+          </GrowthChartPanel>
+        ) : null}
         {visibleRows.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
@@ -451,6 +533,21 @@ export default function SalesmanMomReport({
             <strong>{teamSummary.notImprovingCount}</strong>
           </section>
         </div>
+        {visibleTeamRows.length > 0 ? (
+          <div className="moduleBiChartGrid">
+            <GrowthChartPanel title={t("signalChart")}>
+              <GrowthSignalChart counts={teamSignals} labels={signalLabels} />
+            </GrowthChartPanel>
+            <GrowthChartPanel title={t("compareChart")}>
+              <GrowthCompareChart
+                items={teamCompare}
+                latestLabel={lastMonthHeader}
+                priorLabel={priorMonthHeader}
+                formatValue={formatMoneyAmount}
+              />
+            </GrowthChartPanel>
+          </div>
+        ) : null}
       </section>
 
       <section className="moduleSection">
@@ -499,6 +596,16 @@ export default function SalesmanMomReport({
           <h2>{t("teamQuarterly")}</h2>
         </div>
         <p className="moduleHint">{t("quarterlyHint")}</p>
+        {visibleTeamRows.length > 0 ? (
+          <GrowthChartPanel title={t("trendChart")} hint={t("chartHint")}>
+            <GrowthTrendChart
+              periods={teamQuarterChart.periods}
+              series={teamQuarterChart.series}
+              periodLabel={quarterLabel}
+              formatValue={formatMoneyAmount}
+            />
+          </GrowthChartPanel>
+        ) : null}
         {visibleTeamRows.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
@@ -524,6 +631,16 @@ export default function SalesmanMomReport({
           <h2>{t("teamMonthly")}</h2>
         </div>
         <p className="moduleHint">{t("monthlyHint")}</p>
+        {visibleTeamRows.length > 0 ? (
+          <GrowthChartPanel title={t("trendChart")} hint={t("chartHint")}>
+            <GrowthTrendChart
+              periods={teamMonthChart.periods}
+              series={teamMonthChart.series}
+              periodLabel={(month) => monthLabel(month, currentMonth)}
+              formatValue={formatMoneyAmount}
+            />
+          </GrowthChartPanel>
+        ) : null}
         {visibleTeamRows.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (

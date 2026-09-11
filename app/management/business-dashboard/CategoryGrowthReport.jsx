@@ -4,6 +4,12 @@ import { useMemo } from "react";
 import ExportableTable from "../../components/ExportableTable";
 import CategoryGrowthFilters, { filterGrowthRows } from "./CategoryGrowthFilters";
 import GrowthPeriodGrid from "./GrowthPeriodGrid";
+import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart, GrowthTrendChart } from "./GrowthCharts";
+import {
+  buildPeriodChartModel,
+  buildShareChartItems,
+  buildSignalMix,
+} from "../../lib/growthCharts";
 import {
   formatGrowthPercent,
   formatMoneyAmount,
@@ -79,6 +85,13 @@ const TEXT = {
     en: "Green is higher than the previous month. Red is lower. The current month is month-to-date only.",
     ar: "الأخضر أعلى من الشهر السابق. الأحمر أقل. الشهر الحالي حتى اليوم فقط.",
   },
+  chartHint: {
+    en: "Hover a period for amounts. Click a name to hide or show that line. Charts follow the current filters.",
+    ar: "مرّر على الفترة لمشاهدة المبالغ. انقر اسماً لإخفاء الخط أو إظهاره. الرسوم تتبع التصفية الحالية.",
+  },
+  shareChart: { en: "Share of lifetime sales", ar: "حصة مبيعات العمر" },
+  signalChart: { en: "Signal mix", ar: "مزيج الإشارات" },
+  trendChart: { en: "Trend", ar: "الاتجاه" },
   quarterlyHint: {
     en: "Green is higher than the previous quarter. Red is lower. The current quarter is quarter-to-date only.",
     ar: "الأخضر أعلى من الربع السابق. الأحمر أقل. الربع الحالي حتى اليوم فقط.",
@@ -165,6 +178,20 @@ export default function CategoryGrowthReport({
     () => quarterGridTotals(categories, recentQuarters),
     [categories, recentQuarters],
   );
+  const yearChart = useMemo(
+    () => buildPeriodChartModel(categories, years, (row) => row.yearValues),
+    [categories, years],
+  );
+  const quarterChart = useMemo(
+    () => buildPeriodChartModel(categories, recentQuarters, (row) => row.quarterValues),
+    [categories, recentQuarters],
+  );
+  const monthChart = useMemo(
+    () => buildPeriodChartModel(categories, recentMonths),
+    [categories, recentMonths],
+  );
+  const shareItems = useMemo(() => buildShareChartItems(categories), [categories]);
+  const signalMix = useMemo(() => buildSignalMix(categories), [categories]);
 
   const hasData = allRows.length > 0;
 
@@ -257,6 +284,16 @@ export default function CategoryGrowthReport({
           </section>
         </div>
         <div className="moduleHint">{t("range")}: {historyLabel}</div>
+        {categories.length > 0 ? (
+          <div className="moduleBiChartGrid">
+            <GrowthChartPanel title={t("signalChart")}>
+              <GrowthSignalChart counts={signalMix} />
+            </GrowthChartPanel>
+            <GrowthChartPanel title={t("shareChart")}>
+              <GrowthBarChart items={shareItems} formatValue={formatMoneyAmount} />
+            </GrowthChartPanel>
+          </div>
+        ) : null}
       </section>
 
       <section className="moduleSection">
@@ -284,6 +321,16 @@ export default function CategoryGrowthReport({
           <h2>{t("yearly")}</h2>
         </div>
         <p className="moduleHint">{t("yearlyHint")}</p>
+        {categories.length > 0 ? (
+          <GrowthChartPanel title={t("trendChart")} hint={t("chartHint")}>
+            <GrowthTrendChart
+              periods={yearChart.periods}
+              series={yearChart.series}
+              periodLabel={(year) => (year === currentYear ? `${year} YTD` : year)}
+              formatValue={formatMoneyAmount}
+            />
+          </GrowthChartPanel>
+        ) : null}
         {categories.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
@@ -345,6 +392,16 @@ export default function CategoryGrowthReport({
           <h2>{t("quarterly")}</h2>
         </div>
         <p className="moduleHint">{t("quarterlyHint")}</p>
+        {categories.length > 0 ? (
+          <GrowthChartPanel title={t("trendChart")} hint={t("chartHint")}>
+            <GrowthTrendChart
+              periods={quarterChart.periods}
+              series={quarterChart.series}
+              periodLabel={quarterLabel}
+              formatValue={formatMoneyAmount}
+            />
+          </GrowthChartPanel>
+        ) : null}
         {categories.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
@@ -369,6 +426,16 @@ export default function CategoryGrowthReport({
           <h2>{t("monthly")}</h2>
         </div>
         <p className="moduleHint">{t("monthlyHint")}</p>
+        {categories.length > 0 ? (
+          <GrowthChartPanel title={t("trendChart")} hint={t("chartHint")}>
+            <GrowthTrendChart
+              periods={monthChart.periods}
+              series={monthChart.series}
+              periodLabel={(month) => monthLabel(month, currentMonth)}
+              formatValue={formatMoneyAmount}
+            />
+          </GrowthChartPanel>
+        ) : null}
         {categories.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (

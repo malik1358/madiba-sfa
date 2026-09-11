@@ -6859,3 +6859,217 @@ th:has(.moduleTableColumnFilterInput) {
   font-weight: 600;
 }
 
+.moduleBiChartGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 900px) {
+  .moduleBiChartGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.moduleBiChartPanel {
+  min-width: 0;
+  padding: 12px 14px 10px;
+  border: 1px solid #d7e4e8;
+  border-radius: 14px;
+  background: #f8fbfc;
+}
+
+.moduleBiChartPanel h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: #0f4c5c;
+}
+
+.moduleBiChart {
+  position: relative;
+}
+
+.moduleBiChartSvg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.moduleBiChartGridLine {
+  stroke: #d5e3e8;
+  stroke-width: 1;
+}
+
+.moduleBiChartAxis {
+  fill: #64748b;
+  font-size: 11px;
+}
+
+.moduleBiChartHoverLine {
+  stroke: #0f4c5c;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.moduleBiChartTooltip {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  min-width: 160px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.moduleBiChartTooltip strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.moduleBiChartTooltip div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.moduleBiChartTooltip span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.moduleBiChartLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.moduleBiChartLegendBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: #35515a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.moduleBiChartLegendBtn i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  flex: 0 0 auto;
+}
+
+.moduleBiChartLegendBtn.isOff {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.moduleBiChart--bars {
+  display: grid;
+  gap: 8px;
+}
+
+.moduleBiCompareRow {
+  display: grid;
+  grid-template-columns: minmax(88px, 160px) 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.moduleBiCompareLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f4c5c;
+}
+
+.moduleBiCompareTracks {
+  display: grid;
+  gap: 4px;
+}
+
+.moduleBiCompareBar {
+  min-width: 2px;
+  max-width: 100%;
+  height: 18px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.moduleBiCompareBar--prior {
+  background: #94a3b8;
+}
+
+.moduleBiCompareBar--latest {
+  background: #0ea5a4;
+}
+
+.moduleBiCompareBar.is-green {
+  background: #166534;
+}
+
+.moduleBiCompareBar.is-orange {
+  background: #c2410c;
+}
+
+.moduleBiCompareBar.is-red {
+  background: #b91c1c;
+}
+
+.moduleBiCompareBar.is-neutral {
+  background: #0f4c5c;
+}
+
+.moduleBiCompareBar em {
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.moduleBiCompareSwatch--prior,
+.moduleBiCompareSwatch--latest {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.moduleBiCompareSwatch--prior {
+  background: #94a3b8;
+}
+
+.moduleBiCompareSwatch--latest {
+  background: #0ea5a4;
+}
+
+.moduleBiSignalTrack {
+  display: flex;
+  overflow: hidden;
+  height: 16px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.moduleBiSignalSlice {
+  height: 100%;
+}
+

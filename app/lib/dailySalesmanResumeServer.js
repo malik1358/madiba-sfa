@@ -7,6 +7,7 @@ import {
 import {
   attachResumeRowBosses,
   buildDailySalesmanResumeEmail,
+  classifyResumeTeamLeaders,
   emptySalesmanResumeRow,
   resolveDailySalesmanResumeRecipients,
   resolveResumeWorkingEndAt,
@@ -404,9 +405,22 @@ export function buildSalesmanResumeRows({
   const collectionsByUser = collectionMetrics.size
     ? collectionMetrics
     : new Map([...collectionCounts.entries()].map(([userId, count]) => [userId, { count, value: 0 }]));
+  const { firstLevelIds } = classifyResumeTeamLeaders({
+    profiles: hierarchyProfiles.length ? hierarchyProfiles : profiles,
+    authUsers,
+  });
+  const seenProfileIds = new Set();
+  const mergedProfiles = [];
+  [...(profiles || []), ...(hierarchyProfiles || [])].forEach((profile) => {
+    const id = String(profile?.id || "").trim();
+    if (!id || seenProfileIds.has(id)) return;
+    if (!profiles.some((row) => row.id === profile.id) && !firstLevelIds.has(id)) return;
+    seenProfileIds.add(id);
+    mergedProfiles.push(profile);
+  });
   const byUserId = new Map();
 
-  for (const profile of profiles || []) {
+  for (const profile of mergedProfiles) {
     ensureRow(byUserId, profile);
   }
 
@@ -466,21 +480,24 @@ export function buildSalesmanResumeRows({
     });
   }
 
-  return attachResumeRowBosses(
-    sortSalesmanResumeRows([...byUserId.values()].filter((row) => {
-      if (!shouldIncludeSalesmanResumeRow(row)) return false;
-      return Number(row.orders || 0)
-        + Number(row.orderValue || 0)
-        + Number(row.invoiceCount || 0)
-        + Number(row.invoiceAmount || 0)
-        + Number(row.collections || 0)
-        + Number(row.collectionValue || 0)
-        + Number(row.visits || 0)
-        + Number(row.skuSoldCount || 0) > 0
-        || SALESMAN_ROLES.has(normalizeRole(row.role));
-    })),
-    { profiles: hierarchyProfiles, authUsers },
-  );
+  const attached = attachResumeRowBosses([...byUserId.values()], {
+    profiles: hierarchyProfiles.length ? hierarchyProfiles : profiles,
+    authUsers,
+  });
+
+  return sortSalesmanResumeRows(attached.filter((row) => {
+    if (!shouldIncludeSalesmanResumeRow(row)) return false;
+    return Number(row.orders || 0)
+      + Number(row.orderValue || 0)
+      + Number(row.invoiceCount || 0)
+      + Number(row.invoiceAmount || 0)
+      + Number(row.collections || 0)
+      + Number(row.collectionValue || 0)
+      + Number(row.visits || 0)
+      + Number(row.skuSoldCount || 0) > 0
+      || SALESMAN_ROLES.has(normalizeRole(row.role))
+      || row.isFirstLevelTeamLeader;
+  }));
 }
 
 export async function buildDailySalesmanResume(admin, { date, now = new Date() } = {}) {
@@ -495,9 +512,14 @@ export async function buildDailySalesmanResume(admin, { date, now = new Date() }
     loadInvoiceMetricsBySalesman(admin, reportDate),
   ]);
 
+  const { firstLevelIds } = classifyResumeTeamLeaders({
+    profiles: hierarchyProfiles,
+    authUsers,
+  });
   const userIds = [
     ...new Set([
       ...profiles.map((profile) => profile.id),
+      ...[...firstLevelIds],
       ...visitCounts.keys(),
       ...collectionMetrics.keys(),
       ...orderMetrics.keys(),

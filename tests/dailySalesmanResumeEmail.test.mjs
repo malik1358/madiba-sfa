@@ -5,6 +5,7 @@ import {
   DEFAULT_DAILY_SALESMAN_RESUME_TO,
   attachResumeRowBosses,
   buildDailySalesmanResumeEmail,
+  classifyResumeTeamLeaders,
   groupSalesmanResumeRowsByBoss,
   isHiddenResumeSalesman,
   isOccasionalResumeSalesman,
@@ -151,23 +152,94 @@ test("resolveResumeWorkingEndAt uses last activity for auto logout", () => {
   );
 });
 
-test("groupSalesmanResumeRowsByBoss groups by direct boss and totals each team", () => {
+test("groupSalesmanResumeRowsByBoss keeps first-level leaders in their own team", () => {
   const groups = groupSalesmanResumeRowsByBoss([
-    { salesmanName: "Belal", bossUserId: "nabil", bossName: "Ahmed Nabil", bossCode: "AHMED NABIL", orders: 1, orderValue: 100 },
-    { salesmanName: "George", bossUserId: "nabil", bossName: "Ahmed Nabil", bossCode: "AHMED NABIL", orders: 2, orderValue: 50 },
+    {
+      salesmanName: "Belal",
+      bossUserId: "nabil",
+      teamLeaderUserId: "nabil",
+      teamLeaderName: "Ahmed Nabil",
+      teamLeaderCode: "AHMED NABIL",
+      orders: 1,
+      orderValue: 100,
+    },
+    {
+      salesmanName: "George",
+      bossUserId: "nabil",
+      teamLeaderUserId: "nabil",
+      teamLeaderName: "Ahmed Nabil",
+      teamLeaderCode: "AHMED NABIL",
+      orders: 2,
+      orderValue: 50,
+    },
     { salesmanName: "Junaid", orders: 1, orderValue: 20 },
-    { salesmanName: "Nabil", bossUserId: "soyeb", bossName: "Soyeb", bossCode: "SOYEB", orders: 3, orderValue: 80 },
+    {
+      userId: "abdul",
+      salesmanName: "Abdul Rehman",
+      salesmanCode: "ABDUL REHMAN",
+      bossUserId: "soyeb",
+      bossName: "Soyeb",
+      bossCode: "SOYEB",
+      teamLeaderUserId: "abdul",
+      teamLeaderName: "Abdul Rehman",
+      teamLeaderCode: "ABDUL REHMAN",
+      isFirstLevelTeamLeader: true,
+      orders: 3,
+      orderValue: 80,
+    },
   ]);
 
   assert.deepEqual(groups.map((group) => group.label), [
+    "Team — Abdul Rehman (ABDUL REHMAN)",
     "Team — Ahmed Nabil (AHMED NABIL)",
-    "Team — Soyeb (SOYEB)",
     "No boss",
   ]);
-  assert.equal(groups[0].totals.orders, 3);
-  assert.equal(groups[0].totals.orderValue, 150);
-  assert.equal(groups[1].rows[0].salesmanName, "Nabil");
+  assert.equal(groups[0].rows[0].salesmanName, "Abdul Rehman");
+  assert.equal(groups[1].totals.orders, 3);
+  assert.equal(groups[1].totals.orderValue, 150);
   assert.equal(groups[2].rows[0].salesmanName, "Junaid");
+});
+
+test("attachResumeRowBosses puts first-level leaders in their own team instead of Soyeb", () => {
+  const profiles = [
+    { id: "belal", salesman_code: "BELAL", salesman_name: "Belal" },
+    { id: "nabil", salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil" },
+    { id: "abdul", salesman_code: "ABDUL REHMAN", salesman_name: "Abdul Rehman" },
+    { id: "thamer", salesman_code: "SM002", salesman_name: "Thamer" },
+    { id: "soyeb", salesman_code: "SOYEB", salesman_name: "Soyeb" },
+  ];
+  const authUsers = [
+    { id: "belal", user_metadata: { head_salesman_code: "AHMED NABIL" } },
+    { id: "nabil", user_metadata: { head_salesman_code: "SOYEB" } },
+    { id: "thamer", user_metadata: { head_salesman_code: "ABDUL REHMAN" } },
+    { id: "abdul", user_metadata: { head_salesman_code: "SOYEB" } },
+    { id: "soyeb", user_metadata: {} },
+  ];
+
+  const classified = classifyResumeTeamLeaders({ profiles, authUsers });
+  assert.equal(classified.firstLevelIds.has("nabil"), true);
+  assert.equal(classified.firstLevelIds.has("abdul"), true);
+  assert.equal(classified.secondTierIds.has("soyeb"), true);
+
+  const rows = attachResumeRowBosses([
+    { userId: "belal", salesmanName: "Belal" },
+    { userId: "nabil", salesmanName: "Ahmed Nabil", salesmanCode: "AHMED NABIL" },
+    { userId: "abdul", salesmanName: "Abdul Rehman", salesmanCode: "ABDUL REHMAN" },
+    { userId: "thamer", salesmanName: "Thamer" },
+  ], { profiles, authUsers });
+
+  assert.equal(rows.find((row) => row.userId === "abdul").teamLeaderUserId, "abdul");
+  assert.equal(rows.find((row) => row.userId === "abdul").isFirstLevelTeamLeader, true);
+  assert.equal(rows.find((row) => row.userId === "thamer").teamLeaderUserId, "abdul");
+  assert.equal(rows.find((row) => row.userId === "nabil").teamLeaderUserId, "nabil");
+  assert.equal(rows.find((row) => row.userId === "belal").teamLeaderUserId, "nabil");
+
+  const groups = groupSalesmanResumeRowsByBoss(rows);
+  assert.deepEqual(groups.map((group) => group.label), [
+    "Team — Abdul Rehman (ABDUL REHMAN)",
+    "Team — Ahmed Nabil (AHMED NABIL)",
+  ]);
+  assert.equal(groups.some((group) => group.label.includes("Soyeb")), false);
 });
 
 test("buildDailySalesmanResumeEmail groups rows by boss when hierarchy is present", () => {
@@ -247,7 +319,7 @@ test("buildSalesmanResumeRows aggregates metrics by user", () => {
     }]]),
   });
 
-  assert.equal(rows.length, 2);
+  assert.equal(rows.length, 3);
   const ahmed = rows.find((row) => row.userId === "u1");
   assert.deepEqual(
     {
@@ -336,6 +408,33 @@ test("occasional office names appear only with an order or collection", () => {
 
   assert.deepEqual(rows.map((row) => row.userId).sort(), ["george", "junaid", "soyeb"]);
   assert.equal(rows.some((row) => row.userId === "nabil" || row.userId === "fazlur"), false);
+});
+
+test("first-level team leaders stay visible even without orders", () => {
+  const rows = buildSalesmanResumeRows({
+    profiles: [
+      { id: "george", role: "salesman", salesman_name: "GEORGE", salesman_code: "GEORGE" },
+    ],
+    hierarchyProfiles: [
+      { id: "george", role: "salesman", salesman_name: "GEORGE", salesman_code: "GEORGE" },
+      { id: "nabil", role: "manager", salesman_name: "Ahmed Nabil", salesman_code: "AHMED NABIL" },
+      { id: "soyeb", role: "manager", salesman_name: "SOYEB", salesman_code: "SOYEB" },
+    ],
+    authUsers: [
+      { id: "george", user_metadata: { head_salesman_code: "AHMED NABIL" } },
+      { id: "nabil", user_metadata: { head_salesman_code: "SOYEB" } },
+      { id: "soyeb", user_metadata: {} },
+    ],
+    workdays: new Map([
+      ["george", { loginAt: "2026-09-10T06:00:00.000Z" }],
+    ]),
+  });
+
+  const nabil = rows.find((row) => row.userId === "nabil");
+  assert.equal(Boolean(nabil), true);
+  assert.equal(nabil.isFirstLevelTeamLeader, true);
+  assert.equal(nabil.teamLeaderUserId, "nabil");
+  assert.equal(shouldIncludeSalesmanResumeRow(nabil), true);
 });
 
 test("summarizeSalesmanResumeRows totals columns", () => {

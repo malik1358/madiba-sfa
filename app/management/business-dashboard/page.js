@@ -12,15 +12,19 @@ import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from
 import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import CategoryGrowthReport from "./CategoryGrowthReport";
+import { emptyGrowthFilters } from "../../lib/categoryGrowth";
 
 const TEXT = {
-  title: { en: "Business Dashboard", ar: "لوحة الأعمال" },
+  title: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
   subtitle: {
-    en: "KRAs, KPIs, and red alerts from live field, sales, and collection data",
-    ar: "مؤشرات الأداء والتنبيهات الحمراء من بيانات الميدان والمبيعات والتحصيل",
+    en: "Sales-based indicators, category growth since inception, and operational red lights",
+    ar: "مؤشرات من المبيعات، نمو الفئات منذ البداية، وتنبيهات التشغيل الحمراء",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading business dashboard...", ar: "جاري تحميل لوحة الأعمال..." },
+  categoryGrowth: { en: "Category growth", ar: "نمو الفئات" },
+  operations: { en: "Daily operations", ar: "التشغيل اليومي" },
   date: { en: "Report date", ar: "تاريخ التقرير" },
   redAlerts: { en: "Red alerts", ar: "تنبيهات حمراء" },
   warnings: { en: "Warnings", ar: "تحذيرات" },
@@ -49,10 +53,18 @@ export default function BusinessDashboardPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const supabaseClient = getSupabaseClient();
+  const [view, setView] = useState("category-growth");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reportDate, setReportDate] = useState(() => getKsaDateString());
   const [dashboard, setDashboard] = useState(null);
+  const [growthLoading, setGrowthLoading] = useState(true);
+  const [growthReport, setGrowthReport] = useState(null);
+  const [growthDraft, setGrowthDraft] = useState(() => emptyGrowthFilters());
+  const [growthApplied, setGrowthApplied] = useState(() => emptyGrowthFilters());
+  const [growthCatalogs, setGrowthCatalogs] = useState({});
+  const [growthSearch, setGrowthSearch] = useState("");
+  const [growthStatusFilter, setGrowthStatusFilter] = useState([]);
 
   usePopupMessages({ error });
 
@@ -104,13 +116,94 @@ export default function BusinessDashboardPage() {
       }
     }
 
+    if (view !== "operations") {
+      stopSafetyTimer();
+      setLoading(false);
+      return () => {
+        cancelled = true;
+        stopSafetyTimer();
+      };
+    }
+
     loadDashboard();
 
     return () => {
       cancelled = true;
       stopSafetyTimer();
     };
-  }, [reportDate]);
+  }, [reportDate, view]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const stopSafetyTimer = startReportSafetyTimer(() => {
+      if (cancelled) return;
+      setGrowthLoading(false);
+      setError((current) => current || "Category growth timed out. Please refresh.");
+    });
+
+    async function loadGrowth() {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        stopSafetyTimer();
+        setGrowthLoading(false);
+        return;
+      }
+
+      setGrowthLoading(true);
+      setError("");
+
+      try {
+        const session = await resolveAuthSession(supabase, 12000);
+        if (cancelled) return;
+        if (!session?.access_token) throw new Error("Please login again.");
+
+        const { response, payload } = await fetchJsonWithTimeout(
+          "/api/business-dashboard/category-growth",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ filters: growthApplied }),
+          },
+          60000,
+        );
+
+        if (cancelled) return;
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load category growth.");
+        }
+
+        setGrowthReport(payload);
+        if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.message || "Unable to load category growth.");
+        setGrowthReport(null);
+      } finally {
+        stopSafetyTimer();
+        if (!cancelled) setGrowthLoading(false);
+      }
+    }
+
+    if (view !== "category-growth") {
+      stopSafetyTimer();
+      setGrowthLoading(false);
+      return () => {
+        cancelled = true;
+        stopSafetyTimer();
+      };
+    }
+
+    loadGrowth();
+
+    return () => {
+      cancelled = true;
+      stopSafetyTimer();
+    };
+  }, [view, growthApplied]);
 
   const redAlerts = useMemo(
     () => (dashboard?.alerts || []).filter((row) => row.severity === "red"),
@@ -154,6 +247,58 @@ export default function BusinessDashboardPage() {
           </div>
 
           <section className="moduleSection">
+            <div className="moduleBiTabs" role="tablist" aria-label={t("title")}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "category-growth"}
+                className={`moduleBiTab${view === "category-growth" ? " isActive" : ""}`}
+                onClick={() => setView("category-growth")}
+              >
+                {t("categoryGrowth")}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "operations"}
+                className={`moduleBiTab${view === "operations" ? " isActive" : ""}`}
+                onClick={() => setView("operations")}
+              >
+                {t("operations")}
+              </button>
+            </div>
+          </section>
+
+          {view === "category-growth" ? (
+            <CategoryGrowthReport
+              language={language}
+              loading={growthLoading}
+              report={growthReport}
+              draft={growthDraft}
+              catalogs={growthCatalogs}
+              applied={growthApplied}
+              search={growthSearch}
+              statusFilter={growthStatusFilter}
+              onSearchChange={setGrowthSearch}
+              onStatusFilterChange={setGrowthStatusFilter}
+              onDraftChange={setGrowthDraft}
+              onGroupByChange={(groupBy) => {
+                setGrowthDraft((current) => ({ ...current, groupBy }));
+                setGrowthApplied((current) => ({ ...current, groupBy }));
+              }}
+              onApply={() => setGrowthApplied({ ...growthDraft })}
+              onClear={() => {
+                const empty = emptyGrowthFilters();
+                setGrowthDraft(empty);
+                setGrowthApplied(empty);
+                setGrowthSearch("");
+                setGrowthStatusFilter([]);
+              }}
+            />
+          ) : null}
+
+          {view === "operations" ? (
+          <section className="moduleSection">
             <label className="moduleField">
               {t("date")}
               <input
@@ -164,10 +309,11 @@ export default function BusinessDashboardPage() {
               />
             </label>
           </section>
+          ) : null}
 
-          {loading && <div className="moduleLoading">{t("loading")}</div>}
+          {view === "operations" && loading && <div className="moduleLoading">{t("loading")}</div>}
 
-          {!loading && dashboard && (
+          {view === "operations" && !loading && dashboard && (
             <>
               <div className="moduleMetricGrid">
                 <section className="moduleMetricCard moduleBusinessKpi--red">

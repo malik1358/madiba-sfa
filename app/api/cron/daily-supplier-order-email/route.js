@@ -54,6 +54,7 @@ async function handleRequest(request) {
       const admin = createAdminClient();
       return runDailySupplierOrderEmailCycle(admin, {
         date,
+        trigger: "cron",
         env: {
           ...process.env,
           ...(String(force || "").trim() ? { DAILY_SUPPLIER_ORDER_EMAIL_FORCE: "true" } : {}),

@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import { normalizeImportedItemName } from "../../lib/itemName.js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
+import { runDailySupplierOrderEmailCycle } from "../../lib/dailySupplierOrderEmailServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -1149,6 +1150,29 @@ export async function POST(request) {
         });
       } catch (rebuildError) {
         console.error("Mobile snapshot rebuild after sales upload failed:", rebuildError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const emailAdmin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const emailResult = await runDailySupplierOrderEmailCycle(emailAdmin, {
+          trigger: "sales-upload",
+          now: new Date(),
+          env: process.env,
+        });
+        if (emailResult?.skipped) {
+          console.info("Daily supplier order email skipped after sales upload:", emailResult.reason || "skipped");
+        } else {
+          console.info("Daily supplier order email sent after sales upload:", {
+            date: emailResult?.date,
+            sentCount: emailResult?.sentCount,
+            orderCount: emailResult?.orderCount,
+          });
+        }
+      } catch (emailError) {
+        console.error("Daily supplier order email after sales upload failed:", emailError);
       }
     });
 

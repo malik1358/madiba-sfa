@@ -44,6 +44,7 @@ import {
   pendingOrderTimeToMakeSeconds,
   shouldRunTimeToMakeClock,
 } from "../../lib/pendingOrderTimeToMake";
+import { amountInclVat } from "../../lib/invoiceAmountFromPdf";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -77,6 +78,8 @@ const EMPTY_FILTERS = {
   created: [],
   lastUpdated: [],
   age: [],
+  orderValue: [],
+  invoiceValue: [],
 };
 
 function displayOrDash(value) {
@@ -115,6 +118,8 @@ function pendingOrderFilterValues(order, meta) {
     created: displayOrDash(formatDateTime(order.created_at)),
     lastUpdated: displayOrDash(formatDateTime(order.updated_at)),
     age: String(daysOld(order.updated_at || order.created_at)),
+    orderValue: formatMoneyInclVat(orderValueInclVat(order)),
+    invoiceValue: formatMoneyInclVat(invoiceMadeInclVat(meta)),
   };
 }
 
@@ -129,11 +134,32 @@ const HEADING_FILTERS = [
   { key: "created", label: "Order created" },
   { key: "lastUpdated", label: "Last Updated" },
   { key: "age", label: "Age (days)" },
+  { key: "orderValue", label: "Order value (incl. VAT)" },
+  { key: "invoiceValue", label: "Invoice made (incl. VAT)" },
 ];
 const HEADING_FILTER_KEYS = HEADING_FILTERS.map(({ key }) => key);
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function moneyExclVat(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function orderValueInclVat(order) {
+  return amountInclVat(moneyExclVat(order?.total_value));
+}
+
+function invoiceMadeInclVat(meta) {
+  return amountInclVat(moneyExclVat(meta?.invoiceAmountExclVat));
+}
+
+function formatMoneyInclVat(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "-";
+  return number.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatDateTime(value) {
@@ -402,6 +428,19 @@ export default function PendingOrdersPage() {
 
       setActiveOrderId(orderId);
       setOrderLines(data || []);
+      const openedOrderValue = (data || []).reduce((sum, line) => {
+        const lineValue = Number(line.line_value);
+        if (Number.isFinite(lineValue) && lineValue > 0) return sum + lineValue;
+        const fallback = Number(line.quantity || 0) * Number(line.rate || 0);
+        return sum + (Number.isFinite(fallback) ? fallback : 0);
+      }, 0);
+      if (openedOrderValue > 0) {
+        setOrders((current) => (current || []).map((row) => (
+          String(row.id) === String(orderId)
+            ? { ...row, total_value: Math.round(openedOrderValue * 100) / 100 }
+            : row
+        )));
+      }
       setOrderHistory(historyResponse.ok && historyPayload.success && Array.isArray(historyPayload.history) ? historyPayload.history : []);
       setSelectedInvoiceFile(null);
 
@@ -650,6 +689,14 @@ export default function PendingOrdersPage() {
     });
   }, [effectiveColumnFilters, invoiceMetaByOrder, orders]);
 
+  const filteredValueTotals = useMemo(() => {
+    return filteredOrders.reduce((totals, order) => {
+      totals.orderValue += orderValueInclVat(order) || 0;
+      totals.invoiceValue += invoiceMadeInclVat(invoiceMetaByOrder?.[order.id]) || 0;
+      return totals;
+    }, { orderValue: 0, invoiceValue: 0 });
+  }, [filteredOrders, invoiceMetaByOrder]);
+
   async function regenerateOrderPdf() {
     if (!activeOrder) {
       setError("Open an order first to regenerate PDF.");
@@ -759,6 +806,8 @@ export default function PendingOrdersPage() {
         "Order created": formatDateTime(order.created_at),
         "Last Updated": formatDateTime(order.updated_at),
         "Age (days)": daysOld(order.updated_at || order.created_at),
+        "Order value (incl. VAT)": formatMoneyInclVat(orderValueInclVat(order)),
+        "Invoice made (incl. VAT)": formatMoneyInclVat(invoiceMadeInclVat(invoiceMetaByOrder?.[order.id])),
       }));
 
       workbook.Sheets.PendingOrders = XLSX.utils.json_to_sheet(queueRows);
@@ -980,6 +1029,8 @@ export default function PendingOrdersPage() {
                           <td>{formatDateTime(order.created_at)}</td>
                           <td>{formatDateTime(order.updated_at)}</td>
                           <td>{age}</td>
+                          <td style={{ textAlign: "right" }}>{formatMoneyInclVat(orderValueInclVat(order))}</td>
+                          <td style={{ textAlign: "right" }}>{formatMoneyInclVat(invoiceMadeInclVat(meta))}</td>
                           <td>
                             <button
                               type="button"
@@ -994,7 +1045,7 @@ export default function PendingOrdersPage() {
 
                         {activeOrderId === order.id && (
                           <tr>
-                            <td colSpan={11}>
+                            <td colSpan={13}>
                               <div style={{ marginTop: "8px", marginBottom: "8px" }}>
                                 <div className="moduleSectionHeader">
                                   <h2>Order #{formatSalesOrderNumber(order) || order.id} Details</h2>
@@ -1192,10 +1243,20 @@ export default function PendingOrdersPage() {
 
                   {filteredOrders.length === 0 && (
                     <tr>
-                      <td colSpan={11}>{orders.length === 0 ? "No pending orders found." : "No orders match the current filters."}</td>
+                      <td colSpan={13}>{orders.length === 0 ? "No pending orders found." : "No orders match the current filters."}</td>
                     </tr>
                   )}
                 </tbody>
+                {filteredOrders.length > 0 ? (
+                  <tfoot>
+                    <tr className="modulePendingOrdersTotalRow">
+                      <td colSpan={10}>Total ({filteredOrders.length} order{filteredOrders.length === 1 ? "" : "s"})</td>
+                      <td style={{ textAlign: "right" }}>{filteredValueTotals.orderValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td style={{ textAlign: "right" }}>{filteredValueTotals.invoiceValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                ) : null}
               </table>
             </ExportableTable>
           </section>

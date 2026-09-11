@@ -3,6 +3,7 @@ import {
   buildDailySupplierOrderEmail,
   buildDailySupplierOrderRow,
   DAILY_SUPPLIER_ORDER_EMAIL_LAST_SENT_KEY,
+  defaultSupplierOrderSinceIso,
   groupDailySupplierOrders,
   parseDailySupplierOrderLastSent,
   resolveDailySupplierOrderDigestCc,
@@ -17,6 +18,7 @@ import { getMailerConfig, isEmailConfigured, normalizeDeliverableEmail, parseEma
 import {
   hasUploadedInvoice,
   invoiceMetaKey,
+  missingInvoiceCreatedFromIso,
   parseInvoiceMeta,
 } from "./missingInvoiceEmail.js";
 import { loadInvoiceMetaMap } from "./missingInvoiceEmailServer.js";
@@ -24,12 +26,11 @@ import { INVOICE_BUCKET } from "./orderInvoiceComparison.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { resolveReportingChainFromAuth } from "./salesHierarchy.js";
 import {
-  addKsaCalendarDays,
+  formatKsaDateTime,
+  getKsaDateString,
   getKsaWeekdayIndex,
-  getKsaWeekdayIndexForDateString,
   getPreviousKsaDateString,
   isKsaOrderDay,
-  ksaDayBounds,
 } from "./workdayActivity.js";
 
 const ORDERS_SELECT = "id,order_number,customer_code,customer_name,salesman_code,salesman_name,status,created_by,created_at,updated_at,submitted_at,total_value";
@@ -52,7 +53,7 @@ function envFlagEnabled(value, defaultValue = true) {
 
 export function parseSupplierOrderReportDate(value, now = new Date()) {
   const date = String(value || "").trim();
-  if (!date) return getPreviousKsaDateString(now);
+  if (!date) return getKsaDateString(now);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new Error("Invalid report date. Use YYYY-MM-DD.");
   }
@@ -65,22 +66,16 @@ export function resolveDailySupplierOrderEmailSchedule(date, now = new Date()) {
     return { date: parseSupplierOrderReportDate(explicit, now), skipped: false, reason: "" };
   }
 
-  const previousDate = getPreviousKsaDateString(now);
-  const previousWeekday = getKsaWeekdayIndexForDateString(previousDate);
-
-  if (previousWeekday === 5) {
-    return { date: addKsaCalendarDays(previousDate, -1), skipped: false, reason: "" };
-  }
-
   if (getKsaWeekdayIndex(now) === 5) {
-    return { date: previousDate, skipped: true, reason: "friday_holiday" };
+    return { date: getKsaDateString(now), skipped: true, reason: "friday_holiday" };
   }
 
-  if (!isKsaOrderDay(previousDate)) {
-    return { date: previousDate, skipped: true, reason: "not_order_day" };
+  const reportDate = getKsaDateString(now);
+  if (!isKsaOrderDay(reportDate) && !isKsaOrderDay(getPreviousKsaDateString(now))) {
+    return { date: reportDate, skipped: true, reason: "not_order_day" };
   }
 
-  return { date: previousDate, skipped: false, reason: "" };
+  return { date: reportDate, skipped: false, reason: "" };
 }
 
 function salesmanOrderRecipients({ reportEmail, email, chainEmails = [] } = {}) {
@@ -91,17 +86,6 @@ function salesmanOrderRecipients({ reportEmail, email, chainEmails = [] } = {}) 
     if (!to.includes(address)) to.push(address);
   });
   return { to };
-}
-
-function orderTimestampIso(row) {
-  return String(row?.submitted_at || row?.created_at || row?.updated_at || "").trim();
-}
-
-function isSubmittedOrderInWindow(row, startIso, endIso) {
-  if (String(row?.status || "").toUpperCase() !== "SUBMITTED") return false;
-  const ts = Date.parse(orderTimestampIso(row));
-  if (!Number.isFinite(ts)) return false;
-  return ts >= Date.parse(startIso) && ts <= Date.parse(endIso);
 }
 
 async function fetchPagedRows(admin, table, select, applyFilters) {
@@ -119,24 +103,28 @@ async function fetchPagedRows(admin, table, select, applyFilters) {
   return rows;
 }
 
-export async function loadSubmittedOrdersForKsaDate(admin, reportDate) {
-  const { startIso, endIso } = ksaDayBounds(reportDate);
-  const widenedStart = new Date(startIso);
-  widenedStart.setUTCDate(widenedStart.getUTCDate() - 1);
-  const widenedEnd = new Date(endIso);
-  widenedEnd.setUTCDate(widenedEnd.getUTCDate() + 1);
-
+export async function loadSubmittedOrdersForSupplierReport(admin, {
+  asOfIso = new Date().toISOString(),
+} = {}) {
+  const createdFromIso = missingInvoiceCreatedFromIso() || defaultSupplierOrderSinceIso();
   const orders = await fetchPagedRows(
     admin,
     "sales_orders",
     ORDERS_SELECT,
     (query) => query
       .eq("status", "SUBMITTED")
-      .gte("updated_at", widenedStart.toISOString())
-      .lte("updated_at", widenedEnd.toISOString()),
+      .gte("created_at", createdFromIso)
+      .lte("created_at", asOfIso)
+      .order("created_at", { ascending: true }),
   );
+  return orders;
+}
 
-  return selectDailySupplierOrders(orders.filter((row) => isSubmittedOrderInWindow(row, startIso, endIso)));
+/** @deprecated Prefer loadSubmittedOrdersForSupplierReport + selectDailySupplierOrders */
+export async function loadSubmittedOrdersForKsaDate(admin, reportDate) {
+  return loadSubmittedOrdersForSupplierReport(admin, {
+    asOfIso: new Date().toISOString(),
+  });
 }
 
 export async function loadOrderValuesById(admin, orders = []) {
@@ -253,7 +241,7 @@ async function loadAuthUsers(admin) {
   return usersRes.data?.users || [];
 }
 
-export async function loadLastDailySupplierOrderEmailDate(admin) {
+export async function loadLastDailySupplierOrderEmailMarker(admin) {
   const { data, error } = await admin
     .from("system_settings")
     .select("setting_value")
@@ -263,12 +251,37 @@ export async function loadLastDailySupplierOrderEmailDate(admin) {
   return parseDailySupplierOrderLastSent(data?.setting_value);
 }
 
-export async function saveLastDailySupplierOrderEmailDate(admin, reportDate) {
+/** @deprecated use loadLastDailySupplierOrderEmailMarker */
+export async function loadLastDailySupplierOrderEmailDate(admin) {
+  const marker = await loadLastDailySupplierOrderEmailMarker(admin);
+  return marker.date || marker.lastSentAt || "";
+}
+
+export async function saveLastDailySupplierOrderEmailMarker(admin, {
+  reportDate,
+  asOfIso,
+  trigger = "",
+} = {}) {
   const { error } = await admin.from("system_settings").upsert({
     setting_key: DAILY_SUPPLIER_ORDER_EMAIL_LAST_SENT_KEY,
-    setting_value: JSON.stringify({ date: reportDate, lastSentAt: new Date().toISOString() }),
+    setting_value: JSON.stringify({
+      date: reportDate,
+      lastSentAt: asOfIso,
+      asOf: asOfIso,
+      trigger: String(trigger || "").trim() || null,
+      savedAt: new Date().toISOString(),
+    }),
   }, { onConflict: "setting_key" });
   if (error) throw error;
+}
+
+/** @deprecated use saveLastDailySupplierOrderEmailMarker */
+export async function saveLastDailySupplierOrderEmailDate(admin, reportDate) {
+  await saveLastDailySupplierOrderEmailMarker(admin, {
+    reportDate,
+    asOfIso: new Date().toISOString(),
+    trigger: "legacy",
+  });
 }
 
 function buildRowsForOrders(orders, {
@@ -289,42 +302,79 @@ function buildRowsForOrders(orders, {
 
 export async function runDailySupplierOrderEmailCycle(admin, {
   date,
+  trigger = "manual",
   now = new Date(),
   env = process.env,
   send = sendEmail,
-  loadOrders = loadSubmittedOrdersForKsaDate,
+  loadOrders = loadSubmittedOrdersForSupplierReport,
   loadProfiles = loadProfilesForSupplierOrderEmails,
   loadMeta = loadInvoiceMetaMap,
   loadValues = loadOrderValuesById,
   loadInvoiceValues = resolveInvoiceValuesByOrder,
-  loadLastSentDate = loadLastDailySupplierOrderEmailDate,
-  saveLastSentDate = saveLastDailySupplierOrderEmailDate,
+  loadLastSentMarker = loadLastDailySupplierOrderEmailMarker,
+  saveLastSentMarker = saveLastDailySupplierOrderEmailMarker,
   listAuthUsers = loadAuthUsers,
+  // Legacy test hooks
+  loadLastSentDate,
+  saveLastSentDate,
 } = {}) {
-  const schedule = resolveDailySupplierOrderEmailSchedule(date, now);
-  const reportDate = schedule.date;
+  const force = envFlagEnabled(env.DAILY_SUPPLIER_ORDER_EMAIL_FORCE, false);
+  const normalizedTrigger = String(trigger || "manual").trim().toLowerCase() || "manual";
+  const asOf = now instanceof Date ? now : new Date(now);
+  const asOfIso = asOf.toISOString();
+  const reportDate = parseSupplierOrderReportDate(date, asOf);
 
-  if (schedule.skipped) {
-    return { date: reportDate, skipped: true, reason: schedule.reason, sentCount: 0, orderCount: 0 };
+  // Midnight cron keeps Friday skip; sales-upload always runs when data lands.
+  if (normalizedTrigger === "cron" && !force) {
+    const schedule = resolveDailySupplierOrderEmailSchedule("", asOf);
+    if (schedule.skipped) {
+      return { date: schedule.date, skipped: true, reason: schedule.reason, sentCount: 0, orderCount: 0 };
+    }
   }
 
   if (!isEmailConfigured(getMailerConfig(env))) {
     return { date: reportDate, skipped: true, reason: "email_not_configured", sentCount: 0, orderCount: 0 };
   }
 
-  const lastSentDate = await loadLastSentDate(admin);
-  if (lastSentDate === reportDate && !envFlagEnabled(env.DAILY_SUPPLIER_ORDER_EMAIL_FORCE, false)) {
+  const resolveLastSent = loadLastSentDate
+    ? async () => {
+      const legacy = await loadLastSentDate(admin);
+      return parseDailySupplierOrderLastSent(legacy);
+    }
+    : loadLastSentMarker;
+
+  const marker = await resolveLastSent(admin);
+  const sinceIso = marker.lastSentAt || defaultSupplierOrderSinceIso();
+
+  // Upload-driven sends advance the watermark; only block exact duplicate cron runs for the same KSA date.
+  if (
+    normalizedTrigger === "cron"
+    && !force
+    && marker.date === reportDate
+    && marker.lastSentAt
+  ) {
     return { date: reportDate, skipped: true, reason: "already_sent", sentCount: 0, orderCount: 0 };
   }
 
-  const orders = await loadOrders(admin, reportDate);
+  const candidateOrders = await loadOrders(admin, { sinceIso, asOfIso, reportDate });
+  const candidateIds = candidateOrders.map((order) => order.id);
+  const metaByOrder = await loadMeta(admin, candidateIds);
+  const orders = selectDailySupplierOrders(candidateOrders, metaByOrder, { sinceIso, asOfIso });
+
   if (!orders.length) {
-    return { date: reportDate, skipped: true, reason: "no_orders", sentCount: 0, orderCount: 0 };
+    return {
+      date: reportDate,
+      skipped: true,
+      reason: "no_orders",
+      sentCount: 0,
+      orderCount: 0,
+      sinceIso,
+      asOfIso,
+    };
   }
 
-  const [profiles, metaByOrder, authUsers] = await Promise.all([
+  const [profiles, authUsers] = await Promise.all([
     loadProfiles(admin),
-    loadMeta(admin, orders.map((order) => order.id)),
     listAuthUsers(admin),
   ]);
   const { values: orderValues, linesByOrder } = await loadValues(admin, orders);
@@ -333,6 +383,7 @@ export async function runDailySupplierOrderEmailCycle(admin, {
   const sendToUsers = envFlagEnabled(env.DAILY_SUPPLIER_ORDER_EMAIL_SEND_TO_USERS, true);
   const digestTo = resolveDailySupplierOrderDigestRecipients(env);
   const digestCc = resolveDailySupplierOrderDigestCc(env, digestTo);
+  const asOfLabel = formatKsaDateTime(asOfIso);
 
   const results = [];
   let sentCount = 0;
@@ -352,6 +403,7 @@ export async function runDailySupplierOrderEmailCycle(admin, {
         salesmanName,
         rows,
         includeSalesman: false,
+        asOfLabel,
       });
       const chainEmails = resolveReportingChainFromAuth({
         actorUserId: group.profile?.id,
@@ -399,6 +451,7 @@ export async function runDailySupplierOrderEmailCycle(admin, {
       salesmanName: "",
       rows: digestRows,
       includeSalesman: true,
+      asOfLabel,
     });
     try {
       const sent = await send({ ...message, to: digestTo, cc: digestCc }, env);
@@ -427,7 +480,15 @@ export async function runDailySupplierOrderEmailCycle(admin, {
 
   if (sentCount > 0 && failedCount === 0) {
     try {
-      await saveLastSentDate(admin, reportDate);
+      if (saveLastSentDate) {
+        await saveLastSentDate(admin, reportDate);
+      } else {
+        await saveLastSentMarker(admin, {
+          reportDate,
+          asOfIso,
+          trigger: normalizedTrigger,
+        });
+      }
     } catch {
       // Sending succeeded even if the marker cannot be stored.
     }
@@ -441,6 +502,9 @@ export async function runDailySupplierOrderEmailCycle(admin, {
     failedCount,
     orderCount: orders.length,
     groupCount: groups.length,
+    sinceIso,
+    asOfIso,
+    trigger: normalizedTrigger,
     results,
   };
 }

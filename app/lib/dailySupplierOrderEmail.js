@@ -1,9 +1,14 @@
+import { amountInclVat } from "./invoiceAmountFromPdf.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
 import {
   DEFAULT_MISSING_INVOICE_EMAIL_CC,
   DEFAULT_MISSING_INVOICE_EMAIL_TO,
+  hasUploadedInvoice,
   invoiceStatusLabel,
+  isInvoiceNotUploadedStatus,
   isTestCustomerOrder,
+  MISSING_INVOICE_CREATED_FROM,
+  parseInvoiceMeta,
 } from "./missingInvoiceEmail.js";
 import { formatSalesOrderNumber } from "./salesOrderNumber.js";
 import { formatKsaDateTime } from "./workdayActivity.js";
@@ -52,10 +57,61 @@ export function supplierOrderDisplayName(order = {}, profile = null) {
   return name || code || "Unknown salesman";
 }
 
-export function selectDailySupplierOrders(orders = []) {
+export function isAwaitingBillingUpdate(meta) {
+  return isInvoiceNotUploadedStatus(meta) && !hasUploadedInvoice(meta);
+}
+
+export function orderActivityAtMs(order = {}) {
+  const candidates = [order?.updated_at, order?.submitted_at, order?.created_at]
+    .map((value) => Date.parse(String(value || "")))
+    .filter((value) => Number.isFinite(value));
+  return candidates.length ? Math.max(...candidates) : null;
+}
+
+export function invoiceActivityAtMs(meta) {
+  const payload = parseInvoiceMeta(meta) || {};
+  const candidates = [
+    payload.statusUpdatedAt,
+    payload.invoiceUploadedAt,
+    payload.invoiceAmountExtractedAt,
+  ]
+    .map((value) => Date.parse(String(value || "")))
+    .filter((value) => Number.isFinite(value));
+  return candidates.length ? Math.max(...candidates) : null;
+}
+
+export function shouldIncludeInSupplierOrderReport(order, meta = null, sinceMs = 0, asOfMs = Date.now()) {
+  if (String(order?.status || "").trim().toUpperCase() !== "SUBMITTED") return false;
+  if (isTestCustomerOrder(order)) return false;
+
+  const orderMs = orderActivityAtMs(order);
+  if (Number.isFinite(orderMs) && orderMs > asOfMs) return false;
+
+  const invoiceMs = invoiceActivityAtMs(meta);
+  const activityMs = Math.max(orderMs || 0, invoiceMs || 0);
+  if (activityMs > sinceMs && activityMs <= asOfMs) return true;
+
+  // Keep listing until billing sets a status or uploads an invoice.
+  if (isAwaitingBillingUpdate(meta)) return true;
+
+  return false;
+}
+
+export function selectDailySupplierOrders(orders = [], metaByOrder = new Map(), {
+  sinceIso = "",
+  asOfIso = "",
+} = {}) {
+  const sinceMs = Date.parse(String(sinceIso || ""));
+  const asOfMs = Date.parse(String(asOfIso || "")) || Date.now();
+  const sinceFloor = Number.isFinite(sinceMs) ? sinceMs : 0;
+
   return (orders || [])
-    .filter((order) => String(order?.status || "").trim().toUpperCase() === "SUBMITTED")
-    .filter((order) => !isTestCustomerOrder(order))
+    .filter((order) => shouldIncludeInSupplierOrderReport(
+      order,
+      metaByOrder.get(String(order?.id || "").trim()) || null,
+      sinceFloor,
+      asOfMs,
+    ))
     .sort((left, right) => {
       const salesman = supplierOrderDisplayName(left).localeCompare(supplierOrderDisplayName(right));
       if (salesman) return salesman;
@@ -111,11 +167,20 @@ function customerLabel(order) {
   return code || name || "-";
 }
 
+export function toInclVatAmount(exclValue) {
+  if (exclValue == null || exclValue === "") return null;
+  const excl = Number(exclValue);
+  if (!Number.isFinite(excl) || excl < 0) return null;
+  return amountInclVat(excl);
+}
+
 export function buildDailySupplierOrderRow(order, meta = null, extra = {}) {
-  const orderValue = Number.isFinite(Number(extra.orderValue)) ? Number(extra.orderValue) : Number(order?.total_value);
-  const invoiceValue = extra.invoiceValue == null || extra.invoiceValue === ""
+  const orderExcl = Number.isFinite(Number(extra.orderValue)) ? Number(extra.orderValue) : Number(order?.total_value);
+  const invoiceExcl = extra.invoiceValue == null || extra.invoiceValue === ""
     ? null
     : Number(extra.invoiceValue);
+  const orderValue = toInclVatAmount(Number.isFinite(orderExcl) ? orderExcl : 0) || 0;
+  const invoiceValue = toInclVatAmount(invoiceExcl);
   return {
     order: formatSalesOrderNumber(order) || String(order?.id || "").trim() || "-",
     customer: customerLabel(order),
@@ -123,8 +188,8 @@ export function buildDailySupplierOrderRow(order, meta = null, extra = {}) {
     orderStatus: String(order?.status || "").trim() || "-",
     invoiceStatus: invoiceStatusLabel(meta),
     createdAt: formatKsaDateTime(order?.created_at || order?.submitted_at),
-    orderValue: Number.isFinite(orderValue) ? orderValue : 0,
-    invoiceValue: Number.isFinite(invoiceValue) ? invoiceValue : null,
+    orderValue,
+    invoiceValue,
   };
 }
 
@@ -148,8 +213,8 @@ function tableHeader(includeSalesman) {
     <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Order status</th>
     <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Invoice status</th>
     <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Created (KSA)</th>
-    <th style="text-align:right;padding:6px 8px;border:1px solid #0f4c81;">Order value (excl. VAT)</th>
-    <th style="text-align:right;padding:6px 8px;border:1px solid #0f4c81;">Invoice made (excl. VAT)</th>
+    <th style="text-align:right;padding:6px 8px;border:1px solid #0f4c81;">Order value (incl. VAT)</th>
+    <th style="text-align:right;padding:6px 8px;border:1px solid #0f4c81;">Invoice made (incl. VAT)</th>
   </tr>`;
 }
 
@@ -189,8 +254,8 @@ function renderTable(rows, { includeSalesman = false } = {}) {
 
 function textTable(rows, includeSalesman) {
   const header = includeSalesman
-    ? "Order | Customer | Salesman | Order status | Invoice status | Created (KSA) | Order value excl VAT | Invoice made excl VAT"
-    : "Order | Customer | Order status | Invoice status | Created (KSA) | Order value excl VAT | Invoice made excl VAT";
+    ? "Order | Customer | Salesman | Order status | Invoice status | Created (KSA) | Order value incl VAT | Invoice made incl VAT"
+    : "Order | Customer | Order status | Invoice status | Created (KSA) | Order value incl VAT | Invoice made incl VAT";
   const totals = summarizeDailySupplierOrderRows(rows);
   return [
     header,
@@ -213,22 +278,24 @@ export function buildDailySupplierOrderEmail({
   salesmanName = "",
   rows = [],
   includeSalesman = false,
+  asOfLabel = "",
 } = {}) {
   const totals = summarizeDailySupplierOrderRows(rows);
   const who = String(salesmanName || "").trim();
   const subject = who
     ? `Orders raised ${date} — ${who} (${totals.orders})`
     : `Orders raised ${date} — all salesmen (${totals.orders})`;
+  const cutoff = String(asOfLabel || "").trim();
   const intro = who
-    ? `Submitted orders you raised on ${date} (KSA), with current invoice status. Values are without VAT. Invoice made value is read from the attached invoice PDF.`
-    : `Submitted orders raised on ${date} (KSA), grouped by salesman. Values are without VAT. Invoice made value is read from the attached invoice PDF.`;
+    ? `Submitted orders for ${date} (KSA)${cutoff ? ` as of sales upload ${cutoff}` : ""}. Includes new/changed orders since the last email, plus any still waiting on billing. Values include VAT for order vs invoice comparison. Invoice made is read from the attached invoice PDF.`
+    : `Submitted orders for ${date} (KSA)${cutoff ? ` as of sales upload ${cutoff}` : ""}, grouped by salesman. Includes new/changed orders since the last email, plus any still waiting on billing. Values include VAT for order vs invoice comparison.`;
 
   const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
   <h2 style="margin: 0 0 12px; color: #0f4c81;">Daily order confirmation — ${escapeHtml(date)}</h2>
   <p style="margin: 0 0 16px;">${escapeHtml(intro)}</p>
   ${who ? `<p style="margin: 0 0 16px;"><strong>${escapeHtml(who)}</strong></p>` : ""}
   ${renderTable(rows, { includeSalesman })}
-  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">Totals are without VAT. Invoice made is taken from the attached invoice; blank means no invoice PDF yet or the total could not be read.</p>
+  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">Totals include VAT. Invoice made is taken from the attached invoice; blank means no invoice PDF yet or the total could not be read. Orders without a billing update stay on this list until billing acts.</p>
 </div>`;
 
   const text = [
@@ -243,9 +310,25 @@ export function buildDailySupplierOrderEmail({
 }
 
 export function parseDailySupplierOrderLastSent(value) {
-  const raw = value && typeof value === "object" && !Array.isArray(value)
-    ? String(value.date || value.lastSentDate || "")
-    : String(value || "");
-  const date = raw.trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "";
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const lastSentAt = String(value.lastSentAt || value.asOf || "").trim();
+    const date = String(value.date || value.lastSentDate || "").trim();
+    return {
+      date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "",
+      lastSentAt: Number.isFinite(Date.parse(lastSentAt)) ? new Date(lastSentAt).toISOString() : "",
+    };
+  }
+
+  const raw = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return { date: raw, lastSentAt: "" };
+  }
+  if (Number.isFinite(Date.parse(raw))) {
+    return { date: "", lastSentAt: new Date(raw).toISOString() };
+  }
+  return { date: "", lastSentAt: "" };
+}
+
+export function defaultSupplierOrderSinceIso() {
+  return `${MISSING_INVOICE_CREATED_FROM}T00:00:00.000Z`;
 }

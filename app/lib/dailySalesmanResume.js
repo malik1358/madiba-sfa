@@ -47,6 +47,10 @@ export function emptySalesmanResumeRow({
     bossUserId: "",
     bossName: "",
     bossCode: "",
+    teamLeaderUserId: "",
+    teamLeaderName: "",
+    teamLeaderCode: "",
+    isFirstLevelTeamLeader: false,
   };
 }
 
@@ -95,11 +99,87 @@ export function resolveResumeRowBoss(row = {}, { profiles = [], authUsers = [] }
   };
 }
 
+export function classifyResumeTeamLeaders({ profiles = [], authUsers = [] } = {}) {
+  const reportsByBossId = new Map();
+  (authUsers || []).forEach((authUser) => {
+    const userId = String(authUser?.id || "").trim();
+    if (!userId) return;
+    const chain = resolveReportingChainFromAuth({
+      actorUserId: userId,
+      profiles,
+      authUsers,
+    });
+    const bossId = String(chain[0]?.id || "").trim();
+    if (!bossId || bossId === userId) return;
+    if (!reportsByBossId.has(bossId)) reportsByBossId.set(bossId, new Set());
+    reportsByBossId.get(bossId).add(userId);
+  });
+
+  const firstLevelIds = new Set();
+  const secondTierIds = new Set();
+  reportsByBossId.forEach((subs, bossId) => {
+    const leadsOtherLeaders = [...subs].some((id) => reportsByBossId.has(id));
+    if (leadsOtherLeaders) secondTierIds.add(bossId);
+    else firstLevelIds.add(bossId);
+  });
+
+  return { reportsByBossId, firstLevelIds, secondTierIds };
+}
+
+export function resolveResumeTeamLeader(row = {}, {
+  profiles = [],
+  authUsers = [],
+  firstLevelIds = new Set(),
+} = {}) {
+  const userId = String(row.userId || "").trim();
+  const profileById = new Map((profiles || []).map((profile) => [String(profile?.id || ""), profile]));
+
+  const fromProfile = (id, fallback = {}) => {
+    const profile = profileById.get(id) || {};
+    return {
+      teamLeaderUserId: id,
+      teamLeaderName: String(profile.salesman_name || fallback.salesmanName || fallback.salesman_name || "").trim(),
+      teamLeaderCode: String(profile.salesman_code || fallback.salesmanCode || fallback.salesman_code || "").trim(),
+      isFirstLevelTeamLeader: Boolean(userId) && id === userId,
+    };
+  };
+
+  if (userId && firstLevelIds.has(userId)) {
+    return fromProfile(userId, row);
+  }
+
+  if (userId && !userId.startsWith("code:")) {
+    const firstLevel = resolveReportingChainFromAuth({
+      actorUserId: userId,
+      profiles,
+      authUsers,
+    }).find((boss) => firstLevelIds.has(boss.id));
+    if (firstLevel) return fromProfile(firstLevel.id, firstLevel);
+  }
+
+  return {
+    teamLeaderUserId: "",
+    teamLeaderName: "",
+    teamLeaderCode: "",
+    isFirstLevelTeamLeader: false,
+  };
+}
+
 export function attachResumeRowBosses(rows = [], { profiles = [], authUsers = [] } = {}) {
+  const { firstLevelIds } = classifyResumeTeamLeaders({ profiles, authUsers });
   return (rows || []).map((row) => ({
     ...row,
     ...resolveResumeRowBoss(row, { profiles, authUsers }),
+    ...resolveResumeTeamLeader(row, { profiles, authUsers, firstLevelIds }),
   }));
+}
+
+function resumeTeamGroupMeta(row = {}) {
+  const bossUserId = String(row.teamLeaderUserId || row.bossUserId || "").trim();
+  const bossName = String(row.teamLeaderName || row.bossName || "").trim();
+  const bossCode = String(row.teamLeaderCode || row.bossCode || "").trim();
+  const key = bossUserId || bossCode.toUpperCase() || NO_BOSS_RESUME_TEAM_KEY;
+  return { key, bossUserId, bossName, bossCode };
 }
 
 export function groupSalesmanResumeRowsByBoss(rows = []) {
@@ -107,22 +187,20 @@ export function groupSalesmanResumeRowsByBoss(rows = []) {
   const groups = new Map();
 
   included.forEach((row) => {
-    const key = String(row.bossUserId || "").trim()
-      || String(row.bossCode || "").trim().toUpperCase()
-      || NO_BOSS_RESUME_TEAM_KEY;
-    if (!groups.has(key)) {
-      groups.set(key, {
-        key,
-        bossUserId: String(row.bossUserId || "").trim(),
-        bossName: String(row.bossName || "").trim(),
-        bossCode: String(row.bossCode || "").trim(),
+    const meta = resumeTeamGroupMeta(row);
+    if (!groups.has(meta.key)) {
+      groups.set(meta.key, {
+        key: meta.key,
+        bossUserId: meta.bossUserId,
+        bossName: meta.bossName,
+        bossCode: meta.bossCode,
         rows: [],
       });
     }
-    const group = groups.get(key);
-    if (!group.bossName && row.bossName) group.bossName = String(row.bossName).trim();
-    if (!group.bossCode && row.bossCode) group.bossCode = String(row.bossCode).trim();
-    if (!group.bossUserId && row.bossUserId) group.bossUserId = String(row.bossUserId).trim();
+    const group = groups.get(meta.key);
+    if (!group.bossName && meta.bossName) group.bossName = meta.bossName;
+    if (!group.bossCode && meta.bossCode) group.bossCode = meta.bossCode;
+    if (!group.bossUserId && meta.bossUserId) group.bossUserId = meta.bossUserId;
     group.rows.push(row);
   });
 
@@ -203,6 +281,7 @@ export function resumeRowHasOrderOrCollection(row = {}) {
 
 export function shouldIncludeSalesmanResumeRow(row = {}) {
   if (isHiddenResumeSalesman(row)) return false;
+  if (row.isFirstLevelTeamLeader) return true;
   if (isOccasionalResumeSalesman(row) && !resumeRowHasOrderOrCollection(row)) {
     return false;
   }

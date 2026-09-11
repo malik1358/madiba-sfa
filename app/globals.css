@@ -6774,6 +6774,45 @@ th:has(.moduleTableColumnFilterInput) {
   box-shadow: inset 0 0 0 2px #93c5fd;
 }
 
+.moduleBiTable th.moduleBiTotalCol,
+.moduleBiTable td.moduleBiTotalCol {
+  background: #ecfeff;
+  color: #0f4c5c;
+  font-weight: 800;
+  position: sticky;
+  right: 0;
+  z-index: 1;
+}
+
+.moduleBiTable thead th.moduleBiTotalCol {
+  z-index: 3;
+}
+
+.moduleBiTable tfoot td {
+  position: sticky;
+  bottom: 0;
+  font-weight: 800;
+  z-index: 2;
+  background: #ecfeff;
+  color: #0f4c5c;
+}
+
+.moduleBiTable tfoot td:first-child,
+.moduleBiTable tfoot td.moduleBiTotalCol {
+  background: #0f4c5c;
+  color: #ffffff;
+}
+
+.moduleBiTable tfoot td.moduleBiMonthCell--up {
+  background: #166534;
+  color: #ffffff;
+}
+
+.moduleBiTable tfoot td.moduleBiMonthCell--down {
+  background: #991b1b;
+  color: #ffffff;
+}
+
 .moduleBiFilterGrid {
   margin-bottom: 12px;
   grid-template-columns: repeat(4, minmax(0, 1fr));

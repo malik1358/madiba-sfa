@@ -24,6 +24,36 @@ export function monthOverMonthSeries(monthValues = {}, months = [], currentMonth
   });
 }
 
+export function resolveMomComparisonMonths(report = {}) {
+  const months = report.recentMonths || [];
+  const currentMonth = report.currentMonth || "";
+  const completeMonths = (months || []).filter((month) => month && month !== currentMonth);
+  const latestCompleteMonth = completeMonths.at(-1)
+    || (currentMonth ? previousMonthKey(currentMonth) : "")
+    || report.latestCompleteMonth
+    || "";
+  const priorCompleteMonth = completeMonths.at(-2) || previousMonthKey(latestCompleteMonth);
+  return {
+    currentMonth,
+    completeMonths,
+    latestCompleteMonth,
+    priorCompleteMonth,
+  };
+}
+
+export function monthSeriesAmount(monthValues, monthKey) {
+  if (!monthKey) return 0;
+  const values = monthValues || {};
+  if (Object.prototype.hasOwnProperty.call(values, monthKey)) {
+    return Number(values[monthKey] || 0);
+  }
+  const asDate = `${monthKey}-01`;
+  if (Object.prototype.hasOwnProperty.call(values, asDate)) {
+    return Number(values[asDate] || 0);
+  }
+  return 0;
+}
+
 export function trailingToneStreak(series = [], tone) {
   let count = 0;
   for (let index = (series || []).length - 1; index >= 0; index -= 1) {
@@ -73,20 +103,49 @@ function statusRank(status) {
   return 3;
 }
 
-export function buildSalesmanMomRows(report = {}) {
-  const months = report.recentMonths || [];
-  const currentMonth = report.currentMonth || "";
-  const latestCompleteMonth = report.latestCompleteMonth || "";
+function normalizeSalesmanMomToken(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
 
-  const rows = (report.groups || report.categories || []).map((row) => {
+const EXCLUDED_SALESMAN_MOM_NAMES = new Set([
+  "RAHID",
+  "AHMED HADIA",
+  "VILYATH",
+  "NOT ADDED IN VOUCHER",
+  "NOON",
+  "AWAD MOHOMED",
+  "FAZLUR RAHMAN",
+]);
+
+export function isExcludedSalesmanMomRow(row = {}) {
+  const label = normalizeSalesmanMomToken(row.label || row.category);
+  if (!label) return true;
+  const parts = label.split(/\s*·\s*/).map((part) => normalizeSalesmanMomToken(part)).filter(Boolean);
+  const tokens = parts.length ? parts : [label];
+  return tokens.some((token) => EXCLUDED_SALESMAN_MOM_NAMES.has(token));
+}
+
+export function decorateMomRows(groups = [], report = {}) {
+  const months = report.recentMonths || [];
+  const { currentMonth, latestCompleteMonth, priorCompleteMonth } = resolveMomComparisonMonths(report);
+
+  const rows = (groups || []).map((row) => {
     const series = monthOverMonthSeries(row.monthValues, months, currentMonth);
     const lastSix = series.slice(-6);
+    const latest = series.at(-1);
+    const latestCompleteAmount = latest
+      ? Number(latest.amount || 0)
+      : monthSeriesAmount(row.monthValues, latestCompleteMonth);
+    const priorCompleteAmount = latest
+      ? Number(latest.priorAmount || 0)
+      : monthSeriesAmount(row.monthValues, priorCompleteMonth);
+    const momPercent = latest?.percent ?? growthPercent(latestCompleteAmount, priorCompleteAmount);
     const upMonths = lastSix.filter((item) => item.tone === "up").length;
     const downMonths = lastSix.filter((item) => item.tone === "down").length;
     const improvingStreak = trailingToneStreak(series, "up");
     const decliningStreak = trailingToneStreak(series, "down");
     const trajectory = classifySalesmanMom({
-      momPercent: row.momPercent,
+      momPercent,
       improvingStreak,
       decliningStreak,
       upMonths,
@@ -95,6 +154,10 @@ export function buildSalesmanMomRows(report = {}) {
 
     return {
       ...row,
+      latestCompleteMonth,
+      priorCompleteMonth,
+      priorMonthAmount: priorCompleteAmount,
+      momPercent,
       upMonths,
       downMonths,
       comparedMonths: lastSix.length,
@@ -103,8 +166,8 @@ export function buildSalesmanMomRows(report = {}) {
       avgMomPercent: averageMomPercent(lastSix),
       hitRate: lastSix.length ? upMonths / lastSix.length : 0,
       trajectory,
-      latestCompleteAmount: Number(row.monthValues?.[latestCompleteMonth] || row.latestMonthAmount || 0),
-      mtdAmount: Number(row.monthValues?.[currentMonth] || 0),
+      latestCompleteAmount,
+      mtdAmount: monthSeriesAmount(row.monthValues, currentMonth),
     };
   });
 
@@ -118,6 +181,11 @@ export function buildSalesmanMomRows(report = {}) {
   });
 
   return rows;
+}
+
+export function buildSalesmanMomRows(report = {}) {
+  const groups = (report.groups || report.categories || []).filter((row) => !isExcludedSalesmanMomRow(row));
+  return decorateMomRows(groups, report);
 }
 
 export function summarizeSalesmanMom(rows = []) {

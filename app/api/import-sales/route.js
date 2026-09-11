@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { normalizeImportedItemName } from "../../lib/itemName.js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 import { runDailySupplierOrderEmailCycle } from "../../lib/dailySupplierOrderEmailServer.js";
+import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -1150,6 +1151,20 @@ export async function POST(request) {
         });
       } catch (rebuildError) {
         console.error("Mobile snapshot rebuild after sales upload failed:", rebuildError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const cubeAdmin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const cube = await rebuildSalesBiCube(cubeAdmin);
+        console.info("Sales BI cube rebuilt after sales upload:", {
+          factCount: cube?.factCount || 0,
+          sourceRowCount: cube?.sourceRowCount || 0,
+        });
+      } catch (cubeError) {
+        console.error("Sales BI cube rebuild after sales upload failed:", cubeError);
       }
 
       try {

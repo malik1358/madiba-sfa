@@ -19,8 +19,8 @@ import { emptyGrowthFilters } from "../../lib/categoryGrowth";
 const TEXT = {
   title: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
   subtitle: {
-    en: "Sales-based indicators, category growth, salesman month-on-month performance, and operational red lights",
-    ar: "مؤشرات من المبيعات، نمو الفئات، أداء المندوب شهراً بعد شهر، وتنبيهات التشغيل الحمراء",
+    en: "Prepared after each sales upload. Open a report and it reads the ready model instead of scanning every invoice line.",
+    ar: "يُجهَّز النموذج بعد كل رفع مبيعات. عند فتح التقرير يُقرأ النموذج الجاهز بدل مسح كل سطر فاتورة.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading business dashboard...", ar: "جاري تحميل لوحة الأعمال..." },

@@ -55,6 +55,9 @@ export default function CategoryGrowthFilters({
   onGroupByChange,
   onApply,
   onClear,
+  lockGroupBy = "",
+  statusOptions = STATUS_OPTIONS,
+  hint,
 }) {
   const t = translate(language, TEXT);
   const active = hasActiveGrowthFilters(applied);
@@ -85,9 +88,10 @@ export default function CategoryGrowthFilters({
       <div className="moduleSectionHeader">
         <h2>{t("title")}</h2>
       </div>
-      <p className="moduleHint">{t("hint")}</p>
+      <p className="moduleHint">{hint || t("hint")}</p>
 
       <div className="moduleFormGrid moduleBiFilterGrid">
+        {lockGroupBy ? null : (
         <label className="moduleField">
           {t("groupBy")}
           <select
@@ -102,6 +106,7 @@ export default function CategoryGrowthFilters({
             ))}
           </select>
         </label>
+        )}
         <label className="moduleField">
           {t("dateFrom")}
           <input className="moduleInput" type="date" value={draft.dateFrom || ""} onChange={(event) => patchDraft({ dateFrom: event.target.value })} />
@@ -134,7 +139,7 @@ export default function CategoryGrowthFilters({
 
       <div className="moduleBiStatusFilters" aria-label={t("status")}>
         <span>{t("status")}</span>
-        {STATUS_OPTIONS.map((option) => (
+        {statusOptions.map((option) => (
           <label key={option.key} className="moduleBiStatusOption">
             <input
               type="checkbox"
@@ -182,11 +187,12 @@ export default function CategoryGrowthFilters({
   );
 }
 
-export function filterGrowthRows(rows, { search = "", statusFilter = [] } = {}) {
+export function filterGrowthRows(rows, { search = "", statusFilter = [], statusOf } = {}) {
   const query = String(search || "").trim().toLowerCase();
   const statuses = Array.isArray(statusFilter) ? statusFilter : [];
   return (rows || []).filter((row) => {
-    if (statuses.length && !statuses.includes(row.status)) return false;
+    const status = statusOf ? statusOf(row) : row.status;
+    if (statuses.length && !statuses.includes(status)) return false;
     if (!query) return true;
     return String(row.label || row.category || "").toLowerCase().includes(query);
   });

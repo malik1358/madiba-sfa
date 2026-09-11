@@ -1,4 +1,4 @@
-# MADIBA SFA — Internal Android APK
+﻿# MADIBA SFA â€” Internal Android APK
 
 This repo includes a **Capacitor Android shell** that loads the live MADIBA web app from Vercel. Field UI updates deploy instantly through the website; rebuild and publish to Play Store (or sideload APK) only when native settings or permissions change.
 
@@ -8,32 +8,32 @@ This repo includes a **Capacitor Android shell** that loads the live MADIBA web 
 
 ## Build APK without Android Studio (easiest)
 
-Use GitHub Actions — builds in the cloud on Google’s servers. No Android Studio, emulator, or Java needed on your PC.
+Use GitHub Actions â€” builds in the cloud on Googleâ€™s servers. No Android Studio, emulator, or Java needed on your PC.
 
 1. Push this repo to GitHub (or merge the `android/` folder to `main`)
-2. Open GitHub → **Actions** → **Android APK** → **Run workflow**
+2. Open GitHub â†’ **Actions** â†’ **Android APK** â†’ **Run workflow**
 3. When the job finishes, download artifact **madiba-sfa-release-apk**
-4. Unzip → share `app-release.apk` with salesmen (same release signing key as Google Play internal testing)
+4. Unzip â†’ share `app-release.apk` with salesmen (same release signing key as Google Play internal testing)
 
 The workflow also runs automatically when `android/` or Capacitor config changes on `main`.
 
 ### After installing the APK (required once per phone)
 
-1. **Allow location → All the time** for MADIBA SFA
+1. **Allow location â†’ All the time** for MADIBA SFA
 2. **Allow notifications** when prompted
-3. **Battery → Unrestricted** for MADIBA SFA — **required before login**; the app blocks sign-in and morning attendance until this is set
-4. Complete **morning attendance** — this starts the native field-tracking notification
+3. **Battery â†’ Unrestricted** for MADIBA SFA â€” **required before login**; the app blocks sign-in and morning attendance until this is set
+4. Complete **morning attendance** â€” this starts the native field-tracking notification
 
 While logged in during an active work session, the app will:
 
-- Show a persistent **“MADIBA field tracking active”** notification (Android foreground service)
+- Show a persistent **â€œMADIBA field tracking activeâ€** notification (Android foreground service)
 - Check location every **5 minutes** while the app process is running, and save an **idle GPS ping** once **15 minutes pass with no visit/order/collection activity** (not a fixed ping every 15 minutes on the clock)
 - When Soyeb reopens the app after it was minimized, a **catch-up ping** runs immediately if the 15-minute idle threshold was already reached
 - Show a **lock-screen alert** if no visit/order/collection is recorded for 45 minutes (repeats every 15 minutes while still idle)
 
-**Important:** Android may pause JavaScript timers when the screen is off or another app is in front. For reliable tracking, keep MADIBA open or return to it periodically, set **Battery → Unrestricted**, and grant **Location → Allow all the time**. Pings are also paused during **lunch break** (between Lunch out and Lunch in).
+**Important:** Android may pause JavaScript timers when the screen is off or another app is in front. For reliable tracking, keep MADIBA open or return to it periodically, set **Battery â†’ Unrestricted**, and grant **Location â†’ Allow all the time**. Pings are also paused during **lunch break** (between Lunch out and Lunch in).
 
-Active sessions follow attendance logs: **login → lunch break out**, then **lunch break in → logout**. Nothing runs during lunch or after end-of-day. If lunch lasts more than **3 hours**, a one-time reminder push is sent (English or Arabic).
+Active sessions follow attendance logs: **login â†’ lunch break out**, then **lunch break in â†’ logout**. Nothing runs during lunch or after end-of-day. If lunch lasts more than **3 hours**, a one-time reminder push is sent (English or Arabic).
 
 ---
 
@@ -41,25 +41,25 @@ Active sessions follow attendance logs: **login → lunch break out**, then **lu
 
 Push alerts to salesmen (even when the app is not open) require Firebase Cloud Messaging.
 
-1. Create a Firebase project → add Android app `com.madiba.sfa`
-2. Download **`google-services.json`** → place in `android/app/google-services.json`
+1. Create a Firebase project â†’ add Android app `com.madiba.sfa`
+2. Download **`google-services.json`** â†’ place in `android/app/google-services.json`
 3. Run these SQL migrations in Supabase:
    - `supabase/migrations/20260822120000_device_push_tokens.sql`
    - `supabase/migrations/20260822153000_push_notification_log.sql`
    - `supabase/migrations/20260822160000_push_notification_reference_key.sql`
-4. In Firebase → **Project settings → Service accounts** → **Generate new private key**
-5. In Vercel → **Environment variables** → add `FIREBASE_SERVICE_ACCOUNT_JSON` (paste the full JSON on one line)
+4. In Firebase â†’ **Project settings â†’ Service accounts** â†’ **Generate new private key**
+5. In Vercel â†’ **Environment variables** â†’ add `FIREBASE_SERVICE_ACCOUNT_JSON` (paste the full JSON on one line)
 6. Ensure `CRON_SECRET` is set in Vercel (same value as GitHub Actions secret)
-7. Rebuild the APK (Actions → **Android APK** → **Run workflow**)
-8. Reinstall on phones — login registers the device token automatically
+7. Rebuild the APK (Actions â†’ **Android APK** â†’ **Run workflow**)
+8. Reinstall on phones â€” login registers the device token automatically
 
-After deploy, MADIBA automatically sends **45-minute inactivity push alerts**, repeating every **15 minutes** while still idle, during each user's active work session (login → lunch out, lunch in → logout) via `/api/cron/inactivity-push` (GitHub Actions workflow **Inactivity Push**). Alerts use each user's selected language (English or Arabic). The same cron also emails the user and every boss in **Salesman Hierarchy** every **40 minutes** while there is no visit, order, or collection — skipping lunch break, ended workdays, and anything after **10:00 PM KSA**. If a salesman or collector has **not logged in by 11:00 KSA**, the same cron emails the user and hierarchy bosses **every 30 minutes** until they log in (skipped on Friday).
+After deploy, MADIBA automatically sends **45-minute inactivity push alerts**, repeating every **15 minutes** while still idle, during each user's active work session (login â†’ lunch out, lunch in â†’ logout) via `/api/cron/inactivity-push` (GitHub Actions workflow **Inactivity Push**). Alerts use each user's selected language (English or Arabic). The same cron also emails the user and every boss in **Salesman Hierarchy** every **40 minutes** while there is no visit, order, or collection â€” skipping lunch break, ended workdays, and anything after **10:00 PM KSA**. If a salesman or collector has **not logged in by 11:00 KSA**, the same cron emails the user and hierarchy bosses **every 30 minutes** until they log in (skipped on Friday).
 
-Submitted orders from **September 2026 onward** with **no invoice uploaded after 1 hour** are emailed every **15 minutes** during **India back-office hours (Saturday–Thursday, 9:00 AM–8:00 PM IST)** via `/api/cron/missing-invoice-email`. Supabase `pg_cron` is the primary trigger; the GitHub Actions workflow **Missing Invoice Email** remains a backup. Digests are suppressed for **12 minutes** after a successful send so the two schedulers cannot double-mail. Recipients are the invoice-ops list, with **jenil.modi@noorshukran.com** on CC. Friday is a holiday. Credit-approval, stock-unavailable, test-customer, and **Rejected by management** orders are excluded.
+Submitted orders from **September 2026 onward** with **no invoice uploaded after 1 hour** are emailed every **15 minutes** during **India back-office hours (Saturdayâ€“Thursday, 9:00 AMâ€“8:00 PM IST)** via `/api/cron/missing-invoice-email`. Supabase `pg_cron` is the primary trigger; the GitHub Actions workflow **Missing Invoice Email** remains a backup. Digests are suppressed for **12 minutes** after a successful send so the two schedulers cannot double-mail. Recipients are the invoice-ops list, with **jenil.modi@noorshukran.com** on CC. Friday is a holiday. Credit-approval, stock-unavailable, test-customer, and **Rejected by management** orders are excluded.
 
-After each **sales Excel upload**, `/api/import-sales` sends the daily order confirmation: each salesman receives orders they raised (plus any still waiting on billing), and invoice-ops receive the combined digest. The capture window is from the previous email watermark through upload time — later changes go on the next upload’s email. The table includes order status, invoice status, **order value including VAT**, and **invoice made value including VAT** (from the attached invoice PDF), with a **total row**. Test-customer orders are excluded. Manual backfill uses GitHub Actions workflow **Daily Supplier Order Email** (`workflow_dispatch`).
+At **00:20 KSA**, GitHub Actions workflow **Daily Supplier Order Email** calls `/api/cron/daily-supplier-order-email` for the previous KSA day: each salesman receives all orders they raised (every invoice status) with **hierarchy bosses on CC**, and invoice-ops receive the combined digest. Older orders still waiting on billing stay on the list. Values are **including VAT**, with colorful status badges and a **total row**. Friday follows the visit-report holiday skip. The same email also runs after each **sales Excel upload**.
 
-Every field transaction (visit, order, collection, prospect, attendance, etc.) also sends **push alerts up the reporting chain** — each boss in **Salesman Hierarchy** receives the alert, and if that boss also has a head, the alert continues to the top.
+Every field transaction (visit, order, collection, prospect, attendance, etc.) also sends **push alerts up the reporting chain** â€” each boss in **Salesman Hierarchy** receives the alert, and if that boss also has a head, the alert continues to the top.
 
 Admins can also send a manual push:
 
@@ -77,9 +77,9 @@ Without `google-services.json` and `FIREBASE_SERVICE_ACCOUNT_JSON`, background G
 ## What you need on your PC (only if building locally)
 
 1. **Node.js 20+** (already used for this repo)
-2. **Android Studio** — https://developer.android.com/studio
+2. **Android Studio** â€” https://developer.android.com/studio
    - During setup, install **Android SDK**, **SDK Platform Tools**, and **Android SDK Build-Tools**
-3. **Java 17** — usually bundled with Android Studio
+3. **Java 17** â€” usually bundled with Android Studio
 
 After Android Studio installs, set environment variable (Windows PowerShell example):
 
@@ -117,7 +117,7 @@ Android Studio opens the `android/` folder.
 In Android Studio:
 
 1. Wait for Gradle sync to finish
-2. **Build → Build Bundle(s) / APK(s) → Build APK(s)**
+2. **Build â†’ Build Bundle(s) / APK(s) â†’ Build APK(s)**
 3. When done, click **locate** in the notification
 
 Output file:
@@ -136,7 +136,7 @@ Do this once to create your company keystore, then reuse it for every release.
 
 ### 1. Create keystore (one-time)
 
-In Android Studio: **Build → Generate Signed App Bundle / APK → APK → Create new...**
+In Android Studio: **Build â†’ Generate Signed App Bundle / APK â†’ APK â†’ Create new...**
 
 Or from terminal:
 
@@ -159,7 +159,7 @@ keyPassword=YOUR_KEY_PASSWORD
 
 ### 3. Build release APK
 
-In Android Studio: **Build → Generate Signed App Bundle / APK → APK → release**
+In Android Studio: **Build â†’ Generate Signed App Bundle / APK â†’ APK â†’ release**
 
 Output:
 
@@ -173,11 +173,11 @@ android/app/build/outputs/apk/release/app-release.apk
 
 1. Send the APK file (Google Drive link is more reliable than WhatsApp for large APKs)
 2. On the phone: download the APK
-3. Android may ask to allow **Install unknown apps** for Chrome / Files / Drive — allow once
-4. Tap the APK → **Install**
+3. Android may ask to allow **Install unknown apps** for Chrome / Files / Drive â€” allow once
+4. Tap the APK â†’ **Install**
 5. Open **MADIBA SFA** from the app drawer (not Chrome)
 
-### If install fails ("Installation failed — Please try again")
+### If install fails ("Installation failed â€” Please try again")
 
 | Cause | Fix |
 | --- | --- |
@@ -186,14 +186,14 @@ android/app/build/outputs/apk/release/app-release.apk
 | **Corrupted WhatsApp transfer** | Re-download from Google Drive or GitHub artifact; avoid forwarding APK in chat |
 | **Play Store copy already installed** | Use Play Store internal testing update, or uninstall Play copy first then sideload |
 
-Android only shows a generic error for all of these. When in doubt: **uninstall MADIBA SFA → install the newest release APK**.
+Android only shows a generic error for all of these. When in doubt: **uninstall MADIBA SFA â†’ install the newest release APK**.
 
 ### Recommended phone settings
 
 | Setting | Value |
 | --- | --- |
-| Location → MADIBA SFA | **Allow all the time** |
-| Battery → MADIBA SFA | **Unrestricted** |
+| Location â†’ MADIBA SFA | **Allow all the time** |
+| Battery â†’ MADIBA SFA | **Unrestricted** |
 | Notifications | Allow (needed for future push alerts) |
 
 ---
@@ -226,11 +226,11 @@ Rebuild the APK after changing the URL.
 
 ```
 Android APK (Capacitor)
-  └── WebView → https://madiba-sfa.vercel.app
-        ├── Same login, My Day, Collections, offline queue
-        ├── Native foreground service → GPS pings while logged in
-        ├── Local notifications → inactivity alerts on lock screen
-        └── Firebase push → remote alerts (after google-services.json)
+  â””â”€â”€ WebView â†’ https://madiba-sfa.vercel.app
+        â”œâ”€â”€ Same login, My Day, Collections, offline queue
+        â”œâ”€â”€ Native foreground service â†’ GPS pings while logged in
+        â”œâ”€â”€ Local notifications â†’ inactivity alerts on lock screen
+        â””â”€â”€ Firebase push â†’ remote alerts (after google-services.json)
 ```
 
 ---
@@ -241,7 +241,7 @@ Android APK (Capacitor)
 | --- | --- |
 | Blank white screen | Confirm phone has internet on first launch; check Vercel URL opens in Chrome |
 | Gradle sync failed | Open SDK Manager in Android Studio; install latest SDK Platform + Build Tools |
-| Location/camera blocked | App info → Permissions → allow Location + Camera |
+| Location/camera blocked | App info â†’ Permissions â†’ allow Location + Camera |
 | Old UI after deploy | Force-close app and reopen; web updates come from Vercel automatically |
 | APK install failed | Uninstall old MADIBA SFA first; use latest **madiba-sfa-release-apk** (not an old debug build) |
 
@@ -254,7 +254,7 @@ Android APK (Capacitor)
 
 ---
 
-## Google Play — internal testing (recommended for field rollout)
+## Google Play â€” internal testing (recommended for field rollout)
 
 Use **Google Play internal testing** so salesmen install and update MADIBA from the Play Store instead of sideloading APK files. The app still loads the live Vercel site; Play Store updates only the native Android shell (GPS, push, permissions).
 
@@ -262,16 +262,16 @@ Use **Google Play internal testing** so salesmen install and update MADIBA from 
 
 | Change | How salesmen get it |
 | --- | --- |
-| UI, orders, collections, APIs | Vercel deploy — force-close and reopen the app |
+| UI, orders, collections, APIs | Vercel deploy â€” force-close and reopen the app |
 | Native Android (GPS service, push, permissions) | New Play Store internal release |
 
-### One-time setup (about 30–60 minutes)
+### One-time setup (about 30â€“60 minutes)
 
 #### 1. Google Play Developer account
 
 1. Open [Google Play Console](https://play.google.com/console)
 2. Pay the **one-time $25** registration fee (company account recommended)
-3. Create a new app → name **MADIBA SFA** → default language **English**
+3. Create a new app â†’ name **MADIBA SFA** â†’ default language **English**
 
 #### 2. Create the app listing (minimum for internal testing)
 
@@ -285,11 +285,11 @@ In Play Console, complete these sections (required even for internal track):
 | **Target audience** | 18+ (field staff) |
 | **Data safety** | Declare location collection (field tracking), data encrypted in transit |
 | **Privacy policy** | Public URL (required because the app uses location) |
-| **Store listing** | App name, short description, 512×512 icon, 2+ phone screenshots |
+| **Store listing** | App name, short description, 512Ã—512 icon, 2+ phone screenshots |
 
 Package name must be **`com.madiba.sfa`** (matches this repo).
 
-#### 3. Create an upload keystore (one-time — keep safe)
+#### 3. Create an upload keystore (one-time â€” keep safe)
 
 From any machine with Java installed:
 
@@ -302,19 +302,19 @@ keytool -genkeypair -v \
 
 Store the `.keystore` file and passwords securely. If lost, you cannot publish updates to the same Play listing.
 
-For local release builds, copy `android/keystore.properties.example` → `android/keystore.properties` and point `storeFile` at your keystore.
+For local release builds, copy `android/keystore.properties.example` â†’ `android/keystore.properties` and point `storeFile` at your keystore.
 
 #### 4. Link a Google Cloud service account (for GitHub uploads)
 
-1. Play Console → **Setup → API access** → link or create a Google Cloud project
-2. **Create new service account** → open Google Cloud Console
+1. Play Console â†’ **Setup â†’ API access** â†’ link or create a Google Cloud project
+2. **Create new service account** â†’ open Google Cloud Console
 3. Grant the service account **Service Account User** (if prompted)
-4. Back in Play Console → **Grant access** to the service account → role **Release manager** (or Admin for first setup)
-5. In Google Cloud → **IAM → Service account → Keys** → **Add key → JSON** → download the JSON file
+4. Back in Play Console â†’ **Grant access** to the service account â†’ role **Release manager** (or Admin for first setup)
+5. In Google Cloud â†’ **IAM â†’ Service account â†’ Keys** â†’ **Add key â†’ JSON** â†’ download the JSON file
 
 #### 5. Add GitHub repository secrets
 
-In GitHub → **Settings → Secrets and variables → Actions**, add:
+In GitHub â†’ **Settings â†’ Secrets and variables â†’ Actions**, add:
 
 | Secret | Value |
 | --- | --- |
@@ -334,18 +334,18 @@ Paste the clipboard into the `ANDROID_KEYSTORE_BASE64` secret.
 
 #### 6. First release to internal testing
 
-1. GitHub → **Actions** → **Play Store Internal** → **Run workflow** (branch `main`, deploy = true)
+1. GitHub â†’ **Actions** â†’ **Play Store Internal** â†’ **Run workflow** (branch `main`, deploy = true)
 2. Wait for the job to finish (builds signed AAB + uploads to internal track)
-3. In Play Console → **Testing → Internal testing** → confirm the release is active
+3. In Play Console â†’ **Testing â†’ Internal testing** â†’ confirm the release is active
 
 If the upload fails on the very first release, open Play Console once and accept **Google Play App Signing** when prompted, then re-run the workflow.
 
 ### Add salesmen as internal testers
 
-1. Play Console → **Testing → Internal testing → Testers**
+1. Play Console â†’ **Testing â†’ Internal testing â†’ Testers**
 2. Create an email list (Google accounts used on their phones)
 3. Copy the **opt-in link** and send it to each salesman (WhatsApp / email)
-4. Each tester opens the link → **Become a tester** → installs **MADIBA SFA** from the Play Store
+4. Each tester opens the link â†’ **Become a tester** â†’ installs **MADIBA SFA** from the Play Store
 
 They only need the opt-in link **once**. After that, updates arrive through the Play Store like any other app.
 
@@ -354,9 +354,9 @@ They only need the opt-in link **once**. After that, updates arrive through the 
 | Trigger | What happens |
 | --- | --- |
 | Push to `main` (android / native files change) | Workflow builds AAB and uploads to **internal** automatically |
-| Manual | Actions → **Play Store Internal** → **Run workflow** |
+| Manual | Actions â†’ **Play Store Internal** â†’ **Run workflow** |
 
-Each build gets `versionCode = GitHub run number` and `versionName = 1.0.<run number>`. Play Store requires a higher `versionCode` on every upload — the workflow handles this.
+Each build gets `versionCode = GitHub run number` and `versionName = 1.0.<run number>`. Play Store requires a higher `versionCode` on every upload â€” the workflow handles this.
 
 ### Require the latest APK before login
 
@@ -370,7 +370,7 @@ The web app can block outdated Android APK builds at login. Set the minimum requ
   "minVersionName": "1.0.200",
   "downloadUrl": "https://your-apk-link.example/app-debug.apk",
   "messageEn": "Install the latest MADIBA APK from admin, then sign in again.",
-  "messageAr": "ثبّت أحدث APK من المسؤول ثم سجّل الدخول مرة أخرى."
+  "messageAr": "Ø«Ø¨Ù‘Øª Ø£Ø­Ø¯Ø« APK Ù…Ù† Ø§Ù„Ù…Ø³Ø¤ÙˆÙ„ Ø«Ù… Ø³Ø¬Ù‘Ù„ Ø§Ù„Ø¯Ø®ÙˆÙ„ Ù…Ø±Ø© Ø£Ø®Ø±Ù‰."
 }
 ```
 
@@ -398,4 +398,4 @@ android/play-whatsnew/en-US/whatsnew
 | Upload failed: package not found | Create the app in Play Console with package `com.madiba.sfa` first |
 | Upload failed: API access | Re-check service account has Release manager in Play Console |
 | Tester cannot see the app | They must open the opt-in link with the same Google account on their phone |
-| App not updating | Play Store → MADIBA SFA → check for update; or wait a few hours for rollout |
+| App not updating | Play Store â†’ MADIBA SFA â†’ check for update; or wait a few hours for rollout |

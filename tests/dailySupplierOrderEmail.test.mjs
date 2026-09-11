@@ -183,9 +183,9 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
         salesman_name: "ABDUL REHMAN",
         status: "SUBMITTED",
         created_by: "u1",
-        created_at: "2026-09-09T06:43:00.000Z",
-        submitted_at: "2026-09-09T06:43:00.000Z",
-        updated_at: "2026-09-09T06:43:00.000Z",
+        created_at: "2026-09-10T06:43:00.000Z",
+        submitted_at: "2026-09-10T06:43:00.000Z",
+        updated_at: "2026-09-10T06:43:00.000Z",
       },
     ]),
     loadProfiles: async () => ([
@@ -209,7 +209,7 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
       },
     ]),
     loadMeta: async () => new Map([
-      ["378", { status: "Invoice made", invoiceFilePath: "C1/378/file.pdf", invoiceAmountExclVat: 980, statusUpdatedAt: "2026-09-09T10:00:00.000Z" }],
+      ["378", { status: "Invoice made", invoiceFilePath: "C1/378/file.pdf", invoiceAmountExclVat: 980, statusUpdatedAt: "2026-09-10T08:00:00.000Z" }],
     ]),
     loadValues: async () => ({
       values: new Map([["378", 1000]]),

@@ -82,11 +82,15 @@ export function resolveDailySupplierOrderEmailSchedule(date, now = new Date()) {
 function salesmanOrderRecipients({ reportEmail, email, chainEmails = [] } = {}) {
   const user = normalizeDeliverableEmail(reportEmail) || normalizeDeliverableEmail(email);
   const to = [];
+  const cc = [];
   if (user) to.push(user);
   parseEmailList(Array.isArray(chainEmails) ? chainEmails.join(",") : chainEmails).forEach((address) => {
-    if (!to.includes(address)) to.push(address);
+    const normalized = normalizeDeliverableEmail(address) || address;
+    if (!normalized) return;
+    if (to.includes(normalized) || cc.includes(normalized)) return;
+    cc.push(normalized);
   });
-  return { to };
+  return { to, cc };
 }
 
 async function fetchPagedRows(admin, table, select, applyFilters) {
@@ -435,13 +439,18 @@ export async function runDailySupplierOrderEmailCycle(admin, {
         continue;
       }
       try {
-        const sent = await send({ ...message, to: recipients.to }, env);
+        const sent = await send({
+          ...message,
+          to: recipients.to,
+          ...(recipients.cc.length ? { cc: recipients.cc } : {}),
+        }, env);
         sentCount += 1;
         results.push({
           salesmanName,
           skipped: false,
           orderCount: rows.length,
           to: recipients.to,
+          cc: recipients.cc,
           provider: sent?.provider || null,
         });
       } catch (error) {
@@ -452,6 +461,7 @@ export async function runDailySupplierOrderEmailCycle(admin, {
           failed: true,
           orderCount: rows.length,
           to: recipients.to,
+          cc: recipients.cc,
           error: error.message || "Unable to send email",
         });
       }

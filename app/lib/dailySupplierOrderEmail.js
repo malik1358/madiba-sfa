@@ -205,39 +205,68 @@ export function summarizeDailySupplierOrderRows(rows = []) {
   );
 }
 
+function statusBadge(label, tone = "neutral") {
+  const tones = {
+    success: { bg: "#dcfce7", fg: "#166534", border: "#86efac" },
+    warning: { bg: "#ffedd5", fg: "#9a3412", border: "#fdba74" },
+    danger: { bg: "#fee2e2", fg: "#991b1b", border: "#fca5a5" },
+    info: { bg: "#e0f2fe", fg: "#075985", border: "#7dd3fc" },
+    neutral: { bg: "#f1f5f9", fg: "#334155", border: "#cbd5e1" },
+  };
+  const colors = tones[tone] || tones.neutral;
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:${colors.bg};color:${colors.fg};border:1px solid ${colors.border};font-size:12px;font-weight:700;white-space:nowrap;">${escapeHtml(label)}</span>`;
+}
+
+function invoiceStatusTone(status) {
+  const text = String(status || "").trim().toLowerCase();
+  if (!text || text === "-" || text.includes("not uploaded")) return "warning";
+  if (text.includes("invoice made") || text.includes("uploaded")) return "success";
+  if (text.includes("reject")) return "danger";
+  if (text.includes("credit") || text.includes("stock") || text.includes("waiting") || text.includes("quotation")) return "info";
+  return "neutral";
+}
+
+function orderStatusTone(status) {
+  const text = String(status || "").trim().toUpperCase();
+  if (text === "SUBMITTED") return "info";
+  if (text === "DRAFT" || text === "PENDING") return "warning";
+  if (text === "CANCELLED") return "danger";
+  return "neutral";
+}
+
 function tableHeader(includeSalesman) {
-  return `<tr style="background:#0f4c81;color:#ffffff;">
-    <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Order</th>
-    <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Customer</th>
-    ${includeSalesman ? '<th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Salesman</th>' : ""}
-    <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Order status</th>
-    <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Invoice status</th>
-    <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Created (KSA)</th>
-    <th style="text-align:right;padding:6px 8px;border:1px solid #0f4c81;">Order value (incl. VAT)</th>
-    <th style="text-align:right;padding:6px 8px;border:1px solid #0f4c81;">Invoice made (incl. VAT)</th>
+  return `<tr style="background:linear-gradient(90deg,#0f766e,#0f4c81);background-color:#0f4c81;color:#ffffff;">
+    <th style="text-align:left;padding:10px 8px;border:1px solid #0c3d67;">Order</th>
+    <th style="text-align:left;padding:10px 8px;border:1px solid #0c3d67;">Customer</th>
+    ${includeSalesman ? '<th style="text-align:left;padding:10px 8px;border:1px solid #0c3d67;">Salesman</th>' : ""}
+    <th style="text-align:left;padding:10px 8px;border:1px solid #0c3d67;">Order status</th>
+    <th style="text-align:left;padding:10px 8px;border:1px solid #0c3d67;">Invoice status</th>
+    <th style="text-align:left;padding:10px 8px;border:1px solid #0c3d67;">Created (KSA)</th>
+    <th style="text-align:right;padding:10px 8px;border:1px solid #0c3d67;">Order value (incl. VAT)</th>
+    <th style="text-align:right;padding:10px 8px;border:1px solid #0c3d67;">Invoice made (incl. VAT)</th>
   </tr>`;
 }
 
 function tableRow(row, index, includeSalesman) {
-  const rowBg = index % 2 === 0 ? "#ffffff" : "#eef6fb";
+  const rowBg = index % 2 === 0 ? "#ffffff" : "#f0fdfa";
   return `<tr style="background:${rowBg};">
-    <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.order)}</td>
-    <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.customer)}</td>
-    ${includeSalesman ? `<td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.salesman)}</td>` : ""}
-    <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.orderStatus)}</td>
-    <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.invoiceStatus)}</td>
-    <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.createdAt)}</td>
-    <td style="text-align:right;border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(formatSupplierMoney(row.orderValue))}</td>
-    <td style="text-align:right;border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(formatSupplierMoney(row.invoiceValue))}</td>
+    <td style="border:1px solid #99f6e4;padding:8px;font-weight:700;color:#0f766e;">${escapeHtml(row.order)}</td>
+    <td style="border:1px solid #99f6e4;padding:8px;">${escapeHtml(row.customer)}</td>
+    ${includeSalesman ? `<td style="border:1px solid #99f6e4;padding:8px;">${escapeHtml(row.salesman)}</td>` : ""}
+    <td style="border:1px solid #99f6e4;padding:8px;">${statusBadge(row.orderStatus, orderStatusTone(row.orderStatus))}</td>
+    <td style="border:1px solid #99f6e4;padding:8px;">${statusBadge(row.invoiceStatus, invoiceStatusTone(row.invoiceStatus))}</td>
+    <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.createdAt)}</td>
+    <td style="text-align:right;border:1px solid #99f6e4;padding:8px;font-weight:700;color:#0f4c81;">${escapeHtml(formatSupplierMoney(row.orderValue))}</td>
+    <td style="text-align:right;border:1px solid #99f6e4;padding:8px;font-weight:700;color:#166534;">${escapeHtml(formatSupplierMoney(row.invoiceValue))}</td>
   </tr>`;
 }
 
 function totalRow(totals, includeSalesman) {
   const span = includeSalesman ? 6 : 5;
-  return `<tr style="background:#0f4c81;color:#ffffff;font-weight:700;">
-    <td style="padding:8px;border:1px solid #0c3d67;" colspan="${span}">Total (${totals.orders} order${totals.orders === 1 ? "" : "s"})</td>
-    <td style="text-align:right;padding:8px;border:1px solid #0c3d67;">${escapeHtml(formatSupplierMoney(totals.orderValue))}</td>
-    <td style="text-align:right;padding:8px;border:1px solid #0c3d67;">${escapeHtml(formatSupplierMoney(totals.invoiceValue))}</td>
+  return `<tr style="background:#134e4a;color:#ffffff;font-weight:700;">
+    <td style="padding:10px 8px;border:1px solid #115e59;" colspan="${span}">Total (${totals.orders} order${totals.orders === 1 ? "" : "s"})</td>
+    <td style="text-align:right;padding:10px 8px;border:1px solid #115e59;background:#0f766e;">${escapeHtml(formatSupplierMoney(totals.orderValue))}</td>
+    <td style="text-align:right;padding:10px 8px;border:1px solid #115e59;background:#15803d;">${escapeHtml(formatSupplierMoney(totals.invoiceValue))}</td>
   </tr>`;
 }
 
@@ -245,11 +274,36 @@ function renderTable(rows, { includeSalesman = false } = {}) {
   const totals = summarizeDailySupplierOrderRows(rows);
   const body = rows.length
     ? rows.map((row, index) => tableRow(row, index, includeSalesman)).join("")
-    : `<tr><td colspan="${includeSalesman ? 8 : 7}" style="border:1px solid #c5d4de;padding:8px;">No submitted orders.</td></tr>`;
-  return `<table style="border-collapse: collapse; font-size: 13px; width: 100%;">
+    : `<tr><td colspan="${includeSalesman ? 8 : 7}" style="border:1px solid #99f6e4;padding:12px;background:#fff7ed;color:#9a3412;">No submitted orders.</td></tr>`;
+  return `<table style="border-collapse: collapse; font-size: 13px; width: 100%; border:1px solid #99f6e4;">
     <thead>${tableHeader(includeSalesman)}</thead>
     <tbody>${body}${rows.length ? totalRow(totals, includeSalesman) : ""}</tbody>
   </table>`;
+}
+
+function summaryCards(totals) {
+  return `<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:0 0;margin:0 0 16px;">
+  <tr>
+    <td style="width:33%;padding:0 6px 0 0;vertical-align:top;">
+      <div style="background:#ecfeff;border:1px solid #67e8f9;border-radius:10px;padding:12px;">
+        <div style="font-size:11px;font-weight:700;color:#0e7490;text-transform:uppercase;letter-spacing:0.04em;">Orders</div>
+        <div style="font-size:22px;font-weight:800;color:#155e75;margin-top:4px;">${escapeHtml(String(totals.orders))}</div>
+      </div>
+    </td>
+    <td style="width:33%;padding:0 3px;vertical-align:top;">
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;padding:12px;">
+        <div style="font-size:11px;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:0.04em;">Order value (incl. VAT)</div>
+        <div style="font-size:22px;font-weight:800;color:#1e3a8a;margin-top:4px;">${escapeHtml(formatSupplierMoney(totals.orderValue))}</div>
+      </div>
+    </td>
+    <td style="width:34%;padding:0 0 0 6px;vertical-align:top;">
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:12px;">
+        <div style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;letter-spacing:0.04em;">Invoice made (incl. VAT)</div>
+        <div style="font-size:22px;font-weight:800;color:#14532d;margin-top:4px;">${escapeHtml(formatSupplierMoney(totals.invoiceValue))}</div>
+      </div>
+    </td>
+  </tr>
+</table>`;
 }
 
 function textTable(rows, includeSalesman) {
@@ -287,15 +341,24 @@ export function buildDailySupplierOrderEmail({
     : `Orders raised ${date} — all salesmen (${totals.orders})`;
   const cutoff = String(asOfLabel || "").trim();
   const intro = who
-    ? `Submitted orders for ${date} (KSA)${cutoff ? ` as of sales upload ${cutoff}` : ""}. Includes new/changed orders since the last email, plus any still waiting on billing. Values include VAT for order vs invoice comparison. Invoice made is read from the attached invoice PDF.`
+    ? `Submitted orders for ${date} (KSA)${cutoff ? ` as of sales upload ${cutoff}` : ""}. Includes new/changed orders since the last email, plus any still waiting on billing. Values include VAT for order vs invoice comparison.`
     : `Submitted orders for ${date} (KSA)${cutoff ? ` as of sales upload ${cutoff}` : ""}, grouped by salesman. Includes new/changed orders since the last email, plus any still waiting on billing. Values include VAT for order vs invoice comparison.`;
 
-  const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
-  <h2 style="margin: 0 0 12px; color: #0f4c81;">Daily order confirmation — ${escapeHtml(date)}</h2>
-  <p style="margin: 0 0 16px;">${escapeHtml(intro)}</p>
-  ${who ? `<p style="margin: 0 0 16px;"><strong>${escapeHtml(who)}</strong></p>` : ""}
-  ${renderTable(rows, { includeSalesman })}
-  <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">Totals include VAT. Invoice made is taken from the attached invoice; blank means no invoice PDF yet or the total could not be read. Orders without a billing update stay on this list until billing acts.</p>
+  const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #0f172a; line-height: 1.5; background:#f8fafc; padding:16px;">
+  <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #99f6e4;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,118,110,0.12);">
+    <div style="background:linear-gradient(135deg,#0f766e 0%,#0f4c81 55%,#155e75 100%);background-color:#0f4c81;padding:18px 20px;color:#ffffff;">
+      <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.9;">MADIBA SFA</div>
+      <h2 style="margin:6px 0 4px;font-size:22px;color:#ffffff;">Daily order confirmation</h2>
+      <div style="font-size:14px;opacity:0.95;">${escapeHtml(date)}${cutoff ? ` · upload ${escapeHtml(cutoff)}` : ""}</div>
+    </div>
+    <div style="padding:18px 20px 8px;">
+      <p style="margin:0 0 14px;color:#334155;">${escapeHtml(intro)}</p>
+      ${who ? `<p style="margin:0 0 16px;"><span style="display:inline-block;padding:6px 12px;border-radius:999px;background:#ecfeff;border:1px solid #67e8f9;color:#0e7490;font-weight:800;">${escapeHtml(who)}</span></p>` : ""}
+      ${summaryCards(totals)}
+      ${renderTable(rows, { includeSalesman })}
+      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">Totals include VAT. Invoice made is taken from the attached invoice PDF; blank means no invoice yet or the total could not be read. Orders without a billing update stay on this list until billing acts. Hierarchy bosses are copied on each salesman email.</p>
+    </div>
+  </div>
 </div>`;
 
   const text = [

@@ -132,11 +132,14 @@ test("buildDailySupplierOrderEmail includes values with VAT and a total row", ()
   assert.match(message.subject, /ABDUL REHMAN/);
   assert.match(message.html, /Order value \(incl\. VAT\)/);
   assert.match(message.html, /Invoice made \(incl\. VAT\)/);
+  assert.match(message.html, /MADIBA SFA/);
+  assert.match(message.html, /Daily order confirmation/);
   assert.match(message.html, /1,150.00/);
   assert.match(message.html, /1,127.00/);
   assert.match(message.html, /Total \(2 orders\)/);
   assert.match(message.html, /1,725.00/);
   assert.match(message.html, /1,702.00/);
+  assert.match(message.html, /background:#dcfce7/);
   assert.equal(message.orderCount, 2);
   assert.equal(message.totals.orderValue, 1725);
   assert.equal(message.totals.invoiceValue, 1702);
@@ -183,6 +186,15 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
         role: "salesman",
         is_active: true,
       },
+      {
+        id: "boss1",
+        salesman_code: "MGR",
+        salesman_name: "Boss One",
+        email: "boss@madiba.com",
+        report_email: "boss.report@madiba.com",
+        role: "manager",
+        is_active: true,
+      },
     ]),
     loadMeta: async () => new Map([
       ["378", { status: "Invoice made", invoiceFilePath: "C1/378/file.pdf", invoiceAmountExclVat: 980, statusUpdatedAt: "2026-09-09T10:00:00.000Z" }],
@@ -196,16 +208,35 @@ test("runDailySupplierOrderEmailCycle emails each salesman and a combined digest
     saveLastSentMarker: async (_admin, marker) => {
       saved.push(marker);
     },
-    listAuthUsers: async () => [],
+    listAuthUsers: async () => ([
+      {
+        id: "u1",
+        user_metadata: {
+          salesman_code: "AR",
+          salesman_name: "ABDUL REHMAN",
+          head_salesman_code: "MGR",
+          head_salesman_name: "Boss One",
+        },
+      },
+      {
+        id: "boss1",
+        user_metadata: {
+          salesman_code: "MGR",
+          salesman_name: "Boss One",
+        },
+      },
+    ]),
   });
 
   assert.equal(result.skipped, false);
   assert.equal(result.sentCount, 2);
   assert.equal(result.orderCount, 1);
   assert.equal(sent[0].to[0], "abdul.report@madiba.com");
+  assert.deepEqual(sent[0].cc, ["boss.report@madiba.com"]);
   assert.match(sent[0].html, /1,127.00/);
   assert.match(sent[0].html, /Invoice made/);
   assert.match(sent[0].html, /incl\. VAT/);
+  assert.match(sent[0].html, /MADIBA SFA/);
   assert.deepEqual(sent[1].to, DEFAULT_MISSING_INVOICE_EMAIL_TO);
   assert.match(sent[1].html, /ABDUL REHMAN/);
   assert.equal(saved.length, 1);

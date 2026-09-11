@@ -12,7 +12,9 @@ import {
   formatGrowthPercent,
   growthPercent,
   ingestCategoryGrowthRows,
+  monthChangeTone,
   normalizeCategoryName,
+  selectRecentGrowthMonths,
   silentMonthCount,
 } from "../app/lib/categoryGrowth.js";
 
@@ -119,4 +121,41 @@ test("silent and declining helpers count gaps and losing streaks", () => {
     ["2026-04", 40],
   ]);
   assert.equal(consecutiveDecliningMonths(byMonth, "2026-04"), 3);
+});
+
+test("month cells compare to the previous month and keep the current month in view", () => {
+  assert.equal(monthChangeTone(120, 100), "up");
+  assert.equal(monthChangeTone(80, 100), "down");
+  assert.equal(monthChangeTone(100, 100), "");
+  assert.deepEqual(
+    selectRecentGrowthMonths({
+      firstMonth: "2025-01",
+      lastDataMonth: "2026-08",
+      asOfMonth: "2026-09",
+    }),
+    [
+      "2025-10",
+      "2025-11",
+      "2025-12",
+      "2026-01",
+      "2026-02",
+      "2026-03",
+      "2026-04",
+      "2026-05",
+      "2026-06",
+      "2026-07",
+      "2026-08",
+      "2026-09",
+    ],
+  );
+
+  const acc = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(acc, [
+    { transaction_date: "2026-07-10", category: "Fridge", sales_amount: 100 },
+    { transaction_date: "2026-08-10", category: "Fridge", sales_amount: 80 },
+  ]);
+  const report = buildCategoryGrowthReport(acc, { asOfDate: "2026-09-11" });
+  assert.equal(report.currentMonth, "2026-09");
+  assert.equal(report.recentMonths.at(-1), "2026-09");
+  assert.equal(report.categories[0].monthValues["2026-09"], 0);
 });

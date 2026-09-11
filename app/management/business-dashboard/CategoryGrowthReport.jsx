@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import ExportableTable from "../../components/ExportableTable";
 import CategoryGrowthFilters, { filterGrowthRows } from "./CategoryGrowthFilters";
-import { formatGrowthPercent, formatMoneyAmount, formatSharePercent, growthDimensionLabel } from "../../lib/categoryGrowth";
+import { formatGrowthPercent, formatMoneyAmount, formatSharePercent, growthDimensionLabel, monthChangeTone, previousMonthKey } from "../../lib/categoryGrowth";
 import { translate } from "../../lib/appLanguage";
 
 const TEXT = {
@@ -36,6 +36,10 @@ const TEXT = {
   noAlerts: { en: "No category red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على الفئات من المبيعات المرفوعة." },
   yearly: { en: "Sales by year since inception", ar: "المبيعات حسب السنة منذ البداية" },
   monthly: { en: "Last 12 months", ar: "آخر 12 شهراً" },
+  monthlyHint: {
+    en: "Green is higher than the previous month. Red is lower. The current month is month-to-date only.",
+    ar: "الأخضر أعلى من الشهر السابق. الأحمر أقل. الشهر الحالي حتى اليوم فقط.",
+  },
   category: { en: "Category", ar: "الفئة" },
   firstSale: { en: "First sale", ar: "أول بيع" },
   lastSale: { en: "Last sale", ar: "آخر بيع" },
@@ -61,11 +65,12 @@ function trendClass(value) {
   return "";
 }
 
-function monthLabel(month) {
+function monthLabel(month, currentMonth) {
   const match = String(month || "").match(/^(\d{4})-(\d{2})$/);
   if (!match) return month || "—";
   const date = new Date(Number(match[1]), Number(match[2]) - 1, 1);
-  return date.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+  const label = date.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+  return month === currentMonth ? `${label} MTD` : label;
 }
 
 export default function CategoryGrowthReport({
@@ -94,6 +99,7 @@ export default function CategoryGrowthReport({
   );
   const years = report?.years || [];
   const recentMonths = report?.recentMonths || [];
+  const currentMonth = report?.currentMonth || "";
 
   const hasData = allRows.length > 0;
 
@@ -257,6 +263,7 @@ export default function CategoryGrowthReport({
         <div className="moduleSectionHeader">
           <h2>{t("monthly")}</h2>
         </div>
+        <p className="moduleHint">{t("monthlyHint")}</p>
         {categories.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
@@ -266,7 +273,9 @@ export default function CategoryGrowthReport({
               <tr>
                 <th>{groupLabel}</th>
                 {recentMonths.map((month) => (
-                  <th key={month}>{monthLabel(month)}</th>
+                  <th key={month} className={month === currentMonth ? "moduleBiMonthHead--current" : ""}>
+                    {monthLabel(month, currentMonth)}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -274,11 +283,24 @@ export default function CategoryGrowthReport({
               {categories.map((row) => (
                 <tr key={`month-${row.label || row.category}`}>
                   <td>{row.label || row.category}</td>
-                  {recentMonths.map((month) => (
-                    <td key={month}>
-                      {row.monthValues?.[month] ? formatMoneyAmount(row.monthValues[month]) : "—"}
-                    </td>
-                  ))}
+                  {recentMonths.map((month, index) => {
+                    const amount = Number(row.monthValues?.[month] || 0);
+                    const previousKey = index > 0 ? recentMonths[index - 1] : previousMonthKey(month);
+                    const previous = Number(row.monthValues?.[previousKey] || 0);
+                    const tone = monthChangeTone(amount, previous, Boolean(previousKey));
+                    const isCurrent = month === currentMonth;
+                    return (
+                      <td
+                        key={month}
+                        className={[
+                          tone ? `moduleBiMonthCell--${tone}` : "",
+                          isCurrent ? "moduleBiMonthCell--current" : "",
+                        ].filter(Boolean).join(" ")}
+                      >
+                        {amount ? formatMoneyAmount(amount) : "—"}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>

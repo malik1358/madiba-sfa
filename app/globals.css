@@ -5995,6 +5995,26 @@ th:has(.moduleTableColumnFilterInput) {
     position: sticky;
   }
 
+  .moduleBiTableWrap {
+    overflow: auto;
+  }
+
+  .moduleBiTable th,
+  .moduleBiTable.moduleStackedHeaderTable thead tr:first-child th,
+  .moduleBiTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
+    position: sticky;
+    box-shadow: inset 0 -1px 0 #d5e1e4;
+  }
+
+  .moduleBiTable th,
+  .moduleBiTable.moduleStackedHeaderTable thead tr:first-child th {
+    top: 0;
+  }
+
+  .moduleBiTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
+    top: var(--module-stacked-header-row1);
+  }
+
   .moduleKpiTargetsFilters {
     grid-template-columns: 1fr;
   }
@@ -6700,11 +6720,22 @@ th:has(.moduleTableColumnFilterInput) {
 }
 
 .moduleBiTableWrap {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: min(70dvh, 720px);
 }
 
 .moduleBiTable {
   min-width: 980px;
+}
+
+/* Stick headers to this table's scroll box, not the page chrome. */
+.moduleBiTable th,
+.moduleBiTable.moduleStackedHeaderTable thead tr:first-child th {
+  top: 0;
+}
+
+.moduleBiTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
+  top: var(--module-stacked-header-row1);
 }
 
 .moduleBiTrend--up {
@@ -6720,6 +6751,27 @@ th:has(.moduleTableColumnFilterInput) {
 .moduleBiTrend--downHard {
   color: #b42318;
   font-weight: 800;
+}
+
+.moduleBiMonthHead--current {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.moduleBiMonthCell--up {
+  background: #dcfce7;
+  color: #166534;
+  font-weight: 800;
+}
+
+.moduleBiMonthCell--down {
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: 800;
+}
+
+.moduleBiMonthCell--current {
+  box-shadow: inset 0 0 0 2px #93c5fd;
 }
 
 .moduleBiFilterGrid {

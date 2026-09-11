@@ -395,6 +395,27 @@ function buildMonthSeries(byMonth, months) {
   return series;
 }
 
+export function monthChangeTone(current, previous, hasPrevious = true) {
+  if (!hasPrevious) return "";
+  const now = Number(current || 0);
+  const prior = Number(previous || 0);
+  if (now > prior) return "up";
+  if (now < prior) return "down";
+  return "";
+}
+
+export function selectRecentGrowthMonths({ firstMonth = "", lastDataMonth = "", asOfMonth = "" } = {}) {
+  const end = [lastDataMonth, asOfMonth]
+    .filter((month) => /^\d{4}-\d{2}$/.test(month))
+    .sort()
+    .at(-1) || "";
+  if (!end) return [];
+  const startBound = firstMonth && firstMonth < end ? firstMonth : end;
+  const history = enumerateMonths(startBound, end);
+  const start = history.slice(-12)[0] || end;
+  return enumerateMonths(start, end);
+}
+
 export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
   const lastDate = acc.lastDate || "";
   const firstDate = acc.firstDate || "";
@@ -407,12 +428,15 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
   const latestYear = lastDataMonth ? lastDataMonth.slice(0, 4) : "";
   const firstYear = firstMonth ? firstMonth.slice(0, 4) : "";
   const years = enumerateYears(firstYear, latestYear);
-  const recentMonths = lastDataMonth
-    ? enumerateMonths(
-      enumerateMonths(firstMonth, lastDataMonth).slice(-12)[0] || lastDataMonth,
-      lastDataMonth,
-    )
-    : [];
+  const currentMonth = asOfMonth || lastDataMonth;
+  const recentMonths = selectRecentGrowthMonths({
+    firstMonth,
+    lastDataMonth,
+    asOfMonth: currentMonth,
+  });
+  const monthValueKeys = recentMonths[0]
+    ? [previousMonthKey(recentMonths[0]), ...recentMonths].filter(Boolean)
+    : recentMonths;
 
   const lifetimeTotal = sumMonths(acc.companyByMonth, enumerateMonths(firstMonth, lastDataMonth));
   const currentYtdMonths = latestYear ? monthsInYearThrough(latestYear, lastDataMonth) : [];
@@ -422,7 +446,7 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
   const categories = [...acc.byGroup.values()].map((entry) => {
     const lifetime = sumMonths(entry.byMonth, enumerateMonths(entry.firstDate.slice(0, 7), lastDataMonth));
     const yearValues = buildYearSeries(entry.byMonth, years, lastDataMonth);
-    const monthValues = buildMonthSeries(entry.byMonth, recentMonths);
+    const monthValues = buildMonthSeries(entry.byMonth, monthValueKeys);
     const currentYtd = sumMonths(entry.byMonth, currentYtdMonths);
     const priorYtd = sumMonths(entry.byMonth, priorYtdMonths);
     const latestMonthAmount = Number(entry.byMonth.get(latestCompleteMonth) || 0);
@@ -492,6 +516,7 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
     lastDate,
     years,
     recentMonths,
+    currentMonth,
     latestCompleteMonth,
     latestMonthIsPartial,
     lifetimeTotal,

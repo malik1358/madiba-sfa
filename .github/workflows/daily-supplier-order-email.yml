@@ -3,6 +3,19 @@ name: Daily Supplier Order Email
 on:
   # Primary trigger is sales Excel upload (/api/import-sales). Keep this for manual/backfill runs.
   workflow_dispatch:
+    inputs:
+      date:
+        description: "Report date YYYY-MM-DD (KSA). Empty = today."
+        required: false
+        default: ""
+      to:
+        description: "Test-only recipient override (skips salesmen + default digest list)."
+        required: false
+        default: ""
+      force:
+        description: "Force send even if already marked sent"
+        required: false
+        default: "true"
 
 jobs:
   email:
@@ -12,6 +25,9 @@ jobs:
         env:
           DAILY_SUPPLIER_ORDER_EMAIL_URL: ${{ secrets.DAILY_SUPPLIER_ORDER_EMAIL_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+          INPUT_TO: ${{ github.event.inputs.to }}
+          INPUT_FORCE: ${{ github.event.inputs.force }}
         run: |
           DEFAULT_DAILY_SUPPLIER_ORDER_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/daily-supplier-order-email'
           DAILY_SUPPLIER_ORDER_EMAIL_URL_TRIMMED="$(printf '%s' "$DAILY_SUPPLIER_ORDER_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -32,12 +48,34 @@ jobs:
 
           CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
+          export FORCE_VALUE="${INPUT_FORCE:-true}"
+          export DATE_VALUE="$(printf '%s' "$INPUT_DATE" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          export TO_VALUE="$(printf '%s' "$INPUT_TO" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          python3 - <<'PY' > payload.json
+          import json, os
+          payload = {
+            "force": os.environ.get("FORCE_VALUE", "true").strip().lower() not in ("0", "false", "no", ""),
+          }
+          date = os.environ.get("DATE_VALUE", "").strip()
+          to = os.environ.get("TO_VALUE", "").strip()
+          if date:
+            payload["date"] = date
+          if to:
+            payload["to"] = to
+            payload["sendToUsers"] = False
+          print(json.dumps(payload))
+          PY
+
+          echo "Request payload:"
+          cat payload.json
+
           post_report() {
             local target_url="$1"
             curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
               -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
               -H "Content-Type: application/json" \
-              --data '{"force":true}'
+              --data @payload.json
           }
 
           status_code="$(post_report "$DAILY_SUPPLIER_ORDER_EMAIL_URL_EFFECTIVE")"

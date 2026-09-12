@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import ExportableTable from "../../components/ExportableTable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -261,7 +260,6 @@ export default function SalesmanVisitPlanPage() {
           </div>
           <div className="moduleHeaderActions">
             <AppLanguageSwitch language={language} setLanguage={setLanguage} />
-            <MostVisitedPages />
           </div>
         </header>
 

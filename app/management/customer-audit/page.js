@@ -15,7 +15,6 @@ const TEXT = {
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -379,7 +378,7 @@ function CustomerAuditPageContent() {
               <h1>{t("title")}</h1>
               <p className="auditSubtitle">{t("subtitle")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
 
           {error && error.toLowerCase().includes("login") ? (
@@ -415,7 +414,7 @@ function CustomerAuditPageContent() {
               <h1>{t("title")}</h1>
               <p className="auditSubtitle">{t("loadingCustomer")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
           <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
         </div>
@@ -433,7 +432,7 @@ function CustomerAuditPageContent() {
               <h1>{t("title")}</h1>
               <p className="auditSubtitle">{t("subtitle")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
           <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
           <EmptyState title="No sales history" message={`No sales history was found for ${selectedCustomer.customer_name}.`} />
@@ -453,7 +452,7 @@ function CustomerAuditPageContent() {
             <h1>{t("title")}</h1>
             <p className="auditSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
         </div>
 
         <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>

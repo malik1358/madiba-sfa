@@ -33,8 +33,10 @@ import { needsEnglishTranslation, translateText } from "../../lib/translateText.
 import { formatCollectionUserDisplayName } from "../../lib/geo.js";
 import {
   patchCollectionVisitSummaryEnglishRemark,
+  patchCollectionVisitSummaryVisitDistance,
   patchCollectionVisitSummaryVisitNumber,
 } from "../../lib/collectionVisitSummary.js";
+import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp.js";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -1050,6 +1052,7 @@ export async function POST(request) {
     // Insert new collection visit
     const existingVisitCount = await countCollectionVisitsForUserDay(admin, user.id);
     const authoritativeVisitNumber = Math.max(visitNumberForDay, existingVisitCount + 1);
+    const savedAtIso = new Date().toISOString();
     let finalSummaryText = summaryText
       ? patchCollectionVisitSummaryEnglishRemark(summaryText, remarkEnglish)
       : summaryText;
@@ -1058,6 +1061,28 @@ export async function POST(request) {
         finalSummaryText,
         authoritativeVisitNumber,
       );
+    }
+
+    // Recompute distance/waiting with the service role so prior collection visits
+    // are visible even when client RLS cannot read them. Matches Collection Report.
+    if (finalSummaryText && Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      try {
+        const { data: customerRow } = await admin
+          .from("customers")
+          .select("customer_code,latitude,longitude")
+          .eq("customer_code", customerCode)
+          .maybeSingle();
+        const visitDistance = await loadVisitDistanceMetrics({
+          supabase: admin,
+          userId: user.id,
+          location: { latitude, longitude },
+          customer: customerRow || {},
+          savedAt: savedAtIso,
+        });
+        finalSummaryText = patchCollectionVisitSummaryVisitDistance(finalSummaryText, visitDistance);
+      } catch (distanceError) {
+        console.warn("Unable to recompute visit distance for WhatsApp summary:", distanceError);
+      }
     }
 
     const visitInsertBase = {
@@ -1078,7 +1103,7 @@ export async function POST(request) {
       probability_label: probabilityLabel || null,
       visit_number_for_day: authoritativeVisitNumber > 0 ? authoritativeVisitNumber : null,
       created_by: user.id,
-      saved_at: new Date().toISOString(),
+      saved_at: savedAtIso,
     };
 
     const visitInsertWithGps = {
@@ -1169,6 +1194,8 @@ export async function POST(request) {
       message: "Collection visit saved successfully",
       visitId: insertData?.id,
       gpsCaptured: Number.isFinite(latitude) && Number.isFinite(longitude),
+      summaryText: finalSummaryText || null,
+      visitNumberForDay: authoritativeVisitNumber > 0 ? authoritativeVisitNumber : null,
     });
   } catch (error) {
     console.error("Error saving collection visit:", error);

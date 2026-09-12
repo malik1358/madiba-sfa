@@ -15,7 +15,6 @@ import {
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -1994,7 +1993,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
           </div>
           <div className="moduleHeaderMeta">
             <AppLanguageSwitch language={language} setLanguage={setLanguage} />
-            <MostVisitedPages />
             <Link href="/" className="moduleBackLink">{t("dashboard")}</Link>
           </div>
         </div>

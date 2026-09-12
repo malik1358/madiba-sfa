@@ -137,7 +137,9 @@ export function findPreviousVisitDistanceAnchors(rows = [], savedAt = "") {
   let previousGpsRow = null;
   let previousVisitRow = null;
   previousRows.forEach((row) => {
-    if (hasGpsCoordinates(row)) previousGpsRow = row;
+    if (!hasGpsCoordinates(row)) return;
+    previousGpsRow = row;
+    // Match Collection Report: waiting anchors skip idle GPS pings and require GPS.
     if (!isIdleGpsPingTimelineRow(row)) previousVisitRow = row;
   });
 

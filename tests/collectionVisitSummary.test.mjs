@@ -5,6 +5,7 @@ import {
   buildCollectionVisitSummary,
   isPriorityCollectionVisit,
   patchCollectionVisitSummaryEnglishRemark,
+  patchCollectionVisitSummaryVisitDistance,
   patchCollectionVisitSummaryVisitNumber,
 } from "../app/lib/collectionVisitSummary.js";
 
@@ -67,6 +68,39 @@ Outstanding:
   const patched = patchCollectionVisitSummaryVisitNumber(stored, 11);
   assert.match(patched, /^Visit number today: 11\.$/m);
   assert.doesNotMatch(patched, /^Visit number today: 1\.$/m);
+});
+
+test("patchCollectionVisitSummaryVisitDistance replaces wrong waiting with report value", () => {
+  const stored = `Customer: 1216C Qaryah Sweileh Trading Company
+Queue priority: 1.
+Payment probability: High.
+Code: 1216C
+Salesman: Osama
+Outcome: Asked to come later
+Next visit: 12/09/2026.
+Visit number today: 6.
+Outstanding:
+0-30: 0
+31-60: 0
+61-90: 0
+91-120: 0
+>120: 13,332.97
+
+Distance from customer: 0.34 km
+Distance from previous: 27.69 km
+Est. waiting: 4h 22m`;
+
+  const patched = patchCollectionVisitSummaryVisitDistance(stored, {
+    distanceFromCustomerKm: 0.34,
+    distanceFromPreviousKm: 0.34,
+    waitingMinutes: 39,
+  });
+
+  assert.match(patched, /Distance from customer: 0\.34 km/);
+  assert.match(patched, /Distance from previous: 0\.34 km/);
+  assert.match(patched, /Est\. waiting: 39 min/);
+  assert.doesNotMatch(patched, /4h 22m/);
+  assert.doesNotMatch(patched, /27\.69 km/);
 });
 
 test("patchCollectionVisitSummaryEnglishRemark replaces stale English remarks", () => {

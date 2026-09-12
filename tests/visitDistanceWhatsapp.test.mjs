@@ -82,3 +82,51 @@ test("findPreviousVisitDistanceAnchors skips later rows and idle pings for waiti
   assert.equal(anchors.previousGpsRow.transactionType, "GPS_PING");
   assert.equal(anchors.previousVisitRow.transactionType, "VISIT_REPORT");
 });
+
+test("resolveVisitDistanceMetrics matches report waiting when prior collection visit is present", () => {
+  // Same customer revisited 39 minutes later at the same GPS (1216C case).
+  const previousCollection = {
+    savedAt: "2026-09-12T12:03:00.000Z",
+    transactionType: "COLLECTION_VISIT",
+    latitude: 24.72,
+    longitude: 46.72,
+  };
+  const metrics = resolveVisitDistanceMetrics({
+    location: { latitude: 24.72, longitude: 46.72 },
+    customer: { latitude: 24.72, longitude: 46.72 },
+    previousGpsRow: previousCollection,
+    previousVisitRow: previousCollection,
+    savedAt: "2026-09-12T12:42:00.000Z",
+  });
+
+  assert.equal(metrics.waitingMinutes, 39);
+  assert.equal(metrics.distanceFromPreviousKm, 0);
+  assert.match(formatVisitDistanceWhatsappLines(metrics)[3], /Est\. waiting: 39 min/);
+});
+
+test("findPreviousVisitDistanceAnchors prefers prior collection visit over older field visit", () => {
+  const rows = [
+    {
+      savedAt: "2026-09-12T08:20:00.000Z",
+      transactionType: "VISIT_REPORT",
+      latitude: 24.72,
+      longitude: 46.72,
+    },
+    {
+      savedAt: "2026-09-12T12:02:00.000Z",
+      transactionType: "COLLECTION_VISIT",
+      latitude: 24.50,
+      longitude: 46.50,
+    },
+    {
+      savedAt: "2026-09-12T12:03:00.000Z",
+      transactionType: "COLLECTION_VISIT",
+      latitude: 24.72,
+      longitude: 46.72,
+    },
+  ];
+
+  const anchors = findPreviousVisitDistanceAnchors(rows, "2026-09-12T12:42:00.000Z");
+  assert.equal(anchors.previousVisitRow.savedAt, "2026-09-12T12:03:00.000Z");
+  assert.equal(anchors.previousGpsRow.savedAt, "2026-09-12T12:03:00.000Z");
+});

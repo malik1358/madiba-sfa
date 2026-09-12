@@ -46,7 +46,7 @@ const TEXT = {
   sales: { en: "Sales", ar: "المبيعات" },
   profit: { en: "Profit", ar: "الربح" },
   profitHint: {
-    en: "Profit uses the GP amount from the sales file. Re-upload sales after this update if Profit is empty.",
+    en: "Profit uses the GP / Gross Profit / Profit amount column from the sales file. After this fix, re-upload sales. The upload page will show which column was read.",
     ar: "الربح من مبلغ GP في ملف المبيعات. أعد رفع المبيعات بعد هذا التحديث إذا كان الربح فارغاً.",
   },
 };

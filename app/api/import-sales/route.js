@@ -6,6 +6,12 @@ import { normalizeImportedItemName } from "../../lib/itemName.js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 import { runDailySupplierOrderEmailCycle } from "../../lib/dailySupplierOrderEmailServer.js";
 import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
+import {
+  findImportValue,
+  findProfitAmount,
+  parseImportNumber,
+  summarizeProfitImport,
+} from "../../lib/salesImportHeaders.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -26,26 +32,7 @@ function clean(value) {
 }
 
 function number(value) {
-  if (
-    value === undefined ||
-    value === null ||
-    value === ""
-  ) {
-    return 0;
-  }
-
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
-
-  const cleaned = String(value)
-    .replace(/,/g, "")
-    .replace(/%/g, "")
-    .trim();
-
-  const parsed = Number(cleaned);
-
-  return Number.isFinite(parsed) ? parsed : 0;
+  return parseImportNumber(value);
 }
 
 function excelDate(value) {
@@ -102,21 +89,7 @@ function excelDate(value) {
 }
 
 function findValue(row, possibilities) {
-  const keys = Object.keys(row);
-
-  for (const possibility of possibilities) {
-    const match = keys.find(
-      (key) =>
-        key.trim().toLowerCase() ===
-        possibility.trim().toLowerCase()
-    );
-
-    if (match) {
-      return row[match];
-    }
-  }
-
-  return null;
+  return findImportValue(row, possibilities);
 }
 
 function pickLatestCustomerRow(existing, candidate) {
@@ -742,14 +715,7 @@ export async function POST(request) {
           ),
 
           profit_amount: number(
-            findValue(row, [
-              "GP",
-              "Gross Profit",
-              "Gross Profit Amount",
-              "Profit",
-              "Profit Amount",
-              "GP Amount",
-            ])
+            findProfitAmount(row)
           ),
 
           first_purchase_date:
@@ -796,6 +762,13 @@ export async function POST(request) {
         "No valid sales rows were detected in the Excel file."
       );
     }
+
+    const profitImport = summarizeProfitImport(rows, mappedRows);
+    console.info("Sales import profit column", {
+      profitColumn: profitImport.profitColumn,
+      profitRows: profitImport.profitRows,
+      headers: profitImport.excelHeaders,
+    });
 
     /* ========================================================
        7. DATA QUALITY VALIDATION
@@ -1248,6 +1221,11 @@ export async function POST(request) {
 
       liveMaxDate:
         liveBatch?.max_transaction_date || maxDate,
+
+      profitColumn: profitImport.profitColumn,
+      profitRows: profitImport.profitRows,
+      profitSum: profitImport.profitSum,
+      excelHeaders: profitImport.excelHeaders,
 
       message: mergedIntoExisting
         ? `Sales data updated for ${uploadDates.length} date(s). Other dates were kept unchanged.`

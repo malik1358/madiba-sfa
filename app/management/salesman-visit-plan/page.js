@@ -26,20 +26,28 @@ const TEXT = {
     ar: "أعلى توقفات احتمالاً للمبيعات والتحصيل، مرتبة لكل مندوب.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
-  loading: { en: "Building visit plans...", ar: "جاري بناء خطط الزيارات..." },
+  loading: { en: "Loading saved visit plan...", ar: "جاري تحميل خطة الزيارة المحفوظة..." },
   refresh: { en: "Refresh", ar: "تحديث" },
   salesman: { en: "Salesman", ar: "المندوب" },
   allSalesmen: { en: "All salesmen", ar: "كل المندوبين" },
   visitsPerSalesman: { en: "Visits per salesman", ar: "زيارات لكل مندوب" },
   previewEmail: { en: "Send email now", ar: "إرسال البريد الآن" },
+  rebuildSnapshot: { en: "Rebuild midnight snapshot", ar: "إعادة بناء لقطة منتصف الليل" },
+  rebuilding: { en: "Rebuilding...", ar: "جاري إعادة البناء..." },
+  rebuilt: { en: "Midnight snapshot rebuilt and saved.", ar: "تم إعادة بناء لقطة منتصف الليل وحفظها." },
   sending: { en: "Sending...", ar: "جاري الإرسال..." },
   accessDenied: {
     en: "You do not have access to salesman visit plans.",
     ar: "ليس لديك صلاحية لخطط زيارات المندوبين.",
   },
   previewBanner: {
-    en: "Salesmen can open their own plan. Daily email sends each salesman's ranked stops plus an admin digest.",
-    ar: "يمكن للمندوبين فتح خطتهم. البريد اليومي يرسل توقفات كل مندوب مع ملخص للأدمن.",
+    en: "Plans are built once at midnight KSA and saved. This page only shows the ready plan — it does not rebuild live.",
+    ar: "تُبنى الخطط مرة عند منتصف الليل بتوقيت السعودية وتُحفظ. هذه الصفحة تعرض الخطة الجاهزة فقط — دون إعادة بناء مباشرة.",
+  },
+  builtAt: { en: "Built at", ar: "بُنيت في" },
+  notReady: {
+    en: "Tonight's visit plan is not ready yet. It is built automatically at midnight KSA.",
+    ar: "خطة زيارة الليلة غير جاهزة بعد. تُبنى تلقائياً عند منتصف الليل بتوقيت السعودية.",
   },
   flags: { en: "Feature flags", ar: "أعلام الميزة" },
   salesmanAccess: { en: "Salesman page access", ar: "وصول صفحة المندوب" },
@@ -75,6 +83,21 @@ function formatMoney(value) {
   return number.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
+function formatBuiltAt(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const parsed = Date.parse(text);
+  if (!Number.isFinite(parsed)) return text;
+  return new Date(parsed).toLocaleString("en-GB", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function scoreClass(label) {
   const normalized = String(label || "").trim().toLowerCase();
   if (normalized === "high") return "moduleBiMonthCell--up";
@@ -95,16 +118,24 @@ export default function SalesmanVisitPlanPage() {
   const t = translate(language, TEXT);
   const { access, loading: accessLoading } = useModuleAccess();
   const supabaseClient = getSupabaseClient();
+  const isAdmin = String(access?.role || "").toLowerCase() === "admin";
 
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [plans, setPlans] = useState([]);
+  const [allPlans, setAllPlans] = useState([]);
   const [accessMeta, setAccessMeta] = useState(null);
   const [salesmanFilter, setSalesmanFilter] = useState("");
   const [visitLimit, setVisitLimit] = useState("12");
-  const [summary, setSummary] = useState({ salesmanCount: 0, visitCount: 0, reportDate: "" });
+  const [summary, setSummary] = useState({
+    salesmanCount: 0,
+    visitCount: 0,
+    reportDate: "",
+    builtAt: "",
+    missingSnapshot: false,
+  });
 
   usePopupMessages({ error, message });
 
@@ -128,33 +159,34 @@ export default function SalesmanVisitPlanPage() {
       const params = new URLSearchParams({
         limit: String(Math.max(1, Math.min(50, Number(visitLimit) || 12))),
       });
-      if (salesmanFilter) params.set("salesman", salesmanFilter);
 
       const { response, payload: data } = await fetchJsonWithTimeout(
         `/api/admin/salesman-visit-plan?${params.toString()}`,
         {
           headers: { Authorization: `Bearer ${session.access_token}` },
         },
-        120000,
+        30000,
       );
 
       if (!response.ok || !data?.success) {
         throw new Error(data?.error || "Unable to load visit plans.");
       }
-      setPlans(data.plans || []);
+      setAllPlans(data.plans || []);
       setAccessMeta(data.access || null);
       setSummary({
         salesmanCount: data.salesmanCount || 0,
         visitCount: data.visitCount || 0,
         reportDate: data.reportDate || "",
+        builtAt: data.builtAt || "",
+        missingSnapshot: Boolean(data.missingSnapshot),
       });
     } catch (err) {
-      setPlans([]);
+      setAllPlans([]);
       setError(err.message || "Unable to load visit plans.");
     } finally {
       setLoading(false);
     }
-  }, [salesmanFilter, visitLimit]);
+  }, [visitLimit]);
 
   useEffect(() => {
     if (accessLoading) return;
@@ -166,13 +198,19 @@ export default function SalesmanVisitPlanPage() {
   }, [accessLoading, canAccess, loadPlans]);
 
   const salesmanOptions = useMemo(() => (
-    [...plans]
+    [...allPlans]
       .map((plan) => ({
         code: plan.salesmanCode,
         label: planLabel(plan),
       }))
       .sort((a, b) => a.label.localeCompare(b.label))
-  ), [plans]);
+  ), [allPlans]);
+
+  const plans = useMemo(() => {
+    if (!salesmanFilter) return allPlans;
+    const code = String(salesmanFilter || "").trim().toUpperCase();
+    return allPlans.filter((plan) => String(plan.salesmanCode || "").trim().toUpperCase() === code);
+  }, [allPlans, salesmanFilter]);
 
   const totals = useMemo(() => plans.reduce((acc, plan) => {
     acc.dueAmount += Number(plan.totals?.dueAmount || 0);
@@ -201,6 +239,7 @@ export default function SalesmanVisitPlanPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
+            action: "email",
             salesman: salesmanFilter || undefined,
             limit: Math.max(1, Math.min(50, Number(visitLimit) || 12)),
             forcePreview: false,
@@ -209,7 +248,7 @@ export default function SalesmanVisitPlanPage() {
         120000,
       );
 
-      if (data?.skipped && data?.reason === "email_disabled_until_approved") {
+      if (data?.skipped && (data?.reason === "email_disabled_until_approved" || data?.reason === "email_disabled")) {
         setMessage(t("emailSkipped"));
         return;
       }
@@ -225,6 +264,45 @@ export default function SalesmanVisitPlanPage() {
       setError(err.message || "Unable to send preview email.");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function rebuildSnapshot() {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    setRebuilding(true);
+    setError("");
+    setMessage("");
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const { response, payload: data } = await fetchJsonWithTimeout(
+        "/api/admin/salesman-visit-plan",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "rebuild",
+            limit: Math.max(1, Math.min(50, Number(visitLimit) || 12)),
+          }),
+        },
+        120000,
+      );
+
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || "Unable to rebuild visit plan snapshot.");
+      }
+      setMessage(t("rebuilt"));
+      await loadPlans();
+    } catch (err) {
+      setError(err.message || "Unable to rebuild visit plan snapshot.");
+    } finally {
+      setRebuilding(false);
     }
   }
 
@@ -267,6 +345,13 @@ export default function SalesmanVisitPlanPage() {
 
         <div className="moduleHint" role="status">
           {t("previewBanner")}
+          {summary.builtAt ? (
+            <>
+              {" "}
+              <strong>{t("builtAt")}:</strong> {formatBuiltAt(summary.builtAt)}
+              {summary.reportDate ? ` (${summary.reportDate})` : ""}
+            </>
+          ) : null}
         </div>
 
         <section className="moduleFilterRow" style={{ marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
@@ -294,22 +379,29 @@ export default function SalesmanVisitPlanPage() {
               onChange={(event) => setVisitLimit(event.target.value)}
             />
           </label>
-          <button type="button" className="moduleInlineButton" onClick={loadPlans} disabled={loading}>
+          <button type="button" className="moduleInlineButton" onClick={loadPlans} disabled={loading || rebuilding}>
             {loading ? t("loading") : t("refresh")}
           </button>
-          <button type="button" className="moduleInlineButton" onClick={sendPreviewEmail} disabled={sending || loading}>
-            {sending ? t("sending") : t("previewEmail")}
-          </button>
+          {isAdmin ? (
+            <>
+              <button type="button" className="moduleInlineButton" onClick={sendPreviewEmail} disabled={sending || loading || rebuilding || summary.missingSnapshot}>
+                {sending ? t("sending") : t("previewEmail")}
+              </button>
+              <button type="button" className="moduleInlineButton" onClick={rebuildSnapshot} disabled={rebuilding || loading}>
+                {rebuilding ? t("rebuilding") : t("rebuildSnapshot")}
+              </button>
+            </>
+          ) : null}
         </section>
 
         <section className="moduleMetricGrid">
           <article className="moduleMetricCard">
             <span>{t("salesmen")}</span>
-            <strong>{summary.salesmanCount}</strong>
+            <strong>{salesmanFilter ? plans.length : summary.salesmanCount}</strong>
           </article>
           <article className="moduleMetricCard">
             <span>{t("visits")}</span>
-            <strong>{summary.visitCount}</strong>
+            <strong>{totals.visits}</strong>
           </article>
           <article className="moduleMetricCard">
             <span>{t("due")}</span>
@@ -336,7 +428,9 @@ export default function SalesmanVisitPlanPage() {
 
         {loading ? <div className="moduleLoading">{t("loading")}</div> : null}
 
-        {!loading && plans.length === 0 ? <div className="moduleHint">{t("noPlans")}</div> : null}
+        {!loading && summary.missingSnapshot ? <div className="moduleHint">{t("notReady")}</div> : null}
+
+        {!loading && !summary.missingSnapshot && plans.length === 0 ? <div className="moduleHint">{t("noPlans")}</div> : null}
 
         {!loading && plans.map((plan) => (
           <section key={plan.salesmanCode} className="moduleSection" style={{ marginTop: 16 }}>

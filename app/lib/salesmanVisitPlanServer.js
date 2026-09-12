@@ -3,9 +3,11 @@ import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import { getMailerConfig, isEmailConfigured, normalizeDeliverableEmail, sendEmail } from "./mailer.js";
 import {
   DEFAULT_VISITS_PER_SALESMAN,
+  SALESMAN_VISIT_PLAN_SNAPSHOT_KEY,
   buildSalesmanVisitPlanDigestEmail,
   buildSalesmanVisitPlanEmail,
   daysSinceDate,
+  filterVisitPlanSnapshot,
   groupVisitPlansBySalesman,
   isSalesmanVisitPlanEmailEnabled,
   isSalesmanVisitPlanSendToUsersEnabled,
@@ -164,6 +166,103 @@ export function buildSalesmanVisitPlanPayload({
     plans,
     warnings,
   };
+}
+
+export async function readSalesmanVisitPlanSnapshot(admin) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", SALESMAN_VISIT_PLAN_SNAPSHOT_KEY)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw new Error(formatSupabaseError(error));
+  }
+  if (!data?.setting_value) return null;
+
+  try {
+    const parsed = JSON.parse(String(data.setting_value));
+    if (!parsed || !Array.isArray(parsed.plans)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeSalesmanVisitPlanSnapshot(admin, payload) {
+  const snapshot = {
+    version: 1,
+    builtAt: new Date().toISOString(),
+    reportDate: payload.reportDate || getKsaDateString(),
+    visitLimit: payload.visitLimit || DEFAULT_VISITS_PER_SALESMAN,
+    salesmanCount: payload.salesmanCount || 0,
+    visitCount: payload.visitCount || 0,
+    warnings: payload.warnings || [],
+    plans: payload.plans || [],
+  };
+
+  const { error } = await admin.from("system_settings").upsert({
+    setting_key: SALESMAN_VISIT_PLAN_SNAPSHOT_KEY,
+    setting_value: JSON.stringify(snapshot),
+  }, { onConflict: "setting_key" });
+
+  if (error) throw new Error(formatSupabaseError(error));
+  return snapshot;
+}
+
+export async function loadSalesmanVisitPlanFromSnapshot(admin, {
+  salesmanCode = "",
+  limit = 0,
+} = {}) {
+  const snapshot = await readSalesmanVisitPlanSnapshot(admin);
+  return filterVisitPlanSnapshot(snapshot, { salesmanCode, limit });
+}
+
+/** Heavy build used only by midnight cron (or admin rebuild). */
+export async function buildAndStoreSalesmanVisitPlanSnapshot(admin, {
+  actorUserId,
+  limit = DEFAULT_VISITS_PER_SALESMAN,
+} = {}) {
+  if (!actorUserId) throw new Error("Actor user id is required to build visit plans.");
+
+  const { buildVisibleCustomersForScope } = await import("../api/customers/visible/route.js");
+  const {
+    fetchOutstandingAndCollectionRecords,
+    getSalesScope,
+  } = await import("../api/payment-collections/route.js");
+
+  const [scope, salesmanProfiles] = await Promise.all([
+    getSalesScope(admin, actorUserId),
+    loadSalesmanVisitPlanProfiles(admin),
+  ]);
+
+  const visibleScope = {
+    ...scope,
+    hasAllAccess: true,
+    visibleSalesmanCodes: [],
+    identitySearchPatterns: scope.identitySearchPatterns || [],
+    outstandingSalesmanIdentities: scope.outstandingSalesmanIdentities || [],
+  };
+
+  const [visibleResult, collectionRecords] = await Promise.all([
+    buildVisibleCustomersForScope(admin, visibleScope, {
+      includeRecentSales: true,
+      includeOutstanding: true,
+      excludeBuildingMaterial: true,
+    }),
+    fetchOutstandingAndCollectionRecords(admin, scope),
+  ]);
+
+  const payload = buildSalesmanVisitPlanPayload({
+    visibleCustomers: visibleResult?.customers || [],
+    collectionRecords: collectionRecords || [],
+    salesmanProfiles,
+    limit,
+    warnings: visibleResult?.warnings || [],
+  });
+
+  return writeSalesmanVisitPlanSnapshot(admin, payload);
 }
 
 export async function sendSalesmanVisitPlanEmailsFromPayload(payload, {

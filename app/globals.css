@@ -6760,6 +6760,104 @@ th:has(.moduleTableColumnFilterInput) {
   color: #0f4c5c;
 }
 
+.moduleBiDashKpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.moduleBiDashKpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f0fdfa 0%, #e0f2fe 100%);
+  border: 1px solid #99f6e4;
+  color: #0f4c5c;
+}
+
+.moduleBiDashKpi span,
+.moduleBiDashKpi em {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-style: normal;
+  opacity: 0.78;
+}
+
+.moduleBiDashKpi strong {
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.moduleBiDashKpi--up {
+  background: linear-gradient(180deg, #dcfce7 0%, #bbf7d0 100%);
+  border-color: #86efac;
+  color: #14532d;
+}
+
+.moduleBiDashKpi--down {
+  background: linear-gradient(180deg, #fee2e2 0%, #fecaca 100%);
+  border-color: #fca5a5;
+  color: #7f1d1d;
+}
+
+.moduleBiDashKpi--watch {
+  background: linear-gradient(180deg, #ffedd5 0%, #fed7aa 100%);
+  border-color: #fdba74;
+  color: #9a3412;
+}
+
+.moduleBiDashLaunch {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.moduleBiDashLaunchCard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 92px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 16px;
+  background: #0f4c5c;
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.moduleBiDashLaunchCard span {
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.88;
+}
+
+.moduleBiDashLaunchCard strong {
+  font-size: 22px;
+}
+
+.moduleBiDashLaunchCard--teal {
+  background: #0e7490;
+}
+
+.moduleBiDashLaunchCard--green {
+  background: #166534;
+}
+
+.moduleBiDashLaunchCard--navy {
+  background: #1e3a5f;
+}
+
+.moduleBiDashLaunchCard--orange {
+  background: #c2410c;
+}
+
 .moduleBiTableWrap {
   overflow: auto;
   max-height: min(70dvh, 720px);

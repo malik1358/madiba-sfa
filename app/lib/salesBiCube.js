@@ -5,7 +5,7 @@ import {
 } from "./categoryGrowth.js";
 
 export const SALES_BI_CUBE_KEY = "sales_bi_cube_v1";
-export const SALES_BI_CUBE_VERSION = 1;
+export const SALES_BI_CUBE_VERSION = 2;
 export const SALES_BI_TABLE = "sales_bi_monthly";
 
 const CUBE_DIMENSION_FIELDS = [
@@ -139,6 +139,7 @@ export function serializeSalesBiCube({ facts = [], batchId = "", builtAt = "", s
 
 export function deserializeSalesBiCube(payload) {
   if (!payload || typeof payload !== "object") return null;
+  if (Number(payload.version || 0) !== SALES_BI_CUBE_VERSION) return null;
   const facts = Array.isArray(payload.facts) ? payload.facts : [];
   return {
     version: Number(payload.version || 0),

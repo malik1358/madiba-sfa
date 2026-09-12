@@ -288,9 +288,16 @@ export function scoreVisitPlanCustomer(row = {}, todayIso = new Date().toISOStri
     area: String(row.area || "").trim(),
     recent_sales_value: Math.max(toNumber(row.recent_sales_value), 0),
     average_monthly_purchase: Math.max(toNumber(row.average_monthly_purchase), 0),
+    last_visit_date: String(row.last_visit_date || row.latest_collection?.saved_at || "").trim().slice(0, 10) || null,
     days_since_last_invoice: row.days_since_last_invoice == null
       ? daysSinceDate(row.latest_transaction_date || row.last_invoice_date, todayIso)
       : Math.max(0, toNumber(row.days_since_last_invoice)),
+    days_since_last_visit: row.days_since_last_visit == null
+      ? daysSinceDate(
+        row.last_visit_date || row.latest_collection?.saved_at,
+        todayIso,
+      )
+      : Math.max(0, toNumber(row.days_since_last_visit)),
     outstanding_0_30,
     outstanding_30_60,
     outstanding_61_90,
@@ -512,18 +519,20 @@ export function buildSalesmanVisitPlanEmail(plan, {
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;">${escapeHtml(visit.rank)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;"><a href="${escapeHtml(auditUrl)}" style="color:#0f4c5c;font-weight:700;text-decoration:underline;">${customerLabel}</a><br/><span style="color:#64748b;font-size:12px;">${escapeHtml(visit.customer_code || "")}</span></td>
       <td style="border:1px solid #c5d4de;padding:6px;">${escapeHtml([visit.city, visit.area].filter(Boolean).join(" / ") || "-")}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:center;">${escapeHtml(visit.days_since_last_invoice == null ? "-" : visit.days_since_last_invoice)}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:center;">${escapeHtml(visit.days_since_last_visit == null ? "-" : visit.days_since_last_visit)}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.recent_sales_value))}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.average_monthly_purchase))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${focusCellStyle(visit.focus)}">${escapeHtml(visit.focus)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${scoreCellStyle(visit.combined_label)}">${escapeHtml(visit.combined_score)} · ${escapeHtml(visit.combined_label)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${scoreCellStyle(visit.sales_label)}">${escapeHtml(visit.sales_score)} · ${escapeHtml(visit.sales_label)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${scoreCellStyle(visit.collection_label)}">${escapeHtml(visit.collection_score)} · ${escapeHtml(visit.collection_label)}</td>
-      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.recent_sales_value))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.total_due_amount))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.outstanding_0_30))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.outstanding_30_60))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.outstanding_61_90))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.outstanding_91_120))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.outstanding_above_120))}</td>
-      <td style="border:1px solid #c5d4de;padding:6px;text-align:center;">${escapeHtml(visit.days_since_last_invoice == null ? "-" : visit.days_since_last_invoice)}</td>
     </tr>`;
   }).join("");
 
@@ -556,33 +565,36 @@ export function buildSalesmanVisitPlanEmail(plan, {
             <th style="border:1px solid #0c3d4a;padding:8px;">#</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Customer</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">City / Area</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;">Days from last invoice</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;">Days from last visit</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;">Recent 6M value</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;">Avg monthly purchase</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Focus</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Combined</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Sales</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Collection</th>
-            <th style="border:1px solid #0c3d4a;padding:8px;">Recent 6M</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Due</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">0-30</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">31-60</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">61-90</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">91-120</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">&gt;120</th>
-            <th style="border:1px solid #0c3d4a;padding:8px;">Days since invoice</th>
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml || `<tr><td colspan="15" style="padding:12px;border:1px solid #c5d4de;">No recommended visits.</td></tr>`}
+          ${rowsHtml || `<tr><td colspan="17" style="padding:12px;border:1px solid #c5d4de;">No recommended visits.</td></tr>`}
         </tbody>
         <tfoot>
           <tr style="background:#e8f1f4;font-weight:700;">
-            <td colspan="8" style="border:1px solid #c5d4de;padding:6px;">Total</td>
+            <td colspan="5" style="border:1px solid #c5d4de;padding:6px;">Total</td>
+            <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.recentSales || 0))}</td>
+            <td colspan="5" style="border:1px solid #c5d4de;padding:6px;"></td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.dueAmount || 0))}</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_0_30 || 0))}</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_30_60 || 0))}</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_61_90 || 0))}</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_91_120 || 0))}</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_above_120 || 0))}</td>
-            <td style="border:1px solid #c5d4de;padding:6px;"></td>
           </tr>
         </tfoot>
       </table>
@@ -598,6 +610,7 @@ export function buildSalesmanVisitPlanEmail(plan, {
     "",
     ...visits.map((visit) => [
       `${visit.rank}. ${visit.customer_name || visit.customer_code} (${visit.customer_code})`,
+      `  Days invoice ${visit.days_since_last_invoice ?? "-"}; days visit ${visit.days_since_last_visit ?? "-"}; recent 6M ${formatMoney(visit.recent_sales_value)}; avg monthly ${formatMoney(visit.average_monthly_purchase)}`,
       `  Focus ${visit.focus}; combined ${visit.combined_score} ${visit.combined_label}`,
       `  Sales ${visit.sales_score}; collection ${visit.collection_score}; due ${formatMoney(visit.total_due_amount)}`,
       `  Buckets 0-30 ${formatMoney(visit.outstanding_0_30)} | 31-60 ${formatMoney(visit.outstanding_30_60)} | 61-90 ${formatMoney(visit.outstanding_61_90)} | 91-120 ${formatMoney(visit.outstanding_91_120)} | >120 ${formatMoney(visit.outstanding_above_120)}`,

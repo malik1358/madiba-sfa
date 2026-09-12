@@ -14,6 +14,11 @@ import {
   resolveSalesmanVisitPlanDigestRecipients,
   salesmanVisitPlanDisplayName,
 } from "./salesmanVisitPlan.js";
+import {
+  MY_DAY_VISIT_LOOKBACK_DAYS,
+  applyLatestVisitFromLogRow,
+  visitReportsSinceIso,
+} from "./myDayPlannerLoad.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 function normalizeCode(value) {
@@ -62,20 +67,69 @@ export async function loadSalesmanVisitPlanProfiles(admin) {
   });
 }
 
-export function mergeVisitPlanCustomerCandidates(visibleCustomers, collectionRecords, todayIso = new Date().toISOString()) {
+function sortTimestamp(value) {
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+export async function loadLatestVisitDatesByCustomer(admin, {
+  lookbackDays = MY_DAY_VISIT_LOOKBACK_DAYS,
+} = {}) {
+  const latestVisitByCustomer = new Map();
+  const nextVisitByCustomer = new Map();
+  const sinceIso = visitReportsSinceIso(new Date(), lookbackDays);
+  const pageSize = 1000;
+  let from = 0;
+
+  while (from < 25000) {
+    const { data, error } = await admin
+      .from("daily_activity_logs")
+      .select("note,created_at")
+      .eq("entry_type", "VISIT_REPORT")
+      .gte("created_at", sinceIso)
+      .order("created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      if (isMissingTableError(error)) return latestVisitByCustomer;
+      throw new Error(formatSupabaseError(error));
+    }
+
+    const rows = data || [];
+    rows.forEach((row) => {
+      applyLatestVisitFromLogRow(latestVisitByCustomer, nextVisitByCustomer, row, sortTimestamp);
+    });
+
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return latestVisitByCustomer;
+}
+
+export function mergeVisitPlanCustomerCandidates(
+  visibleCustomers,
+  collectionRecords,
+  todayIso = new Date().toISOString(),
+  lastVisitByCustomer = null,
+) {
   const byCode = new Map();
+  const visitMap = lastVisitByCustomer instanceof Map ? lastVisitByCustomer : new Map();
 
   (visibleCustomers || []).forEach((customer) => {
     const code = normalizeCode(customer?.customer_code);
     if (!code) return;
+    const lastVisitDate = visitMap.get(code) || customer.last_visit_date || null;
     byCode.set(code, {
       ...customer,
       customer_code: code,
       salesman_code: normalizeCode(customer.current_salesman_code || customer.salesman_code),
+      last_visit_date: lastVisitDate,
       days_since_last_invoice: daysSinceDate(
         customer.latest_transaction_date || customer.last_invoice_date,
         todayIso,
       ),
+      days_since_last_visit: daysSinceDate(lastVisitDate, todayIso),
     });
   });
 
@@ -92,6 +146,8 @@ export function mergeVisitPlanCustomerCandidates(visibleCustomers, collectionRec
     if (!code) return;
     const due = dueByCode.get(code);
     const existing = byCode.get(code) || {};
+    const collectionVisit = due?.latest_collection?.saved_at || record.latest_collection?.saved_at || null;
+    const lastVisitDate = visitMap.get(code) || existing.last_visit_date || collectionVisit || null;
     byCode.set(code, {
       ...existing,
       ...record,
@@ -111,6 +167,8 @@ export function mergeVisitPlanCustomerCandidates(visibleCustomers, collectionRec
       highest_monthly_sales: Math.max(Number(existing.highest_monthly_sales || 0), 0),
       days_since_last_invoice: existing.days_since_last_invoice
         ?? daysSinceDate(existing.latest_transaction_date, todayIso),
+      last_visit_date: lastVisitDate,
+      days_since_last_visit: daysSinceDate(lastVisitDate, todayIso),
       total_due_amount: Number(due?.total_due_amount || 0),
       max_overdue_days: Number(due?.max_overdue_days || 0),
       due_invoice_count: Number(due?.due_invoice_count || 0),
@@ -128,6 +186,7 @@ export function mergeVisitPlanCustomerCandidates(visibleCustomers, collectionRec
 
   dueByCode.forEach((due, code) => {
     if (byCode.has(code)) return;
+    const lastVisitDate = visitMap.get(code) || due?.latest_collection?.saved_at || null;
     byCode.set(code, {
       ...due,
       customer_code: code,
@@ -136,6 +195,8 @@ export function mergeVisitPlanCustomerCandidates(visibleCustomers, collectionRec
       average_monthly_purchase: 0,
       highest_monthly_sales: 0,
       days_since_last_invoice: null,
+      last_visit_date: lastVisitDate,
+      days_since_last_visit: daysSinceDate(lastVisitDate, todayIso),
     });
   });
 
@@ -150,8 +211,14 @@ export function buildSalesmanVisitPlanPayload({
   limit = DEFAULT_VISITS_PER_SALESMAN,
   todayIso = new Date().toISOString(),
   warnings = [],
+  lastVisitByCustomer = null,
 } = {}) {
-  const candidates = mergeVisitPlanCustomerCandidates(visibleCustomers, collectionRecords, todayIso);
+  const candidates = mergeVisitPlanCustomerCandidates(
+    visibleCustomers,
+    collectionRecords,
+    todayIso,
+    lastVisitByCustomer,
+  );
   const filterCode = normalizeCode(salesmanCode);
   const filtered = filterCode
     ? candidates.filter((row) => normalizeCode(row.salesman_code || row.current_salesman_code) === filterCode)
@@ -250,13 +317,14 @@ export async function buildAndStoreSalesmanVisitPlanSnapshot(admin, {
     outstandingSalesmanIdentities: scope.outstandingSalesmanIdentities || [],
   };
 
-  const [visibleResult, collectionRecords] = await Promise.all([
+  const [visibleResult, collectionRecords, lastVisitByCustomer] = await Promise.all([
     buildVisibleCustomersForScope(admin, visibleScope, {
       includeRecentSales: true,
       includeOutstanding: true,
       excludeBuildingMaterial: true,
     }),
     fetchOutstandingAndCollectionRecords(admin, scope),
+    loadLatestVisitDatesByCustomer(admin),
   ]);
 
   const payload = buildSalesmanVisitPlanPayload({
@@ -265,6 +333,7 @@ export async function buildAndStoreSalesmanVisitPlanSnapshot(admin, {
     salesmanProfiles,
     limit,
     warnings: visibleResult?.warnings || [],
+    lastVisitByCustomer,
   });
 
   return writeSalesmanVisitPlanSnapshot(admin, payload);

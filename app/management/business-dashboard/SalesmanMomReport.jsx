@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import BiExcelHead, { useBiExcelFilters } from "./BiExcelHead";
 import ExportableTable from "../../components/ExportableTable";
 import CategoryGrowthFilters, { filterGrowthRows } from "./CategoryGrowthFilters";
 import {
@@ -169,26 +170,46 @@ function MomScorecardTable({
   const priorMonthHeader = priorCompleteMonth
     ? `${t("priorMonth")} (${monthLabel(priorCompleteMonth, "")})`
     : t("priorMonth");
+  const keys = useMemo(
+    () => ["name", ...(showPeople ? ["people"] : []), "latest", "prior", "mom", "avgMom", "up", "down", "streak", "mtd", "signal"],
+    [showPeople],
+  );
+  const valueOf = useCallback((row, key) => {
+    if (key === "name") return row.label || "-";
+    if (key === "people") return String(row.memberCount || 0);
+    if (key === "latest") return row.latestCompleteAmount ? formatMoneyAmount(row.latestCompleteAmount) : "—";
+    if (key === "prior") return row.priorMonthAmount ? formatMoneyAmount(row.priorMonthAmount) : "—";
+    if (key === "mom") return formatGrowthPercent(row.momPercent);
+    if (key === "avgMom") return formatGrowthPercent(row.avgMomPercent);
+    if (key === "up") return String(row.upMonths ?? "—");
+    if (key === "down") return String(row.downMonths ?? "—");
+    if (key === "streak") return streakLabel(row);
+    if (key === "mtd") return row.mtdAmount ? formatMoneyAmount(row.mtdAmount) : "—";
+    return row.trajectory?.label || "—";
+  }, []);
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
   return (
     <ExportableTable filename={filename} sheetName={sheetName} className="moduleTableWrap moduleBiTableWrap">
       <table className="moduleTable moduleBiTable">
         <thead>
           <tr>
-            <th>{nameHeader}</th>
-            {showPeople ? <th>{peopleHeader}</th> : null}
-            <th>{lastMonthHeader}</th>
-            <th>{priorMonthHeader}</th>
-            <th>{t("mom")}</th>
-            <th>{t("avgMom")}</th>
-            <th>{t("upMonths")}</th>
-            <th>{t("downMonths")}</th>
-            <th>{t("streak")}</th>
-            <th>{t("mtd")}</th>
-            <th>{t("signal")}</th>
+            <BiExcelHead label={nameHeader} filterKey="name" options={options} filters={filters} onChange={setFilter} />
+            {showPeople ? (
+              <BiExcelHead label={peopleHeader} filterKey="people" options={options} filters={filters} onChange={setFilter} />
+            ) : null}
+            <BiExcelHead label={lastMonthHeader} filterKey="latest" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={priorMonthHeader} filterKey="prior" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("mom")} filterKey="mom" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("avgMom")} filterKey="avgMom" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("upMonths")} filterKey="up" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("downMonths")} filterKey="down" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("streak")} filterKey="streak" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("mtd")} filterKey="mtd" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("signal")} filterKey="signal" options={options} filters={filters} onChange={setFilter} />
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {visibleRows.map((row) => (
             <tr key={row.label}>
               <td>{row.label}</td>
               {showPeople ? <td>{row.memberCount || 0}</td> : null}

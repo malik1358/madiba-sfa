@@ -32,7 +32,7 @@ import {
   regionPriceMapFor,
   resolveOrderPricingRegion,
 } from "../../lib/regionalPricing";
-import { DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, resolveOverdueDaysFromDueDate, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, resolveOverdueDaysFromDueDate, resolveUploadedOutstandingSalesman, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { fetchOutstandingCached, subscribeOutstandingCacheCleared } from "../../lib/mobileDataCache";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 
@@ -279,6 +279,14 @@ function CustomerAuditPageContent() {
     return visibleOutstandingBucketLabels(baseLabels, outstandingInfo.customer?.buckets);
   }, [outstandingInfo.bucketLabels, outstandingInfo.customer]);
 
+  const outstandingSalesman = useMemo(
+    () => resolveUploadedOutstandingSalesman({
+      customerInvoices: outstandingInfo.customerInvoices,
+      aggregateRowSalesman: outstandingInfo.customer?.salesman,
+    }),
+    [outstandingInfo.customer?.salesman, outstandingInfo.customerInvoices],
+  );
+
   useEffect(() => {
     async function loadPrices() {
       try {
@@ -450,7 +458,11 @@ function CustomerAuditPageContent() {
 
         <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
 
-        <CustomerHeader customer={selectedCustomer} analytics={analytics} />
+        <CustomerHeader
+          customer={selectedCustomer}
+          analytics={analytics}
+          outstandingSalesman={outstandingSalesman}
+        />
 
         <section className="auditSection">
           <div className="auditTransactionHeader">

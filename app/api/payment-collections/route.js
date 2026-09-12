@@ -22,7 +22,7 @@ import {
   hydrateOutstandingInvoices,
   isPlaceholderSalesmanValue,
   pickLongestCustomerName,
-  pickOutstandingSalesmanName,
+  resolveUploadedOutstandingSalesman,
   customerAccountCodesMatch,
   resolveCustomerAccountCode,
   resolveCollectionOutstandingBuckets,
@@ -804,7 +804,6 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     const legalTransfer = findLegalTransferForCustomer(legalTransfers, customer.customer_code);
 
     // The uploaded outstanding file decides who collects when invoice salesman is present.
-    const uploadSalesman = pickOutstandingSalesmanName(customerInvoices);
     if (!customerMatchesCollectionScope({
       customer,
       customerInvoices,
@@ -827,6 +826,18 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       invoices: customerInvoices,
       todayIso,
     });
+    const hasUploadedOutstandingWorkbook = outstandingRows.length > 0;
+    const salesmanFromUpload = resolveUploadedOutstandingSalesman({
+      customerInvoices,
+      aggregateRowSalesman: aggregateRowSalesmanByCode.get(customer.customer_code)
+        || String(uploadedOutstanding?.salesman || "").trim(),
+    });
+    // When an outstanding workbook is loaded, salesman comes from that file only —
+    // not from customer-master / last sales-invoice assignment.
+    const salesmanFromMaster = !hasUploadedOutstandingWorkbook
+      && !isPlaceholderSalesmanValue(customer.current_salesman_code)
+      ? (salesmanMap.get(normalizeCode(customer.current_salesman_code)) || customer.current_salesman_code)
+      : "";
 
     records.push({
       customer_code: customer.customer_code,
@@ -836,10 +847,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
         customer.customer_name,
       ),
       current_salesman_code: customer.current_salesman_code,
-      salesman_name: pickOutstandingSalesmanName(customerInvoices)
-        || (!isPlaceholderSalesmanValue(customer.current_salesman_code)
-          ? (salesmanMap.get(normalizeCode(customer.current_salesman_code)) || customer.current_salesman_code)
-          : ""),
+      salesman_name: salesmanFromUpload || salesmanFromMaster,
       city: customer.city,
       area: customer.area,
       latitude: customer.latitude,

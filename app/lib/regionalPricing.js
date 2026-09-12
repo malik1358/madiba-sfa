@@ -155,6 +155,7 @@ export function getPricedOrderLine({
   valueThreshold = VALUE_DISCOUNT_THRESHOLD_SAR,
   schemeUnitDiscount = 0,
   schemeDiscountedQty = 0,
+  excludeCashDiscount = false,
 } = {}) {
   const qty = Number(quantity || 0);
   const wholesale = Number(wholesaleRate || 0);
@@ -170,16 +171,18 @@ export function getPricedOrderLine({
     applied.value = true;
   }
 
-  if (normalizePaymentType(paymentType) === "cash" && cashRate > 0) {
+  const safeQty = Number.isFinite(qty) ? Math.max(qty, 0) : 0;
+  const schemeQty = Math.min(Math.max(Number(schemeDiscountedQty || 0), 0), safeQty);
+  const schemeRate = Math.max(Number(schemeUnitDiscount || 0), 0);
+  const schemeDiscountAmount = schemeQty * schemeRate;
+  const schemeBlocksCash = excludeCashDiscount === true && schemeDiscountAmount > 0;
+
+  if (normalizePaymentType(paymentType) === "cash" && cashRate > 0 && !schemeBlocksCash) {
     rate *= (1 - cashRate);
     applied.cash = true;
   }
 
-  const safeQty = Number.isFinite(qty) ? Math.max(qty, 0) : 0;
   const wholesaleLineValue = safeQty * wholesale;
-  const schemeQty = Math.min(Math.max(Number(schemeDiscountedQty || 0), 0), safeQty);
-  const schemeRate = Math.max(Number(schemeUnitDiscount || 0), 0);
-  const schemeDiscountAmount = schemeQty * schemeRate;
   const lineValue = Math.max(0, (safeQty * rate) - schemeDiscountAmount);
   if (schemeDiscountAmount > 0) {
     applied.scheme = true;
@@ -257,6 +260,7 @@ export function buildEffectivePriceList({
       valueDiscountRate: lookupDiscountRate(valueDiscountMap, code) || lookupDiscountRate(valueDiscountMap, rawCode),
       schemeUnitDiscount: Number(scheme.unitDiscount || 0),
       schemeDiscountedQty: Number(scheme.discountedQty || 0),
+      excludeCashDiscount: scheme.excludeCashDiscount === true,
     });
 
     next[code] = priced.rate;

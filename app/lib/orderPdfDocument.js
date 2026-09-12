@@ -175,6 +175,7 @@ export function mapSavedOrderLinesToPdfLines(lines = [], {
       valueDiscountRate: valueDiscount,
       schemeUnitDiscount: scheme.unitDiscount,
       schemeDiscountedQty: scheme.discountedQty,
+      excludeCashDiscount: scheme.excludeCashDiscount === true,
     });
 
     return {

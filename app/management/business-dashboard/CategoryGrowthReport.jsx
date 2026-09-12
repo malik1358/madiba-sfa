@@ -22,6 +22,7 @@ import {
   previousQuarterKey,
   quarterGridTotals,
   quarterLabel,
+  yearGridTotals,
 } from "../../lib/categoryGrowth";
 import { translate } from "../../lib/appLanguage";
 
@@ -142,7 +143,7 @@ function YearlyGrowthTable({
   t,
 }) {
   const keys = useMemo(
-    () => ["name", "first", "last", "lifetime", "share", "cagr", "yoy", "mom", "status", ...years],
+    () => ["name", "first", "last", "lifetime", "share", "cagr", "yoy", "mom", "status", ...years, "__total__"],
     [years],
   );
   const valueOf = useCallback((row, key) => {
@@ -155,9 +156,18 @@ function YearlyGrowthTable({
     if (key === "yoy") return formatGrowthPercent(row.yoyPercent);
     if (key === "mom") return formatGrowthPercent(row.momPercent);
     if (key === "status") return row.statusLabel || row.status || "—";
+    if (key === "__total__") {
+      const total = (years || []).reduce((sum, year) => sum + Number(row.yearValues?.[year] || 0), 0);
+      return total ? formatMoneyAmount(total) : "—";
+    }
     return Number(row.yearValues?.[key] || 0) ? formatMoneyAmount(row.yearValues[key]) : "—";
-  }, []);
+  }, [years]);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
+  const yearTotals = useMemo(() => yearGridTotals(visibleRows, years), [visibleRows, years]);
+  const lifetimeTotal = useMemo(
+    () => visibleRows.reduce((sum, row) => sum + Number(row.lifetime || 0), 0),
+    [visibleRows],
+  );
 
   return (
     <ExportableTable filename={filename} sheetName="Growth" className="moduleTableWrap moduleBiTableWrap">
@@ -184,10 +194,18 @@ function YearlyGrowthTable({
                 className={year === currentYear ? "moduleBiMonthHead--current" : ""}
               />
             ))}
+            <BiExcelHead
+              label={t("total")}
+              filterKey="__total__"
+              options={options}
+              filters={filters}
+              onChange={setFilter}
+              className="moduleBiTotalCol"
+            />
           </tr>
         </thead>
         <tbody>
-          {visibleRows.map((row) => (
+          {visibleRows.map((row, rowIndex) => (
             <tr key={row.label || row.category}>
               <td>{row.label || row.category}</td>
               <td>{row.firstDate}</td>
@@ -211,9 +229,38 @@ function YearlyGrowthTable({
                   </td>
                 );
               })}
+              <td className="moduleBiTotalCol">
+                {yearTotals.rowTotals[rowIndex] ? formatMoneyAmount(yearTotals.rowTotals[rowIndex]) : "—"}
+              </td>
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr className="moduleBiTotalRow">
+            <td>{t("total")}</td>
+            <td>—</td>
+            <td>—</td>
+            <td>{lifetimeTotal ? formatMoneyAmount(lifetimeTotal) : "—"}</td>
+            <td>{lifetimeTotal ? formatSharePercent(100) : "—"}</td>
+            <td>—</td>
+            <td>—</td>
+            <td>—</td>
+            <td>—</td>
+            {years.map((year, index) => {
+              const amount = Number(yearTotals.columnTotals[index] || 0);
+              const previous = index > 0 ? Number(yearTotals.columnTotals[index - 1] || 0) : 0;
+              const tone = monthChangeTone(amount, previous, index > 0);
+              return (
+                <td key={`year-total-${year}`} className={periodCellClass(tone, year === currentYear)}>
+                  {amount ? formatMoneyAmount(amount) : "—"}
+                </td>
+              );
+            })}
+            <td className="moduleBiTotalCol">
+              {yearTotals.grandTotal ? formatMoneyAmount(yearTotals.grandTotal) : "—"}
+            </td>
+          </tr>
+        </tfoot>
       </table>
     </ExportableTable>
   );

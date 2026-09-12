@@ -459,19 +459,17 @@ export async function POST(request) {
 
        IMPORTANT SECURITY RULE:
        --------------------------------------------------------
+       We store only the GP / profit amount for Business Intelligence.
+
        We deliberately DO NOT import:
 
-       - Margin
        - Margin %
-       - GP
        - GP %
-       - Gross Profit
        - Cost
        - Cost Price
        - Purchase Cost
        - Landed Cost
        - COGS
-       - Profit
        - Profit %
 
        We also DO NOT store the complete original Excel row.
@@ -740,6 +738,17 @@ export async function POST(request) {
           sales_amount: number(
             findValue(row, [
               "Sales Amount",
+            ])
+          ),
+
+          profit_amount: number(
+            findValue(row, [
+              "GP",
+              "Gross Profit",
+              "Gross Profit Amount",
+              "Profit",
+              "Profit Amount",
+              "GP Amount",
             ])
           ),
 

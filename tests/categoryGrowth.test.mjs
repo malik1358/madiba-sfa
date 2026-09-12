@@ -12,11 +12,13 @@ import {
   formatGrowthPercent,
   growthPercent,
   ingestCategoryGrowthRows,
+  pickBiMeasure,
   monthChangeTone,
   monthGridTotals,
   monthsInQuarter,
   normalizeCategoryName,
   quarterGridTotals,
+  yearGridTotals,
   quarterKeyFromMonthKey,
   quarterLabel,
   selectRecentGrowthMonths,
@@ -177,6 +179,32 @@ test("month grid totals add a row total, month totals, and grand total", () => {
   assert.deepEqual(totals.rowTotals, [180, 60]);
   assert.deepEqual(totals.columnTotals, [120, 120, 0]);
   assert.equal(totals.grandTotal, 240);
+});
+
+test("year grid totals add a row total, year totals, and grand total", () => {
+  const totals = yearGridTotals(
+    [
+      { yearValues: { 2025: 100, 2026: 80 } },
+      { yearValues: { 2025: 20, 2026: 40 } },
+    ],
+    ["2025", "2026"],
+  );
+  assert.deepEqual(totals.rowTotals, [180, 60]);
+  assert.deepEqual(totals.columnTotals, [120, 120]);
+  assert.equal(totals.grandTotal, 240);
+});
+
+test("profit measure uses GP and stays separate from sales", () => {
+  const acc = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(acc, [
+    { transaction_date: "2026-02-10", category: "Fridge", sales_amount: 200, profit_amount: 40 },
+    { transaction_date: "2026-03-10", category: "Fridge", sales_amount: 100, profit_amount: 25 },
+  ], { measure: "profit" });
+  const report = buildCategoryGrowthReport(acc, { asOfDate: "2026-09-11" });
+  assert.equal(report.lifetimeTotal, 65);
+  assert.equal(report.categories[0].yearValues["2026"], 65);
+  const picked = pickBiMeasure({ lifetimeTotal: 300, measures: { sales: { lifetimeTotal: 300 }, profit: { lifetimeTotal: 65 } } }, "profit");
+  assert.equal(picked.lifetimeTotal, 65);
 });
 
 test("quarters roll months together and keep the current quarter as QTD", () => {

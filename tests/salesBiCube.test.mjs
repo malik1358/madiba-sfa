@@ -28,6 +28,7 @@ test("cube rolls invoice lines into one monthly fact per dimension combo", () =>
       customer_code: "C1",
       item_code: "I1",
       sales_amount: 100,
+      profit_amount: 30,
       quantity: 2,
     },
     {
@@ -38,6 +39,7 @@ test("cube rolls invoice lines into one monthly fact per dimension combo", () =>
       customer_code: "C1",
       item_code: "I1",
       sales_amount: 50,
+      profit_amount: 10,
       quantity: 1,
     },
     {
@@ -57,6 +59,7 @@ test("cube rolls invoice lines into one monthly fact per dimension combo", () =>
   assert.equal(facts.length, 2);
   const february = facts.find((row) => row.month === "2026-02");
   assert.equal(february.sales_amount, 150);
+  assert.equal(february.profit_amount, 40);
   assert.equal(february.quantity, 3);
   assert.equal(february.line_count, 2);
 });

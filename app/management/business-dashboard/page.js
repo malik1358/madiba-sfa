@@ -14,7 +14,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import CategoryGrowthReport from "./CategoryGrowthReport";
 import SalesmanMomReport, { emptySalesmanMomFilters } from "./SalesmanMomReport";
-import { emptyGrowthFilters } from "../../lib/categoryGrowth";
+import { emptyGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
 import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart } from "./GrowthCharts";
 
 const TEXT = {
@@ -42,6 +42,13 @@ const TEXT = {
   alertMix: { en: "Alert mix", ar: "مزيج التنبيهات" },
   moneyChart: { en: "Sales and collections", ar: "المبيعات والتحصيل" },
   activityChart: { en: "Field activity", ar: "نشاط الميدان" },
+  measure: { en: "Show numbers", ar: "عرض الأرقام" },
+  sales: { en: "Sales", ar: "المبيعات" },
+  profit: { en: "Profit", ar: "الربح" },
+  profitHint: {
+    en: "Profit uses the GP amount from the sales file. Re-upload sales after this update if Profit is empty.",
+    ar: "الربح من مبلغ GP في ملف المبيعات. أعد رفع المبيعات بعد هذا التحديث إذا كان الربح فارغاً.",
+  },
 };
 
 function kpiClass(status) {
@@ -77,6 +84,15 @@ export default function BusinessDashboardPage() {
   const [salesmanApplied, setSalesmanApplied] = useState(() => emptySalesmanMomFilters());
   const [salesmanSearch, setSalesmanSearch] = useState("");
   const [salesmanStatusFilter, setSalesmanStatusFilter] = useState([]);
+  const [amountMeasure, setAmountMeasure] = useState("sales");
+  const visibleGrowthReport = useMemo(
+    () => pickBiMeasure(growthReport, amountMeasure),
+    [growthReport, amountMeasure],
+  );
+  const visibleSalesmanReport = useMemo(
+    () => pickBiMeasure(salesmanReport, amountMeasure),
+    [salesmanReport, amountMeasure],
+  );
 
   usePopupMessages({ error });
 
@@ -362,11 +378,36 @@ export default function BusinessDashboardPage() {
             </div>
           </section>
 
+          {view === "category-growth" || view === "salesman-mom" ? (
+            <section className="moduleSection">
+              <div className="moduleBiMeasureBar">
+                <span>{t("measure")}</span>
+                <div className="moduleBiTabs" role="group" aria-label={t("measure")}>
+                  <button
+                    type="button"
+                    className={`moduleBiTab${amountMeasure === "sales" ? " isActive" : ""}`}
+                    onClick={() => setAmountMeasure("sales")}
+                  >
+                    {t("sales")}
+                  </button>
+                  <button
+                    type="button"
+                    className={`moduleBiTab${amountMeasure === "profit" ? " isActive" : ""}`}
+                    onClick={() => setAmountMeasure("profit")}
+                  >
+                    {t("profit")}
+                  </button>
+                </div>
+              </div>
+              {amountMeasure === "profit" ? <p className="moduleHint">{t("profitHint")}</p> : null}
+            </section>
+          ) : null}
+
           {view === "category-growth" ? (
             <CategoryGrowthReport
               language={language}
               loading={growthLoading}
-              report={growthReport}
+              report={visibleGrowthReport}
               draft={growthDraft}
               catalogs={growthCatalogs}
               applied={growthApplied}
@@ -394,7 +435,7 @@ export default function BusinessDashboardPage() {
             <SalesmanMomReport
               language={language}
               loading={salesmanLoading}
-              report={salesmanReport}
+              report={visibleSalesmanReport}
               draft={salesmanDraft}
               catalogs={growthCatalogs}
               applied={salesmanApplied}

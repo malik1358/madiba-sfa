@@ -304,11 +304,24 @@ export function cagrPercent(startValue, endValue, periods) {
   return ((end / start) ** (1 / count) - 1) * 100;
 }
 
+export function formatWholePercent(value) {
+  if (value == null || !Number.isFinite(value)) return "";
+  const rounded = Math.round(value);
+  const sign = rounded > 0 ? "+" : "";
+  return `${sign}${rounded}%`;
+}
+
 export function formatGrowthPercent(value) {
   if (value == null || !Number.isFinite(value)) return "—";
-  const rounded = Math.round(value * 10) / 10;
-  const sign = rounded > 0 ? "+" : "";
-  return `${sign}${rounded.toFixed(1)}%`;
+  return formatWholePercent(value);
+}
+
+export function formatAmountWithDelta(current, previous, hasPrevious = true) {
+  const amount = Number(current || 0);
+  const amountText = amount ? formatMoneyAmount(amount) : "—";
+  if (!hasPrevious) return amountText;
+  const delta = formatWholePercent(growthPercent(current, previous));
+  return delta ? `${amountText} ${delta}` : amountText;
 }
 
 export function formatMoneyAmount(value) {

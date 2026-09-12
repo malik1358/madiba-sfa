@@ -9,7 +9,9 @@ import {
   consecutiveDecliningMonths,
   createCategoryGrowthAccumulator,
   enumerateMonths,
+  formatAmountWithDelta,
   formatGrowthPercent,
+  formatWholePercent,
   growthPercent,
   ingestCategoryGrowthRows,
   pickBiMeasure,
@@ -35,8 +37,11 @@ test("growth and CAGR use a prior baseline", () => {
   assert.equal(growthPercent(120, 100), 20);
   assert.equal(growthPercent(80, 0), null);
   assert.equal(Math.round(cagrPercent(100, 121, 2) * 10) / 10, 10);
-  assert.equal(formatGrowthPercent(-12.34), "-12.3%");
+  assert.equal(formatWholePercent(-12.34), "-12%");
+  assert.equal(formatGrowthPercent(-12.34), "-12%");
   assert.equal(formatGrowthPercent(null), "—");
+  assert.equal(formatAmountWithDelta(120, 100, true), `${Number(120).toLocaleString("en-SA")} +20%`);
+  assert.equal(formatAmountWithDelta(80, 0, true), Number(80).toLocaleString("en-SA"));
 });
 
 test("enumerateMonths fills inclusive calendar months", () => {

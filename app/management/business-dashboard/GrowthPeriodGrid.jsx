@@ -2,7 +2,19 @@
 
 import { useCallback, useMemo } from "react";
 import ExportableTable from "../../components/ExportableTable";
-import { formatMoneyAmount, monthChangeTone, periodGridTotals } from "../../lib/categoryGrowth";
+import { formatAmountWithDelta, formatMoneyAmount, formatWholePercent, growthPercent, monthChangeTone, periodGridTotals } from "../../lib/categoryGrowth";
+
+function PeriodAmountCell({ amount, previous, hasPrevious, className = "" }) {
+  const delta = hasPrevious ? formatWholePercent(growthPercent(amount, previous)) : "";
+  return (
+    <td className={className}>
+      <span className="moduleBiAmountDelta">
+        <strong>{Number(amount || 0) ? formatMoneyAmount(amount) : "—"}</strong>
+        {delta ? <em>{delta}</em> : null}
+      </span>
+    </td>
+  );
+}
 import BiExcelHead, { useBiExcelFilters } from "./BiExcelHead";
 
 const NAME_KEY = "__name__";
@@ -34,8 +46,9 @@ export default function GrowthPeriodGrid({
     if (key === TOTAL_KEY) {
       return periodAmountText(periods.reduce((sum, period) => sum + Number(values[period] || 0), 0));
     }
-    return periodAmountText(values[key]);
-  }, [periods, valuesOf]);
+    const previousKey = previousKeyOf?.(key, periods.indexOf(key), periods);
+    return formatAmountWithDelta(values[key], values[previousKey], Boolean(previousKey));
+  }, [periods, previousKeyOf, valuesOf]);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
   const visibleTotals = useMemo(
     () => periodGridTotals(visibleRows, periods, valuesOf),
@@ -85,15 +98,16 @@ export default function GrowthPeriodGrid({
                   const tone = monthChangeTone(amount, previous, Boolean(previousKey));
                   const isCurrent = period === currentPeriod;
                   return (
-                    <td
+                    <PeriodAmountCell
                       key={period}
+                      amount={amount}
+                      previous={previous}
+                      hasPrevious={Boolean(previousKey)}
                       className={[
                         tone ? `moduleBiMonthCell--${tone}` : "",
                         isCurrent ? "moduleBiMonthCell--current" : "",
                       ].filter(Boolean).join(" ")}
-                    >
-                      {amount ? formatMoneyAmount(amount) : "—"}
-                    </td>
+                    />
                   );
                 })}
                 <td className="moduleBiTotalCol">
@@ -112,15 +126,16 @@ export default function GrowthPeriodGrid({
               const tone = monthChangeTone(amount, previous, index > 0);
               const isCurrent = period === currentPeriod;
               return (
-                <td
+                <PeriodAmountCell
                   key={`total-${period}`}
+                  amount={amount}
+                  previous={previous}
+                  hasPrevious={index > 0}
                   className={[
                     tone ? `moduleBiMonthCell--${tone}` : "",
                     isCurrent ? "moduleBiMonthCell--current" : "",
                   ].filter(Boolean).join(" ")}
-                >
-                  {amount ? formatMoneyAmount(amount) : "—"}
-                </td>
+                />
               );
             })}
             <td className="moduleBiTotalCol">

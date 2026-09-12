@@ -131,7 +131,7 @@ export default function SalesmanVisitPlanPage() {
       });
       if (salesmanFilter) params.set("salesman", salesmanFilter);
 
-      const data = await fetchJsonWithTimeout(
+      const { response, payload: data } = await fetchJsonWithTimeout(
         `/api/admin/salesman-visit-plan?${params.toString()}`,
         {
           headers: { Authorization: `Bearer ${session.access_token}` },
@@ -139,7 +139,9 @@ export default function SalesmanVisitPlanPage() {
         120000,
       );
 
-      if (!data?.success) throw new Error(data?.error || "Unable to load visit plans.");
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || "Unable to load visit plans.");
+      }
       setPlans(data.plans || []);
       setAccessMeta(data.access || null);
       setSummary({
@@ -191,7 +193,7 @@ export default function SalesmanVisitPlanPage() {
       const session = await resolveAuthSession(supabase, 8000);
       if (!session?.access_token) throw new Error("Please login again.");
 
-      const data = await fetchJsonWithTimeout(
+      const { response, payload: data } = await fetchJsonWithTimeout(
         "/api/admin/salesman-visit-plan",
         {
           method: "POST",
@@ -212,7 +214,7 @@ export default function SalesmanVisitPlanPage() {
         setMessage(t("emailSkipped"));
         return;
       }
-      if (!data?.success && data?.failedCount) {
+      if (!response.ok || (!data?.success && data?.failedCount)) {
         throw new Error(data?.error || "Preview email failed.");
       }
       if (data?.skipped) {

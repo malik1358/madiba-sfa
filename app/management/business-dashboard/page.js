@@ -12,6 +12,7 @@ import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from
 import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
+import BiOverviewDashboard from "./BiOverviewDashboard";
 import CategoryGrowthReport from "./CategoryGrowthReport";
 import SalesmanMomReport, { emptySalesmanMomFilters } from "./SalesmanMomReport";
 import { emptyGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
@@ -25,6 +26,7 @@ const TEXT = {
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading business dashboard...", ar: "جاري تحميل لوحة الأعمال..." },
+  overview: { en: "Dashboard", ar: "اللوحة" },
   categoryGrowth: { en: "Category growth", ar: "نمو الفئات" },
   salesmanMom: { en: "Salesman MoM", ar: "المندوب شهرياً" },
   operations: { en: "Daily operations", ar: "التشغيل اليومي" },
@@ -66,7 +68,7 @@ export default function BusinessDashboardPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
   const supabaseClient = getSupabaseClient();
-  const [view, setView] = useState("category-growth");
+  const [view, setView] = useState("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reportDate, setReportDate] = useState(() => getKsaDateString());
@@ -144,7 +146,7 @@ export default function BusinessDashboardPage() {
       }
     }
 
-    if (view !== "operations") {
+    if (view !== "operations" && view !== "overview") {
       stopSafetyTimer();
       setLoading(false);
       return () => {
@@ -216,7 +218,7 @@ export default function BusinessDashboardPage() {
       }
     }
 
-    if (view !== "category-growth") {
+    if (view !== "category-growth" && view !== "overview") {
       stopSafetyTimer();
       setGrowthLoading(false);
       return () => {
@@ -288,7 +290,7 @@ export default function BusinessDashboardPage() {
       }
     }
 
-    if (view !== "salesman-mom") {
+    if (view !== "salesman-mom" && view !== "overview") {
       stopSafetyTimer();
       setSalesmanLoading(false);
       return () => {
@@ -351,6 +353,15 @@ export default function BusinessDashboardPage() {
               <button
                 type="button"
                 role="tab"
+                aria-selected={view === "overview"}
+                className={`moduleBiTab${view === "overview" ? " isActive" : ""}`}
+                onClick={() => setView("overview")}
+              >
+                {t("overview")}
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={view === "category-growth"}
                 className={`moduleBiTab${view === "category-growth" ? " isActive" : ""}`}
                 onClick={() => setView("category-growth")}
@@ -378,7 +389,7 @@ export default function BusinessDashboardPage() {
             </div>
           </section>
 
-          {view === "category-growth" || view === "salesman-mom" ? (
+          {view === "overview" || view === "category-growth" || view === "salesman-mom" ? (
             <section className="moduleSection">
               <div className="moduleBiMeasureBar">
                 <span>{t("measure")}</span>
@@ -401,6 +412,20 @@ export default function BusinessDashboardPage() {
               </div>
               {amountMeasure === "profit" ? <p className="moduleHint">{t("profitHint")}</p> : null}
             </section>
+          ) : null}
+
+          {view === "overview" ? (
+            <BiOverviewDashboard
+              language={language}
+              loading={growthLoading || salesmanLoading}
+              growthReport={visibleGrowthReport}
+              salesmanReport={visibleSalesmanReport}
+              operations={{
+                redAlerts: redAlerts.length,
+                orangeAlerts: orangeAlerts.length,
+              }}
+              onOpen={setView}
+            />
           ) : null}
 
           {view === "category-growth" ? (

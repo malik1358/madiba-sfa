@@ -6,7 +6,11 @@ import {
   assignSalesmanRowToTeam,
   buildTeamDirectoryMembers,
   buildTeamMomRows,
+  ECOM_SALES_LABEL,
+  resolveTeamBucket,
+  rollupTeamGrowthFromRows,
   rollupTeamGrowthGroups,
+  STORE_SALES_LABEL,
   teamMomLabel,
 } from "../app/lib/salesmanTeamMom.js";
 
@@ -34,6 +38,45 @@ test("mapped inactive salesmen stay on their team instead of No team", () => {
   assert.equal(groups[0].label, "Team — AHMED NABIL");
   assert.equal(groups[0].memberCount, 2);
   assert.equal(groups[0].monthValues["2026-08"], 140);
+});
+
+test("people without a boss stay as their own team row", () => {
+  const groups = rollupTeamGrowthGroups(
+    [
+      { label: "Zia · ZIA", lifetime: 40, monthValues: { "2026-08": 40 } },
+      { label: "Ali · ALI", lifetime: 100, monthValues: { "2026-08": 100 } },
+    ],
+    [],
+    { latestCompleteMonth: "2026-08" },
+  );
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map((row) => row.label).sort(), ["Ali · ALI", "Zia · ZIA"]);
+  assert.equal(groups.some((row) => row.label === "No team"), false);
+});
+
+test("TRENDYOL and NOON roll into Ecom sales and store vouchers roll into Store sales", () => {
+  assert.equal(resolveTeamBucket({ label: "TRENDYOL · TRENDYOL" }).teamLabel, ECOM_SALES_LABEL);
+  assert.equal(resolveTeamBucket({ label: "NOON" }).teamLabel, ECOM_SALES_LABEL);
+  assert.equal(resolveTeamBucket({
+    salesman_name: "Ali",
+    salesman_code: "ALI",
+    voucher_type: "RIYADH STORE SALES",
+  }).teamLabel, STORE_SALES_LABEL);
+
+  const groups = rollupTeamGrowthFromRows(
+    [
+      { transaction_date: "2026-08-04", salesman_name: "TRENDYOL", salesman_code: "TRENDYOL", sales_amount: 80 },
+      { transaction_date: "2026-08-08", salesman_name: "NOON", salesman_code: "NOON", sales_amount: 20 },
+      { transaction_date: "2026-08-10", salesman_name: "Ali", salesman_code: "ALI", voucher_type: "RIYADH STORE SALES", sales_amount: 50 },
+      { transaction_date: "2026-08-12", salesman_name: "Ali", salesman_code: "ALI", voucher_type: "SALES", sales_amount: 30 },
+    ],
+    [],
+    { asOfDate: "2026-09-01", measure: "sales" },
+  );
+  const byLabel = Object.fromEntries(groups.map((row) => [row.label, row.lifetime]));
+  assert.equal(byLabel[ECOM_SALES_LABEL], 100);
+  assert.equal(byLabel[STORE_SALES_LABEL], 50);
+  assert.equal(byLabel["Ali · ALI"], 30);
 });
 
 test("team labels use the first-level leader name", () => {

@@ -8,6 +8,7 @@ import {
   emptyGrowthFilters,
   formatGrowthPercent,
   formatMoneyAmount,
+  monthChangeTone,
   monthGridTotals,
   previousMonthKey,
   previousQuarterKey,
@@ -131,10 +132,14 @@ function statusClass(status) {
 
 function trendClass(value) {
   if (value == null || !Number.isFinite(value)) return "";
-  if (value <= -15) return "moduleBiTrend--downHard";
-  if (value < 0) return "moduleBiTrend--down";
-  if (value >= 5) return "moduleBiTrend--up";
+  if (value <= -15) return "moduleBiMonthCell--down moduleBiTrend--downHard";
+  if (value < 0) return "moduleBiMonthCell--down moduleBiTrend--down";
+  if (value >= 5) return "moduleBiMonthCell--up moduleBiTrend--up";
   return "";
+}
+
+function periodCellClass(tone) {
+  return tone ? `moduleBiMonthCell--${tone}` : "";
 }
 
 function monthLabel(month, currentMonth) {
@@ -188,6 +193,12 @@ function MomScorecardTable({
     return row.trajectory?.label || "—";
   }, []);
   const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
+  const footer = useMemo(() => ({
+    people: visibleRows.reduce((sum, row) => sum + Number(row.memberCount || 0), 0),
+    latest: visibleRows.reduce((sum, row) => sum + Number(row.latestCompleteAmount || 0), 0),
+    prior: visibleRows.reduce((sum, row) => sum + Number(row.priorMonthAmount || 0), 0),
+    mtd: visibleRows.reduce((sum, row) => sum + Number(row.mtdAmount || 0), 0),
+  }), [visibleRows]);
   return (
     <ExportableTable filename={filename} sheetName={sheetName} className="moduleTableWrap moduleBiTableWrap">
       <table className="moduleTable moduleBiTable">
@@ -213,20 +224,39 @@ function MomScorecardTable({
             <tr key={row.label}>
               <td>{row.label}</td>
               {showPeople ? <td>{row.memberCount || 0}</td> : null}
-              <td>{row.latestCompleteAmount ? formatMoneyAmount(row.latestCompleteAmount) : "—"}</td>
+              <td className={periodCellClass(monthChangeTone(row.latestCompleteAmount, row.priorMonthAmount, row.priorMonthAmount != null))}>
+                {row.latestCompleteAmount ? formatMoneyAmount(row.latestCompleteAmount) : "—"}
+              </td>
               <td>{row.priorMonthAmount ? formatMoneyAmount(row.priorMonthAmount) : "—"}</td>
               <td className={trendClass(row.momPercent)}>{formatGrowthPercent(row.momPercent)}</td>
               <td className={trendClass(row.avgMomPercent)}>{formatGrowthPercent(row.avgMomPercent)}</td>
-              <td>{row.upMonths}</td>
-              <td>{row.downMonths}</td>
-              <td>{streakLabel(row)}</td>
-              <td>{row.mtdAmount ? formatMoneyAmount(row.mtdAmount) : "—"}</td>
+              <td className="moduleBiMonthCell--up">{row.upMonths}</td>
+              <td className="moduleBiMonthCell--down">{row.downMonths}</td>
+              <td className={row.improvingStreak >= 1 ? "moduleBiMonthCell--up" : row.decliningStreak >= 1 ? "moduleBiMonthCell--down" : ""}>{streakLabel(row)}</td>
+              <td className={periodCellClass(monthChangeTone(row.mtdAmount, row.latestCompleteAmount, row.latestCompleteAmount != null))}>
+                {row.mtdAmount ? formatMoneyAmount(row.mtdAmount) : "—"}
+              </td>
               <td>
                 <span className={statusClass(row.trajectory.status)}>{row.trajectory.label}</span>
               </td>
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr className="moduleBiTotalRow">
+            <td>{t("total")}</td>
+            {showPeople ? <td>{footer.people || "—"}</td> : null}
+            <td className="moduleBiTotalCol">{footer.latest ? formatMoneyAmount(footer.latest) : "—"}</td>
+            <td className="moduleBiTotalCol">{footer.prior ? formatMoneyAmount(footer.prior) : "—"}</td>
+            <td>—</td>
+            <td>—</td>
+            <td>—</td>
+            <td>—</td>
+            <td>—</td>
+            <td className="moduleBiTotalCol">{footer.mtd ? formatMoneyAmount(footer.mtd) : "—"}</td>
+            <td>—</td>
+          </tr>
+        </tfoot>
       </table>
     </ExportableTable>
   );

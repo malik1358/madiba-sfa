@@ -5,7 +5,7 @@ import {
 } from "./categoryGrowth.js";
 
 export const SALES_BI_CUBE_KEY = "sales_bi_cube_v1";
-export const SALES_BI_CUBE_VERSION = 2;
+export const SALES_BI_CUBE_VERSION = 3;
 export const SALES_BI_TABLE = "sales_bi_monthly";
 
 const CUBE_DIMENSION_FIELDS = [
@@ -54,8 +54,9 @@ export function ingestSalesRowsIntoCube(cube, rows = []) {
     const month = cubeMonthFromDate(row.transaction_date);
     if (!month) return;
     const amount = Number(row.sales_amount || 0);
+    const profit = Number(row.profit_amount || 0);
     const quantity = Number(row.quantity || 0);
-    if (!Number.isFinite(amount) && !Number.isFinite(quantity)) return;
+    if (!Number.isFinite(amount) && !Number.isFinite(profit) && !Number.isFinite(quantity)) return;
 
     cube.sourceRowCount += 1;
     const fact = {
@@ -71,6 +72,7 @@ export function ingestSalesRowsIntoCube(cube, rows = []) {
       local_import: dim(row.local_import),
       abc_class: dim(row.abc_class),
       sales_amount: Number.isFinite(amount) ? amount : 0,
+      profit_amount: Number.isFinite(profit) ? profit : 0,
       quantity: Number.isFinite(quantity) ? quantity : 0,
     };
     const key = cubeFactKey(fact);
@@ -80,6 +82,7 @@ export function ingestSalesRowsIntoCube(cube, rows = []) {
       return;
     }
     existing.sales_amount += fact.sales_amount;
+    existing.profit_amount = Number(existing.profit_amount || 0) + fact.profit_amount;
     existing.quantity += fact.quantity;
     existing.line_count += 1;
     if (!existing.salesman_name && fact.salesman_name) existing.salesman_name = fact.salesman_name;
@@ -93,7 +96,7 @@ export function salesBiFactsFromCube(cube) {
   return [...(cube?.facts?.values() || [])];
 }
 
-export function salesBiFactToGrowthRow(fact) {
+export function salesBiFactToGrowthRow(fact, measure = "sales") {
   return {
     transaction_date: `${fact.month}-01`,
     category: fact.category,
@@ -107,7 +110,9 @@ export function salesBiFactToGrowthRow(fact) {
     local_import: fact.local_import,
     abc_class: fact.abc_class,
     sales_amount: Number(fact.sales_amount || 0),
+    profit_amount: Number(fact.profit_amount || 0),
     quantity: Number(fact.quantity || 0),
+    measure,
   };
 }
 
@@ -131,6 +136,7 @@ export function serializeSalesBiCube({ facts = [], batchId = "", builtAt = "", s
       li: fact.local_import,
       abc: fact.abc_class,
       a: Number(fact.sales_amount || 0),
+      p: Number(fact.profit_amount || 0),
       q: Number(fact.quantity || 0),
       n: Number(fact.line_count || 0),
     })),
@@ -160,6 +166,7 @@ export function deserializeSalesBiCube(payload) {
       local_import: fact.li || fact.local_import,
       abc_class: fact.abc || fact.abc_class,
       sales_amount: Number(fact.a ?? fact.sales_amount ?? 0),
+      profit_amount: Number(fact.p ?? fact.profit_amount ?? 0),
       quantity: Number(fact.q ?? fact.quantity ?? 0),
       line_count: Number(fact.n ?? fact.line_count ?? 0),
     })),

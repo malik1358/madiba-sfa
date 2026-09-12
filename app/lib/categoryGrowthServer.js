@@ -14,6 +14,7 @@ import { rollupTeamGrowthGroups } from "./salesmanTeamMom.js";
 import { loadSalesmanTeamMembers } from "./salesmanTeamMomServer.js";
 
 const SALES_SELECTS = [
+  "transaction_date,category,sales_amount,profit_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,voucher_number,reference,local_import,abc_class",
   "transaction_date,category,sales_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,voucher_number,reference,local_import,abc_class",
   "transaction_date,category,sales_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,voucher_number,reference",
   "transaction_date,category,sales_amount,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type",
@@ -27,12 +28,6 @@ function isMissingTableError(error) {
   return error?.code === "42P01"
     || message.includes("could not find the table")
     || (message.includes("relation") && message.includes("does not exist"));
-}
-
-async function ingestPagedSales(admin, select, acc, options) {
-  await pageActiveSales(admin, select, (rows) => {
-    ingestCategoryGrowthRows(acc, rows || [], options);
-  });
 }
 
 function packReport(acc, { asOfDate, filters, extraMeta = {} }) {
@@ -54,23 +49,66 @@ function packReport(acc, { asOfDate, filters, extraMeta = {} }) {
   };
 }
 
+function measureSlice(report) {
+  return {
+    firstDate: report.firstDate,
+    lastDate: report.lastDate,
+    years: report.years,
+    recentMonths: report.recentMonths,
+    currentMonth: report.currentMonth,
+    recentQuarters: report.recentQuarters,
+    currentQuarter: report.currentQuarter,
+    latestCompleteMonth: report.latestCompleteMonth,
+    latestMonthIsPartial: report.latestMonthIsPartial,
+    lifetimeTotal: report.lifetimeTotal,
+    currentYtd: report.currentYtd,
+    priorYtd: report.priorYtd,
+    yoyPercent: report.yoyPercent,
+    groups: report.groups,
+    categories: report.categories,
+    teamGroups: report.teamGroups,
+    alerts: report.alerts,
+    meta: report.meta,
+  };
+}
+
+function reportFromRows(rows, { asOfDate, filters, extraMeta = {}, alignDates = false }) {
+  const applied = alignDates ? monthAlignGrowthFilters(filters) : filters;
+  function build(measure) {
+    const acc = createCategoryGrowthAccumulator();
+    const catalogs = createGrowthCatalogs();
+    ingestCategoryGrowthRows(acc, rows, { filters: applied, catalogs, measure });
+    return packReport(acc, {
+      asOfDate,
+      filters,
+      extraMeta: {
+        ...extraMeta,
+        filtered: extraMeta.filtered === true || hasActiveGrowthFilters(filters) || acc.sourceRowCount !== acc.rowCount,
+        catalogs,
+        measure,
+      },
+    });
+  }
+  const sales = build("sales");
+  const profit = build("profit");
+  return {
+    ...sales,
+    measures: {
+      sales: measureSlice(sales),
+      profit: measureSlice(profit),
+    },
+  };
+}
+
 function reportFromFacts(facts, { asOfDate, filters, extraMeta = {} }) {
-  const aligned = monthAlignGrowthFilters(filters);
-  const acc = createCategoryGrowthAccumulator();
-  const catalogs = createGrowthCatalogs();
-  ingestCategoryGrowthRows(acc, (facts || []).map(salesBiFactToGrowthRow), {
-    filters: aligned,
-    catalogs,
-  });
-  return packReport(acc, {
+  return reportFromRows((facts || []).map((fact) => salesBiFactToGrowthRow(fact)), {
     asOfDate,
     filters,
     extraMeta: {
       ...extraMeta,
       source: extraMeta.source || "sales_bi_cube",
-      filtered: hasActiveGrowthFilters(filters) || acc.sourceRowCount !== acc.rowCount,
-      catalogs,
     },
+    alignDates: true,
   });
 }
 
@@ -78,17 +116,16 @@ async function reportFromLiveSales(admin, { asOfDate, filters }) {
   let lastError = null;
 
   for (const select of SALES_SELECTS) {
-    const acc = createCategoryGrowthAccumulator();
-    const catalogs = createGrowthCatalogs();
     try {
-      await ingestPagedSales(admin, select, acc, { filters, catalogs });
-      return packReport(acc, {
+      const rows = [];
+      await pageActiveSales(admin, select, (page) => {
+        rows.push(...(page || []));
+      });
+      return reportFromRows(rows, {
         asOfDate,
         filters,
         extraMeta: {
           missingTable: false,
-          filtered: acc.sourceRowCount !== acc.rowCount,
-          catalogs,
           source: "active_sales",
         },
       });
@@ -151,11 +188,17 @@ export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters }
   if (normalized.groupBy === "salesman") {
     try {
       const members = await loadSalesmanTeamMembers(admin);
-      report.teamGroups = rollupTeamGrowthGroups(report.groups || report.categories || [], members, report);
-      report.meta = {
-        ...report.meta,
-        teamCount: report.teamGroups.length,
-      };
+      function attachTeams(target) {
+        if (!target) return;
+        target.teamGroups = rollupTeamGrowthGroups(target.groups || target.categories || [], members, target);
+        target.meta = {
+          ...target.meta,
+          teamCount: target.teamGroups.length,
+        };
+      }
+      attachTeams(report);
+      attachTeams(report.measures?.sales);
+      attachTeams(report.measures?.profit);
     } catch (error) {
       console.error("Team month-on-month grouping failed:", error);
     }

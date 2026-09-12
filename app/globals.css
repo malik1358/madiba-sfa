@@ -4340,13 +4340,35 @@ th:has(.moduleTableColumnFilterInput) {
   position: sticky;
   top: var(--sticky-table-top);
   z-index: 6;
-  background: #edf4f5;
-  box-shadow: inset 0 -1px 0 #d5e1e4;
-  color: #073f4c;
+  background: #0f4c5c;
+  box-shadow: inset 0 -1px 0 #0b3c49;
+  color: #ffffff;
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   vertical-align: top;
+}
+
+.moduleTable tbody tr:nth-child(even) td {
+  background: #f3fbfb;
+}
+
+.moduleTable tbody tr:hover td {
+  background: #e5f4f4;
+}
+
+.moduleTable .moduleBiMonthCell--up,
+.moduleTable tbody tr:nth-child(even) td.moduleBiMonthCell--up,
+.moduleTable tbody tr:hover td.moduleBiMonthCell--up {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.moduleTable .moduleBiMonthCell--down,
+.moduleTable tbody tr:nth-child(even) td.moduleBiMonthCell--down,
+.moduleTable tbody tr:hover td.moduleBiMonthCell--down {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .moduleTable thead tr.moduleTableColumnFilterRow th {
@@ -6717,6 +6739,19 @@ th:has(.moduleTableColumnFilterInput) {
   background: #0f4c5c;
   border-color: #0f4c5c;
   color: #ffffff;
+}
+
+.moduleBiMeasureBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.moduleBiMeasureBar > span {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f4c5c;
 }
 
 .moduleBiTableWrap {

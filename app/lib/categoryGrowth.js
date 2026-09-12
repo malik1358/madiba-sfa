@@ -349,17 +349,30 @@ function ensureGroup(acc, label, dateKey) {
   return entry;
 }
 
+export function growthRowAmount(row = {}, measure = "sales") {
+  if (String(measure || "sales") === "profit") return Number(row.profit_amount || 0);
+  return Number(row.sales_amount || 0);
+}
+
+export function pickBiMeasure(report, measure = "sales") {
+  const key = String(measure || "sales") === "profit" ? "profit" : "sales";
+  const slice = report?.measures?.[key];
+  if (!slice) return report;
+  return { ...report, ...slice, measure: key };
+}
+
 export function ingestCategoryGrowthRows(acc, rows = [], options = {}) {
   const filters = normalizeGrowthFilters(options.filters || options);
   const groupBy = filters.groupBy || DEFAULT_GROWTH_GROUP_BY;
   const catalogs = options.catalogs;
+  const measure = options.measure || "sales";
 
   (rows || []).forEach((row) => {
     const dateKey = salesDateKey(row.transaction_date);
     const month = monthKeyFromDateKey(dateKey);
     if (!month) return;
 
-    const amount = Number(row.sales_amount || 0);
+    const amount = growthRowAmount(row, measure);
     if (!Number.isFinite(amount)) return;
 
     acc.sourceRowCount += 1;
@@ -499,6 +512,10 @@ export function monthGridTotals(rows = [], months = []) {
 
 export function quarterGridTotals(rows = [], quarters = []) {
   return periodGridTotals(rows, quarters, (row) => row?.quarterValues);
+}
+
+export function yearGridTotals(rows = [], years = []) {
+  return periodGridTotals(rows, years, (row) => row?.yearValues);
 }
 
 export function selectRecentGrowthMonths({ firstMonth = "", lastDataMonth = "", asOfMonth = "" } = {}) {

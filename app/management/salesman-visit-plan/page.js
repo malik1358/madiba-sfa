@@ -22,8 +22,8 @@ function planLabel(plan) {
 const TEXT = {
   title: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },
   subtitle: {
-    en: "Highest-probability stops for sales and collection, ranked per salesman.",
-    ar: "أعلى توقفات احتمالاً للمبيعات والتحصيل، مرتبة لكل مندوب.",
+    en: "70% sales / 30% collection. Customers with outstanding >60 days are collection-only.",
+    ar: "70% مبيعات / 30% تحصيل. العملاء الذين لديهم مستحقات أكثر من 60 يوماً للتحصيل فقط.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading saved visit plan...", ar: "جاري تحميل خطة الزيارة المحفوظة..." },
@@ -65,8 +65,15 @@ const TEXT = {
   collectionProb: { en: "Collection", ar: "التحصيل" },
   recentSales: { en: "Recent 6M", ar: "آخر 6 أشهر" },
   due: { en: "Due", ar: "المستحق" },
+  bucket30: { en: "0-30", ar: "0-30" },
+  bucket31to60: { en: "31-60", ar: "31-60" },
+  bucket61to90: { en: "61-90", ar: "61-90" },
+  bucket91to120: { en: "91-120", ar: "91-120" },
+  bucket120plus: { en: ">120", ar: ">120" },
   daysSinceInvoice: { en: "Days since invoice", ar: "أيام منذ الفاتورة" },
   total: { en: "Total", ar: "الإجمالي" },
+  salesFocusCount: { en: "Sales focus", ar: "تركيز المبيعات" },
+  collectionFocusCount: { en: "Collection focus", ar: "تركيز التحصيل" },
   salesmen: { en: "Salesmen", ar: "المندوبون" },
   visits: { en: "Visits", ar: "الزيارات" },
   avgCombined: { en: "Avg combined", ar: "متوسط المشترك" },
@@ -439,6 +446,10 @@ export default function SalesmanVisitPlanPage() {
               <span>
                 {plan.visitCount} {t("visits").toLowerCase()}
                 {" · "}
+                {t("salesFocusCount")}: {plan.totals?.salesVisits || 0}
+                {" · "}
+                {t("collectionFocusCount")}: {plan.totals?.collectionVisits || 0}
+                {" · "}
                 {t("avgCombined")}: {plan.totals?.averageCombinedScore || 0}
                 {" · "}
                 {t("due")}: {formatMoney(plan.totals?.dueAmount)}
@@ -460,6 +471,11 @@ export default function SalesmanVisitPlanPage() {
                     <th>{t("collectionProb")}</th>
                     <th>{t("recentSales")}</th>
                     <th>{t("due")}</th>
+                    <th>{t("bucket30")}</th>
+                    <th>{t("bucket31to60")}</th>
+                    <th>{t("bucket61to90")}</th>
+                    <th>{t("bucket91to120")}</th>
+                    <th>{t("bucket120plus")}</th>
                     <th>{t("daysSinceInvoice")}</th>
                   </tr>
                 </thead>
@@ -468,7 +484,11 @@ export default function SalesmanVisitPlanPage() {
                     <tr key={`${plan.salesmanCode}-${visit.customer_code}`}>
                       <td>{visit.rank}</td>
                       <td>
-                        <strong>{visit.customer_name || "-"}</strong>
+                        <Link
+                          href={`/management/customer-audit?customer_code=${encodeURIComponent(visit.customer_code || "")}`}
+                        >
+                          <strong>{visit.customer_name || "-"}</strong>
+                        </Link>
                         <div className="moduleHint">{visit.customer_code}</div>
                       </td>
                       <td>{[visit.city, visit.area].filter(Boolean).join(" / ") || "-"}</td>
@@ -484,15 +504,30 @@ export default function SalesmanVisitPlanPage() {
                       </td>
                       <td>{formatMoney(visit.recent_sales_value)}</td>
                       <td>{formatMoney(visit.total_due_amount)}</td>
+                      <td>{formatMoney(visit.outstanding_0_30)}</td>
+                      <td>{formatMoney(visit.outstanding_30_60)}</td>
+                      <td className={Number(visit.outstanding_61_90) > 0 ? "moduleBiMonthCell--down" : ""}>
+                        {formatMoney(visit.outstanding_61_90)}
+                      </td>
+                      <td className={Number(visit.outstanding_91_120) > 0 ? "moduleBiMonthCell--down" : ""}>
+                        {formatMoney(visit.outstanding_91_120)}
+                      </td>
+                      <td className={Number(visit.outstanding_above_120) > 0 ? "moduleBiMonthCell--down" : ""}>
+                        {formatMoney(visit.outstanding_above_120)}
+                      </td>
                       <td>{visit.days_since_last_invoice == null ? "-" : visit.days_since_last_invoice}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={7} className="moduleBiTotalCol"><strong>{t("total")}</strong></td>
-                    <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.recentSales)}</strong></td>
+                    <td colSpan={8} className="moduleBiTotalCol"><strong>{t("total")}</strong></td>
                     <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.dueAmount)}</strong></td>
+                    <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.outstanding_0_30)}</strong></td>
+                    <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.outstanding_30_60)}</strong></td>
+                    <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.outstanding_61_90)}</strong></td>
+                    <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.outstanding_91_120)}</strong></td>
+                    <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.outstanding_above_120)}</strong></td>
                     <td className="moduleBiTotalCol" />
                   </tr>
                 </tfoot>

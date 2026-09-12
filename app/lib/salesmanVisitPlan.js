@@ -1,6 +1,7 @@
 import { buildCollectionPriority } from "./paymentCollections.js";
 import { parseEmailList, isLikelyEmail, normalizeDeliverableEmail } from "./mailer.js";
 import { escapeHtml } from "./dailyVisitReportEmail.js";
+import { resolveAppOrigin } from "./inactivityEmail.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 export const DEFAULT_VISITS_PER_SALESMAN = 12;
@@ -34,13 +35,23 @@ function recomputePlanTotals(visits = []) {
     acc.combinedScore += Number(visit.combined_score || 0);
     acc.dueAmount += Number(visit.total_due_amount || 0);
     acc.recentSales += Number(visit.recent_sales_value || 0);
-    if (visit.focus === "Both" || visit.focus === "Collection") acc.collectionVisits += 1;
-    if (visit.focus === "Both" || visit.focus === "Sales") acc.salesVisits += 1;
+    acc.outstanding_0_30 += Number(visit.outstanding_0_30 || 0);
+    acc.outstanding_30_60 += Number(visit.outstanding_30_60 || 0);
+    acc.outstanding_61_90 += Number(visit.outstanding_61_90 || 0);
+    acc.outstanding_91_120 += Number(visit.outstanding_91_120 || 0);
+    acc.outstanding_above_120 += Number(visit.outstanding_above_120 || 0);
+    if (visit.focus === "Collection") acc.collectionVisits += 1;
+    if (visit.focus === "Sales" || visit.focus === "Both") acc.salesVisits += 1;
     return acc;
   }, {
     combinedScore: 0,
     dueAmount: 0,
     recentSales: 0,
+    outstanding_0_30: 0,
+    outstanding_30_60: 0,
+    outstanding_61_90: 0,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
     collectionVisits: 0,
     salesVisits: 0,
   });
@@ -188,11 +199,12 @@ export function buildCollectionOpportunityFromRow(row = {}, todayIso = new Date(
     total_due_amount: totalDue,
     max_overdue_days: Math.max(
       toNumber(row.max_overdue_days),
-      toNumber(row.outstanding_above_90) > 0 ? 100
-        : toNumber(row.outstanding_61_90) > 0 ? 75
-          : toNumber(row.outstanding_30_60) > 0 ? 45
-            : toNumber(row.outstanding_0_30) > 0 ? 15
-              : 0,
+      toNumber(row.outstanding_above_120) > 0 || toNumber(row.outstanding_above_90) > 0 ? 130
+        : toNumber(row.outstanding_91_120) > 0 ? 100
+          : toNumber(row.outstanding_61_90) > 0 ? 75
+            : toNumber(row.outstanding_30_60) > 0 ? 45
+              : toNumber(row.outstanding_0_30) > 0 ? 15
+                : 0,
     ),
     due_invoice_count: Math.max(toNumber(row.due_invoice_count), totalDue > 0 ? 1 : 0),
     outstanding_cash: toNumber(row.outstanding_cash),
@@ -207,7 +219,19 @@ export function buildCombinedVisitScore(salesScore, collectionScore) {
   return Math.round((0.42 * sales) + (0.42 * collection) + (0.16 * synergy));
 }
 
-export function resolveVisitFocus(salesScore, collectionScore) {
+export function outstandingAbove60Amount(row = {}) {
+  return Math.max(
+    0,
+    toNumber(row.outstanding_61_90)
+      + toNumber(row.outstanding_91_120)
+      + toNumber(row.outstanding_above_120)
+      + toNumber(row.outstanding_above_90),
+  );
+}
+
+export function resolveVisitFocus(salesScore, collectionScore, row = {}) {
+  if (outstandingAbove60Amount(row) > 0) return "Collection";
+
   const sales = toNumber(salesScore);
   const collection = toNumber(collectionScore);
   const salesStrong = sales >= 40;
@@ -219,17 +243,40 @@ export function resolveVisitFocus(salesScore, collectionScore) {
   return "Sales";
 }
 
+export function visitPlanMixTargets(limit = DEFAULT_VISITS_PER_SALESMAN) {
+  const capped = Math.max(1, Math.min(50, Number(limit) || DEFAULT_VISITS_PER_SALESMAN));
+  const collectionTarget = Math.round(capped * 0.3);
+  const salesTarget = capped - collectionTarget;
+  return { capped, salesTarget, collectionTarget };
+}
+
 export function scoreVisitPlanCustomer(row = {}, todayIso = new Date().toISOString()) {
-  const salesScore = buildSalesOpportunityScore(row);
-  const collection = buildCollectionOpportunityFromRow(row, todayIso);
+  const outstanding_0_30 = Math.max(toNumber(row.outstanding_0_30), 0);
+  const outstanding_30_60 = Math.max(toNumber(row.outstanding_30_60), 0);
+  const outstanding_61_90 = Math.max(toNumber(row.outstanding_61_90), 0);
+  const outstanding_91_120 = Math.max(toNumber(row.outstanding_91_120), 0);
+  const outstanding_above_120 = Math.max(toNumber(row.outstanding_above_120), 0);
+  const outstanding_above_90 = Math.max(
+    toNumber(row.outstanding_above_90),
+    outstanding_91_120 + outstanding_above_120,
+  );
+  const bucketRow = {
+    ...row,
+    outstanding_0_30,
+    outstanding_30_60,
+    outstanding_61_90,
+    outstanding_91_120,
+    outstanding_above_120,
+    outstanding_above_90,
+  };
+
+  const salesScore = buildSalesOpportunityScore(bucketRow);
+  const collection = buildCollectionOpportunityFromRow(bucketRow, todayIso);
   const combinedScore = buildCombinedVisitScore(salesScore, collection.score);
-  const focus = resolveVisitFocus(salesScore, collection.score);
+  const focus = resolveVisitFocus(salesScore, collection.score, bucketRow);
   const totalOutstanding = Math.max(
     toNumber(row.total_due_amount),
-    toNumber(row.outstanding_0_30)
-      + toNumber(row.outstanding_30_60)
-      + toNumber(row.outstanding_61_90)
-      + toNumber(row.outstanding_above_90),
+    outstanding_0_30 + outstanding_30_60 + outstanding_61_90 + outstanding_91_120 + outstanding_above_120,
   );
 
   return {
@@ -244,6 +291,12 @@ export function scoreVisitPlanCustomer(row = {}, todayIso = new Date().toISOStri
     days_since_last_invoice: row.days_since_last_invoice == null
       ? daysSinceDate(row.latest_transaction_date || row.last_invoice_date, todayIso)
       : Math.max(0, toNumber(row.days_since_last_invoice)),
+    outstanding_0_30,
+    outstanding_30_60,
+    outstanding_61_90,
+    outstanding_91_120,
+    outstanding_above_120,
+    outstanding_above_90,
     total_due_amount: totalOutstanding,
     sales_score: salesScore,
     sales_label: probabilityLabel(salesScore),
@@ -255,30 +308,88 @@ export function scoreVisitPlanCustomer(row = {}, todayIso = new Date().toISOStri
   };
 }
 
+function compareByCollectionThenCombined(left, right) {
+  const byCollection = right.collection_score - left.collection_score;
+  if (byCollection !== 0) return byCollection;
+  const byCombined = right.combined_score - left.combined_score;
+  if (byCombined !== 0) return byCombined;
+  const byDue = right.total_due_amount - left.total_due_amount;
+  if (byDue !== 0) return byDue;
+  return String(left.customer_name || left.customer_code).localeCompare(
+    String(right.customer_name || right.customer_code),
+  );
+}
+
+function compareBySalesThenCombined(left, right) {
+  const bySales = right.sales_score - left.sales_score;
+  if (bySales !== 0) return bySales;
+  const byCombined = right.combined_score - left.combined_score;
+  if (byCombined !== 0) return byCombined;
+  const byValue = right.recent_sales_value - left.recent_sales_value;
+  if (byValue !== 0) return byValue;
+  return String(left.customer_name || left.customer_code).localeCompare(
+    String(right.customer_name || right.customer_code),
+  );
+}
+
+export function selectVisitPlanMix(scoredRows = [], limit = DEFAULT_VISITS_PER_SALESMAN) {
+  const { capped, salesTarget, collectionTarget } = visitPlanMixTargets(limit);
+  const collectionPool = [...scoredRows]
+    .filter((row) => row.focus === "Collection")
+    .sort(compareByCollectionThenCombined);
+  const salesPool = [...scoredRows]
+    .filter((row) => row.focus !== "Collection")
+    .sort(compareBySalesThenCombined);
+
+  const used = new Set();
+  const salesPicked = [];
+  const collectionPicked = [];
+
+  for (const row of collectionPool) {
+    if (collectionPicked.length >= collectionTarget) break;
+    if (used.has(row.customer_code)) continue;
+    used.add(row.customer_code);
+    collectionPicked.push({ ...row, focus: "Collection" });
+  }
+
+  for (const row of salesPool) {
+    if (salesPicked.length >= salesTarget) break;
+    if (used.has(row.customer_code)) continue;
+    used.add(row.customer_code);
+    salesPicked.push({ ...row, focus: row.focus === "Both" ? "Both" : "Sales" });
+  }
+
+  // Fill leftover slots from the other pool so the plan still reaches the visit limit.
+  const leftovers = [...collectionPool, ...salesPool]
+    .filter((row) => !used.has(row.customer_code));
+
+  for (const row of leftovers) {
+    if (salesPicked.length + collectionPicked.length >= capped) break;
+    if (used.has(row.customer_code)) continue;
+    if (outstandingAbove60Amount(row) > 0 || row.focus === "Collection") {
+      used.add(row.customer_code);
+      collectionPicked.push({ ...row, focus: "Collection" });
+      continue;
+    }
+    used.add(row.customer_code);
+    salesPicked.push({ ...row, focus: row.focus === "Both" ? "Both" : "Sales" });
+  }
+
+  // Prefer sales stops first (70%), then collection (30%).
+  return [...salesPicked, ...collectionPicked]
+    .slice(0, capped)
+    .map((row, index) => ({ ...row, rank: index + 1 }));
+}
+
 export function rankSalesmanVisitPlan(customers = [], {
   limit = DEFAULT_VISITS_PER_SALESMAN,
   todayIso = new Date().toISOString(),
 } = {}) {
   const scored = (customers || [])
     .map((row) => scoreVisitPlanCustomer(row, todayIso))
-    .filter((row) => row.customer_code && (row.sales_score > 0 || row.collection_score > 0))
-    .sort((left, right) => {
-      const byCombined = right.combined_score - left.combined_score;
-      if (byCombined !== 0) return byCombined;
-      const byDue = right.total_due_amount - left.total_due_amount;
-      if (byDue !== 0) return byDue;
-      const bySales = right.recent_sales_value - left.recent_sales_value;
-      if (bySales !== 0) return bySales;
-      return String(left.customer_name || left.customer_code).localeCompare(
-        String(right.customer_name || right.customer_code),
-      );
-    });
+    .filter((row) => row.customer_code && (row.sales_score > 0 || row.collection_score > 0));
 
-  const capped = Math.max(1, Math.min(50, Number(limit) || DEFAULT_VISITS_PER_SALESMAN));
-  return scored.slice(0, capped).map((row, index) => ({
-    ...row,
-    rank: index + 1,
-  }));
+  return selectVisitPlanMix(scored, limit);
 }
 
 export function salesmanVisitPlanDisplayName(plan = {}) {
@@ -315,13 +426,23 @@ export function groupVisitPlansBySalesman(customers = [], {
       acc.combinedScore += visit.combined_score;
       acc.dueAmount += visit.total_due_amount;
       acc.recentSales += visit.recent_sales_value;
-      if (visit.focus === "Both" || visit.focus === "Collection") acc.collectionVisits += 1;
-      if (visit.focus === "Both" || visit.focus === "Sales") acc.salesVisits += 1;
+      acc.outstanding_0_30 += visit.outstanding_0_30 || 0;
+      acc.outstanding_30_60 += visit.outstanding_30_60 || 0;
+      acc.outstanding_61_90 += visit.outstanding_61_90 || 0;
+      acc.outstanding_91_120 += visit.outstanding_91_120 || 0;
+      acc.outstanding_above_120 += visit.outstanding_above_120 || 0;
+      if (visit.focus === "Collection") acc.collectionVisits += 1;
+      if (visit.focus === "Sales" || visit.focus === "Both") acc.salesVisits += 1;
       return acc;
     }, {
       combinedScore: 0,
       dueAmount: 0,
       recentSales: 0,
+      outstanding_0_30: 0,
+      outstanding_30_60: 0,
+      outstanding_61_90: 0,
+      outstanding_91_120: 0,
+      outstanding_above_120: 0,
       collectionVisits: 0,
       salesVisits: 0,
     });
@@ -369,17 +490,27 @@ function focusCellStyle(focus) {
   return "background:#e8f7ee;color:#166534;font-weight:700;";
 }
 
+function customerAuditUrl(customerCode, origin = resolveAppOrigin()) {
+  const code = encodeURIComponent(normalizeCode(customerCode));
+  const base = String(origin || "").replace(/\/+$/, "");
+  return `${base}/management/customer-audit?customer_code=${code}`;
+}
+
 export function buildSalesmanVisitPlanEmail(plan, {
   reportDate = getKsaDateString(),
   previewOnly = false,
+  appOrigin = resolveAppOrigin(),
 } = {}) {
   const titleName = salesmanVisitPlanDisplayName(plan);
   const visits = Array.isArray(plan?.visits) ? plan.visits : [];
+  const origin = String(appOrigin || resolveAppOrigin()).replace(/\/+$/, "");
   const rowsHtml = visits.map((visit, index) => {
     const rowBg = index % 2 === 0 ? "#ffffff" : "#eef6fb";
+    const auditUrl = customerAuditUrl(visit.customer_code, origin);
+    const customerLabel = escapeHtml(visit.customer_name || "-");
     return `<tr style="background:${rowBg};">
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;">${escapeHtml(visit.rank)}</td>
-      <td style="border:1px solid #c5d4de;padding:6px;">${escapeHtml(visit.customer_name || "-")}<br/><span style="color:#64748b;font-size:12px;">${escapeHtml(visit.customer_code || "")}</span></td>
+      <td style="border:1px solid #c5d4de;padding:6px;"><a href="${escapeHtml(auditUrl)}" style="color:#0f4c5c;font-weight:700;text-decoration:underline;">${customerLabel}</a><br/><span style="color:#64748b;font-size:12px;">${escapeHtml(visit.customer_code || "")}</span></td>
       <td style="border:1px solid #c5d4de;padding:6px;">${escapeHtml([visit.city, visit.area].filter(Boolean).join(" / ") || "-")}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${focusCellStyle(visit.focus)}">${escapeHtml(visit.focus)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${scoreCellStyle(visit.combined_label)}">${escapeHtml(visit.combined_score)} · ${escapeHtml(visit.combined_label)}</td>
@@ -387,6 +518,11 @@ export function buildSalesmanVisitPlanEmail(plan, {
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${scoreCellStyle(visit.collection_label)}">${escapeHtml(visit.collection_score)} · ${escapeHtml(visit.collection_label)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.recent_sales_value))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.total_due_amount))}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.outstanding_0_30))}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.outstanding_30_60))}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.outstanding_61_90))}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.outstanding_91_120))}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.outstanding_above_120))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;">${escapeHtml(visit.days_since_last_invoice == null ? "-" : visit.days_since_last_invoice)}</td>
     </tr>`;
   }).join("");
@@ -399,21 +535,22 @@ export function buildSalesmanVisitPlanEmail(plan, {
   const html = `<!DOCTYPE html>
 <html>
 <body style="font-family:Segoe UI,Arial,sans-serif;color:#0f172a;background:#f8fafc;padding:16px;">
-  <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ea;border-radius:12px;overflow:hidden;">
+  <div style="max-width:1100px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ea;border-radius:12px;overflow:hidden;">
     <div style="background:#0f4c5c;color:#ffffff;padding:16px 20px;">
       <h1 style="margin:0;font-size:20px;">Highest-probability visit plan</h1>
       <p style="margin:6px 0 0;opacity:0.9;">${escapeHtml(titleName)} · ${escapeHtml(reportDate)}</p>
     </div>
     <div style="padding:16px 20px;">
       ${previewBanner}
-      <p style="margin:0 0 12px;">Recommended stops ranked for sales opportunity and collection probability. Aim for both where the focus is <strong>Both</strong>.</p>
+      <p style="margin:0 0 12px;">Target mix: <strong>70% sales</strong> / <strong>30% collection</strong>. Any customer with outstanding &gt;60 days is collection-only.</p>
       <p style="margin:0 0 16px;color:#475569;">
         Visits: <strong>${escapeHtml(visits.length)}</strong>
+        · Sales focus: <strong>${escapeHtml(plan?.totals?.salesVisits ?? 0)}</strong>
+        · Collection focus: <strong>${escapeHtml(plan?.totals?.collectionVisits ?? 0)}</strong>
         · Avg combined: <strong>${escapeHtml(plan?.totals?.averageCombinedScore ?? 0)}</strong>
         · Due on plan: <strong>${escapeHtml(formatMoney(plan?.totals?.dueAmount || 0))}</strong>
-        · Recent 6M sales on plan: <strong>${escapeHtml(formatMoney(plan?.totals?.recentSales || 0))}</strong>
       </p>
-      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
           <tr style="background:#0f4c5c;color:#ffffff;">
             <th style="border:1px solid #0c3d4a;padding:8px;">#</th>
@@ -425,12 +562,29 @@ export function buildSalesmanVisitPlanEmail(plan, {
             <th style="border:1px solid #0c3d4a;padding:8px;">Collection</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Recent 6M</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Due</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;">0-30</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;">31-60</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;">61-90</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;">91-120</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;">&gt;120</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Days since invoice</th>
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml || `<tr><td colspan="10" style="padding:12px;border:1px solid #c5d4de;">No recommended visits.</td></tr>`}
+          ${rowsHtml || `<tr><td colspan="15" style="padding:12px;border:1px solid #c5d4de;">No recommended visits.</td></tr>`}
         </tbody>
+        <tfoot>
+          <tr style="background:#e8f1f4;font-weight:700;">
+            <td colspan="8" style="border:1px solid #c5d4de;padding:6px;">Total</td>
+            <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.dueAmount || 0))}</td>
+            <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_0_30 || 0))}</td>
+            <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_30_60 || 0))}</td>
+            <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_61_90 || 0))}</td>
+            <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_91_120 || 0))}</td>
+            <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_above_120 || 0))}</td>
+            <td style="border:1px solid #c5d4de;padding:6px;"></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   </div>
@@ -440,12 +594,14 @@ export function buildSalesmanVisitPlanEmail(plan, {
   const textLines = [
     `Highest-probability visit plan — ${titleName} — ${reportDate}`,
     previewOnly ? "Admin preview only — salesman email disabled until approved." : "",
-    `Visits: ${visits.length}; avg combined ${plan?.totals?.averageCombinedScore ?? 0}`,
+    `Visits: ${visits.length}; avg combined ${plan?.totals?.averageCombinedScore ?? 0}; mix 70% sales / 30% collection`,
     "",
     ...visits.map((visit) => [
       `${visit.rank}. ${visit.customer_name || visit.customer_code} (${visit.customer_code})`,
       `  Focus ${visit.focus}; combined ${visit.combined_score} ${visit.combined_label}`,
       `  Sales ${visit.sales_score}; collection ${visit.collection_score}; due ${formatMoney(visit.total_due_amount)}`,
+      `  Buckets 0-30 ${formatMoney(visit.outstanding_0_30)} | 31-60 ${formatMoney(visit.outstanding_30_60)} | 61-90 ${formatMoney(visit.outstanding_61_90)} | 91-120 ${formatMoney(visit.outstanding_91_120)} | >120 ${formatMoney(visit.outstanding_above_120)}`,
+      `  Audit: ${customerAuditUrl(visit.customer_code, origin)}`,
     ].join("\n")),
   ].filter(Boolean);
 

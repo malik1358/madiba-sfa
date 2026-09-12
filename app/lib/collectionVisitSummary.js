@@ -49,6 +49,7 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   bucket91to120: "91-120",
   bucket120plus: ">120",
   summaryNotSpecified: "not specified",
+  gps: "GPS",
   distanceFromCustomer: "Distance from customer",
   distanceFromPrevious: "Distance from previous",
   estWaiting: "Est. waiting",
@@ -126,6 +127,7 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   lines.push(`${labels.bucket91to120}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${labels.bucket120plus}: ${formatMoney(row.outstanding_above_120)}`);
   lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
+    gps: labels.gps,
     distanceFromCustomer: labels.distanceFromCustomer,
     distanceFromPrevious: labels.distanceFromPrevious,
     estWaiting: labels.estWaiting,

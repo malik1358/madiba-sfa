@@ -1,5 +1,6 @@
 import { distanceFromCustomerKm } from "./customerLocation.js";
 import {
+  buildGoogleMapsPointUrl,
   computeWaitingMinutes,
   formatDurationMinutes,
   haversineDistanceKm,
@@ -25,6 +26,7 @@ export const VISIT_DISTANCE_ACTIVITY_ENTRY_TYPES = [
 ];
 
 export const VISIT_DISTANCE_WHATSAPP_LABELS = {
+  gps: "GPS",
   distanceFromCustomer: "Distance from customer",
   distanceFromPrevious: "Distance from previous",
   estWaiting: "Est. waiting",
@@ -46,15 +48,22 @@ export function formatVisitDistanceKm(value) {
   return `${number.toFixed(2)} km`;
 }
 
-export function formatVisitDistanceWhatsappLines(metrics = {}, labels = VISIT_DISTANCE_WHATSAPP_LABELS) {
+export function formatVisitGpsWhatsappValue(metrics = {}) {
+  if (!hasGpsCoordinates(metrics)) return "-";
+  return buildGoogleMapsPointUrl(Number(metrics.latitude), Number(metrics.longitude));
+}
+
+export function formatVisitDistanceWhatsappLines(metrics = {}, labels = {}) {
+  const resolvedLabels = { ...VISIT_DISTANCE_WHATSAPP_LABELS, ...labels };
   const waiting = metrics.waitingMinutes == null
     ? "-"
     : formatDurationMinutes(metrics.waitingMinutes);
   return [
     "",
-    `${labels.distanceFromCustomer}: ${formatVisitDistanceKm(metrics.distanceFromCustomerKm)}`,
-    `${labels.distanceFromPrevious}: ${formatVisitDistanceKm(metrics.distanceFromPreviousKm)}`,
-    `${labels.estWaiting}: ${waiting}`,
+    `${resolvedLabels.gps}: ${formatVisitGpsWhatsappValue(metrics)}`,
+    `${resolvedLabels.distanceFromCustomer}: ${formatVisitDistanceKm(metrics.distanceFromCustomerKm)}`,
+    `${resolvedLabels.distanceFromPrevious}: ${formatVisitDistanceKm(metrics.distanceFromPreviousKm)}`,
+    `${resolvedLabels.estWaiting}: ${waiting}`,
   ];
 }
 
@@ -95,7 +104,10 @@ export function resolveVisitDistanceMetrics({
     );
   }
 
+  const hasVisitGps = hasGpsCoordinates(location);
   return {
+    latitude: hasVisitGps ? Number(location.latitude) : null,
+    longitude: hasVisitGps ? Number(location.longitude) : null,
     distanceFromCustomerKm: distanceFromCustomer,
     distanceFromPreviousKm,
     waitingMinutes,

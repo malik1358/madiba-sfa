@@ -303,6 +303,7 @@ const TEXT = {
   summaryReceiptMode: { en: "Receipt mode", ar: "طريقة الاستلام" },
   summaryNextVisit: { en: "Next visit", ar: "الزيارة القادمة" },
   summaryVisitNumber: { en: "Visit number today", ar: "رقم الزيارة لليوم" },
+  summaryGps: { en: "GPS", ar: "GPS" },
   summaryDistanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
   summaryDistanceFromPrevious: { en: "Distance from previous", ar: "المسافة من السابق" },
   summaryEstWaiting: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
@@ -450,6 +451,7 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   lines.push(`${t("bucket91to120")}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${t("bucket120plus")}: ${formatMoney(row.outstanding_above_120)}`);
   lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
+    gps: t("summaryGps"),
     distanceFromCustomer: t("summaryDistanceFromCustomer"),
     distanceFromPrevious: t("summaryDistanceFromPrevious"),
     estWaiting: t("summaryEstWaiting"),

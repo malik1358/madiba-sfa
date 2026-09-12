@@ -8,10 +8,11 @@ import {
   timelineRowFromActivityLog,
 } from "../app/lib/visitDistanceWhatsapp.js";
 
-test("formatVisitDistanceWhatsappLines always includes the three GPS fields", () => {
+test("formatVisitDistanceWhatsappLines always includes GPS and the three distance fields", () => {
   const lines = formatVisitDistanceWhatsappLines({});
   assert.deepEqual(lines, [
     "",
+    "GPS: -",
     "Distance from customer: -",
     "Distance from previous: -",
     "Est. waiting: -",
@@ -36,15 +37,18 @@ test("resolveVisitDistanceMetrics uses customer GPS, previous GPS, and waiting t
     savedAt: "2026-09-10T08:00:00.000Z",
   });
 
+  assert.equal(metrics.latitude, 24.72);
+  assert.equal(metrics.longitude, 46.72);
   assert.ok(metrics.distanceFromCustomerKm > 0);
   assert.ok(metrics.distanceFromPreviousKm > 2);
   assert.ok(metrics.waitingMinutes > 0);
 
   const lines = formatVisitDistanceWhatsappLines(metrics);
   assert.equal(lines[0], "");
-  assert.match(lines[1], /Distance from customer: \d+\.\d{2} km/);
-  assert.match(lines[2], /Distance from previous: \d+\.\d{2} km/);
-  assert.match(lines[3], /Est. waiting:/);
+  assert.match(lines[1], /GPS: https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=24\.72%2C46\.72/);
+  assert.match(lines[2], /Distance from customer: \d+\.\d{2} km/);
+  assert.match(lines[3], /Distance from previous: \d+\.\d{2} km/);
+  assert.match(lines[4], /Est. waiting:/);
   assert.doesNotMatch(lines.join("\n"), /Est. waiting: -$/);
 });
 

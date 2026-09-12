@@ -6728,14 +6728,25 @@ th:has(.moduleTableColumnFilterInput) {
   min-width: 980px;
 }
 
-/* Stick headers to this table's scroll box, not the page chrome. */
-.moduleBiTable th,
+/* Stick the label row only. A second header row (filters) stacks under it. */
+.moduleBiTable thead tr:first-child th,
 .moduleBiTable.moduleStackedHeaderTable thead tr:first-child th {
   top: 0;
+  z-index: 4;
 }
 
+.moduleBiTable thead tr:nth-child(2) th,
 .moduleBiTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
   top: var(--module-stacked-header-row1);
+  z-index: 3;
+}
+
+.moduleBiTable .moduleTableHeadingFilter {
+  min-width: 120px;
+}
+
+.moduleBiTableWrap .moduleExcelColumnFilterPanel {
+  z-index: 6;
 }
 
 .moduleBiTrend--up {

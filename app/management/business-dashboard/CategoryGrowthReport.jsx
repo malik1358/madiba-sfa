@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import ExportableTable from "../../components/ExportableTable";
 import CategoryGrowthFilters, { filterGrowthRows } from "./CategoryGrowthFilters";
 import GrowthPeriodGrid from "./GrowthPeriodGrid";
+import BiExcelHead, { useBiExcelFilters } from "./BiExcelHead";
 import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart, GrowthTrendChart } from "./GrowthCharts";
 import {
   buildPeriodChartModel,
@@ -130,6 +131,92 @@ function periodCellClass(tone, isCurrent = false) {
     tone ? `moduleBiMonthCell--${tone}` : "",
     isCurrent ? "moduleBiMonthCell--current" : "",
   ].filter(Boolean).join(" ");
+}
+
+function YearlyGrowthTable({
+  filename,
+  groupLabel,
+  rows,
+  years,
+  currentYear,
+  t,
+}) {
+  const keys = useMemo(
+    () => ["name", "first", "last", "lifetime", "share", "cagr", "yoy", "mom", "status", ...years],
+    [years],
+  );
+  const valueOf = useCallback((row, key) => {
+    if (key === "name") return row.label || row.category || "-";
+    if (key === "first") return row.firstDate || "—";
+    if (key === "last") return row.lastDate || "—";
+    if (key === "lifetime") return formatMoneyAmount(row.lifetime);
+    if (key === "share") return formatSharePercent(row.sharePercent);
+    if (key === "cagr") return formatGrowthPercent(row.cagrPercent);
+    if (key === "yoy") return formatGrowthPercent(row.yoyPercent);
+    if (key === "mom") return formatGrowthPercent(row.momPercent);
+    if (key === "status") return row.statusLabel || row.status || "—";
+    return Number(row.yearValues?.[key] || 0) ? formatMoneyAmount(row.yearValues[key]) : "—";
+  }, []);
+  const { filters, options, visibleRows, setFilter } = useBiExcelFilters(rows, keys, valueOf);
+
+  return (
+    <ExportableTable filename={filename} sheetName="Growth" className="moduleTableWrap moduleBiTableWrap">
+      <table className="moduleTable moduleBiTable">
+        <thead>
+          <tr>
+            <BiExcelHead label={groupLabel} filterKey="name" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("firstSale")} filterKey="first" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("lastSale")} filterKey="last" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("lifetime")} filterKey="lifetime" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("share")} filterKey="share" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("cagr")} filterKey="cagr" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("yoy")} filterKey="yoy" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("mom")} filterKey="mom" options={options} filters={filters} onChange={setFilter} />
+            <BiExcelHead label={t("status")} filterKey="status" options={options} filters={filters} onChange={setFilter} />
+            {years.map((year) => (
+              <BiExcelHead
+                key={year}
+                label={year === currentYear ? `${year} YTD` : year}
+                filterKey={year}
+                options={options}
+                filters={filters}
+                onChange={setFilter}
+                className={year === currentYear ? "moduleBiMonthHead--current" : ""}
+              />
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {visibleRows.map((row) => (
+            <tr key={row.label || row.category}>
+              <td>{row.label || row.category}</td>
+              <td>{row.firstDate}</td>
+              <td>{row.lastDate}</td>
+              <td>{formatMoneyAmount(row.lifetime)}</td>
+              <td>{formatSharePercent(row.sharePercent)}</td>
+              <td className={periodCellClass(percentTone(row.cagrPercent))}>{formatGrowthPercent(row.cagrPercent)}</td>
+              <td className={periodCellClass(percentTone(row.yoyPercent))}>{formatGrowthPercent(row.yoyPercent)}</td>
+              <td className={periodCellClass(percentTone(row.momPercent))}>{formatGrowthPercent(row.momPercent)}</td>
+              <td>
+                <span className={statusClass(row.status)}>{row.statusLabel}</span>
+              </td>
+              {years.map((year, index) => {
+                const amount = Number(row.yearValues?.[year] || 0);
+                const previousYear = index > 0 ? years[index - 1] : "";
+                const previous = previousYear ? Number(row.yearValues?.[previousYear] || 0) : 0;
+                const tone = monthChangeTone(amount, previous, Boolean(previousYear));
+                return (
+                  <td key={year} className={periodCellClass(tone, year === currentYear)}>
+                    {amount ? formatMoneyAmount(amount) : "—"}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </ExportableTable>
+  );
 }
 
 function monthLabel(month, currentMonth) {
@@ -334,56 +421,14 @@ export default function CategoryGrowthReport({
         {categories.length === 0 ? (
           <div className="moduleHint">{t("emptySlice")}</div>
         ) : (
-        <ExportableTable filename={`sales-growth-${groupBy}`} sheetName="Growth" className="moduleTableWrap moduleBiTableWrap">
-          <table className="moduleTable moduleBiTable">
-            <thead>
-              <tr>
-                <th>{groupLabel}</th>
-                <th>{t("firstSale")}</th>
-                <th>{t("lastSale")}</th>
-                <th>{t("lifetime")}</th>
-                <th>{t("share")}</th>
-                <th>{t("cagr")}</th>
-                <th>{t("yoy")}</th>
-                <th>{t("mom")}</th>
-                <th>{t("status")}</th>
-                {years.map((year) => (
-                  <th key={year} className={year === currentYear ? "moduleBiMonthHead--current" : ""}>
-                    {year === currentYear ? `${year} YTD` : year}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {categories.map((row) => (
-                <tr key={row.label || row.category}>
-                  <td>{row.label || row.category}</td>
-                  <td>{row.firstDate}</td>
-                  <td>{row.lastDate}</td>
-                  <td>{formatMoneyAmount(row.lifetime)}</td>
-                  <td>{formatSharePercent(row.sharePercent)}</td>
-                  <td className={periodCellClass(percentTone(row.cagrPercent))}>{formatGrowthPercent(row.cagrPercent)}</td>
-                  <td className={periodCellClass(percentTone(row.yoyPercent))}>{formatGrowthPercent(row.yoyPercent)}</td>
-                  <td className={periodCellClass(percentTone(row.momPercent))}>{formatGrowthPercent(row.momPercent)}</td>
-                  <td>
-                    <span className={statusClass(row.status)}>{row.statusLabel}</span>
-                  </td>
-                  {years.map((year, index) => {
-                    const amount = Number(row.yearValues?.[year] || 0);
-                    const previousYear = index > 0 ? years[index - 1] : "";
-                    const previous = previousYear ? Number(row.yearValues?.[previousYear] || 0) : 0;
-                    const tone = monthChangeTone(amount, previous, Boolean(previousYear));
-                    return (
-                      <td key={year} className={periodCellClass(tone, year === currentYear)}>
-                        {amount ? formatMoneyAmount(amount) : "—"}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </ExportableTable>
+        <YearlyGrowthTable
+          filename={`sales-growth-${groupBy}`}
+          groupLabel={groupLabel}
+          rows={categories}
+          years={years}
+          currentYear={currentYear}
+          t={t}
+        />
         )}
       </section>
 

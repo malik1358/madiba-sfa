@@ -5,6 +5,7 @@ import { getKsaDateString } from "./workdayActivity.js";
 
 export const DEFAULT_VISITS_PER_SALESMAN = 12;
 export const DEFAULT_SALESMAN_VISIT_PLAN_EMAIL_TO = "malik@pinasz.com";
+export const SALESMAN_VISIT_PLAN_SNAPSHOT_KEY = "salesman_visit_plan_snapshot_v1";
 
 function envFlagEnabled(value, defaultValue = false) {
   const raw = String(value ?? "").trim().toLowerCase();
@@ -26,6 +27,80 @@ export function resolveSalesmanVisitPlanDigestRecipients(env = process.env) {
   const configured = parseEmailList(env.SALESMAN_VISIT_PLAN_EMAIL_TO);
   const defaults = parseEmailList(DEFAULT_SALESMAN_VISIT_PLAN_EMAIL_TO).filter((email) => isLikelyEmail(email));
   return [...new Set([...defaults, ...configured])];
+}
+
+function recomputePlanTotals(visits = []) {
+  const totals = (visits || []).reduce((acc, visit) => {
+    acc.combinedScore += Number(visit.combined_score || 0);
+    acc.dueAmount += Number(visit.total_due_amount || 0);
+    acc.recentSales += Number(visit.recent_sales_value || 0);
+    if (visit.focus === "Both" || visit.focus === "Collection") acc.collectionVisits += 1;
+    if (visit.focus === "Both" || visit.focus === "Sales") acc.salesVisits += 1;
+    return acc;
+  }, {
+    combinedScore: 0,
+    dueAmount: 0,
+    recentSales: 0,
+    collectionVisits: 0,
+    salesVisits: 0,
+  });
+  return {
+    ...totals,
+    averageCombinedScore: visits.length ? Math.round(totals.combinedScore / visits.length) : 0,
+  };
+}
+
+/** Serve a previously built midnight snapshot without recomputing scores. */
+export function filterVisitPlanSnapshot(snapshot, {
+  salesmanCode = "",
+  limit = 0,
+} = {}) {
+  if (!snapshot || !Array.isArray(snapshot.plans)) {
+    return {
+      reportDate: "",
+      builtAt: "",
+      visitLimit: DEFAULT_VISITS_PER_SALESMAN,
+      salesmanCount: 0,
+      visitCount: 0,
+      plans: [],
+      warnings: [],
+      fromSnapshot: false,
+      missingSnapshot: true,
+    };
+  }
+
+  const filterCode = normalizeCode(salesmanCode);
+  let plans = filterCode
+    ? snapshot.plans.filter((plan) => normalizeCode(plan.salesmanCode) === filterCode)
+    : [...snapshot.plans];
+
+  const visitLimit = Number(limit) > 0
+    ? Math.max(1, Math.min(50, Number(limit)))
+    : Number(snapshot.visitLimit || DEFAULT_VISITS_PER_SALESMAN);
+
+  plans = plans.map((plan) => {
+    const visits = (plan.visits || [])
+      .slice(0, visitLimit)
+      .map((visit, index) => ({ ...visit, rank: index + 1 }));
+    return {
+      ...plan,
+      visitCount: visits.length,
+      visits,
+      totals: recomputePlanTotals(visits),
+    };
+  }).filter((plan) => plan.visitCount > 0);
+
+  return {
+    reportDate: snapshot.reportDate || "",
+    builtAt: snapshot.builtAt || "",
+    visitLimit,
+    salesmanCount: plans.length,
+    visitCount: plans.reduce((sum, plan) => sum + plan.visitCount, 0),
+    plans,
+    warnings: Array.isArray(snapshot.warnings) ? snapshot.warnings : [],
+    fromSnapshot: true,
+    missingSnapshot: false,
+  };
 }
 
 function toNumber(value) {

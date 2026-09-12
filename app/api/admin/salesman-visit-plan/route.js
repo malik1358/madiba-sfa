@@ -1,10 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { buildVisibleCustomersForScope } from "../../customers/visible/route.js";
-import {
-  fetchOutstandingAndCollectionRecords,
-  getSalesScope,
-} from "../../payment-collections/route.js";
 import { isCollectionOnlyAccess, isSalesmanVisitPlanSalesmanAccessApproved } from "../../../lib/moduleAccess.js";
 import {
   DEFAULT_VISITS_PER_SALESMAN,
@@ -12,9 +7,9 @@ import {
   isSalesmanVisitPlanSendToUsersEnabled,
 } from "../../../lib/salesmanVisitPlan.js";
 import {
-  buildSalesmanVisitPlanPayload,
+  buildAndStoreSalesmanVisitPlanSnapshot,
   formatSupabaseError,
-  loadSalesmanVisitPlanProfiles,
+  loadSalesmanVisitPlanFromSnapshot,
   sendSalesmanVisitPlanEmailsFromPayload,
 } from "../../../lib/salesmanVisitPlanServer.js";
 
@@ -31,7 +26,7 @@ function createAdminClient() {
   });
 }
 
-async function requireVisitPlanAccess(admin, request, { forEmail = false } = {}) {
+async function requireVisitPlanAccess(admin, request, { forEmail = false, forRebuild = false } = {}) {
   const authHeader = request.headers.get("authorization") || "";
   if (!authHeader.startsWith("Bearer ")) {
     return { error: NextResponse.json({ success: false, error: "Please login again." }, { status: 401 }) };
@@ -53,7 +48,7 @@ async function requireVisitPlanAccess(admin, request, { forEmail = false } = {})
   if (profileError || !profile || isCollectionOnlyAccess({ role, salesmanCode: profile.salesman_code })) {
     return {
       error: NextResponse.json(
-        { success: false, error: "Only admin can access salesman visit plans until approval." },
+        { success: false, error: "You do not have access to salesman visit plans." },
         { status: 403 },
       ),
     };
@@ -63,11 +58,10 @@ async function requireVisitPlanAccess(admin, request, { forEmail = false } = {})
     return { user, profile, role, forceOwnSalesman: false };
   }
 
-  // Email controls stay admin-only even after salesman page access is approved.
-  if (forEmail) {
+  if (forEmail || forRebuild) {
     return {
       error: NextResponse.json(
-        { success: false, error: "Only admin can send visit plan emails." },
+        { success: false, error: "Only admin can rebuild or email visit plans." },
         { status: 403 },
       ),
     };
@@ -88,49 +82,19 @@ async function requireVisitPlanAccess(admin, request, { forEmail = false } = {})
 
   return {
     error: NextResponse.json(
-      { success: false, error: "Only admin can access salesman visit plans until approval." },
+      { success: false, error: "You do not have access to salesman visit plans." },
       { status: 403 },
     ),
   };
 }
 
-async function loadVisitPlanPayload(admin, actorUserId, {
-  salesmanCode = "",
-  limit = DEFAULT_VISITS_PER_SALESMAN,
-  allAccess = true,
-} = {}) {
-  const [scope, salesmanProfiles] = await Promise.all([
-    getSalesScope(admin, actorUserId),
-    loadSalesmanVisitPlanProfiles(admin),
-  ]);
-
-  const visibleScope = allAccess
-    ? {
-      ...scope,
-      hasAllAccess: true,
-      visibleSalesmanCodes: [],
-      identitySearchPatterns: scope.identitySearchPatterns || [],
-      outstandingSalesmanIdentities: scope.outstandingSalesmanIdentities || [],
-    }
-    : scope;
-
-  const [visibleResult, collectionRecords] = await Promise.all([
-    buildVisibleCustomersForScope(admin, visibleScope, {
-      includeRecentSales: true,
-      includeOutstanding: true,
-      excludeBuildingMaterial: true,
-    }),
-    fetchOutstandingAndCollectionRecords(admin, scope),
-  ]);
-
-  return buildSalesmanVisitPlanPayload({
-    visibleCustomers: visibleResult?.customers || [],
-    collectionRecords: collectionRecords || [],
-    salesmanProfiles,
-    salesmanCode,
-    limit,
-    warnings: visibleResult?.warnings || [],
-  });
+function accessMeta() {
+  return {
+    adminOnly: !isSalesmanVisitPlanSalesmanAccessApproved(),
+    salesmanAccessApproved: isSalesmanVisitPlanSalesmanAccessApproved(),
+    emailEnabled: isSalesmanVisitPlanEmailEnabled(),
+    sendToUsersEnabled: isSalesmanVisitPlanSendToUsersEnabled(),
+  };
 }
 
 export async function GET(request) {
@@ -148,22 +112,16 @@ export async function GET(request) {
     const salesmanCode = access.forceOwnSalesman
       ? String(access.profile.salesman_code || "").trim()
       : requestedSalesman;
-    const limit = Number(url.searchParams.get("limit") || DEFAULT_VISITS_PER_SALESMAN);
-    const payload = await loadVisitPlanPayload(admin, access.user.id, {
+    const limit = Number(url.searchParams.get("limit") || 0);
+    const payload = await loadSalesmanVisitPlanFromSnapshot(admin, {
       salesmanCode,
       limit,
-      allAccess: !access.forceOwnSalesman,
     });
 
     return NextResponse.json({
       success: true,
       ...payload,
-      access: {
-        adminOnly: !isSalesmanVisitPlanSalesmanAccessApproved(),
-        salesmanAccessApproved: isSalesmanVisitPlanSalesmanAccessApproved(),
-        emailEnabled: isSalesmanVisitPlanEmailEnabled(),
-        sendToUsersEnabled: isSalesmanVisitPlanSendToUsersEnabled(),
-      },
+      access: accessMeta(),
     }, {
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     });
@@ -181,10 +139,6 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
     }
 
-    const admin = createAdminClient();
-    const access = await requireVisitPlanAccess(admin, request, { forEmail: true });
-    if (access.error) return access.error;
-
     let body = {};
     try {
       body = await request.json();
@@ -192,14 +146,42 @@ export async function POST(request) {
       body = {};
     }
 
-    const salesmanCode = String(body.salesman || body.salesmanCode || "").trim();
-    const limit = Number(body.limit || DEFAULT_VISITS_PER_SALESMAN);
-    const forcePreview = body.forcePreview === true;
-    const payload = await loadVisitPlanPayload(admin, access.user.id, {
-      salesmanCode,
-      limit,
-      allAccess: true,
+    const action = String(body.action || "email").trim().toLowerCase();
+    const admin = createAdminClient();
+    const access = await requireVisitPlanAccess(admin, request, {
+      forEmail: action === "email",
+      forRebuild: action === "rebuild",
     });
+    if (access.error) return access.error;
+
+    if (action === "rebuild") {
+      const snapshot = await buildAndStoreSalesmanVisitPlanSnapshot(admin, {
+        actorUserId: access.user.id,
+        limit: Number(body.limit || DEFAULT_VISITS_PER_SALESMAN),
+      });
+      return NextResponse.json({
+        success: true,
+        rebuilt: true,
+        ...snapshot,
+        access: accessMeta(),
+      });
+    }
+
+    const salesmanCode = String(body.salesman || body.salesmanCode || "").trim();
+    const forcePreview = body.forcePreview === true;
+    const payload = await loadSalesmanVisitPlanFromSnapshot(admin, {
+      salesmanCode,
+      limit: Number(body.limit || 0),
+    });
+
+    if (payload.missingSnapshot) {
+      return NextResponse.json({
+        success: false,
+        error: "No midnight visit plan is ready yet. Rebuild the snapshot first, or wait for the nightly job.",
+        access: accessMeta(),
+      }, { status: 404 });
+    }
+
     const result = await sendSalesmanVisitPlanEmailsFromPayload(payload, {
       salesmanCode,
       forcePreview,
@@ -208,18 +190,13 @@ export async function POST(request) {
     return NextResponse.json({
       success: result.failedCount === 0 && !result.skipped,
       ...result,
-      access: {
-        adminOnly: !isSalesmanVisitPlanSalesmanAccessApproved(),
-        salesmanAccessApproved: isSalesmanVisitPlanSalesmanAccessApproved(),
-        emailEnabled: isSalesmanVisitPlanEmailEnabled(),
-        sendToUsersEnabled: isSalesmanVisitPlanSendToUsersEnabled(),
-      },
+      access: accessMeta(),
     }, {
       status: result.skipped ? 200 : (result.failedCount ? 500 : 200),
     });
   } catch (error) {
     return NextResponse.json(
-      { success: false, error: formatSupabaseError(error) || "Unable to send salesman visit plan email." },
+      { success: false, error: formatSupabaseError(error) || "Unable to process salesman visit plan request." },
       { status: 500 },
     );
   }

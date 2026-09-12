@@ -6,6 +6,7 @@ import {
   buildSalesOpportunityScore,
   buildSalesmanVisitPlanDigestEmail,
   buildSalesmanVisitPlanEmail,
+  filterVisitPlanSnapshot,
   groupVisitPlansBySalesman,
   isSalesmanVisitPlanEmailEnabled,
   isSalesmanVisitPlanSendToUsersEnabled,
@@ -166,6 +167,47 @@ test("feature flags default on after promotion", () => {
   assert.equal(isSalesmanVisitPlanSalesmanAccessApproved({
     NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS: "false",
   }), false);
+});
+
+test("filterVisitPlanSnapshot serves saved plans without rebuilding", () => {
+  const missing = filterVisitPlanSnapshot(null);
+  assert.equal(missing.missingSnapshot, true);
+  assert.equal(missing.plans.length, 0);
+
+  const filtered = filterVisitPlanSnapshot({
+    reportDate: "2026-09-12",
+    builtAt: "2026-09-11T21:00:00.000Z",
+    visitLimit: 12,
+    plans: [
+      {
+        salesmanCode: "S1",
+        salesmanName: "One",
+        visitCount: 2,
+        visits: [
+          { customer_code: "A", combined_score: 80, total_due_amount: 100, recent_sales_value: 200, focus: "Both" },
+          { customer_code: "B", combined_score: 70, total_due_amount: 50, recent_sales_value: 100, focus: "Sales" },
+          { customer_code: "C", combined_score: 60, total_due_amount: 10, recent_sales_value: 20, focus: "Collection" },
+        ],
+        totals: { dueAmount: 160, recentSales: 320, averageCombinedScore: 70 },
+      },
+      {
+        salesmanCode: "S2",
+        salesmanName: "Two",
+        visitCount: 1,
+        visits: [
+          { customer_code: "D", combined_score: 55, total_due_amount: 5, recent_sales_value: 9, focus: "Sales" },
+        ],
+        totals: { dueAmount: 5, recentSales: 9, averageCombinedScore: 55 },
+      },
+    ],
+  }, { salesmanCode: "S1", limit: 2 });
+
+  assert.equal(filtered.missingSnapshot, false);
+  assert.equal(filtered.fromSnapshot, true);
+  assert.equal(filtered.salesmanCount, 1);
+  assert.equal(filtered.plans[0].visits.length, 2);
+  assert.equal(filtered.plans[0].visits[0].rank, 1);
+  assert.equal(filtered.plans[0].totals.dueAmount, 150);
 });
 
 test("module access includes salesman visit plan for admin and field sales", () => {

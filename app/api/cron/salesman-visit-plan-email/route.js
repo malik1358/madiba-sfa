@@ -6,16 +6,11 @@ import {
   isSalesmanVisitPlanEmailEnabled,
 } from "../../../lib/salesmanVisitPlan.js";
 import {
-  buildSalesmanVisitPlanPayload,
+  buildAndStoreSalesmanVisitPlanSnapshot,
   formatSupabaseError,
   loadSalesmanVisitPlanProfiles,
   sendSalesmanVisitPlanEmailsFromPayload,
 } from "../../../lib/salesmanVisitPlanServer.js";
-import { buildVisibleCustomersForScope } from "../../customers/visible/route.js";
-import {
-  fetchOutstandingAndCollectionRecords,
-  getSalesScope,
-} from "../../payment-collections/route.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -35,16 +30,6 @@ async function handleRequest(request) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    if (!isSalesmanVisitPlanEmailEnabled()) {
-      return NextResponse.json({
-        success: true,
-        skipped: true,
-        reason: "email_disabled_until_approved",
-        sentCount: 0,
-        failedCount: 0,
-      });
-    }
-
     if (!supabaseUrl || !serviceKey) {
       return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
     }
@@ -56,45 +41,47 @@ async function handleRequest(request) {
       return NextResponse.json({ success: false, error: "No admin profile available to build visit plans." }, { status: 500 });
     }
 
-    const scope = await getSalesScope(admin, actor.id);
-    const visibleScope = {
-      ...scope,
-      hasAllAccess: true,
-      visibleSalesmanCodes: [],
-      identitySearchPatterns: scope.identitySearchPatterns || [],
-      outstandingSalesmanIdentities: scope.outstandingSalesmanIdentities || [],
-    };
-
-    const [visibleResult, collectionRecords] = await Promise.all([
-      buildVisibleCustomersForScope(admin, visibleScope, {
-        includeRecentSales: true,
-        includeOutstanding: true,
-        excludeBuildingMaterial: true,
-      }),
-      fetchOutstandingAndCollectionRecords(admin, scope),
-    ]);
-
-    const payload = buildSalesmanVisitPlanPayload({
-      visibleCustomers: visibleResult?.customers || [],
-      collectionRecords: collectionRecords || [],
-      salesmanProfiles: profiles,
+    // Always build and store the midnight snapshot so the page can serve it instantly.
+    const snapshot = await buildAndStoreSalesmanVisitPlanSnapshot(admin, {
+      actorUserId: actor.id,
       limit: DEFAULT_VISITS_PER_SALESMAN,
-      warnings: visibleResult?.warnings || [],
     });
 
-    const result = await sendSalesmanVisitPlanEmailsFromPayload(payload, {
+    if (!isSalesmanVisitPlanEmailEnabled()) {
+      return NextResponse.json({
+        success: true,
+        stored: true,
+        emailed: false,
+        skipped: true,
+        reason: "email_disabled",
+        reportDate: snapshot.reportDate,
+        builtAt: snapshot.builtAt,
+        salesmanCount: snapshot.salesmanCount,
+        visitCount: snapshot.visitCount,
+        sentCount: 0,
+        failedCount: 0,
+      });
+    }
+
+    const result = await sendSalesmanVisitPlanEmailsFromPayload(snapshot, {
       forcePreview: false,
     });
 
     return NextResponse.json(
-      { success: result.failedCount === 0, ...result },
+      {
+        success: result.failedCount === 0,
+        stored: true,
+        emailed: true,
+        builtAt: snapshot.builtAt,
+        ...result,
+      },
       { status: result.failedCount ? 500 : 200 },
     );
   } catch (error) {
     return NextResponse.json(
       {
         success: false,
-        error: formatSupabaseError(error) || "Salesman visit plan email cycle failed.",
+        error: formatSupabaseError(error) || "Salesman visit plan midnight cycle failed.",
       },
       { status: 500 },
     );

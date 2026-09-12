@@ -66,16 +66,23 @@ const TEXT = {
     en: "Growth is calculated on the current slice of uploaded sales. Current year is year-to-date through the latest invoice date in the slice.",
     ar: "يُحسب النمو على شريحة المبيعات الحالية. السنة الحالية حتى تاريخ آخر فاتورة في الشريحة.",
   },
+  summaryHintProfit: {
+    en: "Growth is calculated on the current slice of uploaded profit. Current year is year-to-date through the latest invoice date in the slice.",
+    ar: "يُحسب النمو على شريحة الربح الحالية. السنة الحالية حتى تاريخ آخر فاتورة في الشريحة.",
+  },
   categories: { en: "Rows", ar: "الصفوف" },
   growing: { en: "Growing", ar: "نمو" },
   declining: { en: "Red lights", ar: "إشارات حمراء" },
   warnings: { en: "Watch list", ar: "قائمة المراقبة" },
   lifetime: { en: "Lifetime sales", ar: "مبيعات العمر" },
+  lifetimeProfit: { en: "Lifetime profit", ar: "ربح العمر" },
   companyYoy: { en: "Company YTD vs last year", ar: "الشركة هذا العام مقابل العام الماضي" },
   range: { en: "Sales history", ar: "تاريخ المبيعات" },
+  rangeProfit: { en: "Profit history", ar: "تاريخ الربح" },
   redAlerts: { en: "Categories needing attention", ar: "فئات تحتاج متابعة" },
   noAlerts: { en: "No category red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على الفئات من المبيعات المرفوعة." },
   yearly: { en: "Sales by year since inception", ar: "المبيعات حسب السنة منذ البداية" },
+  yearlyProfit: { en: "Profit by year since inception", ar: "الربح حسب السنة منذ البداية" },
   yearlyHint: {
     en: "Green is higher than the previous year. Red is lower. The current year is year-to-date only.",
     ar: "الأخضر أعلى من السنة السابقة. الأحمر أقل. السنة الحالية حتى اليوم فقط.",
@@ -92,6 +99,7 @@ const TEXT = {
     ar: "مرّر على الفترة لمشاهدة المبالغ. انقر اسماً لإخفاء الخط أو إظهاره. الرسوم تتبع التصفية الحالية.",
   },
   shareChart: { en: "Share of lifetime sales", ar: "حصة مبيعات العمر" },
+  shareChartProfit: { en: "Share of lifetime profit", ar: "حصة ربح العمر" },
   signalChart: { en: "Signal mix", ar: "مزيج الإشارات" },
   trendChart: { en: "Trend", ar: "الاتجاه" },
   quarterlyHint: {
@@ -100,7 +108,9 @@ const TEXT = {
   },
   category: { en: "Category", ar: "الفئة" },
   firstSale: { en: "First sale", ar: "أول بيع" },
+  firstSaleProfit: { en: "First profit", ar: "أول ربح" },
   lastSale: { en: "Last sale", ar: "آخر بيع" },
+  lastSaleProfit: { en: "Last profit", ar: "آخر ربح" },
   share: { en: "Share", ar: "الحصة" },
   cagr: { en: "CAGR", ar: "معدل النمو السنوي" },
   yoy: { en: "YTD vs LY", ar: "هذا العام مقابل الماضي" },
@@ -274,10 +284,22 @@ function monthLabel(month, currentMonth) {
   return month === currentMonth ? `${label} MTD` : label;
 }
 
+function translateForMeasure(language, dictionary, measure) {
+  const t = translate(language, dictionary);
+  return (key) => {
+    if (measure === "profit") {
+      const profitLabel = t(`${key}Profit`);
+      if (profitLabel !== `${key}Profit`) return profitLabel;
+    }
+    return t(key);
+  };
+}
+
 export default function CategoryGrowthReport({
   language,
   loading,
   report,
+  measure = "sales",
   draft,
   catalogs,
   applied,
@@ -290,7 +312,8 @@ export default function CategoryGrowthReport({
   onApply,
   onClear,
 }) {
-  const t = translate(language, TEXT);
+  const amountMeasure = measure === "profit" || report?.measure === "profit" ? "profit" : "sales";
+  const t = translateForMeasure(language, TEXT, amountMeasure);
   const groupBy = applied?.groupBy || report?.filters?.groupBy || "category";
   const groupLabel = growthDimensionLabel(groupBy, language);
   const allRows = report?.groups || report?.categories || [];

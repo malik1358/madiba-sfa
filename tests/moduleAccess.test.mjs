@@ -5,6 +5,7 @@ import {
   buildModuleAccess,
   canManageOrderInvoice,
   isCollectionOnlyAccess,
+  isSalesmanVisitPlanSalesmanAccessApproved,
   listAccessibleModules,
   localizedModuleLabel,
   localizedNavGroupLabel,
@@ -122,6 +123,17 @@ test("outstanding without GPS is limited to admin and manager", () => {
   assert.equal(buildModuleAccess({ role: "manager" }).canAccess("outstandingNoGps"), true);
   assert.equal(buildModuleAccess({ role: "salesman" }).canAccess("outstandingNoGps"), false);
   assert.equal(localizedModuleLabel("outstandingNoGps", "en"), "Outstanding Without GPS");
+});
+
+test("salesman visit plan is available to admin and field sales after promotion", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("salesmanVisitPlan"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("salesmanVisitPlan"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("salesmanVisitPlan"), true);
+  assert.equal(localizedModuleLabel("salesmanVisitPlan", "en"), "Salesman Visit Plan");
+  assert.equal(isSalesmanVisitPlanSalesmanAccessApproved({}), true);
+  assert.equal(isSalesmanVisitPlanSalesmanAccessApproved({
+    NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS: "false",
+  }), false);
 });
 
 test("KPI targets can be updated by admin and manager only", () => {

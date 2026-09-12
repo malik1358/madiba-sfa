@@ -1,3 +1,15 @@
+function envFlagEnabled(value, defaultValue = false) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return defaultValue;
+  return raw !== "0" && raw !== "false" && raw !== "no";
+}
+
+export function isSalesmanVisitPlanSalesmanAccessApproved(
+  env = typeof process !== "undefined" ? process.env : {},
+) {
+  return envFlagEnabled(env.NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS, true);
+}
+
 export const MODULES = {
   dashboard: { href: "/", label: "Dashboard" },
   management: { href: "/management", label: "Management" },
@@ -17,6 +29,7 @@ export const MODULES = {
   businessDashboard: { href: "/management/business-dashboard", label: "Business Intelligence" },
   customerMaster: { href: "/management/customer-master", label: "Customer Master" },
   outstandingNoGps: { href: "/management/outstanding-no-gps", label: "Outstanding Without GPS" },
+  salesmanVisitPlan: { href: "/management/salesman-visit-plan", label: "Salesman Visit Plan" },
   salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
   customerBookShares: { href: "/management/customer-book-shares", label: "Customer Book Shares" },
   kpiTargets: { href: "/management/kpi-targets", label: "KPI Targets" },
@@ -31,7 +44,7 @@ export const NAV_GROUPS = [
   {
     key: "field",
     label: "Field Sales",
-    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "myCollections"],
+    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "myCollections", "salesmanVisitPlan"],
   },
   {
     key: "collections",
@@ -131,6 +144,12 @@ export function buildModuleAccess(context = {}) {
       businessDashboard: isAdmin || isManager,
       customerMaster: isAdmin || isManager,
       outstandingNoGps: isAdmin || isManager,
+      // Enabled for field sales after admin approval. Set NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS=false to lock again.
+      salesmanVisitPlan: isAdmin || (
+        isSalesmanVisitPlanSalesmanAccessApproved()
+        && isFieldSales
+        && !isCollector
+      ),
       salesmanHierarchy: isAdmin || isManager || isInvoiceMaker,
       customerBookShares: isAdmin || isManager,
       kpiTargets: isAdmin || isManager,
@@ -195,6 +214,7 @@ export const MODULE_LABELS = {
   businessDashboard: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
   customerMaster: { en: "Customer Master", ar: "سجل العملاء" },
   outstandingNoGps: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
+  salesmanVisitPlan: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },
   salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },
   customerBookShares: { en: "Customer Book Shares", ar: "مشاركة دفاتر العملاء" },
   kpiTargets: { en: "KPI Targets", ar: "أهداف الأداء" },

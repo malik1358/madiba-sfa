@@ -90,6 +90,13 @@ function normalizeCredentialToken(value) {
     .replace(/\.{2,}/g, ".");
 }
 
+function headOptionLabel(option) {
+  const name = option.salesman_name || option.salesman_code || "";
+  const code = option.salesman_code ? ` (${option.salesman_code})` : "";
+  const status = option.is_active === false ? " — Inactive" : "";
+  return `${name}${code}${status}`;
+}
+
 function displayLoginName(value) {
   const text = String(value || "").trim().toLowerCase();
   return text.includes("@") ? text.split("@")[0] : text;
@@ -629,7 +636,7 @@ export default function SalesmanHierarchyPage() {
                 <option value="">No head</option>
                 {headOptions.map((option) => (
                   <option key={`new-${option.id}`} value={option.salesman_code || ""}>
-                    {option.salesman_name || option.salesman_code} {option.salesman_code ? `(${option.salesman_code})` : ""}
+                    {headOptionLabel(option)}
                   </option>
                 ))}
               </select>
@@ -752,7 +759,7 @@ export default function SalesmanHierarchyPage() {
                           <span>{stockTakeAccessSelections[salesman.id] === true ? t("stockTakeOn") : t("stockTakeOff")}</span>
                         </label>
                       </td>
-                      <td>{currentHead ? `${currentHead.salesman_name || currentHead.salesman_code} (${currentHead.salesman_code})` : "-"}</td>
+                      <td>{currentHead ? headOptionLabel(currentHead) : "-"}</td>
                       <td>
                         <select
                           className="moduleInput"
@@ -765,7 +772,7 @@ export default function SalesmanHierarchyPage() {
                             .filter((option) => option.id !== salesman.id)
                             .map((option) => (
                               <option key={`${salesman.id}-${option.id}`} value={option.salesman_code || ""}>
-                                {option.salesman_name || option.salesman_code} {option.salesman_code ? `(${option.salesman_code})` : ""}
+                                {headOptionLabel(option)}
                               </option>
                             ))}
                         </select>

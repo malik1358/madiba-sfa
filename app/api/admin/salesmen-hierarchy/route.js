@@ -462,11 +462,12 @@ export async function GET(request) {
       salesmen,
       autoCreateSummary,
       headOptions: salesmen
-        .filter((salesman) => salesman.is_active !== false && !isInvoiceMakerRole(salesman.role) && !isProductPromoterRole(salesman.role))
+        .filter((salesman) => !isInvoiceMakerRole(salesman.role))
         .map((salesman) => ({
           id: salesman.id,
           salesman_code: salesman.salesman_code,
           salesman_name: salesman.salesman_name,
+          is_active: salesman.is_active !== false,
         })),
     });
   } catch (error) {

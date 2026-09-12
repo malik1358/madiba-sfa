@@ -42,6 +42,7 @@ export function priceOrderLines(lines, {
       valueDiscountRate: valueDiscountMap[code] || 0,
       schemeUnitDiscount: scheme.unitDiscount,
       schemeDiscountedQty: scheme.discountedQty,
+      excludeCashDiscount: scheme.excludeCashDiscount === true,
     });
 
     return {

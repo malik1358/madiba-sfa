@@ -70,6 +70,7 @@ function fromDraft(draft, index) {
     qualifierItemCodes: parseItemCodeList(draft.qualifierItemCodes),
     qualifierMinQty: Number(draft.qualifierMinQty || 1),
     qualifierMode: draft.qualifierMode,
+    excludeCashDiscount: draft.excludeCashDiscount !== false,
   };
 }
 
@@ -310,6 +311,19 @@ export default function SchemesPage() {
                       >
                         <option value="active">Active</option>
                         <option value="inactive">Inactive</option>
+                      </select>
+                    </label>
+                    <label>
+                      Cash discount
+                      <select
+                        className="moduleInput"
+                        value={scheme.excludeCashDiscount === false ? "allow" : "exclude"}
+                        onChange={(event) => updateScheme(index, {
+                          excludeCashDiscount: event.target.value !== "allow",
+                        })}
+                      >
+                        <option value="exclude">Do not combine</option>
+                        <option value="allow">Allow stacking</option>
                       </select>
                     </label>
                   </div>

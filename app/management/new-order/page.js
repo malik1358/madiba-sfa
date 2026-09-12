@@ -978,6 +978,7 @@ export default function NewOrderPage() {
         valueDiscountRate: valueDiscount,
         schemeUnitDiscount: scheme.unitDiscount,
         schemeDiscountedQty: scheme.discountedQty,
+        excludeCashDiscount: scheme.excludeCashDiscount === true,
       });
       return {
         ...priced,
@@ -1922,6 +1923,7 @@ export default function NewOrderPage() {
                                 valueDiscountRate: valueDiscount,
                                 schemeUnitDiscount: scheme.unitDiscount,
                                 schemeDiscountedQty: scheme.discountedQty,
+                                excludeCashDiscount: scheme.excludeCashDiscount === true,
                               });
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";

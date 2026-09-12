@@ -9,8 +9,11 @@ import {
   consecutiveDecliningMonths,
   createCategoryGrowthAccumulator,
   enumerateMonths,
+  buildContributionGridRows,
   formatAmountWithDelta,
+  formatContributionPercent,
   formatGrowthPercent,
+  formatSharePointDelta,
   formatWholePercent,
   growthPercent,
   ingestCategoryGrowthRows,
@@ -42,6 +45,22 @@ test("growth and CAGR use a prior baseline", () => {
   assert.equal(formatGrowthPercent(null), "—");
   assert.equal(formatAmountWithDelta(120, 100, true), `${Number(120).toLocaleString("en-SA")} +20%`);
   assert.equal(formatAmountWithDelta(80, 0, true), Number(80).toLocaleString("en-SA"));
+  assert.equal(formatContributionPercent(42.4), "42%");
+  assert.equal(formatSharePointDelta(42, 38, true), "+4pp");
+});
+
+test("contribution rows are each category's share of the period total", () => {
+  const rows = buildContributionGridRows(
+    [
+      { label: "Building", monthValues: { "2026-08": 80, "2026-09": 50 } },
+      { label: "Office", monthValues: { "2026-08": 20, "2026-09": 50 } },
+    ],
+    ["2026-08", "2026-09"],
+  );
+  assert.equal(rows[0].contributionValues["2026-08"], 80);
+  assert.equal(rows[1].contributionValues["2026-08"], 20);
+  assert.equal(rows[0].contributionValues["2026-09"], 50);
+  assert.equal(rows[0].windowShare, 65);
 });
 
 test("enumerateMonths fills inclusive calendar months", () => {

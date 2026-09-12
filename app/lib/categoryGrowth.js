@@ -507,6 +507,43 @@ export function monthChangeTone(current, previous, hasPrevious = true) {
   return "";
 }
 
+export function formatContributionPercent(value) {
+  if (value == null || !Number.isFinite(Number(value)) || Number(value) === 0) return "—";
+  return `${Math.round(Number(value))}%`;
+}
+
+export function formatSharePointDelta(current, previous, hasPrevious = true) {
+  if (!hasPrevious) return "";
+  const delta = Number(current || 0) - Number(previous || 0);
+  if (!Number.isFinite(delta)) return "";
+  const rounded = Math.round(delta);
+  const sign = rounded > 0 ? "+" : "";
+  return `${sign}${rounded}pp`;
+}
+
+export function buildContributionGridRows(rows = [], periods = [], valuesOf = (row) => row?.monthValues) {
+  const columnTotals = (periods || []).map((period) => (
+    (rows || []).reduce((sum, row) => sum + Number((valuesOf(row) || {})[period] || 0), 0)
+  ));
+  const grandTotal = columnTotals.reduce((sum, value) => sum + value, 0);
+  return (rows || []).map((row) => {
+    const source = valuesOf(row) || {};
+    const contributionValues = {};
+    let windowAmount = 0;
+    (periods || []).forEach((period, index) => {
+      const amount = Number(source[period] || 0);
+      windowAmount += amount;
+      const total = Number(columnTotals[index] || 0);
+      contributionValues[period] = total ? (amount / total) * 100 : 0;
+    });
+    return {
+      ...row,
+      contributionValues,
+      windowShare: grandTotal ? (windowAmount / grandTotal) * 100 : 0,
+    };
+  });
+}
+
 export function periodGridTotals(rows = [], periods = [], valuesOf = (row) => row?.monthValues) {
   const rowTotals = (rows || []).map((row) => {
     const values = valuesOf(row) || {};

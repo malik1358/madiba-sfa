@@ -12,6 +12,7 @@ import {
   buildSignalMix,
 } from "../../lib/growthCharts";
 import {
+  buildContributionGridRows,
   formatGrowthPercent,
   formatMoneyAmount,
   formatSharePercent,
@@ -101,6 +102,14 @@ const TEXT = {
     ar: "مرّر على الفترة لمشاهدة المبالغ. انقر اسماً لإخفاء الخط أو إظهاره. الرسوم تتبع التصفية الحالية.",
   },
   shareChart: { en: "Share of lifetime sales", ar: "حصة مبيعات العمر" },
+  contribution: { en: "Contribution %", ar: "نسبة المساهمة" },
+  contributionHint: {
+    en: "Each cell is that row's share of the company total in that period. The Total column is the share of the whole window. Green and red mark a change in percentage points vs the previous period.",
+    ar: "كل خلية هي حصة الصف من إجمالي الشركة في تلك الفترة. عمود الإجمالي هو الحصة من النافذة كلها. الأخضر والأحمر للتغير بنقاط النسبة مقابل الفترة السابقة.",
+  },
+  contributionYearly: { en: "Yearly contribution", ar: "المساهمة السنوية" },
+  contributionQuarterly: { en: "Quarterly contribution", ar: "المساهمة الربعية" },
+  contributionMonthly: { en: "Monthly contribution", ar: "المساهمة الشهرية" },
   shareChartProfit: { en: "Share of lifetime profit", ar: "حصة ربح العمر" },
   signalChart: { en: "Signal mix", ar: "مزيج الإشارات" },
   trendChart: { en: "Trend", ar: "الاتجاه" },
@@ -357,6 +366,18 @@ export default function CategoryGrowthReport({
     () => buildPeriodChartModel(categories, recentMonths),
     [categories, recentMonths],
   );
+  const yearContributionRows = useMemo(
+    () => buildContributionGridRows(categories, years, (row) => row.yearValues),
+    [categories, years],
+  );
+  const quarterContributionRows = useMemo(
+    () => buildContributionGridRows(categories, recentQuarters, (row) => row.quarterValues),
+    [categories, recentQuarters],
+  );
+  const monthContributionRows = useMemo(
+    () => buildContributionGridRows(categories, recentMonths),
+    [categories, recentMonths],
+  );
   const shareItems = useMemo(() => buildShareChartItems(categories), [categories]);
   const signalMix = useMemo(() => buildSignalMix(categories), [categories]);
 
@@ -576,6 +597,64 @@ export default function CategoryGrowthReport({
             totals={monthTotals}
             totalLabel={t("total")}
           />
+        )}
+      </section>
+
+      <section className="moduleSection">
+        <div className="moduleSectionHeader">
+          <h2>{t("contribution")}</h2>
+        </div>
+        <p className="moduleHint">{t("contributionHint")}</p>
+        {categories.length === 0 ? (
+          <div className="moduleHint">{t("emptySlice")}</div>
+        ) : (
+          <>
+            <h3 className="moduleBiFilterHeading">{t("contributionYearly")}</h3>
+            <GrowthPeriodGrid
+              filename={`contribution-${groupBy}-years`}
+              sheetName="Yearly contribution"
+              rowHeader={groupLabel}
+              rows={yearContributionRows}
+              periods={years}
+              currentPeriod={currentYear}
+              periodLabel={(year) => (year === currentYear ? `${year} YTD` : year)}
+              valuesOf={(row) => row.contributionValues}
+              previousKeyOf={(period, index, periods) => (index > 0 ? periods[index - 1] : "")}
+              totalLabel={t("total")}
+              valueKind="percent"
+              rowTotalOf={(row) => row.windowShare}
+            />
+            <h3 className="moduleBiFilterHeading">{t("contributionQuarterly")}</h3>
+            <GrowthPeriodGrid
+              filename={`contribution-${groupBy}-quarters`}
+              sheetName="Quarterly contribution"
+              rowHeader={groupLabel}
+              rows={quarterContributionRows}
+              periods={recentQuarters}
+              currentPeriod={currentQuarter}
+              periodLabel={quarterLabel}
+              valuesOf={(row) => row.contributionValues}
+              previousKeyOf={(period, index, periods) => (index > 0 ? periods[index - 1] : previousQuarterKey(period))}
+              totalLabel={t("total")}
+              valueKind="percent"
+              rowTotalOf={(row) => row.windowShare}
+            />
+            <h3 className="moduleBiFilterHeading">{t("contributionMonthly")}</h3>
+            <GrowthPeriodGrid
+              filename={`contribution-${groupBy}-months`}
+              sheetName="Monthly contribution"
+              rowHeader={groupLabel}
+              rows={monthContributionRows}
+              periods={recentMonths}
+              currentPeriod={currentMonth}
+              periodLabel={monthLabel}
+              valuesOf={(row) => row.contributionValues}
+              previousKeyOf={(period, index, periods) => (index > 0 ? periods[index - 1] : previousMonthKey(period))}
+              totalLabel={t("total")}
+              valueKind="percent"
+              rowTotalOf={(row) => row.windowShare}
+            />
+          </>
         )}
       </section>
     </>

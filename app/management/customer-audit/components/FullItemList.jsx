@@ -176,6 +176,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
                       valueDiscountRate: valueDiscount,
                       schemeUnitDiscount: scheme.unitDiscount,
                       schemeDiscountedQty: scheme.discountedQty,
+                      excludeCashDiscount: scheme.excludeCashDiscount === true,
                     });
                     const nameIsCode = normalizeCode(item.item_name) === normalizeCode(code);
                     return (

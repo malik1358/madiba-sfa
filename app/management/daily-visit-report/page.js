@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import DayRouteMap from "../../components/DayRouteMap";
 import ExportableTable from "../../components/ExportableTable";
@@ -520,7 +519,6 @@ export default function DailyVisitReportPage() {
             </div>
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
-              <MostVisitedPages />
               <AccessibleHeaderLink moduleKey="collectionReport" href="/management/collection-report" className="moduleBackLink">
                 Collection Report
               </AccessibleHeaderLink>

@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import ExportableTable from "../../components/ExportableTable";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
@@ -576,7 +575,6 @@ export default function StockTakePage() {
               </div>
               <div className="moduleHeaderMeta">
                 <AppLanguageSwitch language={language} setLanguage={setLanguage} />
-                <MostVisitedPages />
                 <Link href="/" className="moduleBackLink">{t("back")}</Link>
               </div>
             </div>
@@ -599,7 +597,6 @@ export default function StockTakePage() {
             </div>
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
-              <MostVisitedPages />
               <Link href="/management/stock-take/report" className="moduleInlineButton">{t("report")}</Link>
               <Link href="/" className="moduleBackLink">{t("back")}</Link>
             </div>

@@ -4,7 +4,6 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -187,7 +186,6 @@ export default function MySalesInvoicesPage() {
             </div>
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
-              <MostVisitedPages />
               <Link href="/" className="moduleBackLink">{t("dashboard")}</Link>
             </div>
           </div>

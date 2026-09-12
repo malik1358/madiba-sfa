@@ -6,7 +6,6 @@ import { getSupabaseClient } from "./lib/supabase";
 import { useAppLanguage } from "./lib/appLanguage";
 import MorningAttendanceGate from "./components/MorningAttendanceGate";
 import DashboardNearestCustomers from "./components/DashboardNearestCustomers";
-import MostVisitedPages from "./components/MostVisitedPages";
 import SupabaseUnavailable from "./components/SupabaseUnavailable";
 import { buildModuleAccess, listAccessibleModules, shouldRequireTransactionGps } from "./lib/moduleAccess";
 import { hasMorningAttendanceToday, isMorningAttendanceRequiredForRole } from "./lib/morningAttendance";
@@ -374,7 +373,6 @@ export default function Home() {
           </div>
 
           <div className="dashboardHeaderActions">
-            <MostVisitedPages />
             <button
               className="logoutButton"
               onClick={handleLogout}

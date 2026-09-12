@@ -7,7 +7,6 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { fetchJsonWithTimeout, resolveAuthSession } from "../../lib/authSession";
 import {
@@ -166,7 +165,6 @@ export default function MyPerformancePage() {
           </div>
           <div className="moduleHeaderMeta">
             <AppLanguageSwitch language={language} setLanguage={setLanguage} />
-            <MostVisitedPages />
             {canManageTargets ? (
               <Link href="/management/kpi-targets" className="moduleInlineButton">{t("updateTargets")}</Link>
             ) : null}

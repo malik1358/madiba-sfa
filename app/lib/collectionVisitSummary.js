@@ -168,6 +168,33 @@ export function patchCollectionVisitSummaryVisitNumber(
   return `${text}\n${insertLine}`;
 }
 
+export function patchCollectionVisitSummaryVisitDistance(
+  summary,
+  metrics = {},
+  labels = COLLECTION_VISIT_SUMMARY_LABELS,
+) {
+  let text = String(summary || "");
+  if (!text) return text;
+
+  const distanceLines = formatVisitDistanceWhatsappLines(metrics, {
+    distanceFromCustomer: labels.distanceFromCustomer,
+    distanceFromPrevious: labels.distanceFromPrevious,
+    estWaiting: labels.estWaiting,
+  });
+  const block = distanceLines.join("\n").replace(/^\n/, "");
+  if (!block) return text;
+
+  const distanceBlockPattern = new RegExp(
+    `(?:\\n|^)${escapeRegExp(labels.distanceFromCustomer)}:[\\s\\S]*$`,
+    "m",
+  );
+  if (distanceBlockPattern.test(text)) {
+    return text.replace(distanceBlockPattern, `\n${block}`);
+  }
+
+  return `${text.trimEnd()}\n\n${block}`;
+}
+
 export function patchCollectionVisitSummaryEnglishRemark(
   summary,
   englishRemark,

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -1816,6 +1815,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
       });
 
       const payload = saveResult.payload || {};
+      const correctedSummary = String(payload?.summaryText || "").trim();
+      const whatsappSummary = correctedSummary || summaryText;
       const popupMessage = saveResult.queued
         ? t("msgSavedOffline")
         : payload?.whatsapp?.error
@@ -1823,18 +1824,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
           : t("msgVisitSaved");
 
       const isNative = await isNativeMobilePlatform();
-      await presentWhatsappSummaryAfterSave(summaryText, {
+      await presentWhatsappSummaryAfterSave(whatsappSummary, {
         files: shareFiles,
       });
       showPopup({
         message: popupMessage,
         variant: "success",
-        whatsappText: summaryText,
+        whatsappText: whatsappSummary,
         whatsappFiles: shareFiles,
         autoShareWhatsapp: isNative || Boolean(saveResult.queued),
       });
 
-      setTodayVisitCount(visitNumberForDay);
+      setTodayVisitCount(Number(payload?.visitNumberForDay || visitNumberForDay));
       requestLoginFirstCustomerHintCheck();
       await refreshPendingSyncCount();
 
@@ -1849,7 +1850,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           nextVisitAt: form.nextVisitAt,
           remarkArabic: form.remarkArabic,
           remarkEnglish: effectiveEnglishRemark,
-          summaryText,
+          summaryText: whatsappSummary,
         }, session.user.id, scope);
         void processOfflineQueue(async () => session.access_token);
       }
@@ -2071,7 +2072,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
               <h1>{t("title")}</h1>
               <p className="moduleSubtitle">{t("subtitle")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/management" className="moduleBackLink">{t("dashboard")}</Link></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/management" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
 
           {error ? (

@@ -1,3 +1,6 @@
+// Direct read so Next.js inlines NEXT_PUBLIC_BUILD_TIME at `next build`.
+const INLINED_PUBLIC_BUILD_TIME = process.env.NEXT_PUBLIC_BUILD_TIME || "";
+
 export function resolveBuildId(env = process.env) {
   return String(env.VERCEL_GIT_COMMIT_SHA || env.NEXT_PUBLIC_BUILD_ID || "local").slice(0, 7);
 }
@@ -6,6 +9,8 @@ export function resolveBuildTime(env = process.env) {
   const raw = String(
     env.NEXT_PUBLIC_BUILD_TIME
     || env.VERCEL_DEPLOYMENT_CREATED_AT
+    || process.env.NEXT_PUBLIC_BUILD_TIME
+    || INLINED_PUBLIC_BUILD_TIME
     || "",
   ).trim();
 

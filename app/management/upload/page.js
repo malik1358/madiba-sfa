@@ -405,6 +405,19 @@ export default function UploadSalesPage() {
                   : "✓ New sales dataset is now LIVE"}
               </div>
 
+              {Number(result.profitRows || 0) > 0 ? (
+                <p>
+                  Profit read from {result.profitColumn || "GP"} on{" "}
+                  {Number(result.profitRows).toLocaleString()} rows.
+                </p>
+              ) : (
+                <p className="uploadWarning">
+                  No profit/GP amount was found. Add a GP, Gross Profit, Profit,
+                  or Margin amount column (not %) and upload again. Headers in
+                  this file: {(result.excelHeaders || []).join(", ") || "none"}
+                </p>
+              )}
+
             </div>
           )}
 

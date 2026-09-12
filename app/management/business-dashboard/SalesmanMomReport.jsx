@@ -62,6 +62,14 @@ const TEXT = {
     en: "Latest complete month vs the month before it. Improving means sales are rising month after month. Current month is MTD only and is not used in the streak.",
     ar: "آخر شهر مكتمل مقابل الشهر السابق. التحسن يعني ارتفاع المبيعات شهراً بعد شهر. الشهر الحالي حتى اليوم فقط ولا يُحسب في التسلسل.",
   },
+  summaryHintProfit: {
+    en: "Latest complete month vs the month before it. Improving means profit is rising month after month. Current month is MTD only and is not used in the streak.",
+    ar: "آخر شهر مكتمل مقابل الشهر السابق. التحسن يعني ارتفاع الربح شهراً بعد شهر. الشهر الحالي حتى اليوم فقط ولا يُحسب في التسلسل.",
+  },
+  lastMonthProfit: { en: "Last complete month profit", ar: "ربح آخر شهر مكتمل" },
+  priorMonthProfit: { en: "Month before profit", ar: "ربح الشهر السابق" },
+  mtdProfit: { en: "Current MTD profit", ar: "ربح الحالي حتى اليوم" },
+  compareChartProfit: { en: "Last complete month profit vs month before", ar: "ربح آخر شهر مكتمل مقابل الشهر السابق" },
   filterHint: {
     en: "Filter the salesman scorecard by any imported sales field, then Apply.",
     ar: "صفّ بطاقة المندوبين بأي حقل مبيعات ثم اضغط تطبيق.",
@@ -262,10 +270,22 @@ function MomScorecardTable({
   );
 }
 
+function translateForMeasure(language, dictionary, measure) {
+  const t = translate(language, dictionary);
+  return (key) => {
+    if (measure === "profit") {
+      const profitLabel = t(`${key}Profit`);
+      if (profitLabel !== `${key}Profit`) return profitLabel;
+    }
+    return t(key);
+  };
+}
+
 export default function SalesmanMomReport({
   language,
   loading,
   report,
+  measure = "sales",
   draft,
   catalogs,
   applied,
@@ -277,7 +297,8 @@ export default function SalesmanMomReport({
   onApply,
   onClear,
 }) {
-  const t = translate(language, TEXT);
+  const amountMeasure = measure === "profit" || report?.measure === "profit" ? "profit" : "sales";
+  const t = translateForMeasure(language, TEXT, amountMeasure);
   const allRows = useMemo(() => buildSalesmanMomRows(report || {}), [report]);
   const teamRows = useMemo(() => buildTeamMomRows(report || {}), [report]);
   const visibleRows = useMemo(

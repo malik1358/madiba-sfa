@@ -407,6 +407,7 @@ export default function BusinessDashboardPage() {
             <CategoryGrowthReport
               language={language}
               loading={growthLoading}
+              measure={amountMeasure}
               report={visibleGrowthReport}
               draft={growthDraft}
               catalogs={growthCatalogs}
@@ -435,6 +436,7 @@ export default function BusinessDashboardPage() {
             <SalesmanMomReport
               language={language}
               loading={salesmanLoading}
+              measure={amountMeasure}
               report={visibleSalesmanReport}
               draft={salesmanDraft}
               catalogs={growthCatalogs}

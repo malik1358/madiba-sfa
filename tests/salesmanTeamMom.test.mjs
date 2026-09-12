@@ -10,6 +10,32 @@ import {
   teamMomLabel,
 } from "../app/lib/salesmanTeamMom.js";
 
+test("mapped inactive salesmen stay on their team instead of No team", () => {
+  const members = buildTeamDirectoryMembers([
+    { id: "p1", salesman_code: "ZIA", salesman_name: "Zia", is_active: false },
+    { id: "p2", salesman_code: "ALI", salesman_name: "Ali", is_active: true },
+  ], () => ({
+    teamKey: "ahmed",
+    teamLeaderUserId: "ahmed",
+    teamLeaderCode: "AHMED NABIL",
+    teamLeaderName: "AHMED NABIL",
+  }));
+
+  const groups = rollupTeamGrowthGroups(
+    [
+      { label: "Zia · ZIA", lifetime: 40, monthValues: { "2026-08": 40 } },
+      { label: "Ali · ALI", lifetime: 100, monthValues: { "2026-08": 100 } },
+    ],
+    members,
+    { latestCompleteMonth: "2026-08" },
+  );
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].label, "Team — AHMED NABIL");
+  assert.equal(groups[0].memberCount, 2);
+  assert.equal(groups[0].monthValues["2026-08"], 140);
+});
+
 test("team labels use the first-level leader name", () => {
   assert.equal(teamMomLabel({
     teamLeaderName: "Junaid",

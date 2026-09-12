@@ -78,8 +78,8 @@ const TEXT = {
   teams: { en: "Teams", ar: "الفرق" },
   teamSummary: { en: "Team month-on-month performance", ar: "أداء الفريق شهراً بعد شهر" },
   teamSummaryHint: {
-    en: "Each team is the first-level leader plus the salesmen who report to that leader. Green and red follow the same month-on-month rules as the salesman scorecard.",
-    ar: "كل فريق هو القائد من المستوى الأول والمندوبون التابعون له. الأخضر والأحمر بنفس قواعد المندوب شهراً بعد شهر.",
+    en: "Each team is the first-level leader plus the salesmen who report to that leader, including inactive people who still have a hierarchy mapping. Unmapped sales go to No team.",
+    ar: "كل فريق هو القائد من المستوى الأول والمندوبون التابعون له، بمن فيهم غير النشطين الذين ما زال لهم ربط في الهيكل. المبيعات بلا ربط تذهب إلى بلا فريق.",
   },
   teamScorecard: { en: "Team month-on-month scorecard", ar: "بطاقة الفريق شهراً بعد شهر" },
   team: { en: "Team", ar: "الفريق" },

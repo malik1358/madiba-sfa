@@ -10,7 +10,9 @@ async function listProfiles(admin) {
     result = await admin.from("profiles").select(fallback).order("salesman_name");
   }
   if (result.error) throw result.error;
-  return (result.data || []).filter((row) => row?.is_active !== false);
+  // Keep inactive salesmen. Hierarchy mapping still applies; only people
+  // with no boss/team land in No team.
+  return result.data || [];
 }
 
 async function listAuthUsers(admin) {

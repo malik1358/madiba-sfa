@@ -15,6 +15,8 @@ import {
   salesBiFactToGrowthRow,
   salesBiFactsFromCube,
   serializeSalesBiCube,
+  salesBiCubeMeasureTotal,
+  salesBiCubeNeedsRebuild,
 } from "../app/lib/salesBiCube.js";
 
 test("cube rolls invoice lines into one monthly fact per dimension combo", () => {
@@ -112,6 +114,25 @@ test("voucher number and reference filters fall back to live sales", () => {
 
 test("old prepared sales models are ignored so a rebuilt cube is used", () => {
   assert.equal(deserializeSalesBiCube({ version: 1, facts: [{ m: "2026-02", a: 99 }] }), null);
+});
+
+test("cube rebuilds when it is older than the last sales upload or missing live profit", () => {
+  const cube = {
+    builtAt: "2026-09-12T06:34:53.210Z",
+    facts: [{ month: "2026-02", sales_amount: 100, profit_amount: 0 }],
+  };
+  assert.equal(salesBiCubeMeasureTotal(cube, "sales"), 100);
+  assert.equal(salesBiCubeMeasureTotal(cube, "profit"), 0);
+  assert.equal(salesBiCubeNeedsRebuild(cube, { liveHasProfit: true }), true);
+  assert.equal(salesBiCubeNeedsRebuild(cube, {
+    liveHasProfit: false,
+    lastImportAt: "2026-09-12T08:04:27.376Z",
+  }), true);
+  assert.equal(salesBiCubeNeedsRebuild({
+    ...cube,
+    builtAt: "2026-09-12T08:10:00.000Z",
+    facts: [{ month: "2026-02", sales_amount: 100, profit_amount: 12 }],
+  }, { liveHasProfit: true, lastImportAt: "2026-09-12T08:04:27.376Z" }), false);
 });
 
 test("date filters snap to month grain for cube reads", () => {

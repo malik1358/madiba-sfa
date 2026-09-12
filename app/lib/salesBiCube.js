@@ -5,7 +5,7 @@ import {
 } from "./categoryGrowth.js";
 
 export const SALES_BI_CUBE_KEY = "sales_bi_cube_v1";
-export const SALES_BI_CUBE_VERSION = 3;
+export const SALES_BI_CUBE_VERSION = 4;
 export const SALES_BI_TABLE = "sales_bi_monthly";
 
 const CUBE_DIMENSION_FIELDS = [
@@ -171,6 +171,26 @@ export function deserializeSalesBiCube(payload) {
       line_count: Number(fact.n ?? fact.line_count ?? 0),
     })),
   };
+}
+
+export function salesBiCubeFacts(cube) {
+  if (!cube) return [];
+  if (cube.facts instanceof Map) return [...cube.facts.values()];
+  return Array.isArray(cube.facts) ? cube.facts : [];
+}
+
+export function salesBiCubeMeasureTotal(cube, measure = "sales") {
+  const field = String(measure) === "profit" ? "profit_amount" : "sales_amount";
+  return salesBiCubeFacts(cube).reduce((sum, fact) => sum + Number(fact[field] || 0), 0);
+}
+
+export function salesBiCubeNeedsRebuild(cube, { liveHasProfit = false, lastImportAt = "" } = {}) {
+  if (!cube || !salesBiCubeFacts(cube).length) return true;
+  if (liveHasProfit && salesBiCubeMeasureTotal(cube, "profit") === 0) return true;
+  const builtAt = Date.parse(cube.builtAt || "");
+  const importedAt = Date.parse(lastImportAt || "");
+  if (Number.isFinite(builtAt) && Number.isFinite(importedAt) && builtAt < importedAt) return true;
+  return false;
 }
 
 export function monthAlignGrowthFilters(filters = {}) {

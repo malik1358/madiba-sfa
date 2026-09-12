@@ -7,6 +7,7 @@ import {
   SALES_BI_TABLE,
   salesBiFactsFromCube,
   serializeSalesBiCube,
+  salesBiCubeNeedsRebuild,
 } from "./salesBiCube.js";
 
 const SALES_SELECTS = [
@@ -115,7 +116,7 @@ async function readCubeFromTable(admin) {
   while (true) {
     const { data, error } = await admin
       .from(SALES_BI_TABLE)
-      .select("month,category,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,local_import,abc_class,sales_amount,quantity,line_count")
+      .select("month,category,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,local_import,abc_class,sales_amount,profit_amount,quantity,line_count")
       .range(from, from + pageSize - 1);
     if (error) {
       if (isMissingTableError(error) || isMissingSchemaColumn(error)) return null;
@@ -211,12 +212,47 @@ export async function rebuildSalesBiCube(admin) {
   return cube;
 }
 
+async function latestActiveImportCompletedAt(admin) {
+  const { data, error } = await admin
+    .from("import_batches")
+    .select("completed_at")
+    .eq("status", "ACTIVE")
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error) || isMissingSchemaColumn(error)) return "";
+    throw error;
+  }
+  return String(data?.completed_at || "");
+}
+
+async function liveSalesHaveProfit(admin) {
+  const { data, error } = await admin
+    .from("active_sales")
+    .select("profit_amount")
+    .neq("profit_amount", 0)
+    .limit(1);
+  if (error) {
+    if (isMissingTableError(error) || isMissingSchemaColumn(error)) return false;
+    throw error;
+  }
+  return Boolean(data?.length);
+}
+
+async function shouldRebuildLoadedCube(admin, cube) {
+  if (!cube?.facts?.length) return true;
+  const [lastImportAt, liveHasProfit] = await Promise.all([
+    latestActiveImportCompletedAt(admin),
+    liveSalesHaveProfit(admin),
+  ]);
+  return salesBiCubeNeedsRebuild(cube, { lastImportAt, liveHasProfit });
+}
+
 export async function loadSalesBiCube(admin, { allowStale = true } = {}) {
   const batchId = await activeSalesBatchId(admin);
 
   if (memoryCube && (!batchId || memoryCube.batchId === batchId || allowStale)) {
     const stale = Boolean(batchId && memoryCube.batchId && memoryCube.batchId !== batchId);
-    if (!stale || allowStale) {
+    if ((!stale || allowStale) && !(await shouldRebuildLoadedCube(admin, memoryCube))) {
       return { ...memoryCube, stale, source: "memory" };
     }
   }
@@ -224,14 +260,14 @@ export async function loadSalesBiCube(admin, { allowStale = true } = {}) {
   const fromSettings = await readCubeFromSettings(admin);
   if (fromSettings?.facts?.length) {
     const stale = Boolean(batchId && fromSettings.batchId && fromSettings.batchId !== batchId);
-    if (!stale || allowStale) {
+    if ((!stale || allowStale) && !(await shouldRebuildLoadedCube(admin, fromSettings))) {
       rememberCube(fromSettings);
       return { ...fromSettings, stale, source: "settings" };
     }
   }
 
   const fromTable = await readCubeFromTable(admin);
-  if (fromTable?.facts?.length) {
+  if (fromTable?.facts?.length && !(await shouldRebuildLoadedCube(admin, fromTable))) {
     rememberCube({ ...fromTable, batchId: fromTable.batchId || batchId });
     return {
       ...fromTable,

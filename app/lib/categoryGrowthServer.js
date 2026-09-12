@@ -9,7 +9,7 @@ import {
 } from "./categoryGrowth.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { cubeSupportsFilters, monthAlignGrowthFilters, salesBiFactToGrowthRow } from "./salesBiCube.js";
-import { loadSalesBiCube, rebuildSalesBiCube } from "./salesBiCubeServer.js";
+import { loadSalesBiCube, pageActiveSales, rebuildSalesBiCube } from "./salesBiCubeServer.js";
 import { rollupTeamGrowthGroups } from "./salesmanTeamMom.js";
 import { loadSalesmanTeamMembers } from "./salesmanTeamMomServer.js";
 
@@ -30,19 +30,9 @@ function isMissingTableError(error) {
 }
 
 async function ingestPagedSales(admin, select, acc, options) {
-  const pageSize = 1000;
-  let from = 0;
-
-  while (true) {
-    const { data, error } = await admin
-      .from("active_sales")
-      .select(select)
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    ingestCategoryGrowthRows(acc, data || [], options);
-    if (!data || data.length < pageSize) break;
-    from += pageSize;
-  }
+  await pageActiveSales(admin, select, (rows) => {
+    ingestCategoryGrowthRows(acc, rows || [], options);
+  });
 }
 
 function packReport(acc, { asOfDate, filters, extraMeta = {} }) {

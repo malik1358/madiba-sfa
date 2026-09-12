@@ -38,14 +38,23 @@ async function activeSalesBatchId(admin) {
   return String(data?.setting_value || "").trim();
 }
 
-async function pageActiveSales(admin, select, onPage) {
+export async function pageActiveSales(admin, select, onPage) {
   const pageSize = 1000;
   let from = 0;
   while (true) {
-    const { data, error } = await admin
+    let query = admin
       .from("active_sales")
       .select(select)
+      .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
+    let { data, error } = await query;
+    if (error && /column .*id/i.test(String(error.message || ""))) {
+      ({ data, error } = await admin
+        .from("active_sales")
+        .select(select)
+        .order("transaction_date", { ascending: true })
+        .range(from, from + pageSize - 1));
+    }
     if (error) throw error;
     await onPage(data || []);
     if (!data || data.length < pageSize) break;

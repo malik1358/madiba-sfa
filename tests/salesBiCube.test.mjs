@@ -107,6 +107,10 @@ test("voucher number and reference filters fall back to live sales", () => {
   assert.equal(cubeSupportsFilters({ values: { reference: ["PO-9"] } }), false);
 });
 
+test("old prepared sales models are ignored so a rebuilt cube is used", () => {
+  assert.equal(deserializeSalesBiCube({ version: 1, facts: [{ m: "2026-02", a: 99 }] }), null);
+});
+
 test("date filters snap to month grain for cube reads", () => {
   const aligned = monthAlignGrowthFilters({ dateFrom: "2026-03-15", dateTo: "2026-04-09" });
   assert.equal(aligned.dateFrom, "2026-03-01");

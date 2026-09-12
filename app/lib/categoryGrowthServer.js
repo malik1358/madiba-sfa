@@ -10,7 +10,7 @@ import {
 import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { cubeSupportsFilters, monthAlignGrowthFilters, salesBiFactToGrowthRow } from "./salesBiCube.js";
 import { loadSalesBiCube, pageActiveSales, rebuildSalesBiCube } from "./salesBiCubeServer.js";
-import { rollupTeamGrowthGroups } from "./salesmanTeamMom.js";
+import { rollupTeamGrowthFromRows, rollupTeamGrowthGroups } from "./salesmanTeamMom.js";
 import { loadSalesmanTeamMembers } from "./salesmanTeamMomServer.js";
 
 const SALES_SELECTS = [
@@ -121,38 +121,48 @@ async function reportFromLiveSales(admin, { asOfDate, filters }) {
       await pageActiveSales(admin, select, (page) => {
         rows.push(...(page || []));
       });
-      return reportFromRows(rows, {
-        asOfDate,
-        filters,
-        extraMeta: {
-          missingTable: false,
-          source: "active_sales",
-        },
-      });
+      return {
+        report: reportFromRows(rows, {
+          asOfDate,
+          filters,
+          extraMeta: {
+            missingTable: false,
+            source: "active_sales",
+          },
+        }),
+        rows,
+      };
     } catch (error) {
       lastError = error;
       if (isMissingTableError(error)) {
-        return packReport(createCategoryGrowthAccumulator(), {
-          asOfDate,
-          filters,
-          extraMeta: { missingTable: true, filtered: false, source: "active_sales" },
-        });
+        return {
+          report: packReport(createCategoryGrowthAccumulator(), {
+            asOfDate,
+            filters,
+            extraMeta: { missingTable: true, filtered: false, source: "active_sales" },
+          }),
+          rows: [],
+        };
       }
       if (!isMissingSchemaColumn(error)) throw error;
     }
   }
 
   if (lastError) throw lastError;
-  return packReport(createCategoryGrowthAccumulator(), {
-    asOfDate,
-    filters,
-    extraMeta: { missingTable: false, filtered: false, source: "active_sales" },
-  });
+  return {
+    report: packReport(createCategoryGrowthAccumulator(), {
+      asOfDate,
+      filters,
+      extraMeta: { missingTable: false, filtered: false, source: "active_sales" },
+    }),
+    rows: [],
+  };
 }
 
 export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters } = {}) {
   const normalized = normalizeGrowthFilters(filters);
   let report;
+  let sourceRows = [];
 
   if (cubeSupportsFilters(normalized)) {
     try {
@@ -164,6 +174,7 @@ export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters }
           extraMeta: { missingTable: true, filtered: false, source: "sales_bi_cube" },
         });
       } else if (cube?.facts) {
+        sourceRows = (cube.facts || []).map((fact) => salesBiFactToGrowthRow(fact));
         report = reportFromFacts(cube.facts, {
           asOfDate,
           filters: normalized,
@@ -182,23 +193,32 @@ export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters }
   }
 
   if (!report) {
-    report = await reportFromLiveSales(admin, { asOfDate, filters: normalized });
+    const live = await reportFromLiveSales(admin, { asOfDate, filters: normalized });
+    report = live.report;
+    sourceRows = live.rows || [];
   }
 
   if (normalized.groupBy === "salesman") {
     try {
       const members = await loadSalesmanTeamMembers(admin);
-      function attachTeams(target) {
+      function attachTeams(target, measure) {
         if (!target) return;
-        target.teamGroups = rollupTeamGrowthGroups(target.groups || target.categories || [], members, target);
+        target.teamGroups = sourceRows.length
+          ? rollupTeamGrowthFromRows(sourceRows, members, {
+            filters: normalized,
+            measure,
+            report: target,
+            asOfDate,
+          })
+          : rollupTeamGrowthGroups(target.groups || target.categories || [], members, target);
         target.meta = {
           ...target.meta,
           teamCount: target.teamGroups.length,
         };
       }
-      attachTeams(report);
-      attachTeams(report.measures?.sales);
-      attachTeams(report.measures?.profit);
+      attachTeams(report, report.measure || "sales");
+      attachTeams(report.measures?.sales, "sales");
+      attachTeams(report.measures?.profit, "profit");
     } catch (error) {
       console.error("Team month-on-month grouping failed:", error);
     }

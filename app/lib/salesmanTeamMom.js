@@ -1,4 +1,12 @@
-import { growthPercent } from "./categoryGrowth.js";
+import {
+  buildCategoryGrowthReport,
+  createCategoryGrowthAccumulator,
+  dimensionValue,
+  growthPercent,
+  ingestCategoryGrowthRows,
+  normalizeGrowthFilters,
+  rowMatchesGrowthFilters,
+} from "./categoryGrowth.js";
 import {
   buildSalesmanScopeMatchers,
   normalizeSalesmanCode,
@@ -12,6 +20,17 @@ import {
 } from "./salesmanMom.js";
 
 export const NO_TEAM_MOM_KEY = "__no_team__";
+export const ECOM_SALES_KEY = "__ecom_sales__";
+export const STORE_SALES_KEY = "__store_sales__";
+export const ECOM_SALES_LABEL = "Ecom sales";
+export const STORE_SALES_LABEL = "Store sales";
+
+const ECOM_SALESMAN_TOKENS = new Set(["TRENDYOL", "NOON"]);
+const STORE_VOUCHER_TOKENS = new Set(["RIYADH STORE SALES"]);
+
+function normalizeTeamToken(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
 
 export function teamMomLabel(member = {}) {
   const name = String(member.teamLeaderName || member.salesmanName || "").trim();
@@ -48,6 +67,43 @@ export function memberMatchesSalesmanRow(member, row) {
 
 export function assignSalesmanRowToTeam(row, members = []) {
   return (members || []).find((member) => memberMatchesSalesmanRow(member, row)) || null;
+}
+
+export function salesmanRowIdentity(row = {}) {
+  const label = String(row.label || row.category || "").trim()
+    || dimensionValue(row, "salesman");
+  return {
+    ...row,
+    label,
+    category: row.category || label,
+    voucher_type: row.voucher_type,
+  };
+}
+
+export function isEcomSalesmanIdentity(row = {}) {
+  return salesmanMomIdentityValues(salesmanRowIdentity(row)).some((value) => (
+    ECOM_SALESMAN_TOKENS.has(normalizeTeamToken(value))
+  ));
+}
+
+export function isStoreSalesVoucher(row = {}) {
+  return STORE_VOUCHER_TOKENS.has(normalizeTeamToken(row?.voucher_type || dimensionValue(row, "voucher_type")));
+}
+
+export function resolveTeamBucket(row = {}, members = []) {
+  const identity = salesmanRowIdentity(row);
+  if (isStoreSalesVoucher(identity)) {
+    return { teamKey: STORE_SALES_KEY, teamLabel: STORE_SALES_LABEL };
+  }
+  if (isEcomSalesmanIdentity(identity)) {
+    return { teamKey: ECOM_SALES_KEY, teamLabel: ECOM_SALES_LABEL };
+  }
+  const member = assignSalesmanRowToTeam(identity, members);
+  if (member?.teamKey && member.teamKey !== NO_TEAM_MOM_KEY) {
+    return { teamKey: member.teamKey, teamLabel: member.teamLabel };
+  }
+  const label = identity.label || "Unnamed";
+  return { teamKey: `solo:${normalizeTeamToken(label)}`, teamLabel: label };
 }
 
 function addSeries(target, source) {
@@ -96,11 +152,12 @@ export function rollupTeamGrowthGroups(salesmanRows = [], members = [], report =
   };
 
   (salesmanRows || []).forEach((row) => {
-    if (isExcludedSalesmanMomRow(row)) return;
-    const member = assignSalesmanRowToTeam(row, members);
-    const team = member
-      ? ensure(member.teamKey, member.teamLabel)
-      : ensure(NO_TEAM_MOM_KEY, "No team");
+    const identity = salesmanRowIdentity(row);
+    if (isExcludedSalesmanMomRow(identity) && !isEcomSalesmanIdentity(identity) && !isStoreSalesVoucher(identity)) {
+      return;
+    }
+    const bucket = resolveTeamBucket(identity, members);
+    const team = ensure(bucket.teamKey, bucket.teamLabel);
     team.lifetime += Number(row.lifetime || 0);
     team.memberCount += 1;
     team.members.push(row.label || row.category);
@@ -115,6 +172,41 @@ export function rollupTeamGrowthGroups(salesmanRows = [], members = [], report =
       monthSeriesAmount(team.monthValues, priorCompleteMonth),
     ),
   }));
+}
+
+export function rollupTeamGrowthFromRows(rows = [], members = [], options = {}) {
+  const filters = normalizeGrowthFilters(options.filters || options.report?.filters || {});
+  const measure = options.measure || options.report?.measure || "sales";
+  const matched = (rows || []).filter((row) => rowMatchesGrowthFilters(row, filters));
+  const remapped = matched.map((row) => {
+    const identity = salesmanRowIdentity(row);
+    if (isExcludedSalesmanMomRow(identity) && !isEcomSalesmanIdentity(identity) && !isStoreSalesVoucher(identity)) {
+      return null;
+    }
+    const bucket = resolveTeamBucket(identity, members);
+    return {
+      ...row,
+      salesman_name: bucket.teamLabel,
+      salesman_code: "",
+    };
+  }).filter(Boolean);
+
+  const acc = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(acc, remapped, {
+    filters: {
+      ...filters,
+      groupBy: "salesman",
+      values: {
+        ...filters.values,
+        salesman: [],
+        salesman_name: [],
+        salesman_code: [],
+      },
+    },
+    measure,
+  });
+  const built = buildCategoryGrowthReport(acc, { asOfDate: options.asOfDate || options.report?.lastDate || "" });
+  return built.groups || [];
 }
 
 export function buildTeamMomRows(report = {}, members = []) {

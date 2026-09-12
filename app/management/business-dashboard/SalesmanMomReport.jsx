@@ -78,8 +78,8 @@ const TEXT = {
   teams: { en: "Teams", ar: "الفرق" },
   teamSummary: { en: "Team month-on-month performance", ar: "أداء الفريق شهراً بعد شهر" },
   teamSummaryHint: {
-    en: "Each team is the first-level leader plus the salesmen who report to that leader, including inactive people who still have a hierarchy mapping. Unmapped sales go to No team.",
-    ar: "كل فريق هو القائد من المستوى الأول والمندوبون التابعون له، بمن فيهم غير النشطين الذين ما زال لهم ربط في الهيكل. المبيعات بلا ربط تذهب إلى بلا فريق.",
+    en: "Each team is the first-level leader plus the people who report to that leader, including inactive mapped staff. People with no boss stay as their own row. TRENDYOL and NOON are Ecom sales. Voucher type Riyadh Store Sales is Store sales.",
+    ar: "كل فريق هو القائد ومن يتبعه، بمن فيهم غير النشطين المربوطين. من بلا مدير يظهر وحده. ترينديول ونون مبيعات إلكترونية. نوع السند Riyadh Store Sales مبيعات المتجر.",
   },
   teamScorecard: { en: "Team month-on-month scorecard", ar: "بطاقة الفريق شهراً بعد شهر" },
   team: { en: "Team", ar: "الفريق" },

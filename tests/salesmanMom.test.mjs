@@ -104,6 +104,7 @@ test("scorecard drops placeholder and duplicated salesman names", () => {
       { label: "RAHID · RAHID", lifetime: 80, momPercent: -20, monthValues: { "2026-08": 40 } },
       { label: "NOT ADDED IN VOUCHER · NOT ADDED IN VOUCHER", lifetime: 50, momPercent: -30, monthValues: { "2026-08": 20 } },
       { label: "NOON · NOON", lifetime: 10, momPercent: 5, monthValues: { "2026-08": 10 } },
+      { label: "TRENDYOL · TRENDYOL", lifetime: 12, momPercent: 8, monthValues: { "2026-08": 12 } },
     ],
   });
   assert.deepEqual(rows.map((row) => row.label), ["Ali · A01"]);

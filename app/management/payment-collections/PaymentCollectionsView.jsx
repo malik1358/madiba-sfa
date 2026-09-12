@@ -75,6 +75,7 @@ const TEXT = {
   title: { en: "Payment Collections", ar: "التحصيلات" },
   subtitle: { en: "Due-customer collection queue and visit tracking", ar: "قائمة التحصيل للعملاء المستحقين وتتبع الزيارات" },
   dashboard: { en: "← Management", ar: "← الإدارة" },
+  home: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading collection queue...", ar: "جاري تحميل قائمة التحصيل..." },
   dueQueue: { en: "Due Collection Queue", ar: "قائمة التحصيل المستحق" },
   legalQueue: { en: "Legal Queue", ar: "قائمة القسم القانوني" },
@@ -2074,7 +2075,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
               <h1>{t("title")}</h1>
               <p className="moduleSubtitle">{t("subtitle")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/management" className="moduleBackLink">{t("dashboard")}</Link></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href={access.canAccess("management") ? "/management" : "/"} className="moduleBackLink">{access.canAccess("management") ? t("dashboard") : t("home")}</Link></div>
           </div>
 
           {error ? (

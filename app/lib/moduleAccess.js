@@ -44,7 +44,7 @@ export const NAV_GROUPS = [
   {
     key: "field",
     label: "Field Sales",
-    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "myCollections", "salesmanVisitPlan"],
+    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "salesmanVisitPlan"],
   },
   {
     key: "collections",
@@ -136,8 +136,9 @@ export function buildModuleAccess(context = {}) {
       newCustomer: isFieldSales && !isCollector,
       myPerformance: isFieldSales && !isCollector,
       mySalesInvoices: isFieldSales && !isCollector,
-      myCollections: isSalesman,
-      paymentCollections: isAdmin || isManager || isCollector || isInvoiceMaker,
+      // Legacy /management/my-collections path stays available via canAccessPath.
+      myCollections: false,
+      paymentCollections: isAdmin || isManager || isCollector || isInvoiceMaker || (isSalesman && !isCollector),
       collectionReport: isAdmin || isManager || isCollector,
       dailyVisitReport: isAdmin || isManager || isCollector || isSalesman,
       userActivity: isAdmin || isManager || isCollector,
@@ -162,7 +163,13 @@ export function buildModuleAccess(context = {}) {
 
   access.canAccess = (moduleKey) => Boolean(access.modules[moduleKey]);
   access.canAccessPath = (href) => {
-    const normalizedHref = String(href || "").trim();
+    const normalizedHref = String(href || "").trim().split("?")[0];
+    if (
+      (normalizedHref === MODULES.myCollections.href || normalizedHref === MODULES.paymentCollections.href)
+      && (access.canAccess("myCollections") || access.canAccess("paymentCollections"))
+    ) {
+      return true;
+    }
     const match = Object.entries(MODULES).find(([, module]) => module.href === normalizedHref);
     return match ? access.canAccess(match[0]) : true;
   };
@@ -245,7 +252,7 @@ export const ROLE_LABELS = {
 export const PINNED_MODULE_KEYS = {
   admin: ["customerAudit", "paymentCollections", "upload", "dailyVisitReport"],
   manager: ["customerAudit", "paymentCollections", "upload", "dailyVisitReport"],
-  salesman: ["myDay", "customerAudit", "newOrder", "myCollections"],
+  salesman: ["myDay", "customerAudit", "newOrder", "paymentCollections"],
   collector: ["paymentCollections", "collectionReport", "dailyVisitReport", "userActivity"],
   "invoice-maker": ["customerAudit", "pendingOrders", "upload", "paymentCollections"],
   "product-promoter": ["myDay", "customerAudit", "newOrder", "gpsMap"],

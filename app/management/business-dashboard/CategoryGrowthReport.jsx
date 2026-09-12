@@ -15,6 +15,8 @@ import {
   formatGrowthPercent,
   formatMoneyAmount,
   formatSharePercent,
+  formatWholePercent,
+  growthPercent,
   growthDimensionLabel,
   monthChangeTone,
   monthGridTotals,
@@ -233,9 +235,13 @@ function YearlyGrowthTable({
                 const previousYear = index > 0 ? years[index - 1] : "";
                 const previous = previousYear ? Number(row.yearValues?.[previousYear] || 0) : 0;
                 const tone = monthChangeTone(amount, previous, Boolean(previousYear));
+                const delta = previousYear ? formatWholePercent(growthPercent(amount, previous)) : "";
                 return (
                   <td key={year} className={periodCellClass(tone, year === currentYear)}>
-                    {amount ? formatMoneyAmount(amount) : "—"}
+                    <span className="moduleBiAmountDelta">
+                      <strong>{amount ? formatMoneyAmount(amount) : "—"}</strong>
+                      {delta ? <em>{delta}</em> : null}
+                    </span>
                   </td>
                 );
               })}
@@ -260,9 +266,13 @@ function YearlyGrowthTable({
               const amount = Number(yearTotals.columnTotals[index] || 0);
               const previous = index > 0 ? Number(yearTotals.columnTotals[index - 1] || 0) : 0;
               const tone = monthChangeTone(amount, previous, index > 0);
+              const delta = index > 0 ? formatWholePercent(growthPercent(amount, previous)) : "";
               return (
                 <td key={`year-total-${year}`} className={periodCellClass(tone, year === currentYear)}>
-                  {amount ? formatMoneyAmount(amount) : "—"}
+                  <span className="moduleBiAmountDelta">
+                    <strong>{amount ? formatMoneyAmount(amount) : "—"}</strong>
+                    {delta ? <em>{delta}</em> : null}
+                  </span>
                 </td>
               );
             })}

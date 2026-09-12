@@ -8,6 +8,8 @@ import {
   emptyGrowthFilters,
   formatGrowthPercent,
   formatMoneyAmount,
+  formatWholePercent,
+  growthPercent,
   monthChangeTone,
   monthGridTotals,
   previousMonthKey,
@@ -233,7 +235,10 @@ function MomScorecardTable({
               <td>{row.label}</td>
               {showPeople ? <td>{row.memberCount || 0}</td> : null}
               <td className={periodCellClass(monthChangeTone(row.latestCompleteAmount, row.priorMonthAmount, row.priorMonthAmount != null))}>
-                {row.latestCompleteAmount ? formatMoneyAmount(row.latestCompleteAmount) : "—"}
+                <span className="moduleBiAmountDelta">
+                  <strong>{row.latestCompleteAmount ? formatMoneyAmount(row.latestCompleteAmount) : "—"}</strong>
+                  {row.priorMonthAmount != null ? <em>{formatWholePercent(growthPercent(row.latestCompleteAmount, row.priorMonthAmount))}</em> : null}
+                </span>
               </td>
               <td>{row.priorMonthAmount ? formatMoneyAmount(row.priorMonthAmount) : "—"}</td>
               <td className={trendClass(row.momPercent)}>{formatGrowthPercent(row.momPercent)}</td>
@@ -242,7 +247,10 @@ function MomScorecardTable({
               <td className="moduleBiMonthCell--down">{row.downMonths}</td>
               <td className={row.improvingStreak >= 1 ? "moduleBiMonthCell--up" : row.decliningStreak >= 1 ? "moduleBiMonthCell--down" : ""}>{streakLabel(row)}</td>
               <td className={periodCellClass(monthChangeTone(row.mtdAmount, row.latestCompleteAmount, row.latestCompleteAmount != null))}>
-                {row.mtdAmount ? formatMoneyAmount(row.mtdAmount) : "—"}
+                <span className="moduleBiAmountDelta">
+                  <strong>{row.mtdAmount ? formatMoneyAmount(row.mtdAmount) : "—"}</strong>
+                  {row.latestCompleteAmount != null ? <em>{formatWholePercent(growthPercent(row.mtdAmount, row.latestCompleteAmount))}</em> : null}
+                </span>
               </td>
               <td>
                 <span className={statusClass(row.trajectory.status)}>{row.trajectory.label}</span>
@@ -254,14 +262,24 @@ function MomScorecardTable({
           <tr className="moduleBiTotalRow">
             <td>{t("total")}</td>
             {showPeople ? <td>{footer.people || "—"}</td> : null}
-            <td className="moduleBiTotalCol">{footer.latest ? formatMoneyAmount(footer.latest) : "—"}</td>
+            <td className="moduleBiTotalCol">
+              <span className="moduleBiAmountDelta">
+                <strong>{footer.latest ? formatMoneyAmount(footer.latest) : "—"}</strong>
+                {footer.prior ? <em>{formatWholePercent(growthPercent(footer.latest, footer.prior))}</em> : null}
+              </span>
+            </td>
             <td className="moduleBiTotalCol">{footer.prior ? formatMoneyAmount(footer.prior) : "—"}</td>
             <td>—</td>
             <td>—</td>
             <td>—</td>
             <td>—</td>
             <td>—</td>
-            <td className="moduleBiTotalCol">{footer.mtd ? formatMoneyAmount(footer.mtd) : "—"}</td>
+            <td className="moduleBiTotalCol">
+              <span className="moduleBiAmountDelta">
+                <strong>{footer.mtd ? formatMoneyAmount(footer.mtd) : "—"}</strong>
+                {footer.latest ? <em>{formatWholePercent(growthPercent(footer.mtd, footer.latest))}</em> : null}
+              </span>
+            </td>
             <td>—</td>
           </tr>
         </tfoot>

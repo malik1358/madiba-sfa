@@ -4,6 +4,14 @@ import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import { normalizeImportedItemName } from "../../lib/itemName.js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
+import { runDailySupplierOrderEmailCycle } from "../../lib/dailySupplierOrderEmailServer.js";
+import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
+import {
+  findImportValue,
+  findProfitAmount,
+  parseImportNumber,
+  summarizeProfitImport,
+} from "../../lib/salesImportHeaders.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -24,26 +32,7 @@ function clean(value) {
 }
 
 function number(value) {
-  if (
-    value === undefined ||
-    value === null ||
-    value === ""
-  ) {
-    return 0;
-  }
-
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
-
-  const cleaned = String(value)
-    .replace(/,/g, "")
-    .replace(/%/g, "")
-    .trim();
-
-  const parsed = Number(cleaned);
-
-  return Number.isFinite(parsed) ? parsed : 0;
+  return parseImportNumber(value);
 }
 
 function excelDate(value) {
@@ -100,21 +89,7 @@ function excelDate(value) {
 }
 
 function findValue(row, possibilities) {
-  const keys = Object.keys(row);
-
-  for (const possibility of possibilities) {
-    const match = keys.find(
-      (key) =>
-        key.trim().toLowerCase() ===
-        possibility.trim().toLowerCase()
-    );
-
-    if (match) {
-      return row[match];
-    }
-  }
-
-  return null;
+  return findImportValue(row, possibilities);
 }
 
 function pickLatestCustomerRow(existing, candidate) {
@@ -457,19 +432,17 @@ export async function POST(request) {
 
        IMPORTANT SECURITY RULE:
        --------------------------------------------------------
+       We store only the GP / profit amount for Business Intelligence.
+
        We deliberately DO NOT import:
 
-       - Margin
        - Margin %
-       - GP
        - GP %
-       - Gross Profit
        - Cost
        - Cost Price
        - Purchase Cost
        - Landed Cost
        - COGS
-       - Profit
        - Profit %
 
        We also DO NOT store the complete original Excel row.
@@ -741,6 +714,10 @@ export async function POST(request) {
             ])
           ),
 
+          profit_amount: number(
+            findProfitAmount(row)
+          ),
+
           first_purchase_date:
             excelDate(
               findValue(row, [
@@ -785,6 +762,13 @@ export async function POST(request) {
         "No valid sales rows were detected in the Excel file."
       );
     }
+
+    const profitImport = summarizeProfitImport(rows, mappedRows);
+    console.info("Sales import profit column", {
+      profitColumn: profitImport.profitColumn,
+      profitRows: profitImport.profitRows,
+      headers: profitImport.excelHeaders,
+    });
 
     /* ========================================================
        7. DATA QUALITY VALIDATION
@@ -1150,6 +1134,43 @@ export async function POST(request) {
       } catch (rebuildError) {
         console.error("Mobile snapshot rebuild after sales upload failed:", rebuildError);
       }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const cubeAdmin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const cube = await rebuildSalesBiCube(cubeAdmin);
+        console.info("Sales BI cube rebuilt after sales upload:", {
+          factCount: cube?.factCount || 0,
+          sourceRowCount: cube?.sourceRowCount || 0,
+        });
+      } catch (cubeError) {
+        console.error("Sales BI cube rebuild after sales upload failed:", cubeError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        const emailAdmin = createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const emailResult = await runDailySupplierOrderEmailCycle(emailAdmin, {
+          trigger: "sales-upload",
+          now: new Date(),
+          env: process.env,
+        });
+        if (emailResult?.skipped) {
+          console.info("Daily supplier order email skipped after sales upload:", emailResult.reason || "skipped");
+        } else {
+          console.info("Daily supplier order email sent after sales upload:", {
+            date: emailResult?.date,
+            sentCount: emailResult?.sentCount,
+            orderCount: emailResult?.orderCount,
+          });
+        }
+      } catch (emailError) {
+        console.error("Daily supplier order email after sales upload failed:", emailError);
+      }
     });
 
     return NextResponse.json({
@@ -1200,6 +1221,11 @@ export async function POST(request) {
 
       liveMaxDate:
         liveBatch?.max_transaction_date || maxDate,
+
+      profitColumn: profitImport.profitColumn,
+      profitRows: profitImport.profitRows,
+      profitSum: profitImport.profitSum,
+      excelHeaders: profitImport.excelHeaders,
 
       message: mergedIntoExisting
         ? `Sales data updated for ${uploadDates.length} date(s). Other dates were kept unchanged.`

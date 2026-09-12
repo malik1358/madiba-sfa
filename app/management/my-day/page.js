@@ -15,7 +15,6 @@ import {
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -33,7 +32,11 @@ import {
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
 import { resolveVisitLastInvoiceDate } from "../../lib/outstanding";
-import { maybePromptCustomerLocationUpdate } from "../../lib/customerLocation";
+import {
+  CUSTOMER_LOCATION_UPDATE_SKIP,
+  CUSTOMER_LOCATION_UPDATE_UPDATE,
+  maybePromptCustomerLocationUpdate,
+} from "../../lib/customerLocation";
 import {
   CUSTOMER_MOBILE_REQUIRED_ERROR,
   customerHasMobile,
@@ -41,6 +44,7 @@ import {
   updateCustomerMobile,
 } from "../../lib/customerContact";
 import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
+import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { slimVisitStockChecks } from "../../lib/visitReportSave";
 import { buildGpsActivityNote, formatCollectorDisplayName, resolveGpsCapturePlatform } from "../../lib/geo";
 import {
@@ -55,12 +59,13 @@ import { useAppPopup } from "../../components/AppPopupProvider";
 import { postJsonResilient } from "../../lib/offlineApi";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { requestLoginFirstCustomerHintCheck } from "../../lib/loginFirstCustomerHint";
-import { copyTextToClipboard, openWhatsappDirect } from "../../lib/whatsappShare";
+import { copyTextToClipboard } from "../../lib/whatsappShare";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import { useNearestCustomerSuggestions } from "../../hooks/useNearestCustomerSuggestions";
 import { buildNearestCustomerActions } from "../../lib/dashboardNearestCustomers";
-import { getScheduleTodayKey, isScheduleDateInWindow } from "../../lib/scheduleDateWindow";
+import { getScheduleTodayKey, groupScheduleRowsByDisplayDate, PAST_SCHEDULE_GROUP_KEY } from "../../lib/scheduleDateWindow";
 import {
+  activeScheduledVisitDate,
   getTodayDateKey,
   nextVisitDateInputValue,
   validateNextVisitDate,
@@ -98,11 +103,12 @@ const PAGE_TEXT = {
   visitSchedule: { en: "Visit Schedule", ar: "جدول الزيارات" },
   plannedVisitsCount: { en: "scheduled visits", ar: "زيارات مجدولة" },
   scheduleWindowHint: {
-    en: "Showing past visits, today, and tomorrow. Tap a date to open it.",
-    ar: "يتم عرض الزيارات السابقة واليوم وغدًا. اضغط على التاريخ لفتحه.",
+    en: "Showing one Past dates group, today, and tomorrow only. Later dates are hidden.",
+    ar: "يُعرض مجموعة التواريخ السابقة واليوم وغدًا فقط. التواريخ الأبعد مخفية.",
   },
   createOrder: { en: "Create Order", ar: "إنشاء طلب" },
   noPlannedVisits: { en: "No planned visits for past dates, today, or tomorrow.", ar: "لا توجد زيارات مجدولة للأيام السابقة أو اليوم أو غدًا." },
+  pastScheduledVisits: { en: "Past dates", ar: "التواريخ السابقة" },
   calendarDate: { en: "Date", ar: "التاريخ" },
   calendarTime: { en: "Time", ar: "الوقت" },
   unscheduledVisits: { en: "Unscheduled visits", ar: "زيارات بدون موعد" },
@@ -172,6 +178,10 @@ const PAGE_TEXT = {
     ar: "أدخل رقم جوال سعودي (05xxxxxxxx) لهذا العميل قبل حفظ الزيارة.",
   },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
+  yes: { en: "Yes", ar: "نعم" },
+  no: { en: "No", ar: "لا" },
+  locationUpdateTitle: { en: "Update customer location?", ar: "تحديث موقع العميل؟" },
+  visitSaved: { en: "Visit saved. Share the summary on WhatsApp.", ar: "تم حفظ الزيارة. شارك الملخص على واتساب." },
   paymentFollowup: { en: "Payment follow-up", ar: "متابعة دفع" },
   comeBackLater: { en: "Asked to come back later", ar: "طلب العودة لاحقاً" },
   purchaseManagerUnavailable: { en: "Purchase manager not available", ar: "مدير المشتريات غير موجود" },
@@ -320,7 +330,7 @@ function visitRowFromCustomerRecord(customer, extras = {}) {
     last_invoice_date: customer.latest_transaction_date || customer.last_invoice_date || null,
     latest_transaction_date: customer.latest_transaction_date || null,
     last_visit_date: customer.last_visit_date || null,
-    next_visit_at: customer.next_visit_at || null,
+    next_visit_at: activeScheduledVisitDate(customer.next_visit_at, customer.last_visit_date) || null,
     recent_sales_value: Number(customer.recent_sales_value || 0),
     average_monthly_purchase: Number(customer.average_monthly_purchase || 0),
     highest_monthly_sales: Number(customer.highest_monthly_sales || 0),
@@ -857,7 +867,10 @@ export default function MyDayPage({ mode = "default" } = {}) {
             mobile: row.mobile || "",
             last_visit_date: latestVisitByCustomer.get(customerCode) || null,
             days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(customerCode) || null),
-            next_visit_at: nextVisitByCustomer.get(customerCode) || null,
+            next_visit_at: activeScheduledVisitDate(
+              nextVisitByCustomer.get(customerCode),
+              latestVisitByCustomer.get(customerCode),
+            ) || null,
             recent_sales_value: Number(row.recent_sales_value || 0),
             average_monthly_purchase: Number(row.average_monthly_purchase || 0),
             highest_monthly_sales: Number(row.highest_monthly_sales || 0),
@@ -952,16 +965,30 @@ export default function MyDayPage({ mode = "default" } = {}) {
     }
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        callback(value);
+      };
+      const timer = window.setTimeout(() => {
+        finish(reject, new Error("Unable to read GPS location."));
+      }, 12000);
+
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          resolve({
+          window.clearTimeout(timer);
+          finish(resolve, {
             latitude: Number(position.coords.latitude.toFixed(6)),
             longitude: Number(position.coords.longitude.toFixed(6)),
             accuracy: Number(position.coords.accuracy.toFixed(1)),
           });
         },
-        () => reject(new Error("Unable to read GPS location.")),
-        { enableHighAccuracy: true, timeout: 10000 }
+        () => {
+          window.clearTimeout(timer);
+          finish(reject, new Error("Unable to read GPS location."));
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
       );
     });
   }
@@ -977,10 +1004,34 @@ export default function MyDayPage({ mode = "default" } = {}) {
         language,
         customer,
         skipReverseGeocode: true,
+        promptChoice: async (promptDetails) => {
+          const choice = await showPopup({
+            title: t("locationUpdateTitle"),
+            message: promptDetails.message,
+            variant: "warning",
+            choices: [
+              { id: "yes", label: t("yes") },
+              { id: "no", label: t("no") },
+            ],
+          });
+          return choice === "yes" ? CUSTOMER_LOCATION_UPDATE_UPDATE : CUSTOMER_LOCATION_UPDATE_SKIP;
+        },
       });
     } catch (locationError) {
       console.warn("Customer location update skipped", locationError);
     }
+  }
+
+  function presentVisitWhatsappSummary(summary, { saved = true, errorMessage = "" } = {}) {
+    const text = String(summary || "").trim();
+    if (!text) return;
+    void copyTextToClipboard(text);
+    showPopup({
+      message: errorMessage || t("visitSaved"),
+      variant: saved ? "success" : "error",
+      whatsappText: text,
+      autoShareWhatsapp: true,
+    });
   }
 
   async function addLog(entryType) {
@@ -1213,6 +1264,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     setError("");
     setMessage("");
 
+    let summaryText = "";
     try {
       const {
         data: { session },
@@ -1228,8 +1280,23 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
-      await promptCustomerGpsIfFar(customer, location, session.access_token);
       const capturedAt = new Date().toISOString();
+      const visitDistance = await loadVisitDistanceMetrics({
+        supabase,
+        userId: session.user.id,
+        location,
+        customer,
+        savedAt: capturedAt,
+      });
+      summaryText = buildFieldVisitWhatsappSummary({
+        customer,
+        visitForm,
+        salesmanName: formatCollectorDisplayName(profile || {}),
+        salesmanCode: profile?.salesman_code || "",
+        language,
+        visitDistance,
+      });
+      void copyTextToClipboard(summaryText);
       const platform = await resolveGpsCapturePlatform();
       const stockChecks = slimVisitStockChecks(visitForm.stockChecks);
 
@@ -1274,16 +1341,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
       requestLoginFirstCustomerHintCheck();
 
-      const summaryText = buildFieldVisitWhatsappSummary({
-        customer,
-        visitForm,
-        salesmanName: formatCollectorDisplayName(profile || {}),
-        salesmanCode: profile?.salesman_code || "",
-        language,
-      });
-
-      void copyTextToClipboard(summaryText);
-
       setVisitStatusRows((current) =>
         current.map((row) => {
           if (row.customer_code !== customer.customer_code) return row;
@@ -1293,7 +1350,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
             last_visit_date: capturedAt,
             days_since_last_visit: 0,
             status: "Visited",
-            next_visit_at: visitForm.nextVisitAt || null,
+            next_visit_at: activeScheduledVisitDate(visitForm.nextVisitAt, capturedAt) || null,
           };
         })
       );
@@ -1306,13 +1363,16 @@ export default function MyDayPage({ mode = "default" } = {}) {
         stockChecks: [],
       });
 
-      openWhatsappDirect(summaryText);
+      presentVisitWhatsappSummary(summaryText, { saved: true });
     } catch (err) {
       const message = String(err?.message || "Unable to save visit report.");
-      if (message === CUSTOMER_MOBILE_REQUIRED_ERROR || message.toLowerCase().includes("05xxxxxxxx")) {
-        setError(t("customerMobileRequired"));
+      const errorMessage = message === CUSTOMER_MOBILE_REQUIRED_ERROR || message.toLowerCase().includes("05xxxxxxxx")
+        ? t("customerMobileRequired")
+        : (message.toLowerCase().includes("past") ? t("nextVisitPast") : message);
+      if (summaryText) {
+        presentVisitWhatsappSummary(summaryText, { saved: false, errorMessage });
       } else {
-        setError(message.toLowerCase().includes("past") ? t("nextVisitPast") : message);
+        setError(errorMessage);
       }
     } finally {
       setVisitSaving(false);
@@ -1733,7 +1793,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   const plannedVisitRows = useMemo(
     () =>
       [...visitStatusRows, ...prospectScheduleRows]
-        .filter((row) => row.next_visit_at)
+        .filter((row) => activeScheduledVisitDate(row.next_visit_at, row.last_visit_date))
         .sort((a, b) => {
           const bySchedule = getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at);
           if (bySchedule !== 0) return bySchedule;
@@ -1743,9 +1803,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
   );
 
   const visitCalendar = useMemo(() => {
-    const dayMap = new Map();
-    const unscheduled = [];
     const todayKey = getScheduleTodayKey();
+    const unscheduled = [];
+    const datedRows = [];
 
     plannedVisitRows.forEach((row) => {
       const time = getSortTimestamp(row.next_visit_at);
@@ -1753,33 +1813,28 @@ export default function MyDayPage({ mode = "default" } = {}) {
         unscheduled.push(row);
         return;
       }
-
-      const dateKey = row.schedule_date
-        || (/^\d{4}-\d{2}-\d{2}/.test(String(row.next_visit_at || ""))
-          ? String(row.next_visit_at).slice(0, 10)
-          : new Date(time).toISOString().slice(0, 10));
-      if (!isScheduleDateInWindow(dateKey, todayKey)) return;
-
-      const current = dayMap.get(dateKey) || [];
-      current.push(row);
-      dayMap.set(dateKey, current);
+      datedRows.push(row);
     });
 
-    const days = Array.from(dayMap.entries())
-      .map(([dateKey, rows]) => ({
-        dateKey,
-        label: new Date(`${dateKey}T00:00:00`).toLocaleDateString("en-GB", {
+    const days = groupScheduleRowsByDisplayDate(
+      datedRows,
+      (row) => row.schedule_date || row.next_visit_at,
+      todayKey,
+    ).map((group) => ({
+      dateKey: group.dateKey,
+      label: group.dateKey === PAST_SCHEDULE_GROUP_KEY
+        ? t("pastScheduledVisits")
+        : new Date(`${group.dateKey}T00:00:00`).toLocaleDateString("en-GB", {
           weekday: "short",
           day: "2-digit",
           month: "short",
           year: "numeric",
         }),
-        rows: rows.sort((a, b) => getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at)),
-      }))
-      .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+      rows: group.rows.sort((a, b) => getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at)),
+    }));
 
     return { days, unscheduled };
-  }, [plannedVisitRows]);
+  }, [plannedVisitRows, language]);
 
   const activeVisitRow = useMemo(() => {
     const code = String(activeVisitCustomerCode || "").trim();
@@ -1938,7 +1993,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
           </div>
           <div className="moduleHeaderMeta">
             <AppLanguageSwitch language={language} setLanguage={setLanguage} />
-            <MostVisitedPages />
             <Link href="/" className="moduleBackLink">{t("dashboard")}</Link>
           </div>
         </div>

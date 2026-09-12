@@ -7,7 +7,6 @@ import { getSupabaseClient } from "../lib/supabase";
 import { translate, useAppLanguage } from "../lib/appLanguage";
 import SupabaseUnavailable from "../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../components/AppLanguageSwitch";
-import MostVisitedPages from "../components/MostVisitedPages";
 import { usePopupMessages } from "../hooks/usePopupMessages";
 import { useAppPopup } from "../components/AppPopupProvider";
 import { buildModuleAccess, listAccessibleModules, localizedModuleLabel } from "../lib/moduleAccess";
@@ -230,6 +229,7 @@ export default function ManagementPage() {
       "customerAudit",
       "customerMaster",
       "outstandingNoGps",
+      "salesmanVisitPlan",
       "newOrder",
       "visitWithoutOrder",
       "salesmanHierarchy",
@@ -289,7 +289,7 @@ export default function ManagementPage() {
               <p className="moduleEyebrow">MADIBA SFA</p>
               <h1>{t("title")}</h1>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
         </div>
       </main>
@@ -306,7 +306,7 @@ export default function ManagementPage() {
             <h1>{t("title")}</h1>
             <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         <div className="moduleMetricGrid">

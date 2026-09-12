@@ -17,6 +17,7 @@ import {
   isTestCustomerOrder,
   isWithinMissingInvoiceEmailWindow,
   missingInvoiceCreatedFromIso,
+  wasMissingInvoiceEmailSentRecently,
   resolveMissingInvoiceEmailCc,
   resolveMissingInvoiceEmailRecipients,
   selectMissingInvoiceOrders,
@@ -182,6 +183,7 @@ test("runMissingInvoiceEmailCycle skips when nothing is overdue", async () => {
 
 test("runMissingInvoiceEmailCycle sends one digest to the default list", async () => {
   const sent = [];
+  const saved = [];
   const result = await runMissingInvoiceEmailCycle({}, {
     now,
     env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
@@ -193,6 +195,11 @@ test("runMissingInvoiceEmailCycle sends one digest to the default list", async (
       orders: [submittedOrder(7)],
       metaByOrder: new Map(),
     }),
+    loadLastSentAt: async () => null,
+    saveLastSentAt: async (_admin, sentAt) => {
+      saved.push(sentAt);
+    },
+    syncVault: async () => ({ ok: true }),
   });
 
   assert.equal(result.skipped, false);
@@ -202,6 +209,7 @@ test("runMissingInvoiceEmailCycle sends one digest to the default list", async (
   assert.deepEqual(sent[0].cc, DEFAULT_MISSING_INVOICE_EMAIL_CC);
   assert.deepEqual(result.cc, DEFAULT_MISSING_INVOICE_EMAIL_CC);
   assert.match(sent[0].subject, /SO-7|1 order missing invoice/);
+  assert.equal(saved.length, 1);
 });
 
 test("runMissingInvoiceEmailCycle skips outside India back-office hours", async () => {
@@ -218,6 +226,34 @@ test("runMissingInvoiceEmailCycle skips outside India back-office hours", async 
 
   assert.equal(result.skipped, true);
   assert.equal(result.reason, "outside_india_back_office_hours");
+});
+
+test("recent missing-invoice sends are suppressed for 12 minutes", () => {
+  assert.equal(wasMissingInvoiceEmailSentRecently(now.getTime(), now), true);
+  assert.equal(wasMissingInvoiceEmailSentRecently(now.getTime() - 13 * 60 * 1000, now), false);
+  assert.equal(wasMissingInvoiceEmailSentRecently({ lastSentAt: now.toISOString() }, now), true);
+});
+
+test("runMissingInvoiceEmailCycle skips when a digest was just sent", async () => {
+  const result = await runMissingInvoiceEmailCycle({}, {
+    now,
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    send: async () => {
+      throw new Error("should not send");
+    },
+    loadOrders: async () => ({
+      orders: [submittedOrder(7)],
+      metaByOrder: new Map(),
+    }),
+    loadLastSentAt: async () => now.getTime() - 60 * 1000,
+    saveLastSentAt: async () => {
+      throw new Error("should not save");
+    },
+    syncVault: async () => ({ skipped: true }),
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "sent_recently");
 });
 
 test("runMissingInvoiceEmailCycle skips when email is not configured", async () => {

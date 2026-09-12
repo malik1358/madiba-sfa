@@ -74,6 +74,7 @@ export default function QuickOrder({ quickOrderSuggestions, orderQuantities, dec
                           valueDiscountRate: valueDiscount,
                           schemeUnitDiscount: scheme.unitDiscount,
                           schemeDiscountedQty: scheme.discountedQty,
+                          excludeCashDiscount: scheme.excludeCashDiscount === true,
                         });
                         return (
                           <tr key={`${group.key}-${item.item_code}`}>

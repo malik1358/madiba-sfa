@@ -6,7 +6,8 @@ import {
   normalizeSalesmanCode,
   TEAM_PERFORMANCE_VIEW,
 } from "../../lib/performanceKpis.js";
-import { loadPerformanceSnapshotsForSalesmen } from "../../lib/performanceKpisServer.js";
+import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from "../../lib/performanceKpisServer.js";
+import { teamTargetSalesmanCode } from "../../lib/kpiTargetsTable.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 
@@ -117,10 +118,15 @@ export async function GET(request) {
       salesmen: members,
       reportDate,
     });
+    const viewerTeamCode = teamTargetSalesmanCode(profile.salesman_code);
+    const teamTargetMap = viewerTeamCode
+      ? await loadKpiTargetsBySalesman(admin, { salesmanCodes: [viewerTeamCode], reportDate })
+      : new Map();
     const teamSnapshot = canViewTeam
       ? consolidatePerformanceSnapshots(snapshots, {
         reportDate,
         salesmanName: `${profile.salesman_name || "Team"} — team`,
+        teamTargets: teamTargetMap.get(viewerTeamCode)?.targets || null,
       })
       : null;
 

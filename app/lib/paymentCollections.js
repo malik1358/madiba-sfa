@@ -12,6 +12,7 @@ import {
   customerAssignmentMatchesScope,
   customerHasActiveSalesmanTransfer,
 } from "./customerSalesmanAssignment.js";
+import { activeScheduledVisitDate } from "./nextVisitDate.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -174,11 +175,21 @@ export function collectionRowMatchesCustomerQuery(row, customerFilter) {
 }
 
 export function scheduledRevisitDate(record) {
-  return dateOnly(record?.latest_collection?.next_visit_at);
+  return activeScheduledVisitDate(
+    record?.latest_collection?.next_visit_at,
+    record?.latest_collection?.saved_at,
+  );
 }
 
 export function hasCollectionVisit(record) {
   return Boolean(dateOnly(record?.latest_collection?.saved_at));
+}
+
+export function formatLatestCollectionVisitRemark(latestCollection) {
+  const arabic = String(latestCollection?.remark_arabic || "").trim();
+  const english = String(latestCollection?.remark_english || "").trim();
+  if (arabic && english && arabic !== english) return `${arabic} / ${english}`;
+  return arabic || english;
 }
 
 function scheduledRevisitTier(record, today) {
@@ -353,7 +364,7 @@ export function buildCollectionPriority(record) {
     : buildExposureScore(totalDueAmount, maxOverdueDays);
   const latestStatus = String(record?.latest_collection?.payment_status || "").trim().toUpperCase();
   const lastVisitAt = dateOnly(record?.latest_collection?.saved_at);
-  const nextVisitAt = dateOnly(record?.latest_collection?.next_visit_at);
+  const nextVisitAt = scheduledRevisitDate(record);
   const today = dateOnly(record?.today || new Date().toISOString());
   const daysSinceLastVisit = lastVisitAt && today ? diffDays(today, lastVisitAt) : 90;
 

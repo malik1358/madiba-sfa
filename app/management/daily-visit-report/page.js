@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import DayRouteMap from "../../components/DayRouteMap";
 import ExportableTable from "../../components/ExportableTable";
@@ -136,8 +135,8 @@ const TEXT = {
   tableLegend: { en: "Row colors", ar: "ألوان الصفوف" },
   inactivityLogTitle: { en: "Inactivity email log", ar: "سجل بريد عدم النشاط" },
   inactivityLogHint: {
-    en: "Cron checks about every 10 minutes. A new email is due every 40 minutes of idle time. Lunch is skipped. Gap shows minutes since the previous email for that user.",
-    ar: "يتحقق الكرون كل 10 دقائق تقريباً. يُستحق بريد جديد كل 40 دقيقة من التوقف. يُستثنى الغداء. الفجوة هي الدقائق منذ البريد السابق لنفس المستخدم.",
+    en: "Vercel Cron checks every 10 minutes. A new email is due every 40 minutes of idle time. Lunch is skipped. Gap shows minutes since the previous email for that user.",
+    ar: "يتحقق كرون Vercel كل 10 دقائق. يُستحق بريد جديد كل 40 دقيقة من التوقف. يُستثنى الغداء. الفجوة هي الدقائق منذ البريد السابق لنفس المستخدم.",
   },
   inactivitySent: { en: "Emails sent", ar: "رسائل أُرسلت" },
   inactivityChecks: { en: "Cron checks", ar: "فحوصات الكرون" },
@@ -520,7 +519,6 @@ export default function DailyVisitReportPage() {
             </div>
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
-              <MostVisitedPages />
               <AccessibleHeaderLink moduleKey="collectionReport" href="/management/collection-report" className="moduleBackLink">
                 Collection Report
               </AccessibleHeaderLink>

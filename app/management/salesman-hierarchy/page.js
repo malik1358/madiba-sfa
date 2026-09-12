@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
@@ -88,6 +87,13 @@ function normalizeCredentialToken(value) {
     .replace(/[^A-Z0-9]+/g, ".")
     .replace(/^\.+|\.+$/g, "")
     .replace(/\.{2,}/g, ".");
+}
+
+function headOptionLabel(option) {
+  const name = option.salesman_name || option.salesman_code || "";
+  const code = option.salesman_code ? ` (${option.salesman_code})` : "";
+  const status = option.is_active === false ? " — Inactive" : "";
+  return `${name}${code}${status}`;
 }
 
 function displayLoginName(value) {
@@ -533,7 +539,7 @@ export default function SalesmanHierarchyPage() {
             <h1>{t("title")}</h1>
             <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/management" className="moduleBackLink">{t("management")}</Link></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/management" className="moduleBackLink">{t("management")}</Link></div>
         </div>
 
         <div className="moduleMetricGrid">
@@ -629,7 +635,7 @@ export default function SalesmanHierarchyPage() {
                 <option value="">No head</option>
                 {headOptions.map((option) => (
                   <option key={`new-${option.id}`} value={option.salesman_code || ""}>
-                    {option.salesman_name || option.salesman_code} {option.salesman_code ? `(${option.salesman_code})` : ""}
+                    {headOptionLabel(option)}
                   </option>
                 ))}
               </select>
@@ -752,7 +758,7 @@ export default function SalesmanHierarchyPage() {
                           <span>{stockTakeAccessSelections[salesman.id] === true ? t("stockTakeOn") : t("stockTakeOff")}</span>
                         </label>
                       </td>
-                      <td>{currentHead ? `${currentHead.salesman_name || currentHead.salesman_code} (${currentHead.salesman_code})` : "-"}</td>
+                      <td>{currentHead ? headOptionLabel(currentHead) : "-"}</td>
                       <td>
                         <select
                           className="moduleInput"
@@ -765,7 +771,7 @@ export default function SalesmanHierarchyPage() {
                             .filter((option) => option.id !== salesman.id)
                             .map((option) => (
                               <option key={`${salesman.id}-${option.id}`} value={option.salesman_code || ""}>
-                                {option.salesman_name || option.salesman_code} {option.salesman_code ? `(${option.salesman_code})` : ""}
+                                {headOptionLabel(option)}
                               </option>
                             ))}
                         </select>

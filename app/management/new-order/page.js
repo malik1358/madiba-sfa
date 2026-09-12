@@ -4,7 +4,6 @@ import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSessionWithTimeout, withTimeout } from "../../lib/authSession";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -978,6 +977,7 @@ export default function NewOrderPage() {
         valueDiscountRate: valueDiscount,
         schemeUnitDiscount: scheme.unitDiscount,
         schemeDiscountedQty: scheme.discountedQty,
+        excludeCashDiscount: scheme.excludeCashDiscount === true,
       });
       return {
         ...priced,
@@ -1014,7 +1014,7 @@ export default function NewOrderPage() {
   );
 
   const buildOrderSnapshot = useCallback(
-    (orderId, statusLabel, orderNumber = "") => {
+    (orderId, statusLabel, orderNumber = "", visitDistance = null) => {
       if (!selectedCustomer || orderItems.length === 0) return null;
 
       const savedAtIso = new Date().toISOString();
@@ -1043,6 +1043,7 @@ export default function NewOrderPage() {
           customer: outstandingInfo?.customer || null,
           customerInvoices: Array.isArray(outstandingInfo?.customerInvoices) ? outstandingInfo.customerInvoices : [],
         },
+        visitDistance: visitDistance || null,
       };
     },
     [
@@ -1173,7 +1174,7 @@ export default function NewOrderPage() {
     const saved = await saveDraft({ silent: true });
     if (!saved?.orderId) return;
 
-    const snapshot = buildOrderSnapshot(saved.orderId, "Draft Saved", saved.orderNumber);
+    const snapshot = buildOrderSnapshot(saved.orderId, "Draft Saved", saved.orderNumber, saved.visitDistance);
     if (!snapshot) return;
 
     const queued = isQueuedPendingOrderId(saved.orderId);
@@ -1194,7 +1195,7 @@ export default function NewOrderPage() {
     const saved = await submitOrder({ silent: true });
     if (!saved?.orderId) return;
 
-    const snapshot = buildOrderSnapshot(saved.orderId, "Submitted", saved.orderNumber);
+    const snapshot = buildOrderSnapshot(saved.orderId, "Submitted", saved.orderNumber, saved.visitDistance);
     if (!snapshot) return;
 
     const queued = isQueuedPendingOrderId(saved.orderId);
@@ -1582,7 +1583,7 @@ export default function NewOrderPage() {
             <h1>{t("title")}</h1>
             <p className="moduleSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
         </div>
 
         <section className="moduleSection">
@@ -1921,6 +1922,7 @@ export default function NewOrderPage() {
                                 valueDiscountRate: valueDiscount,
                                 schemeUnitDiscount: scheme.unitDiscount,
                                 schemeDiscountedQty: scheme.discountedQty,
+                                excludeCashDiscount: scheme.excludeCashDiscount === true,
                               });
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";

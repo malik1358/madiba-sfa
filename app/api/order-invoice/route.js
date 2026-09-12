@@ -11,6 +11,7 @@ import { isProspectCustomerCode } from "../../lib/customerCode.js";
 import { expandMutualGroupScopeIdentities } from "../../lib/mutualSalesmanGroups.js";
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
+import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -20,8 +21,10 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const STATUS_PENDING_CREDIT = "Pending for credit approval";
 const STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
+const STATUS_QUOTATION_WAITING_PAYMENT = "Quotation submitted waiting for the payment";
 const STATUS_REJECTED = "Rejected by management";
 const STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
+const STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
 const STATUS_INVOICE_MADE = "Invoice made";
 const QUERY_CHUNK = 150;
 
@@ -35,11 +38,6 @@ function chunkList(items, size = QUERY_CHUNK) {
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
-}
-
-function isInvoiceMakerRole(role) {
-  const normalized = String(role || "").trim().toLowerCase();
-  return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
 function metaKey(orderId) {
@@ -344,8 +342,8 @@ export async function POST(request) {
     const contentType = request.headers.get("content-type") || "";
 
     if (contentType.toLowerCase().includes("multipart/form-data")) {
-      if (!isInvoiceMakerRole(scope.role)) {
-        return NextResponse.json({ success: false, error: "Only invoice maker can upload invoices." }, { status: 403 });
+      if (!canManageOrderInvoice(scope.role)) {
+        return NextResponse.json({ success: false, error: "Only admin, manager, or invoice maker can upload invoices." }, { status: 403 });
       }
 
       const form = await request.formData();
@@ -530,8 +528,8 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Unsupported action." }, { status: 400 });
     }
 
-    if (!isInvoiceMakerRole(scope.role)) {
-      return NextResponse.json({ success: false, error: "Only invoice maker can set invoice status." }, { status: 403 });
+    if (!canManageOrderInvoice(scope.role)) {
+      return NextResponse.json({ success: false, error: "Only admin, manager, or invoice maker can set invoice status." }, { status: 403 });
     }
 
     const orderId = String(body?.orderId || "").trim();
@@ -541,7 +539,7 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
     }
 
-    if (![STATUS_PENDING_CREDIT, STATUS_WAITING_CREDIT_APPLICATION, STATUS_REJECTED, STATUS_STOCK_UNAVAILABLE, STATUS_INVOICE_MADE].includes(status)) {
+    if (![STATUS_PENDING_CREDIT, STATUS_WAITING_CREDIT_APPLICATION, STATUS_QUOTATION_WAITING_PAYMENT, STATUS_REJECTED, STATUS_STOCK_UNAVAILABLE, STATUS_WAITING_STOCK_TRANSFER, STATUS_INVOICE_MADE].includes(status)) {
       return NextResponse.json({ success: false, error: "Unsupported status value." }, { status: 400 });
     }
 

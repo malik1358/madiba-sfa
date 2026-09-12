@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess } from "../../../lib/moduleAccess.js";
 import { isMissingSchemaColumn, monthStartDate, normalizePerformanceTargets, normalizeSalesmanCode } from "../../../lib/performanceKpis.js";
-import { loadPerformanceSnapshotsForSalesmen } from "../../../lib/performanceKpisServer.js";
+import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from "../../../lib/performanceKpisServer.js";
+import { isTeamTargetSalesmanCode, teamTargetSalesmanCode, uniqueBossesFromRows } from "../../../lib/kpiTargetsTable.js";
 import { findHeadProfile } from "../../../lib/salesHierarchy.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
@@ -122,17 +123,40 @@ export async function GET(request) {
     const bossByCode = new Map(
       salesmen.map((row) => [normalizeSalesmanCode(row.salesman_code), row]),
     );
+    const rows = snapshots.map((snapshot) => {
+      const boss = bossByCode.get(normalizeSalesmanCode(snapshot.salesmanCode));
+      return {
+        ...snapshot,
+        bossCode: boss?.bossCode || "",
+        bossName: boss?.bossName || "",
+      };
+    });
+    const bosses = uniqueBossesFromRows(rows);
+    const teamTargetCodes = bosses.map((boss) => teamTargetSalesmanCode(boss.bossCode)).filter(Boolean);
+    const teamTargetsByCode = await loadKpiTargetsBySalesman(admin, {
+      salesmanCodes: teamTargetCodes,
+      reportDate,
+    });
 
     return NextResponse.json({
       success: true,
       month: monthStartDate(reportDate),
       reportDate,
-      rows: snapshots.map((snapshot) => {
-        const boss = bossByCode.get(normalizeSalesmanCode(snapshot.salesmanCode));
+      rows,
+      teamTargets: bosses.map((boss) => {
+        const stored = teamTargetsByCode.get(teamTargetSalesmanCode(boss.bossCode));
         return {
-          ...snapshot,
-          bossCode: boss?.bossCode || "",
-          bossName: boss?.bossName || "",
+          bossCode: boss.bossCode,
+          bossName: boss.bossName,
+          salesmanCode: teamTargetSalesmanCode(boss.bossCode),
+          targets: stored?.targets || {
+            officeSupplies: 0,
+            otherSales: 0,
+            totalSales: 0,
+            collection: 0,
+            newCustomers: 0,
+            repeatCustomers: 0,
+          },
         };
       }),
     });
@@ -166,7 +190,10 @@ export async function PUT(request) {
     }
 
     const rows = incoming.map((row) => {
-      const salesmanCode = normalizeSalesmanCode(row.salesmanCode || row.salesman_code);
+      const rawCode = row.salesmanCode || row.salesman_code;
+      const salesmanCode = isTeamTargetSalesmanCode(rawCode)
+        ? String(rawCode || "").trim().toUpperCase().replace(/\s+/g, " ")
+        : normalizeSalesmanCode(rawCode);
       if (!salesmanCode) {
         throw new Error("Each row needs a salesman code.");
       }

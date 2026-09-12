@@ -5,7 +5,11 @@ import {
   buildOfflineProspectCustomerCode,
   buildProspectCustomerCode,
   enrichProspectsWithOrders,
+  extractMissingProspectsColumn,
+  dropMissingProspectSelectColumn,
   formatProspectOrderLabel,
+  findProspectById,
+  findProspectForCustomerCode,
   hiddenProspectCustomerCodes,
   isOpenProspectForOrderScreens,
   isPlaceholderProspectName,
@@ -13,6 +17,7 @@ import {
   mergeUniqueCustomersByCode,
   prospectDisplayName,
   resolveProspectCustomerCode,
+  visibleCustomerFromProspect,
 } from "../app/lib/prospects.js";
 
 test("buildProspectCustomerCode formats prospect order customer codes", () => {
@@ -107,5 +112,86 @@ test("open prospect helpers keep unordered prospects and hide ordered or convert
     [{ customer_code: "PROSPECT-11", customer_name: "New Shop" }],
     [{ customer_code: "prospect-11", customer_name: "Duplicate" }, { customer_code: "1173C", customer_name: "Real" }],
   ).map((row) => row.customer_code).join(","), "PROSPECT-11,1173C");
+});
+
+test("visibleCustomerFromProspect maps a visit-report customer from a prospect row", () => {
+  const customer = visibleCustomerFromProspect({
+    id: 64,
+    salesman_code: "S12",
+    company_name: "Gana al araice",
+    city: "Riyadh",
+    area: "Al Jazah",
+  });
+
+  assert.equal(customer.customer_code, "PROSPECT-64");
+  assert.equal(customer.customer_name, "Gana al araice");
+  assert.equal(customer.current_salesman_code, "S12");
+  assert.equal(customer.is_prospect, true);
+});
+
+test("findProspectForCustomerCode loads live and offline prospect codes", async () => {
+  const admin = {
+    from() {
+      return {
+        select() { return this; },
+        eq(field, value) {
+          this.field = field;
+          this.value = value;
+          return this;
+        },
+        ilike() { return this; },
+        limit() { return this; },
+        maybeSingle() {
+          if (this.field === "id" && this.value === 64) {
+            return { data: { id: 64, company_name: "Gana al araice" }, error: null };
+          }
+          if (this.field === "offline_id" && this.value === "abc123") {
+            return { data: { id: 9, offline_id: "abc123", company_name: "Offline Shop" }, error: null };
+          }
+          return { data: null, error: null };
+        },
+      };
+    },
+  };
+
+  const live = await findProspectForCustomerCode(admin, "PROSPECT-64");
+  assert.equal(live.id, 64);
+  assert.equal((await findProspectForCustomerCode(admin, "PROSPECT-OFF-abc123")).offline_id, "abc123");
+  assert.equal(await findProspectForCustomerCode(admin, "1173C"), null);
+});
+
+test("extractMissingProspectsColumn reads PostgREST missing shop_name errors", () => {
+  assert.equal(extractMissingProspectsColumn("column prospects.shop_name does not exist"), "shop_name");
+  assert.equal(
+    dropMissingProspectSelectColumn("id,salesman_code,company_name,shop_name,remarks", "shop_name"),
+    "id,salesman_code,company_name,remarks",
+  );
+});
+
+test("findProspectById retries when shop_name is missing", async () => {
+  const selects = [];
+  const admin = {
+    from() {
+      return {
+        select(columns) {
+          selects.push(columns);
+          this.columns = columns;
+          return this;
+        },
+        eq() { return this; },
+        maybeSingle() {
+          if (String(this.columns).includes("shop_name")) {
+            return { data: null, error: { message: "column prospects.shop_name does not exist" } };
+          }
+          return { data: { id: 64, company_name: "Gana al araice" }, error: null };
+        },
+      };
+    },
+  };
+
+  const row = await findProspectById(admin, 64);
+  assert.equal(row.id, 64);
+  assert.equal(selects.some((value) => String(value).includes("shop_name")), true);
+  assert.equal(selects.some((value) => !String(value).includes("shop_name")), true);
 });
 

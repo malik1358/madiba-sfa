@@ -1,3 +1,5 @@
+import { activeScheduledVisitDate } from "./nextVisitDate.js";
+
 export const MY_DAY_VISIT_LOOKBACK_DAYS = 120;
 export const MY_DAY_VISIT_REPORT_LIMIT = 400;
 export const MY_DAY_ATTENDANCE_ENTRY_TYPES = [
@@ -25,7 +27,10 @@ export function applyLatestVisitFromLogRow(latestVisitByCustomer, nextVisitByCus
     const current = latestVisitByCustomer.get(customerCode);
     if (!current || getSortTimestamp(visitAt) > getSortTimestamp(current)) {
       latestVisitByCustomer.set(customerCode, visitAt);
-      nextVisitByCustomer.set(customerCode, parsed?.next_visit_at ? String(parsed.next_visit_at) : null);
+      nextVisitByCustomer.set(
+        customerCode,
+        activeScheduledVisitDate(parsed?.next_visit_at, visitAt) || null,
+      );
     }
   } catch {
     // Ignore malformed notes.

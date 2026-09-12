@@ -16,6 +16,8 @@ export const DEFAULT_ORDER_SCHEMES = [
     qualifierItemCodes: ["A004224", "A004225", "A004226", "A004227"],
     qualifierMinQty: 1,
     qualifierMode: "any",
+    // Mix carton deal is already steep; do not stack cash % on top.
+    excludeCashDiscount: true,
   },
 ];
 
@@ -46,6 +48,14 @@ export function parseItemCodeList(value) {
   )];
 }
 
+function parseExcludeCashDiscount(source, rewardItemCode = "") {
+  const raw = source?.excludeCashDiscount ?? source?.exclude_cash_discount;
+  if (raw === false || raw === "false" || raw === 0 || raw === "0") return false;
+  if (raw === true || raw === "true" || raw === 1 || raw === "1") return true;
+  // Built-in mix deal and legacy rows without the flag must not stack cash %.
+  return rewardItemCode === "A005425" || String(source?.id || "").includes("a005425-mix");
+}
+
 export function createEmptySchemeDraft() {
   return {
     id: "",
@@ -59,6 +69,7 @@ export function createEmptySchemeDraft() {
     qualifierItemCodes: [],
     qualifierMinQty: 1,
     qualifierMode: "any",
+    excludeCashDiscount: true,
   };
 }
 
@@ -90,6 +101,7 @@ export function normalizeOrderScheme(raw, index = 0) {
     qualifierItemCodes: parseItemCodeList(source.qualifierItemCodes || source.qualifier_item_codes),
     qualifierMinQty,
     qualifierMode,
+    excludeCashDiscount: parseExcludeCashDiscount(source, rewardItemCode),
   };
 }
 
@@ -153,6 +165,7 @@ export function emptySchemeApplication() {
     schemeAmount: 0,
     schemeNames: [],
     schemeIds: [],
+    excludeCashDiscount: false,
   };
 }
 
@@ -184,6 +197,7 @@ export function evaluateOrderSchemes(quantities = {}, schemes = []) {
         schemeAmount: nextAmount,
         schemeNames: [...current.schemeNames, scheme.name],
         schemeIds: [...current.schemeIds, scheme.id],
+        excludeCashDiscount: current.excludeCashDiscount || scheme.excludeCashDiscount === true,
       };
     });
   });
@@ -213,5 +227,8 @@ export function describeOrderScheme(scheme) {
   const applyLabel = normalized.applyTo === "all_units"
     ? `all ${normalized.rewardItemCode} cartons once ${normalized.rewardEveryQty} CTN is reached`
     : `each complete ${normalized.rewardEveryQty} CTN of ${normalized.rewardItemCode}`;
-  return `On ${applyLabel}, if the order includes ${qualifier}, take ${normalized.unitDiscountSar} SAR off each discounted carton.`;
+  const cashRule = normalized.excludeCashDiscount
+    ? " Does not combine with cash discount."
+    : "";
+  return `On ${applyLabel}, if the order includes ${qualifier}, take ${normalized.unitDiscountSar} SAR off each discounted carton.${cashRule}`;
 }

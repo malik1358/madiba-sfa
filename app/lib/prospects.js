@@ -7,11 +7,48 @@ export function extractMissingProspectsColumn(errorMessage) {
   const postgresStyle = text.match(/column\s+(?:\w+\.)?"?(\w+)"?\s+of\s+relation\s+"?prospects"?\s+does\s+not\s+exist/i);
   if (postgresStyle?.[1]) return postgresStyle[1];
 
+  const qualifiedStyle = text.match(/column\s+\w+\.(\w+)\s+does\s+not\s+exist/i);
+  if (qualifiedStyle?.[1]) return qualifiedStyle[1];
+
   const genericPostgresStyle = text.match(/column\s+(?:\w+\.)?"?(\w+)"?\s+does\s+not\s+exist/i);
   if (genericPostgresStyle?.[1]) return genericPostgresStyle[1];
 
   const schemaCacheStyle = text.match(/Could not find the ['"](\w+)['"] column of ['"]prospects['"] in the schema cache/i);
   return schemaCacheStyle?.[1] || "";
+}
+
+export function dropMissingProspectSelectColumn(select, missingColumn) {
+  const missing = String(missingColumn || "").trim();
+  if (!missing) return String(select || "");
+
+  return String(select || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part && part !== missing && !part.endsWith(`.${missing}`))
+    .join(",");
+}
+
+const PROSPECT_LOOKUP_SELECT = "id,salesman_code,company_name,shop_name,customer_name,remarks,status,offline_id";
+
+async function queryProspectsWithColumnFallback(admin, buildQuery, initialSelect) {
+  let select = initialSelect;
+  const seen = new Set();
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const { data, error } = await buildQuery(admin.from("prospects").select(select));
+    if (!error) return data;
+
+    const missingColumn = extractMissingProspectsColumn(error.message || error.details || error);
+    const nextSelect = dropMissingProspectSelectColumn(select, missingColumn);
+    if (!missingColumn || !nextSelect || nextSelect === select || seen.has(nextSelect)) {
+      throw error;
+    }
+
+    seen.add(select);
+    select = nextSelect;
+  }
+
+  throw new Error("Unable to load prospect because table columns do not match.");
 }
 
 export function createOfflineProspectId() {
@@ -169,14 +206,46 @@ export async function findProspectById(admin, prospectId) {
   const id = Number(prospectId);
   if (!Number.isFinite(id) || id <= 0) return null;
 
-  const { data, error } = await admin
-    .from("prospects")
-    .select("id,salesman_code,company_name,shop_name,customer_name,remarks,status,offline_id")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error) throw error;
+  const data = await queryProspectsWithColumnFallback(
+    admin,
+    (query) => query.eq("id", id).maybeSingle(),
+    PROSPECT_LOOKUP_SELECT,
+  );
   return data || null;
+}
+
+export async function findProspectForCustomerCode(admin, customerCode) {
+  const prospectId = parseProspectIdFromCustomerCode(customerCode);
+  if (prospectId) return findProspectById(admin, prospectId);
+
+  const offlineId = parseOfflineProspectIdFromCustomerCode(customerCode);
+  if (offlineId) return findProspectByOfflineId(admin, offlineId);
+
+  return null;
+}
+
+export function visibleCustomerFromProspect(prospect, fallbackCode = "") {
+  if (!prospect) return null;
+
+  const customerCode = resolveProspectCustomerCode(prospect)
+    || String(fallbackCode || "").trim().toUpperCase();
+  if (!customerCode) return null;
+
+  return {
+    customer_code: customerCode,
+    customer_name: prospectDisplayName(prospect),
+    current_salesman_code: prospect.salesman_code || "",
+    previous_salesman_code: "",
+    latest_transaction_date: null,
+    customer_type: "PROSPECT",
+    city: prospect.city || "",
+    area: prospect.area || "",
+    mobile: prospect.mobile || "",
+    latitude: prospect.latitude,
+    longitude: prospect.longitude,
+    is_active: true,
+    is_prospect: true,
+  };
 }
 
 export function formatProspectOrderLabel(order) {

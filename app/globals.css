@@ -3689,6 +3689,17 @@ table.auditMatrix td.auditTrendSame {
   align-items: stretch;
 }
 
+.appPopupChoices {
+  flex-direction: row;
+  justify-content: center;
+  align-items: stretch;
+}
+
+.appPopupChoices .modulePrimaryButton,
+.appPopupChoices .appPopupOkButton {
+  min-width: 96px;
+}
+
 .appPopupDialogSuccess h2 {
   color: #116843;
 }
@@ -4176,6 +4187,113 @@ th:has(.moduleTableColumnFilterInput) {
   vertical-align: top;
 }
 
+.moduleTableHeadingFilter {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 108px;
+}
+
+.moduleTableHeadingFilter span {
+  line-height: 1.2;
+}
+
+.moduleTableHeadingFilter select.moduleInput {
+  width: 100%;
+  min-width: 0;
+  max-width: 180px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.moduleExcelColumnFilter {
+  position: relative;
+  min-width: 108px;
+}
+
+.moduleExcelColumnFilterButton {
+  display: block;
+  width: 100%;
+  max-width: 180px;
+  min-height: 34px;
+  padding: 5px 24px 5px 8px;
+  border: 1px solid #8fb4bc;
+  border-radius: 6px;
+  background: #ffffff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23073f4c' d='M1 1l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 8px center;
+  color: #073f4c;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moduleExcelColumnFilterButton.isActive {
+  border-color: #0b6173;
+  background-color: #e8f4f6;
+}
+
+.moduleExcelColumnFilterPanel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: min(280px, 72vw);
+  max-height: 320px;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #8fb4bc;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(7, 63, 76, 0.18);
+}
+
+.moduleExcelColumnFilterSearch {
+  margin-bottom: 6px;
+  text-transform: none;
+}
+
+.moduleExcelColumnFilterList {
+  overflow: auto;
+  min-height: 0;
+}
+
+.moduleExcelColumnFilterOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 4px;
+  color: #073f4c;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.moduleExcelColumnFilterOption.isSelectAll {
+  border-bottom: 1px solid #d5e1e4;
+  margin-bottom: 4px;
+}
+
+.moduleExcelColumnFilterOption input {
+  margin-top: 2px;
+}
+
+.moduleExcelColumnFilterEmpty {
+  padding: 10px 4px;
+  color: #5b7b82;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+}
+
 .moduleTableColumnFilterRow th {
   padding-top: 4px;
   padding-bottom: 8px;
@@ -4212,17 +4330,45 @@ th:has(.moduleTableColumnFilterInput) {
   vertical-align: middle;
 }
 
+.modulePendingOrdersTotalRow td {
+  background: #0f4c81;
+  color: #ffffff;
+  font-weight: 800;
+}
+
 .moduleTable th {
   position: sticky;
   top: var(--sticky-table-top);
   z-index: 6;
-  background: #edf4f5;
-  box-shadow: inset 0 -1px 0 #d5e1e4;
-  color: #073f4c;
+  background: #0f4c5c;
+  box-shadow: inset 0 -1px 0 #0b3c49;
+  color: #ffffff;
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   vertical-align: top;
+}
+
+.moduleTable tbody tr:nth-child(even) td {
+  background: #f3fbfb;
+}
+
+.moduleTable tbody tr:hover td {
+  background: #e5f4f4;
+}
+
+.moduleTable .moduleBiMonthCell--up,
+.moduleTable tbody tr:nth-child(even) td.moduleBiMonthCell--up,
+.moduleTable tbody tr:hover td.moduleBiMonthCell--up {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.moduleTable .moduleBiMonthCell--down,
+.moduleTable tbody tr:nth-child(even) td.moduleBiMonthCell--down,
+.moduleTable tbody tr:hover td.moduleBiMonthCell--down {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .moduleTable thead tr.moduleTableColumnFilterRow th {
@@ -4398,6 +4544,40 @@ th:has(.moduleTableColumnFilterInput) {
 .moduleKpiTargetsTable .moduleKpiAchCell .moduleKpiStatus {
   margin-top: 6px;
   white-space: nowrap;
+}
+
+.moduleKpiTargetsTable .moduleKpiTeamRow td {
+  background: #eef6f4;
+}
+
+.moduleKpiTargetsTable .moduleKpiTeamRow .moduleKpiSalesmanCell,
+.moduleKpiTargetsTable .moduleKpiTeamRow .moduleKpiBossCell {
+  background: #eef6f4;
+}
+
+.moduleKpiTargetsTable .moduleKpiTotalsRow td {
+  background: #e7eef0;
+  font-weight: 700;
+}
+
+.moduleKpiTargetsTable .moduleKpiTotalsRow .moduleKpiSalesmanCell,
+.moduleKpiTargetsTable .moduleKpiTotalsRow .moduleKpiBossCell {
+  background: #e7eef0;
+}
+
+.moduleKpiTargetsTable tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  box-shadow: 0 -2px 8px rgba(6, 47, 58, 0.08);
+}
+
+.moduleKpiTargetsTable tfoot .moduleKpiSalesmanCell {
+  z-index: 8;
+}
+
+.moduleKpiTargetsTable tfoot .moduleKpiBossCell {
+  z-index: 7;
 }
 
 .moduleTable td {
@@ -5240,9 +5420,9 @@ th:has(.moduleTableColumnFilterInput) {
   }
 }
 
-/* The queue has 17 columns, so let it scroll instead of crushing cells to nothing. */
+/* The queue has 18 columns, so let it scroll instead of crushing cells to nothing. */
 .moduleCollectorTable {
-  min-width: 1180px;
+  min-width: 1320px;
 }
 
 .moduleCollectorTableWrap .moduleTable th {
@@ -5835,6 +6015,32 @@ th:has(.moduleTableColumnFilterInput) {
   .moduleKpiTargetsTable.moduleTable .moduleKpiSalesmanCell,
   .moduleKpiTargetsTable.moduleTable .moduleKpiBossCell {
     position: sticky;
+  }
+
+  .moduleBiTableWrap {
+    overflow: auto;
+  }
+
+  .moduleBiTable th,
+  .moduleBiTable.moduleStackedHeaderTable thead tr:first-child th,
+  .moduleBiTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
+    position: sticky;
+    box-shadow: inset 0 -1px 0 #d5e1e4;
+  }
+
+  .moduleBiTable th,
+  .moduleBiTable.moduleStackedHeaderTable thead tr:first-child th {
+    top: 0;
+  }
+
+  .moduleBiTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
+    top: var(--module-stacked-header-row1);
+  }
+
+  .moduleBiTable th:first-child,
+  .moduleBiTable td:first-child {
+    position: sticky;
+    left: 0;
   }
 
   .moduleKpiTargetsFilters {
@@ -6516,5 +6722,550 @@ th:has(.moduleTableColumnFilterInput) {
 .stockTakeReportHistoryRow td {
   background: #eef4f6;
   font-size: 12px;
+}
+
+.moduleBiTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.moduleBiTab {
+  border: 1px solid #c5d6db;
+  background: #ffffff;
+  color: #35515a;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.moduleBiTab.isActive {
+  background: #0f4c5c;
+  border-color: #0f4c5c;
+  color: #ffffff;
+}
+
+.moduleBiMeasureBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.moduleBiMeasureBar > span {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f4c5c;
+}
+
+.moduleBiDashKpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.moduleBiDashKpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f0fdfa 0%, #e0f2fe 100%);
+  border: 1px solid #99f6e4;
+  color: #0f4c5c;
+}
+
+.moduleBiDashKpi span,
+.moduleBiDashKpi em {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-style: normal;
+  opacity: 0.78;
+}
+
+.moduleBiDashKpi strong {
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.moduleBiDashKpi--up {
+  background: linear-gradient(180deg, #dcfce7 0%, #bbf7d0 100%);
+  border-color: #86efac;
+  color: #14532d;
+}
+
+.moduleBiDashKpi--down {
+  background: linear-gradient(180deg, #fee2e2 0%, #fecaca 100%);
+  border-color: #fca5a5;
+  color: #7f1d1d;
+}
+
+.moduleBiDashKpi--watch {
+  background: linear-gradient(180deg, #ffedd5 0%, #fed7aa 100%);
+  border-color: #fdba74;
+  color: #9a3412;
+}
+
+.moduleBiDashLaunch {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.moduleBiDashLaunchCard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 92px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 16px;
+  background: #0f4c5c;
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.moduleBiDashLaunchCard span {
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.88;
+}
+
+.moduleBiDashLaunchCard strong {
+  font-size: 22px;
+}
+
+.moduleBiDashLaunchCard--teal {
+  background: #0e7490;
+}
+
+.moduleBiDashLaunchCard--green {
+  background: #166534;
+}
+
+.moduleBiDashLaunchCard--navy {
+  background: #1e3a5f;
+}
+
+.moduleBiDashLaunchCard--orange {
+  background: #c2410c;
+}
+
+.moduleBiTableWrap {
+  overflow: auto;
+  max-height: min(70dvh, 720px);
+}
+
+.moduleBiTable {
+  min-width: 980px;
+}
+
+/* Stick the label row only. A second header row (filters) stacks under it. */
+.moduleBiTable thead tr:first-child th,
+.moduleBiTable.moduleStackedHeaderTable thead tr:first-child th {
+  top: 0;
+  z-index: 4;
+}
+
+.moduleBiTable thead tr:nth-child(2) th,
+.moduleBiTable.moduleStackedHeaderTable thead tr:nth-child(2) th {
+  top: var(--module-stacked-header-row1);
+  z-index: 3;
+}
+
+.moduleBiTable .moduleTableHeadingFilter {
+  min-width: 120px;
+}
+
+.moduleBiTableWrap .moduleExcelColumnFilterPanel {
+  z-index: 6;
+}
+
+.moduleBiTrend--up {
+  color: #116843;
+  font-weight: 800;
+}
+
+.moduleBiTrend--down {
+  color: #c2410c;
+  font-weight: 800;
+}
+
+.moduleBiTrend--downHard {
+  color: #b42318;
+  font-weight: 800;
+}
+
+.moduleBiMonthHead--current {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.moduleBiMonthCell--up {
+  background: #dcfce7;
+  color: #166534;
+  font-weight: 800;
+}
+
+.moduleBiMonthCell--down {
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: 800;
+}
+
+.moduleBiMonthCell--current {
+  box-shadow: inset 0 0 0 2px #93c5fd;
+}
+
+.moduleBiAmountDelta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  line-height: 1.15;
+}
+
+.moduleBiAmountDelta em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.moduleBiTable th:first-child,
+.moduleBiTable td:first-child {
+  position: sticky;
+  left: 0;
+  min-width: 12rem;
+  z-index: 2;
+  box-shadow: 2px 0 8px rgba(6, 47, 58, 0.12);
+}
+
+.moduleBiTable thead th:first-child {
+  z-index: 8;
+  background: #0f4c5c;
+  color: #ffffff;
+  box-shadow: 2px 0 8px rgba(6, 47, 58, 0.16), inset 0 -1px 0 #0b3c49;
+}
+
+.moduleBiTable tbody td:first-child {
+  background: #ffffff;
+}
+
+.moduleBiTable tbody tr:nth-child(even) td:first-child {
+  background: #f3fbfb;
+}
+
+.moduleBiTable tbody tr:hover td:first-child {
+  background: #e5f4f4;
+}
+
+.moduleBiTable tfoot td:first-child {
+  z-index: 5;
+}
+
+.moduleBiTable th.moduleBiTotalCol,
+.moduleBiTable td.moduleBiTotalCol {
+  background: #ecfeff;
+  color: #0f4c5c;
+  font-weight: 800;
+  position: sticky;
+  right: 0;
+  z-index: 1;
+}
+
+.moduleBiTable thead th.moduleBiTotalCol {
+  z-index: 3;
+}
+
+.moduleBiTable tfoot td {
+  position: sticky;
+  bottom: 0;
+  font-weight: 800;
+  z-index: 2;
+  background: #ecfeff;
+  color: #0f4c5c;
+}
+
+.moduleBiTable tfoot td:first-child,
+.moduleBiTable tfoot td.moduleBiTotalCol {
+  background: #0f4c5c;
+  color: #ffffff;
+}
+
+.moduleBiTable tfoot td.moduleBiMonthCell--up {
+  background: #166534;
+  color: #ffffff;
+}
+
+.moduleBiTable tfoot td.moduleBiMonthCell--down {
+  background: #991b1b;
+  color: #ffffff;
+}
+
+.moduleBiFilterGrid {
+  margin-bottom: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .moduleBiFilterGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.moduleBiFilterHeading {
+  margin: 18px 0 10px;
+  font-size: 14px;
+  color: #073f4c;
+}
+
+.moduleBiFieldFilters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.moduleBiFieldFilter .moduleExcelColumnFilter {
+  width: 100%;
+}
+
+.moduleBiStatusFilters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 4px 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #35515a;
+}
+
+.moduleBiStatusOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.moduleBiChartGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 900px) {
+  .moduleBiChartGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.moduleBiChartPanel {
+  min-width: 0;
+  padding: 12px 14px 10px;
+  border: 1px solid #d7e4e8;
+  border-radius: 14px;
+  background: #f8fbfc;
+}
+
+.moduleBiChartPanel h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: #0f4c5c;
+}
+
+.moduleBiChart {
+  position: relative;
+}
+
+.moduleBiChartSvg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.moduleBiChartGridLine {
+  stroke: #d5e3e8;
+  stroke-width: 1;
+}
+
+.moduleBiChartAxis {
+  fill: #64748b;
+  font-size: 11px;
+}
+
+.moduleBiChartHoverLine {
+  stroke: #0f4c5c;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.moduleBiChartTooltip {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  min-width: 160px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.moduleBiChartTooltip strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.moduleBiChartTooltip div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.moduleBiChartTooltip span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.moduleBiChartLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.moduleBiChartLegendBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: #35515a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.moduleBiChartLegendBtn i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  flex: 0 0 auto;
+}
+
+.moduleBiChartLegendBtn.isOff {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.moduleBiChart--bars {
+  display: grid;
+  gap: 8px;
+}
+
+.moduleBiCompareRow {
+  display: grid;
+  grid-template-columns: minmax(88px, 160px) 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.moduleBiCompareLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f4c5c;
+}
+
+.moduleBiCompareTracks {
+  display: grid;
+  gap: 4px;
+}
+
+.moduleBiCompareBar {
+  min-width: 2px;
+  max-width: 100%;
+  height: 18px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.moduleBiCompareBar--prior {
+  background: #94a3b8;
+}
+
+.moduleBiCompareBar--latest {
+  background: #0ea5a4;
+}
+
+.moduleBiCompareBar.is-green {
+  background: #166534;
+}
+
+.moduleBiCompareBar.is-orange {
+  background: #c2410c;
+}
+
+.moduleBiCompareBar.is-red {
+  background: #b91c1c;
+}
+
+.moduleBiCompareBar.is-neutral {
+  background: #0f4c5c;
+}
+
+.moduleBiCompareBar em {
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.moduleBiCompareSwatch--prior,
+.moduleBiCompareSwatch--latest {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.moduleBiCompareSwatch--prior {
+  background: #94a3b8;
+}
+
+.moduleBiCompareSwatch--latest {
+  background: #0ea5a4;
+}
+
+.moduleBiSignalTrack {
+  display: flex;
+  overflow: hidden;
+  height: 16px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.moduleBiSignalSlice {
+  height: 100%;
 }
 

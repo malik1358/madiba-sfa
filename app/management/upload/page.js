@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -253,7 +252,7 @@ export default function UploadSalesPage() {
             <p>{t("subtitle")}</p>
           </div>
 
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/" className="backButton">{t("dashboard")}</a></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/" className="backButton">{t("dashboard")}</a></div>
         </div>
 
         <div className="uploadWarning">
@@ -404,6 +403,19 @@ export default function UploadSalesPage() {
                   ? `✓ Updated ${Number(result.datesUpdated || 0).toLocaleString()} date(s) in the live dataset`
                   : "✓ New sales dataset is now LIVE"}
               </div>
+
+              {Number(result.profitRows || 0) > 0 ? (
+                <p>
+                  Profit read from {result.profitColumn || "GP"} on{" "}
+                  {Number(result.profitRows).toLocaleString()} rows.
+                </p>
+              ) : (
+                <p className="uploadWarning">
+                  No profit/GP amount was found. Add a GP, Gross Profit, Profit,
+                  or Margin amount column (not %) and upload again. Headers in
+                  this file: {(result.excelHeaders || []).join(", ") || "none"}
+                </p>
+              )}
 
             </div>
           )}

@@ -130,6 +130,7 @@ export default function CategoryPerformance({ analytics, itemCatalog = [], expan
                                       valueDiscountRate: valueDiscount,
                                       schemeUnitDiscount: scheme.unitDiscount,
                                       schemeDiscountedQty: scheme.discountedQty,
+                                      excludeCashDiscount: scheme.excludeCashDiscount === true,
                                     });
                                     const catalogItem = catalogByCode.get(String(item.item_code || '').trim().toUpperCase());
                                     const currentName = String(catalogItem?.item_name || '').trim();

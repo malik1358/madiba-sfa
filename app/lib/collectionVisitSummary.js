@@ -1,4 +1,5 @@
 import { formatKsaDateOnly } from "./workdayActivity.js";
+import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -48,6 +49,10 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   bucket91to120: "91-120",
   bucket120plus: ">120",
   summaryNotSpecified: "not specified",
+  gps: "GPS",
+  distanceFromCustomer: "Distance from customer",
+  distanceFromPrevious: "Distance from previous",
+  estWaiting: "Est. waiting",
 };
 
 export function formatCollectionOutcomeLabel(outcome, labels = OUTCOME_LABELS) {
@@ -121,6 +126,12 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   lines.push(`${labels.bucket61to90}: ${formatMoney(row.outstanding_61_90)}`);
   lines.push(`${labels.bucket91to120}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${labels.bucket120plus}: ${formatMoney(row.outstanding_above_120)}`);
+  lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
+    gps: labels.gps,
+    distanceFromCustomer: labels.distanceFromCustomer,
+    distanceFromPrevious: labels.distanceFromPrevious,
+    estWaiting: labels.estWaiting,
+  }));
   return lines.join("\n");
 }
 
@@ -157,6 +168,33 @@ export function patchCollectionVisitSummaryVisitNumber(
   }
 
   return `${text}\n${insertLine}`;
+}
+
+export function patchCollectionVisitSummaryVisitDistance(
+  summary,
+  metrics = {},
+  labels = COLLECTION_VISIT_SUMMARY_LABELS,
+) {
+  let text = String(summary || "");
+  if (!text) return text;
+
+  const distanceLines = formatVisitDistanceWhatsappLines(metrics, {
+    distanceFromCustomer: labels.distanceFromCustomer,
+    distanceFromPrevious: labels.distanceFromPrevious,
+    estWaiting: labels.estWaiting,
+  });
+  const block = distanceLines.join("\n").replace(/^\n/, "");
+  if (!block) return text;
+
+  const distanceBlockPattern = new RegExp(
+    `(?:\\n|^)${escapeRegExp(labels.distanceFromCustomer)}:[\\s\\S]*$`,
+    "m",
+  );
+  if (distanceBlockPattern.test(text)) {
+    return text.replace(distanceBlockPattern, `\n${block}`);
+  }
+
+  return `${text.trimEnd()}\n\n${block}`;
 }
 
 export function patchCollectionVisitSummaryEnglishRemark(

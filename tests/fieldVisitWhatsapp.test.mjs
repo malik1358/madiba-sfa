@@ -49,4 +49,33 @@ test("buildFieldVisitWhatsappSummary builds compact visit message", () => {
   assert.match(summary, /61-90: 500/);
   assert.match(summary, />90: 300/);
   assert.match(summary, /Total: 2,800/);
+  assert.match(summary, /GPS: -/);
+  assert.match(summary, /Distance from customer: -/);
+  assert.match(summary, /Est. waiting: -/);
+});
+
+test("buildFieldVisitWhatsappSummary includes live visit distance metrics at the end", () => {
+  const summary = buildFieldVisitWhatsappSummary({
+    customer: {
+      customer_code: "PROSPECT-300",
+      customer_name: "Jawahir Alqamih Trading Company",
+    },
+    visitForm: {
+      outcome: "PAYMENT_FOLLOWUP",
+      nextVisitAt: "2026-09-12T10:00",
+    },
+    salesmanName: "OSAMA (OSAMA)",
+    visitDistance: {
+      latitude: 24.7136,
+      longitude: 46.6753,
+      distanceFromCustomerKm: 0.12,
+      distanceFromPreviousKm: 3.4,
+      waitingMinutes: 25,
+    },
+  });
+
+  assert.match(summary, /Total: 0\n\nGPS: https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=24\.7136%2C46\.6753/);
+  assert.match(summary, /Distance from customer: 0.12 km/);
+  assert.match(summary, /Distance from previous: 3.40 km/);
+  assert.match(summary, /Est. waiting: 25 min/);
 });

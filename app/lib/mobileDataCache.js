@@ -137,7 +137,7 @@ function myDaySnapshotCacheKey(userId, dateKey) {
 }
 
 function pendingOrdersCacheKey(userId, scope) {
-  return `pendingOrders:v1:${String(userId || "").trim()}:${buildScopeHash(scope)}`;
+  return `pendingOrders:v2:${String(userId || "").trim()}:${buildScopeHash(scope)}`;
 }
 
 function pendingOrdersInvoiceMetaCacheKey(userId) {

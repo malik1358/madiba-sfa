@@ -22,7 +22,9 @@ test("buildOrderWhatsappSummary includes order totals and pdf note", () => {
   assert.match(summary, /Amount without VAT: 1,000/);
   assert.match(summary, /VAT 15%: 150/);
   assert.match(summary, /Amount after VAT: 1,150/);
-  assert.match(summary, /PDF attached\./);
+  assert.match(summary, /PDF attached\.\n\nGPS: -/);
+  assert.match(summary, /Distance from customer: -/);
+  assert.match(summary, /Est. waiting: -/);
   assert.match(summary, /Payment: CASH/);
   assert.match(summary, /Region: dammam/);
 });

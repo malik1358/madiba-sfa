@@ -2,11 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildTeamVisitReportEmail,
   buildUserVisitReportEmail,
   resolveUserReportEmail,
   resolveVisitReportRecipients,
 } from "../app/lib/dailyVisitReportEmail.js";
-import { runDailyVisitReportEmailCycle, resolveDailyVisitReportEmailSchedule, resolveVisitReportChainEmails } from "../app/lib/dailyVisitReportEmailServer.js";
+import {
+  collectVisitReportTeamLeaders,
+  runDailyVisitReportEmailCycle,
+  resolveDailyVisitReportEmailSchedule,
+  resolveVisitReportChainEmails,
+} from "../app/lib/dailyVisitReportEmailServer.js";
+import { buildPerformanceSnapshot } from "../app/lib/performanceKpis.js";
 import { getMailerConfig, isDeliverableEmail, isEmailConfigured, parseEmailList } from "../app/lib/mailer.js";
 
 test("parseEmailList splits mixed separators and ignores invalid values", () => {
@@ -223,6 +230,66 @@ test("buildUserVisitReportEmail shows posted order values", () => {
   assert.match(message.html, /Order submitted<\/td>\s*<td>Order 5,380\.6 SAR/);
 });
 
+test("buildTeamVisitReportEmail consolidates team target vs achievement", () => {
+  const members = [
+    buildPerformanceSnapshot({
+      reportDate: "2026-09-09",
+      salesmanCode: "BELAL",
+      salesmanName: "Belal",
+      actuals: { officeSupplies: 40, otherSales: 10, collection: 5, newCustomers: 1, repeatCustomers: 2 },
+      targets: { officeSupplies: 100, otherSales: 20, collection: 10, newCustomers: 2, repeatCustomers: 4 },
+    }),
+    buildPerformanceSnapshot({
+      reportDate: "2026-09-09",
+      salesmanCode: "GEORGE",
+      salesmanName: "George",
+      actuals: { officeSupplies: 60, otherSales: 30, collection: 15, newCustomers: 1, repeatCustomers: 3 },
+      targets: { officeSupplies: 100, otherSales: 80, collection: 30, newCustomers: 2, repeatCustomers: 6 },
+    }),
+  ];
+  const team = buildPerformanceSnapshot({
+    reportDate: "2026-09-09",
+    salesmanCode: "TEAM",
+    salesmanName: "Ahmed Nabil — team",
+    actuals: { officeSupplies: 100, otherSales: 40, collection: 20, newCustomers: 2, repeatCustomers: 5 },
+    targets: { officeSupplies: 250, otherSales: 150, collection: 80, newCustomers: 6, repeatCustomers: 12 },
+  });
+  const message = buildTeamVisitReportEmail({
+    date: "2026-09-09",
+    bossName: "Ahmed Nabil",
+    team,
+    members,
+  });
+
+  assert.match(message.subject, /Team target vs achievement/);
+  assert.match(message.subject, /Ahmed Nabil/);
+  assert.match(message.html, /Team target vs achievement/);
+  assert.match(message.html, /Team members/);
+  assert.match(message.html, /Belal \(BELAL\)/);
+  assert.match(message.html, /George \(GEORGE\)/);
+  assert.match(message.text, /Team target vs achievement/);
+  assert.match(message.text, /Belal \(BELAL\)/);
+});
+
+test("collectVisitReportTeamLeaders walks the reporting chain", () => {
+  const profiles = [
+    { id: "belal", salesman_code: "BELAL", salesman_name: "Belal", role: "salesman" },
+    { id: "nabil", salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil", role: "salesman", report_email: "nabil@company.com" },
+    { id: "soyeb", salesman_code: "SOYEB", salesman_name: "Soyeb", role: "manager", report_email: "soyeb@company.com" },
+  ];
+  const authUsers = [
+    { id: "belal", user_metadata: { head_salesman_code: "AHMED NABIL" } },
+    { id: "nabil", user_metadata: { head_salesman_code: "SOYEB" } },
+    { id: "soyeb", user_metadata: {} },
+  ];
+  const leaders = collectVisitReportTeamLeaders({
+    recipients: [{ user: { userId: "belal" }, profile: profiles[0] }],
+    profiles,
+    authUsers,
+  });
+  assert.deepEqual(leaders.map((row) => row.id), ["nabil", "soyeb"]);
+});
+
 test("isEmailConfigured requires from plus SMTP or Resend", () => {
   assert.equal(isEmailConfigured(getMailerConfig({})), false);
   assert.equal(isEmailConfigured(getMailerConfig({ SMTP_HOST: "smtp.office365.com", SMTP_FROM: "sfa@madiba.com" })), true);
@@ -409,4 +476,68 @@ test("runDailyVisitReportEmailCycle can send only selected users", async () => {
   assert.equal(sent.length, 1);
   assert.match(sent[0].subject, /Sales Two/);
   assert.equal(sent.some((message) => message.subject.includes("Sales One")), false);
+});
+
+test("runDailyVisitReportEmailCycle sends bosses one team target vs achievement email", async () => {
+  const sent = [];
+  const belalSnapshot = buildPerformanceSnapshot({
+    reportDate: "2026-09-02",
+    salesmanCode: "BELAL",
+    salesmanName: "Belal",
+    actuals: { officeSupplies: 40, otherSales: 10, collection: 5, newCustomers: 1, repeatCustomers: 2 },
+    targets: { officeSupplies: 100, otherSales: 20, collection: 10, newCustomers: 2, repeatCustomers: 4 },
+  });
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-09-02",
+    userIds: ["belal"],
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+      DAILY_VISIT_REPORT_TO: "office@madiba.com",
+    },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadReport: async () => ({
+      date: "2026-09-02",
+      thresholdKm: 0.5,
+      users: [{
+        userId: "belal",
+        userName: "Belal",
+        email: "belal@madiba-sfa.local",
+        visitCount: 1,
+        farFromCustomerCount: 0,
+        totalRouteDistanceKm: 2,
+        entries: [],
+        daySummary: { lines: ["One visit."] },
+      }],
+    }),
+    loadProfiles: async () => ([
+      { id: "belal", role: "salesman", salesman_code: "BELAL", salesman_name: "Belal", email: "belal@madiba-sfa.local", report_email: "belal@company.com", is_active: true },
+      { id: "nabil", role: "salesman", salesman_code: "AHMED NABIL", salesman_name: "Ahmed Nabil", email: "nabil@madiba-sfa.local", report_email: "ahmed.nabil@noorshukran.com", is_active: true },
+      { id: "soyeb", role: "manager", salesman_code: "SOYEB", salesman_name: "Soyeb", email: "soyeb@madiba-sfa.local", report_email: "soyeb@company.com", is_active: true },
+    ]),
+    loadAuthUsers: async () => ([
+      { id: "belal", user_metadata: { head_salesman_code: "AHMED NABIL" } },
+      { id: "nabil", user_metadata: { head_salesman_code: "SOYEB" } },
+      { id: "soyeb", user_metadata: {} },
+    ]),
+    loadSummary: async () => ({ daySummary: { lines: ["One visit."] } }),
+    loadKpis: async () => [belalSnapshot],
+    loadTeamTargets: async () => new Map([
+      ["TEAM::AHMED NABIL", {
+        targets: { officeSupplies: 250, otherSales: 150, collection: 80, newCustomers: 6, repeatCustomers: 12, totalSales: 400 },
+      }],
+    ]),
+  });
+
+  const teamEmails = sent.filter((message) => /Team target vs achievement/.test(message.subject));
+  assert.equal(result.results.filter((row) => row.kind === "team_kpi" && row.status === "sent").length, teamEmails.length);
+  assert.ok(teamEmails.length >= 2);
+  assert.equal(teamEmails.some((message) => message.to.includes("ahmed.nabil@noorshukran.com")), true);
+  assert.equal(teamEmails.some((message) => message.to.includes("soyeb@company.com")), true);
+  assert.equal(teamEmails.some((message) => message.html.includes("Team members")), true);
+  assert.equal(teamEmails.some((message) => message.html.includes("Belal (BELAL)")), true);
+  assert.equal(sent.filter((message) => message.subject.includes("Belal") && !/Team target vs achievement/.test(message.subject)).length, 1);
 });

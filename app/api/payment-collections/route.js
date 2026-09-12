@@ -22,7 +22,7 @@ import {
   hydrateOutstandingInvoices,
   isPlaceholderSalesmanValue,
   pickLongestCustomerName,
-  pickOutstandingSalesmanName,
+  resolveUploadedOutstandingSalesman,
   customerAccountCodesMatch,
   resolveCustomerAccountCode,
   resolveCollectionOutstandingBuckets,
@@ -33,8 +33,10 @@ import { needsEnglishTranslation, translateText } from "../../lib/translateText.
 import { formatCollectionUserDisplayName } from "../../lib/geo.js";
 import {
   patchCollectionVisitSummaryEnglishRemark,
+  patchCollectionVisitSummaryVisitDistance,
   patchCollectionVisitSummaryVisitNumber,
 } from "../../lib/collectionVisitSummary.js";
+import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp.js";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -804,7 +806,6 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     const legalTransfer = findLegalTransferForCustomer(legalTransfers, customer.customer_code);
 
     // The uploaded outstanding file decides who collects when invoice salesman is present.
-    const uploadSalesman = pickOutstandingSalesmanName(customerInvoices);
     if (!customerMatchesCollectionScope({
       customer,
       customerInvoices,
@@ -827,6 +828,18 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       invoices: customerInvoices,
       todayIso,
     });
+    const hasUploadedOutstandingWorkbook = outstandingRows.length > 0;
+    const salesmanFromUpload = resolveUploadedOutstandingSalesman({
+      customerInvoices,
+      aggregateRowSalesman: aggregateRowSalesmanByCode.get(customer.customer_code)
+        || String(uploadedOutstanding?.salesman || "").trim(),
+    });
+    // When an outstanding workbook is loaded, salesman comes from that file only —
+    // not from customer-master / last sales-invoice assignment.
+    const salesmanFromMaster = !hasUploadedOutstandingWorkbook
+      && !isPlaceholderSalesmanValue(customer.current_salesman_code)
+      ? (salesmanMap.get(normalizeCode(customer.current_salesman_code)) || customer.current_salesman_code)
+      : "";
 
     records.push({
       customer_code: customer.customer_code,
@@ -836,10 +849,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
         customer.customer_name,
       ),
       current_salesman_code: customer.current_salesman_code,
-      salesman_name: pickOutstandingSalesmanName(customerInvoices)
-        || (!isPlaceholderSalesmanValue(customer.current_salesman_code)
-          ? (salesmanMap.get(normalizeCode(customer.current_salesman_code)) || customer.current_salesman_code)
-          : ""),
+      salesman_name: salesmanFromUpload || salesmanFromMaster,
       city: customer.city,
       area: customer.area,
       latitude: customer.latitude,
@@ -1042,6 +1052,7 @@ export async function POST(request) {
     // Insert new collection visit
     const existingVisitCount = await countCollectionVisitsForUserDay(admin, user.id);
     const authoritativeVisitNumber = Math.max(visitNumberForDay, existingVisitCount + 1);
+    const savedAtIso = new Date().toISOString();
     let finalSummaryText = summaryText
       ? patchCollectionVisitSummaryEnglishRemark(summaryText, remarkEnglish)
       : summaryText;
@@ -1050,6 +1061,28 @@ export async function POST(request) {
         finalSummaryText,
         authoritativeVisitNumber,
       );
+    }
+
+    // Recompute distance/waiting with the service role so prior collection visits
+    // are visible even when client RLS cannot read them. Matches Collection Report.
+    if (finalSummaryText && Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      try {
+        const { data: customerRow } = await admin
+          .from("customers")
+          .select("customer_code,latitude,longitude")
+          .eq("customer_code", customerCode)
+          .maybeSingle();
+        const visitDistance = await loadVisitDistanceMetrics({
+          supabase: admin,
+          userId: user.id,
+          location: { latitude, longitude },
+          customer: customerRow || {},
+          savedAt: savedAtIso,
+        });
+        finalSummaryText = patchCollectionVisitSummaryVisitDistance(finalSummaryText, visitDistance);
+      } catch (distanceError) {
+        console.warn("Unable to recompute visit distance for WhatsApp summary:", distanceError);
+      }
     }
 
     const visitInsertBase = {
@@ -1070,7 +1103,7 @@ export async function POST(request) {
       probability_label: probabilityLabel || null,
       visit_number_for_day: authoritativeVisitNumber > 0 ? authoritativeVisitNumber : null,
       created_by: user.id,
-      saved_at: new Date().toISOString(),
+      saved_at: savedAtIso,
     };
 
     const visitInsertWithGps = {
@@ -1161,6 +1194,8 @@ export async function POST(request) {
       message: "Collection visit saved successfully",
       visitId: insertData?.id,
       gpsCaptured: Number.isFinite(latitude) && Number.isFinite(longitude),
+      summaryText: finalSummaryText || null,
+      visitNumberForDay: authoritativeVisitNumber > 0 ? authoritativeVisitNumber : null,
     });
   } catch (error) {
     console.error("Error saving collection visit:", error);

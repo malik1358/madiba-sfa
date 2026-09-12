@@ -15,7 +15,6 @@ const TEXT = {
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -32,7 +31,7 @@ import {
   regionPriceMapFor,
   resolveOrderPricingRegion,
 } from "../../lib/regionalPricing";
-import { DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, resolveOverdueDaysFromDueDate, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
+import { DEFAULT_OUTSTANDING_BUCKET_LABELS, resolveOutstandingBucketLabels, resolveOverdueDaysFromDueDate, resolveUploadedOutstandingSalesman, sortBucketLabels, toNumber as parseOutstandingNumber, visibleOutstandingBucketLabels } from "../../lib/outstanding";
 import { fetchOutstandingCached, subscribeOutstandingCacheCleared } from "../../lib/mobileDataCache";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 
@@ -279,6 +278,14 @@ function CustomerAuditPageContent() {
     return visibleOutstandingBucketLabels(baseLabels, outstandingInfo.customer?.buckets);
   }, [outstandingInfo.bucketLabels, outstandingInfo.customer]);
 
+  const outstandingSalesman = useMemo(
+    () => resolveUploadedOutstandingSalesman({
+      customerInvoices: outstandingInfo.customerInvoices,
+      aggregateRowSalesman: outstandingInfo.customer?.salesman,
+    }),
+    [outstandingInfo.customer?.salesman, outstandingInfo.customerInvoices],
+  );
+
   useEffect(() => {
     async function loadPrices() {
       try {
@@ -371,7 +378,7 @@ function CustomerAuditPageContent() {
               <h1>{t("title")}</h1>
               <p className="auditSubtitle">{t("subtitle")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
 
           {error && error.toLowerCase().includes("login") ? (
@@ -407,7 +414,7 @@ function CustomerAuditPageContent() {
               <h1>{t("title")}</h1>
               <p className="auditSubtitle">{t("loadingCustomer")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
           <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
         </div>
@@ -425,7 +432,7 @@ function CustomerAuditPageContent() {
               <h1>{t("title")}</h1>
               <p className="auditSubtitle">{t("subtitle")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
           </div>
           <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
           <EmptyState title="No sales history" message={`No sales history was found for ${selectedCustomer.customer_name}.`} />
@@ -445,12 +452,16 @@ function CustomerAuditPageContent() {
             <h1>{t("title")}</h1>
             <p className="auditSubtitle">{t("subtitle")}</p>
           </div>
-          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
+          <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
         </div>
 
         <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
 
-        <CustomerHeader customer={selectedCustomer} analytics={analytics} />
+        <CustomerHeader
+          customer={selectedCustomer}
+          analytics={analytics}
+          outstandingSalesman={outstandingSalesman}
+        />
 
         <section className="auditSection">
           <div className="auditTransactionHeader">

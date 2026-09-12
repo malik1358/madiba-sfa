@@ -5,7 +5,9 @@ import {
   loadWorkdayEventsByUser,
 } from "./collectionDaySummaryServer.js";
 import {
+  attachResumeRowBosses,
   buildDailySalesmanResumeEmail,
+  classifyResumeTeamLeaders,
   emptySalesmanResumeRow,
   resolveDailySalesmanResumeRecipients,
   resolveResumeWorkingEndAt,
@@ -148,6 +150,22 @@ export async function loadSalesmanResumeProfiles(admin) {
   return (data || [])
     .filter((row) => row.is_active !== false)
     .filter((row) => SALESMAN_ROLES.has(normalizeRole(row.role)));
+}
+
+export async function loadResumeHierarchyProfiles(admin) {
+  const { data, error } = await admin
+    .from("profiles")
+    .select("id,role,salesman_code,salesman_name,is_active");
+
+  if (error) throw new Error(formatSupabaseError(error));
+  return (data || []).filter((row) => row.is_active !== false);
+}
+
+export async function loadResumeAuthUsers(admin) {
+  if (typeof admin?.auth?.admin?.listUsers !== "function") return [];
+  const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (usersRes.error) throw new Error(formatSupabaseError(usersRes.error));
+  return usersRes.data?.users || [];
 }
 
 async function loadVisitCountsByUser(admin, reportDate) {
@@ -381,13 +399,28 @@ export function buildSalesmanResumeRows({
   orderMetrics = new Map(),
   invoiceMetrics = new Map(),
   workdays = new Map(),
+  hierarchyProfiles = [],
+  authUsers = [],
 } = {}) {
   const collectionsByUser = collectionMetrics.size
     ? collectionMetrics
     : new Map([...collectionCounts.entries()].map(([userId, count]) => [userId, { count, value: 0 }]));
+  const { firstLevelIds } = classifyResumeTeamLeaders({
+    profiles: hierarchyProfiles.length ? hierarchyProfiles : profiles,
+    authUsers,
+  });
+  const seenProfileIds = new Set();
+  const mergedProfiles = [];
+  [...(profiles || []), ...(hierarchyProfiles || [])].forEach((profile) => {
+    const id = String(profile?.id || "").trim();
+    if (!id || seenProfileIds.has(id)) return;
+    if (!profiles.some((row) => row.id === profile.id) && !firstLevelIds.has(id)) return;
+    seenProfileIds.add(id);
+    mergedProfiles.push(profile);
+  });
   const byUserId = new Map();
 
-  for (const profile of profiles || []) {
+  for (const profile of mergedProfiles) {
     ensureRow(byUserId, profile);
   }
 
@@ -447,7 +480,12 @@ export function buildSalesmanResumeRows({
     });
   }
 
-  return sortSalesmanResumeRows([...byUserId.values()].filter((row) => {
+  const attached = attachResumeRowBosses([...byUserId.values()], {
+    profiles: hierarchyProfiles.length ? hierarchyProfiles : profiles,
+    authUsers,
+  });
+
+  return sortSalesmanResumeRows(attached.filter((row) => {
     if (!shouldIncludeSalesmanResumeRow(row)) return false;
     return Number(row.orders || 0)
       + Number(row.orderValue || 0)
@@ -457,23 +495,31 @@ export function buildSalesmanResumeRows({
       + Number(row.collectionValue || 0)
       + Number(row.visits || 0)
       + Number(row.skuSoldCount || 0) > 0
-      || SALESMAN_ROLES.has(normalizeRole(row.role));
+      || SALESMAN_ROLES.has(normalizeRole(row.role))
+      || row.isFirstLevelTeamLeader;
   }));
 }
 
 export async function buildDailySalesmanResume(admin, { date, now = new Date() } = {}) {
   const reportDate = parseResumeDateParam(date, now);
-  const [profiles, visitCounts, collectionMetrics, orderMetrics, invoiceMetrics] = await Promise.all([
+  const [profiles, hierarchyProfiles, authUsers, visitCounts, collectionMetrics, orderMetrics, invoiceMetrics] = await Promise.all([
     loadSalesmanResumeProfiles(admin),
+    loadResumeHierarchyProfiles(admin).catch(() => []),
+    loadResumeAuthUsers(admin).catch(() => []),
     loadVisitCountsByUser(admin, reportDate),
     loadCollectionMetricsByUser(admin, reportDate),
     loadOrderMetricsByUser(admin, reportDate),
     loadInvoiceMetricsBySalesman(admin, reportDate),
   ]);
 
+  const { firstLevelIds } = classifyResumeTeamLeaders({
+    profiles: hierarchyProfiles,
+    authUsers,
+  });
   const userIds = [
     ...new Set([
       ...profiles.map((profile) => profile.id),
+      ...[...firstLevelIds],
       ...visitCounts.keys(),
       ...collectionMetrics.keys(),
       ...orderMetrics.keys(),
@@ -492,6 +538,8 @@ export async function buildDailySalesmanResume(admin, { date, now = new Date() }
     orderMetrics,
     invoiceMetrics,
     workdays,
+    hierarchyProfiles,
+    authUsers,
   });
 
   return {

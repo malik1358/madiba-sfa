@@ -4,7 +4,6 @@ import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import NearestCustomerSuggestions from "../../components/NearestCustomerSuggestions";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -49,6 +48,8 @@ import {
   isCashQueueCustomer,
   isScheduledRevisitQueueCustomer,
   canViewerSeeScheduledRevisit,
+  formatLatestCollectionVisitRemark,
+  scheduledRevisitDate,
   sortCashQueueCustomers,
 } from "../../lib/paymentCollections";
 import {
@@ -57,6 +58,7 @@ import {
 } from "../../lib/collectionQueueSearch";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
+import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { getSupabaseClient } from "../../lib/supabase";
 import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
@@ -97,6 +99,7 @@ const TEXT = {
   probability: { en: "Payment Probability", ar: "احتمالية التحصيل" },
   lastUpdate: { en: "Last Update", ar: "آخر تحديث" },
   lastOutcome: { en: "Last Outcome", ar: "آخر نتيجة" },
+  lastVisitRemark: { en: "Last Visit Remark", ar: "ملاحظة آخر زيارة" },
   actions: { en: "Actions", ar: "الإجراءات" },
   open: { en: "Open", ar: "فتح" },
   close: { en: "Close", ar: "إغلاق" },
@@ -301,6 +304,10 @@ const TEXT = {
   summaryReceiptMode: { en: "Receipt mode", ar: "طريقة الاستلام" },
   summaryNextVisit: { en: "Next visit", ar: "الزيارة القادمة" },
   summaryVisitNumber: { en: "Visit number today", ar: "رقم الزيارة لليوم" },
+  summaryGps: { en: "GPS", ar: "GPS" },
+  summaryDistanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
+  summaryDistanceFromPrevious: { en: "Distance from previous", ar: "المسافة من السابق" },
+  summaryEstWaiting: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
   summaryOutstanding: { en: "Outstanding", ar: "المديونية" },
   summaryNotSpecified: { en: "not specified", ar: "غير محدد" },
   viewPaymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
@@ -318,6 +325,7 @@ const TEXT = {
   filterInvoices: { en: "Filter invoices", ar: "تصفية الفواتير" },
   filterProbability: { en: "Filter probability", ar: "تصفية الاحتمالية" },
   filterOutcome: { en: "Filter outcome", ar: "تصفية النتيجة" },
+  filterLastVisitRemark: { en: "Filter remark", ar: "تصفية الملاحظة" },
   filterLastUpdate: { en: "Filter last update", ar: "تصفية آخر تحديث" },
   invDate: { en: "Date", ar: "التاريخ" },
   invRef: { en: "Ref", ar: "المرجع" },
@@ -370,6 +378,7 @@ const EMPTY_CREDIT_COLUMN_FILTERS = {
   dueInvoices: "",
   probability: [],
   lastOutcome: [],
+  lastVisitRemark: "",
   lastUpdate: "",
 };
 
@@ -442,6 +451,12 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   lines.push(`${t("bucket61to90")}: ${formatMoney(row.outstanding_61_90)}`);
   lines.push(`${t("bucket91to120")}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${t("bucket120plus")}: ${formatMoney(row.outstanding_above_120)}`);
+  lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
+    gps: t("summaryGps"),
+    distanceFromCustomer: t("summaryDistanceFromCustomer"),
+    distanceFromPrevious: t("summaryDistanceFromPrevious"),
+    estWaiting: t("summaryEstWaiting"),
+  }));
   return lines.join("\n");
 }
 
@@ -714,6 +729,7 @@ function rowMatchesCreditColumnFilters(row, filters, t) {
   if (!matchesNumericFilter(resolveRowDueInvoiceCount(row), filters.dueInvoices)) return false;
   if (!matchesMultiSelectFilter(filters.probability, resolveRowProbabilityKey(row))) return false;
   if (!matchesMultiSelectFilter(filters.lastOutcome, resolveRowOutcomeKey(row))) return false;
+  if (!includesTextFilter(formatLatestCollectionVisitRemark(row?.latest_collection), filters.lastVisitRemark)) return false;
   if (!includesTextFilter(formatLastUpdateText(row, t), filters.lastUpdate)) return false;
   return true;
 }
@@ -799,6 +815,19 @@ function VisitRemarkCell({ row, t }) {
     <>
       <div>{primaryText}</div>
       {english ? <div className="moduleCode">{english}</div> : null}
+    </>
+  );
+}
+
+function LastVisitRemarkText({ row, t }) {
+  const visit = row?.latest_collection;
+  const arabic = String(visit?.remark_arabic || "").trim();
+  const english = String(visit?.remark_english || "").trim();
+  if (!arabic && !english) return t("noVisitRemark");
+  return (
+    <>
+      <div>{arabic || english}</div>
+      {arabic && english && english !== arabic ? <div className="moduleCode">{english}</div> : null}
     </>
   );
 }
@@ -1304,8 +1333,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
       .filter((row) => isScheduledRevisitQueueCustomer(row, queueToday))
       .filter((row) => !viewer || canViewerSeeScheduledRevisit(row?.latest_collection, null, viewer))
       .sort((left, right) => (
-        toDateInputValue(left?.latest_collection?.next_visit_at)
-          .localeCompare(toDateInputValue(right?.latest_collection?.next_visit_at))
+        toDateInputValue(scheduledRevisitDate(left))
+          .localeCompare(toDateInputValue(scheduledRevisitDate(right)))
       ));
   }, [customerFilter, dueCustomers, notDueCustomers, queueToday, schedulerScope, selectedSalesmen, view]);
 
@@ -1347,7 +1376,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     const todayKey = getScheduleTodayKey();
 
     scheduledRevisitRows.forEach((row) => {
-      const dateKey = toDateInputValue(row?.latest_collection?.next_visit_at);
+      const dateKey = toDateInputValue(scheduledRevisitDate(row));
       if (!isScheduleDateInWindow(dateKey, todayKey)) return;
 
       if (!groups.has(dateKey)) {
@@ -1708,6 +1737,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
         || cashQueuePriorityByKey.get(rowKey(row))
         || 0;
 
+      const visitDistance = await loadVisitDistanceMetrics({
+        supabase,
+        userId: session.user.id,
+        location: gps,
+        customer: row,
+        savedAt: new Date().toISOString(),
+      });
+
       const summaryText = buildVisitSummary(
         row,
         { ...form, visitOutcome: selectedOutcome },
@@ -1716,6 +1753,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         {
           visitNumberForDay,
           queuePriority: resolvedQueuePriority,
+          visitDistance,
         },
       );
 
@@ -1780,6 +1818,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
       });
 
       const payload = saveResult.payload || {};
+      const correctedSummary = String(payload?.summaryText || "").trim();
+      const whatsappSummary = correctedSummary || summaryText;
       const popupMessage = saveResult.queued
         ? t("msgSavedOffline")
         : payload?.whatsapp?.error
@@ -1787,18 +1827,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
           : t("msgVisitSaved");
 
       const isNative = await isNativeMobilePlatform();
-      await presentWhatsappSummaryAfterSave(summaryText, {
+      await presentWhatsappSummaryAfterSave(whatsappSummary, {
         files: shareFiles,
       });
       showPopup({
         message: popupMessage,
         variant: "success",
-        whatsappText: summaryText,
+        whatsappText: whatsappSummary,
         whatsappFiles: shareFiles,
         autoShareWhatsapp: isNative || Boolean(saveResult.queued),
       });
 
-      setTodayVisitCount(visitNumberForDay);
+      setTodayVisitCount(Number(payload?.visitNumberForDay || visitNumberForDay));
       requestLoginFirstCustomerHintCheck();
       await refreshPendingSyncCount();
 
@@ -1813,7 +1853,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           nextVisitAt: form.nextVisitAt,
           remarkArabic: form.remarkArabic,
           remarkEnglish: effectiveEnglishRemark,
-          summaryText,
+          summaryText: whatsappSummary,
         }, session.user.id, scope);
         void processOfflineQueue(async () => session.access_token);
       }
@@ -2035,7 +2075,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
               <h1>{t("title")}</h1>
               <p className="moduleSubtitle">{t("subtitle")}</p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href={access.canAccess("management") ? "/management" : "/"} className="moduleBackLink">{access.canAccess("management") ? t("dashboard") : t("home")}</Link></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href={access.canAccess("management") ? "/management" : "/"} className="moduleBackLink">{access.canAccess("management") ? t("dashboard") : t("home")}</Link></div>
           </div>
 
           {error ? (
@@ -2428,6 +2468,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                     <th>{t("invoices")}</th>
                     <th>{t("probability")}</th>
                     <th>{t("lastOutcome")}</th>
+                    <th>{t("lastVisitRemark")}</th>
                     <th>{t("lastUpdate")}</th>
                     <th>{t("actions")}</th>
                   </tr>
@@ -2593,6 +2634,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
                       <input
                         className="moduleInput moduleCollectorColumnFilter"
                         type="text"
+                        value={creditColumnFilters.lastVisitRemark}
+                        placeholder={t("filterLastVisitRemark")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          lastVisitRemark: event.target.value,
+                        }))}
+                      />
+                    </th>
+                    <th>
+                      <input
+                        className="moduleInput moduleCollectorColumnFilter"
+                        type="text"
                         value={creditColumnFilters.lastUpdate}
                         placeholder={t("filterLastUpdate")}
                         onChange={(event) => setCreditColumnFilters((current) => ({
@@ -2617,7 +2670,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                     if (item.type === "separator") {
                       return (
                         <tr key="not-due-separator" className="moduleCollectorSectionRow">
-                          <td colSpan={17}>
+                          <td colSpan={18}>
                             <strong>{t("notDueQueue")}</strong>
                             <div className="moduleHint">{t("notDueHint")}</div>
                           </td>
@@ -2663,6 +2716,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                             )}
                           </td>
                           <td data-label={t("lastOutcome")}>{formatOutcomeLabel(row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status, t)}</td>
+                          <td data-label={t("lastVisitRemark")}>
+                            <LastVisitRemarkText row={row} t={t} />
+                          </td>
                           <td data-label={t("lastUpdate")}>{formatLastUpdateText(row, t)}</td>
                           <td data-label={t("actions")} className="moduleCollectorCellActions">
                             <div className="moduleInlineStack moduleActionStack">
@@ -2702,7 +2758,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                         </tr>
                         {isOpen ? (
                           <tr id={`collector-detail-${key}`} className="moduleCollectorDetailRow">
-                            <td colSpan={17}>
+                            <td colSpan={18}>
                               {view === "legal" ? (
                                 <div className="moduleInlineStack moduleActionStack" style={{ marginBottom: "12px" }}>
                                   <button

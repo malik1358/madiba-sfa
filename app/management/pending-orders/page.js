@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
-import MostVisitedPages from "../../components/MostVisitedPages";
 import ExportableTable from "../../components/ExportableTable";
+import ExcelColumnFilter from "../../components/ExcelColumnFilter";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { getSupabaseClient } from "../../lib/supabase";
 import {
@@ -35,6 +35,15 @@ import {
 } from "../../lib/orderPdfDocument";
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
+import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess";
+import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
+import {
+  formatPendingDuration,
+  pendingOrderTimeToMakeBucket,
+  pendingOrderTimeToMakeSeconds,
+  shouldRunTimeToMakeClock,
+} from "../../lib/pendingOrderTimeToMake";
+import { amountInclVat } from "../../lib/invoiceAmountFromPdf";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -51,48 +60,146 @@ const TEXT = {
 const PENDING_STATUSES = PENDING_ORDER_STATUSES;
 const INVOICE_STATUS_PENDING_CREDIT = "Pending for credit approval";
 const INVOICE_STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
+const INVOICE_STATUS_QUOTATION_WAITING_PAYMENT = "Quotation submitted waiting for the payment";
 const INVOICE_STATUS_REJECTED = "Rejected by management";
 const INVOICE_STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
+const INVOICE_STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
 const INVOICE_STATUS_MADE = "Invoice made";
 const OUTSTANDING_API = "/api/outstanding";
 const EMPTY_FILTERS = {
-  orderId: "",
-  customer: "",
-  salesman: "",
-  status: "",
-  invoiceStatus: "",
-  uploadedAt: "",
-  timeToMake: "",
-  created: "",
-  lastUpdated: "",
-  age: "",
+  orderId: [],
+  customer: [],
+  salesman: [],
+  status: [],
+  invoiceStatus: [],
+  uploadedAt: [],
+  timeToMake: [],
+  created: [],
+  lastUpdated: [],
+  age: [],
+  orderValue: [],
+  invoiceValue: [],
 };
 
-function includesFilter(value, filter) {
-  const query = String(filter || "").trim().toLowerCase();
-  if (!query) return true;
-  return String(value ?? "").toLowerCase().includes(query);
+function displayOrDash(value) {
+  const text = String(value ?? "").trim();
+  return text || "-";
 }
+
+function uniqueColumnValues(values) {
+  const seen = new Set();
+  const unique = [];
+  values.forEach((value) => {
+    const text = displayOrDash(value);
+    const key = text.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(text);
+  });
+  return unique.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function matchesColumnFilter(value, filter) {
+  return matchesExcelColumnFilter(value, filter);
+}
+
+function pendingOrderFilterValues(order, meta) {
+  return {
+    orderId: displayOrDash(formatSalesOrderNumber(order) || order.id),
+    customer: displayOrDash(order.customer_name || order.customer_code),
+    salesman: displayOrDash(order.salesman_code),
+    status: displayOrDash(order.status),
+    invoiceStatus: displayOrDash(invoiceStatusText(meta, order)),
+    uploadedAt: displayOrDash(formatDateTime(meta?.invoiceUploadedAt)),
+    timeToMake: pendingOrderTimeToMakeBucket(
+      pendingOrderTimeToMakeSeconds(order, meta, Date.now(), invoiceStatusText(meta, order)),
+    ),
+    created: displayOrDash(formatDateTime(order.created_at)),
+    lastUpdated: displayOrDash(formatDateTime(order.updated_at)),
+    age: String(daysOld(order.updated_at || order.created_at)),
+    orderValue: formatMoneyInclVat(orderValueInclVat(order)),
+    invoiceValue: formatMoneyInclVat(invoiceMadeInclVat(meta)),
+  };
+}
+
+const HEADING_FILTERS = [
+  { key: "orderId", label: "Order Number" },
+  { key: "customer", label: "Customer" },
+  { key: "salesman", label: "Salesman" },
+  { key: "status", label: "Status" },
+  { key: "invoiceStatus", label: "Invoice Status" },
+  { key: "uploadedAt", label: "Uploaded At" },
+  { key: "timeToMake", label: "Time to Make" },
+  { key: "created", label: "Order created" },
+  { key: "lastUpdated", label: "Last Updated" },
+  { key: "age", label: "Age (days)" },
+  { key: "orderValue", label: "Order value (incl. VAT)" },
+  { key: "invoiceValue", label: "Invoice made (incl. VAT)" },
+];
+const HEADING_FILTER_KEYS = HEADING_FILTERS.map(({ key }) => key);
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function moneyExclVat(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function orderValueInclVat(order) {
+  return amountInclVat(moneyExclVat(order?.total_value));
+}
+
+function invoiceMadeInclVat(meta) {
+  return amountInclVat(moneyExclVat(meta?.invoiceAmountExclVat));
+}
+
+function formatMoneyInclVat(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "-";
+  return number.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatDateTime(value) {
   return formatKsaDateTime(value);
 }
 
-function formatDuration(secondsValue) {
-  const seconds = Number(secondsValue || 0);
-  if (!Number.isFinite(seconds) || seconds <= 0) return "-";
+const durationTick = {
+  now: Date.now(),
+  listeners: new Set(),
+  timer: null,
+};
 
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainingSeconds = seconds % 60;
+function subscribeDurationTick(listener) {
+  durationTick.listeners.add(listener);
+  if (!durationTick.timer) {
+    durationTick.now = Date.now();
+    durationTick.timer = setInterval(() => {
+      durationTick.now = Date.now();
+      durationTick.listeners.forEach((fn) => fn());
+    }, 1000);
+  }
+  return () => {
+    durationTick.listeners.delete(listener);
+    if (durationTick.listeners.size === 0 && durationTick.timer) {
+      clearInterval(durationTick.timer);
+      durationTick.timer = null;
+    }
+  };
+}
 
-  if (hours > 0) return `${hours}h ${minutes}m ${remainingSeconds}s`;
-  if (minutes > 0) return `${minutes}m ${remainingSeconds}s`;
-  return `${remainingSeconds}s`;
+function TimeToMakeClock({ order, meta }) {
+  const invoiceStatus = invoiceStatusText(meta, order);
+  const live = shouldRunTimeToMakeClock(invoiceStatus);
+  const nowMs = useSyncExternalStore(
+    live ? subscribeDurationTick : () => () => {},
+    () => (live ? durationTick.now : 0),
+    () => 0,
+  );
+  return formatPendingDuration(
+    pendingOrderTimeToMakeSeconds(order, meta, live ? durationTick.now : nowMs, invoiceStatus),
+  );
 }
 
 function daysOld(fromDate) {
@@ -100,11 +207,6 @@ function daysOld(fromDate) {
   const then = new Date(fromDate).getTime();
   const now = Date.now();
   return Math.max(0, Math.floor((now - then) / (1000 * 60 * 60 * 24)));
-}
-
-function isInvoiceMakerRole(role) {
-  const normalized = String(role || "").toLowerCase();
-  return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
 function invoiceStatusText(meta, order = null) {
@@ -325,6 +427,19 @@ export default function PendingOrdersPage() {
 
       setActiveOrderId(orderId);
       setOrderLines(data || []);
+      const openedOrderValue = (data || []).reduce((sum, line) => {
+        const lineValue = Number(line.line_value);
+        if (Number.isFinite(lineValue) && lineValue > 0) return sum + lineValue;
+        const fallback = Number(line.quantity || 0) * Number(line.rate || 0);
+        return sum + (Number.isFinite(fallback) ? fallback : 0);
+      }, 0);
+      if (openedOrderValue > 0) {
+        setOrders((current) => (current || []).map((row) => (
+          String(row.id) === String(orderId)
+            ? { ...row, total_value: Math.round(openedOrderValue * 100) / 100 }
+            : row
+        )));
+      }
       setOrderHistory(historyResponse.ok && historyPayload.success && Array.isArray(historyPayload.history) ? historyPayload.history : []);
       setSelectedInvoiceFile(null);
 
@@ -405,7 +520,7 @@ export default function PendingOrdersPage() {
         // Keep the order open even if invoice metadata refresh fails.
       }
 
-      if (isInvoiceMakerRole(userRole)) {
+      if (canManageOrderInvoice(userRole)) {
         setOpenStartedAtByOrder((current) => {
           if (current[orderId]) return current;
           return { ...current, [orderId]: new Date().toISOString() };
@@ -544,23 +659,42 @@ export default function PendingOrdersPage() {
     [orders, activeOrderId]
   );
 
+  const columnFilterOptions = useMemo(() => {
+    const options = {};
+    HEADING_FILTER_KEYS.forEach((key) => {
+      const matching = orders.filter((order) => {
+        const values = pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null);
+        return rowMatchesOtherExcelFilters(values, columnFilters, key, HEADING_FILTER_KEYS, matchesColumnFilter);
+      });
+      options[key] = uniqueColumnValues(
+        matching.map((order) => pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null)[key]),
+      );
+    });
+    return options;
+  }, [columnFilters, invoiceMetaByOrder, orders]);
+
+  const effectiveColumnFilters = useMemo(() => {
+    const next = { ...columnFilters };
+    HEADING_FILTER_KEYS.forEach((key) => {
+      next[key] = pruneExcelFilterSelection(columnFilters[key], columnFilterOptions[key] || []);
+    });
+    return next;
+  }, [columnFilterOptions, columnFilters]);
+
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
-      const meta = invoiceMetaByOrder?.[order.id] || null;
-      const age = daysOld(order.updated_at || order.created_at);
-
-      return includesFilter(order.id, columnFilters.orderId)
-        && includesFilter(order.customer_name || order.customer_code, columnFilters.customer)
-        && includesFilter(order.salesman_code, columnFilters.salesman)
-        && includesFilter(order.status, columnFilters.status)
-        && includesFilter(invoiceStatusText(meta, order), columnFilters.invoiceStatus)
-        && includesFilter(formatDateTime(meta?.invoiceUploadedAt), columnFilters.uploadedAt)
-        && includesFilter(formatDuration(meta?.invoiceBuildSeconds), columnFilters.timeToMake)
-        && includesFilter(formatDateTime(order.created_at), columnFilters.created)
-        && includesFilter(formatDateTime(order.updated_at), columnFilters.lastUpdated)
-        && includesFilter(age, columnFilters.age);
+      const values = pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null);
+      return HEADING_FILTER_KEYS.every((key) => matchesColumnFilter(values[key], effectiveColumnFilters[key]));
     });
-  }, [columnFilters, invoiceMetaByOrder, orders]);
+  }, [effectiveColumnFilters, invoiceMetaByOrder, orders]);
+
+  const filteredValueTotals = useMemo(() => {
+    return filteredOrders.reduce((totals, order) => {
+      totals.orderValue += orderValueInclVat(order) || 0;
+      totals.invoiceValue += invoiceMadeInclVat(invoiceMetaByOrder?.[order.id]) || 0;
+      return totals;
+    }, { orderValue: 0, invoiceValue: 0 });
+  }, [filteredOrders, invoiceMetaByOrder]);
 
   async function regenerateOrderPdf() {
     if (!activeOrder) {
@@ -662,10 +796,17 @@ export default function PendingOrdersPage() {
         Status: order.status || "-",
         "Invoice Status": invoiceStatusText(invoiceMetaByOrder?.[order.id]),
         "Invoice Uploaded At": formatDateTime(invoiceMetaByOrder?.[order.id]?.invoiceUploadedAt),
-        "Invoice Build Time": formatDuration(invoiceMetaByOrder?.[order.id]?.invoiceBuildSeconds),
+        "Invoice Build Time": formatPendingDuration(pendingOrderTimeToMakeSeconds(
+          order,
+          invoiceMetaByOrder?.[order.id],
+          Date.now(),
+          invoiceStatusText(invoiceMetaByOrder?.[order.id], order),
+        )),
         "Order created": formatDateTime(order.created_at),
         "Last Updated": formatDateTime(order.updated_at),
         "Age (days)": daysOld(order.updated_at || order.created_at),
+        "Order value (incl. VAT)": formatMoneyInclVat(orderValueInclVat(order)),
+        "Invoice made (incl. VAT)": formatMoneyInclVat(invoiceMadeInclVat(invoiceMetaByOrder?.[order.id])),
       }));
 
       workbook.Sheets.PendingOrders = XLSX.utils.json_to_sheet(queueRows);
@@ -801,6 +942,7 @@ export default function PendingOrdersPage() {
   }
 
   const isInvoiceMaker = isInvoiceMakerRole(userRole);
+  const canManageInvoice = canManageOrderInvoice(userRole);
 
   return (
     <MorningAttendanceGate>
@@ -814,7 +956,7 @@ export default function PendingOrdersPage() {
                 {userRole === "admin" || userRole === "manager" || isInvoiceMaker ? t("subtitleTeam") : t("subtitleMine")}
               </p>
             </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><MostVisitedPages /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
+            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><Link href="/" className="moduleBackLink">{t("dashboard")}</Link></div>
           </div>
 
           <div className="moduleMetricGrid">
@@ -838,52 +980,33 @@ export default function PendingOrdersPage() {
               <table className="moduleTable">
                 <thead>
                   <tr>
-                    <th>Order Number</th>
-                    <th>Customer</th>
-                    <th>Salesman</th>
-                    <th>Status</th>
-                    <th>Invoice Status</th>
-                    <th>Uploaded At</th>
-                    <th>Time to Make</th>
-                    <th>Order created</th>
-                    <th>Last Updated</th>
-                    <th>Age (days)</th>
-                    <th>Action</th>
-                  </tr>
-                  <tr>
-                    {[
-                      ["orderId", "Filter ID"],
-                      ["customer", "Filter customer"],
-                      ["salesman", "Filter salesman"],
-                      ["status", "Filter status"],
-                      ["invoiceStatus", "Filter invoice status"],
-                      ["uploadedAt", "Filter uploaded"],
-                      ["timeToMake", "Filter time"],
-                      ["created", "Filter created"],
-                      ["lastUpdated", "Filter updated"],
-                      ["age", "Filter age"],
-                    ].map(([key, placeholder]) => (
-                      <th key={key}>
-                        <input
-                          className="moduleInput"
-                          type="text"
-                          value={columnFilters[key]}
-                          placeholder={placeholder}
-                          onChange={(event) => setColumnFilters((current) => ({
-                            ...current,
-                            [key]: event.target.value,
-                          }))}
-                        />
+                    {HEADING_FILTERS.map(({ key, label }) => (
+                      <th key={key} data-column-filter-label={label}>
+                        <div className="moduleTableHeadingFilter">
+                          <span>{label}</span>
+                          <ExcelColumnFilter
+                            label={label}
+                            options={columnFilterOptions[key] || []}
+                            selected={effectiveColumnFilters[key]}
+                            onChange={(next) => setColumnFilters((current) => ({
+                              ...current,
+                              [key]: next,
+                            }))}
+                          />
+                        </div>
                       </th>
                     ))}
-                    <th>
-                      <button
-                        type="button"
-                        className="moduleInlineButton"
-                        onClick={() => setColumnFilters(EMPTY_FILTERS)}
-                      >
-                        Clear
-                      </button>
+                    <th data-column-filter-label="Action">
+                      <div className="moduleTableHeadingFilter">
+                        <span>Action</span>
+                        <button
+                          type="button"
+                          className="moduleInlineButton"
+                          onClick={() => setColumnFilters(EMPTY_FILTERS)}
+                        >
+                          Clear
+                        </button>
+                      </div>
                     </th>
                   </tr>
                 </thead>
@@ -901,10 +1024,12 @@ export default function PendingOrdersPage() {
                           <td>{order.status || "-"}</td>
                           <td>{invoiceStatusText(meta, order)}</td>
                           <td>{formatDateTime(meta?.invoiceUploadedAt)}</td>
-                          <td>{formatDuration(meta?.invoiceBuildSeconds)}</td>
+                          <td><TimeToMakeClock order={order} meta={meta} /></td>
                           <td>{formatDateTime(order.created_at)}</td>
                           <td>{formatDateTime(order.updated_at)}</td>
                           <td>{age}</td>
+                          <td style={{ textAlign: "right" }}>{formatMoneyInclVat(orderValueInclVat(order))}</td>
+                          <td style={{ textAlign: "right" }}>{formatMoneyInclVat(invoiceMadeInclVat(meta))}</td>
                           <td>
                             <button
                               type="button"
@@ -919,7 +1044,7 @@ export default function PendingOrdersPage() {
 
                         {activeOrderId === order.id && (
                           <tr>
-                            <td colSpan={11}>
+                            <td colSpan={13}>
                               <div style={{ marginTop: "8px", marginBottom: "8px" }}>
                                 <div className="moduleSectionHeader">
                                   <h2>Order #{formatSalesOrderNumber(order) || order.id} Details</h2>
@@ -982,7 +1107,7 @@ export default function PendingOrdersPage() {
                                     <span> | <a href={meta.invoiceFileUrl} target="_blank" rel="noreferrer">View uploaded invoice</a></span>
                                   ) : null}
                                   <span> | <strong>Uploaded at:</strong> {formatDateTime(meta?.invoiceUploadedAt)}</span>
-                                  <span> | <strong>Time to make:</strong> {formatDuration(meta?.invoiceBuildSeconds)}</span>
+                                  <span> | <strong>Time to make:</strong> <TimeToMakeClock order={order} meta={meta} /></span>
                                 </div>
 
                                 {meta?.prospectLinkedCustomerCode ? (
@@ -995,7 +1120,7 @@ export default function PendingOrdersPage() {
 
                                 <InvoiceComparisonPanel meta={meta} />
 
-                                {isInvoiceMaker && (
+                                {canManageInvoice && (
                                   <div style={{ marginTop: "12px" }}>
                                     <div className="moduleFormGrid">
                                       <label>
@@ -1008,8 +1133,10 @@ export default function PendingOrdersPage() {
                                           <option value="">Select status</option>
                                           <option value={INVOICE_STATUS_PENDING_CREDIT}>{INVOICE_STATUS_PENDING_CREDIT}</option>
                                           <option value={INVOICE_STATUS_WAITING_CREDIT_APPLICATION}>{INVOICE_STATUS_WAITING_CREDIT_APPLICATION}</option>
+                                          <option value={INVOICE_STATUS_QUOTATION_WAITING_PAYMENT}>{INVOICE_STATUS_QUOTATION_WAITING_PAYMENT}</option>
                                           <option value={INVOICE_STATUS_REJECTED}>{INVOICE_STATUS_REJECTED}</option>
                                           <option value={INVOICE_STATUS_STOCK_UNAVAILABLE}>{INVOICE_STATUS_STOCK_UNAVAILABLE}</option>
+                                          <option value={INVOICE_STATUS_WAITING_STOCK_TRANSFER}>{INVOICE_STATUS_WAITING_STOCK_TRANSFER}</option>
                                           <option value={INVOICE_STATUS_MADE} disabled={!meta?.invoiceFilePath}>{INVOICE_STATUS_MADE}</option>
                                         </select>
                                       </label>
@@ -1115,10 +1242,20 @@ export default function PendingOrdersPage() {
 
                   {filteredOrders.length === 0 && (
                     <tr>
-                      <td colSpan={11}>{orders.length === 0 ? "No pending orders found." : "No orders match the current filters."}</td>
+                      <td colSpan={13}>{orders.length === 0 ? "No pending orders found." : "No orders match the current filters."}</td>
                     </tr>
                   )}
                 </tbody>
+                {filteredOrders.length > 0 ? (
+                  <tfoot>
+                    <tr className="modulePendingOrdersTotalRow">
+                      <td colSpan={10}>Total ({filteredOrders.length} order{filteredOrders.length === 1 ? "" : "s"})</td>
+                      <td style={{ textAlign: "right" }}>{filteredValueTotals.orderValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td style={{ textAlign: "right" }}>{filteredValueTotals.invoiceValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                ) : null}
               </table>
             </ExportableTable>
           </section>

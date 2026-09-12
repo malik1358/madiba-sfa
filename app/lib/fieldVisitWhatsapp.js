@@ -1,4 +1,5 @@
 import { formatKsaDateOnly } from "./workdayActivity.js";
+import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 
 function formatDateOnly(value) {
   return formatKsaDateOnly(value, "");
@@ -29,6 +30,7 @@ export function buildFieldVisitWhatsappSummary({
   salesmanName = "",
   salesmanCode = "",
   language = "en",
+  visitDistance = {},
 } = {}) {
   const isAr = language === "ar";
   const labels = {
@@ -78,6 +80,7 @@ export function buildFieldVisitWhatsappSummary({
   lines.push(`${labels.bucket61To90}: ${formatMoney(bucket61To90)}`);
   lines.push(`${labels.bucketAbove90}: ${formatMoney(bucketAbove90)}`);
   lines.push(`${labels.totalOutstanding}: ${formatMoney(totalOutstanding)}`);
+  lines.push(...formatVisitDistanceWhatsappLines(visitDistance));
 
   return lines.join("\n");
 }

@@ -1,3 +1,15 @@
+function envFlagEnabled(value, defaultValue = false) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return defaultValue;
+  return raw !== "0" && raw !== "false" && raw !== "no";
+}
+
+export function isSalesmanVisitPlanSalesmanAccessApproved(
+  env = typeof process !== "undefined" ? process.env : {},
+) {
+  return envFlagEnabled(env.NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS, true);
+}
+
 export const MODULES = {
   dashboard: { href: "/", label: "Dashboard" },
   management: { href: "/management", label: "Management" },
@@ -14,9 +26,10 @@ export const MODULES = {
   collectionReport: { href: "/management/collection-report", label: "Collection Report" },
   dailyVisitReport: { href: "/management/daily-visit-report", label: "Daily Visit Report" },
   userActivity: { href: "/management/user-activity", label: "User Activity" },
-  businessDashboard: { href: "/management/business-dashboard", label: "Business Dashboard" },
+  businessDashboard: { href: "/management/business-dashboard", label: "Business Intelligence" },
   customerMaster: { href: "/management/customer-master", label: "Customer Master" },
   outstandingNoGps: { href: "/management/outstanding-no-gps", label: "Outstanding Without GPS" },
+  salesmanVisitPlan: { href: "/management/salesman-visit-plan", label: "Salesman Visit Plan" },
   salesmanHierarchy: { href: "/management/salesman-hierarchy", label: "Salesman Hierarchy" },
   customerBookShares: { href: "/management/customer-book-shares", label: "Customer Book Shares" },
   kpiTargets: { href: "/management/kpi-targets", label: "KPI Targets" },
@@ -31,7 +44,7 @@ export const NAV_GROUPS = [
   {
     key: "field",
     label: "Field Sales",
-    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices"],
+    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "salesmanVisitPlan"],
   },
   {
     key: "collections",
@@ -57,6 +70,11 @@ export function normalizeAccessRole(role) {
 export function isInvoiceMakerRole(role) {
   const normalized = normalizeAccessRole(role);
   return normalized === "invoice-maker";
+}
+
+export function canManageOrderInvoice(role) {
+  const normalized = normalizeAccessRole(role);
+  return isInvoiceMakerRole(normalized) || normalized === "admin" || normalized === "manager";
 }
 
 export function shouldRequireTransactionGps(role) {
@@ -127,6 +145,12 @@ export function buildModuleAccess(context = {}) {
       businessDashboard: isAdmin || isManager,
       customerMaster: isAdmin || isManager,
       outstandingNoGps: isAdmin || isManager,
+      // Enabled for field sales after admin approval. Set NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS=false to lock again.
+      salesmanVisitPlan: isAdmin || (
+        isSalesmanVisitPlanSalesmanAccessApproved()
+        && isFieldSales
+        && !isCollector
+      ),
       salesmanHierarchy: isAdmin || isManager || isInvoiceMaker,
       customerBookShares: isAdmin || isManager,
       kpiTargets: isAdmin || isManager,
@@ -194,9 +218,10 @@ export const MODULE_LABELS = {
   collectionReport: { en: "Collection Report", ar: "تقرير التحصيل" },
   dailyVisitReport: { en: "Daily Visit Report", ar: "تقرير الزيارات اليومية" },
   userActivity: { en: "User Activity", ar: "نشاط المستخدمين" },
-  businessDashboard: { en: "Business Dashboard", ar: "لوحة الأعمال" },
+  businessDashboard: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
   customerMaster: { en: "Customer Master", ar: "سجل العملاء" },
   outstandingNoGps: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
+  salesmanVisitPlan: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },
   salesmanHierarchy: { en: "Salesman Hierarchy", ar: "هيكل المندوبين" },
   customerBookShares: { en: "Customer Book Shares", ar: "مشاركة دفاتر العملاء" },
   kpiTargets: { en: "KPI Targets", ar: "أهداف الأداء" },

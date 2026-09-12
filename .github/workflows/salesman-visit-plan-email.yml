@@ -1,0 +1,60 @@
+name: Salesman Visit Plan Email
+
+on:
+  schedule:
+    # 21:00 UTC = 00:00 KSA — build and store visit plans, then email.
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger salesman visit plan email endpoint
+        env:
+          SALESMAN_VISIT_PLAN_EMAIL_URL: ${{ secrets.SALESMAN_VISIT_PLAN_EMAIL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          DEFAULT_SALESMAN_VISIT_PLAN_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/salesman-visit-plan-email'
+          SALESMAN_VISIT_PLAN_EMAIL_URL_TRIMMED="$(printf '%s' "$SALESMAN_VISIT_PLAN_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          SALESMAN_VISIT_PLAN_EMAIL_URL_EFFECTIVE="$SALESMAN_VISIT_PLAN_EMAIL_URL_TRIMMED"
+
+          if [[ -z "$SALESMAN_VISIT_PLAN_EMAIL_URL_EFFECTIVE" ]]; then
+            echo "SALESMAN_VISIT_PLAN_EMAIL_URL secret is missing; falling back to default endpoint."
+            SALESMAN_VISIT_PLAN_EMAIL_URL_EFFECTIVE="$DEFAULT_SALESMAN_VISIT_PLAN_EMAIL_URL"
+          elif [[ ! "$SALESMAN_VISIT_PLAN_EMAIL_URL_EFFECTIVE" =~ /api/cron/salesman-visit-plan-email([/?].*)?$ ]]; then
+            echo "SALESMAN_VISIT_PLAN_EMAIL_URL secret does not point to /api/cron/salesman-visit-plan-email; falling back to default endpoint."
+            SALESMAN_VISIT_PLAN_EMAIL_URL_EFFECTIVE="$DEFAULT_SALESMAN_VISIT_PLAN_EMAIL_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          post_report() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data '{}'
+          }
+
+          status_code="$(post_report "$SALESMAN_VISIT_PLAN_EMAIL_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$SALESMAN_VISIT_PLAN_EMAIL_URL_EFFECTIVE" != "$DEFAULT_SALESMAN_VISIT_PLAN_EMAIL_URL" ]]; then
+            echo "Primary SALESMAN_VISIT_PLAN_EMAIL_URL failed with HTTP $status_code; retrying default endpoint."
+            SALESMAN_VISIT_PLAN_EMAIL_URL_EFFECTIVE="$DEFAULT_SALESMAN_VISIT_PLAN_EMAIL_URL"
+            status_code="$(post_report "$SALESMAN_VISIT_PLAN_EMAIL_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Salesman visit plan email failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Salesman visit plan email succeeded with HTTP $status_code"
+          cat response.json

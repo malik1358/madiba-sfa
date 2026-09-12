@@ -21,6 +21,7 @@ import {
   formatAchievementPercent,
   formatPerformanceKpiLine,
   formatPerformanceKpiValue,
+  PERFORMANCE_DISPLAY_KPI_KEYS,
   performanceUpdatedStatusLabel,
 } from "./performanceKpis.js";
 import { formatKsaTime } from "./workdayActivity.js";
@@ -95,24 +96,28 @@ function customerLabel(entry) {
   return entry?.customerName || entry?.customerCode || "-";
 }
 
-export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}) {
-  const userName = String(user?.userName || "User").trim() || "User";
-  const subject = `Daily Visit Report — ${userName} — ${date}`;
-  const entries = Array.isArray(user?.entries) ? user.entries : [];
-  const performance = user?.performance || null;
-  const kpis = Array.isArray(performance?.kpis) ? performance.kpis : [];
+function kpiRows(performance) {
+  return Array.isArray(performance?.kpis) ? performance.kpis : [];
+}
 
-  const kpiText = kpis.length
-    ? [
-      "Monthly KPI status:",
-      ...kpis.map((kpi) => `- ${formatPerformanceKpiLine(kpi)}`),
-      performanceUpdatedStatusLabel(performance),
-      "",
-    ]
-    : [];
+function kpiByKey(snapshot, key) {
+  return kpiRows(snapshot).find((item) => item.key === key) || null;
+}
 
-  const kpiHtml = kpis.length
-    ? `<h2 style="font-size: 16px;">Monthly KPI status</h2>
+function memberDisplayName(member) {
+  const name = String(member?.salesmanName || member?.userName || "").trim();
+  const code = String(member?.salesmanCode || "").trim();
+  if (name && code) return `${name} (${code})`;
+  return name || code || "Salesman";
+}
+
+export function buildPerformanceKpiStatusHtml(performance, {
+  heading = "Monthly KPI status",
+} = {}) {
+  const kpis = kpiRows(performance);
+  if (!kpis.length) return "";
+
+  return `<h2 style="font-size: 16px;">${escapeHtml(heading)}</h2>
       <p style="color:#52616b; font-size: 13px;">${escapeHtml(performanceUpdatedStatusLabel(performance))}</p>
       <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%; margin: 0 0 16px;">
         <thead style="background: #f4f7fb;">
@@ -129,8 +134,102 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
             <td>${escapeHtml(kpi.status?.label || "No target")}</td>
           </tr>`).join("")}
         </tbody>
-      </table>`
-    : "";
+      </table>`;
+}
+
+export function buildPerformanceKpiStatusText(performance, {
+  heading = "Monthly KPI status:",
+} = {}) {
+  const kpis = kpiRows(performance);
+  if (!kpis.length) return [];
+  return [
+    heading,
+    ...kpis.map((kpi) => `- ${formatPerformanceKpiLine(kpi)}`),
+    performanceUpdatedStatusLabel(performance),
+    "",
+  ];
+}
+
+export function buildTeamKpiMembersHtml(members = []) {
+  const rows = (members || []).filter(Boolean);
+  if (!rows.length) return "";
+
+  return `<h2 style="font-size: 16px;">Team members</h2>
+      <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%; margin: 0 0 16px;">
+        <thead style="background: #f4f7fb;">
+          <tr>
+            <th>Salesman</th>
+            ${PERFORMANCE_DISPLAY_KPI_KEYS.map((key) => {
+              const label = rows[0]?.kpis?.find((kpi) => kpi.key === key)?.label || key;
+              return `<th>${escapeHtml(label)}</th>`;
+            }).join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((member) => `<tr>
+            <td>${escapeHtml(memberDisplayName(member))}</td>
+            ${PERFORMANCE_DISPLAY_KPI_KEYS.map((key) => {
+              const kpi = kpiByKey(member, key);
+              const actual = formatPerformanceKpiValue(key, kpi?.actual);
+              const target = kpi?.target > 0 ? formatPerformanceKpiValue(key, kpi.target) : "—";
+              return `<td>${escapeHtml(formatAchievementPercent(kpi?.achievement))}<br/><span style="color:#52616b;">${escapeHtml(actual)} / ${escapeHtml(target)}</span></td>`;
+            }).join("")}
+          </tr>`).join("")}
+        </tbody>
+      </table>`;
+}
+
+export function buildTeamVisitReportEmail({
+  date,
+  bossName = "Team",
+  team = null,
+  members = [],
+} = {}) {
+  const teamName = String(bossName || "Team").trim() || "Team";
+  const subject = `Daily Visit Report — Team target vs achievement — ${teamName} — ${date}`;
+  const memberSnapshots = (members || []).filter(Boolean);
+  const kpiHtml = [
+    buildPerformanceKpiStatusHtml(team, { heading: "Team target vs achievement" }),
+    buildTeamKpiMembersHtml(memberSnapshots),
+  ].join("");
+
+  const text = [
+    `Daily visit report team KPI for ${teamName}`,
+    `Date: ${date} (KSA)`,
+    `Team members: ${memberSnapshots.length}`,
+    "",
+    ...buildPerformanceKpiStatusText(team, { heading: "Team target vs achievement:" }),
+    ...(memberSnapshots.length
+      ? [
+        "Team members:",
+        ...memberSnapshots.map((member) => {
+          const lines = kpiRows(member).map((kpi) => formatPerformanceKpiLine(kpi)).join("; ");
+          return `- ${memberDisplayName(member)}: ${lines}`;
+        }),
+      ]
+      : []),
+  ].join("\n");
+
+  const html = `<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #12263f; line-height: 1.4;">
+  <h1 style="font-size: 20px; margin-bottom: 8px;">Daily Visit Report</h1>
+  <p style="margin: 0 0 16px;">Team target vs achievement · ${escapeHtml(teamName)} · ${escapeHtml(date)} (KSA)</p>
+  <p style="color:#52616b; font-size: 13px; margin: 0 0 16px;">Monthly KPIs for the team, using the team target when it is set.</p>
+  ${kpiHtml}
+</body>
+</html>`;
+
+  return { subject, html, text };
+}
+
+export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}) {
+  const userName = String(user?.userName || "User").trim() || "User";
+  const subject = `Daily Visit Report — ${userName} — ${date}`;
+  const entries = Array.isArray(user?.entries) ? user.entries : [];
+  const performance = user?.performance || null;
+  const kpiText = buildPerformanceKpiStatusText(performance);
+  const kpiHtml = buildPerformanceKpiStatusHtml(performance);
 
   const idleGaps = Array.isArray(user?.idleGaps) ? user.idleGaps : (user?.daySummary?.idleGaps || []);
   const routePoints = Array.isArray(user?.routePoints) && user.routePoints.length

@@ -47,9 +47,11 @@ test("combined score boosts customers strong on both sales and collection", () =
   assert.equal(resolveVisitFocus(75, 70), "Both");
   assert.equal(resolveVisitFocus(75, 20), "Sales");
   assert.equal(resolveVisitFocus(20, 75), "Collection");
+  assert.equal(resolveVisitFocus(90, 90, { outstanding_61_90: 1000 }), "Collection");
+  assert.equal(resolveVisitFocus(90, 10, { outstanding_above_120: 500 }), "Collection");
 });
 
-test("rankSalesmanVisitPlan orders by combined probability and caps the list", () => {
+test("rankSalesmanVisitPlan applies 70/30 sales-collection mix and caps the list", () => {
   const ranked = rankSalesmanVisitPlan([
     {
       customer_code: "A1",
@@ -91,6 +93,54 @@ test("rankSalesmanVisitPlan orders by combined probability and caps the list", (
   assert.equal(ranked[0].customer_code, "B1");
   assert.equal(ranked[0].rank, 1);
   assert.equal(ranked[0].focus, "Both");
+});
+
+test("outstanding over 60 days forces collection focus and 70/30 visit mix", () => {
+  const customers = [];
+  for (let i = 1; i <= 10; i += 1) {
+    customers.push({
+      customer_code: `S${i}`,
+      customer_name: `Sales ${i}`,
+      salesman_code: "S1",
+      recent_sales_value: 80000 - (i * 1000),
+      days_since_last_invoice: 30,
+      average_monthly_purchase: 15000,
+      highest_monthly_sales: 25000,
+      total_due_amount: 1000,
+      outstanding_0_30: 1000,
+      probability_score: 35,
+      probability_label: "Medium",
+    });
+  }
+  for (let i = 1; i <= 5; i += 1) {
+    customers.push({
+      customer_code: `C${i}`,
+      customer_name: `Collect ${i}`,
+      salesman_code: "S1",
+      recent_sales_value: 5000,
+      days_since_last_invoice: 10,
+      average_monthly_purchase: 2000,
+      highest_monthly_sales: 4000,
+      total_due_amount: 20000 + (i * 1000),
+      outstanding_61_90: 15000,
+      outstanding_above_120: 5000,
+      probability_score: 80,
+      probability_label: "High",
+    });
+  }
+
+  const ranked = rankSalesmanVisitPlan(customers, {
+    limit: 10,
+    todayIso: "2026-09-12T08:00:00.000Z",
+  });
+
+  assert.equal(ranked.length, 10);
+  const salesish = ranked.filter((row) => row.focus === "Sales" || row.focus === "Both");
+  const collection = ranked.filter((row) => row.focus === "Collection");
+  assert.equal(salesish.length, 7);
+  assert.equal(collection.length, 3);
+  assert.ok(collection.every((row) => Number(row.outstanding_61_90) > 0 || Number(row.outstanding_above_120) > 0));
+  assert.ok(ranked.slice(0, 7).every((row) => row.focus !== "Collection"));
 });
 
 test("groupVisitPlansBySalesman builds one plan per salesman code", () => {
@@ -149,10 +199,17 @@ test("email builders include ranked visit rows", () => {
     todayIso: "2026-09-12T08:00:00.000Z",
   })[0];
 
-  const email = buildSalesmanVisitPlanEmail(plan, { reportDate: "2026-09-12", previewOnly: true });
+  const email = buildSalesmanVisitPlanEmail(plan, {
+    reportDate: "2026-09-12",
+    previewOnly: true,
+    appOrigin: "https://madiba-sfa.vercel.app",
+  });
   assert.match(email.subject, /Sale One/);
   assert.match(email.html, /Alpha Trading/);
   assert.match(email.html, /Admin preview/);
+  assert.match(email.html, /customer-audit\?customer_code=A1/);
+  assert.match(email.html, /70% sales/);
+  assert.match(email.html, /&gt;120|91-120/);
 
   const digest = buildSalesmanVisitPlanDigestEmail([plan], { reportDate: "2026-09-12" });
   assert.match(digest.subject, /digest/i);
@@ -246,6 +303,7 @@ test("merge candidates keep sales metrics and collection probability", () => {
 
   assert.equal(merged.length, 1);
   assert.equal(merged[0].recent_sales_value, 22000);
+  assert.equal(merged[0].outstanding_30_60, 4000);
   assert.ok(Number(merged[0].probability_score) > 0 || Number(merged[0].total_due_amount) > 0);
 
   const payload = buildSalesmanVisitPlanPayload({
@@ -282,9 +340,17 @@ test("scoreVisitPlanCustomer exposes labels for UI coloring", () => {
     average_monthly_purchase: 10000,
     highest_monthly_sales: 20000,
     total_due_amount: 15000,
+    outstanding_0_30: 2000,
+    outstanding_30_60: 3000,
+    outstanding_61_90: 4000,
+    outstanding_91_120: 5000,
+    outstanding_above_120: 1000,
     probability_score: 72,
     probability_label: "High",
   }, "2026-09-12T08:00:00.000Z");
   assert.equal(scored.collection_label, "High");
   assert.ok(scored.combined_score >= 50);
+  assert.equal(scored.focus, "Collection");
+  assert.equal(scored.outstanding_61_90, 4000);
+  assert.equal(scored.outstanding_above_120, 1000);
 });

@@ -7,6 +7,7 @@ import {
   buildOutstandingRow,
   findOutstandingForCustomer,
   findOutstandingHeaderRow,
+  hydrateOutstandingInvoices,
   isSameOutstandingCustomer,
   parseOutstandingRows,
   mergeParsedOutstandingSheets,
@@ -118,8 +119,12 @@ export async function GET(request) {
       ? findOutstandingForCustomer(dataset, customerCode, customerName)
       : null;
     const hasInvoiceRowsInDataset = Array.isArray(dataset.invoices) && dataset.invoices.length > 0;
+    // Hydrate from the uploaded workbook so each invoice keeps its Salesman cell,
+    // and blank/placeholder cells backfill from the uploaded customer row — never
+    // from customer-master / last sales-invoice assignment.
+    const hydratedInvoices = hydrateOutstandingInvoices(dataset);
     const customerInvoices = (customerCode || customerName)
-      ? dataset.invoices
+      ? hydratedInvoices
         .filter((row) => isSameOutstandingCustomer(row.customer_code, row.customer_name, customerCode, customerName))
         .sort((a, b) => {
           const aDue = String(a?.due_date || "");

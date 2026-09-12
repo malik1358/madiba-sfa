@@ -526,6 +526,10 @@ export function syncOutstandingCustomerFromInvoices(customer, invoices, todayIso
   );
   const totalOutstanding = Object.values(buckets).reduce((sum, value) => sum + toNumber(value), 0);
   const first = usableInvoices[0] || {};
+  const uploadSalesman = resolveUploadedOutstandingSalesman({
+    customerInvoices: usableInvoices,
+    aggregateRowSalesman: customer?.salesman,
+  });
 
   return {
     ...(customer || {}),
@@ -534,6 +538,7 @@ export function syncOutstandingCustomerFromInvoices(customer, invoices, todayIso
     buckets,
     open_invoices: usableInvoices.length,
     total_outstanding: totalOutstanding,
+    ...(uploadSalesman ? { salesman: uploadSalesman } : {}),
   };
 }
 
@@ -699,6 +704,29 @@ export function pickOutstandingSalesmanName(invoices) {
   });
 
   return bestName;
+}
+
+/**
+ * Salesman for outstanding screens must come from the uploaded workbook:
+ * each invoice keeps its own Salesman cell, and blank/placeholder cells may
+ * backfill from the uploaded customer aggregate row. Never use customer-master
+ * / last sales-invoice assignment here.
+ */
+export function resolveUploadedOutstandingSalesman({
+  invoiceSalesman = "",
+  customerInvoices = [],
+  aggregateRowSalesman = "",
+} = {}) {
+  const fromInvoice = String(invoiceSalesman || "").trim();
+  if (!isPlaceholderSalesmanValue(fromInvoice)) return fromInvoice;
+
+  const fromInvoices = pickOutstandingSalesmanName(customerInvoices);
+  if (!isPlaceholderSalesmanValue(fromInvoices)) return fromInvoices;
+
+  const fromAggregate = String(aggregateRowSalesman || "").trim();
+  if (!isPlaceholderSalesmanValue(fromAggregate)) return fromAggregate;
+
+  return "";
 }
 
 export function buildOutstandingRowSalesmanByCode(rows) {

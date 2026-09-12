@@ -14,6 +14,7 @@ import {
   buildOutstandingRowSalesmanByCode,
   isPlaceholderSalesmanValue,
   pickOutstandingSalesmanName,
+  resolveUploadedOutstandingSalesman,
   pickLongestCustomerName,
   findOutstandingForCustomer,
   findOutstandingHeaderRow,
@@ -133,6 +134,64 @@ test("pickOutstandingSalesmanName prefers real salesman over empty and placehold
   ];
 
   assert.equal(pickOutstandingSalesmanName(invoices), "Osama");
+});
+
+test("resolveUploadedOutstandingSalesman keeps each invoice salesman from the upload file", () => {
+  assert.equal(
+    resolveUploadedOutstandingSalesman({
+      invoiceSalesman: "ST106 Mr George",
+      customerInvoices: [
+        { salesman: "ST106 Mr George" },
+        { salesman: "Another Salesman" },
+      ],
+      aggregateRowSalesman: "Master Should Not Win",
+    }),
+    "ST106 Mr George",
+  );
+});
+
+test("resolveUploadedOutstandingSalesman backfills from upload rows, not customer-master last invoice", () => {
+  assert.equal(
+    resolveUploadedOutstandingSalesman({
+      invoiceSalesman: "NOT ADDED IN VOUCHER",
+      customerInvoices: [
+        { salesman: "" },
+        { salesman: "NOT ADDED IN VOUCHER" },
+      ],
+      aggregateRowSalesman: "ST106 Mr George",
+    }),
+    "ST106 Mr George",
+  );
+  assert.equal(
+    resolveUploadedOutstandingSalesman({
+      invoiceSalesman: "",
+      customerInvoices: [],
+      aggregateRowSalesman: "",
+    }),
+    "",
+  );
+});
+
+test("parseOutstandingRows keeps distinct salesman values from each uploaded invoice row", () => {
+  const parsed = parseOutstandingRows([
+    ["Date", "Ref. No.", "Party's Name", "Pending", "Due", "Overdue", "Invoice Days", "Salesman"],
+    ["01-Aug-26", "RNFD/114", "1140 Hamsat Khayal Trading Company", 3793, "01-Sep-26", 11, 42, "ST106 Mr George"],
+    ["20-Aug-26", "RNFD/340", "1140 Hamsat Khayal Trading Company", 2820, "20-Sep-26", 0, 23, "ST106 Mr George"],
+    ["25-Aug-26", "RC/076", "1140 Hamsat Khayal Trading Company", 828, "25-Sep-26", 0, 18, "Another Salesman"],
+  ], 0);
+
+  assert.deepEqual(
+    parsed.invoices.map((invoice) => [invoice.ref_no, invoice.salesman]),
+    [
+      ["RNFD/114", "ST106 Mr George"],
+      ["RNFD/340", "ST106 Mr George"],
+      ["RC/076", "Another Salesman"],
+    ],
+  );
+
+  const hydrated = hydrateOutstandingInvoices(parsed);
+  assert.equal(hydrated.find((invoice) => invoice.ref_no === "RC/076")?.salesman, "Another Salesman");
+  assert.equal(hydrated.find((invoice) => invoice.ref_no === "RNFD/114")?.salesman, "ST106 Mr George");
 });
 
 test("applyOutstandingRowSalesman backfills invoice salesman from aggregate rows", () => {

@@ -256,6 +256,10 @@ const TEXT = {
     en: "Working offline from saved queue. Visits save on this device and sync automatically when connection improves.",
     ar: "العمل دون اتصال من القائمة المحفوظة. تُحفظ الزيارات على الجهاز وتُزامَن تلقائياً عند تحسن الاتصال.",
   },
+  offlineQueueMissing: {
+    en: "No saved collection queue on this device. Open Collections once while online, then try again offline.",
+    ar: "لا توجد قائمة تحصيل محفوظة على هذا الجهاز. افتح التحصيل مرة واحدة الاتصال متصل، ثم أعد المحاولة دون اتصال.",
+  },
   staleQueueBanner: {
     en: "Showing saved collection queue while the server reconnects.",
     ar: "عرض قائمة التحصيل المحفوظة أثناء إعادة الاتصال بالخادم.",
@@ -1127,7 +1131,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       let cachedQueues = await readCollectionQueuesForUser(session.user.id);
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
-      if (!queueHasRows(cachedQueues) && getDataRefreshStatus().active) {
+      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+      if (!queueHasRows(cachedQueues) && getDataRefreshStatus().active && !offline) {
         setLoading(true);
         cachedQueues = await waitForHydratedCollectionQueues(session.user.id);
         if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
@@ -1135,7 +1140,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (queueHasRows(cachedQueues)) {
         cachedResult = await applyQueuePayload(cachedQueues, preferredKey);
         setQueueFromCache(true);
+        setQueueOffline(offline);
         setLoading(false);
+        if (offline) {
+          setRefreshingQueue(false);
+          setError("");
+          return cachedResult;
+        }
         setRefreshingQueue(true);
       } else {
         setLoading(true);
@@ -1194,7 +1205,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
       }
 
       const message = String(err.message || "");
-      if (message === "SESSION_TIMEOUT") {
+      const offlineNow = typeof navigator !== "undefined" && navigator.onLine === false;
+      if (offlineNow) {
+        setError(t("offlineQueueMissing"));
+      } else if (message === "SESSION_TIMEOUT") {
         setError("Session check timed out. Please refresh the page or login again.");
       } else if (message.includes("timed out")) {
         setError(t("msgQueueLoadTimeout"));

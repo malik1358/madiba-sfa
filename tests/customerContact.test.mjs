@@ -84,6 +84,21 @@ test("promptCustomerMobileUpdateIfMissing writes a valid number onto the custome
   assert.equal(customer.mobile, "0559988776");
 });
 
+test("fetchCustomerContact returns null when the network request fails", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new TypeError("Failed to fetch");
+  };
+
+  try {
+    const { fetchCustomerContact } = await import("../app/lib/customerContact.js");
+    const result = await fetchCustomerContact("token", "1301");
+    assert.equal(result, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("formatMissingCustomerMobilePrompt names the customer", () => {
   const message = formatMissingCustomerMobilePrompt({
     customerCode: "1301",

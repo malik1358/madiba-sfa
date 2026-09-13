@@ -210,12 +210,15 @@ export async function loadVisitDistanceMetrics({
   const capturedAt = savedAt || new Date().toISOString();
   let previousGpsRow = null;
   let previousVisitRow = null;
-  try {
-    const timeline = await loadTodayVisitTimelineRows(supabase, userId);
-    ({ previousGpsRow, previousVisitRow } = findPreviousVisitDistanceAnchors(timeline, capturedAt));
-  } catch {
-    previousGpsRow = null;
-    previousVisitRow = null;
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (!offline) {
+    try {
+      const timeline = await loadTodayVisitTimelineRows(supabase, userId);
+      ({ previousGpsRow, previousVisitRow } = findPreviousVisitDistanceAnchors(timeline, capturedAt));
+    } catch {
+      previousGpsRow = null;
+      previousVisitRow = null;
+    }
   }
 
   return resolveVisitDistanceMetrics({

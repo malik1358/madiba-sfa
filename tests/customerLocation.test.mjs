@@ -77,6 +77,56 @@ test("evaluateCustomerLocationUpdatePrompt uses the supplied customer and skips 
   assert.equal(prompt, null);
 });
 
+test("fetchCustomerLocation returns null when offline network fails", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new TypeError("Failed to fetch");
+  };
+
+  try {
+    const { fetchCustomerLocation } = await import("../app/lib/customerLocation.js");
+    const result = await fetchCustomerLocation("token", "1234");
+    assert.equal(result, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("evaluateCustomerLocationUpdatePrompt survives offline geocode failures", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalOnLine = Object.getOwnPropertyDescriptor(globalThis.navigator || {}, "onLine");
+  globalThis.fetch = async () => {
+    throw new TypeError("Failed to fetch");
+  };
+  Object.defineProperty(globalThis, "navigator", {
+    value: { onLine: false },
+    configurable: true,
+  });
+
+  try {
+    const { evaluateCustomerLocationUpdatePrompt } = await import("../app/lib/customerLocation.js");
+    const prompt = await evaluateCustomerLocationUpdatePrompt({
+      customerCode: "1234",
+      customerName: "Far Shop",
+      entryLocation: { latitude: 24.8, longitude: 46.8 },
+      accessToken: "token",
+      customer: {
+        customer_code: "1234",
+        customer_name: "Far Shop",
+        latitude: 24.7136,
+        longitude: 46.6753,
+        area: "",
+      },
+    });
+    assert.equal(Boolean(prompt?.message), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalOnLine) {
+      Object.defineProperty(globalThis.navigator, "onLine", originalOnLine);
+    }
+  }
+});
+
 test("withSalesScopeMatchers lets a team lead match subordinate customer assignments", async () => {
   const { withSalesScopeMatchers } = await import("../app/lib/customerAccess.js");
   const { customerSalesmanAssignmentMatchesScope } = await import("../app/lib/salesHierarchy.js");

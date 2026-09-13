@@ -524,7 +524,7 @@ export async function getSalesScope(admin, userId) {
 
 const CUSTOMER_PAGE_SIZE = 1000;
 const CUSTOMER_LOOKUP_BATCH_SIZE = 200;
-const CUSTOMER_COLLECTION_SELECT = "customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,latitude,longitude";
+const CUSTOMER_COLLECTION_SELECT = "customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,mobile,latitude,longitude";
 
 async function fetchAllCustomerRows(admin) {
   const rows = [];
@@ -852,6 +852,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       salesman_name: salesmanFromUpload || salesmanFromMaster,
       city: customer.city,
       area: customer.area,
+      mobile: customer.mobile || "",
       latitude: customer.latitude,
       longitude: customer.longitude,
       invoices: customerInvoices,

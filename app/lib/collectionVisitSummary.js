@@ -40,6 +40,11 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   summaryReceiptMode: "Receipt mode",
   summaryNextVisit: "Next visit",
   summaryVisitNumber: "Visit number today",
+  summaryLastVisitDate: "Last visit date",
+  summaryLastVisitOutcome: "Last visit outcome",
+  summaryLastVisitAmountReceived: "Last visit amount received",
+  summaryLastVisitRemarkArabic: "Last visit remark (Arabic)",
+  summaryLastVisitRemarkEnglish: "Last visit remark (English)",
   summaryOutstanding: "Outstanding",
   remarkArabic: "Remark (Arabic)",
   remarkEnglish: "Remark (English)",
@@ -54,6 +59,45 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   distanceFromPrevious: "Distance from previous",
   estWaiting: "Est. waiting",
 };
+
+export function formatCollectionLastVisitWhatsappLines(
+  lastVisit,
+  {
+    labels = COLLECTION_VISIT_SUMMARY_LABELS,
+    formatOutcome = (outcome) => formatCollectionOutcomeLabel(outcome),
+  } = {},
+) {
+  if (!lastVisit) return [];
+
+  const date = formatDateOnly(lastVisit.saved_at);
+  const outcomeRaw = String(lastVisit.visit_outcome || lastVisit.payment_status || "").trim();
+  const arabicRemark = String(lastVisit.remark_arabic || "").trim();
+  const englishRemark = String(lastVisit.remark_english || "").trim();
+  const amount = Number(lastVisit.amount_received || 0);
+
+  if (!date && !outcomeRaw && !arabicRemark && !englishRemark && amount <= 0) {
+    return [];
+  }
+
+  const lines = [
+    `${labels.summaryLastVisitDate}: ${date || labels.summaryNotSpecified}.`,
+  ];
+
+  if (outcomeRaw) {
+    lines.push(`${labels.summaryLastVisitOutcome}: ${formatOutcome(outcomeRaw) || labels.summaryNotSpecified}.`);
+  }
+  if (amount > 0) {
+    lines.push(`${labels.summaryLastVisitAmountReceived}: ${formatMoney(amount)}.`);
+  }
+  if (arabicRemark) {
+    lines.push(`${labels.summaryLastVisitRemarkArabic}: ${arabicRemark}.`);
+  }
+  if (englishRemark) {
+    lines.push(`${labels.summaryLastVisitRemarkEnglish}: ${englishRemark}.`);
+  }
+
+  return lines;
+}
 
 export function formatCollectionOutcomeLabel(outcome, labels = OUTCOME_LABELS) {
   const key = String(outcome || "").trim().toUpperCase();
@@ -120,6 +164,10 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   if (visitNumberForDay > 0) {
     lines.push(`${labels.summaryVisitNumber}: ${visitNumberForDay}.`);
   }
+  lines.push(...formatCollectionLastVisitWhatsappLines(options.lastVisit, {
+    labels,
+    formatOutcome: (outcome) => formatCollectionOutcomeLabel(outcome, OUTCOME_LABELS),
+  }));
   lines.push(`${labels.summaryOutstanding}:`);
   lines.push(`${labels.bucket30}: ${formatMoney(row.outstanding_0_30)}`);
   lines.push(`${labels.bucket31to60}: ${formatMoney(row.outstanding_30_60)}`);

@@ -48,6 +48,102 @@ test("buildCollectionVisitSummary includes queue priority and outstanding bucket
   assert.match(summary, /Est. waiting: -/);
 });
 
+test("buildCollectionVisitSummary includes last visit date, outcome, remarks, and amount when present", () => {
+  const summary = buildCollectionVisitSummary(
+    {
+      customer_name: "1071C ART MART LIMITED",
+      customer_code: "1071C",
+      salesman_name: "Ahmed Nabil",
+      outstanding_0_30: 0,
+      outstanding_30_60: 0,
+      outstanding_61_90: 0,
+      outstanding_91_120: 0,
+      outstanding_above_120: 1609.65,
+    },
+    {
+      visitOutcome: "ASKED_COME_LATER",
+      amountReceived: "0",
+      receiptMode: "",
+      nextVisitAt: "2026-09-14",
+      remarkArabic: "سوف يتم التحويل اليوم باذن الله",
+      remarkEnglish: "The transfer will be done today, God willing",
+    },
+    {
+      visitNumberForDay: 33,
+      probabilityLabel: "Medium",
+      lastVisit: {
+        saved_at: "2026-09-10T10:00:00.000Z",
+        visit_outcome: "FUNDS_RECEIVED",
+        amount_received: 250,
+        remark_arabic: "تم التحصيل جزئياً",
+        remark_english: "Partial collection completed",
+      },
+    },
+  );
+
+  assert.match(summary, /Last visit date: 10\/09\/2026/);
+  assert.match(summary, /Last visit outcome: Funds received/);
+  assert.match(summary, /Last visit amount received: 250/);
+  assert.match(summary, /Last visit remark \(Arabic\): تم التحصيل جزئياً/);
+  assert.match(summary, /Last visit remark \(English\): Partial collection completed/);
+  assert.match(summary, /Visit number today: 33\.\nLast visit date:/);
+});
+
+test("buildCollectionVisitSummary omits last visit amount when zero and skips empty last visit", () => {
+  const withoutAmount = buildCollectionVisitSummary(
+    {
+      customer_name: "Acme",
+      customer_code: "1009",
+      salesman_name: "Junaid",
+      outstanding_0_30: 0,
+      outstanding_30_60: 0,
+      outstanding_61_90: 0,
+      outstanding_91_120: 0,
+      outstanding_above_120: 0,
+    },
+    {
+      visitOutcome: "ASKED_COME_LATER",
+      amountReceived: "0",
+      nextVisitAt: "2026-09-14",
+    },
+    {
+      lastVisit: {
+        saved_at: "2026-09-01T08:00:00.000Z",
+        visit_outcome: "ASKED_COME_LATER",
+        amount_received: 0,
+        remark_arabic: "لاحقاً",
+        remark_english: "Later",
+      },
+    },
+  );
+
+  assert.match(withoutAmount, /Last visit date: 01\/09\/2026/);
+  assert.match(withoutAmount, /Last visit outcome: Asked to come later/);
+  assert.doesNotMatch(withoutAmount, /Last visit amount received/);
+  assert.match(withoutAmount, /Last visit remark \(Arabic\): لاحقاً/);
+
+  const withoutLastVisit = buildCollectionVisitSummary(
+    {
+      customer_name: "Acme",
+      customer_code: "1009",
+      salesman_name: "Junaid",
+      outstanding_0_30: 0,
+      outstanding_30_60: 0,
+      outstanding_61_90: 0,
+      outstanding_91_120: 0,
+      outstanding_above_120: 0,
+    },
+    {
+      visitOutcome: "ASKED_COME_LATER",
+      amountReceived: "0",
+      nextVisitAt: "2026-09-14",
+    },
+    {},
+  );
+
+  assert.doesNotMatch(withoutLastVisit, /Last visit date/);
+});
+
 test("patchCollectionVisitSummaryVisitNumber replaces stale visit numbers in stored summaries", () => {
   const stored = `Customer: Khaled Waleed Bin Salem Al Mahri Electronic Est.
 Queue priority: 12.

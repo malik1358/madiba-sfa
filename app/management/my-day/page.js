@@ -182,7 +182,6 @@ const PAGE_TEXT = {
   no: { en: "No", ar: "لا" },
   locationUpdateTitle: { en: "Update customer location?", ar: "تحديث موقع العميل؟" },
   visitSaved: { en: "Visit saved. Share the summary on WhatsApp.", ar: "تم حفظ الزيارة. شارك الملخص على واتساب." },
-  paymentFollowup: { en: "Payment follow-up", ar: "متابعة دفع" },
   comeBackLater: { en: "Asked to come back later", ar: "طلب العودة لاحقاً" },
   purchaseManagerUnavailable: { en: "Purchase manager not available", ar: "مدير المشتريات غير موجود" },
   stocksAvailable: { en: "Stocks available", ar: "المخزون متوفر" },
@@ -404,7 +403,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   const [dictationActive, setDictationActive] = useState(false);
   const speechRecognitionRef = useRef(null);
   const [visitForm, setVisitForm] = useState({
-    outcome: "PAYMENT_FOLLOWUP",
+    outcome: "COME_BACK_LATER",
     nextVisitAt: "",
     note: "",
     customerMobile: "",
@@ -1142,7 +1141,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     if (!nextCode) {
       setVisitItemsLoading(false);
       setVisitForm({
-        outcome: "PAYMENT_FOLLOWUP",
+        outcome: "COME_BACK_LATER",
         nextVisitAt: "",
         note: "",
         customerMobile: "",
@@ -1153,7 +1152,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
     setVisitItemsLoading(true);
     setVisitForm({
-      outcome: "PAYMENT_FOLLOWUP",
+      outcome: "COME_BACK_LATER",
       nextVisitAt: nextVisitDateInputValue(customer?.next_visit_at),
       note: "",
       customerMobile: customer?.mobile || "",
@@ -1356,7 +1355,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       );
       setActiveVisitCustomerCode("");
       setVisitForm({
-        outcome: "PAYMENT_FOLLOWUP",
+        outcome: "COME_BACK_LATER",
         nextVisitAt: "",
         note: "",
         customerMobile: "",
@@ -1881,7 +1880,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
           <label>
             {t("visitOutcome")}
             <select className="moduleInput" value={visitForm.outcome} onChange={(event) => setVisitForm((current) => ({ ...current, outcome: event.target.value }))}>
-              <option value="PAYMENT_FOLLOWUP">{t("paymentFollowup")}</option>
               <option value="COME_BACK_LATER">{t("comeBackLater")}</option>
               <option value="PURCHASE_MANAGER_NOT_AVAILABLE">{t("purchaseManagerUnavailable")}</option>
               <option value="STOCKS_AVAILABLE">{t("stocksAvailable")}</option>

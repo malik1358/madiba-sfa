@@ -112,8 +112,8 @@ export function subscribeOutstandingCacheCleared(handler) {
 }
 
 function collectionQueuesCacheKey(scope) {
-  // v5: ignore empty queues left behind by the v4 hydrate-wait race.
-  return `collectionQueues:v5:${buildScopeHash(scope)}`;
+  // v6: include customer mobile on queue rows so collections work offline.
+  return `collectionQueues:v6:${buildScopeHash(scope)}`;
 }
 
 export function collectionQueuesHaveRows(queues) {
@@ -320,6 +320,26 @@ export async function upsertLocalVisibleCustomer(scope, customer) {
 
   await Promise.all([merge(false), merge(true)]);
   return true;
+}
+
+export async function findCachedVisibleCustomerByCode(scope, customerCode) {
+  const code = String(customerCode || "").trim().toUpperCase();
+  if (!scope || !code) return null;
+
+  const basicEntry = await readCacheEntry(customersCacheKey(scope, false));
+  const basicRows = Array.isArray(basicEntry?.value) ? basicEntry.value : [];
+  const basicMatch = basicRows.find((row) => String(row?.customer_code || "").trim().toUpperCase() === code);
+  if (basicMatch) return basicMatch;
+
+  const enrichedEntry = await readCacheEntry(customersCacheKey(scope, true));
+  const enrichedValue = enrichedEntry?.value && typeof enrichedEntry.value === "object"
+    ? enrichedEntry.value
+    : null;
+  const enrichedRows = [
+    ...(Array.isArray(enrichedValue?.customers) ? enrichedValue.customers : []),
+    ...(Array.isArray(enrichedValue?.inactiveCustomers) ? enrichedValue.inactiveCustomers : []),
+  ];
+  return enrichedRows.find((row) => String(row?.customer_code || "").trim().toUpperCase() === code) || null;
 }
 
 export async function fetchVisibleCustomersCached(accessToken, scope, options = {}) {

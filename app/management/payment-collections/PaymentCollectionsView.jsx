@@ -23,7 +23,7 @@ import {
   evaluateCustomerLocationUpdatePrompt,
 } from "../../lib/customerLocation";
 import { promptCustomerMobileUpdateIfMissing } from "../../lib/customerContact";
-import { postFormDataResilient } from "../../lib/offlineApi";
+import { postFormDataResilient, processOfflineQueue, sendJsonResilient } from "../../lib/offlineApi";
 import {
   buildOptimisticLatestCollection,
   incrementLocalCollectionVisitCount,
@@ -1622,19 +1622,28 @@ export default function PaymentCollectionsView({ view = "due" }) {
     customerName,
     entryLocation,
     accessToken,
+    customer = null,
   }) {
+    const offline = typeof navigator !== "undefined" && navigator.onLine === false;
     const promptDetails = await evaluateCustomerLocationUpdatePrompt({
       language,
       customerCode,
       customerName,
       entryLocation,
       accessToken,
+      customer,
+      skipReverseGeocode: offline,
     });
     if (!promptDetails) return CUSTOMER_LOCATION_UPDATE_SKIP;
 
     const choice = await promptCustomerLocationChoice(promptDetails);
     if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE) {
-      await applyCustomerLocationUpdateFromPrompt(promptDetails);
+      try {
+        await applyCustomerLocationUpdateFromPrompt(promptDetails);
+      } catch (locationError) {
+        // Location sync is best-effort; do not block the collection save.
+        console.warn("Customer location update skipped", locationError);
+      }
     }
     return choice;
   }
@@ -1718,10 +1727,19 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerName: row.customer_name,
           entryLocation: gps,
           accessToken: session.access_token,
+          customer: row,
         })
         : CUSTOMER_LOCATION_UPDATE_SKIP;
       if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
         return;
+      }
+
+      let salesScope = null;
+      try {
+        const scopeResult = await fetchSalesScopeCached();
+        salesScope = scopeResult?.scope || null;
+      } catch {
+        salesScope = null;
       }
 
       await promptCustomerMobileUpdateIfMissing({
@@ -1730,6 +1748,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         customerCode: row.customer_code,
         customerName: row.customer_name,
         accessToken: session.access_token,
+        scope: salesScope,
       });
 
       const customerCodeKey = String(row.customer_code || "").trim().toUpperCase();
@@ -1845,7 +1864,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (!saveResult.queued) {
         await loadQueue(rowKey(row));
       } else {
-        const { scope } = await fetchSalesScopeCached();
+        const scope = salesScope || (await fetchSalesScopeCached().catch(() => null))?.scope;
         await persistOptimisticVisitSave(row, {
           visitOutcome: selectedOutcome,
           paymentStatus,
@@ -2006,6 +2025,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerName: row.customer_name,
           entryLocation: gps,
           accessToken: session.access_token,
+          customer: row,
         })
         : CUSTOMER_LOCATION_UPDATE_SKIP;
       if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
@@ -2016,13 +2036,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
         (activeRowKey === rowKey(row) ? form.legalNote : "") || row.legal_transfer?.note || "",
       ).trim();
 
-      const response = await fetch("/api/payment-collections", {
+      const saveResult = await sendJsonResilient({
+        url: "/api/payment-collections",
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
         },
-        body: JSON.stringify({
+        jsonBody: {
           customerCode: row.customer_code,
           customerName: row.customer_name,
           note: legalNote,
@@ -2031,32 +2051,46 @@ export default function PaymentCollectionsView({ view = "due" }) {
           longitude: gps?.longitude ?? null,
           gpsAccuracyMeters: gps?.accuracy ?? null,
           platform,
-        }),
+        },
+        metadata: {
+          type: "collection_legal_transfer",
+          customerCode: row.customer_code,
+          action,
+        },
+        queueFirst: typeof navigator !== "undefined" && navigator.onLine === false,
       });
 
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to update legal transfer status.");
+      if (!saveResult.success) {
+        throw new Error(saveResult.message || "Unable to update legal transfer status.");
       }
 
       showPopup({
-        message: action === "remove"
-          ? `${row.customer_name} ${t("msgLegalRemoved")}`
-          : `${row.customer_name} ${t("msgLegalTransferred")}`,
+        message: saveResult.queued
+          ? t("msgSavedOffline")
+          : (action === "remove"
+            ? `${row.customer_name} ${t("msgLegalRemoved")}`
+            : `${row.customer_name} ${t("msgLegalTransferred")}`),
         variant: "success",
       });
       if (action === "remove") {
         const removedKey = rowKey(row);
         setActiveRowKey("");
         setLegalCustomers((current) => current.filter((item) => rowKey(item) !== removedKey));
-        await invalidateCollectionQueuesForUser(session.user.id);
-        await loadQueue("");
-      } else {
+        if (!saveResult.queued) {
+          await invalidateCollectionQueuesForUser(session.user.id);
+          await loadQueue("");
+        }
+      } else if (!saveResult.queued) {
         await invalidateCollectionQueuesForUser(session.user.id);
         await loadQueue(rowKey(row));
         if (view !== "legal") {
           setActiveRowKey("");
         }
+      } else if (view !== "legal") {
+        setActiveRowKey("");
+      }
+      if (saveResult.queued) {
+        void processOfflineQueue(async () => session.access_token);
       }
     } catch (err) {
       showPopup({ message: localizeApiMessage(err.message || t("msgLegalUpdateFailed")), variant: "error" });

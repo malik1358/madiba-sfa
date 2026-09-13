@@ -182,14 +182,19 @@ export async function fetchCustomerContact(accessToken, customerCode) {
   const code = String(customerCode || "").trim();
   if (!code || !accessToken) return null;
 
-  const response = await fetchWithTimeout(`/api/customers/contact?customerCode=${encodeURIComponent(code)}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.success) return null;
-  return payload.customer || null;
+  try {
+    const response = await fetchWithTimeout(`/api/customers/contact?customerCode=${encodeURIComponent(code)}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.success) return null;
+    return payload.customer || null;
+  } catch {
+    // Offline / flaky networks should not block collection or order posting.
+    return null;
+  }
 }
 
 export async function updateCustomerMobile(accessToken, customerCode, mobile) {
@@ -198,24 +203,86 @@ export async function updateCustomerMobile(accessToken, customerCode, mobile) {
     throw new Error("Mobile must be a valid KSA number with 10 digits starting with 05.");
   }
 
-  const response = await fetchWithTimeout("/api/customers/contact", {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({
-      customerCode,
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (offline || !accessToken) {
+    if (accessToken) {
+      try {
+        const { sendJsonResilient } = await import("./offlineApi.js");
+        await sendJsonResilient({
+          url: "/api/customers/contact",
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          jsonBody: {
+            customerCode,
+            mobile: normalized,
+          },
+          metadata: {
+            type: "customer_mobile_update",
+            customerCode,
+          },
+          queueFirst: true,
+        });
+      } catch {
+        // Keep the local mobile even if the offline queue is unavailable.
+      }
+    }
+    return {
+      customer_code: customerCode,
       mobile: normalized,
-    }),
-  });
-
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.success) {
-    throw new Error(result.error || "Unable to update customer phone number.");
+    };
   }
 
-  return result.customer;
+  try {
+    const response = await fetchWithTimeout("/api/customers/contact", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        customerCode,
+        mobile: normalized,
+      }),
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || "Unable to update customer phone number.");
+    }
+
+    return result.customer;
+  } catch (error) {
+    const { isOfflineLikeError } = await import("./offlineSyncQueue.js");
+    if (!isOfflineLikeError(error)) throw error;
+
+    try {
+      const { sendJsonResilient } = await import("./offlineApi.js");
+      await sendJsonResilient({
+        url: "/api/customers/contact",
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        jsonBody: {
+          customerCode,
+          mobile: normalized,
+        },
+        metadata: {
+          type: "customer_mobile_update",
+          customerCode,
+        },
+        queueFirst: true,
+      });
+    } catch {
+      // Keep the local mobile even if the offline queue is unavailable.
+    }
+    return {
+      customer_code: customerCode,
+      mobile: normalized,
+    };
+  }
 }
 
 export async function promptCustomerMobileUpdateIfMissing({
@@ -233,6 +300,18 @@ export async function promptCustomerMobileUpdateIfMissing({
   }
 
   let current = customer;
+  if (!customerHasMobile(current) && scope) {
+    try {
+      const { findCachedVisibleCustomerByCode } = await import("./mobileDataCache.js");
+      const cached = await findCachedVisibleCustomerByCode(scope, code);
+      if (cached) {
+        current = { ...(current || {}), ...cached };
+      }
+    } catch {
+      // Local cache lookup is best-effort.
+    }
+  }
+
   if (!customerHasMobile(current) && accessToken) {
     const fetched = await fetchCustomerContact(accessToken, code);
     if (fetched) {

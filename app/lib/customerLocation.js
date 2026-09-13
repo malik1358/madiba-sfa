@@ -173,15 +173,20 @@ export async function fetchCustomerLocation(accessToken, customerCode) {
   const code = String(customerCode || "").trim();
   if (!code || !accessToken) return null;
 
-  const response = await fetchWithTimeout(`/api/customers/location?customerCode=${encodeURIComponent(code)}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+  try {
+    const response = await fetchWithTimeout(`/api/customers/location?customerCode=${encodeURIComponent(code)}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.success) return null;
-  return payload.customer || null;
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.success) return null;
+    return payload.customer || null;
+  } catch {
+    // Offline / flaky networks should not block visit or collection posting.
+    return null;
+  }
 }
 
 export async function updateCustomerLocation(accessToken, customerCode, location) {
@@ -198,21 +203,77 @@ export async function updateCustomerLocation(accessToken, customerCode, location
     payload.city = location.city;
   }
 
-  const response = await fetchWithTimeout("/api/customers/location", {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.success) {
-    throw new Error(result.error || "Unable to update customer location.");
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (offline || !accessToken) {
+    if (accessToken) {
+      try {
+        const { sendJsonResilient } = await import("./offlineApi.js");
+        await sendJsonResilient({
+          url: "/api/customers/location",
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          jsonBody: payload,
+          metadata: {
+            type: "customer_location_update",
+            customerCode,
+          },
+          queueFirst: true,
+        });
+      } catch {
+        // Keep the local location even if the offline queue is unavailable.
+      }
+    }
+    return {
+      customer_code: customerCode,
+      ...payload,
+    };
   }
 
-  return result.customer;
+  try {
+    const response = await fetchWithTimeout("/api/customers/location", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || "Unable to update customer location.");
+    }
+
+    return result.customer;
+  } catch (error) {
+    const { isOfflineLikeError } = await import("./offlineSyncQueue.js");
+    if (!isOfflineLikeError(error)) throw error;
+
+    try {
+      const { sendJsonResilient } = await import("./offlineApi.js");
+      await sendJsonResilient({
+        url: "/api/customers/location",
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        jsonBody: payload,
+        metadata: {
+          type: "customer_location_update",
+          customerCode,
+        },
+        queueFirst: true,
+      });
+    } catch {
+      // Keep the local location even if the offline queue is unavailable.
+    }
+    return {
+      customer_code: customerCode,
+      ...payload,
+    };
+  }
 }
 
 function buildLocationUpdatePayload(entryLocation, customer, geocoded = {}) {
@@ -271,6 +332,9 @@ export async function evaluateCustomerLocationUpdatePrompt({
     return null;
   }
 
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const skipGeocode = skipReverseGeocode || offline;
+
   const skipLocationWrite = shouldSkipCustomerLocationWrite(customerCode, knownCustomer);
   let customer = knownCustomer && typeof knownCustomer === "object" ? knownCustomer : null;
   if (!customer && !skipLocationWrite) {
@@ -281,13 +345,17 @@ export async function evaluateCustomerLocationUpdatePrompt({
   const displayName = customerName || customer?.customer_name || customerCode;
 
   let geocoded = { area: "", street: "", city: "" };
-  if (!skipReverseGeocode && !skipLocationWrite && !customerHasArea(customer)) {
-    geocoded = await reverseGeocodeCoordinates(entryLocation.latitude, entryLocation.longitude);
-    const detectedArea = String(geocoded.area || "").trim();
-    const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
-    if (detectedArea) {
-      await updateCustomerLocation(accessToken, customerCode, updatePayload);
-      applyCustomerLocation(customer, updatePayload);
+  if (!skipGeocode && !skipLocationWrite && !customerHasArea(customer)) {
+    try {
+      geocoded = await reverseGeocodeCoordinates(entryLocation.latitude, entryLocation.longitude);
+      const detectedArea = String(geocoded.area || "").trim();
+      const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
+      if (detectedArea) {
+        await updateCustomerLocation(accessToken, customerCode, updatePayload);
+        applyCustomerLocation(customer, updatePayload);
+      }
+    } catch {
+      // Offline / geocode failures should not block the visit.
     }
   }
 

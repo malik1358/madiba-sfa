@@ -18,7 +18,6 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
-import { shouldRequireTransactionGps } from "../../lib/moduleAccess";
 import { detectTable } from "../../lib/schemaGuards";
 import { looksLikeCustomerCodeSearch } from "../../lib/customerMasterQuery";
 import { isProspectCustomerCode } from "../../lib/customerCode";
@@ -46,7 +45,7 @@ import {
 import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { slimVisitStockChecks } from "../../lib/visitReportSave";
-import { buildGpsActivityNote, formatCollectorDisplayName, resolveGpsCapturePlatform } from "../../lib/geo";
+import { buildGpsActivityNote, formatCollectorDisplayName, requireGpsLocation, resolveGpsCapturePlatform } from "../../lib/geo";
 import {
   isMorningAttendanceRequiredForRole,
   notifyMorningAttendanceComplete,
@@ -955,41 +954,15 @@ export default function MyDayPage({ mode = "default" } = {}) {
   }, [today]);
 
   async function captureLocation() {
-    if (!shouldRequireTransactionGps(access.role)) {
-      return null;
+    try {
+      return await requireGpsLocation({ role: access.role });
+    } catch (error) {
+      const message = String(error?.message || "");
+      if (message.includes("GPS is required") || message.includes("UNSUPPORTED")) {
+        throw new Error("Unable to read GPS location.");
+      }
+      throw error instanceof Error ? error : new Error("Unable to read GPS location.");
     }
-
-    if (!navigator.geolocation) {
-      throw new Error("Geolocation is not supported on this device.");
-    }
-
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const finish = (callback, value) => {
-        if (settled) return;
-        settled = true;
-        callback(value);
-      };
-      const timer = window.setTimeout(() => {
-        finish(reject, new Error("Unable to read GPS location."));
-      }, 12000);
-
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          window.clearTimeout(timer);
-          finish(resolve, {
-            latitude: Number(position.coords.latitude.toFixed(6)),
-            longitude: Number(position.coords.longitude.toFixed(6)),
-            accuracy: Number(position.coords.accuracy.toFixed(1)),
-          });
-        },
-        () => {
-          window.clearTimeout(timer);
-          finish(reject, new Error("Unable to read GPS location."));
-        },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
-      );
-    });
   }
 
   async function promptCustomerGpsIfFar(customer, location, accessToken) {

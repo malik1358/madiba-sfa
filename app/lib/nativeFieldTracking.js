@@ -114,6 +114,7 @@ async function hydrateActivityTimestamps(userId) {
 }
 
 async function captureNativeLocation() {
+  const { normalizeGpsCoords } = await import("./geo.js");
   const { Geolocation } = await import("@capacitor/geolocation");
   const position = await Geolocation.getCurrentPosition({
     enableHighAccuracy: true,
@@ -121,11 +122,7 @@ async function captureNativeLocation() {
     maximumAge: 0,
   });
 
-  return {
-    latitude: Number(position.coords.latitude.toFixed(6)),
-    longitude: Number(position.coords.longitude.toFixed(6)),
-    accuracy: Number(position.coords.accuracy.toFixed(1)),
-  };
+  return normalizeGpsCoords(position?.coords);
 }
 
 async function postGpsPing(accessToken, location) {

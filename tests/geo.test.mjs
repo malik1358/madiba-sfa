@@ -25,9 +25,14 @@ import {
   inferGpsCapturePlatformFromNote,
   isCollectionReportCollector,
   isCollectionReportSalesman,
+  GPS_PERMISSION_DENIED_ERROR,
+  GPS_POSITION_UNAVAILABLE_ERROR,
+  GPS_LOCATION_FAILED_ERROR,
   GPS_REQUIRED_ERROR,
   haversineDistanceKm,
+  mapGeolocationFailure,
   nearestActivityGps,
+  normalizeGpsCoords,
   parseGpsFromActivityNote,
   parseReverseGeocodeAddress,
   normalizeGpsCapturePlatform,
@@ -151,6 +156,54 @@ test("collection report role helpers distinguish salesmen and collectors", () =>
 
 test("captureGpsLocation exposes a consistent required GPS error", async () => {
   assert.match(GPS_REQUIRED_ERROR, /GPS is required/i);
+});
+
+test("normalizeGpsCoords rounds coordinates and tolerates missing accuracy", () => {
+  const withAccuracy = normalizeGpsCoords({
+    latitude: 24.71361234,
+    longitude: 46.67531234,
+    accuracy: 12.34,
+  });
+  assert.equal(withAccuracy.latitude, 24.713612);
+  assert.equal(withAccuracy.longitude, 46.675312);
+  assert.equal(withAccuracy.accuracy, 12.3);
+
+  const withoutAccuracy = normalizeGpsCoords({
+    latitude: 24.7136,
+    longitude: 46.6753,
+    accuracy: null,
+  });
+  assert.equal(withoutAccuracy.accuracy, null);
+
+  assert.throws(
+    () => normalizeGpsCoords({ latitude: null, longitude: 46.6753 }),
+    (error) => error?.message === GPS_POSITION_UNAVAILABLE_ERROR,
+  );
+});
+
+test("mapGeolocationFailure maps browser and Capacitor error codes", () => {
+  assert.equal(mapGeolocationFailure({ code: 1 }).message, GPS_PERMISSION_DENIED_ERROR);
+  assert.equal(mapGeolocationFailure({ code: 2 }).message, GPS_POSITION_UNAVAILABLE_ERROR);
+  assert.equal(mapGeolocationFailure({ code: 3 }).message, GPS_LOCATION_FAILED_ERROR);
+  assert.equal(mapGeolocationFailure({}).message, GPS_LOCATION_FAILED_ERROR);
+});
+
+test("my-day visit capture uses shared GPS probe instead of stale browser maximumAge", async () => {
+  const source = await import("node:fs").then((fs) =>
+    fs.readFileSync(new URL("../app/management/my-day/page.js", import.meta.url), "utf8"),
+  );
+  assert.match(source, /requireGpsLocation/);
+  assert.doesNotMatch(source, /maximumAge:\s*30000/);
+  assert.doesNotMatch(source, /navigator\.geolocation\.getCurrentPosition/);
+});
+
+test("geo probe prefers Capacitor Geolocation on native platforms", async () => {
+  const source = await import("node:fs").then((fs) =>
+    fs.readFileSync(new URL("../app/lib/geo.js", import.meta.url), "utf8"),
+  );
+  assert.match(source, /@capacitor\/geolocation/);
+  assert.match(source, /probeNativeGpsLocation/);
+  assert.match(source, /normalizeGpsCoords/);
 });
 
 test("extractStreetFromActivityNote reads nested address fields", () => {

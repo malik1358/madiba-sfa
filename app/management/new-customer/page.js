@@ -13,7 +13,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { fetchSalesScope } from "../../lib/salesScope";
 import { isMostlyLatinLetters } from "../../lib/translateText";
 import { detectTable } from "../../lib/schemaGuards";
-import { insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
+import { captureGpsLocation, insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
@@ -477,50 +477,41 @@ export default function NewCustomerPage() {
   }, []);
 
   async function captureLocation() {
-    if (!navigator.geolocation) {
-      setGpsPermissionWarning("Location is not supported on this device. GPS is required to save a prospect.");
-      return;
-    }
-
     setGpsPermissionWarning("");
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude.toFixed(6);
-        const lng = position.coords.longitude.toFixed(6);
-        setForm((current) => ({ ...current, gps_location: `${lat}, ${lng}` }));
-        setGpsStatus(`Captured ${lat}, ${lng}`);
+    try {
+      const position = await captureGpsLocation();
+      const lat = Number(position.latitude).toFixed(6);
+      const lng = Number(position.longitude).toFixed(6);
+      setForm((current) => ({ ...current, gps_location: `${lat}, ${lng}` }));
+      setGpsStatus(`Captured ${lat}, ${lng}`);
 
-        try {
-          const location = await reverseGeocode(lat, lng);
-          if (location.city || location.area) {
-            setForm((current) => ({
-              ...current,
-              city: location.city || current.city,
-              area: location.area || current.area,
-            }));
+      try {
+        const location = await reverseGeocode(lat, lng);
+        if (location.city || location.area) {
+          setForm((current) => ({
+            ...current,
+            city: location.city || current.city,
+            area: location.area || current.area,
+          }));
 
-            const areaLabel = location.area || "-";
-            const cityLabel = location.city || "-";
-            setGpsStatus(`Captured ${lat}, ${lng} • ${areaLabel}, ${cityLabel}`);
-          } else if (location.formatted) {
-            setGpsStatus(`Captured ${lat}, ${lng} • ${location.formatted}`);
-          }
-        } catch {
-          setGpsStatus(`Captured ${lat}, ${lng}. Could not auto-detect city/area.`);
+          const areaLabel = location.area || "-";
+          const cityLabel = location.city || "-";
+          setGpsStatus(`Captured ${lat}, ${lng} • ${areaLabel}, ${cityLabel}`);
+        } else if (location.formatted) {
+          setGpsStatus(`Captured ${lat}, ${lng} • ${location.formatted}`);
         }
-      },
-      (positionError) => {
-        if (positionError?.code === 1) {
-          setGpsPermissionWarning("Location permission is blocked. Allow location access in your browser and reload this page.");
-        } else if (positionError?.code === 2) {
-          setGpsPermissionWarning("Location is unavailable right now. Check device GPS/network and reload this page.");
-        } else {
-          setGpsPermissionWarning("Unable to read location. Please allow GPS/location access and reload this page.");
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+      } catch {
+        setGpsStatus(`Captured ${lat}, ${lng}. Could not auto-detect city/area.`);
+      }
+    } catch (error) {
+      const message = String(error?.message || "");
+      if (message.includes("GPS is required") || message.includes("UNSUPPORTED") || message.includes("PERMISSION")) {
+        setGpsPermissionWarning("Location permission is blocked or GPS is unavailable. Allow location access and try again.");
+      } else {
+        setGpsPermissionWarning("Unable to read location. Please allow GPS/location access and try again.");
+      }
+    }
   }
 
   function handleDocumentPick(event) {

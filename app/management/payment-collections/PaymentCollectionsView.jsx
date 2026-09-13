@@ -59,7 +59,9 @@ import {
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
+import { formatCollectionLastVisitWhatsappLines } from "../../lib/collectionVisitSummary";
 import { getSupabaseClient } from "../../lib/supabase";
+
 import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
 import { formatKsaDateOnly, formatKsaDateTime, getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
@@ -308,12 +310,18 @@ const TEXT = {
   summaryReceiptMode: { en: "Receipt mode", ar: "طريقة الاستلام" },
   summaryNextVisit: { en: "Next visit", ar: "الزيارة القادمة" },
   summaryVisitNumber: { en: "Visit number today", ar: "رقم الزيارة لليوم" },
+  summaryLastVisitDate: { en: "Last visit date", ar: "تاريخ آخر زيارة" },
+  summaryLastVisitOutcome: { en: "Last visit outcome", ar: "نتيجة آخر زيارة" },
+  summaryLastVisitAmountReceived: { en: "Last visit amount received", ar: "المبلغ المستلم في آخر زيارة" },
+  summaryLastVisitRemarkArabic: { en: "Last visit remark (Arabic)", ar: "ملاحظة آخر زيارة (عربي)" },
+  summaryLastVisitRemarkEnglish: { en: "Last visit remark (English)", ar: "ملاحظة آخر زيارة (انجليزي)" },
   summaryGps: { en: "GPS", ar: "GPS" },
   summaryDistanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
   summaryDistanceFromPrevious: { en: "Distance from previous", ar: "المسافة من السابق" },
   summaryEstWaiting: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
   summaryOutstanding: { en: "Outstanding", ar: "المديونية" },
   summaryNotSpecified: { en: "not specified", ar: "غير محدد" },
+
   viewPaymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
   viewReceiptCopy: { en: "Receipt Copy", ar: "صورة الإيصال" },
   customerFilterPlaceholder: { en: "Filter customer name/code", ar: "تصفية اسم/كود العميل" },
@@ -449,6 +457,17 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   if (visitNumberForDay > 0) {
     lines.push(`${t("summaryVisitNumber")}: ${visitNumberForDay}.`);
   }
+  lines.push(...formatCollectionLastVisitWhatsappLines(options.lastVisit, {
+    labels: {
+      summaryLastVisitDate: t("summaryLastVisitDate"),
+      summaryLastVisitOutcome: t("summaryLastVisitOutcome"),
+      summaryLastVisitAmountReceived: t("summaryLastVisitAmountReceived"),
+      summaryLastVisitRemarkArabic: t("summaryLastVisitRemarkArabic"),
+      summaryLastVisitRemarkEnglish: t("summaryLastVisitRemarkEnglish"),
+      summaryNotSpecified: t("summaryNotSpecified"),
+    },
+    formatOutcome: (outcome) => formatOutcomeLabel(outcome, t),
+  }));
   lines.push(`${t("summaryOutstanding")}:`);
   lines.push(`${t("bucket30")}: ${formatMoney(row.outstanding_0_30)}`);
   lines.push(`${t("bucket31to60")}: ${formatMoney(row.outstanding_30_60)}`);
@@ -464,7 +483,7 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   return lines.join("\n");
 }
 
-function buildStoredVisitReport(row, englishRemark, t, visit = null) {
+function buildStoredVisitReport(row, englishRemark, t, visit = null, options = {}) {
   const selectedVisit = visit || row?.latest_collection;
   if (!selectedVisit) return "";
 
@@ -481,7 +500,11 @@ function buildStoredVisitReport(row, englishRemark, t, visit = null) {
     nextVisitAt: toDateInputValue(selectedVisit.next_visit_at),
     remarkArabic: selectedVisit.remark_arabic || "",
     remarkEnglish: englishRemark || selectedVisit.remark_english || "",
-  }, englishRemark || selectedVisit.remark_english || "", t);
+  }, englishRemark || selectedVisit.remark_english || "", t, {
+    lastVisit: options.lastVisit || null,
+    visitNumberForDay: selectedVisit.visit_number_for_day || 0,
+    queuePriority: selectedVisit.queue_priority || 0,
+  });
 }
 
 async function buildVisitReportText(row, t) {
@@ -496,7 +519,10 @@ async function buildVisitReportText(row, t) {
   for (let index = 0; index < visits.length; index += 1) {
     const visit = visits[index];
     const englishRemark = await resolveEnglishRemark(visit.remark_arabic, visit.remark_english);
-    const report = buildStoredVisitReport(row, englishRemark, t, visit);
+    const previousVisit = visits[index + 1] || null;
+    const report = buildStoredVisitReport(row, englishRemark, t, visit, {
+      lastVisit: previousVisit,
+    });
     if (!report) continue;
 
     if (index > 0) {
@@ -1787,6 +1813,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           visitNumberForDay,
           queuePriority: resolvedQueuePriority,
           visitDistance,
+          lastVisit: row?.latest_collection || null,
         },
       );
 

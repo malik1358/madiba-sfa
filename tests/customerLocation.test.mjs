@@ -77,6 +77,23 @@ test("evaluateCustomerLocationUpdatePrompt uses the supplied customer and skips 
   assert.equal(prompt, null);
 });
 
+test("fetchCustomerLocation soft-fails on aborted requests", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const error = new Error("signal is aborted without reason");
+    error.name = "AbortError";
+    throw error;
+  };
+
+  try {
+    const { fetchCustomerLocation } = await import("../app/lib/customerLocation.js");
+    const customer = await fetchCustomerLocation("token", "1234");
+    assert.equal(customer, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("withSalesScopeMatchers lets a team lead match subordinate customer assignments", async () => {
   const { withSalesScopeMatchers } = await import("../app/lib/customerAccess.js");
   const { customerSalesmanAssignmentMatchesScope } = await import("../app/lib/salesHierarchy.js");

@@ -7,6 +7,7 @@ import {
   hasGpsCoordinates,
   reverseGeocodeCoordinates,
 } from "./geo.js";
+import { toFriendlyAbortError } from "./abortError.js";
 
 export const CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM = 0.5;
 export const GPS_CANCELLED_ERROR = "Location update cancelled.";
@@ -24,6 +25,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = CUSTOMER_LOCATION
       ...options,
       signal: controller.signal,
     });
+  } catch (error) {
+    throw toFriendlyAbortError(error);
   } finally {
     clearTimeout(timer);
   }
@@ -173,15 +176,20 @@ export async function fetchCustomerLocation(accessToken, customerCode) {
   const code = String(customerCode || "").trim();
   if (!code || !accessToken) return null;
 
-  const response = await fetchWithTimeout(`/api/customers/location?customerCode=${encodeURIComponent(code)}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+  try {
+    const response = await fetchWithTimeout(`/api/customers/location?customerCode=${encodeURIComponent(code)}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.success) return null;
-  return payload.customer || null;
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.success) return null;
+    return payload.customer || null;
+  } catch {
+    // Timeout/network during GPS prompts must not block Save Draft / Submit Order.
+    return null;
+  }
 }
 
 export async function updateCustomerLocation(accessToken, customerCode, location) {

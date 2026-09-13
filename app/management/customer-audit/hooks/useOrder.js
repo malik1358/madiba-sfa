@@ -15,6 +15,7 @@ import { normalizePaymentType } from '../../../lib/regionalPricing';
 import { priceOrderLines } from '../../../lib/orderPricing';
 import { claimUnsavedEntry } from '../../../lib/unsavedEntryGuard';
 import { requestLoginFirstCustomerHintCheck } from '../../../lib/loginFirstCustomerHint';
+import { friendlyErrorMessage } from '../../../lib/abortError';
 
 function isPendingOrderId(orderId) {
   return String(orderId || '').startsWith('pending:');
@@ -231,7 +232,7 @@ export function useOrder({
           }
         }
       } catch (err) {
-        setError(err.message || 'Unable to restore draft order.');
+        setError(friendlyErrorMessage(err, 'Unable to restore draft order.'));
       }
     }
 
@@ -374,7 +375,7 @@ export function useOrder({
         visitDistance,
       };
     } catch (err) {
-      setError(err.message || 'Unable to save draft order.');
+      setError(friendlyErrorMessage(err, 'Unable to save draft order.'));
       return null;
     } finally {
       setSavingOrder(false);
@@ -507,7 +508,7 @@ export function useOrder({
         visitDistance,
       };
     } catch (err) {
-      setError(err.message || 'Unable to submit order.');
+      setError(friendlyErrorMessage(err, 'Unable to submit order.'));
       return null;
     } finally {
       setSubmittingOrder(false);

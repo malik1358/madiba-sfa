@@ -1,4 +1,5 @@
 import { resolveCustomerMasterExportFields } from "./customerCode.js";
+import { toFriendlyAbortError } from "./abortError.js";
 
 export const CUSTOMER_MOBILE_REQUIRED_ERROR = "Please update the customer phone number before posting.";
 const CUSTOMER_CONTACT_FETCH_TIMEOUT_MS = 8000;
@@ -142,6 +143,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = CUSTOMER_CONTACT_
       ...options,
       signal: controller.signal,
     });
+  } catch (error) {
+    throw toFriendlyAbortError(error);
   } finally {
     clearTimeout(timer);
   }
@@ -182,14 +185,19 @@ export async function fetchCustomerContact(accessToken, customerCode) {
   const code = String(customerCode || "").trim();
   if (!code || !accessToken) return null;
 
-  const response = await fetchWithTimeout(`/api/customers/contact?customerCode=${encodeURIComponent(code)}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.success) return null;
-  return payload.customer || null;
+  try {
+    const response = await fetchWithTimeout(`/api/customers/contact?customerCode=${encodeURIComponent(code)}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.success) return null;
+    return payload.customer || null;
+  } catch {
+    // Timeout/network during mobile prompts must not block Save Draft / Submit Order.
+    return null;
+  }
 }
 
 export async function updateCustomerMobile(accessToken, customerCode, mobile) {

@@ -24,33 +24,36 @@ export function formatFieldVisitOutcome(outcome, language = "en") {
   return labels[language === "ar" ? "ar" : "en"] || labels.en;
 }
 
+/**
+ * WhatsApp field-visit shares stay English even when the salesman UI is Arabic,
+ * matching collection visit summaries so managers always get the same format.
+ */
 export function buildFieldVisitWhatsappSummary({
   customer = {},
   visitForm = {},
   salesmanName = "",
   salesmanCode = "",
-  language = "en",
+  language: _language = "en",
   visitDistance = {},
 } = {}) {
-  const isAr = language === "ar";
   const labels = {
-    title: isAr ? "تقرير زيارة ميدانية" : "Field visit report",
-    customer: isAr ? "العميل" : "Customer",
-    code: isAr ? "الرمز" : "Code",
-    salesman: isAr ? "رجل البيع" : "Salesman",
-    outcome: isAr ? "النتيجة" : "Outcome",
-    nextVisit: isAr ? "الزيارة القادمة" : "Next visit",
-    notes: isAr ? "ملاحظات" : "Notes",
-    notSpecified: isAr ? "غير محدد" : "not specified",
-    outstanding: isAr ? "المستحقات" : "Outstanding",
-    bucket0To30: isAr ? "0-30 يوماً" : "0-30",
-    bucket31To60: isAr ? "31-60 يوماً" : "31-60",
-    bucket61To90: isAr ? "61-90 يوماً" : "61-90",
-    bucketAbove90: isAr ? ">90 يوماً" : ">90",
-    totalOutstanding: isAr ? "الإجمالي" : "Total",
+    title: "Field visit report",
+    customer: "Customer",
+    code: "Code",
+    salesman: "Salesman",
+    outcome: "Outcome",
+    nextVisit: "Next visit",
+    notes: "Notes",
+    notSpecified: "not specified",
+    outstanding: "Outstanding",
+    bucket0To30: "0-30",
+    bucket31To60: "31-60",
+    bucket61To90: "61-90",
+    bucketAbove90: ">90",
+    totalOutstanding: "Total",
   };
 
-  const outcome = formatFieldVisitOutcome(visitForm.outcome, language);
+  const outcome = formatFieldVisitOutcome(visitForm.outcome, "en");
   const nextVisit = formatDateOnly(visitForm.nextVisitAt);
   const note = String(visitForm.note || "").trim();
   const salesman = String(salesmanName || salesmanCode || "-").trim() || "-";

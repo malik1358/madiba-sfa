@@ -1292,7 +1292,6 @@ export default function MyDayPage({ mode = "default" } = {}) {
         visitForm,
         salesmanName: formatCollectorDisplayName(profile || {}),
         salesmanCode: profile?.salesman_code || "",
-        language,
         visitDistance,
       });
       void copyTextToClipboard(summaryText);

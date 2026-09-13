@@ -86,7 +86,59 @@ test("buildCollectionVisitSummary includes last visit date, outcome, remarks, an
   assert.match(summary, /Last visit amount received: 250/);
   assert.match(summary, /Last visit remark \(Arabic\): تم التحصيل جزئياً/);
   assert.match(summary, /Last visit remark \(English\): Partial collection completed/);
-  assert.match(summary, /Visit number today: 33\.\nLast visit date:/);
+  assert.match(summary, /Visit number today: 33\./);
+  assert.match(summary, /Est\. waiting: -\n\nLast visit date:/);
+  assert.doesNotMatch(summary, /Visit number today: 33\.\nLast visit date:/);
+  assert.doesNotMatch(summary, /Last visit date:[\s\S]*Outstanding:/);
+});
+
+test("buildCollectionVisitSummary places last visit after GPS as a separate trailing block", () => {
+  const summary = buildCollectionVisitSummary(
+    {
+      customer_name: "1094 BLUE CRYSTAL STATIONERY",
+      customer_code: "1094",
+      salesman_name: "Junaid",
+      outstanding_0_30: 0,
+      outstanding_30_60: 0,
+      outstanding_61_90: 2961.25,
+      outstanding_91_120: 228.8,
+      outstanding_above_120: 0,
+    },
+    {
+      visitOutcome: "FUNDS_RECEIVED",
+      amountReceived: "3190",
+      receiptMode: "CASH",
+      nextVisitAt: "2026-09-14",
+    },
+    {
+      visitNumberForDay: 11,
+      queuePriority: 10,
+      probabilityLabel: "Medium",
+      lastVisit: {
+        saved_at: "2026-09-13T10:00:00.000Z",
+        visit_outcome: "FUNDS_RECEIVED",
+        amount_received: 3190,
+      },
+      visitDistance: {
+        latitude: 24.674411,
+        longitude: 46.728291,
+        distanceFromCustomerKm: 0.15,
+        distanceFromPreviousKm: 0.02,
+        waitingMinutes: 1,
+      },
+    },
+  );
+
+  const visitNumberIndex = summary.indexOf("Visit number today: 11.");
+  const outstandingIndex = summary.indexOf("Outstanding:");
+  const gpsIndex = summary.indexOf("GPS:");
+  const lastVisitIndex = summary.indexOf("Last visit date:");
+
+  assert.ok(visitNumberIndex > 0);
+  assert.ok(outstandingIndex > visitNumberIndex);
+  assert.ok(gpsIndex > outstandingIndex);
+  assert.ok(lastVisitIndex > gpsIndex);
+  assert.match(summary, /Est\. waiting: 1 min\n\nLast visit date: 13\/09\/2026\./);
 });
 
 test("buildCollectionVisitSummary omits last visit amount when zero and skips empty last visit", () => {
@@ -185,7 +237,10 @@ Outstanding:
 
 Distance from customer: 0.34 km
 Distance from previous: 27.69 km
-Est. waiting: 4h 22m`;
+Est. waiting: 4h 22m
+
+Last visit date: 10/09/2026.
+Last visit outcome: Funds received.`;
 
   const patched = patchCollectionVisitSummaryVisitDistance(stored, {
     distanceFromCustomerKm: 0.34,
@@ -198,6 +253,8 @@ Est. waiting: 4h 22m`;
   assert.match(patched, /Est\. waiting: 39 min/);
   assert.doesNotMatch(patched, /4h 22m/);
   assert.doesNotMatch(patched, /27\.69 km/);
+  assert.match(patched, /Est\. waiting: 39 min\n\nLast visit date: 10\/09\/2026\./);
+  assert.match(patched, /Last visit outcome: Funds received\./);
 });
 
 test("patchCollectionVisitSummaryEnglishRemark replaces stale English remarks", () => {

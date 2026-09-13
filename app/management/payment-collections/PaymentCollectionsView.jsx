@@ -457,17 +457,6 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   if (visitNumberForDay > 0) {
     lines.push(`${t("summaryVisitNumber")}: ${visitNumberForDay}.`);
   }
-  lines.push(...formatCollectionLastVisitWhatsappLines(options.lastVisit, {
-    labels: {
-      summaryLastVisitDate: t("summaryLastVisitDate"),
-      summaryLastVisitOutcome: t("summaryLastVisitOutcome"),
-      summaryLastVisitAmountReceived: t("summaryLastVisitAmountReceived"),
-      summaryLastVisitRemarkArabic: t("summaryLastVisitRemarkArabic"),
-      summaryLastVisitRemarkEnglish: t("summaryLastVisitRemarkEnglish"),
-      summaryNotSpecified: t("summaryNotSpecified"),
-    },
-    formatOutcome: (outcome) => formatOutcomeLabel(outcome, t),
-  }));
   lines.push(`${t("summaryOutstanding")}:`);
   lines.push(`${t("bucket30")}: ${formatMoney(row.outstanding_0_30)}`);
   lines.push(`${t("bucket31to60")}: ${formatMoney(row.outstanding_30_60)}`);
@@ -480,6 +469,20 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
     distanceFromPrevious: t("summaryDistanceFromPrevious"),
     estWaiting: t("summaryEstWaiting"),
   }));
+  const lastVisitLines = formatCollectionLastVisitWhatsappLines(options.lastVisit, {
+    labels: {
+      summaryLastVisitDate: t("summaryLastVisitDate"),
+      summaryLastVisitOutcome: t("summaryLastVisitOutcome"),
+      summaryLastVisitAmountReceived: t("summaryLastVisitAmountReceived"),
+      summaryLastVisitRemarkArabic: t("summaryLastVisitRemarkArabic"),
+      summaryLastVisitRemarkEnglish: t("summaryLastVisitRemarkEnglish"),
+      summaryNotSpecified: t("summaryNotSpecified"),
+    },
+    formatOutcome: (outcome) => formatOutcomeLabel(outcome, t),
+  });
+  if (lastVisitLines.length > 0) {
+    lines.push("", ...lastVisitLines);
+  }
   return lines.join("\n");
 }
 
@@ -2922,6 +2925,28 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   <section className="moduleMetricCard"><span>{t("probability")}</span><strong>{isNotDue ? "N/A" : row.probability_label}</strong></section>
                                 </div>
 
+                                <div className="moduleSectionHeader" style={{ marginTop: "4px" }}>
+                                  <h2>{t("latestVisit")}</h2>
+                                </div>
+                                {Array.isArray(row.collection_history) && row.collection_history.length > 0 ? (
+                                  <div className="moduleHint" style={{ marginBottom: "12px" }}>
+                                    <strong>{t("lastThreeVisits")}</strong>
+                                    {row.collection_history.map((visit, index) => (
+                                      <div key={`${row.customer_code || key}-visit-${visit.saved_at || index}`} style={{ marginTop: index === 0 ? "8px" : "4px" }}>
+                                        {formatVisitHistoryItem(visit, t)}
+                                      </div>
+                                    ))}
+                                    {row.latest_collection?.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
+                                    {row.latest_collection?.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
+                                  </div>
+                                ) : row.latest_collection ? (
+                                  <div className="moduleHint" style={{ marginBottom: "12px" }}>
+                                    {formatVisitHistoryItem(row.latest_collection, t)}
+                                    {row.latest_collection.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
+                                    {row.latest_collection.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
+                                  </div>
+                                ) : <div className="moduleHint" style={{ marginBottom: "12px" }}>{t("noLatestVisit")}</div>}
+
                                 <div className="moduleFilterRow moduleCollectorFormGrid">
                                   <label>
                                     {t("visitOutcome")}
@@ -3087,28 +3112,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     {copyStatus ? <span className="moduleHint">{copyStatus}</span> : null}
                                   </div>
                                 ) : null}
-
-                                <div className="moduleSectionHeader" style={{ marginTop: "14px" }}>
-                                  <h2>{t("latestVisit")}</h2>
-                                </div>
-                                {Array.isArray(row.collection_history) && row.collection_history.length > 0 ? (
-                                  <div className="moduleHint">
-                                    <strong>{t("lastThreeVisits")}</strong>
-                                    {row.collection_history.map((visit, index) => (
-                                      <div key={`${row.customer_code || key}-visit-${visit.saved_at || index}`} style={{ marginTop: index === 0 ? "8px" : "4px" }}>
-                                        {formatVisitHistoryItem(visit, t)}
-                                      </div>
-                                    ))}
-                                    {row.latest_collection?.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
-                                    {row.latest_collection?.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
-                                  </div>
-                                ) : row.latest_collection ? (
-                                  <div className="moduleHint">
-                                    {formatVisitHistoryItem(row.latest_collection, t)}
-                                    {row.latest_collection.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
-                                    {row.latest_collection.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
-                                  </div>
-                                ) : <div className="moduleHint">{t("noLatestVisit")}</div>}
                               </div>
                             </td>
                           </tr>

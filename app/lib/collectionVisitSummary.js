@@ -164,10 +164,6 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   if (visitNumberForDay > 0) {
     lines.push(`${labels.summaryVisitNumber}: ${visitNumberForDay}.`);
   }
-  lines.push(...formatCollectionLastVisitWhatsappLines(options.lastVisit, {
-    labels,
-    formatOutcome: (outcome) => formatCollectionOutcomeLabel(outcome, OUTCOME_LABELS),
-  }));
   lines.push(`${labels.summaryOutstanding}:`);
   lines.push(`${labels.bucket30}: ${formatMoney(row.outstanding_0_30)}`);
   lines.push(`${labels.bucket31to60}: ${formatMoney(row.outstanding_30_60)}`);
@@ -180,6 +176,13 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
     distanceFromPrevious: labels.distanceFromPrevious,
     estWaiting: labels.estWaiting,
   }));
+  const lastVisitLines = formatCollectionLastVisitWhatsappLines(options.lastVisit, {
+    labels,
+    formatOutcome: (outcome) => formatCollectionOutcomeLabel(outcome, OUTCOME_LABELS),
+  });
+  if (lastVisitLines.length > 0) {
+    lines.push("", ...lastVisitLines);
+  }
   return lines.join("\n");
 }
 
@@ -227,6 +230,7 @@ export function patchCollectionVisitSummaryVisitDistance(
   if (!text) return text;
 
   const distanceLines = formatVisitDistanceWhatsappLines(metrics, {
+    gps: labels.gps,
     distanceFromCustomer: labels.distanceFromCustomer,
     distanceFromPrevious: labels.distanceFromPrevious,
     estWaiting: labels.estWaiting,
@@ -234,12 +238,19 @@ export function patchCollectionVisitSummaryVisitDistance(
   const block = distanceLines.join("\n").replace(/^\n/, "");
   if (!block) return text;
 
+  // Replace only the GPS/distance/waiting block so trailing last-visit lines stay intact.
   const distanceBlockPattern = new RegExp(
-    `(?:\\n|^)${escapeRegExp(labels.distanceFromCustomer)}:[\\s\\S]*$`,
+    `(?:\\n|^)(?:${escapeRegExp(labels.gps)}:\\s*[^\\n]*\\n)?${escapeRegExp(labels.distanceFromCustomer)}:\\s*[^\\n]*\\n${escapeRegExp(labels.distanceFromPrevious)}:\\s*[^\\n]*\\n${escapeRegExp(labels.estWaiting)}:\\s*[^\\n]*`,
     "m",
   );
   if (distanceBlockPattern.test(text)) {
     return text.replace(distanceBlockPattern, `\n${block}`);
+  }
+
+  const lastVisitAnchor = labels.summaryLastVisitDate || "Last visit date";
+  const lastVisitPattern = new RegExp(`\\n${escapeRegExp(lastVisitAnchor)}:`);
+  if (lastVisitPattern.test(text)) {
+    return text.replace(lastVisitPattern, `\n\n${block}\n\n${lastVisitAnchor}:`);
   }
 
   return `${text.trimEnd()}\n\n${block}`;

@@ -111,9 +111,12 @@ export function subscribeOutstandingCacheCleared(handler) {
   };
 }
 
-function collectionQueuesCacheKey(scope) {
-  // v6: include customer mobile on queue rows so collections work offline.
-  return `collectionQueues:v6:${buildScopeHash(scope)}`;
+const COLLECTION_QUEUE_CACHE_VERSION = 6;
+// Keep reading older queue caches so an app update does not blank the offline list.
+const LEGACY_COLLECTION_QUEUE_CACHE_VERSIONS = [5, 4];
+
+function collectionQueuesCacheKey(scope, version = COLLECTION_QUEUE_CACHE_VERSION) {
+  return `collectionQueues:v${version}:${buildScopeHash(scope)}`;
 }
 
 export function collectionQueuesHaveRows(queues) {
@@ -122,6 +125,36 @@ export function collectionQueuesHaveRows(queues) {
     || queues?.notDueCustomers?.length
     || queues?.legalCustomers?.length,
   );
+}
+
+async function readCollectionQueuesEntryForScope(scope) {
+  const currentKey = collectionQueuesCacheKey(scope);
+  const current = await readCacheEntry(currentKey);
+  if (collectionQueuesHaveRows(current?.value)) {
+    return { key: currentKey, entry: current, migrated: false };
+  }
+
+  for (const version of LEGACY_COLLECTION_QUEUE_CACHE_VERSIONS) {
+    const legacyKey = collectionQueuesCacheKey(scope, version);
+    const legacy = await readCacheEntry(legacyKey);
+    if (!collectionQueuesHaveRows(legacy?.value)) continue;
+
+    await writeCacheEntry(currentKey, legacy.value, {
+      ttlMs: CACHE_TTL.collectionQueuesMs,
+      savedAt: legacy.savedAt,
+    });
+    return {
+      key: currentKey,
+      entry: {
+        ...legacy,
+        key: currentKey,
+        value: legacy.value,
+      },
+      migrated: true,
+    };
+  }
+
+  return { key: currentKey, entry: current || null, migrated: false };
 }
 
 function isBrowserOnline() {
@@ -433,17 +466,37 @@ export async function invalidateVisibleCustomersCache(scope) {
   ]);
 }
 
+function toCollectionScope(scope) {
+  return {
+    hasAllAccess: Boolean(scope?.hasAllAccess),
+    visibleSalesmanCodes: Array.isArray(scope?.visibleSalesmanCodes) ? scope.visibleSalesmanCodes : [],
+  };
+}
+
 export async function invalidateCollectionQueuesForUser(userId) {
   const { removeCacheEntry } = await import("./localDataStore.js");
   const scopeEntry = await readCacheEntry(collectionScopeCacheKey(userId));
   if (!scopeEntry?.value) return;
-  await removeCacheEntry(collectionQueuesCacheKey(scopeEntry.value));
+  const scope = scopeEntry.value;
+  await Promise.all([
+    removeCacheEntry(collectionQueuesCacheKey(scope)),
+    ...LEGACY_COLLECTION_QUEUE_CACHE_VERSIONS.map((version) => (
+      removeCacheEntry(collectionQueuesCacheKey(scope, version))
+    )),
+  ]);
 }
 
 export async function readCollectionQueuesForUser(userId) {
   const scopeEntry = await readCacheEntry(collectionScopeCacheKey(userId));
-  if (!scopeEntry?.value) return null;
-  const entry = await readCacheEntry(collectionQueuesCacheKey(scopeEntry.value));
+  let scope = scopeEntry?.value || null;
+  if (!scope) {
+    const salesScopeEntry = await readCacheEntry(scopeCacheKey(userId));
+    if (salesScopeEntry?.value) {
+      scope = toCollectionScope(salesScopeEntry.value);
+    }
+  }
+  if (!scope) return null;
+  const { entry } = await readCollectionQueuesEntryForScope(toCollectionScope(scope));
   return entry?.value || null;
 }
 
@@ -536,20 +589,23 @@ export async function writeCollectionQueuesForUser(userId, scope, queues) {
 
 async function resolveCollectionScopeForUser(accessToken, userId, preferredScope = null) {
   if (preferredScope) {
-    return {
-      hasAllAccess: Boolean(preferredScope?.hasAllAccess),
-      visibleSalesmanCodes: Array.isArray(preferredScope?.visibleSalesmanCodes) ? preferredScope.visibleSalesmanCodes : [],
-    };
+    return toCollectionScope(preferredScope);
   }
 
   const cachedScope = await readCacheEntry(collectionScopeCacheKey(userId));
-  if (cachedScope?.value) return cachedScope.value;
+  if (cachedScope?.value) return toCollectionScope(cachedScope.value);
+
+  const salesScopeCached = await readCacheEntry(scopeCacheKey(userId));
+  if (salesScopeCached?.value) {
+    return toCollectionScope(salesScopeCached.value);
+  }
+
+  if (!isBrowserOnline()) {
+    throw new Error("Collection queue is not available offline yet. Open Collections once while online.");
+  }
 
   const salesScope = await fetchSalesScopeNetwork(accessToken);
-  return {
-    hasAllAccess: Boolean(salesScope?.hasAllAccess),
-    visibleSalesmanCodes: Array.isArray(salesScope?.visibleSalesmanCodes) ? salesScope.visibleSalesmanCodes : [],
-  };
+  return toCollectionScope(salesScope);
 }
 
 export async function fetchCollectionQueuesCached(accessToken, userId, options = {}) {
@@ -558,12 +614,20 @@ export async function fetchCollectionQueuesCached(accessToken, userId, options =
   }
 
   const scope = await resolveCollectionScopeForUser(accessToken, userId, options.scope);
-  const cacheKey = collectionQueuesCacheKey(scope);
-  const cached = await readCacheEntry(cacheKey);
+  const { key: cacheKey, entry: cached } = await readCollectionQueuesEntryForScope(scope);
   const emptyCached = !collectionQueuesHaveRows(cached?.value);
   // Empty queues must not stick for the full TTL — refetch while online.
   const forceRefresh = Boolean(options.forceRefresh)
     || (emptyCached && isBrowserOnline());
+
+  if (!forceRefresh && !isBrowserOnline() && !emptyCached) {
+    return {
+      queues: cached.value,
+      fromCache: true,
+      stale: true,
+      offline: true,
+    };
+  }
 
   const result = await fetchWithLocalCacheResilient(
     cacheKey,

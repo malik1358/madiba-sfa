@@ -45,12 +45,22 @@ test("outstanding cache is dropped after an outstanding upload refresh", async (
   assert.match(refreshSource, /await invalidateOutstandingCache\(\)/);
 });
 
-test("collection queue cache key version is v6 so queues without mobile are discarded", async () => {
+test("collection queue cache keeps v6 current and still reads legacy v5/v4 offline queues", async () => {
   const source = await import("node:fs").then((fs) => (
     fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")
   ));
-  assert.match(source, /collectionQueues:v6:/);
-  assert.doesNotMatch(source, /collectionQueues:v5:/);
+  assert.match(source, /COLLECTION_QUEUE_CACHE_VERSION = 6/);
+  assert.match(source, /LEGACY_COLLECTION_QUEUE_CACHE_VERSIONS = \[5, 4\]/);
+  assert.match(source, /collectionQueues:v\$\{version\}:/);
+  assert.match(source, /readCollectionQueuesEntryForScope/);
+});
+
+test("payment collections loadQueue shows cached customers immediately while offline", async () => {
+  const source = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/management/payment-collections/PaymentCollectionsView.jsx", import.meta.url), "utf8")
+  ));
+  assert.match(source, /navigator\.onLine === false/);
+  assert.match(source, /if \(offline\) \{\s*setRefreshingQueue\(false\);\s*setError\(""\);\s*return cachedResult;/);
 });
 
 test("outstanding cache key version is v2 so stale v1 customer rows are ignored", async () => {

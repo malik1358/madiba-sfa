@@ -246,6 +246,20 @@ export function buildCustomerGpsUpdateFromProspect(prospect, customer, options =
   return update;
 }
 
+export function buildCustomerSalesmanAssignmentFromProspect(prospect, customer) {
+  const targetSalesman = normalizeProspectSalesmanCode(prospect?.salesman_code);
+  if (!targetSalesman) return null;
+
+  const currentSalesman = normalizeProspectSalesmanCode(customer?.current_salesman_code);
+  if (currentSalesman === targetSalesman) return null;
+
+  return {
+    current_salesman_code: targetSalesman,
+    previous_salesman_code: currentSalesman || null,
+    updated_at: new Date().toISOString(),
+  };
+}
+
 async function updateProspectLinkRecord(admin, prospectId, payload) {
   const workingPayload = { ...payload };
   const maxAttempts = Object.keys(workingPayload).length + 2;
@@ -306,13 +320,23 @@ export async function linkProspectToCustomer(admin, options = {}) {
   const linkedCustomerCode = resolvedCustomer.customer_code || normalizeCustomerCode(customer.customer_code);
 
   const gpsUpdate = buildCustomerGpsUpdateFromProspect(prospect, customer, options);
-  if (gpsUpdate) {
-    const { error: gpsError } = await admin
+  const salesmanUpdate = options.assignToProspectSalesman === false
+    ? null
+    : buildCustomerSalesmanAssignmentFromProspect(prospect, customer);
+  const customerUpdate = {
+    ...(gpsUpdate || {}),
+    ...(salesmanUpdate || {}),
+  };
+  if (Object.keys(customerUpdate).length > 0) {
+    if (!customerUpdate.updated_at) {
+      customerUpdate.updated_at = new Date().toISOString();
+    }
+    const { error: customerUpdateError } = await admin
       .from("customers")
-      .update(gpsUpdate)
+      .update(customerUpdate)
       .eq("customer_code", customer.customer_code);
 
-    if (gpsError) throw gpsError;
+    if (customerUpdateError) throw customerUpdateError;
   }
 
   const linkedProspect = await updateProspectLinkRecord(admin, prospectId, {
@@ -325,10 +349,12 @@ export async function linkProspectToCustomer(admin, options = {}) {
     prospect: linkedProspect,
     customer: {
       ...customer,
+      ...customerUpdate,
       customer_code: linkedCustomerCode,
       customer_name: resolvedCustomer.customer_name || customer.customer_name,
     },
     gpsCopied: Boolean(gpsUpdate),
+    salesmanAssigned: Boolean(salesmanUpdate),
     customerCode: linkedCustomerCode,
   };
 }

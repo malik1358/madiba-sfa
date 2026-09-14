@@ -7356,10 +7356,14 @@ button.moduleBiDashKpi:focus-visible {
 
 .moduleVisitPlanTable th.moduleVisitPlanMoneyNarrow,
 .moduleVisitPlanTable td.moduleVisitPlanMoneyNarrow {
-  max-width: 6.75rem;
-  width: 6.75rem;
+  max-width: 5.25rem;
+  width: 5.25rem;
+  min-width: 4.75rem;
+  padding-left: 6px;
+  padding-right: 6px;
   white-space: nowrap;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .moduleVisitPlanTable thead th.moduleVisitPlanMoneyNarrow {

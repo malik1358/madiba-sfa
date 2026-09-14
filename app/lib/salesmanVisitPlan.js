@@ -22,14 +22,14 @@ function envFlagEnabled(value, defaultValue = false) {
   return raw !== "0" && raw !== "false" && raw !== "no";
 }
 
-/** Master switch for visit-plan email cycles (cron / bulk send). On after approval; set false to pause. */
+/** Master switch for visit-plan email cycles (cron / bulk send). Off until the plan is finalized. */
 export function isSalesmanVisitPlanEmailEnabled(env = process.env) {
-  return envFlagEnabled(env.SALESMAN_VISIT_PLAN_EMAIL_ENABLED, true);
+  return envFlagEnabled(env.SALESMAN_VISIT_PLAN_EMAIL_ENABLED, false);
 }
 
-/** When true (and email enabled), each salesman receives their own plan. On after approval. */
+/** When true (and email enabled), each salesman receives their own plan. Off until finalized. */
 export function isSalesmanVisitPlanSendToUsersEnabled(env = process.env) {
-  return envFlagEnabled(env.SALESMAN_VISIT_PLAN_EMAIL_SEND_TO_USERS, true);
+  return envFlagEnabled(env.SALESMAN_VISIT_PLAN_EMAIL_SEND_TO_USERS, false);
 }
 
 export function resolveSalesmanVisitPlanDigestRecipients(env = process.env) {

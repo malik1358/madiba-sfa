@@ -51,7 +51,8 @@ function customersCacheKey(scope, enriched = false) {
 }
 
 function customerHistoryCacheKey(scope, customerCode) {
-  return `history:v1:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
+  // v2: history requests now include customerName for dirty code/name fallbacks.
+  return `history:v2:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
 }
 
 function itemsMasterCacheKey() {
@@ -228,9 +229,16 @@ async function fetchVisibleCustomersNetwork(accessToken, { enriched = false } = 
   return payload.customers || [];
 }
 
-async function fetchCustomerHistoryNetwork(accessToken, customerCode) {
+async function fetchCustomerHistoryNetwork(accessToken, customerCode, customerName = "") {
+  const params = new URLSearchParams({
+    customerCode: String(customerCode || ""),
+  });
+  if (String(customerName || "").trim()) {
+    params.set("customerName", String(customerName).trim());
+  }
+
   const response = await fetch(
-    `/api/customer-history?customerCode=${encodeURIComponent(customerCode)}`,
+    `/api/customer-history?${params.toString()}`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -388,11 +396,16 @@ export async function fetchVisibleCustomersCached(accessToken, scope, options = 
 }
 
 export async function fetchCustomerHistoryCached(accessToken, scope, customerCode, options = {}) {
+  const customerName = options.customerName || "";
   return fetchWithLocalCache(
     customerHistoryCacheKey(scope, customerCode),
     CACHE_TTL.customerHistoryMs,
-    () => fetchCustomerHistoryNetwork(accessToken, customerCode),
-    { onUpdate: options.onUpdate },
+    () => fetchCustomerHistoryNetwork(accessToken, customerCode, customerName),
+    {
+      onUpdate: options.onUpdate,
+      // Empty history was often a failed code-only lookup; always revalidate those.
+      forceRefresh: Boolean(options.forceRefresh),
+    },
   );
 }
 

@@ -143,6 +143,7 @@ export function useCustomerData({ setError, setMessage }) {
         scope,
         customer.customer_code,
         {
+          customerName: customer.customer_name || "",
           onUpdate: (freshHistory) => {
             setTransactions(freshHistory.transactions || []);
             setPeerTransactions(freshHistory.peerTransactions || []);

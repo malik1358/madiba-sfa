@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   OUTSTANDING_DATASET_KEY,
-  customerCodeCandidates,
   customerMatchesOutstandingCodeSet,
   resolveOutstandingCustomerOwnership,
 } from "../../lib/outstanding";
@@ -21,6 +20,11 @@ import {
   nextMonthStart,
   selectMonthlyPerformanceMonths,
 } from "../../lib/monthlyPerformanceMonths.js";
+import {
+  buildCustomerHistoryCodeCandidates,
+  historyRowMatchesCodeCandidates,
+  resolveCustomerHistoryName,
+} from "../../lib/customerHistoryLookup.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -30,7 +34,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const HISTORY_LIMIT = 30000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 10;
+const CACHE_VERSION = 11;
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -186,11 +190,9 @@ function monthStartFromKey(key) {
 
 const HISTORY_ROW_SELECT = "id,import_batch_id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class";
 
-async function fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate) {
-  const normalizedInput = normalizeCode(customerCode);
-  const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
-  const leadingCode = normalizeCode(leadingCodeMatch?.[1] || "");
-  const codeCandidates = [...new Set([normalizedInput, leadingCode].filter(Boolean))];
+async function fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate, customerName = "") {
+  const codeCandidates = buildCustomerHistoryCodeCandidates(customerCode);
+  const resolvedName = resolveCustomerHistoryName(customerCode, customerName);
 
   for (const codeCandidate of codeCandidates) {
     const { data, error } = await admin
@@ -207,17 +209,59 @@ async function fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate) {
     if (Array.isArray(data) && data.length) return data;
   }
 
+  const primaryTarget = codeCandidates.find((code) => /\d/.test(code)) || codeCandidates[0] || "";
+  if (primaryTarget) {
+    const targetNoZeros = primaryTarget.replace(/^0+/, "");
+    const { data, error } = await admin
+      .from("sales_raw")
+      .select(HISTORY_ROW_SELECT)
+      .ilike("customer_code", `%${targetNoZeros || primaryTarget}%`)
+      .gte("transaction_date", fromDate)
+      .lt("transaction_date", untilDate)
+      .order("transaction_date", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(5000);
+
+    if (error) throw error;
+    const matched = (Array.isArray(data) ? data : []).filter((row) => (
+      historyRowMatchesCodeCandidates(row.customer_code, codeCandidates)
+    ));
+    if (matched.length) return matched;
+  }
+
+  if (resolvedName) {
+    const looseNameLike = flexibleNameLikePattern(resolvedName);
+    if (looseNameLike) {
+      const { data, error } = await admin
+        .from("sales_raw")
+        .select(HISTORY_ROW_SELECT)
+        .ilike("customer_name", looseNameLike)
+        .gte("transaction_date", fromDate)
+        .lt("transaction_date", untilDate)
+        .order("transaction_date", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(5000);
+
+      if (error) throw error;
+      const matched = (Array.isArray(data) ? data : []).filter((row) => (
+        namesLooselyMatch(row.customer_name, resolvedName)
+        || namesLooselyMatch(row.customer_code, resolvedName)
+      ));
+      if (matched.length) return matched;
+    }
+  }
+
   return [];
 }
 
-async function overlayCurrentMonthTransactions(admin, customerCode, transactions) {
+async function overlayCurrentMonthTransactions(admin, customerCode, transactions, customerName = "") {
   const currentKey = ksaMonthKey();
   const fromDate = monthStartFromKey(currentKey);
   const untilDate = nextMonthStart(currentKey);
   if (!fromDate || !untilDate) return Array.isArray(transactions) ? transactions : [];
 
   try {
-    const live = await fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate);
+    const live = await fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate, customerName);
     if (!live.length) return Array.isArray(transactions) ? transactions : [];
     const others = (transactions || []).filter((row) => monthKey(row.transaction_date) !== currentKey);
     return mergeSalesSnapshots([...others, ...live]);
@@ -522,14 +566,41 @@ async function writeCached(admin, cacheKey, payload) {
   if (error) throw error;
 }
 
+async function loadMasterCustomerName(admin, customerCode) {
+  const codeCandidates = buildCustomerHistoryCodeCandidates(customerCode);
+  for (const codeCandidate of codeCandidates) {
+    const { data, error } = await admin
+      .from("customers")
+      .select("customer_code,customer_name")
+      .eq("customer_code", codeCandidate)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.customer_name) return data.customer_name;
+  }
+
+  // Dirty masters sometimes store the party name as customer_code.
+  const normalized = normalizeCode(customerCode);
+  if (!normalized) return "";
+  const { data, error } = await admin
+    .from("customers")
+    .select("customer_code,customer_name")
+    .eq("customer_code", normalized)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.customer_name || "";
+}
+
 async function fetchCustomerTransactions(admin, customerCode, customerName, scope) {
-  const normalizedInput = normalizeCode(customerCode);
-  const leadingCodeMatch = normalizedInput.match(/^([A-Z0-9]+)/);
-  const leadingCode = normalizeCode(leadingCodeMatch?.[1] || "");
-  const codeCandidates = [...new Set([normalizedInput, leadingCode].filter(Boolean))];
-  const normalizedCustomerName = normalizeName(customerName);
-  const target = leadingCode || normalizedInput;
-  const targetNoZeros = target.replace(/^0+/, "");
+  const codeCandidates = buildCustomerHistoryCodeCandidates(customerCode);
+  const masterCustomerName = await loadMasterCustomerName(admin, customerCode);
+  const normalizedCustomerName = resolveCustomerHistoryName(
+    customerCode,
+    customerName,
+    masterCustomerName,
+  );
+  const digitTargets = codeCandidates.filter((code) => /\d/.test(code));
+  const primaryTarget = digitTargets[0] || codeCandidates[0] || normalizeCode(customerCode);
+  const targetNoZeros = String(primaryTarget || "").replace(/^0+/, "");
 
   async function fetchHistoryPages(buildQuery) {
     const pageSize = 1000;
@@ -552,7 +623,7 @@ async function fetchCustomerTransactions(admin, customerCode, customerName, scop
   function customerQuery(matchValue) {
     return admin
       .from("sales_raw")
-      .select("id,import_batch_id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
+      .select(HISTORY_ROW_SELECT)
       .eq("customer_code", matchValue)
       .order("transaction_date", { ascending: false })
       .order("id", { ascending: false });
@@ -564,43 +635,35 @@ async function fetchCustomerTransactions(admin, customerCode, customerName, scop
     if (rows.length > 0) break;
   }
 
-  if (rows.length === 0 && target) {
+  if (rows.length === 0 && primaryTarget && /\d/.test(primaryTarget)) {
     // Fallback for dirty imported codes (different case/spacing/leading zeros or code+suffix text).
-    const looseLike = `%${targetNoZeros || target}%`;
+    const looseLike = `%${targetNoZeros || primaryTarget}%`;
     const fallbackData = await fetchHistoryPages(() => admin
       .from("sales_raw")
-      .select("id,import_batch_id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
+      .select(HISTORY_ROW_SELECT)
       .ilike("customer_code", looseLike)
       .order("transaction_date", { ascending: false })
       .order("id", { ascending: false }));
 
-    rows = (Array.isArray(fallbackData) ? fallbackData : []).filter((row) => {
-      const rowCode = normalizeCode(row.customer_code);
-      if (!rowCode) return false;
-      const rowCodeNoZeros = rowCode.replace(/^0+/, "");
-      return (
-        rowCode === target
-        || rowCodeNoZeros === targetNoZeros
-        || rowCode.startsWith(`${target} `)
-        || rowCodeNoZeros.startsWith(`${targetNoZeros} `)
-      );
-    });
+    rows = (Array.isArray(fallbackData) ? fallbackData : []).filter((row) => (
+      historyRowMatchesCodeCandidates(row.customer_code, codeCandidates)
+    ));
   }
 
   if (rows.length === 0 && normalizedCustomerName) {
     const looseNameLike = flexibleNameLikePattern(normalizedCustomerName);
     if (looseNameLike) {
-    const fallbackData = await fetchHistoryPages(() => admin
-      .from("sales_raw")
-      .select("id,import_batch_id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
-      .ilike("customer_name", looseNameLike)
-      .order("transaction_date", { ascending: false })
-      .order("id", { ascending: false }));
+      const fallbackData = await fetchHistoryPages(() => admin
+        .from("sales_raw")
+        .select(HISTORY_ROW_SELECT)
+        .ilike("customer_name", looseNameLike)
+        .order("transaction_date", { ascending: false })
+        .order("id", { ascending: false }));
 
-    rows = (Array.isArray(fallbackData) ? fallbackData : []).filter((row) => {
-      return namesLooselyMatch(row.customer_name, normalizedCustomerName)
-        || namesLooselyMatch(row.customer_code, normalizedCustomerName);
-    });
+      rows = (Array.isArray(fallbackData) ? fallbackData : []).filter((row) => (
+        namesLooselyMatch(row.customer_name, normalizedCustomerName)
+        || namesLooselyMatch(row.customer_code, normalizedCustomerName)
+      ));
     }
   }
 
@@ -694,8 +757,8 @@ async function fetchPeerTransactions(admin, scope, selectedMonthKeys, customerCo
     .map(({ __stamp, ...row }) => row);
 }
 
-async function refreshCustomerCache(admin, customerCode, cacheKey, scope) {
-  const fresh = await fetchCustomerTransactions(admin, customerCode, "", scope);
+async function refreshCustomerCache(admin, customerCode, cacheKey, scope, customerName = "") {
+  const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope);
   const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
   const payload = {
     version: CACHE_VERSION,
@@ -773,10 +836,10 @@ export async function GET(request) {
 
       if (stale) {
         // Return previous data immediately, refresh snapshot in background.
-        void refreshCustomerCache(admin, customerCode, key, scope).catch(() => {});
+        void refreshCustomerCache(admin, customerCode, key, scope, customerName).catch(() => {});
       }
 
-      const transactions = await overlayCurrentMonthTransactions(admin, customerCode, cachedTransactions);
+      const transactions = await overlayCurrentMonthTransactions(admin, customerCode, cachedTransactions, customerName);
 
       return NextResponse.json({
         success: true,

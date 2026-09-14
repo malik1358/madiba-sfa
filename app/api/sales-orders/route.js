@@ -11,7 +11,10 @@ import {
   resolveProspectCustomerCode,
 } from "../../lib/prospects.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
-import { ORDER_STATUS_PENDING_APPROVAL } from "../../lib/orderApproval.js";
+import {
+  ORDER_STATUS_PENDING_APPROVAL,
+  ORDER_STATUS_PENDING_INVOICE_CREATION,
+} from "../../lib/orderApproval.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -23,7 +26,7 @@ function invoiceMetaKey(orderId) {
   return `order_invoice_meta:${String(orderId || "").trim()}`;
 }
 
-async function markOrderPendingApproval(admin, orderId, userId) {
+async function markOrderInvoiceQueueStatus(admin, orderId, userId, status) {
   const key = invoiceMetaKey(orderId);
   const { data: existingRow } = await admin
     .from("system_settings")
@@ -49,7 +52,7 @@ async function markOrderPendingApproval(admin, orderId, userId) {
   const updated = {
     ...existing,
     orderId: String(orderId),
-    status: ORDER_STATUS_PENDING_APPROVAL,
+    status,
     updatedAt: nowIso,
     statusUpdatedAt: nowIso,
     statusUpdatedBy: userId || "",
@@ -535,6 +538,7 @@ export async function POST(request) {
     const capturePlatform = normalizeGpsCapturePlatform(body?.platform);
     const loadedOrderStatus = String(body?.loadedOrderStatus || "DRAFT").trim().toUpperCase();
     const requestedOrderId = body?.orderId ? Number(body.orderId) : null;
+    const creditApprovalRequired = Boolean(body?.creditApprovalRequired);
 
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer is required." }, { status: 400 });
@@ -661,8 +665,15 @@ export async function POST(request) {
         });
       }
 
-      // Submitted orders without an invoice enter the pending-approval queue.
-      await markOrderPendingApproval(admin, orderId, user.id);
+      // Queue for approval when required; otherwise wait for invoice creation.
+      await markOrderInvoiceQueueStatus(
+        admin,
+        orderId,
+        user.id,
+        creditApprovalRequired
+          ? ORDER_STATUS_PENDING_APPROVAL
+          : ORDER_STATUS_PENDING_INVOICE_CREATION,
+      );
 
       status = "SUBMITTED";
     }

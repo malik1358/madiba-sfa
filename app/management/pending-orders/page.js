@@ -41,6 +41,7 @@ import {
   ORDER_STATUS_INVOICE_MADE,
   ORDER_STATUS_PENDING_APPROVAL,
   ORDER_STATUS_PENDING_CREDIT,
+  ORDER_STATUS_PENDING_INVOICE_CREATION,
   ORDER_STATUS_QUOTATION_WAITING_PAYMENT,
   ORDER_STATUS_REJECTED,
   ORDER_STATUS_STOCK_UNAVAILABLE,
@@ -50,6 +51,7 @@ import {
   displayInvoiceStatus,
   isPendingForApprovalStatus,
   shouldAutoMarkPendingApproval,
+  shouldAutoMarkPendingInvoiceCreation,
   shouldShowPendingApprovalActions,
 } from "../../lib/orderApproval";
 import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
@@ -77,6 +79,7 @@ const TEXT = {
 const PENDING_STATUSES = PENDING_ORDER_STATUSES;
 const INVOICE_STATUS_PENDING_APPROVAL = ORDER_STATUS_PENDING_APPROVAL;
 const INVOICE_STATUS_PENDING_CREDIT = ORDER_STATUS_PENDING_CREDIT;
+const INVOICE_STATUS_PENDING_INVOICE_CREATION = ORDER_STATUS_PENDING_INVOICE_CREATION;
 const INVOICE_STATUS_WAITING_CREDIT_APPLICATION = ORDER_STATUS_WAITING_CREDIT_APPLICATION;
 const INVOICE_STATUS_QUOTATION_WAITING_PAYMENT = ORDER_STATUS_QUOTATION_WAITING_PAYMENT;
 const INVOICE_STATUS_REJECTED = ORDER_STATUS_REJECTED;
@@ -351,81 +354,122 @@ export default function PendingOrdersPage() {
   }
 
   async function ensurePendingApprovalStatus(orderId, evaluation, meta = null, order = null) {
-    if (!shouldAutoMarkPendingApproval({
+    if (shouldAutoMarkPendingApproval({
       approvalRequired: Boolean(evaluation?.required),
       meta,
       order,
     })) {
-      return meta;
+      try {
+        return await persistInvoiceStatus(orderId, INVOICE_STATUS_PENDING_APPROVAL);
+      } catch (err) {
+        console.warn(err.message || "Unable to mark order pending for approval.");
+        const fallback = {
+          ...(meta || { orderId }),
+          status: INVOICE_STATUS_PENDING_APPROVAL,
+        };
+        setInvoiceMetaByOrder((current) => ({
+          ...current,
+          [orderId]: fallback,
+        }));
+        setStatusDraftByOrder((current) => ({
+          ...current,
+          [orderId]: INVOICE_STATUS_PENDING_APPROVAL,
+        }));
+        return fallback;
+      }
     }
 
-    try {
-      return await persistInvoiceStatus(orderId, INVOICE_STATUS_PENDING_APPROVAL);
-    } catch (err) {
-      console.warn(err.message || "Unable to mark order pending for approval.");
-      setInvoiceMetaByOrder((current) => ({
-        ...current,
-        [orderId]: {
-          ...(current?.[orderId] || meta || { orderId }),
-          status: INVOICE_STATUS_PENDING_APPROVAL,
-        },
-      }));
-      setStatusDraftByOrder((current) => ({
-        ...current,
-        [orderId]: INVOICE_STATUS_PENDING_APPROVAL,
-      }));
-      return {
-        ...(meta || { orderId }),
-        status: INVOICE_STATUS_PENDING_APPROVAL,
-      };
+    if (shouldAutoMarkPendingInvoiceCreation({
+      approvalRequired: Boolean(evaluation?.required),
+      meta,
+      order,
+    })) {
+      try {
+        return await persistInvoiceStatus(orderId, INVOICE_STATUS_PENDING_INVOICE_CREATION);
+      } catch (err) {
+        console.warn(err.message || "Unable to mark order pending for invoice creation.");
+        const fallback = {
+          ...(meta || { orderId }),
+          status: INVOICE_STATUS_PENDING_INVOICE_CREATION,
+        };
+        setInvoiceMetaByOrder((current) => ({
+          ...current,
+          [orderId]: fallback,
+        }));
+        setStatusDraftByOrder((current) => ({
+          ...current,
+          [orderId]: INVOICE_STATUS_PENDING_INVOICE_CREATION,
+        }));
+        return fallback;
+      }
     }
+
+    return meta;
   }
 
-  async function markSubmittedOrdersPendingApproval(orderList, metaByOrder = {}) {
-    const eligibleIds = (orderList || [])
-      .filter((order) => !isQueuedPendingOrderId(order?.id))
+  async function markSubmittedOrdersInvoiceQueue(orderList, metaByOrder = {}) {
+    const source = (orderList || []).filter((order) => !isQueuedPendingOrderId(order?.id));
+    const approvalRequiredFor = (orderId) => {
+      const evaluation = creditApprovalByOrder?.[orderId];
+      if (!evaluation || typeof evaluation.required !== "boolean") return null;
+      return evaluation.required;
+    };
+    const approvalIds = source
       .filter((order) => shouldAutoMarkPendingApproval({
         order,
         meta: metaByOrder?.[order.id] || null,
-        approvalRequired: true,
+        approvalRequired: approvalRequiredFor(order.id) === true,
+      }))
+      .map((order) => String(order.id));
+    const invoiceIds = source
+      .filter((order) => !approvalIds.includes(String(order.id)))
+      .filter((order) => shouldAutoMarkPendingInvoiceCreation({
+        order,
+        meta: metaByOrder?.[order.id] || null,
+        approvalRequired: approvalRequiredFor(order.id),
       }))
       .map((order) => String(order.id));
 
-    if (eligibleIds.length === 0) return metaByOrder;
+    if (approvalIds.length === 0 && invoiceIds.length === 0) return metaByOrder;
 
     try {
       const token = await getAuthToken();
-      const response = await fetch("/api/order-invoice", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          mode: "mark-pending-approvals",
-          orderIds: eligibleIds,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to mark pending approvals.");
+      let nextMeta = { ...metaByOrder };
+
+      async function postMark(mode, orderIds) {
+        if (orderIds.length === 0) return;
+        const response = await fetch("/api/order-invoice", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ mode, orderIds }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to update pending invoice statuses.");
+        }
+        const items = payload.items && typeof payload.items === "object" ? payload.items : {};
+        nextMeta = { ...nextMeta, ...items };
+        setInvoiceMetaByOrder((current) => ({
+          ...current,
+          ...items,
+        }));
+        setStatusDraftByOrder((current) => {
+          const next = { ...current };
+          Object.entries(items).forEach(([orderId, meta]) => {
+            next[orderId] = String(meta?.status || "");
+          });
+          return next;
+        });
       }
 
-      const items = payload.items && typeof payload.items === "object" ? payload.items : {};
-      setInvoiceMetaByOrder((current) => ({
-        ...current,
-        ...items,
-      }));
-      setStatusDraftByOrder((current) => {
-        const next = { ...current };
-        Object.entries(items).forEach(([orderId, meta]) => {
-          next[orderId] = String(meta?.status || INVOICE_STATUS_PENDING_APPROVAL);
-        });
-        return next;
-      });
-      return { ...metaByOrder, ...items };
+      await postMark("mark-pending-approvals", approvalIds);
+      await postMark("mark-pending-invoice-creation", invoiceIds);
+      return nextMeta;
     } catch (err) {
-      console.warn(err.message || "Unable to mark submitted orders pending for approval.");
+      console.warn(err.message || "Unable to mark submitted order invoice statuses.");
       return metaByOrder;
     }
   }
@@ -494,7 +538,7 @@ export default function PendingOrdersPage() {
       await postApprovalAction(orderId, "approve-order");
       await showPopup({
         variant: "success",
-        message: "Order approved. Invoice makers can continue processing.",
+        message: "Order approved. Status set to Pending for invoice creation.",
       });
     } catch (err) {
       setError(err.message || "Unable to approve order.");
@@ -570,7 +614,7 @@ export default function PendingOrdersPage() {
       });
 
       const sourceOrders = Array.isArray(orderList) ? orderList : (ordersRef.current || []);
-      await markSubmittedOrdersPendingApproval(sourceOrders, { ...(invoiceMetaByOrder || {}), ...items });
+      await markSubmittedOrdersInvoiceQueue(sourceOrders, { ...(invoiceMetaByOrder || {}), ...items });
     } catch (err) {
       console.warn(err.message || "Unable to load invoice status.");
     }
@@ -1482,6 +1526,7 @@ export default function PendingOrdersPage() {
                                         >
                                           <option value="">Select status</option>
                                           <option value={INVOICE_STATUS_PENDING_APPROVAL}>{INVOICE_STATUS_PENDING_APPROVAL}</option>
+                                          <option value={INVOICE_STATUS_PENDING_INVOICE_CREATION}>{INVOICE_STATUS_PENDING_INVOICE_CREATION}</option>
                                           <option value={INVOICE_STATUS_PENDING_CREDIT}>{INVOICE_STATUS_PENDING_CREDIT}</option>
                                           <option value={INVOICE_STATUS_WAITING_CREDIT_APPLICATION}>{INVOICE_STATUS_WAITING_CREDIT_APPLICATION}</option>
                                           <option value={INVOICE_STATUS_QUOTATION_WAITING_PAYMENT}>{INVOICE_STATUS_QUOTATION_WAITING_PAYMENT}</option>

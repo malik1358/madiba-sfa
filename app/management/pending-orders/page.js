@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -50,6 +50,7 @@ import {
   displayInvoiceStatus,
   isPendingForApprovalStatus,
   shouldAutoMarkPendingApproval,
+  shouldShowPendingApprovalActions,
 } from "../../lib/orderApproval";
 import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
 import {
@@ -230,8 +231,10 @@ function invoiceStatusText(meta, order = null, approvalRequired = false) {
   if (order?.queuedLocally) {
     return order.syncStatus === "failed" ? "Sync failed" : "On this device";
   }
-  if (!meta && !approvalRequired) return "-";
-  return displayInvoiceStatus(meta, { approvalRequired });
+  if (!meta && !approvalRequired && String(order?.status || "").trim().toUpperCase() !== "SUBMITTED") {
+    return "-";
+  }
+  return displayInvoiceStatus(meta, { approvalRequired, order });
 }
 
 function InvoiceComparisonPanel({ meta }) {
@@ -273,6 +276,8 @@ export default function PendingOrdersPage() {
   const [offlineHint, setOfflineHint] = useState(false);
   const [error, setError] = useState("");
   const [orders, setOrders] = useState([]);
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
   const [userRole, setUserRole] = useState("");
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [orderLines, setOrderLines] = useState([]);
@@ -345,10 +350,11 @@ export default function PendingOrdersPage() {
     return item;
   }
 
-  async function ensurePendingApprovalStatus(orderId, evaluation, meta = null) {
+  async function ensurePendingApprovalStatus(orderId, evaluation, meta = null, order = null) {
     if (!shouldAutoMarkPendingApproval({
       approvalRequired: Boolean(evaluation?.required),
       meta,
+      order,
     })) {
       return meta;
     }
@@ -372,6 +378,55 @@ export default function PendingOrdersPage() {
         ...(meta || { orderId }),
         status: INVOICE_STATUS_PENDING_APPROVAL,
       };
+    }
+  }
+
+  async function markSubmittedOrdersPendingApproval(orderList, metaByOrder = {}) {
+    const eligibleIds = (orderList || [])
+      .filter((order) => !isQueuedPendingOrderId(order?.id))
+      .filter((order) => shouldAutoMarkPendingApproval({
+        order,
+        meta: metaByOrder?.[order.id] || null,
+        approvalRequired: true,
+      }))
+      .map((order) => String(order.id));
+
+    if (eligibleIds.length === 0) return metaByOrder;
+
+    try {
+      const token = await getAuthToken();
+      const response = await fetch("/api/order-invoice", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          mode: "mark-pending-approvals",
+          orderIds: eligibleIds,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to mark pending approvals.");
+      }
+
+      const items = payload.items && typeof payload.items === "object" ? payload.items : {};
+      setInvoiceMetaByOrder((current) => ({
+        ...current,
+        ...items,
+      }));
+      setStatusDraftByOrder((current) => {
+        const next = { ...current };
+        Object.entries(items).forEach(([orderId, meta]) => {
+          next[orderId] = String(meta?.status || INVOICE_STATUS_PENDING_APPROVAL);
+        });
+        return next;
+      });
+      return { ...metaByOrder, ...items };
+    } catch (err) {
+      console.warn(err.message || "Unable to mark submitted orders pending for approval.");
+      return metaByOrder;
     }
   }
 
@@ -414,6 +469,7 @@ export default function PendingOrdersPage() {
 
   async function ensureOrderMarkedPendingForApproval(orderId) {
     const meta = invoiceMetaByOrder?.[orderId] || null;
+    const order = ordersRef.current.find((entry) => String(entry.id) === String(orderId)) || null;
     if (isPendingForApprovalStatus(meta?.status)) {
       if (String(meta.status || "") !== INVOICE_STATUS_PENDING_APPROVAL) {
         return persistInvoiceStatus(orderId, INVOICE_STATUS_PENDING_APPROVAL);
@@ -421,7 +477,10 @@ export default function PendingOrdersPage() {
       return meta;
     }
     const evaluation = creditApprovalByOrder?.[orderId];
-    if (evaluation?.required || shouldAutoMarkPendingApproval({ approvalRequired: true, meta })) {
+    if (
+      evaluation?.required
+      || shouldAutoMarkPendingApproval({ approvalRequired: true, meta, order })
+    ) {
       return persistInvoiceStatus(orderId, INVOICE_STATUS_PENDING_APPROVAL);
     }
     throw new Error("Order is not pending for approval.");
@@ -467,7 +526,7 @@ export default function PendingOrdersPage() {
     }
   }
 
-  async function loadInvoiceMeta(orderIds, userId = "") {
+  async function loadInvoiceMeta(orderIds, userId = "", orderList = null) {
     if (!Array.isArray(orderIds) || orderIds.length === 0) {
       return;
     }
@@ -509,6 +568,9 @@ export default function PendingOrdersPage() {
         });
         return next;
       });
+
+      const sourceOrders = Array.isArray(orderList) ? orderList : (ordersRef.current || []);
+      await markSubmittedOrdersPendingApproval(sourceOrders, { ...(invoiceMetaByOrder || {}), ...items });
     } catch (err) {
       console.warn(err.message || "Unable to load invoice status.");
     }
@@ -646,7 +708,12 @@ export default function PendingOrdersPage() {
           ...current,
           [orderId]: evaluation,
         }));
-        await ensurePendingApprovalStatus(orderId, evaluation, invoiceMetaByOrder?.[orderId] || null);
+        await ensurePendingApprovalStatus(
+          orderId,
+          evaluation,
+          invoiceMetaByOrder?.[orderId] || null,
+          currentOrder,
+        );
       } catch {
         const fallbackEvaluation = evaluateCreditApproval({
           outstanding: {},
@@ -657,7 +724,12 @@ export default function PendingOrdersPage() {
           ...current,
           [orderId]: fallbackEvaluation,
         }));
-        await ensurePendingApprovalStatus(orderId, fallbackEvaluation, invoiceMetaByOrder?.[orderId] || null);
+        await ensurePendingApprovalStatus(
+          orderId,
+          fallbackEvaluation,
+          invoiceMetaByOrder?.[orderId] || null,
+          currentOrder,
+        );
       }
 
       setStatusDraftByOrder((current) => {
@@ -748,11 +820,12 @@ export default function PendingOrdersPage() {
         async function applyOrders(serverOrders) {
           const queued = await listQueuedPendingOrders();
           const merged = mergeServerAndQueuedOrders(serverOrders, queued);
+          ordersRef.current = merged;
           setOrders(merged);
           const serverIds = merged
             .filter((order) => !isQueuedPendingOrderId(order.id))
             .map((order) => order.id);
-          void loadInvoiceMeta(serverIds, session.user.id);
+          void loadInvoiceMeta(serverIds, session.user.id, merged);
           return merged;
         }
 
@@ -1206,13 +1279,10 @@ export default function PendingOrdersPage() {
                     const age = daysOld(order.updated_at || order.created_at);
                     const meta = invoiceMetaByOrder?.[order.id] || null;
                     const approvalRequired = Boolean(creditApprovalByOrder?.[order.id]?.required);
-                    const pendingApproval = (
-                      isPendingForApprovalStatus(meta?.status)
-                      || (
-                        approvalRequired
-                        && !String(meta?.status || "").trim()
-                        && !meta?.approvedAt
-                      )
+                    const pendingApproval = shouldShowPendingApprovalActions(
+                      order,
+                      meta,
+                      { approvalRequired },
                     );
                     const busyApproval = approvingOrderId === order.id;
 

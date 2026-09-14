@@ -39,12 +39,15 @@ export function isPendingForApprovalStatus(status) {
     || normalized === ORDER_STATUS_PENDING_CREDIT.toLowerCase();
 }
 
-export function displayInvoiceStatus(meta, { approvalRequired = false } = {}) {
+export function displayInvoiceStatus(meta, {
+  approvalRequired = false,
+  order = null,
+} = {}) {
   const status = normalizeInvoiceStatus(meta?.status);
   if (isPendingForApprovalStatus(status)) {
     return ORDER_STATUS_PENDING_APPROVAL;
   }
-  if (status) {
+  if (status && status.toLowerCase() !== "invoice not uploaded") {
     if (status === ORDER_STATUS_REJECTED && meta?.rejectionReason) {
       return `${ORDER_STATUS_REJECTED} (${meta.rejectionReason})`;
     }
@@ -54,12 +57,12 @@ export function displayInvoiceStatus(meta, { approvalRequired = false } = {}) {
     return status;
   }
   if (meta?.approvedAt) {
-    return meta?.invoiceUploadedAt ? ORDER_STATUS_INVOICE_MADE : "-";
+    return meta?.invoiceUploadedAt || meta?.invoiceFilePath ? ORDER_STATUS_INVOICE_MADE : "-";
   }
-  if (approvalRequired) {
+  if (approvalRequired || isSubmittedAwaitingInvoiceApproval(order, meta)) {
     return ORDER_STATUS_PENDING_APPROVAL;
   }
-  if (meta?.invoiceUploadedAt) {
+  if (meta?.invoiceUploadedAt || meta?.invoiceFilePath) {
     return ORDER_STATUS_INVOICE_MADE;
   }
   return "-";
@@ -86,10 +89,64 @@ export function canApprovePendingOrders(role) {
   return normalized === "admin" || normalized === "manager";
 }
 
-export function shouldAutoMarkPendingApproval({ approvalRequired = false, meta = null } = {}) {
-  if (!approvalRequired) return false;
+export function isSubmittedOrder(order) {
+  return String(order?.status || "").trim().toUpperCase() === "SUBMITTED";
+}
+
+export function hasUploadedInvoice(meta) {
+  return Boolean(
+    String(meta?.invoiceFilePath || "").trim()
+    || String(meta?.invoiceUploadedAt || "").trim(),
+  );
+}
+
+/** Statuses that already leave the pending-approval queue. */
+export function hasSettledInvoiceStatus(meta) {
+  const status = normalizeInvoiceStatus(meta?.status).toLowerCase();
+  if (!status) return false;
+  if (isPendingForApprovalStatus(status)) return false;
+  if (status === "invoice not uploaded") return false;
+  return true;
+}
+
+/**
+ * Submitted orders with no invoice uploaded (and not already approved / settled)
+ * belong in the pending-approval queue.
+ */
+export function isSubmittedAwaitingInvoiceApproval(order, meta = null) {
+  if (!isSubmittedOrder(order)) return false;
+  if (hasUploadedInvoice(meta)) return false;
   if (meta?.approvedAt) return false;
+  if (hasSettledInvoiceStatus(meta)) return false;
+  return true;
+}
+
+export function shouldShowPendingApprovalActions(order, meta = null, { approvalRequired = false } = {}) {
+  if (isPendingForApprovalStatus(meta?.status)) return true;
+  if (approvalRequired && !normalizeInvoiceStatus(meta?.status) && !meta?.approvedAt && !hasUploadedInvoice(meta)) {
+    return true;
+  }
+  return isSubmittedAwaitingInvoiceApproval(order, meta);
+}
+
+export function shouldAutoMarkPendingApproval({
+  approvalRequired = false,
+  order = null,
+  meta = null,
+} = {}) {
+  if (meta?.approvedAt) return false;
+  if (hasUploadedInvoice(meta)) return false;
+
   const status = normalizeInvoiceStatus(meta?.status);
+  if (isPendingForApprovalStatus(status) && status !== ORDER_STATUS_PENDING_APPROVAL) {
+    return true;
+  }
+
+  if (isSubmittedAwaitingInvoiceApproval(order, meta)) {
+    return !status || status.toLowerCase() === "invoice not uploaded" || isPendingForApprovalStatus(status);
+  }
+
+  if (!approvalRequired) return false;
   if (!status) return true;
   return isPendingForApprovalStatus(status) && status !== ORDER_STATUS_PENDING_APPROVAL;
 }

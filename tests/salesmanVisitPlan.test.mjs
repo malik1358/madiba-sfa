@@ -238,6 +238,9 @@ test("email builders include ranked visit rows", () => {
   assert.match(email.html, /Last visit date by anyone/);
   assert.match(email.html, /30d/);
   assert.match(email.html, /Avg\/mo/);
+  assert.match(email.html, /Source/);
+  assert.match(email.html, /System suggested|Scheduled appointment/);
+  assert.match(email.html, /not visited for at least 7 days/);
 
   const digest = buildSalesmanVisitPlanDigestEmail([plan], { reportDate: "2026-09-12" });
   assert.match(digest.subject, /digest/i);
@@ -389,4 +392,104 @@ test("scoreVisitPlanCustomer exposes labels for UI coloring", () => {
   assert.equal(scored.days_since_last_visit, 23);
   assert.equal(scored.last_visit_date, "2026-08-20");
   assert.equal(scored.recent_30d_sales_value, 12000);
+});
+
+test("recent visit within 7 days lowers sales opportunity vs 7+ day gap", () => {
+  const base = {
+    recent_sales_value: 80000,
+    recent_30d_sales_value: 12000,
+    days_since_last_invoice: 40,
+    average_monthly_purchase: 15000,
+    highest_monthly_sales: 30000,
+  };
+  const freshVisit = buildSalesOpportunityScore({ ...base, days_since_last_visit: 2 });
+  const agedVisit = buildSalesOpportunityScore({ ...base, days_since_last_visit: 10 });
+  assert.ok(agedVisit > freshVisit, `aged=${agedVisit} fresh=${freshVisit}`);
+  assert.ok(freshVisit < agedVisit * 0.5);
+});
+
+test("due appointments list first and are labeled as scheduled, not system", () => {
+  const ranked = rankSalesmanVisitPlan([
+    {
+      customer_code: "HOT",
+      customer_name: "Hot System Pick",
+      salesman_code: "S1",
+      recent_sales_value: 90000,
+      recent_30d_sales_value: 10000,
+      days_since_last_invoice: 45,
+      days_since_last_visit: 14,
+      average_monthly_purchase: 20000,
+      highest_monthly_sales: 40000,
+      total_due_amount: 0,
+    },
+    {
+      customer_code: "APT",
+      customer_name: "Appointment Due",
+      salesman_code: "S1",
+      recent_sales_value: 5000,
+      recent_30d_sales_value: 0,
+      days_since_last_invoice: 10,
+      days_since_last_visit: 2,
+      average_monthly_purchase: 2000,
+      highest_monthly_sales: 4000,
+      total_due_amount: 0,
+      scheduled_visit_date: "2026-09-12",
+      last_visit_date: "2026-09-10",
+    },
+    {
+      customer_code: "FUTURE",
+      customer_name: "Future Appointment",
+      salesman_code: "S1",
+      recent_sales_value: 50000,
+      recent_30d_sales_value: 5000,
+      days_since_last_invoice: 40,
+      days_since_last_visit: 20,
+      average_monthly_purchase: 12000,
+      highest_monthly_sales: 25000,
+      total_due_amount: 0,
+      scheduled_visit_date: "2026-09-20",
+      last_visit_date: "2026-08-20",
+    },
+  ], { limit: 5, todayIso: "2026-09-12T08:00:00.000Z" });
+
+  assert.equal(ranked[0].customer_code, "APT");
+  assert.equal(ranked[0].plan_source, "appointment");
+  assert.equal(ranked[0].source_label, "Scheduled appointment");
+  assert.equal(ranked[0].is_scheduled_appointment, true);
+  assert.ok(ranked.some((row) => row.customer_code === "HOT" && row.plan_source === "system"));
+  assert.ok(!ranked.some((row) => row.customer_code === "FUTURE" && row.plan_source === "appointment"));
+});
+
+test("system mix prefers customers not visited for at least 7 days", () => {
+  const ranked = rankSalesmanVisitPlan([
+    {
+      customer_code: "RECENT",
+      customer_name: "Visited 2 Days Ago",
+      salesman_code: "S1",
+      recent_sales_value: 90000,
+      recent_30d_sales_value: 10000,
+      days_since_last_invoice: 45,
+      days_since_last_visit: 2,
+      average_monthly_purchase: 20000,
+      highest_monthly_sales: 40000,
+      total_due_amount: 0,
+    },
+    {
+      customer_code: "GAP",
+      customer_name: "Visited 10 Days Ago",
+      salesman_code: "S1",
+      recent_sales_value: 70000,
+      recent_30d_sales_value: 8000,
+      days_since_last_invoice: 42,
+      days_since_last_visit: 10,
+      average_monthly_purchase: 15000,
+      highest_monthly_sales: 30000,
+      total_due_amount: 0,
+    },
+  ], { limit: 1, todayIso: "2026-09-12T08:00:00.000Z" });
+
+  assert.equal(ranked.length, 1);
+  assert.equal(ranked[0].customer_code, "GAP");
+  assert.equal(ranked[0].plan_source, "system");
+  assert.equal(ranked[0].source_label, "System suggested");
 });

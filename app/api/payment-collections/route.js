@@ -9,7 +9,7 @@ import {
 } from "../../lib/paymentCollections.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
-import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
+import { shouldRequireGpsAccessGate, shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { resolveMutualGroupProfiles, expandMutualGroupScopeIdentities, buildSalesmanScopeMatchers, normalizeSalesmanCode, isSoyebProfile } from "../../lib/mutualSalesmanGroups.js";
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
@@ -1235,24 +1235,19 @@ export async function PATCH(request) {
     });
 
     const scope = await getSalesScope(admin, user.id);
-    const requireGps = shouldRequireTransactionGps(scope.userRole);
+    // Legal remove is an office action for admin/manager — do not block on GPS.
+    // Field transfers still require GPS for collectors/salesmen.
+    const requireGps = action === "remove"
+      ? shouldRequireGpsAccessGate(scope.userRole)
+      : shouldRequireTransactionGps(scope.userRole);
 
     if (requireGps && (!Number.isFinite(latitude) || !Number.isFinite(longitude))) {
       throw new Error("GPS is required. Allow location access in the browser and try again.");
     }
 
-    const records = await fetchOutstandingAndCollectionRecords(admin, scope);
-    const matchedRecord = findScopedCollectionRecord(records, customerCode);
-    if (!scope.hasAllAccess) {
-      if (!matchedRecord) {
-        throw new Error("You do not have access to this customer");
-      }
-      customerCode = matchedRecord.customer_code;
-    } else if (matchedRecord) {
-      customerCode = matchedRecord.customer_code;
-    }
-
     if (action === "remove") {
+      // Skip rebuilding the full outstanding queue — that often exceeds the
+      // browser's short PATCH timeout and leaves the legal row undeleted.
       const { data: legalRows, error: legalLookupError } = await admin
         .from("legal_transfers")
         .select("customer_code,is_transferred");
@@ -1271,6 +1266,18 @@ export async function PATCH(request) {
         throw new Error("This customer is not in the legal queue.");
       }
 
+      if (!scope.hasAllAccess) {
+        const records = await fetchOutstandingAndCollectionRecords(admin, scope);
+        const matchedRecord = findScopedCollectionRecord(records, customerCode)
+          || deleteCodes
+            .map((code) => findScopedCollectionRecord(records, code))
+            .find(Boolean);
+        if (!matchedRecord) {
+          throw new Error("You do not have access to this customer");
+        }
+        customerCode = matchedRecord.customer_code;
+      }
+
       const { error } = await admin
         .from("legal_transfers")
         .delete()
@@ -1283,6 +1290,17 @@ export async function PATCH(request) {
         throw error;
       }
     } else if (action === "transfer") {
+      const records = await fetchOutstandingAndCollectionRecords(admin, scope);
+      const matchedRecord = findScopedCollectionRecord(records, customerCode);
+      if (!scope.hasAllAccess) {
+        if (!matchedRecord) {
+          throw new Error("You do not have access to this customer");
+        }
+        customerCode = matchedRecord.customer_code;
+      } else if (matchedRecord) {
+        customerCode = matchedRecord.customer_code;
+      }
+
       const transferCode = await ensureCollectionCustomerRecord(
         admin,
         customerCode,

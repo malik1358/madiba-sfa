@@ -25,6 +25,7 @@ import {
 } from "../../lib/customerLocation";
 import { promptCustomerMobileUpdateIfMissing } from "../../lib/customerContact";
 import { postFormDataResilient, processOfflineQueue, sendJsonResilient } from "../../lib/offlineApi";
+import { shouldRequireGpsAccessGate } from "../../lib/moduleAccess";
 import {
   buildOptimisticLatestCollection,
   incrementLocalCollectionVisitCount,
@@ -2065,13 +2066,19 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (!session?.access_token) throw new Error(t("msgLoginAgain"));
 
-      const gps = await captureGpsLocationWithFallbackConfirm(language, {
-        customerCode: row.customer_code,
-        customerName: row.customer_name,
-        accessToken: session.access_token,
-        role: access.role,
-        skipCustomerLocationUpdate: true,
-      });
+      // Office remove (admin/manager) should not wait on GPS — that blocked legal
+      // removals on desktop and made the row look stuck.
+      const skipGpsForOfficeRemove = action === "remove" && !shouldRequireGpsAccessGate(access.role);
+      const gps = skipGpsForOfficeRemove
+        ? null
+        : await captureGpsLocationWithFallbackConfirm(language, {
+          customerCode: row.customer_code,
+          customerName: row.customer_name,
+          accessToken: session.access_token,
+          role: access.role,
+          skipCustomerLocationUpdate: true,
+          customer: row,
+        });
       const locationChoice = gps
         ? (await resolveLocationUpdateBeforeAction({
           customerCode: row.customer_code,
@@ -2084,7 +2091,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
         return;
       }
-      const platform = await resolveGpsCapturePlatform();
+      const platform = skipGpsForOfficeRemove ? "web" : await resolveGpsCapturePlatform();
       const legalNote = String(
         (activeRowKey === rowKey(row) ? form.legalNote : "") || row.legal_transfer?.note || "",
       ).trim();
@@ -2110,6 +2117,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerCode: row.customer_code,
           action,
         },
+        // Legal remove used to time out at the default 4s while the API rebuilt
+        // the whole outstanding queue, so the delete never reached the database.
+        timeoutMs: 60000,
         queueFirst: typeof navigator !== "undefined" && navigator.onLine === false,
       });
 

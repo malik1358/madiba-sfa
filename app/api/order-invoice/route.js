@@ -17,8 +17,10 @@ import {
   ORDER_STATUS_PENDING_APPROVAL,
   canApprovePendingOrders,
   isPendingForApprovalStatus,
+  isSubmittedAwaitingInvoiceApproval,
   isSupportedInvoiceStatus,
   isValidRejectionReason,
+  shouldAutoMarkPendingApproval,
   statusForRejectionReason,
 } from "../../lib/orderApproval.js";
 
@@ -527,8 +529,87 @@ export async function POST(request) {
       return NextResponse.json({ success: true, item: hydrated, prospectLink: linked.prospectLink });
     }
 
-    if (!["set-status", "approve-order", "reject-order"].includes(mode)) {
+    if (!["set-status", "approve-order", "reject-order", "mark-pending-approvals"].includes(mode)) {
       return NextResponse.json({ success: false, error: "Unsupported action." }, { status: 400 });
+    }
+
+    if (mode === "mark-pending-approvals") {
+      if (!canApprovePendingOrders(scope.role) && !canManageOrderInvoice(scope.role)) {
+        return NextResponse.json({
+          success: false,
+          error: "Only admin, manager, or invoice maker can mark pending approvals.",
+        }, { status: 403 });
+      }
+
+      const requestedIds = Array.isArray(body?.orderIds)
+        ? body.orderIds.map((id) => String(id || "").trim()).filter(Boolean)
+        : [];
+      const uniqueIds = [...new Set(requestedIds)].slice(0, 500);
+      if (uniqueIds.length === 0) {
+        return NextResponse.json({ success: true, items: {}, marked: 0 });
+      }
+
+      const orders = [];
+      for (const idChunk of chunkList(uniqueIds, 100)) {
+        const { data, error } = await admin
+          .from("sales_orders")
+          .select("id,status,customer_code,created_by,salesman_code")
+          .in("id", idChunk);
+        if (error) throw error;
+        orders.push(...(data || []));
+      }
+
+      const visibleOrders = [];
+      for (const order of orders) {
+        try {
+          await ensureOrderVisible(admin, order.id, scope);
+          visibleOrders.push(order);
+        } catch {
+          // Skip orders outside the caller's scope.
+        }
+      }
+
+      const visibleIds = visibleOrders.map((order) => String(order.id));
+      const existingMap = await readMetaMap(admin, visibleIds);
+      const nowIso = new Date().toISOString();
+      const items = {};
+      let marked = 0;
+
+      for (const order of visibleOrders) {
+        const orderId = String(order.id);
+        const existing = existingMap.get(orderId) || { orderId };
+        const alreadyPending = isPendingForApprovalStatus(existing.status)
+          && String(existing.status || "").trim() === ORDER_STATUS_PENDING_APPROVAL;
+
+        if (alreadyPending) {
+          items[orderId] = existing;
+          continue;
+        }
+
+        if (!shouldAutoMarkPendingApproval({ order, meta: existing, approvalRequired: true })) {
+          items[orderId] = existing;
+          continue;
+        }
+
+        const updated = {
+          ...existing,
+          orderId,
+          status: ORDER_STATUS_PENDING_APPROVAL,
+          updatedAt: nowIso,
+          statusUpdatedAt: nowIso,
+          statusUpdatedBy: scope.userId,
+          rejectionReason: "",
+          rejectedAt: "",
+          rejectedBy: "",
+          approvedAt: "",
+          approvedBy: "",
+        };
+        await upsertMeta(admin, updated);
+        items[orderId] = await withSignedUrl(admin, updated);
+        marked += 1;
+      }
+
+      return NextResponse.json({ success: true, items, marked });
     }
 
     const orderId = String(body?.orderId || "").trim();
@@ -541,11 +622,23 @@ export async function POST(request) {
     const existing = existingMap.get(orderId) || { orderId };
     const nowIso = new Date().toISOString();
 
+    async function loadLiveOrder() {
+      const { data: liveOrder, error } = await admin
+        .from("sales_orders")
+        .select("id,status")
+        .eq("id", orderId)
+        .maybeSingle();
+      if (error) throw error;
+      return liveOrder;
+    }
+
     if (mode === "approve-order") {
       if (!canApprovePendingOrders(scope.role)) {
         return NextResponse.json({ success: false, error: "Only admin or manager can approve orders." }, { status: 403 });
       }
-      if (!isPendingForApprovalStatus(existing.status)) {
+      const liveOrder = await loadLiveOrder();
+      if (!isPendingForApprovalStatus(existing.status)
+        && !isSubmittedAwaitingInvoiceApproval(liveOrder, existing)) {
         return NextResponse.json({
           success: false,
           error: "Order is not pending for approval.",
@@ -582,7 +675,9 @@ export async function POST(request) {
           error: "Select a rejection reason: Credit limit, Discount or price problem, or Stock not available.",
         }, { status: 400 });
       }
-      if (!isPendingForApprovalStatus(existing.status)) {
+      const liveOrder = await loadLiveOrder();
+      if (!isPendingForApprovalStatus(existing.status)
+        && !isSubmittedAwaitingInvoiceApproval(liveOrder, existing)) {
         return NextResponse.json({
           success: false,
           error: "Order is not pending for approval.",

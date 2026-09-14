@@ -535,7 +535,6 @@ export async function POST(request) {
     const capturePlatform = normalizeGpsCapturePlatform(body?.platform);
     const loadedOrderStatus = String(body?.loadedOrderStatus || "DRAFT").trim().toUpperCase();
     const requestedOrderId = body?.orderId ? Number(body.orderId) : null;
-    const creditApprovalRequired = Boolean(body?.creditApprovalRequired);
 
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer is required." }, { status: 400 });
@@ -662,9 +661,8 @@ export async function POST(request) {
         });
       }
 
-      if (creditApprovalRequired) {
-        await markOrderPendingApproval(admin, orderId, user.id);
-      }
+      // Submitted orders without an invoice enter the pending-approval queue.
+      await markOrderPendingApproval(admin, orderId, user.id);
 
       status = "SUBMITTED";
     }

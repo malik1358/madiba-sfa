@@ -12,8 +12,10 @@ import {
   canApprovePendingOrders,
   displayInvoiceStatus,
   isPendingForApprovalStatus,
+  isSubmittedAwaitingInvoiceApproval,
   isValidRejectionReason,
   shouldAutoMarkPendingApproval,
+  shouldShowPendingApprovalActions,
   statusForRejectionReason,
 } from "../app/lib/orderApproval.js";
 
@@ -31,6 +33,25 @@ test("orders needing approval display Pending for approval", () => {
     displayInvoiceStatus({ approvedAt: "2026-09-14T10:00:00.000Z" }, { approvalRequired: true }),
     "-",
   );
+});
+
+test("submitted orders without invoice upload show Pending for approval", () => {
+  const order = { id: 12, status: "SUBMITTED" };
+  assert.equal(isSubmittedAwaitingInvoiceApproval(order, null), true);
+  assert.equal(shouldAutoMarkPendingApproval({ order, meta: null }), true);
+  assert.equal(shouldShowPendingApprovalActions(order, null), true);
+  assert.equal(displayInvoiceStatus(null, { order }), ORDER_STATUS_PENDING_APPROVAL);
+});
+
+test("submitted orders with invoice uploaded are not queued for approval", () => {
+  const order = { id: 12, status: "SUBMITTED" };
+  const meta = {
+    invoiceFilePath: "invoices/12.pdf",
+    invoiceUploadedAt: "2026-09-14T10:00:00.000Z",
+  };
+  assert.equal(isSubmittedAwaitingInvoiceApproval(order, meta), false);
+  assert.equal(shouldAutoMarkPendingApproval({ order, meta }), false);
+  assert.equal(shouldShowPendingApprovalActions(order, meta), false);
 });
 
 test("pending for approval includes legacy credit status", () => {

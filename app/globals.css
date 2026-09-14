@@ -6931,6 +6931,18 @@ button.moduleBiDashKpi:focus-visible {
   min-width: 980px;
 }
 
+.moduleBiNameLink {
+  color: #0e7490;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.moduleBiNameLink:hover,
+.moduleBiNameLink:focus-visible {
+  color: #0f4c5c;
+}
+
 /* Stick the label row only. A second header row (filters) stacks under it. */
 .moduleBiTable thead tr:first-child th,
 .moduleBiTable.moduleStackedHeaderTable thead tr:first-child th {

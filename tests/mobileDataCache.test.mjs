@@ -63,6 +63,13 @@ test("payment collections loadQueue shows cached customers immediately while off
   assert.match(source, /if \(offline\) \{\s*setRefreshingQueue\(false\);\s*setError\(""\);\s*return cachedResult;/);
 });
 
+test("invalidateCollectionQueuesForUser clears every queue cache version by prefix", async () => {
+  const source = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")
+  ));
+  assert.match(source, /removeCacheEntriesByPrefix\("collectionQueues:v"\)/);
+});
+
 test("outstanding cache key version is v2 so stale v1 customer rows are ignored", async () => {
   const source = await import("node:fs").then((fs) => (
     fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")

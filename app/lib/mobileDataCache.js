@@ -488,15 +488,13 @@ function toCollectionScope(scope) {
 
 export async function invalidateCollectionQueuesForUser(userId) {
   const { removeCacheEntry } = await import("./localDataStore.js");
-  const scopeEntry = await readCacheEntry(collectionScopeCacheKey(userId));
-  if (!scopeEntry?.value) return;
-  const scope = scopeEntry.value;
-  await Promise.all([
-    removeCacheEntry(collectionQueuesCacheKey(scope)),
-    ...LEGACY_COLLECTION_QUEUE_CACHE_VERSIONS.map((version) => (
-      removeCacheEntry(collectionQueuesCacheKey(scope, version))
-    )),
-  ]);
+  // Clear every collection-queue cache key across current and legacy versions.
+  // Scope hashes can drift between the provisional sales-scope and the API
+  // scope, and a single-key delete leaves stale legal/due rows that
+  // "Remove From Legal" then reloads from disk.
+  await removeCacheEntriesByPrefix("collectionQueues:v");
+  if (!userId) return;
+  await removeCacheEntry(collectionScopeCacheKey(userId));
 }
 
 export async function readCollectionQueuesForUser(userId) {

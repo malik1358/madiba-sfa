@@ -3,7 +3,7 @@ import {
   buildCollectionQueues,
   customerMatchesCollectionScope,
   filterCollectionQueueInvoices,
-  findLegalTransferCustomerCode,
+  findAllLegalTransferCustomerCodes,
   findLegalTransferForCustomer,
   redactCollectionVisitScheduleForViewer,
 } from "../../lib/paymentCollections.js";
@@ -1255,7 +1255,7 @@ export async function PATCH(request) {
     if (action === "remove") {
       const { data: legalRows, error: legalLookupError } = await admin
         .from("legal_transfers")
-        .select("customer_code");
+        .select("customer_code,is_transferred");
 
       if (legalLookupError) {
         if (isMissingTableError(legalLookupError)) {
@@ -1264,15 +1264,17 @@ export async function PATCH(request) {
         throw legalLookupError;
       }
 
-      const deleteCode = findLegalTransferCustomerCode(legalRows || [], customerCode);
-      if (!deleteCode) {
+      // Delete every matching account-code variant (e.g. 1468 and 1468C). Leaving
+      // a sibling row behind keeps the customer on the Legal tab after remove.
+      const deleteCodes = findAllLegalTransferCustomerCodes(legalRows || [], customerCode);
+      if (deleteCodes.length === 0) {
         throw new Error("This customer is not in the legal queue.");
       }
 
       const { error } = await admin
         .from("legal_transfers")
         .delete()
-        .eq("customer_code", deleteCode);
+        .in("customer_code", deleteCodes);
 
       if (error) {
         if (isMissingTableError(error)) {

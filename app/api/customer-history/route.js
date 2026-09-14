@@ -25,6 +25,11 @@ import {
   historyRowMatchesCodeCandidates,
   resolveCustomerHistoryName,
 } from "../../lib/customerHistoryLookup.js";
+import {
+  RECEIPT_DATASET_KEY,
+  findReceiptsForCustomer,
+  normalizeReceiptDataset,
+} from "../../lib/receiptRegister.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -142,6 +147,29 @@ function cacheKeyFor(customerCode, scope) {
   }
 
   return `customer_history_cache:${normalizeCode(customerCode)}:${scopeHash.toString(36)}`;
+}
+
+function parseJson(value) {
+  try {
+    return JSON.parse(value || "null");
+  } catch {
+    return null;
+  }
+}
+
+async function loadCustomerReceipts(admin, customerCode, customerName = "") {
+  try {
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", RECEIPT_DATASET_KEY)
+      .maybeSingle();
+    if (error) throw error;
+    const dataset = normalizeReceiptDataset(parseJson(data?.setting_value));
+    return findReceiptsForCustomer(dataset, customerCode, customerName);
+  } catch {
+    return [];
+  }
 }
 
 function monthKey(value) {
@@ -802,6 +830,7 @@ export async function GET(request) {
 
     const key = cacheKeyFor(customerCode, scope);
     const cached = await loadCached(admin, key);
+    const receipts = await loadCustomerReceipts(admin, customerCode, customerName);
 
     const isCurrentCacheVersion = Number(cached?.version || 0) === CACHE_VERSION;
 
@@ -831,6 +860,7 @@ export async function GET(request) {
           source: "fresh",
           transactions: payload.transactions,
           peerTransactions: payload.peerTransactions,
+          receipts,
         });
       }
 
@@ -851,6 +881,7 @@ export async function GET(request) {
         source: "cache",
         transactions,
         peerTransactions: Array.isArray(cached.peerTransactions) ? cached.peerTransactions : [],
+        receipts,
       });
     }
 
@@ -875,6 +906,7 @@ export async function GET(request) {
       source: "fresh",
       transactions: payload.transactions,
       peerTransactions: payload.peerTransactions,
+      receipts,
     });
   } catch (error) {
     const message = error.message || "Unable to load customer history.";

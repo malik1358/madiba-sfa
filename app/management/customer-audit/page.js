@@ -109,6 +109,7 @@ function CustomerAuditPageContent() {
     selectedCustomer,
     transactions,
     peerTransactions,
+    receipts,
     visits,
     loadingVisits,
     itemMaster,
@@ -124,7 +125,7 @@ function CustomerAuditPageContent() {
   } = useCustomerData({ setError, setMessage });
 
   const { access } = useModuleAccess();
-  const analytics = useAnalytics(transactions);
+  const analytics = useAnalytics(transactions, receipts);
   const quickOrderSuggestions = useQuickOrder({ analytics, transactions, peerTransactions, itemMaster });
   const allowedPricingRegions = useMemo(
     () => allowedOrderPricingRegions({

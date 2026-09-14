@@ -51,8 +51,8 @@ function customersCacheKey(scope, enriched = false) {
 }
 
 function customerHistoryCacheKey(scope, customerCode) {
-  // v2: history requests now include customerName for dirty code/name fallbacks.
-  return `history:v2:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
+  // v3: history payloads include receipt register rows mapped to the customer.
+  return `history:v3:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
 }
 
 function itemsMasterCacheKey() {
@@ -253,6 +253,7 @@ async function fetchCustomerHistoryNetwork(accessToken, customerCode, customerNa
   return {
     transactions: Array.isArray(payload.transactions) ? payload.transactions : [],
     peerTransactions: Array.isArray(payload.peerTransactions) ? payload.peerTransactions : [],
+    receipts: Array.isArray(payload.receipts) ? payload.receipts : [],
   };
 }
 

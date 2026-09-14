@@ -16,8 +16,10 @@ const TEXT = {
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   lastSalesUpload: { en: "Last sales upload", ar: "آخر رفع للمبيعات" },
   lastOutstandingUpload: { en: "Last outstanding upload", ar: "آخر رفع للمتأخرات" },
+  lastReceiptUpload: { en: "Last receipt upload", ar: "آخر رفع للسندات" },
   noSalesUploadYet: { en: "No sales upload yet.", ar: "لا يوجد رفع للمبيعات بعد." },
   noOutstandingUploadYet: { en: "No outstanding upload yet.", ar: "لا يوجد رفع للمتأخرات بعد." },
+  noReceiptUploadYet: { en: "No receipt upload yet.", ar: "لا يوجد رفع للسندات بعد." },
   loadingLastUploads: { en: "Loading last upload dates...", ar: "جاري تحميل تواريخ آخر رفع..." },
 };
 
@@ -39,8 +41,13 @@ export default function UploadSalesPage() {
   const [outstandingUploading, setOutstandingUploading] = useState(false);
   const [outstandingResult, setOutstandingResult] = useState(null);
   const [outstandingError, setOutstandingError] = useState("");
+  const [receiptFile, setReceiptFile] = useState(null);
+  const [receiptUploading, setReceiptUploading] = useState(false);
+  const [receiptResult, setReceiptResult] = useState(null);
+  const [receiptError, setReceiptError] = useState("");
   const [lastSalesUpload, setLastSalesUpload] = useState(null);
   const [lastOutstandingUpload, setLastOutstandingUpload] = useState(null);
+  const [lastReceiptUpload, setLastReceiptUpload] = useState(null);
   const [loadingLastUploads, setLoadingLastUploads] = useState(true);
 
   const uploadSuccessMessage = result
@@ -49,10 +56,13 @@ export default function UploadSalesPage() {
   const outstandingSuccessMessage = outstandingResult
     ? String(outstandingResult.message || outstandingResult.fileName || "Outstanding data updated successfully.").trim()
     : "";
+  const receiptSuccessMessage = receiptResult
+    ? String(receiptResult.message || receiptResult.fileName || "Receipt register updated successfully.").trim()
+    : "";
 
   usePopupMessages({
-    error: error || outstandingError,
-    message: uploadSuccessMessage || outstandingSuccessMessage,
+    error: error || outstandingError || receiptError,
+    message: uploadSuccessMessage || outstandingSuccessMessage || receiptSuccessMessage,
   });
 
   const supabaseClient = getSupabaseClient();
@@ -74,10 +84,11 @@ export default function UploadSalesPage() {
       if (!session?.access_token) {
         setLastSalesUpload(null);
         setLastOutstandingUpload(null);
+        setLastReceiptUpload(null);
         return;
       }
 
-      const [salesBatchResult, outstandingResponse] = await Promise.all([
+      const [salesBatchResult, outstandingResponse, receiptResponse] = await Promise.all([
         supabase
           .from("import_batches")
           .select("file_name,completed_at,started_at,status,customer_count,total_rows")
@@ -86,6 +97,11 @@ export default function UploadSalesPage() {
           .limit(1)
           .maybeSingle(),
         fetch("/api/outstanding", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }),
+        fetch("/api/receipts", {
           headers: {
             Authorization: `Bearer ${session.access_token}`,
           },
@@ -113,9 +129,24 @@ export default function UploadSalesPage() {
             }
           : null,
       );
+
+      const receiptPayload = await receiptResponse.json().catch(() => ({}));
+      setLastReceiptUpload(
+        receiptResponse.ok
+        && receiptPayload.success
+        && receiptPayload.uploadedAt
+          ? {
+              fileName: receiptPayload.fileName || "",
+              uploadedAt: receiptPayload.uploadedAt,
+              rowsCount: receiptPayload.rowsCount || 0,
+              matchedCount: receiptPayload.matchedCount || 0,
+            }
+          : null,
+      );
     } catch {
       setLastSalesUpload(null);
       setLastOutstandingUpload(null);
+      setLastReceiptUpload(null);
     } finally {
       setLoadingLastUploads(false);
     }
@@ -237,6 +268,56 @@ export default function UploadSalesPage() {
       setOutstandingError(err.message || "Outstanding upload failed.");
     } finally {
       setOutstandingUploading(false);
+    }
+  }
+
+  async function uploadReceiptFile() {
+    if (!receiptFile) {
+      setReceiptError("Please select a DayBook / receipt Excel file first.");
+      return;
+    }
+
+    setReceiptUploading(true);
+    setReceiptError("");
+    setReceiptResult(null);
+
+    try {
+      const supabase = getSupabaseClient();
+
+      if (!supabase) {
+        throw new Error("Supabase is not configured.");
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Your login session has expired. Please login again.");
+      }
+
+      const formData = new FormData();
+      formData.append("file", receiptFile);
+
+      const response = await fetch("/api/receipts", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: formData,
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Receipt register upload failed.");
+      }
+
+      setReceiptResult(data);
+      await loadLastUploadInfo();
+    } catch (err) {
+      setReceiptError(err.message || "Receipt register upload failed.");
+    } finally {
+      setReceiptUploading(false);
     }
   }
 
@@ -480,6 +561,102 @@ export default function UploadSalesPage() {
                   <span>Uploaded At</span>
                   <strong>{formatUploadTimestamp(outstandingResult.uploadedAt)}</strong>
                 </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="uploadCard" style={{ marginTop: "18px" }}>
+          <div className="uploadWarning">
+            <strong>Receipt Register / DayBook Upload</strong>
+            <p>
+              Upload the Tally DayBook receipt register (monthly or date range).
+              Only the receipt dates found in this file are replaced. Other dates stay unchanged,
+              same as sales uploads. Particulars are mapped to customers by code/name.
+            </p>
+          </div>
+
+          <div className="uploadMeta">
+            {loadingLastUploads ? (
+              <p>{t("loadingLastUploads")}</p>
+            ) : lastReceiptUpload ? (
+              <p>
+                <strong>{t("lastReceiptUpload")}:</strong>{" "}
+                {formatUploadTimestamp(lastReceiptUpload.uploadedAt)}
+                {lastReceiptUpload.fileName ? ` | ${lastReceiptUpload.fileName}` : ""}
+                {lastReceiptUpload.rowsCount ? ` | ${Number(lastReceiptUpload.rowsCount).toLocaleString()} receipts` : ""}
+                {lastReceiptUpload.matchedCount ? ` | ${Number(lastReceiptUpload.matchedCount).toLocaleString()} mapped` : ""}
+              </p>
+            ) : (
+              <p>{t("noReceiptUploadYet")}</p>
+            )}
+          </div>
+
+          <label className="fileDrop">
+            <div className="fileIcon">🧾</div>
+            <strong>{receiptFile ? receiptFile.name : "Choose DayBook / Receipt Excel File"}</strong>
+            <span>{receiptFile ? `${(receiptFile.size / 1024 / 1024).toFixed(2)} MB` : ".xlsx or .xls"}</span>
+
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => {
+                setReceiptFile(e.target.files?.[0] || null);
+                setReceiptResult(null);
+                setReceiptError("");
+              }}
+            />
+          </label>
+
+          <button
+            className="replaceButton"
+            onClick={uploadReceiptFile}
+            disabled={!receiptFile || receiptUploading}
+          >
+            {receiptUploading ? "Uploading Receipt Register..." : "Validate & Update Receipt Register"}
+          </button>
+
+          {receiptUploading && (
+            <div className="processingBox">
+              <div className="spinner"></div>
+              <div>
+                <strong>Please keep this page open</strong>
+                <p>
+                  Reading DayBook receipts, mapping particulars to customers, and updating only the
+                  dates found in the file.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {receiptResult && (
+            <div className="uploadSuccess">
+              <div className="resultGrid">
+                <div>
+                  <span>Rows In File</span>
+                  <strong>{Number(receiptResult.rows || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Dates Updated</span>
+                  <strong>{Number(receiptResult.datesUpdated || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Mapped To Customers</span>
+                  <strong>{Number(receiptResult.matchedCount || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Unmapped Rows</span>
+                  <strong>{Number(receiptResult.unmatchedCount || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Live Receipts</span>
+                  <strong>{Number(receiptResult.liveRows || receiptResult.rowsCount || 0).toLocaleString()}</strong>
+                </div>
+              </div>
+              <div className="snapshotActivated">
+                {receiptResult.mergedIntoExisting
+                  ? `✓ Updated ${Number(receiptResult.datesUpdated || 0).toLocaleString()} date(s) in the live receipt register`
+                  : "✓ Receipt register is now LIVE"}
               </div>
             </div>
           )}

@@ -616,6 +616,7 @@ export default function NewOrderPage() {
   const [loadingCustomerHistory, setLoadingCustomerHistory] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [peerTransactions, setPeerTransactions] = useState([]);
+  const [receipts, setReceipts] = useState([]);
   const [priceList, setPriceList] = useState({});
   const [regionPriceMaps, setRegionPriceMaps] = useState({});
   const [cashDiscountMap, setCashDiscountMap] = useState({});
@@ -782,7 +783,7 @@ export default function NewOrderPage() {
     [priceList, pricingRegion, regionPriceMaps]
   );
 
-  const analytics = useAnalytics(transactions);
+  const analytics = useAnalytics(transactions, receipts);
   const quickOrderSuggestions = useQuickOrder({
     analytics,
     transactions,
@@ -1493,6 +1494,7 @@ export default function NewOrderPage() {
       if (!selectedCustomer) {
         setTransactions([]);
         setPeerTransactions([]);
+        setReceipts([]);
         setShowTransactions(false);
         setAuditExpandedCategories({});
         return;
@@ -1513,7 +1515,7 @@ export default function NewOrderPage() {
 
         async function loadHistory(refresh = false) {
           const response = await fetch(
-            `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}${refresh ? "&refresh=1" : ""}`,
+            `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}&customerName=${encodeURIComponent(selectedCustomer.customer_name || "")}${refresh ? "&refresh=1" : ""}`,
             {
               headers: {
                 Authorization: `Bearer ${accessToken}`,
@@ -1536,9 +1538,11 @@ export default function NewOrderPage() {
 
         setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);
         setPeerTransactions(Array.isArray(payload.peerTransactions) ? payload.peerTransactions : []);
+        setReceipts(Array.isArray(payload.receipts) ? payload.receipts : []);
       } catch (err) {
         setTransactions([]);
         setPeerTransactions([]);
+        setReceipts([]);
         setError(err.message || "Unable to load customer details history.");
       } finally {
         setLoadingCustomerHistory(false);

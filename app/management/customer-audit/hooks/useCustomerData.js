@@ -18,6 +18,7 @@ export function useCustomerData({ setError, setMessage }) {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [peerTransactions, setPeerTransactions] = useState([]);
+  const [receipts, setReceipts] = useState([]);
   const [visits, setVisits] = useState([]);
   const [loadingVisits, setLoadingVisits] = useState(false);
   const [itemMaster, setItemMaster] = useState([]);
@@ -100,7 +101,7 @@ export function useCustomerData({ setError, setMessage }) {
             ...(scope.mutualSalesmanCodes || []),
             ...(scope.visibleMembers || []).map((member) => member.salesman_code),
           ].filter(Boolean)),
-        ].sort();
+        ].sort());
 
         setSalesmen(salesmanCodes);
       })(), LOAD_TIMEOUT_MS, 'Customer data load timed out. Please refresh the page or login again.');
@@ -128,6 +129,7 @@ export function useCustomerData({ setError, setMessage }) {
     setSelectedCustomer(customer);
     setTransactions([]);
     setPeerTransactions([]);
+    setReceipts([]);
     setVisits([]);
     setLoadingCustomer(true);
     setLoadingVisits(true);
@@ -151,6 +153,7 @@ export function useCustomerData({ setError, setMessage }) {
           onUpdate: (freshHistory) => {
             setTransactions(freshHistory.transactions || []);
             setPeerTransactions(freshHistory.peerTransactions || []);
+            setReceipts(freshHistory.receipts || []);
           },
         },
       );
@@ -180,6 +183,7 @@ export function useCustomerData({ setError, setMessage }) {
 
       setTransactions(historyResult.data.transactions || []);
       setPeerTransactions(historyResult.data.peerTransactions || []);
+      setReceipts(historyResult.data.receipts || []);
       setVisits(visitRows);
     } catch (err) {
       setError(err.message || 'Unable to load customer history.');
@@ -200,6 +204,7 @@ export function useCustomerData({ setError, setMessage }) {
     setSelectedCustomer(null);
     setTransactions([]);
     setPeerTransactions([]);
+    setReceipts([]);
     setVisits([]);
     setLoadingVisits(false);
     setExpandedCategories({});
@@ -221,6 +226,7 @@ export function useCustomerData({ setError, setMessage }) {
     selectedCustomer,
     transactions,
     peerTransactions,
+    receipts,
     visits,
     loadingVisits,
     itemMaster,

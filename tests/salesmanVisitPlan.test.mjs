@@ -28,18 +28,42 @@ import {
 test("sales opportunity prefers purchase-gap customers with strong recent value", () => {
   const hot = buildSalesOpportunityScore({
     recent_sales_value: 80000,
-    days_since_last_invoice: 35,
+    recent_30d_sales_value: 12000,
+    days_since_last_invoice: 40,
     average_monthly_purchase: 15000,
     highest_monthly_sales: 30000,
   });
   const cold = buildSalesOpportunityScore({
     recent_sales_value: 1000,
+    recent_30d_sales_value: 1000,
     days_since_last_invoice: 3,
     average_monthly_purchase: 500,
     highest_monthly_sales: 800,
   });
   assert.ok(hot > cold);
   assert.ok(hot >= 70);
+});
+
+test("fresh last-30-day buyer has low sales upside and no collection focus", () => {
+  const scored = scoreVisitPlanCustomer({
+    customer_code: "1541",
+    customer_name: "Company Asian Health",
+    recent_sales_value: 21579,
+    recent_30d_sales_value: 21579,
+    average_monthly_purchase: 21579,
+    highest_monthly_sales: 21579,
+    days_since_last_invoice: 20,
+    total_due_amount: 21579,
+    outstanding_0_30: 21579,
+    outstanding_30_60: 0,
+    probability_score: 75,
+    probability_label: "High",
+  }, "2026-09-14T08:00:00.000Z");
+
+  assert.ok(scored.sales_score < 45, `sales_score=${scored.sales_score}`);
+  assert.equal(scored.collection_score, 0);
+  assert.equal(scored.focus, "Sales");
+  assert.ok(scored.combined_score < 50);
 });
 
 test("combined score boosts customers strong on both sales and collection", () => {
@@ -212,8 +236,8 @@ test("email builders include ranked visit rows", () => {
   assert.match(email.html, /&gt;120|91-120/);
   assert.match(email.html, /Days from last visit/);
   assert.match(email.html, /Last visit date by anyone/);
-  assert.match(email.html, /Last 30 days sales/);
-  assert.match(email.html, /Avg monthly/);
+  assert.match(email.html, /30d/);
+  assert.match(email.html, /Avg\/mo/);
 
   const digest = buildSalesmanVisitPlanDigestEmail([plan], { reportDate: "2026-09-12" });
   assert.match(digest.subject, /digest/i);

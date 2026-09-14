@@ -143,6 +143,7 @@ export function daysSinceDate(value, todayIso = new Date().toISOString()) {
 
 export function buildSalesOpportunityScore(row = {}) {
   const recentSales = Math.max(toNumber(row.recent_sales_value), 0);
+  const recent30d = Math.max(toNumber(row.recent_30d_sales_value), 0);
   const daysSince = Math.max(
     toNumber(row.days_since_last_invoice != null ? row.days_since_last_invoice : 45),
     0,
@@ -158,12 +159,14 @@ export function buildSalesOpportunityScore(row = {}) {
   else if (recentSales >= 5000) score += 14;
   else if (recentSales > 0) score += 8;
 
-  if (daysSince >= 20 && daysSince <= 45) score += 30;
-  else if (daysSince > 45 && daysSince <= 75) score += 24;
-  else if (daysSince > 75 && daysSince <= 120) score += 16;
-  else if (daysSince > 14 && daysSince < 20) score += 12;
-  else if (daysSince > 120) score += 8;
-  else score += 4;
+  // Reorder window peaks after a real purchase gap — not while the last invoice is still fresh.
+  if (daysSince >= 35 && daysSince <= 75) score += 30;
+  else if (daysSince > 75 && daysSince <= 120) score += 22;
+  else if (daysSince >= 25 && daysSince < 35) score += 16;
+  else if (daysSince > 120 && daysSince <= 180) score += 12;
+  else if (daysSince > 14 && daysSince < 25) score += 6;
+  else if (daysSince > 180) score += 5;
+  else score += 2;
 
   if (avgMonthly >= 20000) score += 20;
   else if (avgMonthly >= 10000) score += 15;
@@ -174,7 +177,27 @@ export function buildSalesOpportunityScore(row = {}) {
   else if (highest >= 20000) score += 10;
   else if (highest > 0) score += 5;
 
+  // Almost all recent value landed in the last 30 days → little upside for another sale now.
+  const freshBuyerShare = recentSales > 0 ? recent30d / recentSales : 0;
+  if (freshBuyerShare >= 0.85 || daysSince < 25) {
+    const factor = daysSince < 14 ? 0.35 : daysSince < 25 ? 0.5 : 0.55;
+    score = Math.round(score * factor);
+  }
+
   return Math.max(0, Math.min(100, score));
+}
+
+/** Collection visits only make sense once aging is past the first 30 days (or cash is due). */
+export function hasCollectibleOutstanding(row = {}) {
+  const aged = Math.max(0,
+    toNumber(row.outstanding_30_60)
+      + toNumber(row.outstanding_61_90)
+      + toNumber(row.outstanding_91_120)
+      + toNumber(row.outstanding_above_120)
+      + toNumber(row.outstanding_above_90),
+  );
+  const cash = Math.max(0, toNumber(row.outstanding_cash));
+  return aged > 0 || cash > 0 || toNumber(row.max_overdue_days) >= 30;
 }
 
 export function buildCollectionOpportunityFromRow(row = {}, todayIso = new Date().toISOString()) {
@@ -183,8 +206,15 @@ export function buildCollectionOpportunityFromRow(row = {}, todayIso = new Date(
     toNumber(row.outstanding_0_30)
       + toNumber(row.outstanding_30_60)
       + toNumber(row.outstanding_61_90)
-      + toNumber(row.outstanding_above_90),
+      + toNumber(row.outstanding_above_90)
+      + toNumber(row.outstanding_91_120)
+      + toNumber(row.outstanding_above_120),
   );
+
+  if (!hasCollectibleOutstanding(row)) {
+    return { score: 0, label: "N/A" };
+  }
+
   if (totalDue <= 0 && !(Number(row.probability_score) > 0)) {
     return { score: 0, label: "N/A" };
   }
@@ -581,9 +611,9 @@ export function buildSalesmanVisitPlanEmail(plan, {
             <th style="border:1px solid #0c3d4a;padding:8px;">Days from last invoice</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Days from last visit</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Last visit date by anyone</th>
-            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Recent 6M</th>
-            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Last 30 days sales</th>
-            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Avg monthly</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">6M</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">30d</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Avg/mo</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Focus</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Combined</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Sales</th>

@@ -11,20 +11,13 @@ CREATE INDEX IF NOT EXISTS idx_prospects_created_by
 UPDATE public.prospects AS p
 SET created_by = src.created_by
 FROM (
-  SELECT
+  SELECT DISTINCT ON (upper(trim(so.customer_code)))
     substring(upper(trim(so.customer_code)) from '^PROSPECT-([0-9]+)$')::bigint AS prospect_id,
-    (
-      SELECT so2.created_by
-      FROM public.sales_orders AS so2
-      WHERE upper(trim(so2.customer_code)) = upper(trim(so.customer_code))
-        AND so2.created_by IS NOT NULL
-      ORDER BY so2.created_at ASC NULLS LAST, so2.id ASC
-      LIMIT 1
-    ) AS created_by
+    so.created_by
   FROM public.sales_orders AS so
   WHERE so.customer_code ~* '^PROSPECT-[0-9]+$'
     AND so.created_by IS NOT NULL
-  GROUP BY upper(trim(so.customer_code))
+  ORDER BY upper(trim(so.customer_code)), so.created_at ASC NULLS LAST, so.id ASC
 ) AS src
 WHERE p.id = src.prospect_id
   AND p.created_by IS NULL

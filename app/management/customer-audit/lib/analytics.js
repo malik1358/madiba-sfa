@@ -1,7 +1,8 @@
 import { selectMonthlyPerformanceMonths } from '../../../lib/monthlyPerformanceMonths.js';
+import { attachMonthlyReceipts, monthKeyFromReceiptDate } from '../../../lib/receiptRegister.js';
 import { monthKey, parseDateValue, salesUnitQty } from './format';
 
-export function buildAnalytics(transactions, { currentMonthKey } = {}) {
+export function buildAnalytics(transactions, { currentMonthKey, receipts = [] } = {}) {
   if (!transactions.length) {
     return null;
   }
@@ -152,6 +153,7 @@ export function buildAnalytics(transactions, { currentMonthKey } = {}) {
     sales: monthlyMap.get(month).sales,
     skuCount: monthlyMap.get(month).skus.size,
     orderCount: monthlyMap.get(month).orders.size,
+    receipts: 0,
   }));
 
   const items = Array.from(itemMap.values())
@@ -199,7 +201,7 @@ export function buildAnalytics(transactions, { currentMonthKey } = {}) {
     .filter((category) => category.totalSales !== 0 || category.totalSkuCount > 0)
     .sort((a, b) => b.totalSales - a.totalSales);
 
-  return {
+  const base = {
     latestDate,
     months,
     yearGroups,
@@ -211,4 +213,17 @@ export function buildAnalytics(transactions, { currentMonthKey } = {}) {
     itemCount: itemMap.size,
     transactionCount: transactions.length,
   };
+
+  const receiptList = Array.isArray(receipts) ? receipts : [];
+  if (!receiptList.length) {
+    return {
+      ...base,
+      receiptTotal: 0,
+      receiptCount: 0,
+    };
+  }
+
+  // Keep receipt months that fall inside the selected performance window.
+  const scopedReceipts = receiptList.filter((row) => monthSet.has(monthKeyFromReceiptDate(row?.receipt_date)));
+  return attachMonthlyReceipts(base, scopedReceipts);
 }

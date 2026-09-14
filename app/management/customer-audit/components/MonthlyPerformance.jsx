@@ -37,6 +37,24 @@ export default function MonthlyPerformance({ analytics }) {
               <td className="auditMatrixTotal">{numberFormat(analytics.monthlySummary.reduce((total, month) => total + month.sales, 0))}</td>
             </tr>
             <tr>
+              <th>Receipts</th>
+              {analytics.monthlySummary.map((month, index) => {
+                const previous = index > 0 ? Number(analytics.monthlySummary[index - 1].receipts || 0) : 0;
+                const value = Number(month.receipts || 0);
+                return (
+                  <td key={month.month} className={trendClass(value, previous, index > 0)}>
+                    {numberFormat(value)}
+                  </td>
+                );
+              })}
+              <td className="auditMatrixTotal">
+                {numberFormat(
+                  analytics.receiptTotal
+                  ?? analytics.monthlySummary.reduce((total, month) => total + Number(month.receipts || 0), 0),
+                )}
+              </td>
+            </tr>
+            <tr>
               <th>SKUs Sold</th>
               {analytics.monthlySummary.map((month, index) => {
                 const previous = index > 0 ? analytics.monthlySummary[index - 1].skuCount : 0;

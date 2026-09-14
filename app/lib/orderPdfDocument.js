@@ -346,17 +346,26 @@ export async function enrichOrderPdfLiveData(snapshot, {
     })());
   }
 
-  if (authHeaders && liveCustomerCode && !skipHistory && !analytics?.monthlySummary?.length) {
+  if (authHeaders && liveCustomerCode && !skipHistory) {
     dataLookups.push((async () => {
       try {
         const historyResponse = await fetch(
-          `${customerHistoryApi}?customerCode=${encodeURIComponent(liveCustomerCode)}`,
+          `${customerHistoryApi}?customerCode=${encodeURIComponent(liveCustomerCode)}&customerName=${encodeURIComponent(liveCustomerName || "")}`,
           { headers: authHeaders }
         );
         const historyPayload = await historyResponse.json().catch(() => ({}));
         if (historyResponse.ok && historyPayload.success) {
           const { buildAnalytics } = await import("../management/customer-audit/lib/analytics.js");
-          analytics = buildAnalytics(Array.isArray(historyPayload.transactions) ? historyPayload.transactions : []);
+          const { attachMonthlyReceipts } = await import("./receiptRegister.js");
+          const receipts = Array.isArray(historyPayload.receipts) ? historyPayload.receipts : [];
+          if (!analytics?.monthlySummary?.length) {
+            analytics = buildAnalytics(
+              Array.isArray(historyPayload.transactions) ? historyPayload.transactions : [],
+              { receipts },
+            );
+          } else {
+            analytics = attachMonthlyReceipts(analytics, receipts);
+          }
         }
       } catch {
         analytics = analyticsFallback;

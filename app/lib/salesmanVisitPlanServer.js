@@ -231,6 +231,7 @@ export function mergeVisitPlanCustomerCandidates(
       city: record.city || existing.city || "",
       area: record.area || existing.area || "",
       recent_sales_value: Math.max(Number(existing.recent_sales_value || 0), 0),
+      recent_30d_sales_value: Math.max(Number(existing.recent_30d_sales_value || 0), 0),
       average_monthly_purchase: Math.max(Number(existing.average_monthly_purchase || 0), 0),
       highest_monthly_sales: Math.max(Number(existing.highest_monthly_sales || 0), 0),
       days_since_last_invoice: existing.days_since_last_invoice
@@ -260,6 +261,7 @@ export function mergeVisitPlanCustomerCandidates(
       customer_code: code,
       salesman_code: normalizeCode(due.current_salesman_code || due.salesman_code),
       recent_sales_value: 0,
+      recent_30d_sales_value: 0,
       average_monthly_purchase: 0,
       highest_monthly_sales: 0,
       days_since_last_invoice: null,

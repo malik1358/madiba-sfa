@@ -34,6 +34,14 @@ const TEXT = {
   previewEmail: { en: "Send email now", ar: "إرسال البريد الآن" },
   rebuildSnapshot: { en: "Rebuild midnight snapshot", ar: "إعادة بناء لقطة منتصف الليل" },
   rebuilding: { en: "Rebuilding...", ar: "جاري إعادة البناء..." },
+  rebuildQueued: {
+    en: "Rebuild started in the background. Waiting for the new snapshot...",
+    ar: "بدأت إعادة البناء في الخلفية. بانتظار اللقطة الجديدة...",
+  },
+  rebuildFailed: {
+    en: "Snapshot rebuild failed. Try again, or wait for the midnight job.",
+    ar: "فشلت إعادة بناء اللقطة. أعد المحاولة، أو انتظر مهمة منتصف الليل.",
+  },
   rebuilt: { en: "Midnight snapshot rebuilt and saved.", ar: "تم إعادة بناء لقطة منتصف الليل وحفظها." },
   sending: { en: "Sending...", ar: "جاري الإرسال..." },
   accessDenied: {
@@ -151,22 +159,25 @@ export default function SalesmanVisitPlanPage() {
     reportDate: "",
     builtAt: "",
     missingSnapshot: false,
+    rebuildStatus: null,
   });
 
   usePopupMessages({ error, message });
 
   const canAccess = access.canAccess("salesmanVisitPlan");
 
-  const loadPlans = useCallback(async () => {
+  const loadPlans = useCallback(async ({ quiet = false } = {}) => {
     const supabase = getSupabaseClient();
     if (!supabase) {
-      setLoading(false);
-      return;
+      if (!quiet) setLoading(false);
+      return null;
     }
 
-    setLoading(true);
-    setError("");
-    setMessage("");
+    if (!quiet) {
+      setLoading(true);
+      setError("");
+      setMessage("");
+    }
 
     try {
       const session = await resolveAuthSession(supabase, 8000);
@@ -195,12 +206,15 @@ export default function SalesmanVisitPlanPage() {
         reportDate: data.reportDate || "",
         builtAt: data.builtAt || "",
         missingSnapshot: Boolean(data.missingSnapshot),
+        rebuildStatus: data.rebuildStatus || null,
       });
+      return data;
     } catch (err) {
       setAllPlans([]);
-      setError(err.message || "Unable to load visit plans.");
+      if (!quiet) setError(err.message || "Unable to load visit plans.");
+      return null;
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, [visitLimit]);
 
@@ -290,6 +304,7 @@ export default function SalesmanVisitPlanPage() {
     setRebuilding(true);
     setError("");
     setMessage("");
+    const previousBuiltAt = String(summary.builtAt || "").trim();
     try {
       const session = await resolveAuthSession(supabase, 8000);
       if (!session?.access_token) throw new Error("Please login again.");
@@ -307,14 +322,38 @@ export default function SalesmanVisitPlanPage() {
             limit: Math.max(1, Math.min(50, Number(visitLimit) || 12)),
           }),
         },
-        120000,
+        30000,
       );
 
       if (!response.ok || !data?.success) {
-        throw new Error(data?.error || "Unable to rebuild visit plan snapshot.");
+        const statusHint = response.status === 504 || response.status === 502
+          ? "Gateway Timeout"
+          : "";
+        throw new Error(data?.error || statusHint || "Unable to rebuild visit plan snapshot.");
+      }
+
+      setMessage(t("rebuildQueued"));
+
+      let done = false;
+      for (let attempt = 0; attempt < 48; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        const next = await loadPlans({ quiet: true });
+        const status = String(next?.rebuildStatus?.status || "").toLowerCase();
+        const nextBuiltAt = String(next?.builtAt || "").trim();
+
+        if (status === "error") {
+          throw new Error(next?.rebuildStatus?.error || t("rebuildFailed"));
+        }
+        if (status === "done" || (nextBuiltAt && nextBuiltAt !== previousBuiltAt)) {
+          done = true;
+          break;
+        }
+      }
+
+      if (!done) {
+        throw new Error(t("rebuildFailed"));
       }
       setMessage(t("rebuilt"));
-      await loadPlans();
     } catch (err) {
       setError(err.message || "Unable to rebuild visit plan snapshot.");
     } finally {

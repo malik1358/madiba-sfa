@@ -65,6 +65,8 @@ const TEXT = {
     ar: "جدول المبيعات غير متاح بعد، لذلك لا يمكن بناء هذا التقرير.",
   },
   summary: { en: "Category growth since first sale", ar: "نمو الفئات منذ أول بيع" },
+  summaryCustomer: { en: "Customer sales and growth since first sale", ar: "مبيعات العملاء ونموهم منذ أول بيع" },
+  summaryCustomerProfit: { en: "Customer profit and growth since first sale", ar: "ربح العملاء ونموهم منذ أول بيع" },
   summaryHint: {
     en: "Growth is calculated on the current slice of uploaded sales. Current year is year-to-date through the latest invoice date in the slice.",
     ar: "يُحسب النمو على شريحة المبيعات الحالية. السنة الحالية حتى تاريخ آخر فاتورة في الشريحة.",
@@ -83,7 +85,9 @@ const TEXT = {
   range: { en: "Sales history", ar: "تاريخ المبيعات" },
   rangeProfit: { en: "Profit history", ar: "تاريخ الربح" },
   redAlerts: { en: "Categories needing attention", ar: "فئات تحتاج متابعة" },
+  redAlertsCustomer: { en: "Customers needing attention", ar: "عملاء يحتاجون متابعة" },
   noAlerts: { en: "No category red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على الفئات من المبيعات المرفوعة." },
+  noAlertsCustomer: { en: "No customer red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على العملاء من المبيعات المرفوعة." },
   yearly: { en: "Sales by year since inception", ar: "المبيعات حسب السنة منذ البداية" },
   yearlyProfit: { en: "Profit by year since inception", ar: "الربح حسب السنة منذ البداية" },
   yearlyHint: {
@@ -330,11 +334,15 @@ export default function CategoryGrowthReport({
   onGroupByChange,
   onApply,
   onClear,
+  lockGroupBy = "",
 }) {
   const amountMeasure = measure === "profit" || report?.measure === "profit" ? "profit" : "sales";
   const t = translateForMeasure(language, TEXT, amountMeasure);
-  const groupBy = applied?.groupBy || report?.filters?.groupBy || "category";
+  const groupBy = lockGroupBy || applied?.groupBy || report?.filters?.groupBy || "category";
   const groupLabel = growthDimensionLabel(groupBy, language);
+  const heading = (key) => (groupBy === "customer" ? t(`${key}Customer`) : t(key));
+  const reportAnchor = groupBy === "customer" ? "bi-customer-growth" : "bi-category-growth";
+  const contributionAnchor = groupBy === "customer" ? "bi-customer-contribution" : "bi-contribution";
   const allRows = report?.groups || report?.categories || [];
   const categories = useMemo(
     () => filterGrowthRows(allRows, { search, statusFilter }),
@@ -402,6 +410,7 @@ export default function CategoryGrowthReport({
       onGroupByChange={onGroupByChange}
       onApply={onApply}
       onClear={onClear}
+      lockGroupBy={lockGroupBy}
     />
   );
 
@@ -435,9 +444,9 @@ export default function CategoryGrowthReport({
   return (
     <>
       {filters}
-      <section className="moduleSection">
+      <section id={reportAnchor} className="moduleSection">
         <div className="moduleSectionHeader">
-          <h2>{t("summary")}</h2>
+          <h2>{heading("summary")}</h2>
         </div>
         <p className="moduleHint">{t("summaryHint")}</p>
         {report.meta?.preparedAt ? (
@@ -486,10 +495,10 @@ export default function CategoryGrowthReport({
 
       <section className="moduleSection">
         <div className="moduleSectionHeader">
-          <h2>{t("redAlerts")}</h2>
+          <h2>{heading("redAlerts")}</h2>
         </div>
         {(report.alerts || []).length === 0 ? (
-          <div className="moduleHint">{t("noAlerts")}</div>
+          <div className="moduleHint">{heading("noAlerts")}</div>
         ) : (
           <div className="moduleBusinessAlertList">
             {(report.alerts || []).map((alert) => (
@@ -600,7 +609,7 @@ export default function CategoryGrowthReport({
         )}
       </section>
 
-      <section className="moduleSection">
+      <section id={contributionAnchor} className="moduleSection">
         <div className="moduleSectionHeader">
           <h2>{t("contribution")}</h2>
         </div>

@@ -69,6 +69,13 @@ export function dimensionValue(row = {}, key) {
   }
 }
 
+export function emptyCustomerGrowthFilters() {
+  return {
+    ...emptyGrowthFilters(),
+    groupBy: "customer",
+  };
+}
+
 export function emptyGrowthFilters() {
   return {
     groupBy: DEFAULT_GROWTH_GROUP_BY,

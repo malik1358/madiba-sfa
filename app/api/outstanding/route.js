@@ -17,6 +17,7 @@ import {
   syncOutstandingCustomerFromInvoices,
 } from "../../lib/outstanding";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
+import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -77,6 +78,7 @@ async function readDataset(admin) {
     return {
       uploadedAt: "",
       fileName: "",
+      filePath: "",
       bucketLabels: [],
       rows: [],
       invoices: [],
@@ -87,6 +89,7 @@ async function readDataset(admin) {
   return {
     uploadedAt: String(parsed.uploadedAt || ""),
     fileName: String(parsed.fileName || ""),
+    filePath: String(parsed.filePath || ""),
     bucketLabels: resolveOutstandingBucketLabels(parsed.bucketLabels || [], rows),
     rows,
     invoices: Array.isArray(parsed.invoices) ? parsed.invoices : [],
@@ -139,6 +142,7 @@ export async function GET(request) {
       success: true,
       uploadedAt: dataset.uploadedAt,
       fileName: dataset.fileName,
+      canDownload: Boolean(String(dataset.filePath || "").trim()),
       bucketLabels: dataset.bucketLabels,
       customer,
       customerInvoices,
@@ -226,9 +230,23 @@ export async function POST(request) {
       : mergeParsedOutstandingSheets(parsedSheets);
     const nowIso = new Date().toISOString();
 
+    let storedFilePath = "";
+    try {
+      const storedFile = await storeUploadedExcel(admin, {
+        kind: "outstanding",
+        fileName,
+        bytes: Buffer.from(arrayBuffer),
+        uploadedAt: nowIso,
+      });
+      storedFilePath = storedFile.filePath;
+    } catch (storeError) {
+      console.error("Could not store outstanding upload file for download:", storeError);
+    }
+
     const payload = {
       uploadedAt: nowIso,
       fileName,
+      filePath: storedFilePath,
       bucketLabels: parsed.bucketLabels,
       rows: parsed.rows,
       invoices: parsed.invoices,

@@ -21,6 +21,8 @@ const TEXT = {
   noOutstandingUploadYet: { en: "No outstanding upload yet.", ar: "لا يوجد رفع للمتأخرات بعد." },
   noReceiptUploadYet: { en: "No receipt upload yet.", ar: "لا يوجد رفع للسندات بعد." },
   loadingLastUploads: { en: "Loading last upload dates...", ar: "جاري تحميل تواريخ آخر رفع..." },
+  downloadFile: { en: "Download file", ar: "تحميل الملف" },
+  downloadingFile: { en: "Downloading...", ar: "جاري التحميل..." },
 };
 
 function formatUploadTimestamp(value) {
@@ -49,6 +51,7 @@ export default function UploadSalesPage() {
   const [lastOutstandingUpload, setLastOutstandingUpload] = useState(null);
   const [lastReceiptUpload, setLastReceiptUpload] = useState(null);
   const [loadingLastUploads, setLoadingLastUploads] = useState(true);
+  const [downloadingKind, setDownloadingKind] = useState("");
 
   const uploadSuccessMessage = result
     ? String(result.message || result.fileName || "Sales data updated successfully.").trim()
@@ -88,7 +91,7 @@ export default function UploadSalesPage() {
         return;
       }
 
-      const [salesBatchResult, outstandingResponse, receiptResponse] = await Promise.all([
+      const [salesBatchResult, outstandingResponse, salesFileMetaResponse, receiptResponse] = await Promise.all([
         supabase
           .from("import_batches")
           .select("file_name,completed_at,started_at,status,customer_count,total_rows")
@@ -97,6 +100,11 @@ export default function UploadSalesPage() {
           .limit(1)
           .maybeSingle(),
         fetch("/api/outstanding", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }),
+        fetch("/api/upload-files?kind=sales&meta=1", {
           headers: {
             Authorization: `Bearer ${session.access_token}`,
           },
@@ -110,11 +118,14 @@ export default function UploadSalesPage() {
 
       if (salesBatchResult.error) throw salesBatchResult.error;
 
+      const salesFileMeta = await salesFileMetaResponse.json().catch(() => ({}));
+
       setLastSalesUpload(salesBatchResult.data ? {
         fileName: salesBatchResult.data.file_name || "",
         uploadedAt: salesBatchResult.data.completed_at || salesBatchResult.data.started_at || "",
         rowsCount: salesBatchResult.data.total_rows || 0,
         customersCount: salesBatchResult.data.customer_count || 0,
+        canDownload: Boolean(salesFileMetaResponse.ok && salesFileMeta.success && salesFileMeta.available),
       } : null);
 
       const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
@@ -126,6 +137,7 @@ export default function UploadSalesPage() {
               fileName: outstandingPayload.fileName || "",
               uploadedAt: outstandingPayload.uploadedAt,
               rowsCount: outstandingPayload.rowsCount || 0,
+              canDownload: Boolean(outstandingPayload.canDownload),
             }
           : null,
       );
@@ -155,6 +167,60 @@ export default function UploadSalesPage() {
   useEffect(() => {
     loadLastUploadInfo();
   }, []);
+
+  async function downloadUploadedFile(kind, fallbackName) {
+    const normalizedKind = String(kind || "").trim().toLowerCase();
+    if (!["sales", "outstanding"].includes(normalizedKind) || downloadingKind) return;
+
+    setDownloadingKind(normalizedKind);
+    setError("");
+    setOutstandingError("");
+
+    try {
+      const supabase = getSupabaseClient();
+      if (!supabase) throw new Error("Supabase is not configured.");
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Your login session has expired. Please login again.");
+      }
+
+      const response = await fetch(`/api/upload-files?kind=${normalizedKind}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Unable to download uploaded file.");
+      }
+
+      const blob = await response.blob();
+      const headerName = response.headers.get("Content-Disposition") || "";
+      const matchedName = headerName.match(/filename="([^"]+)"/i)?.[1];
+      const fileName = matchedName || fallbackName || `${normalizedKind}.xlsx`;
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      if (normalizedKind === "outstanding") {
+        setOutstandingError(err.message || "Unable to download uploaded file.");
+      } else {
+        setError(err.message || "Unable to download uploaded file.");
+      }
+    } finally {
+      setDownloadingKind("");
+    }
+  }
 
   if (!supabaseClient) {
     return (
@@ -350,12 +416,24 @@ export default function UploadSalesPage() {
           {loadingLastUploads ? (
             <p>{t("loadingLastUploads")}</p>
           ) : lastSalesUpload ? (
-            <p>
-              <strong>{t("lastSalesUpload")}:</strong>{" "}
-              {formatUploadTimestamp(lastSalesUpload.uploadedAt)}
-              {lastSalesUpload.fileName ? ` | ${lastSalesUpload.fileName}` : ""}
-              {lastSalesUpload.rowsCount ? ` | ${Number(lastSalesUpload.rowsCount).toLocaleString()} rows` : ""}
-            </p>
+            <div className="uploadMetaRow">
+              <p>
+                <strong>{t("lastSalesUpload")}:</strong>{" "}
+                {formatUploadTimestamp(lastSalesUpload.uploadedAt)}
+                {lastSalesUpload.fileName ? ` | ${lastSalesUpload.fileName}` : ""}
+                {lastSalesUpload.rowsCount ? ` | ${Number(lastSalesUpload.rowsCount).toLocaleString()} rows` : ""}
+              </p>
+              {lastSalesUpload.canDownload ? (
+                <button
+                  type="button"
+                  className="uploadDownloadButton"
+                  onClick={() => downloadUploadedFile("sales", lastSalesUpload.fileName)}
+                  disabled={Boolean(downloadingKind)}
+                >
+                  {downloadingKind === "sales" ? t("downloadingFile") : t("downloadFile")}
+                </button>
+              ) : null}
+            </div>
           ) : (
             <p>{t("noSalesUploadYet")}</p>
           )}
@@ -515,12 +593,24 @@ export default function UploadSalesPage() {
             {loadingLastUploads ? (
               <p>{t("loadingLastUploads")}</p>
             ) : lastOutstandingUpload ? (
-              <p>
-                <strong>{t("lastOutstandingUpload")}:</strong>{" "}
-                {formatUploadTimestamp(lastOutstandingUpload.uploadedAt)}
-                {lastOutstandingUpload.fileName ? ` | ${lastOutstandingUpload.fileName}` : ""}
-                {lastOutstandingUpload.rowsCount ? ` | ${Number(lastOutstandingUpload.rowsCount).toLocaleString()} customers` : ""}
-              </p>
+              <div className="uploadMetaRow">
+                <p>
+                  <strong>{t("lastOutstandingUpload")}:</strong>{" "}
+                  {formatUploadTimestamp(lastOutstandingUpload.uploadedAt)}
+                  {lastOutstandingUpload.fileName ? ` | ${lastOutstandingUpload.fileName}` : ""}
+                  {lastOutstandingUpload.rowsCount ? ` | ${Number(lastOutstandingUpload.rowsCount).toLocaleString()} customers` : ""}
+                </p>
+                {lastOutstandingUpload.canDownload ? (
+                  <button
+                    type="button"
+                    className="uploadDownloadButton"
+                    onClick={() => downloadUploadedFile("outstanding", lastOutstandingUpload.fileName)}
+                    disabled={Boolean(downloadingKind)}
+                  >
+                    {downloadingKind === "outstanding" ? t("downloadingFile") : t("downloadFile")}
+                  </button>
+                ) : null}
+              </div>
             ) : (
               <p>{t("noOutstandingUploadYet")}</p>
             )}

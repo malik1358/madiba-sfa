@@ -13,6 +13,7 @@ import {
   periodGridTotals,
 } from "../../lib/categoryGrowth";
 import BiExcelHead, { useBiExcelFilters } from "./BiExcelHead";
+import BiCustomerNameLink from "./BiCustomerNameLink";
 
 const NAME_KEY = "__name__";
 const TOTAL_KEY = "__total__";
@@ -53,6 +54,7 @@ export default function GrowthPeriodGrid({
   allLabel = "All",
   valueKind = "amount",
   rowTotalOf,
+  linkNames = false,
 }) {
   const isPercent = valueKind === "percent";
   const keys = useMemo(() => [NAME_KEY, ...periods, TOTAL_KEY], [periods]);
@@ -124,7 +126,7 @@ export default function GrowthPeriodGrid({
               : Number(gridTotals.rowTotals[rowIndex] || 0);
             return (
               <tr key={`period-${rowKeyOf(row)}`}>
-                <td>{row.label || row.category}</td>
+                <td><BiCustomerNameLink row={row} enabled={linkNames} /></td>
                 {periods.map((period, index) => {
                   const amount = Number(values[period] || 0);
                   const previousKey = previousKeyOf(period, index, periods);

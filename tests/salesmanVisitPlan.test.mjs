@@ -211,6 +211,7 @@ test("email builders include ranked visit rows", () => {
   assert.match(email.html, /70% sales/);
   assert.match(email.html, /&gt;120|91-120/);
   assert.match(email.html, /Days from last visit/);
+  assert.match(email.html, /Last visit date by anyone/);
   assert.match(email.html, /Avg monthly purchase/);
 
   const digest = buildSalesmanVisitPlanDigestEmail([plan], { reportDate: "2026-09-12" });
@@ -358,4 +359,5 @@ test("scoreVisitPlanCustomer exposes labels for UI coloring", () => {
   assert.equal(scored.outstanding_above_120, 1000);
   assert.equal(scored.average_monthly_purchase, 10000);
   assert.equal(scored.days_since_last_visit, 23);
+  assert.equal(scored.last_visit_date, "2026-08-20");
 });

@@ -12,6 +12,15 @@ import { expandMutualGroupScopeIdentities } from "../../lib/mutualSalesmanGroups
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
 import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess.js";
+import {
+  ORDER_STATUS_INVOICE_MADE,
+  ORDER_STATUS_PENDING_APPROVAL,
+  canApprovePendingOrders,
+  isPendingForApprovalStatus,
+  isSupportedInvoiceStatus,
+  isValidRejectionReason,
+  statusForRejectionReason,
+} from "../../lib/orderApproval.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -19,13 +28,7 @@ export const maxDuration = 60;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const STATUS_PENDING_CREDIT = "Pending for credit approval";
-const STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
-const STATUS_QUOTATION_WAITING_PAYMENT = "Quotation submitted waiting for the payment";
-const STATUS_REJECTED = "Rejected by management";
-const STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
-const STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
-const STATUS_INVOICE_MADE = "Invoice made";
+const STATUS_INVOICE_MADE = ORDER_STATUS_INVOICE_MADE;
 const QUERY_CHUNK = 150;
 
 function chunkList(items, size = QUERY_CHUNK) {
@@ -524,42 +527,118 @@ export async function POST(request) {
       return NextResponse.json({ success: true, item: hydrated, prospectLink: linked.prospectLink });
     }
 
-    if (mode !== "set-status") {
+    if (!["set-status", "approve-order", "reject-order"].includes(mode)) {
       return NextResponse.json({ success: false, error: "Unsupported action." }, { status: 400 });
+    }
+
+    const orderId = String(body?.orderId || "").trim();
+    if (!orderId) {
+      return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
+    }
+
+    await ensureOrderVisible(admin, orderId, scope);
+    const existingMap = await readMetaMap(admin, [orderId]);
+    const existing = existingMap.get(orderId) || { orderId };
+    const nowIso = new Date().toISOString();
+
+    if (mode === "approve-order") {
+      if (!canApprovePendingOrders(scope.role)) {
+        return NextResponse.json({ success: false, error: "Only admin or manager can approve orders." }, { status: 403 });
+      }
+      if (!isPendingForApprovalStatus(existing.status)) {
+        return NextResponse.json({
+          success: false,
+          error: "Order is not pending for approval.",
+        }, { status: 400 });
+      }
+
+      const updated = {
+        ...existing,
+        orderId,
+        status: "",
+        approvedAt: nowIso,
+        approvedBy: scope.userId,
+        rejectionReason: "",
+        rejectedAt: "",
+        rejectedBy: "",
+        updatedAt: nowIso,
+        statusUpdatedAt: nowIso,
+        statusUpdatedBy: scope.userId,
+      };
+
+      await upsertMeta(admin, updated);
+      const hydrated = await withSignedUrl(admin, updated);
+      return NextResponse.json({ success: true, item: hydrated });
+    }
+
+    if (mode === "reject-order") {
+      if (!canApprovePendingOrders(scope.role)) {
+        return NextResponse.json({ success: false, error: "Only admin or manager can reject orders." }, { status: 403 });
+      }
+      const rejectionReason = String(body?.rejectionReason || "").trim();
+      if (!isValidRejectionReason(rejectionReason)) {
+        return NextResponse.json({
+          success: false,
+          error: "Select a rejection reason: Credit limit, Discount or price problem, or Stock not available.",
+        }, { status: 400 });
+      }
+      if (!isPendingForApprovalStatus(existing.status)) {
+        return NextResponse.json({
+          success: false,
+          error: "Order is not pending for approval.",
+        }, { status: 400 });
+      }
+
+      const updated = {
+        ...existing,
+        orderId,
+        status: statusForRejectionReason(rejectionReason),
+        rejectionReason,
+        rejectedAt: nowIso,
+        rejectedBy: scope.userId,
+        approvedAt: "",
+        approvedBy: "",
+        updatedAt: nowIso,
+        statusUpdatedAt: nowIso,
+        statusUpdatedBy: scope.userId,
+      };
+
+      await upsertMeta(admin, updated);
+      const hydrated = await withSignedUrl(admin, updated);
+      return NextResponse.json({ success: true, item: hydrated });
     }
 
     if (!canManageOrderInvoice(scope.role)) {
       return NextResponse.json({ success: false, error: "Only admin, manager, or invoice maker can set invoice status." }, { status: 403 });
     }
 
-    const orderId = String(body?.orderId || "").trim();
     const status = String(body?.status || "").trim();
-
-    if (!orderId) {
-      return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
-    }
-
-    if (![STATUS_PENDING_CREDIT, STATUS_WAITING_CREDIT_APPLICATION, STATUS_QUOTATION_WAITING_PAYMENT, STATUS_REJECTED, STATUS_STOCK_UNAVAILABLE, STATUS_WAITING_STOCK_TRANSFER, STATUS_INVOICE_MADE].includes(status)) {
+    if (!isSupportedInvoiceStatus(status)) {
       return NextResponse.json({ success: false, error: "Unsupported status value." }, { status: 400 });
     }
-
-    await ensureOrderVisible(admin, orderId, scope);
-    const existingMap = await readMetaMap(admin, [orderId]);
-    const existing = existingMap.get(orderId) || { orderId };
 
     if (status === STATUS_INVOICE_MADE && !existing.invoiceFilePath) {
       return NextResponse.json({ success: false, error: "Upload invoice PDF before setting status to Invoice made." }, { status: 400 });
     }
 
-    const nowIso = new Date().toISOString();
     const updated = {
       ...existing,
       orderId,
-      status,
+      status: status === ORDER_STATUS_PENDING_APPROVAL || isPendingForApprovalStatus(status)
+        ? ORDER_STATUS_PENDING_APPROVAL
+        : status,
       updatedAt: nowIso,
       statusUpdatedAt: nowIso,
       statusUpdatedBy: scope.userId,
     };
+
+    if (status === ORDER_STATUS_PENDING_APPROVAL || isPendingForApprovalStatus(status)) {
+      updated.rejectionReason = "";
+      updated.rejectedAt = "";
+      updated.rejectedBy = "";
+      updated.approvedAt = "";
+      updated.approvedBy = "";
+    }
 
     await upsertMeta(admin, updated);
     const hydrated = await withSignedUrl(admin, updated);

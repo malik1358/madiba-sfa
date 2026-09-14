@@ -71,9 +71,12 @@ const TEXT = {
   combined: { en: "Combined", ar: "المشترك" },
   salesProb: { en: "Sales", ar: "المبيعات" },
   collectionProb: { en: "Collection", ar: "التحصيل" },
-  recentSales: { en: "Recent 6M", ar: "آخر 6 أشهر" },
-  recent30d: { en: "Last 30 days sales", ar: "مبيعات آخر 30 يوماً" },
-  avgMonthly: { en: "Avg monthly", ar: "متوسط شهري" },
+  recentSales: { en: "6M", ar: "6 أشهر" },
+  recentSalesTitle: { en: "Recent 6M sales value", ar: "قيمة مبيعات آخر 6 أشهر" },
+  recent30d: { en: "30d", ar: "30 يوماً" },
+  recent30dTitle: { en: "Last 30 days sales value", ar: "قيمة مبيعات آخر 30 يوماً" },
+  avgMonthly: { en: "Avg/mo", ar: "متوسط/شهر" },
+  avgMonthlyTitle: { en: "Average monthly purchase", ar: "متوسط الشراء الشهري" },
   due: { en: "Due", ar: "المستحق" },
   bucket30: { en: "0-30", ar: "0-30" },
   bucket31to60: { en: "31-60", ar: "31-60" },
@@ -517,9 +520,9 @@ export default function SalesmanVisitPlanPage() {
                     <th>{t("daysSinceInvoice")}</th>
                     <th>{t("daysSinceVisit")}</th>
                     <th>{t("lastVisitDate")}</th>
-                    <th className="moduleVisitPlanMoneyNarrow">{t("recentSales")}</th>
-                    <th className="moduleVisitPlanMoneyNarrow">{t("recent30d")}</th>
-                    <th className="moduleVisitPlanMoneyNarrow">{t("avgMonthly")}</th>
+                    <th className="moduleVisitPlanMoneyNarrow" title={t("recentSalesTitle")}>{t("recentSales")}</th>
+                    <th className="moduleVisitPlanMoneyNarrow" title={t("recent30dTitle")}>{t("recent30d")}</th>
+                    <th className="moduleVisitPlanMoneyNarrow" title={t("avgMonthlyTitle")}>{t("avgMonthly")}</th>
                     <th>{t("focus")}</th>
                     <th>{t("combined")}</th>
                     <th>{t("salesProb")}</th>

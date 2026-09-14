@@ -133,11 +133,20 @@ test("pending approval and pending invoice creation are included; settled status
   assert.equal(isMissingInvoiceOverdue(submittedOrder(31), { status: "Pending for credit approval" }, now), true);
   assert.equal(isMissingInvoiceOverdue(submittedOrder(35), { status: "Pending for approval" }, now), true);
   assert.equal(isMissingInvoiceOverdue(submittedOrder(36), { status: "Pending for invoice creation" }, now), true);
+  assert.equal(isMissingInvoiceOverdue(submittedOrder(37), { status: "Waiting for overdue collection" }, now), true);
   assert.equal(isMissingInvoiceOverdue(submittedOrder(32), { status: "Stock unavailable" }, now), false);
   assert.equal(isMissingInvoiceOverdue(submittedOrder(33), { status: MISSING_INVOICE_STATUS_NOT_UPLOADED }, now), true);
 
   const selected = selectMissingInvoiceOrders(
-    [submittedOrder(31), submittedOrder(32), submittedOrder(33), submittedOrder(34), submittedOrder(35), submittedOrder(36)],
+    [
+      submittedOrder(31),
+      submittedOrder(32),
+      submittedOrder(33),
+      submittedOrder(34),
+      submittedOrder(35),
+      submittedOrder(36),
+      submittedOrder(37),
+    ],
     new Map([
       ["31", { status: "Pending for credit approval" }],
       ["32", { status: "Stock unavailable" }],
@@ -145,43 +154,53 @@ test("pending approval and pending invoice creation are included; settled status
       ["34", {}],
       ["35", { status: "Pending for approval" }],
       ["36", { status: "Pending for invoice creation" }],
+      ["37", { status: "Waiting for overdue collection" }],
     ]),
     now,
   ).map((order) => order.id);
 
-  assert.deepEqual(selected, [31, 33, 34, 35, 36]);
+  assert.deepEqual(selected, [31, 33, 34, 35, 36, 37]);
 });
 
-test("buildMissingInvoiceAlertEmail uses separate tables for approval and invoice creation", () => {
+test("buildMissingInvoiceAlertEmail uses separate tables for approval, invoice creation, and overdue collection", () => {
   const message = buildMissingInvoiceAlertEmail({
     now,
     orders: [
       submittedOrder(12),
       submittedOrder(13),
       submittedOrder(14),
+      submittedOrder(15),
     ],
     metaByOrder: new Map([
       ["12", { status: MISSING_INVOICE_STATUS_NOT_UPLOADED }],
       ["13", { status: "Pending for approval" }],
       ["14", { status: "Pending for invoice creation" }],
+      ["15", { status: "Waiting for overdue collection" }],
     ]),
   });
 
-  assert.match(message.subject, /3 orders pending invoice \/ approval after 1 hour/);
+  assert.match(message.subject, /4 orders pending invoice \/ approval after 1 hour/);
   assert.match(message.html, /Pending for approval \(1\)/);
   assert.match(message.html, /Pending for invoice creation \(2\)/);
+  assert.match(message.html, /Waiting for overdue collection \(1\)/);
   assert.match(message.html, /SO-13/);
   assert.match(message.html, /SO-12/);
   assert.match(message.html, /SO-14/);
+  assert.match(message.html, /SO-15/);
   assert.match(message.html, /Pending for approval/);
   assert.match(message.html, /Pending for invoice creation/);
+  assert.match(message.html, /Waiting for overdue collection/);
   assert.doesNotMatch(message.html, /Stock unavailable/);
   assert.match(message.html, /Saturday–Thursday, 9:00 AM–8:00 PM IST/);
   assert.match(message.text, /from September 2026 onward/);
-  assert.match(message.text, /Pending for approval: 1\. Pending for invoice creation: 2\./);
-  assert.equal(message.orderCount, 3);
+  assert.match(
+    message.text,
+    /Pending for approval: 1\. Pending for invoice creation: 2\. Waiting for overdue collection: 1\./,
+  );
+  assert.equal(message.orderCount, 4);
   assert.equal(message.pendingApprovalCount, 1);
   assert.equal(message.pendingInvoiceCreationCount, 2);
+  assert.equal(message.waitingOverdueCollectionCount, 1);
 });
 
 test("runMissingInvoiceEmailCycle skips when nothing is overdue", async () => {

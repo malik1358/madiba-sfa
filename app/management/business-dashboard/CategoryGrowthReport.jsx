@@ -68,6 +68,8 @@ const TEXT = {
   summary: { en: "Category growth since first sale", ar: "نمو الفئات منذ أول بيع" },
   summaryCustomer: { en: "Customer sales and growth since first sale", ar: "مبيعات العملاء ونموهم منذ أول بيع" },
   summaryCustomerProfit: { en: "Customer profit and growth since first sale", ar: "ربح العملاء ونموهم منذ أول بيع" },
+  summaryItem: { en: "Item sales and growth since first sale", ar: "مبيعات الأصناف ونموها منذ أول بيع" },
+  summaryItemProfit: { en: "Item profit and growth since first sale", ar: "ربح الأصناف ونموها منذ أول بيع" },
   summaryHint: {
     en: "Growth is calculated on the current slice of uploaded sales. Current year is year-to-date through the latest invoice date in the slice.",
     ar: "يُحسب النمو على شريحة المبيعات الحالية. السنة الحالية حتى تاريخ آخر فاتورة في الشريحة.",
@@ -87,8 +89,10 @@ const TEXT = {
   rangeProfit: { en: "Profit history", ar: "تاريخ الربح" },
   redAlerts: { en: "Categories needing attention", ar: "فئات تحتاج متابعة" },
   redAlertsCustomer: { en: "Customers needing attention", ar: "عملاء يحتاجون متابعة" },
+  redAlertsItem: { en: "Items needing attention", ar: "أصناف تحتاج متابعة" },
   noAlerts: { en: "No category red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على الفئات من المبيعات المرفوعة." },
   noAlertsCustomer: { en: "No customer red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على العملاء من المبيعات المرفوعة." },
+  noAlertsItem: { en: "No item red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على الأصناف من المبيعات المرفوعة." },
   holdHintCustomer: {
     en: "Customers transferred to legal, or with outstanding older than 60 days, are hidden. We are not selling them until they pay.",
     ar: "العملاء المحوّلون للقانوني أو الذين لديهم مستحقات أكثر من 60 يوماً مخفيون. لا نبيع لهم حتى يسددوا.",
@@ -346,9 +350,10 @@ export default function CategoryGrowthReport({
   const t = translateForMeasure(language, TEXT, amountMeasure);
   const groupBy = lockGroupBy || applied?.groupBy || report?.filters?.groupBy || "category";
   const groupLabel = growthDimensionLabel(groupBy, language);
-  const heading = (key) => (groupBy === "customer" ? t(`${key}Customer`) : t(key));
-  const reportAnchor = groupBy === "customer" ? "bi-customer-growth" : "bi-category-growth";
-  const contributionAnchor = groupBy === "customer" ? "bi-customer-contribution" : "bi-contribution";
+  const headingSuffix = groupBy === "item" ? "Item" : groupBy === "customer" ? "Customer" : "";
+  const heading = (key) => (headingSuffix ? t(`${key}${headingSuffix}`) : t(key));
+  const reportAnchor = groupBy === "item" ? "bi-item-growth" : groupBy === "customer" ? "bi-customer-growth" : "bi-category-growth";
+  const contributionAnchor = groupBy === "item" ? "bi-item-contribution" : groupBy === "customer" ? "bi-customer-contribution" : "bi-contribution";
   const allRows = report?.groups || report?.categories || [];
   const categories = useMemo(
     () => filterGrowthRows(allRows, { search, statusFilter }),

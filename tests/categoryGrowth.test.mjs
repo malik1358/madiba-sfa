@@ -17,6 +17,7 @@ import {
   formatWholePercent,
   growthPercent,
   ingestCategoryGrowthRows,
+  emptyItemGrowthFilters,
   pickBiMeasure,
   monthChangeTone,
   monthGridTotals,
@@ -132,6 +133,14 @@ test("filters and group-by slice the same sales into different rows", () => {
   const salesmanReport = buildCategoryGrowthReport(salesmanAcc, { asOfDate: "2026-09-11" });
   assert.equal(salesmanReport.groups.length, 2);
   assert.equal(salesmanReport.groups.some((row) => row.label === "Ali · S1"), true);
+
+  const itemAcc = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(itemAcc, rows, { groupBy: "item" });
+  const itemReport = buildCategoryGrowthReport(itemAcc, { asOfDate: "2026-09-11" });
+  assert.equal(emptyItemGrowthFilters().groupBy, "item");
+  assert.equal(itemReport.groups.length, 2);
+  assert.equal(itemReport.groups.some((row) => row.label === "Ice · I1"), true);
+  assert.equal(itemReport.groups.find((row) => row.label === "Ice · I1").lifetime, 180);
 
   const fridgeAcc = createCategoryGrowthAccumulator();
   ingestCategoryGrowthRows(fridgeAcc, rows, {

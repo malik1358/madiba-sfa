@@ -76,6 +76,13 @@ export function emptyCustomerGrowthFilters() {
   };
 }
 
+export function emptyItemGrowthFilters() {
+  return {
+    ...emptyGrowthFilters(),
+    groupBy: "item",
+  };
+}
+
 export function emptyGrowthFilters() {
   return {
     groupBy: DEFAULT_GROWTH_GROUP_BY,

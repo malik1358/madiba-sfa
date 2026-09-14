@@ -31,6 +31,9 @@ const TEXT = {
   customers: { en: "Customers", ar: "العملاء" },
   customerGrowing: { en: "Growing customers", ar: "عملاء نامون" },
   customerDeclining: { en: "Customer red lights", ar: "عملاء بإشارات حمراء" },
+  items: { en: "Items", ar: "الأصناف" },
+  itemGrowing: { en: "Growing items", ar: "أصناف نامية" },
+  itemDeclining: { en: "Item red lights", ar: "أصناف بإشارات حمراء" },
   growing: { en: "Growing", ar: "نمو" },
   declining: { en: "Red lights", ar: "إشارات حمراء" },
   salesmen: { en: "Salesmen", ar: "المندوبون" },
@@ -39,12 +42,14 @@ const TEXT = {
   teams: { en: "Teams / channels", ar: "الفرق / القنوات" },
   openCategory: { en: "Category growth", ar: "نمو الفئات" },
   openCustomer: { en: "Customer growth", ar: "نمو العملاء" },
+  openItem: { en: "Item growth", ar: "نمو الأصناف" },
   openContribution: { en: "Contribution %", ar: "نسبة المساهمة" },
   openSalesman: { en: "Salesman MoM", ar: "المندوب شهرياً" },
   openTeams: { en: "Teams, ecom, store", ar: "الفرق والإلكترون والمتجر" },
   openOperations: { en: "Daily operations", ar: "التشغيل اليومي" },
   topCategories: { en: "Top categories", ar: "أعلى الفئات" },
   topCustomers: { en: "Top customers", ar: "أعلى العملاء" },
+  topItems: { en: "Top items", ar: "أعلى الأصناف" },
   contribution: { en: "Contribution last 6 months", ar: "المساهمة آخر 6 أشهر" },
   salesmanPulse: { en: "Salesman pulse", ar: "نبض المندوبين" },
   teamPulse: { en: "Team and channel pulse", ar: "نبض الفرق والقنوات" },
@@ -110,13 +115,14 @@ export default function BiOverviewDashboard({
   growthReport,
   salesmanReport,
   customerReport,
+  itemReport,
   operations,
   onOpen,
 }) {
   const t = translate(language, TEXT);
   const model = useMemo(
-    () => buildBiOverviewModel({ growth: growthReport, salesman: salesmanReport, customer: customerReport }),
-    [customerReport, growthReport, salesmanReport],
+    () => buildBiOverviewModel({ growth: growthReport, salesman: salesmanReport, customer: customerReport, item: itemReport }),
+    [customerReport, growthReport, itemReport, salesmanReport],
   );
   const shareItems = useMemo(() => buildShareChartItems(model.topCategories), [model.topCategories]);
   const signalMix = useMemo(() => buildSignalMix(model.topCategories), [model.topCategories]);
@@ -126,7 +132,7 @@ export default function BiOverviewDashboard({
   );
 
   if (loading) return <div className="moduleLoading">{t("loading")}</div>;
-  if (!model.categoryCount && !model.salesmanSummary.salesmanCount && !model.customerCount) {
+  if (!model.categoryCount && !model.salesmanSummary.salesmanCount && !model.customerCount && !model.itemCount) {
     return <div className="moduleHint">{t("empty")}</div>;
   }
 
@@ -171,6 +177,18 @@ export default function BiOverviewDashboard({
             <span>{t("customerDeclining")}</span>
             <strong>{model.customerDecliningCount}</strong>
           </DashLink>
+          <DashLink className="moduleBiDashKpi" view="item-growth" section="bi-item-growth" onOpen={onOpen} label={`${t("openReport")}: ${t("openItem")}`}>
+            <span>{t("items")}</span>
+            <strong>{model.itemCount}</strong>
+          </DashLink>
+          <DashLink className={kpiCardClass("green")} view="item-growth" section="bi-item-growth" onOpen={onOpen} label={`${t("openReport")}: ${t("openItem")}`}>
+            <span>{t("itemGrowing")}</span>
+            <strong>{model.itemGrowingCount}</strong>
+          </DashLink>
+          <DashLink className={kpiCardClass("red")} view="item-growth" section="bi-item-growth" onOpen={onOpen} label={`${t("openReport")}: ${t("openItem")}`}>
+            <span>{t("itemDeclining")}</span>
+            <strong>{model.itemDecliningCount}</strong>
+          </DashLink>
           <DashLink className={kpiCardClass("green")} view="salesman-mom" section="bi-salesman-mom" onOpen={onOpen} label={`${t("openReport")}: ${t("openSalesman")}`}>
             <span>{t("improving")}</span>
             <strong>{model.salesmanSummary.improvingCount}</strong>
@@ -208,6 +226,10 @@ export default function BiOverviewDashboard({
           <DashLink className="moduleBiDashLaunchCard moduleBiDashLaunchCard--cyan" view="customer-growth" section="bi-customer-growth" onOpen={onOpen} label={`${t("openReport")}: ${t("openCustomer")}`}>
             <span>{t("openCustomer")}</span>
             <strong>{model.customerCount}</strong>
+          </DashLink>
+          <DashLink className="moduleBiDashLaunchCard moduleBiDashLaunchCard--purple" view="item-growth" section="bi-item-growth" onOpen={onOpen} label={`${t("openReport")}: ${t("openItem")}`}>
+            <span>{t("openItem")}</span>
+            <strong>{model.itemCount}</strong>
           </DashLink>
           <DashLink className="moduleBiDashLaunchCard moduleBiDashLaunchCard--teal" view="category-growth" section="bi-contribution" onOpen={onOpen} label={`${t("openReport")}: ${t("openContribution")}`}>
             <span>{t("openContribution")}</span>
@@ -331,6 +353,52 @@ export default function BiOverviewDashboard({
                   <td>{t("total")}</td>
                   <td className="moduleBiTotalCol">{formatMoneyAmount(model.topCustomers.reduce((sum, row) => sum + Number(row.lifetime || 0), 0))}</td>
                   <td>{formatContributionPercent(model.topCustomers.reduce((sum, row) => sum + Number(row.sharePercent || 0), 0))}</td>
+                  <td colSpan={3} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {model.topItems.length ? (
+        <section className="moduleSection">
+          <div className="moduleSectionHeader">
+            <h2>
+              <button type="button" className="moduleBiDashSectionLink" onClick={() => onOpen?.("item-growth", "bi-item-growth")}>
+                {t("topItems")}
+              </button>
+            </h2>
+          </div>
+          <div className="moduleTableWrap moduleBiTableWrap">
+            <table className="moduleTable moduleBiTable">
+              <thead>
+                <tr>
+                  <th>{t("name")}</th>
+                  <th>{t("lifetimeCol")}</th>
+                  <th>{t("share")}</th>
+                  <th>{t("yoy")}</th>
+                  <th>{t("mom")}</th>
+                  <th>{t("signal")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {model.topItems.map((row) => (
+                  <tr key={row.label} className="moduleBiDashRowLink" onClick={() => onOpen?.("item-growth", "bi-item-growth")}>
+                    <td>{row.label}</td>
+                    <td className="moduleBiTotalCol">{formatMoneyAmount(row.lifetime)}</td>
+                    <td>{formatContributionPercent(row.sharePercent)}</td>
+                    <td className={toneClass(overviewKpiTone(row.yoyPercent))}>{formatGrowthPercent(row.yoyPercent)}</td>
+                    <td className={toneClass(overviewKpiTone(row.momPercent))}>{formatGrowthPercent(row.momPercent)}</td>
+                    <td><span className={statusClass(row.status)}>{row.statusLabel || row.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>{t("total")}</td>
+                  <td className="moduleBiTotalCol">{formatMoneyAmount(model.topItems.reduce((sum, row) => sum + Number(row.lifetime || 0), 0))}</td>
+                  <td>{formatContributionPercent(model.topItems.reduce((sum, row) => sum + Number(row.sharePercent || 0), 0))}</td>
                   <td colSpan={3} />
                 </tr>
               </tfoot>

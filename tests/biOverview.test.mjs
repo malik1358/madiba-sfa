@@ -25,6 +25,13 @@ test("overview model rolls category, contribution, salesman, and team snapshots"
         { label: "Shop B · 200", lifetime: 200, sharePercent: 20, yoyPercent: -6, momPercent: -2, status: "red" },
       ],
     },
+    item: {
+      meta: { growingCount: 1, decliningCount: 2, warningCount: 0 },
+      groups: [
+        { label: "A4 Paper · P1", lifetime: 120, sharePercent: 40, yoyPercent: -12, momPercent: -6, status: "red" },
+        { label: "Toner · T2", lifetime: 80, sharePercent: 27, yoyPercent: 4, momPercent: 2, status: "green" },
+      ],
+    },
     salesman: {
       currentMonth: "2026-09",
       latestCompleteMonth: "2026-08",
@@ -42,6 +49,9 @@ test("overview model rolls category, contribution, salesman, and team snapshots"
   assert.equal(model.customerCount, 2);
   assert.equal(model.topCustomers[0].label, "Shop A · 100");
   assert.equal(model.customerGrowingCount, 4);
+  assert.equal(model.itemCount, 2);
+  assert.equal(model.itemDecliningCount, 2);
+  assert.equal(model.topItems[0].label, "A4 Paper · P1");
   assert.equal(model.topCategories[0].label, "Building");
   assert.equal(model.contributionRows[0].contributionValues["2026-08"], 75);
   assert.equal(model.salesmanSummary.salesmanCount, 1);

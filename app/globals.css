@@ -6883,6 +6883,10 @@ button.moduleBiDashKpi:focus-visible {
   background: #0f766e;
 }
 
+.moduleBiDashLaunchCard--purple {
+  background: #6d28d9;
+}
+
 .moduleBiDashRowLink {
   cursor: pointer;
 }

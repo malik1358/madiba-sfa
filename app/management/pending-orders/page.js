@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -36,6 +36,25 @@ import {
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess";
+import {
+  ORDER_REJECTION_REASONS,
+  ORDER_STATUS_INVOICE_MADE,
+  ORDER_STATUS_PENDING_APPROVAL,
+  ORDER_STATUS_PENDING_CREDIT,
+  ORDER_STATUS_PENDING_INVOICE_CREATION,
+  ORDER_STATUS_QUOTATION_WAITING_PAYMENT,
+  ORDER_STATUS_REJECTED,
+  ORDER_STATUS_STOCK_UNAVAILABLE,
+  ORDER_STATUS_WAITING_CREDIT_APPLICATION,
+  ORDER_STATUS_WAITING_STOCK_TRANSFER,
+  ORDER_STATUS_WAITING_OVERDUE_COLLECTION,
+  canApprovePendingOrders,
+  displayInvoiceStatus,
+  isPendingForApprovalStatus,
+  shouldAutoMarkPendingApproval,
+  shouldAutoMarkPendingInvoiceCreation,
+  shouldShowPendingApprovalActions,
+} from "../../lib/orderApproval";
 import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
 import {
   formatPendingDuration,
@@ -44,6 +63,7 @@ import {
   shouldRunTimeToMakeClock,
 } from "../../lib/pendingOrderTimeToMake";
 import { amountInclVat } from "../../lib/invoiceAmountFromPdf";
+import { useAppPopup } from "../../components/AppPopupProvider";
 
 const TEXT = {
   title: { en: "Pending Orders", ar: "الطلبات المعلقة" },
@@ -58,13 +78,16 @@ const TEXT = {
 };
 
 const PENDING_STATUSES = PENDING_ORDER_STATUSES;
-const INVOICE_STATUS_PENDING_CREDIT = "Pending for credit approval";
-const INVOICE_STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
-const INVOICE_STATUS_QUOTATION_WAITING_PAYMENT = "Quotation submitted waiting for the payment";
-const INVOICE_STATUS_REJECTED = "Rejected by management";
-const INVOICE_STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
-const INVOICE_STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
-const INVOICE_STATUS_MADE = "Invoice made";
+const INVOICE_STATUS_PENDING_APPROVAL = ORDER_STATUS_PENDING_APPROVAL;
+const INVOICE_STATUS_PENDING_CREDIT = ORDER_STATUS_PENDING_CREDIT;
+const INVOICE_STATUS_PENDING_INVOICE_CREATION = ORDER_STATUS_PENDING_INVOICE_CREATION;
+const INVOICE_STATUS_WAITING_CREDIT_APPLICATION = ORDER_STATUS_WAITING_CREDIT_APPLICATION;
+const INVOICE_STATUS_QUOTATION_WAITING_PAYMENT = ORDER_STATUS_QUOTATION_WAITING_PAYMENT;
+const INVOICE_STATUS_REJECTED = ORDER_STATUS_REJECTED;
+const INVOICE_STATUS_STOCK_UNAVAILABLE = ORDER_STATUS_STOCK_UNAVAILABLE;
+const INVOICE_STATUS_WAITING_STOCK_TRANSFER = ORDER_STATUS_WAITING_STOCK_TRANSFER;
+const INVOICE_STATUS_WAITING_OVERDUE_COLLECTION = ORDER_STATUS_WAITING_OVERDUE_COLLECTION;
+const INVOICE_STATUS_MADE = ORDER_STATUS_INVOICE_MADE;
 const OUTSTANDING_API = "/api/outstanding";
 const EMPTY_FILTERS = {
   orderId: [],
@@ -103,16 +126,16 @@ function matchesColumnFilter(value, filter) {
   return matchesExcelColumnFilter(value, filter);
 }
 
-function pendingOrderFilterValues(order, meta) {
+function pendingOrderFilterValues(order, meta, approvalRequired = false) {
   return {
     orderId: displayOrDash(formatSalesOrderNumber(order) || order.id),
     customer: displayOrDash(order.customer_name || order.customer_code),
     salesman: displayOrDash(order.salesman_code),
     status: displayOrDash(order.status),
-    invoiceStatus: displayOrDash(invoiceStatusText(meta, order)),
+    invoiceStatus: displayOrDash(invoiceStatusText(meta, order, approvalRequired)),
     uploadedAt: displayOrDash(formatDateTime(meta?.invoiceUploadedAt)),
     timeToMake: pendingOrderTimeToMakeBucket(
-      pendingOrderTimeToMakeSeconds(order, meta, Date.now(), invoiceStatusText(meta, order)),
+      pendingOrderTimeToMakeSeconds(order, meta, Date.now(), invoiceStatusText(meta, order, approvalRequired)),
     ),
     created: displayOrDash(formatDateTime(order.created_at)),
     lastUpdated: displayOrDash(formatDateTime(order.updated_at)),
@@ -189,8 +212,8 @@ function subscribeDurationTick(listener) {
   };
 }
 
-function TimeToMakeClock({ order, meta }) {
-  const invoiceStatus = invoiceStatusText(meta, order);
+function TimeToMakeClock({ order, meta, approvalRequired = false }) {
+  const invoiceStatus = invoiceStatusText(meta, order, approvalRequired);
   const live = shouldRunTimeToMakeClock(invoiceStatus);
   const nowMs = useSyncExternalStore(
     live ? subscribeDurationTick : () => () => {},
@@ -209,14 +232,14 @@ function daysOld(fromDate) {
   return Math.max(0, Math.floor((now - then) / (1000 * 60 * 60 * 24)));
 }
 
-function invoiceStatusText(meta, order = null) {
+function invoiceStatusText(meta, order = null, approvalRequired = false) {
   if (order?.queuedLocally) {
     return order.syncStatus === "failed" ? "Sync failed" : "On this device";
   }
-  if (!meta) return "-";
-  if (meta.status) return meta.status;
-  if (meta.invoiceUploadedAt) return INVOICE_STATUS_MADE;
-  return "-";
+  if (!meta && !approvalRequired && String(order?.status || "").trim().toUpperCase() !== "SUBMITTED") {
+    return "-";
+  }
+  return displayInvoiceStatus(meta, { approvalRequired, order });
 }
 
 function InvoiceComparisonPanel({ meta }) {
@@ -252,11 +275,14 @@ function InvoiceComparisonPanel({ meta }) {
 export default function PendingOrdersPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
+  const { showPopup } = useAppPopup();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [offlineHint, setOfflineHint] = useState(false);
   const [error, setError] = useState("");
   const [orders, setOrders] = useState([]);
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
   const [userRole, setUserRole] = useState("");
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [orderLines, setOrderLines] = useState([]);
@@ -265,7 +291,9 @@ export default function PendingOrdersPage() {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [invoiceMetaByOrder, setInvoiceMetaByOrder] = useState({});
   const [statusDraftByOrder, setStatusDraftByOrder] = useState({});
+  const [rejectReasonByOrder, setRejectReasonByOrder] = useState({});
   const [openStartedAtByOrder, setOpenStartedAtByOrder] = useState({});
+  const [approvingOrderId, setApprovingOrderId] = useState("");
 
   usePopupMessages({ error });
   const [selectedInvoiceFile, setSelectedInvoiceFile] = useState(null);
@@ -297,7 +325,254 @@ export default function PendingOrdersPage() {
     return session.access_token;
   }
 
-  async function loadInvoiceMeta(orderIds, userId = "") {
+  async function persistInvoiceStatus(orderId, status) {
+    const token = await getAuthToken();
+    const response = await fetch("/api/order-invoice", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        mode: "set-status",
+        orderId,
+        status,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.error || "Unable to save invoice status.");
+    }
+    const item = payload.item || { orderId, status };
+    setInvoiceMetaByOrder((current) => ({
+      ...current,
+      [orderId]: item,
+    }));
+    setStatusDraftByOrder((current) => ({
+      ...current,
+      [orderId]: String(item.status || status || ""),
+    }));
+    return item;
+  }
+
+  async function ensurePendingApprovalStatus(orderId, evaluation, meta = null, order = null) {
+    if (shouldAutoMarkPendingApproval({
+      approvalRequired: Boolean(evaluation?.required),
+      meta,
+      order,
+    })) {
+      try {
+        return await persistInvoiceStatus(orderId, INVOICE_STATUS_PENDING_APPROVAL);
+      } catch (err) {
+        console.warn(err.message || "Unable to mark order pending for approval.");
+        const fallback = {
+          ...(meta || { orderId }),
+          status: INVOICE_STATUS_PENDING_APPROVAL,
+        };
+        setInvoiceMetaByOrder((current) => ({
+          ...current,
+          [orderId]: fallback,
+        }));
+        setStatusDraftByOrder((current) => ({
+          ...current,
+          [orderId]: INVOICE_STATUS_PENDING_APPROVAL,
+        }));
+        return fallback;
+      }
+    }
+
+    if (shouldAutoMarkPendingInvoiceCreation({
+      approvalRequired: Boolean(evaluation?.required),
+      meta,
+      order,
+    })) {
+      try {
+        return await persistInvoiceStatus(orderId, INVOICE_STATUS_PENDING_INVOICE_CREATION);
+      } catch (err) {
+        console.warn(err.message || "Unable to mark order pending for invoice creation.");
+        const fallback = {
+          ...(meta || { orderId }),
+          status: INVOICE_STATUS_PENDING_INVOICE_CREATION,
+        };
+        setInvoiceMetaByOrder((current) => ({
+          ...current,
+          [orderId]: fallback,
+        }));
+        setStatusDraftByOrder((current) => ({
+          ...current,
+          [orderId]: INVOICE_STATUS_PENDING_INVOICE_CREATION,
+        }));
+        return fallback;
+      }
+    }
+
+    return meta;
+  }
+
+  async function markSubmittedOrdersInvoiceQueue(orderList, metaByOrder = {}) {
+    const source = (orderList || []).filter((order) => !isQueuedPendingOrderId(order?.id));
+    const approvalRequiredFor = (orderId) => {
+      const evaluation = creditApprovalByOrder?.[orderId];
+      if (!evaluation || typeof evaluation.required !== "boolean") return null;
+      return evaluation.required;
+    };
+    const approvalIds = source
+      .filter((order) => shouldAutoMarkPendingApproval({
+        order,
+        meta: metaByOrder?.[order.id] || null,
+        approvalRequired: approvalRequiredFor(order.id) === true,
+      }))
+      .map((order) => String(order.id));
+    const invoiceIds = source
+      .filter((order) => !approvalIds.includes(String(order.id)))
+      .filter((order) => shouldAutoMarkPendingInvoiceCreation({
+        order,
+        meta: metaByOrder?.[order.id] || null,
+        approvalRequired: approvalRequiredFor(order.id),
+      }))
+      .map((order) => String(order.id));
+
+    if (approvalIds.length === 0 && invoiceIds.length === 0) return metaByOrder;
+
+    try {
+      const token = await getAuthToken();
+      let nextMeta = { ...metaByOrder };
+
+      async function postMark(mode, orderIds) {
+        if (orderIds.length === 0) return;
+        const response = await fetch("/api/order-invoice", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ mode, orderIds }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to update pending invoice statuses.");
+        }
+        const items = payload.items && typeof payload.items === "object" ? payload.items : {};
+        nextMeta = { ...nextMeta, ...items };
+        setInvoiceMetaByOrder((current) => ({
+          ...current,
+          ...items,
+        }));
+        setStatusDraftByOrder((current) => {
+          const next = { ...current };
+          Object.entries(items).forEach(([orderId, meta]) => {
+            next[orderId] = String(meta?.status || "");
+          });
+          return next;
+        });
+      }
+
+      await postMark("mark-pending-approvals", approvalIds);
+      await postMark("mark-pending-invoice-creation", invoiceIds);
+      return nextMeta;
+    } catch (err) {
+      console.warn(err.message || "Unable to mark submitted order invoice statuses.");
+      return metaByOrder;
+    }
+  }
+
+  async function postApprovalAction(orderId, mode, extra = {}) {
+    const token = await getAuthToken();
+    const response = await fetch("/api/order-invoice", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        mode,
+        orderId,
+        ...extra,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.error || "Unable to update order approval.");
+    }
+    const item = payload.item || { orderId };
+    setInvoiceMetaByOrder((current) => ({
+      ...current,
+      [orderId]: item,
+    }));
+    setStatusDraftByOrder((current) => ({
+      ...current,
+      [orderId]: String(item.status || ""),
+    }));
+    if (mode === "reject-order") {
+      setRejectReasonByOrder((current) => {
+        const next = { ...current };
+        delete next[orderId];
+        return next;
+      });
+    }
+    return item;
+  }
+
+  async function ensureOrderMarkedPendingForApproval(orderId) {
+    const meta = invoiceMetaByOrder?.[orderId] || null;
+    const order = ordersRef.current.find((entry) => String(entry.id) === String(orderId)) || null;
+    if (isPendingForApprovalStatus(meta?.status)) {
+      if (String(meta.status || "") !== INVOICE_STATUS_PENDING_APPROVAL) {
+        return persistInvoiceStatus(orderId, INVOICE_STATUS_PENDING_APPROVAL);
+      }
+      return meta;
+    }
+    const evaluation = creditApprovalByOrder?.[orderId];
+    if (
+      evaluation?.required
+      || shouldAutoMarkPendingApproval({ approvalRequired: true, meta, order })
+    ) {
+      return persistInvoiceStatus(orderId, INVOICE_STATUS_PENDING_APPROVAL);
+    }
+    throw new Error("Order is not pending for approval.");
+  }
+
+  async function approvePendingOrder(orderId) {
+    setApprovingOrderId(orderId);
+    setError("");
+    try {
+      await ensureOrderMarkedPendingForApproval(orderId);
+      await postApprovalAction(orderId, "approve-order");
+      await showPopup({
+        variant: "success",
+        message: "Order approved. Status set to Pending for invoice creation.",
+      });
+    } catch (err) {
+      setError(err.message || "Unable to approve order.");
+    } finally {
+      setApprovingOrderId("");
+    }
+  }
+
+  async function rejectPendingOrder(orderId) {
+    const reason = String(rejectReasonByOrder?.[orderId] || "").trim();
+    if (!reason) {
+      setError("Select a rejection reason first.");
+      return;
+    }
+
+    setApprovingOrderId(orderId);
+    setError("");
+    try {
+      await ensureOrderMarkedPendingForApproval(orderId);
+      await postApprovalAction(orderId, "reject-order", { rejectionReason: reason });
+      await showPopup({
+        variant: "success",
+        message: `Order rejected (${reason}).`,
+      });
+    } catch (err) {
+      setError(err.message || "Unable to reject order.");
+    } finally {
+      setApprovingOrderId("");
+    }
+  }
+
+  async function loadInvoiceMeta(orderIds, userId = "", orderList = null) {
     if (!Array.isArray(orderIds) || orderIds.length === 0) {
       return;
     }
@@ -339,6 +614,9 @@ export default function PendingOrdersPage() {
         });
         return next;
       });
+
+      const sourceOrders = Array.isArray(orderList) ? orderList : (ordersRef.current || []);
+      await markSubmittedOrdersInvoiceQueue(sourceOrders, { ...(invoiceMetaByOrder || {}), ...items });
     } catch (err) {
       console.warn(err.message || "Unable to load invoice status.");
     }
@@ -470,20 +748,34 @@ export default function PendingOrdersPage() {
           creditApplication: documentsResponse.ok && documentsPayload.success
             ? documentsPayload.compliance?.creditApplication
             : { present: false },
+          paymentType: currentOrder?.payment_type || outstandingCustomer?.payment_type || "credit",
         });
         setCreditApprovalByOrder((current) => ({
           ...current,
           [orderId]: evaluation,
         }));
+        await ensurePendingApprovalStatus(
+          orderId,
+          evaluation,
+          invoiceMetaByOrder?.[orderId] || null,
+          currentOrder,
+        );
       } catch {
+        const fallbackEvaluation = evaluateCreditApproval({
+          outstanding: {},
+          orderValue: (data || []).reduce((sum, line) => sum + Number(line.line_value || 0), 0),
+          creditApplication: { present: false },
+        });
         setCreditApprovalByOrder((current) => ({
           ...current,
-          [orderId]: evaluateCreditApproval({
-            outstanding: {},
-            orderValue: (data || []).reduce((sum, line) => sum + Number(line.line_value || 0), 0),
-            creditApplication: { present: false },
-          }),
+          [orderId]: fallbackEvaluation,
         }));
+        await ensurePendingApprovalStatus(
+          orderId,
+          fallbackEvaluation,
+          invoiceMetaByOrder?.[orderId] || null,
+          currentOrder,
+        );
       }
 
       setStatusDraftByOrder((current) => {
@@ -574,11 +866,12 @@ export default function PendingOrdersPage() {
         async function applyOrders(serverOrders) {
           const queued = await listQueuedPendingOrders();
           const merged = mergeServerAndQueuedOrders(serverOrders, queued);
+          ordersRef.current = merged;
           setOrders(merged);
           const serverIds = merged
             .filter((order) => !isQueuedPendingOrderId(order.id))
             .map((order) => order.id);
-          void loadInvoiceMeta(serverIds, session.user.id);
+          void loadInvoiceMeta(serverIds, session.user.id, merged);
           return merged;
         }
 
@@ -663,15 +956,23 @@ export default function PendingOrdersPage() {
     const options = {};
     HEADING_FILTER_KEYS.forEach((key) => {
       const matching = orders.filter((order) => {
-        const values = pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null);
+        const values = pendingOrderFilterValues(
+          order,
+          invoiceMetaByOrder?.[order.id] || null,
+          Boolean(creditApprovalByOrder?.[order.id]?.required),
+        );
         return rowMatchesOtherExcelFilters(values, columnFilters, key, HEADING_FILTER_KEYS, matchesColumnFilter);
       });
       options[key] = uniqueColumnValues(
-        matching.map((order) => pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null)[key]),
+        matching.map((order) => pendingOrderFilterValues(
+          order,
+          invoiceMetaByOrder?.[order.id] || null,
+          Boolean(creditApprovalByOrder?.[order.id]?.required),
+        )[key]),
       );
     });
     return options;
-  }, [columnFilters, invoiceMetaByOrder, orders]);
+  }, [columnFilters, creditApprovalByOrder, invoiceMetaByOrder, orders]);
 
   const effectiveColumnFilters = useMemo(() => {
     const next = { ...columnFilters };
@@ -683,10 +984,14 @@ export default function PendingOrdersPage() {
 
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
-      const values = pendingOrderFilterValues(order, invoiceMetaByOrder?.[order.id] || null);
+      const values = pendingOrderFilterValues(
+        order,
+        invoiceMetaByOrder?.[order.id] || null,
+        Boolean(creditApprovalByOrder?.[order.id]?.required),
+      );
       return HEADING_FILTER_KEYS.every((key) => matchesColumnFilter(values[key], effectiveColumnFilters[key]));
     });
-  }, [effectiveColumnFilters, invoiceMetaByOrder, orders]);
+  }, [creditApprovalByOrder, effectiveColumnFilters, invoiceMetaByOrder, orders]);
 
   const filteredValueTotals = useMemo(() => {
     return filteredOrders.reduce((totals, order) => {
@@ -794,7 +1099,11 @@ export default function PendingOrdersPage() {
         "Customer Code": order.customer_code || "-",
         Salesman: order.salesman_code || "-",
         Status: order.status || "-",
-        "Invoice Status": invoiceStatusText(invoiceMetaByOrder?.[order.id]),
+        "Invoice Status": invoiceStatusText(
+          invoiceMetaByOrder?.[order.id],
+          order,
+          Boolean(creditApprovalByOrder?.[order.id]?.required),
+        ),
         "Invoice Uploaded At": formatDateTime(invoiceMetaByOrder?.[order.id]?.invoiceUploadedAt),
         "Invoice Build Time": formatPendingDuration(pendingOrderTimeToMakeSeconds(
           order,
@@ -943,6 +1252,7 @@ export default function PendingOrdersPage() {
 
   const isInvoiceMaker = isInvoiceMakerRole(userRole);
   const canManageInvoice = canManageOrderInvoice(userRole);
+  const canApproveOrders = canApprovePendingOrders(userRole);
 
   return (
     <MorningAttendanceGate>
@@ -1014,6 +1324,13 @@ export default function PendingOrdersPage() {
                   {filteredOrders.map((order) => {
                     const age = daysOld(order.updated_at || order.created_at);
                     const meta = invoiceMetaByOrder?.[order.id] || null;
+                    const approvalRequired = Boolean(creditApprovalByOrder?.[order.id]?.required);
+                    const pendingApproval = shouldShowPendingApprovalActions(
+                      order,
+                      meta,
+                      { approvalRequired },
+                    );
+                    const busyApproval = approvingOrderId === order.id;
 
                     return (
                       <Fragment key={order.id}>
@@ -1022,23 +1339,61 @@ export default function PendingOrdersPage() {
                           <td>{order.customer_name || order.customer_code || "-"}</td>
                           <td>{order.salesman_code || "-"}</td>
                           <td>{order.status || "-"}</td>
-                          <td>{invoiceStatusText(meta, order)}</td>
+                          <td>{invoiceStatusText(meta, order, approvalRequired)}</td>
                           <td>{formatDateTime(meta?.invoiceUploadedAt)}</td>
-                          <td><TimeToMakeClock order={order} meta={meta} /></td>
+                          <td><TimeToMakeClock order={order} meta={meta} approvalRequired={approvalRequired} /></td>
                           <td>{formatDateTime(order.created_at)}</td>
                           <td>{formatDateTime(order.updated_at)}</td>
                           <td>{age}</td>
                           <td style={{ textAlign: "right" }}>{formatMoneyInclVat(orderValueInclVat(order))}</td>
                           <td style={{ textAlign: "right" }}>{formatMoneyInclVat(invoiceMadeInclVat(meta))}</td>
                           <td>
-                            <button
-                              type="button"
-                              className="moduleInlineButton"
-                              onClick={() => openOrder(order.id)}
-                              disabled={loadingLines && activeOrderId === order.id}
-                            >
-                              {activeOrderId === order.id ? "Close" : "Open"}
-                            </button>
+                            <div className="moduleActionRow" style={{ flexWrap: "wrap", gap: "6px" }}>
+                              <button
+                                type="button"
+                                className="moduleInlineButton"
+                                onClick={() => openOrder(order.id)}
+                                disabled={loadingLines && activeOrderId === order.id}
+                              >
+                                {activeOrderId === order.id ? "Close" : "Open"}
+                              </button>
+                              {canApproveOrders && pendingApproval ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="modulePrimaryButton"
+                                    onClick={() => approvePendingOrder(order.id)}
+                                    disabled={busyApproval}
+                                  >
+                                    {busyApproval ? "Working..." : "Approve"}
+                                  </button>
+                                  <select
+                                    className="moduleInput"
+                                    style={{ minWidth: "160px" }}
+                                    value={rejectReasonByOrder?.[order.id] || ""}
+                                    onChange={(event) => setRejectReasonByOrder((current) => ({
+                                      ...current,
+                                      [order.id]: event.target.value,
+                                    }))}
+                                    aria-label="Rejection reason"
+                                  >
+                                    <option value="">Reject reason...</option>
+                                    {ORDER_REJECTION_REASONS.map((reason) => (
+                                      <option key={reason} value={reason}>{reason}</option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    className="moduleInlineButton"
+                                    style={{ borderColor: "#9b1c1c", color: "#9b1c1c" }}
+                                    onClick={() => rejectPendingOrder(order.id)}
+                                    disabled={busyApproval || !rejectReasonByOrder?.[order.id]}
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : null}
+                            </div>
                           </td>
                         </tr>
 
@@ -1102,12 +1457,15 @@ export default function PendingOrdersPage() {
 
                                 <div className="moduleHint" style={{ marginTop: "10px" }}>
                                   <strong>Order created:</strong> {formatDateTime(order.created_at)}
-                                  <span> | <strong>Invoice status:</strong> {invoiceStatusText(meta)}</span>
+                                  <span> | <strong>Invoice status:</strong> {invoiceStatusText(meta, order, approvalRequired)}</span>
+                                  {meta?.rejectionReason ? (
+                                    <span> | <strong>Rejection reason:</strong> {meta.rejectionReason}</span>
+                                  ) : null}
                                   {meta?.invoiceFileUrl ? (
                                     <span> | <a href={meta.invoiceFileUrl} target="_blank" rel="noreferrer">View uploaded invoice</a></span>
                                   ) : null}
                                   <span> | <strong>Uploaded at:</strong> {formatDateTime(meta?.invoiceUploadedAt)}</span>
-                                  <span> | <strong>Time to make:</strong> <TimeToMakeClock order={order} meta={meta} /></span>
+                                  <span> | <strong>Time to make:</strong> <TimeToMakeClock order={order} meta={meta} approvalRequired={approvalRequired} /></span>
                                 </div>
 
                                 {meta?.prospectLinkedCustomerCode ? (
@@ -1120,6 +1478,44 @@ export default function PendingOrdersPage() {
 
                                 <InvoiceComparisonPanel meta={meta} />
 
+                                {canApproveOrders && pendingApproval ? (
+                                  <div className="moduleActionRow" style={{ marginTop: "12px", flexWrap: "wrap", gap: "8px" }}>
+                                    <button
+                                      type="button"
+                                      className="modulePrimaryButton"
+                                      onClick={() => approvePendingOrder(order.id)}
+                                      disabled={busyApproval}
+                                    >
+                                      {busyApproval ? "Working..." : "Approve order"}
+                                    </button>
+                                    <label style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: "200px" }}>
+                                      Rejection reason
+                                      <select
+                                        className="moduleInput"
+                                        value={rejectReasonByOrder?.[order.id] || ""}
+                                        onChange={(event) => setRejectReasonByOrder((current) => ({
+                                          ...current,
+                                          [order.id]: event.target.value,
+                                        }))}
+                                      >
+                                        <option value="">Select reason</option>
+                                        {ORDER_REJECTION_REASONS.map((reason) => (
+                                          <option key={reason} value={reason}>{reason}</option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <button
+                                      type="button"
+                                      className="moduleInlineButton"
+                                      style={{ borderColor: "#9b1c1c", color: "#9b1c1c", alignSelf: "flex-end" }}
+                                      onClick={() => rejectPendingOrder(order.id)}
+                                      disabled={busyApproval || !rejectReasonByOrder?.[order.id]}
+                                    >
+                                      Reject order
+                                    </button>
+                                  </div>
+                                ) : null}
+
                                 {canManageInvoice && (
                                   <div style={{ marginTop: "12px" }}>
                                     <div className="moduleFormGrid">
@@ -1131,12 +1527,15 @@ export default function PendingOrdersPage() {
                                           onChange={(event) => setStatusDraftByOrder((current) => ({ ...current, [order.id]: event.target.value }))}
                                         >
                                           <option value="">Select status</option>
+                                          <option value={INVOICE_STATUS_PENDING_APPROVAL}>{INVOICE_STATUS_PENDING_APPROVAL}</option>
+                                          <option value={INVOICE_STATUS_PENDING_INVOICE_CREATION}>{INVOICE_STATUS_PENDING_INVOICE_CREATION}</option>
                                           <option value={INVOICE_STATUS_PENDING_CREDIT}>{INVOICE_STATUS_PENDING_CREDIT}</option>
                                           <option value={INVOICE_STATUS_WAITING_CREDIT_APPLICATION}>{INVOICE_STATUS_WAITING_CREDIT_APPLICATION}</option>
                                           <option value={INVOICE_STATUS_QUOTATION_WAITING_PAYMENT}>{INVOICE_STATUS_QUOTATION_WAITING_PAYMENT}</option>
                                           <option value={INVOICE_STATUS_REJECTED}>{INVOICE_STATUS_REJECTED}</option>
                                           <option value={INVOICE_STATUS_STOCK_UNAVAILABLE}>{INVOICE_STATUS_STOCK_UNAVAILABLE}</option>
                                           <option value={INVOICE_STATUS_WAITING_STOCK_TRANSFER}>{INVOICE_STATUS_WAITING_STOCK_TRANSFER}</option>
+                                          <option value={INVOICE_STATUS_WAITING_OVERDUE_COLLECTION}>{INVOICE_STATUS_WAITING_OVERDUE_COLLECTION}</option>
                                           <option value={INVOICE_STATUS_MADE} disabled={!meta?.invoiceFilePath}>{INVOICE_STATUS_MADE}</option>
                                         </select>
                                       </label>

@@ -20,10 +20,12 @@ import {
   CUSTOMER_LOCATION_UPDATE_CANCEL,
   CUSTOMER_LOCATION_UPDATE_SKIP,
   CUSTOMER_LOCATION_UPDATE_UPDATE,
+  customerWithUpdatedLocation,
   evaluateCustomerLocationUpdatePrompt,
 } from "../../lib/customerLocation";
 import { promptCustomerMobileUpdateIfMissing } from "../../lib/customerContact";
 import { postFormDataResilient, processOfflineQueue, sendJsonResilient } from "../../lib/offlineApi";
+import { shouldRequireGpsAccessGate } from "../../lib/moduleAccess";
 import {
   buildOptimisticLatestCollection,
   incrementLocalCollectionVisitCount,
@@ -1134,9 +1136,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
     return { dueCustomers: due, notDueCustomers: notDue, legalCustomers: legal };
   }
 
-  async function loadQueue(preferredKey = "") {
+  async function loadQueue(preferredKey = "", options = {}) {
     const supabase = getSupabaseClient();
     const seq = ++loadSeqRef.current;
+    const forceRefresh = Boolean(options.forceRefresh);
 
     if (!supabase) {
       setLoading(false);
@@ -1158,10 +1161,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (!session?.access_token || !session?.user?.id) throw new Error("Please login again.");
 
-      let cachedQueues = await readCollectionQueuesForUser(session.user.id);
+      let cachedQueues = forceRefresh ? null : await readCollectionQueuesForUser(session.user.id);
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
       const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-      if (!queueHasRows(cachedQueues) && getDataRefreshStatus().active && !offline) {
+      if (!forceRefresh && !queueHasRows(cachedQueues) && getDataRefreshStatus().active && !offline) {
         setLoading(true);
         cachedQueues = await waitForHydratedCollectionQueues(session.user.id);
         if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
@@ -1196,6 +1199,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       queueRefreshWatchdogRef.current = watchdog;
 
       const queueResult = await fetchCollectionQueuesCached(session.access_token, session.user.id, {
+        forceRefresh,
         onUpdate: (freshQueues) => {
           if (loadSeqRef.current !== seq) return;
           if (queueRefreshWatchdogRef.current === watchdog) {
@@ -1677,9 +1681,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
       customer,
       skipReverseGeocode: offline,
     });
-    if (!promptDetails) return CUSTOMER_LOCATION_UPDATE_SKIP;
+    if (!promptDetails) {
+      return { choice: CUSTOMER_LOCATION_UPDATE_SKIP, customer };
+    }
 
     const choice = await promptCustomerLocationChoice(promptDetails);
+    let nextCustomer = customer;
     if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE) {
       try {
         await applyCustomerLocationUpdateFromPrompt(promptDetails);
@@ -1687,8 +1694,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
         // Location sync is best-effort; do not block the collection save.
         console.warn("Customer location update skipped", locationError);
       }
+      // Always use the accepted GPS for distance-from-customer in the visit summary.
+      nextCustomer = customerWithUpdatedLocation(customer, promptDetails.updatePayload);
     }
-    return choice;
+    return { choice, customer: nextCustomer };
   }
 
   async function saveVisit(row, options = {}) {
@@ -1764,7 +1773,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         setForm((current) => ({ ...current, remarkEnglish: effectiveEnglishRemark }));
       }
 
-      const locationChoice = gps
+      const locationUpdate = gps
         ? await resolveLocationUpdateBeforeAction({
           customerCode: row.customer_code,
           customerName: row.customer_name,
@@ -1772,7 +1781,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
           accessToken: session.access_token,
           customer: row,
         })
-        : CUSTOMER_LOCATION_UPDATE_SKIP;
+        : { choice: CUSTOMER_LOCATION_UPDATE_SKIP, customer: row };
+      const locationChoice = locationUpdate.choice;
       if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
         return;
       }
@@ -1803,7 +1813,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         supabase,
         userId: session.user.id,
         location: gps,
-        customer: row,
+        customer: locationUpdate.customer || row,
         savedAt: new Date().toISOString(),
       });
 
@@ -2056,26 +2066,32 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (!session?.access_token) throw new Error(t("msgLoginAgain"));
 
-      const gps = await captureGpsLocationWithFallbackConfirm(language, {
-        customerCode: row.customer_code,
-        customerName: row.customer_name,
-        accessToken: session.access_token,
-        role: access.role,
-        skipCustomerLocationUpdate: true,
-      });
+      // Office remove (admin/manager) should not wait on GPS — that blocked legal
+      // removals on desktop and made the row look stuck.
+      const skipGpsForOfficeRemove = action === "remove" && !shouldRequireGpsAccessGate(access.role);
+      const gps = skipGpsForOfficeRemove
+        ? null
+        : await captureGpsLocationWithFallbackConfirm(language, {
+          customerCode: row.customer_code,
+          customerName: row.customer_name,
+          accessToken: session.access_token,
+          role: access.role,
+          skipCustomerLocationUpdate: true,
+          customer: row,
+        });
       const locationChoice = gps
-        ? await resolveLocationUpdateBeforeAction({
+        ? (await resolveLocationUpdateBeforeAction({
           customerCode: row.customer_code,
           customerName: row.customer_name,
           entryLocation: gps,
           accessToken: session.access_token,
           customer: row,
-        })
+        })).choice
         : CUSTOMER_LOCATION_UPDATE_SKIP;
       if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
         return;
       }
-      const platform = await resolveGpsCapturePlatform();
+      const platform = skipGpsForOfficeRemove ? "web" : await resolveGpsCapturePlatform();
       const legalNote = String(
         (activeRowKey === rowKey(row) ? form.legalNote : "") || row.legal_transfer?.note || "",
       ).trim();
@@ -2101,6 +2117,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerCode: row.customer_code,
           action,
         },
+        // Legal remove used to time out at the default 4s while the API rebuilt
+        // the whole outstanding queue, so the delete never reached the database.
+        timeoutMs: 60000,
         queueFirst: typeof navigator !== "undefined" && navigator.onLine === false,
       });
 
@@ -2119,14 +2138,22 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (action === "remove") {
         const removedKey = rowKey(row);
         setActiveRowKey("");
-        setLegalCustomers((current) => current.filter((item) => rowKey(item) !== removedKey));
+        const nextLegal = (queuesRef.current.legalCustomers || []).filter((item) => rowKey(item) !== removedKey);
+        const patchedQueues = {
+          ...queuesRef.current,
+          legalCustomers: nextLegal,
+        };
+        queuesRef.current = patchedQueues;
+        setLegalCustomers(nextLegal);
         if (!saveResult.queued) {
           await invalidateCollectionQueuesForUser(session.user.id);
-          await loadQueue("");
+          // Force a network reload so the on-device queue cache cannot put the
+          // customer back on the Legal tab after a successful remove.
+          await loadQueue("", { forceRefresh: true });
         }
       } else if (!saveResult.queued) {
         await invalidateCollectionQueuesForUser(session.user.id);
-        await loadQueue(rowKey(row));
+        await loadQueue(rowKey(row), { forceRefresh: true });
         if (view !== "legal") {
           setActiveRowKey("");
         }

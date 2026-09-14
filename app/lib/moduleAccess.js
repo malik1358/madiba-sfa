@@ -34,6 +34,7 @@ export const MODULES = {
   customerBookShares: { href: "/management/customer-book-shares", label: "Customer Book Shares" },
   kpiTargets: { href: "/management/kpi-targets", label: "KPI Targets" },
   schemes: { href: "/management/schemes", label: "Schemes" },
+  itemPriceHistory: { href: "/management/item-price-history", label: "Item Price History" },
   gpsMap: { href: "/management/gps-map", label: "GPS Map" },
   upload: { href: "/management/upload", label: "Imports" },
   stockTake: { href: "/management/stock-take", label: "Stock Take" },
@@ -44,7 +45,7 @@ export const NAV_GROUPS = [
   {
     key: "field",
     label: "Field Sales",
-    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "salesmanVisitPlan"],
+    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "salesmanVisitPlan", "itemPriceHistory"],
   },
   {
     key: "collections",
@@ -155,6 +156,7 @@ export function buildModuleAccess(context = {}) {
       customerBookShares: isAdmin || isManager,
       kpiTargets: isAdmin || isManager,
       schemes: isAdmin || isManager,
+      itemPriceHistory: (isAdmin || isManager || isInvoiceMaker || isSalesman || isProductPromoter) && !isCollector,
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
       upload: isAdmin || isManager || isInvoiceMaker,
       stockTake: stockTakeAccess,
@@ -226,6 +228,7 @@ export const MODULE_LABELS = {
   customerBookShares: { en: "Customer Book Shares", ar: "مشاركة دفاتر العملاء" },
   kpiTargets: { en: "KPI Targets", ar: "أهداف الأداء" },
   schemes: { en: "Schemes", ar: "العروض" },
+  itemPriceHistory: { en: "Item Price History", ar: "سجل أسعار الأصناف" },
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },
   upload: { en: "Imports", ar: "الاستيراد" },
   stockTake: { en: "Stock Take", ar: "جرد المخزون" },

@@ -22,8 +22,8 @@ function planLabel(plan) {
 const TEXT = {
   title: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },
   subtitle: {
-    en: "70% sales / 30% collection. Customers with outstanding >60 days are collection-only.",
-    ar: "70% مبيعات / 30% تحصيل. العملاء الذين لديهم مستحقات أكثر من 60 يوماً للتحصيل فقط.",
+    en: "Scheduled appointments (today or earlier) list first — not system suggestions. System picks prefer customers not visited for at least 7 days. Mix: 70% sales / 30% collection. Customers with outstanding >60 days are collection-only.",
+    ar: "المواعيد المجدولة (اليوم أو قبلها) تظهر أولاً — وليست اقتراحات النظام. اقتراحات النظام تفضّل العملاء غير المزارين منذ 7 أيام على الأقل. المزيج: 70% مبيعات / 30% تحصيل. العملاء الذين لديهم مستحقات أكثر من 60 يوماً للتحصيل فقط.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading saved visit plan...", ar: "جاري تحميل خطة الزيارة المحفوظة..." },
@@ -49,8 +49,8 @@ const TEXT = {
     ar: "ليس لديك صلاحية لخطط زيارات المندوبين.",
   },
   previewBanner: {
-    en: "Plans are built once at midnight KSA and saved. This page only shows the ready plan — it does not rebuild live.",
-    ar: "تُبنى الخطط مرة عند منتصف الليل بتوقيت السعودية وتُحفظ. هذه الصفحة تعرض الخطة الجاهزة فقط — دون إعادة بناء مباشرة.",
+    en: "Visit-plan email is paused until the list is finalized. Plans are still built/saved for this page — cron and salesman mail stay off.",
+    ar: "بريد خطة الزيارة متوقف حتى اعتماد القائمة. الخطط ما زالت تُبنى وتُحفظ لهذه الصفحة — الكرون وبريد المندوبين متوقفان.",
   },
   builtAt: { en: "Built at", ar: "بُنيت في" },
   notReady: {
@@ -68,6 +68,9 @@ const TEXT = {
   customer: { en: "Customer", ar: "العميل" },
   cityArea: { en: "City / Area", ar: "المدينة / المنطقة" },
   focus: { en: "Focus", ar: "التركيز" },
+  source: { en: "Source", ar: "المصدر" },
+  sourceAppointment: { en: "Scheduled appointment", ar: "موعد مجدول" },
+  sourceSystem: { en: "System suggested", ar: "اقتراح النظام" },
   combined: { en: "Combined", ar: "المشترك" },
   salesProb: { en: "Sales", ar: "المبيعات" },
   collectionProb: { en: "Collection", ar: "التحصيل" },
@@ -139,6 +142,22 @@ function focusClass(focus) {
   if (normalized === "both") return "moduleBiMonthCell--current";
   if (normalized === "collection") return "moduleBiMonthCell--down";
   return "moduleBiMonthCell--up";
+}
+
+function sourceClass(source) {
+  const normalized = String(source || "").trim().toLowerCase();
+  if (normalized === "appointment" || normalized.includes("appointment")) {
+    return "moduleBiMonthCell--down";
+  }
+  return "moduleBiMonthCell--current";
+}
+
+function visitSourceLabel(visit, t) {
+  if (visit?.source_label) return visit.source_label;
+  if (visit?.plan_source === "appointment" || visit?.is_scheduled_appointment) {
+    return t("sourceAppointment");
+  }
+  return t("sourceSystem");
 }
 
 export default function SalesmanVisitPlanPage() {
@@ -524,6 +543,7 @@ export default function SalesmanVisitPlanPage() {
                     <th className="moduleVisitPlanMoneyNarrow" title={t("recent30dTitle")}>{t("recent30d")}</th>
                     <th className="moduleVisitPlanMoneyNarrow" title={t("avgMonthlyTitle")}>{t("avgMonthly")}</th>
                     <th>{t("focus")}</th>
+                    <th>{t("source")}</th>
                     <th>{t("combined")}</th>
                     <th>{t("salesProb")}</th>
                     <th>{t("collectionProb")}</th>
@@ -555,6 +575,12 @@ export default function SalesmanVisitPlanPage() {
                       <td className="moduleVisitPlanMoneyNarrow">{formatMoney(visit.recent_30d_sales_value)}</td>
                       <td className="moduleVisitPlanMoneyNarrow">{formatMoney(visit.average_monthly_purchase)}</td>
                       <td className={focusClass(visit.focus)}>{visit.focus}</td>
+                      <td className={sourceClass(visit.plan_source || visit.source_label)}>
+                        {visitSourceLabel(visit, t)}
+                        {visit.scheduled_visit_date && (visit.plan_source === "appointment" || visit.is_scheduled_appointment) ? (
+                          <div className="moduleHint">{visit.scheduled_visit_date}</div>
+                        ) : null}
+                      </td>
                       <td className={scoreClass(visit.combined_label)}>
                         {visit.combined_score} · {visit.combined_label}
                       </td>
@@ -585,7 +611,7 @@ export default function SalesmanVisitPlanPage() {
                     <td className="moduleBiTotalCol moduleVisitPlanMoneyNarrow"><strong>{formatMoney(plan.totals?.recentSales)}</strong></td>
                     <td className="moduleBiTotalCol moduleVisitPlanMoneyNarrow"><strong>{formatMoney(plan.totals?.recent30dSales)}</strong></td>
                     <td className="moduleBiTotalCol moduleVisitPlanMoneyNarrow" />
-                    <td colSpan={4} className="moduleBiTotalCol" />
+                    <td colSpan={5} className="moduleBiTotalCol" />
                     <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.dueAmount)}</strong></td>
                     <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.outstanding_0_30)}</strong></td>
                     <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.outstanding_30_60)}</strong></td>

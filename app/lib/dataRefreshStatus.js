@@ -141,7 +141,7 @@ export function formatDataAge(timestamp, now = Date.now(), language = "en") {
   return isAr ? `قبل ${days} ي` : `${days}d ago`;
 }
 
-export function isDataRefreshStale(status = state, maxAgeMs = 6 * 60 * 60 * 1000, now = Date.now()) {
+export function isDataRefreshStale(status = state, maxAgeMs = 60 * 60 * 1000, now = Date.now()) {
   const savedAt = Number(status.lastSavedAt || 0);
   const builtAt = Date.parse(status.lastBuiltAt || "") || 0;
   const latest = Math.max(savedAt, builtAt);

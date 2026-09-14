@@ -35,8 +35,11 @@ export default function CustomerList({ customers, selectedSalesman, setSelectedS
           return (
           <button type="button" className="auditCustomerCard" key={rowKey} onClick={() => openCustomer({
             ...customer,
-            customer_code: display.customer_code || customer.customer_code,
-            customer_name: display.customer_name || customer.customer_name,
+            // Keep the master customer_code for history lookup candidate expansion.
+            // Only fill gaps from the display parser; never replace a real master code
+            // with an empty parsed code when the stored value is a dirty name-as-code.
+            customer_code: customer.customer_code || display.customer_code,
+            customer_name: display.customer_name || customer.customer_name || customer.customer_code,
           })}>
             <div className="auditCustomerCode">{display.customer_code || customer.customer_code}</div>
             <div className="auditCustomerMain">

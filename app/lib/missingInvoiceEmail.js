@@ -2,6 +2,14 @@ import { formatIdleDuration } from "./collectionDaySummary.js";
 import { escapeHtml } from "./dailyVisitReportEmail.js";
 import { formatResumeMoney } from "./dailySalesmanResume.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
+import {
+  ORDER_STATUS_PENDING_CREDIT,
+  ORDER_STATUS_PENDING_INVOICE_CREATION,
+  ORDER_STATUS_WAITING_OVERDUE_COLLECTION,
+  isPendingForApprovalStatus,
+  isPendingForInvoiceCreationStatus,
+  isWaitingForOverdueCollectionStatus,
+} from "./orderApproval.js";
 import { formatKsaDateTime, getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
 export const MISSING_INVOICE_GRACE_MS = 60 * 60 * 1000;
@@ -10,6 +18,9 @@ export const MISSING_INVOICE_EMAIL_LAST_SENT_KEY = "missing_invoice_email_last_s
 export const MISSING_INVOICE_CREATED_FROM = "2026-09-01";
 export const MISSING_INVOICE_STATUS_REJECTED = "Rejected by management";
 export const MISSING_INVOICE_STATUS_NOT_UPLOADED = "Invoice not uploaded";
+export const MISSING_INVOICE_STATUS_PENDING_APPROVAL = "Pending for approval";
+export const MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION = ORDER_STATUS_PENDING_INVOICE_CREATION;
+export const MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION = ORDER_STATUS_WAITING_OVERDUE_COLLECTION;
 export const IST_TIMEZONE = "Asia/Kolkata";
 export const MISSING_INVOICE_EMAIL_START_MINUTES = 9 * 60;
 export const MISSING_INVOICE_EMAIL_END_MINUTES = 20 * 60;
@@ -27,6 +38,15 @@ export const DEFAULT_MISSING_INVOICE_EMAIL_CC = [
   "soyeb@noorshukran.com",
   "fazlur.rahiman@noorshukran.com",
 ];
+
+const EXCLUDED_INVOICE_STATUSES = new Set([
+  MISSING_INVOICE_STATUS_REJECTED.toLowerCase(),
+  "stock unavailable",
+  "waiting for credit application",
+  "quotation submitted waiting for the payment",
+  "waiting for stock transfer",
+  "invoice made",
+]);
 
 const IST_WEEKDAY_INDEX = {
   Sun: 0,
@@ -104,6 +124,15 @@ export function hasUploadedInvoice(meta) {
 
 export function invoiceStatusLabel(meta) {
   const status = String(parseInvoiceMeta(meta)?.status || "").trim();
+  if (isPendingForApprovalStatus(status) || status.toLowerCase() === ORDER_STATUS_PENDING_CREDIT.toLowerCase()) {
+    return MISSING_INVOICE_STATUS_PENDING_APPROVAL;
+  }
+  if (isPendingForInvoiceCreationStatus(status)) {
+    return MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION;
+  }
+  if (isWaitingForOverdueCollectionStatus(status)) {
+    return MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION;
+  }
   return status || MISSING_INVOICE_STATUS_NOT_UPLOADED;
 }
 
@@ -112,9 +141,36 @@ export function isInvoiceNotUploadedStatus(meta) {
   return !status || status === MISSING_INVOICE_STATUS_NOT_UPLOADED.toLowerCase();
 }
 
+export function isPendingApprovalEmailStatus(meta) {
+  const status = String(parseInvoiceMeta(meta)?.status || "").trim();
+  return isPendingForApprovalStatus(status);
+}
+
+export function isPendingInvoiceCreationEmailStatus(meta) {
+  const status = String(parseInvoiceMeta(meta)?.status || "").trim();
+  if (isPendingForInvoiceCreationStatus(status)) return true;
+  return isInvoiceNotUploadedStatus(meta);
+}
+
+export function isWaitingOverdueCollectionEmailStatus(meta) {
+  const status = String(parseInvoiceMeta(meta)?.status || "").trim();
+  return isWaitingForOverdueCollectionStatus(status);
+}
+
 export function isRejectedByManagement(meta) {
   const status = String(parseInvoiceMeta(meta)?.status || "").trim().toLowerCase();
   return status === MISSING_INVOICE_STATUS_REJECTED.toLowerCase();
+}
+
+export function isExcludedFromMissingInvoiceEmail(meta) {
+  if (hasUploadedInvoice(meta)) return true;
+  if (isRejectedByManagement(meta)) return true;
+  const status = String(parseInvoiceMeta(meta)?.status || "").trim().toLowerCase();
+  if (!status) return false;
+  if (isPendingForApprovalStatus(status) || isPendingForInvoiceCreationStatus(status)) return false;
+  if (isWaitingForOverdueCollectionStatus(status)) return false;
+  if (status === MISSING_INVOICE_STATUS_NOT_UPLOADED.toLowerCase()) return false;
+  return EXCLUDED_INVOICE_STATUSES.has(status);
 }
 
 export function missingInvoiceCreatedFromIso() {
@@ -147,15 +203,37 @@ export function isMissingInvoiceOverdue(order, meta, now = new Date()) {
   if (!createdAt) return false;
   if (!isCreatedFromSeptember2026(order)) return false;
   if (now.getTime() - createdAt < MISSING_INVOICE_GRACE_MS) return false;
-  if (isRejectedByManagement(meta)) return false;
-  if (!isInvoiceNotUploadedStatus(meta)) return false;
-  return !hasUploadedInvoice(meta);
+  if (isExcludedFromMissingInvoiceEmail(meta)) return false;
+  return isPendingApprovalEmailStatus(meta)
+    || isPendingInvoiceCreationEmailStatus(meta)
+    || isWaitingOverdueCollectionEmailStatus(meta);
 }
 
 export function selectMissingInvoiceOrders(orders = [], metaByOrder = new Map(), now = new Date()) {
   return (orders || [])
     .filter((order) => isMissingInvoiceOverdue(order, metaByOrder.get(String(order?.id || "").trim()), now))
     .sort((left, right) => (orderCreatedAtMs(left) || 0) - (orderCreatedAtMs(right) || 0));
+}
+
+export function partitionMissingInvoiceOrders(orders = [], metaByOrder = new Map()) {
+  const pendingApproval = [];
+  const pendingInvoiceCreation = [];
+  const waitingOverdueCollection = [];
+
+  (orders || []).forEach((order) => {
+    const meta = metaByOrder.get(String(order?.id || "").trim());
+    if (isWaitingOverdueCollectionEmailStatus(meta)) {
+      waitingOverdueCollection.push(order);
+      return;
+    }
+    if (isPendingApprovalEmailStatus(meta)) {
+      pendingApproval.push(order);
+      return;
+    }
+    pendingInvoiceCreation.push(order);
+  });
+
+  return { pendingApproval, pendingInvoiceCreation, waitingOverdueCollection };
 }
 
 export function formatMissingInvoiceAge(createdAt, now = new Date()) {
@@ -212,23 +290,45 @@ function orderRow(order, meta, now) {
   };
 }
 
-export function buildMissingInvoiceAlertEmail({
-  now = new Date(),
-  orders = [],
-  metaByOrder = new Map(),
-} = {}) {
-  const date = getKsaDateString(now);
-  const rows = (orders || []).map((order) => (
-    orderRow(order, metaByOrder.get(String(order?.id || "").trim()), now)
-  ));
-  const count = rows.length;
-  const subject = `${count} order${count === 1 ? "" : "s"} missing invoice after 1 hour — ${date}`;
+function renderOrderTableRows(rows) {
+  if (!rows.length) {
+    return `<tr><td colspan="7" style="border:1px solid #c5d4de;padding:8px;">No orders in this queue.</td></tr>`;
+  }
+  return rows.map((row, index) => {
+    const rowBg = index % 2 === 0 ? "#ffffff" : "#eef6fb";
+    return `<tr style="background:${rowBg};">
+        <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.order)}</td>
+        <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.customer)}</td>
+        <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.salesman)}</td>
+        <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.createdAt)}</td>
+        <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.age)}</td>
+        <td style="text-align:right;border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.value)}</td>
+        <td style="border:1px solid #c5d4de;padding:6px 8px;">${escapeHtml(row.invoiceStatus)}</td>
+      </tr>`;
+  }).join("");
+}
 
-  const text = [
-    `${count} submitted order${count === 1 ? "" : "s"} from September 2026 onward still ${count === 1 ? "has" : "have"} no invoice uploaded more than 1 hour after creation.`,
-    "Orders rejected by management, pending credit approval, stock unavailable, test-customer orders, and orders created before September 2026 are excluded.",
-    `Checked at (KSA): ${formatKsaDateTime(now)}`,
-    "",
+function renderOrderTableHtml(title, rows) {
+  return `<h3 style="margin: 20px 0 8px; color: #0f4c5c;">${escapeHtml(title)} (${rows.length})</h3>
+  <table style="border-collapse: collapse; font-size: 13px; width: 100%;">
+    <thead>
+      <tr style="background:#0f4c5c;color:#ffffff;">
+        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Order</th>
+        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Customer</th>
+        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Salesman</th>
+        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Created (KSA)</th>
+        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Waiting</th>
+        <th style="text-align:right;padding:6px 8px;border:1px solid #0f4c5c;">Value</th>
+        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c5c;">Invoice status</th>
+      </tr>
+    </thead>
+    <tbody>${renderOrderTableRows(rows)}</tbody>
+  </table>`;
+}
+
+function renderOrderTableText(title, rows) {
+  return [
+    `${title} (${rows.length})`,
     "Order | Customer | Salesman | Created (KSA) | Waiting | Value | Invoice status",
     ...rows.map((row) => [
       row.order,
@@ -240,42 +340,57 @@ export function buildMissingInvoiceAlertEmail({
       row.invoiceStatus,
     ].join(" | ")),
   ].join("\n");
+}
 
-  const bodyRows = rows.length
-    ? rows.map((row, index) => {
-      const rowBg = index % 2 === 0 ? "#ffffff" : "#eef6fb";
-      return `<tr style="background:${rowBg};">
-        <td style="border:1px solid #c5d4de;">${escapeHtml(row.order)}</td>
-        <td style="border:1px solid #c5d4de;">${escapeHtml(row.customer)}</td>
-        <td style="border:1px solid #c5d4de;">${escapeHtml(row.salesman)}</td>
-        <td style="border:1px solid #c5d4de;">${escapeHtml(row.createdAt)}</td>
-        <td style="border:1px solid #c5d4de;">${escapeHtml(row.age)}</td>
-        <td style="text-align:right;border:1px solid #c5d4de;">${escapeHtml(row.value)}</td>
-        <td style="border:1px solid #c5d4de;">${escapeHtml(row.invoiceStatus)}</td>
-      </tr>`;
-    }).join("")
-    : `<tr><td colspan="7" style="border:1px solid #c5d4de;padding:8px;">No overdue orders.</td></tr>`;
+export function buildMissingInvoiceAlertEmail({
+  now = new Date(),
+  orders = [],
+  metaByOrder = new Map(),
+} = {}) {
+  const date = getKsaDateString(now);
+  const partitioned = partitionMissingInvoiceOrders(orders, metaByOrder);
+  const approvalRows = partitioned.pendingApproval.map((order) => (
+    orderRow(order, metaByOrder.get(String(order?.id || "").trim()), now)
+  ));
+  const invoiceRows = partitioned.pendingInvoiceCreation.map((order) => (
+    orderRow(order, metaByOrder.get(String(order?.id || "").trim()), now)
+  ));
+  const overdueCollectionRows = partitioned.waitingOverdueCollection.map((order) => (
+    orderRow(order, metaByOrder.get(String(order?.id || "").trim()), now)
+  ));
+  const count = approvalRows.length + invoiceRows.length + overdueCollectionRows.length;
+  const subject = `${count} order${count === 1 ? "" : "s"} pending invoice / approval after 1 hour — ${date}`;
+
+  const text = [
+    `${count} submitted order${count === 1 ? "" : "s"} from September 2026 onward still ${count === 1 ? "needs" : "need"} invoice action more than 1 hour after creation.`,
+    `Pending for approval: ${approvalRows.length}. Pending for invoice creation: ${invoiceRows.length}. Waiting for overdue collection: ${overdueCollectionRows.length}.`,
+    "Orders rejected by management, stock unavailable, waiting-credit/quotation/stock-transfer, invoice-made, test-customer orders, and orders created before September 2026 are excluded.",
+    `Checked at (KSA): ${formatKsaDateTime(now)}`,
+    "",
+    renderOrderTableText(MISSING_INVOICE_STATUS_PENDING_APPROVAL, approvalRows),
+    "",
+    renderOrderTableText(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceRows),
+    "",
+    renderOrderTableText(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows),
+  ].join("\n");
 
   const html = `<div style="font-family: Arial, sans-serif; color: #1f2933; line-height: 1.5;">
-  <h2 style="margin: 0 0 12px; color: #0f4c81;">Invoices still missing after 1 hour</h2>
-  <p style="margin: 0 0 16px;">${count} submitted order${count === 1 ? "" : "s"} from September 2026 onward ${count === 1 ? "has" : "have"} no invoice uploaded more than 1 hour after creation. Orders rejected by management, pending credit approval, stock unavailable, test-customer orders, and orders created before September 2026 are excluded.</p>
-  <p style="margin: 0 0 16px; color: #52616b; font-size: 13px;">Checked at (KSA): ${escapeHtml(formatKsaDateTime(now))}</p>
-  <table style="border-collapse: collapse; font-size: 13px; width: 100%;">
-    <thead>
-      <tr style="background:#0f4c81;color:#ffffff;">
-        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Order</th>
-        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Customer</th>
-        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Salesman</th>
-        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Created (KSA)</th>
-        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Waiting</th>
-        <th style="text-align:right;padding:6px 8px;border:1px solid #0f4c81;">Value</th>
-        <th style="text-align:left;padding:6px 8px;border:1px solid #0f4c81;">Invoice status</th>
-      </tr>
-    </thead>
-    <tbody>${bodyRows}</tbody>
-  </table>
+  <h2 style="margin: 0 0 12px; color: #0f4c5c;">Orders pending invoice action after 1 hour</h2>
+  <p style="margin: 0 0 16px;">${count} submitted order${count === 1 ? "" : "s"} from September 2026 onward ${count === 1 ? "still needs" : "still need"} invoice action more than 1 hour after creation. This email includes <strong>Pending for approval</strong> (${approvalRows.length}), <strong>Pending for invoice creation</strong> (${invoiceRows.length}), and <strong>Waiting for overdue collection</strong> (${overdueCollectionRows.length}) in separate tables.</p>
+  <p style="margin: 0 0 16px; color: #52616b; font-size: 13px;">Checked at (KSA): ${escapeHtml(formatKsaDateTime(now))}. Rejected, stock-unavailable, waiting-credit/quotation/stock-transfer, invoice-made, test-customer, and pre-September-2026 orders are excluded.</p>
+  ${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_APPROVAL, approvalRows)}
+  ${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceRows)}
+  ${renderOrderTableHtml(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows)}
   <p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">This reminder is sent every 15 minutes during India back-office hours (Saturday–Thursday, 9:00 AM–8:00 PM IST) while any qualifying order remains. Friday is a holiday.</p>
 </div>`;
 
-  return { subject, text, html, orderCount: count };
+  return {
+    subject,
+    text,
+    html,
+    orderCount: count,
+    pendingApprovalCount: approvalRows.length,
+    pendingInvoiceCreationCount: invoiceRows.length,
+    waitingOverdueCollectionCount: overdueCollectionRows.length,
+  };
 }

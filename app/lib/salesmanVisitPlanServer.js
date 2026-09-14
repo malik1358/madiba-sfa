@@ -19,6 +19,7 @@ import {
   applyLatestVisitFromLogRow,
   visitReportsSinceIso,
 } from "./myDayPlannerLoad.js";
+import { activeScheduledVisitDate } from "./nextVisitDate.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 function normalizeCode(value) {
@@ -82,7 +83,7 @@ function rememberLatestVisit(map, customerCode, visitAt) {
   }
 }
 
-/** Fast last-visit lookup: collection visits + a capped field-visit sample. */
+/** Fast last-visit + next-appointment lookup: collection visits + a capped field-visit sample. */
 export async function loadLatestVisitDatesByCustomer(admin, {
   lookbackDays = 90,
   maxFieldVisitRows = 3000,
@@ -92,17 +93,41 @@ export async function loadLatestVisitDatesByCustomer(admin, {
 
   const { data: collectionVisits, error: collectionError } = await admin
     .from("collection_visits")
-    .select("customer_code,saved_at")
+    .select("customer_code,saved_at,next_visit_at")
     .order("saved_at", { ascending: false })
     .limit(5000);
 
   if (collectionError && !isMissingTableError(collectionError)) {
-    throw new Error(formatSupabaseError(collectionError));
+    // Older schemas may lack next_visit_at — fall back without it.
+    if (/next_visit_at/i.test(String(collectionError.message || ""))) {
+      const fallback = await admin
+        .from("collection_visits")
+        .select("customer_code,saved_at")
+        .order("saved_at", { ascending: false })
+        .limit(5000);
+      if (fallback.error && !isMissingTableError(fallback.error)) {
+        throw new Error(formatSupabaseError(fallback.error));
+      }
+      (fallback.data || []).forEach((row) => {
+        rememberLatestVisit(latestVisitByCustomer, row?.customer_code, row?.saved_at);
+      });
+    } else {
+      throw new Error(formatSupabaseError(collectionError));
+    }
+  } else {
+    (collectionVisits || []).forEach((row) => {
+      const code = normalizeCode(row?.customer_code);
+      const at = String(row?.saved_at || "").trim();
+      if (!code || !at) return;
+      const current = latestVisitByCustomer.get(code);
+      if (!current || sortTimestamp(at) > sortTimestamp(current)) {
+        latestVisitByCustomer.set(code, at);
+        const next = activeScheduledVisitDate(row?.next_visit_at, at);
+        if (next) nextVisitByCustomer.set(code, next);
+        else nextVisitByCustomer.delete(code);
+      }
+    });
   }
-
-  (collectionVisits || []).forEach((row) => {
-    rememberLatestVisit(latestVisitByCustomer, row?.customer_code, row?.saved_at);
-  });
 
   const sinceIso = visitReportsSinceIso(new Date(), lookbackDays);
   const pageSize = 1000;
@@ -133,7 +158,7 @@ export async function loadLatestVisitDatesByCustomer(admin, {
     from += pageSize;
   }
 
-  return latestVisitByCustomer;
+  return { latestVisitByCustomer, nextVisitByCustomer };
 }
 
 export async function readVisitPlanRebuildStatus(admin) {
@@ -180,9 +205,30 @@ export function mergeVisitPlanCustomerCandidates(
   collectionRecords,
   todayIso = new Date().toISOString(),
   lastVisitByCustomer = null,
+  nextVisitByCustomer = null,
 ) {
   const byCode = new Map();
-  const visitMap = lastVisitByCustomer instanceof Map ? lastVisitByCustomer : new Map();
+  const visitMap = lastVisitByCustomer instanceof Map
+    ? lastVisitByCustomer
+    : (lastVisitByCustomer?.latestVisitByCustomer instanceof Map
+      ? lastVisitByCustomer.latestVisitByCustomer
+      : new Map());
+  const nextVisitMap = nextVisitByCustomer instanceof Map
+    ? nextVisitByCustomer
+    : (lastVisitByCustomer?.nextVisitByCustomer instanceof Map
+      ? lastVisitByCustomer.nextVisitByCustomer
+      : new Map());
+
+  function resolveScheduled(code, row, lastVisitDate) {
+    return activeScheduledVisitDate(
+      nextVisitMap.get(code)
+        || row?.scheduled_visit_date
+        || row?.scheduled_revisit_at
+        || row?.next_visit_at
+        || row?.latest_collection?.next_visit_at,
+      lastVisitDate,
+    ) || null;
+  }
 
   (visibleCustomers || []).forEach((customer) => {
     const code = normalizeCode(customer?.customer_code);
@@ -193,6 +239,7 @@ export function mergeVisitPlanCustomerCandidates(
       customer_code: code,
       salesman_code: normalizeCode(customer.current_salesman_code || customer.salesman_code),
       last_visit_date: lastVisitDate,
+      scheduled_visit_date: resolveScheduled(code, customer, lastVisitDate),
       days_since_last_invoice: daysSinceDate(
         customer.latest_transaction_date || customer.last_invoice_date,
         todayIso,
@@ -216,7 +263,7 @@ export function mergeVisitPlanCustomerCandidates(
     const existing = byCode.get(code) || {};
     const collectionVisit = due?.latest_collection?.saved_at || record.latest_collection?.saved_at || null;
     const lastVisitDate = visitMap.get(code) || existing.last_visit_date || collectionVisit || null;
-    byCode.set(code, {
+    const merged = {
       ...existing,
       ...record,
       customer_code: code,
@@ -250,13 +297,16 @@ export function mergeVisitPlanCustomerCandidates(
       probability_score: Number(due?.probability_score || 0),
       probability_label: due?.probability_label || "",
       latest_collection: due?.latest_collection || record.latest_collection || null,
-    });
+      scheduled_revisit_at: due?.scheduled_revisit_at || null,
+    };
+    merged.scheduled_visit_date = resolveScheduled(code, merged, lastVisitDate);
+    byCode.set(code, merged);
   });
 
   dueByCode.forEach((due, code) => {
     if (byCode.has(code)) return;
     const lastVisitDate = visitMap.get(code) || due?.latest_collection?.saved_at || null;
-    byCode.set(code, {
+    const row = {
       ...due,
       customer_code: code,
       salesman_code: normalizeCode(due.current_salesman_code || due.salesman_code),
@@ -267,7 +317,10 @@ export function mergeVisitPlanCustomerCandidates(
       days_since_last_invoice: null,
       last_visit_date: lastVisitDate,
       days_since_last_visit: daysSinceDate(lastVisitDate, todayIso),
-    });
+      scheduled_revisit_at: due?.scheduled_revisit_at || null,
+    };
+    row.scheduled_visit_date = resolveScheduled(code, row, lastVisitDate);
+    byCode.set(code, row);
   });
 
   return [...byCode.values()];
@@ -282,12 +335,14 @@ export function buildSalesmanVisitPlanPayload({
   todayIso = new Date().toISOString(),
   warnings = [],
   lastVisitByCustomer = null,
+  nextVisitByCustomer = null,
 } = {}) {
   const candidates = mergeVisitPlanCustomerCandidates(
     visibleCustomers,
     collectionRecords,
     todayIso,
     lastVisitByCustomer,
+    nextVisitByCustomer,
   );
   const filterCode = normalizeCode(salesmanCode);
   const filtered = filterCode
@@ -393,7 +448,7 @@ export async function buildAndStoreSalesmanVisitPlanSnapshot(admin, {
     outstandingSalesmanIdentities: scope.outstandingSalesmanIdentities || [],
   };
 
-  const [visibleResult, collectionRecords, lastVisitByCustomer] = await Promise.all([
+  const [visibleResult, collectionRecords, visitLookup] = await Promise.all([
     buildVisibleCustomersForScope(admin, visibleScope, {
       includeRecentSales: true,
       // Outstanding aging already comes from collection records — skip duplicate attach.
@@ -410,7 +465,8 @@ export async function buildAndStoreSalesmanVisitPlanSnapshot(admin, {
     salesmanProfiles,
     limit,
     warnings: visibleResult?.warnings || [],
-    lastVisitByCustomer,
+    lastVisitByCustomer: visitLookup?.latestVisitByCustomer || visitLookup,
+    nextVisitByCustomer: visitLookup?.nextVisitByCustomer || null,
   });
 
   return writeSalesmanVisitPlanSnapshot(admin, payload);

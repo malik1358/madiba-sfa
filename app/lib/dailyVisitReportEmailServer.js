@@ -106,6 +106,10 @@ function envFlagEnabled(value, defaultValue = true) {
   return raw !== "0" && raw !== "false" && raw !== "no";
 }
 
+function isAdminVisitReportProfile(profile) {
+  return String(profile?.role || "").trim().toLowerCase() === "admin";
+}
+
 function reportDisplayName(profile) {
   const name = String(profile?.salesman_name || "").trim();
   const code = String(profile?.salesman_code || "").trim();
@@ -171,8 +175,9 @@ function teamTargetsForLeader(map, bossCode) {
 
 export function collectVisitReportTeamLeaders({ recipients = [], profiles = [], authUsers = [] } = {}) {
   const leaders = new Map();
+  const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
 
-  recipients.forEach(({ user }) => {
+  recipients.forEach(({ user, profile }) => {
     resolveReportingChainFromAuth({
       actorUserId: user?.userId,
       profiles,
@@ -180,6 +185,11 @@ export function collectVisitReportTeamLeaders({ recipients = [], profiles = [], 
     }).forEach((boss) => {
       if (boss?.id && !leaders.has(boss.id)) leaders.set(boss.id, boss);
     });
+
+    const self = profileById.get(user?.userId) || profile;
+    if (!self?.id || leaders.has(self.id)) return;
+    const subIds = resolveSubordinateUserIds(authUsers, self, profiles);
+    if (subIds.size) leaders.set(self.id, self);
   });
 
   profiles.forEach((profile) => {
@@ -202,17 +212,20 @@ export function teamKpiSnapshotsForLeader({
   kpiByUserId = new Map(),
 } = {}) {
   const subIds = resolveSubordinateUserIds(authUsers, leader, profiles);
+  const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  const recipientById = new Map((recipients || []).map((row) => [row.user?.userId, row]));
+  const memberIds = [...new Set([leader?.id, ...subIds].filter(Boolean))];
   const snapshots = [];
   const seen = new Set();
 
-  recipients.forEach(({ profile, user }) => {
-    const isSelf = user.userId === leader?.id;
-    if (!isSelf && !subIds.has(user.userId)) return;
+  memberIds.forEach((userId) => {
+    const recipient = recipientById.get(userId);
+    const profile = profileById.get(userId) || recipient?.profile || null;
     if (isCollectionOnlyAccess({
       role: profile?.role,
-      salesmanCode: profile?.salesman_code || user?.salesmanCode,
+      salesmanCode: profile?.salesman_code || recipient?.user?.salesmanCode,
     })) return;
-    const snapshot = kpiByUserId.get(user.userId);
+    const snapshot = kpiByUserId.get(userId);
     if (!snapshotHasKpis(snapshot)) return;
     const code = String(snapshot.salesmanCode || profile?.salesman_code || "").trim();
     if (code && seen.has(code)) return;
@@ -306,13 +319,15 @@ export async function runDailyVisitReportEmailCycle(admin, {
   if (requestedUserIds.length) {
     requestedUserIds.forEach((userId) => {
       if (seen.has(userId)) return;
-      seen.add(userId);
       const reportUser = reportByUserId.get(userId);
       const profile = profileById.get(userId) || {
         id: userId,
         email: reportUser?.email,
         salesman_name: reportUser?.userName,
       };
+      // Admins are not field users; never send them a personal daily visit report.
+      if (isAdminVisitReportProfile(profile)) return;
+      seen.add(userId);
       recipients.push({
         profile,
         user: reportUser || stubUserReport(profile),
@@ -320,6 +335,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
     });
   } else {
     profiles.forEach((profile) => {
+      if (isAdminVisitReportProfile(profile)) return;
       if (!shouldEmailVisitReportForRole(profile.role) && !reportByUserId.has(profile.id)) {
         return;
       }
@@ -333,9 +349,15 @@ export async function runDailyVisitReportEmailCycle(admin, {
 
     report.users.forEach((user) => {
       if (seen.has(user.userId)) return;
+      const profile = profileById.get(user.userId) || {
+        id: user.userId,
+        email: user.email,
+        salesman_name: user.userName,
+      };
+      if (isAdminVisitReportProfile(profile)) return;
       seen.add(user.userId);
       recipients.push({
-        profile: { id: user.userId, email: user.email, salesman_name: user.userName },
+        profile,
         user,
       });
     });
@@ -360,13 +382,32 @@ export async function runDailyVisitReportEmailCycle(admin, {
   const consideredUserCount = recipients.length;
   recipients = activeRecipients;
 
-  const kpiSalesmen = recipients
-    .map(({ profile, user }) => ({
-      userId: user.userId,
-      salesmanCode: profile.salesman_code,
-      salesmanName: user.userName || profile.salesman_name,
-    }))
-    .filter((row) => row.salesmanCode);
+  const leaders = collectVisitReportTeamLeaders({ recipients, profiles, authUsers });
+  const kpiSalesmenById = new Map();
+  function addKpiSalesman(profile, userName = "") {
+    const userId = String(profile?.id || "").trim();
+    const salesmanCode = String(profile?.salesman_code || "").trim();
+    if (!userId || !salesmanCode || kpiSalesmenById.has(userId)) return;
+    if (isCollectionOnlyAccess({ role: profile?.role, salesmanCode })) return;
+    kpiSalesmenById.set(userId, {
+      userId,
+      salesmanCode,
+      salesmanName: userName || profile.salesman_name || salesmanCode,
+    });
+  }
+
+  recipients.forEach(({ profile, user }) => {
+    addKpiSalesman(profile, user.userName || profile.salesman_name);
+  });
+  leaders.forEach((leader) => {
+    addKpiSalesman(leader, leader.salesman_name);
+    resolveSubordinateUserIds(authUsers, leader, profiles).forEach((subId) => {
+      const profile = profileById.get(subId);
+      if (profile) addKpiSalesman(profile, profile.salesman_name);
+    });
+  });
+
+  const kpiSalesmen = [...kpiSalesmenById.values()];
 
   let kpiByUserId = new Map();
   if (kpiSalesmen.length) {
@@ -381,6 +422,44 @@ export async function runDailyVisitReportEmailCycle(admin, {
     }
   }
 
+  let teamTargetByCode = new Map();
+  try {
+    const teamCodes = [...new Set(
+      leaders.flatMap((leader) => leaderTeamTargetCodes(leader.salesman_code)),
+    )];
+    if (teamCodes.length) {
+      teamTargetByCode = await loadTeamTargets(admin, { salesmanCodes: teamCodes, reportDate }) || new Map();
+    }
+  } catch {
+    teamTargetByCode = new Map();
+  }
+
+  const teamPayloadByLeaderId = new Map();
+  for (const leader of leaders) {
+    const subIds = resolveSubordinateUserIds(authUsers, leader, profiles);
+    if (!subIds.size) continue;
+
+    const memberSnapshots = teamKpiSnapshotsForLeader({
+      leader,
+      recipients,
+      profiles,
+      authUsers,
+      kpiByUserId,
+    });
+    if (!memberSnapshots.length) continue;
+
+    teamPayloadByLeaderId.set(leader.id, {
+      leader,
+      members: memberSnapshots,
+      team: consolidatePerformanceSnapshots(memberSnapshots, {
+        reportDate,
+        salesmanName: `${leader.salesman_name || leader.salesman_code || "Team"} — team`,
+        teamTargets: teamTargetsForLeader(teamTargetByCode, leader.salesman_code)?.targets || null,
+      }),
+    });
+  }
+
+  const leadersWithTeamInPersonalEmail = new Set();
   for (const { profile, user } of recipients) {
     let userReport = {
       ...user,
@@ -414,14 +493,18 @@ export async function runDailyVisitReportEmailCycle(admin, {
       continue;
     }
 
+    const teamPayload = teamPayloadByLeaderId.get(user.userId) || null;
     const message = buildUserVisitReportEmail({
       date: reportDate,
       user: userReport,
       thresholdKm: report.thresholdKm,
+      team: teamPayload?.team || null,
+      teamMembers: teamPayload?.members || [],
     });
 
     try {
       const sent = await send({ ...message, to }, env);
+      if (teamPayload) leadersWithTeamInPersonalEmail.add(user.userId);
       results.push({
         userId: userReport.userId,
         userName: userReport.userName,
@@ -429,6 +512,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
         to,
         kind: "user",
         provider: sent?.provider || null,
+        hasTeamKpis: Boolean(teamPayload),
       });
     } catch (error) {
       results.push({
@@ -440,19 +524,6 @@ export async function runDailyVisitReportEmailCycle(admin, {
         error: error.message || "Unable to send email",
       });
     }
-  }
-
-  const leaders = collectVisitReportTeamLeaders({ recipients, profiles, authUsers });
-  let teamTargetByCode = new Map();
-  try {
-    const teamCodes = [...new Set(
-      leaders.flatMap((leader) => leaderTeamTargetCodes(leader.salesman_code)),
-    )];
-    if (teamCodes.length) {
-      teamTargetByCode = await loadTeamTargets(admin, { salesmanCodes: teamCodes, reportDate }) || new Map();
-    }
-  } catch {
-    teamTargetByCode = new Map();
   }
 
   async function sendTeamKpiEmail({ userId, userName, to, message }) {
@@ -493,25 +564,10 @@ export async function runDailyVisitReportEmailCycle(admin, {
   const coveredCompanyEmails = new Set();
   const allKpiSnapshots = [...kpiByUserId.values()].filter(snapshotHasKpis);
 
-  for (const leader of leaders) {
-    const subIds = resolveSubordinateUserIds(authUsers, leader, profiles);
-    const hasSubordinate = recipients.some(({ user }) => subIds.has(user.userId));
-    if (!hasSubordinate) continue;
+  for (const [leaderId, payload] of teamPayloadByLeaderId.entries()) {
+    if (leadersWithTeamInPersonalEmail.has(leaderId)) continue;
 
-    const memberSnapshots = teamKpiSnapshotsForLeader({
-      leader,
-      recipients,
-      profiles,
-      authUsers,
-      kpiByUserId,
-    });
-    if (!memberSnapshots.length) continue;
-
-    const team = consolidatePerformanceSnapshots(memberSnapshots, {
-      reportDate,
-      salesmanName: `${leader.salesman_name || leader.salesman_code || "Team"} — team`,
-      teamTargets: teamTargetsForLeader(teamTargetByCode, leader.salesman_code)?.targets || null,
-    });
+    const { leader, members, team } = payload;
     const inbox = resolveUserReportEmail({
       reportEmail: leader.report_email,
       email: leader.email,
@@ -524,10 +580,10 @@ export async function runDailyVisitReportEmailCycle(admin, {
         date: reportDate,
         bossName: leader.salesman_name || leader.salesman_code || "Team",
         team,
-        members: memberSnapshots,
+        members,
       }),
     });
-    if (delivered.length && memberSnapshots.length >= allKpiSnapshots.length) {
+    if (delivered.length && members.length >= allKpiSnapshots.length) {
       delivered.forEach((email) => coveredCompanyEmails.add(email));
     }
   }

@@ -38,6 +38,7 @@ test("salesmen see field modules and payment collections", () => {
   assert.equal(access.canAccess("myDay"), true);
   assert.equal(access.canAccess("newOrder"), true);
   assert.equal(access.canAccess("visitWithoutOrder"), true);
+  assert.equal(access.canAccess("itemPriceHistory"), true);
   assert.equal(access.canAccess("myCollections"), false);
   assert.equal(access.canAccess("paymentCollections"), true);
   assert.equal(access.canAccessPath("/management/my-collections"), true);
@@ -47,6 +48,15 @@ test("salesmen see field modules and payment collections", () => {
   assert.equal(access.canAccess("gpsMap"), false);
   assert.equal(access.canAccess("salesmanHierarchy"), false);
   assert.equal(access.canAccess("upload"), false);
+});
+
+test("collectors cannot open item price history", () => {
+  const access = buildModuleAccess({
+    role: "salesman",
+    salesmanCode: "CL01",
+    collectionOnlyMetadata: true,
+  });
+  assert.equal(access.canAccess("itemPriceHistory"), false);
 });
 
 test("admin manager and invoice-maker can set pending order invoice status", () => {

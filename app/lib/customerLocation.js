@@ -63,6 +63,7 @@ export async function captureGpsLocationWithFallbackConfirm(language = "en", opt
     accessToken: options.accessToken || "",
     skipCustomerLocationUpdate: Boolean(options.skipCustomerLocationUpdate),
     role: options.role || "",
+    customer: options.customer || null,
   });
 }
 
@@ -88,6 +89,7 @@ export async function resolveVisitGpsAndUpdateCustomer({
   accessToken = "",
   skipCustomerLocationUpdate = false,
   role = "",
+  customer = null,
 }) {
   if (!shouldRequireTransactionGps(role)) {
     return null;
@@ -127,11 +129,19 @@ export async function resolveVisitGpsAndUpdateCustomer({
     && !isProspectCustomerCode(customerCode)
   ) {
     if (saveCustomerGps) {
-      await saveCustomerGpsFromVisitLocation({
+      const updated = await saveCustomerGpsFromVisitLocation({
         customerCode,
         entryLocation: location,
         accessToken,
       });
+      if (customer && updated) {
+        applyCustomerLocation(customer, updated);
+      } else if (customer) {
+        applyCustomerLocation(customer, {
+          latitude: location.latitude,
+          longitude: location.longitude,
+        });
+      }
     } else {
       await maybePromptCustomerLocationUpdate({
         customerCode,
@@ -139,6 +149,7 @@ export async function resolveVisitGpsAndUpdateCustomer({
         entryLocation: location,
         accessToken,
         language,
+        customer,
       });
     }
   }
@@ -288,12 +299,23 @@ function buildLocationUpdatePayload(entryLocation, customer, geocoded = {}) {
   };
 }
 
+export function customerWithUpdatedLocation(customer, updatePayload) {
+  if (!customer || !updatePayload) return customer;
+  const next = { ...customer };
+  if (updatePayload.latitude !== undefined) next.latitude = updatePayload.latitude;
+  if (updatePayload.longitude !== undefined) next.longitude = updatePayload.longitude;
+  if (updatePayload.area) next.area = updatePayload.area;
+  if (updatePayload.city) next.city = updatePayload.city;
+  return next;
+}
+
 function applyCustomerLocation(customer, updatePayload) {
-  if (!customer) return;
-  customer.latitude = updatePayload.latitude;
-  customer.longitude = updatePayload.longitude;
-  if (updatePayload.area) customer.area = updatePayload.area;
-  if (updatePayload.city) customer.city = updatePayload.city;
+  if (!customer || !updatePayload) return;
+  const next = customerWithUpdatedLocation(customer, updatePayload);
+  customer.latitude = next.latitude;
+  customer.longitude = next.longitude;
+  if (next.area) customer.area = next.area;
+  if (next.city) customer.city = next.city;
 }
 
 function buildCustomerLocationUpdateMessage({
@@ -414,11 +436,19 @@ export async function maybePromptCustomerLocationUpdate({
     customer,
     skipReverseGeocode,
   });
-  if (!promptDetails) return;
+  if (!promptDetails) return CUSTOMER_LOCATION_UPDATE_SKIP;
 
   const resolveChoice = promptChoice || defaultLegacyLocationUpdatePrompt;
   const choice = await resolveChoice(promptDetails);
   if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE && !shouldSkipCustomerLocationWrite(customerCode, customer)) {
-    await applyCustomerLocationUpdateFromPrompt(promptDetails);
+    try {
+      await applyCustomerLocationUpdateFromPrompt(promptDetails);
+    } catch (locationError) {
+      // Keep visiting/order flows unblocked; still use accepted GPS for distance.
+      console.warn("Customer location update skipped", locationError);
+    }
+    // Keep in-memory customer GPS in sync so distance-from-customer uses the new point.
+    applyCustomerLocation(customer, promptDetails.updatePayload);
   }
+  return choice;
 }

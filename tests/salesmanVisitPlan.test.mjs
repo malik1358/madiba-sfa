@@ -212,7 +212,7 @@ test("email builders include ranked visit rows", () => {
   assert.match(email.html, /&gt;120|91-120/);
   assert.match(email.html, /Days from last visit/);
   assert.match(email.html, /Last visit date by anyone/);
-  assert.match(email.html, /Last 30 days purchase/);
+  assert.match(email.html, /Last 30 days sales/);
   assert.match(email.html, /Avg monthly purchase/);
 
   const digest = buildSalesmanVisitPlanDigestEmail([plan], { reportDate: "2026-09-12" });

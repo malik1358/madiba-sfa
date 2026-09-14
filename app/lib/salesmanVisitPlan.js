@@ -582,8 +582,8 @@ export function buildSalesmanVisitPlanEmail(plan, {
             <th style="border:1px solid #0c3d4a;padding:8px;">Days from last visit</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Last visit date by anyone</th>
             <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Recent 6M</th>
-            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Last 30 days purchase</th>
-            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Avg monthly purchase</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Last 30 days sales</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Avg monthly</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Focus</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Combined</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Sales</th>

@@ -22,6 +22,11 @@ import { detectTable } from "../../lib/schemaGuards";
 import { looksLikeCustomerCodeSearch } from "../../lib/customerMasterQuery";
 import { isProspectCustomerCode } from "../../lib/customerCode";
 import { loadOpenProspectCustomers } from "../../lib/openProspectCustomers";
+import { markLocalProspectRejected } from "../../lib/offlineProspects";
+import {
+  parseOfflineProspectIdFromCustomerCode,
+  parseProspectIdFromCustomerCode,
+} from "../../lib/prospects";
 import {
   applyLatestVisitFromLogRow,
   MY_DAY_ATTENDANCE_ENTRY_TYPES,
@@ -152,6 +157,16 @@ const PAGE_TEXT = {
   markingInactive: { en: "Marking...", ar: "جاري التعطيل..." },
   markActive: { en: "Mark Active", ar: "إعادة التفعيل" },
   markingActive: { en: "Activating...", ar: "جاري التفعيل..." },
+  forecloseLead: { en: "Foreclose Lead", ar: "إغلاق العميل المحتمل" },
+  foreclosingLead: { en: "Foreclosing...", ar: "جاري الإغلاق..." },
+  forecloseLeadConfirm: {
+    en: "Foreclose this lead? It will be removed from My Day and open prospect lists.",
+    ar: "إغلاق هذا العميل المحتمل؟ سيتم إزالته من يومي وقوائم العملاء المحتملين.",
+  },
+  leadForeclosed: {
+    en: "Lead foreclosed and removed from visit status.",
+    ar: "تم إغلاق العميل المحتمل وإزالته من حالة الزيارات.",
+  },
   inactiveSaved: { en: "Customer marked inactive and removed from visit status.", ar: "تم تعطيل العميل وإزالته من حالة الزيارات." },
   activeSaved: { en: "Customer activated and removed from inactive list.", ar: "تم تفعيل العميل وإزالته من قائمة غير النشطين." },
   inactiveSince: { en: "Inactive Since", ar: "غير نشط منذ" },
@@ -405,6 +420,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   const [visitSaving, setVisitSaving] = useState(false);
   const [visitItemsLoading, setVisitItemsLoading] = useState(false);
   const [inactiveCustomerCode, setInactiveCustomerCode] = useState("");
+  const [foreclosingLeadCode, setForeclosingLeadCode] = useState("");
   const [visitStatusSearch, setVisitStatusSearch] = useState("");
   const [selectedVisitStatusSalesmen, setSelectedVisitStatusSalesmen] = useState([]);
   const [dictationSupported, setDictationSupported] = useState(false);
@@ -1476,6 +1492,78 @@ export default function MyDayPage({ mode = "default" } = {}) {
     }
   }
 
+  async function forecloseLead(customer) {
+    const code = String(customer?.customer_code || "").trim();
+    if (!code || !(customer?.is_prospect || isProspectCustomerCode(code))) return;
+
+    if (typeof window !== "undefined" && !window.confirm(t("forecloseLeadConfirm"))) {
+      return;
+    }
+
+    const prospectId = parseProspectIdFromCustomerCode(code);
+    const offlineId = String(customer?.offline_id || parseOfflineProspectIdFromCustomerCode(code) || "").trim();
+    if (!prospectId && !offlineId) {
+      setError("Unable to identify this prospect.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    setForeclosingLeadCode(code);
+    setError("");
+    setMessage("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Please login again.");
+      }
+
+      const response = await fetch("/api/prospects", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: "foreclose",
+          id: prospectId || undefined,
+          offline_id: offlineId || undefined,
+          remarks: `Foreclosed from My Day on ${new Date().toISOString().slice(0, 10)}`,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Unable to foreclose this lead.");
+      }
+
+      await markLocalProspectRejected({
+        id: result?.data?.id || prospectId || undefined,
+        offline_id: offlineId || undefined,
+      }).catch(() => null);
+
+      const codeUpper = code.toUpperCase();
+      setVisitStatusRows((current) => current.filter((row) => String(row.customer_code || "").trim().toUpperCase() !== codeUpper));
+      setRouteRows((current) => current.filter((row) => String(row.customer_code || "").trim().toUpperCase() !== codeUpper));
+      setProspectScheduleRows((current) => current.filter((row) => String(row.customer_code || "").trim().toUpperCase() !== codeUpper));
+      if (activeVisitCustomerCode === code) {
+        setActiveVisitCustomerCode("");
+      }
+      setMessage(t("leadForeclosed"));
+    } catch (err) {
+      setError(err.message || "Unable to foreclose this lead.");
+    } finally {
+      setForeclosingLeadCode("");
+    }
+  }
+
   async function markCustomerActive(customer) {
     const code = String(customer?.customer_code || "").trim();
     if (!code) return;
@@ -2189,12 +2277,22 @@ export default function MyDayPage({ mode = "default" } = {}) {
                         <td data-label={t("actions")} className="moduleScheduleCellActions">
                           <div className="moduleInlineStack moduleActionStack">
                             {row.is_prospect ? (
-                              <Link
-                                href={`/management/new-order?customer_code=${encodeURIComponent(row.customer_code)}&customer_name=${encodeURIComponent(row.customer_name)}&salesman_code=${encodeURIComponent(row.salesman_code)}&source=prospect`}
-                                className="moduleInlineButton moduleActionButton"
-                              >
-                                {t("createOrder")}
-                              </Link>
+                              <>
+                                <Link
+                                  href={`/management/new-order?customer_code=${encodeURIComponent(row.customer_code)}&customer_name=${encodeURIComponent(row.customer_name)}&salesman_code=${encodeURIComponent(row.salesman_code)}&source=prospect`}
+                                  className="moduleInlineButton moduleActionButton"
+                                >
+                                  {t("createOrder")}
+                                </Link>
+                                <button
+                                  type="button"
+                                  className="moduleInlineButton moduleActionButton"
+                                  onClick={() => forecloseLead(row)}
+                                  disabled={foreclosingLeadCode === row.customer_code}
+                                >
+                                  {foreclosingLeadCode === row.customer_code ? t("foreclosingLead") : t("forecloseLead")}
+                                </button>
+                              </>
                             ) : (
                               <>
                                 <button type="button" className="moduleInlineButton moduleActionButton" onClick={() => openVisitReport(row)}>
@@ -2368,7 +2466,16 @@ export default function MyDayPage({ mode = "default" } = {}) {
                         >
                           {t("openAudit")}
                         </Link>
-                        {row.is_prospect ? null : (
+                        {row.is_prospect ? (
+                        <button
+                          type="button"
+                          className="moduleInlineButton moduleActionButton"
+                          onClick={() => forecloseLead(row)}
+                          disabled={foreclosingLeadCode === row.customer_code}
+                        >
+                          {foreclosingLeadCode === row.customer_code ? t("foreclosingLead") : t("forecloseLead")}
+                        </button>
+                        ) : (
                         <button
                           type="button"
                           className="moduleInlineButton moduleActionButton"

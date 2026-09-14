@@ -88,7 +88,7 @@ test("mapProspectOrderNumbers includes offline prospect customer codes", () => {
   assert.equal(grouped.get("PROSPECT-OFF-ABC123")?.[0]?.order_number, "SO-OFF");
 });
 
-test("open prospect helpers keep unordered prospects and hide ordered or converted ones", () => {
+test("open prospect helpers keep unordered prospects and hide ordered, converted, or rejected ones", () => {
   const openProspect = { id: 11, company_name: "New Shop" };
   const orderedProspect = {
     id: 12,
@@ -101,13 +101,20 @@ test("open prospect helpers keep unordered prospects and hide ordered or convert
     company_name: "Linked Shop",
     converted_customer_code: "1173C",
   };
+  const rejectedProspect = {
+    id: 14,
+    company_name: "Closed Shop",
+    status: "REJECTED",
+  };
 
   assert.equal(isOpenProspectForOrderScreens(openProspect), true);
   assert.equal(isOpenProspectForOrderScreens(orderedProspect), false);
   assert.equal(isOpenProspectForOrderScreens(convertedProspect), false);
-  assert.deepEqual([...hiddenProspectCustomerCodes([openProspect, orderedProspect, convertedProspect])].sort(), [
+  assert.equal(isOpenProspectForOrderScreens(rejectedProspect), false);
+  assert.deepEqual([...hiddenProspectCustomerCodes([openProspect, orderedProspect, convertedProspect, rejectedProspect])].sort(), [
     "PROSPECT-12",
     "PROSPECT-13",
+    "PROSPECT-14",
   ]);
   assert.equal(mergeUniqueCustomersByCode(
     [{ customer_code: "PROSPECT-11", customer_name: "New Shop" }],

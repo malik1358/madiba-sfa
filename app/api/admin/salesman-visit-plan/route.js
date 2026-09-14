@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCollectionOnlyAccess, isSalesmanVisitPlanSalesmanAccessApproved } from "../../../lib/moduleAccess.js";
 import {
@@ -11,10 +11,11 @@ import {
   formatSupabaseError,
   loadSalesmanVisitPlanFromSnapshot,
   sendSalesmanVisitPlanEmailsFromPayload,
+  writeVisitPlanRebuildStatus,
 } from "../../../lib/salesmanVisitPlanServer.js";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -155,14 +156,52 @@ export async function POST(request) {
     if (access.error) return access.error;
 
     if (action === "rebuild") {
-      const snapshot = await buildAndStoreSalesmanVisitPlanSnapshot(admin, {
-        actorUserId: access.user.id,
-        limit: Number(body.limit || DEFAULT_VISITS_PER_SALESMAN),
+      const startedAt = new Date().toISOString();
+      const limit = Number(body.limit || DEFAULT_VISITS_PER_SALESMAN);
+      const actorUserId = access.user.id;
+
+      await writeVisitPlanRebuildStatus(admin, {
+        status: "running",
+        startedAt,
+        finishedAt: null,
+        builtAt: null,
+        error: null,
       });
+
+      after(async () => {
+        const rebuildAdmin = createAdminClient();
+        try {
+          const snapshot = await buildAndStoreSalesmanVisitPlanSnapshot(rebuildAdmin, {
+            actorUserId,
+            limit,
+          });
+          await writeVisitPlanRebuildStatus(rebuildAdmin, {
+            status: "done",
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            builtAt: snapshot.builtAt || null,
+            error: null,
+          });
+        } catch (rebuildError) {
+          console.error("Salesman visit plan rebuild failed:", rebuildError);
+          try {
+            await writeVisitPlanRebuildStatus(rebuildAdmin, {
+              status: "error",
+              startedAt,
+              finishedAt: new Date().toISOString(),
+              builtAt: null,
+              error: formatSupabaseError(rebuildError) || "Rebuild failed.",
+            });
+          } catch (statusError) {
+            console.error("Unable to store visit plan rebuild status:", statusError);
+          }
+        }
+      });
+
       return NextResponse.json({
         success: true,
-        rebuilt: true,
-        ...snapshot,
+        accepted: true,
+        rebuilding: true,
         access: accessMeta(),
       });
     }

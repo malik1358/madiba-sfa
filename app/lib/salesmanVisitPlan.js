@@ -7,6 +7,7 @@ import { getKsaDateString } from "./workdayActivity.js";
 export const DEFAULT_VISITS_PER_SALESMAN = 12;
 export const DEFAULT_SALESMAN_VISIT_PLAN_EMAIL_TO = "malik@pinasz.com";
 export const SALESMAN_VISIT_PLAN_SNAPSHOT_KEY = "salesman_visit_plan_snapshot_v1";
+export const SALESMAN_VISIT_PLAN_REBUILD_STATUS_KEY = "salesman_visit_plan_rebuild_status_v1";
 
 function envFlagEnabled(value, defaultValue = false) {
   const raw = String(value ?? "").trim().toLowerCase();

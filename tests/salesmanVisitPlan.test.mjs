@@ -302,11 +302,13 @@ test("merge candidates keep sales metrics and collection probability", () => {
       outstanding_above_90: 0,
     }],
     "2026-09-12T08:00:00.000Z",
+    new Map([["A1", "2026-09-01T10:00:00.000Z"]]),
   );
 
   assert.equal(merged.length, 1);
   assert.equal(merged[0].recent_sales_value, 22000);
   assert.equal(merged[0].outstanding_30_60, 4000);
+  assert.equal(merged[0].days_since_last_visit, 11);
   assert.ok(Number(merged[0].probability_score) > 0 || Number(merged[0].total_due_amount) > 0);
 
   const payload = buildSalesmanVisitPlanPayload({

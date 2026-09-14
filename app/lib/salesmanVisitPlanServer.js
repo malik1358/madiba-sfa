@@ -3,6 +3,7 @@ import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import { getMailerConfig, isEmailConfigured, normalizeDeliverableEmail, sendEmail } from "./mailer.js";
 import {
   DEFAULT_VISITS_PER_SALESMAN,
+  SALESMAN_VISIT_PLAN_REBUILD_STATUS_KEY,
   SALESMAN_VISIT_PLAN_SNAPSHOT_KEY,
   buildSalesmanVisitPlanDigestEmail,
   buildSalesmanVisitPlanEmail,
@@ -15,7 +16,6 @@ import {
   salesmanVisitPlanDisplayName,
 } from "./salesmanVisitPlan.js";
 import {
-  MY_DAY_VISIT_LOOKBACK_DAYS,
   applyLatestVisitFromLogRow,
   visitReportsSinceIso,
 } from "./myDayPlannerLoad.js";
@@ -72,26 +72,55 @@ function sortTimestamp(value) {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+function rememberLatestVisit(map, customerCode, visitAt) {
+  const code = normalizeCode(customerCode);
+  const at = String(visitAt || "").trim();
+  if (!code || !at) return;
+  const current = map.get(code);
+  if (!current || sortTimestamp(at) > sortTimestamp(current)) {
+    map.set(code, at);
+  }
+}
+
+/** Fast last-visit lookup: collection visits + a capped field-visit sample. */
 export async function loadLatestVisitDatesByCustomer(admin, {
-  lookbackDays = MY_DAY_VISIT_LOOKBACK_DAYS,
+  lookbackDays = 90,
+  maxFieldVisitRows = 3000,
 } = {}) {
   const latestVisitByCustomer = new Map();
   const nextVisitByCustomer = new Map();
+
+  const { data: collectionVisits, error: collectionError } = await admin
+    .from("collection_visits")
+    .select("customer_code,saved_at")
+    .order("saved_at", { ascending: false })
+    .limit(5000);
+
+  if (collectionError && !isMissingTableError(collectionError)) {
+    throw new Error(formatSupabaseError(collectionError));
+  }
+
+  (collectionVisits || []).forEach((row) => {
+    rememberLatestVisit(latestVisitByCustomer, row?.customer_code, row?.saved_at);
+  });
+
   const sinceIso = visitReportsSinceIso(new Date(), lookbackDays);
   const pageSize = 1000;
   let from = 0;
+  const maxRows = Math.max(pageSize, Number(maxFieldVisitRows) || 3000);
 
-  while (from < 25000) {
+  while (from < maxRows) {
+    const end = Math.min(from + pageSize, maxRows) - 1;
     const { data, error } = await admin
       .from("daily_activity_logs")
       .select("note,created_at")
       .eq("entry_type", "VISIT_REPORT")
       .gte("created_at", sinceIso)
       .order("created_at", { ascending: false })
-      .range(from, from + pageSize - 1);
+      .range(from, end);
 
     if (error) {
-      if (isMissingTableError(error)) return latestVisitByCustomer;
+      if (isMissingTableError(error)) break;
       throw new Error(formatSupabaseError(error));
     }
 
@@ -105,6 +134,45 @@ export async function loadLatestVisitDatesByCustomer(admin, {
   }
 
   return latestVisitByCustomer;
+}
+
+export async function readVisitPlanRebuildStatus(admin) {
+  const { data, error } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", SALESMAN_VISIT_PLAN_REBUILD_STATUS_KEY)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error)) return null;
+    throw new Error(formatSupabaseError(error));
+  }
+  if (!data?.setting_value) return null;
+  try {
+    const parsed = JSON.parse(String(data.setting_value));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeVisitPlanRebuildStatus(admin, status) {
+  const payload = {
+    status: String(status?.status || "").trim() || "unknown",
+    startedAt: status?.startedAt || null,
+    finishedAt: status?.finishedAt || null,
+    builtAt: status?.builtAt || null,
+    error: status?.error || null,
+    updatedAt: new Date().toISOString(),
+  };
+  const { error } = await admin.from("system_settings").upsert({
+    setting_key: SALESMAN_VISIT_PLAN_REBUILD_STATUS_KEY,
+    setting_value: JSON.stringify(payload),
+  }, { onConflict: "setting_key" });
+  if (error && !isMissingTableError(error)) {
+    throw new Error(formatSupabaseError(error));
+  }
+  return payload;
 }
 
 export function mergeVisitPlanCustomerCandidates(
@@ -287,8 +355,14 @@ export async function loadSalesmanVisitPlanFromSnapshot(admin, {
   salesmanCode = "",
   limit = 0,
 } = {}) {
-  const snapshot = await readSalesmanVisitPlanSnapshot(admin);
-  return filterVisitPlanSnapshot(snapshot, { salesmanCode, limit });
+  const [snapshot, rebuildStatus] = await Promise.all([
+    readSalesmanVisitPlanSnapshot(admin),
+    readVisitPlanRebuildStatus(admin).catch(() => null),
+  ]);
+  return {
+    ...filterVisitPlanSnapshot(snapshot, { salesmanCode, limit }),
+    rebuildStatus,
+  };
 }
 
 /** Heavy build used only by midnight cron (or admin rebuild). */
@@ -320,7 +394,8 @@ export async function buildAndStoreSalesmanVisitPlanSnapshot(admin, {
   const [visibleResult, collectionRecords, lastVisitByCustomer] = await Promise.all([
     buildVisibleCustomersForScope(admin, visibleScope, {
       includeRecentSales: true,
-      includeOutstanding: true,
+      // Outstanding aging already comes from collection records — skip duplicate attach.
+      includeOutstanding: false,
       excludeBuildingMaterial: true,
     }),
     fetchOutstandingAndCollectionRecords(admin, scope),

@@ -616,6 +616,7 @@ export default function NewOrderPage() {
   const [loadingCustomerHistory, setLoadingCustomerHistory] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [peerTransactions, setPeerTransactions] = useState([]);
+  const [receipts, setReceipts] = useState([]);
   const [priceList, setPriceList] = useState({});
   const [regionPriceMaps, setRegionPriceMaps] = useState({});
   const [cashDiscountMap, setCashDiscountMap] = useState({});
@@ -782,7 +783,7 @@ export default function NewOrderPage() {
     [priceList, pricingRegion, regionPriceMaps]
   );
 
-  const analytics = useAnalytics(transactions);
+  const analytics = useAnalytics(transactions, receipts);
   const quickOrderSuggestions = useQuickOrder({
     analytics,
     transactions,
@@ -1192,7 +1193,10 @@ export default function NewOrderPage() {
   }, [buildOrderSnapshot, language, presentOrderWhatsappShare, saveDraft]);
 
   const handleSubmitOrder = useCallback(async () => {
-    const saved = await submitOrder({ silent: true });
+    const saved = await submitOrder({
+      silent: true,
+      creditApprovalRequired: Boolean(creditApproval?.required),
+    });
     if (!saved?.orderId) return;
 
     const snapshot = buildOrderSnapshot(saved.orderId, "Submitted", saved.orderNumber, saved.visitDistance);
@@ -1210,7 +1214,7 @@ export default function NewOrderPage() {
         : `Order #${orderNumber} submitted.`);
 
     await presentOrderWhatsappShare(snapshot, { savedMessage, queued });
-  }, [buildOrderSnapshot, language, presentOrderWhatsappShare, submitOrder]);
+  }, [buildOrderSnapshot, creditApproval?.required, language, presentOrderWhatsappShare, submitOrder]);
 
   const shareText = useMemo(() => {
     if (!lastSavedOrder) return "";
@@ -1490,6 +1494,7 @@ export default function NewOrderPage() {
       if (!selectedCustomer) {
         setTransactions([]);
         setPeerTransactions([]);
+        setReceipts([]);
         setShowTransactions(false);
         setAuditExpandedCategories({});
         return;
@@ -1510,7 +1515,7 @@ export default function NewOrderPage() {
 
         async function loadHistory(refresh = false) {
           const response = await fetch(
-            `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}${refresh ? "&refresh=1" : ""}`,
+            `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}&customerName=${encodeURIComponent(selectedCustomer.customer_name || "")}${refresh ? "&refresh=1" : ""}`,
             {
               headers: {
                 Authorization: `Bearer ${accessToken}`,
@@ -1533,9 +1538,11 @@ export default function NewOrderPage() {
 
         setTransactions(Array.isArray(payload.transactions) ? payload.transactions : []);
         setPeerTransactions(Array.isArray(payload.peerTransactions) ? payload.peerTransactions : []);
+        setReceipts(Array.isArray(payload.receipts) ? payload.receipts : []);
       } catch (err) {
         setTransactions([]);
         setPeerTransactions([]);
+        setReceipts([]);
         setError(err.message || "Unable to load customer details history.");
       } finally {
         setLoadingCustomerHistory(false);

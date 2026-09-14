@@ -40,6 +40,11 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   summaryReceiptMode: "Receipt mode",
   summaryNextVisit: "Next visit",
   summaryVisitNumber: "Visit number today",
+  summaryLastVisitDate: "Last visit date",
+  summaryLastVisitOutcome: "Last visit outcome",
+  summaryLastVisitAmountReceived: "Last visit amount received",
+  summaryLastVisitRemarkArabic: "Last visit remark (Arabic)",
+  summaryLastVisitRemarkEnglish: "Last visit remark (English)",
   summaryOutstanding: "Outstanding",
   remarkArabic: "Remark (Arabic)",
   remarkEnglish: "Remark (English)",
@@ -54,6 +59,45 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   distanceFromPrevious: "Distance from previous",
   estWaiting: "Est. waiting",
 };
+
+export function formatCollectionLastVisitWhatsappLines(
+  lastVisit,
+  {
+    labels = COLLECTION_VISIT_SUMMARY_LABELS,
+    formatOutcome = (outcome) => formatCollectionOutcomeLabel(outcome),
+  } = {},
+) {
+  if (!lastVisit) return [];
+
+  const date = formatDateOnly(lastVisit.saved_at);
+  const outcomeRaw = String(lastVisit.visit_outcome || lastVisit.payment_status || "").trim();
+  const arabicRemark = String(lastVisit.remark_arabic || "").trim();
+  const englishRemark = String(lastVisit.remark_english || "").trim();
+  const amount = Number(lastVisit.amount_received || 0);
+
+  if (!date && !outcomeRaw && !arabicRemark && !englishRemark && amount <= 0) {
+    return [];
+  }
+
+  const lines = [
+    `${labels.summaryLastVisitDate}: ${date || labels.summaryNotSpecified}.`,
+  ];
+
+  if (outcomeRaw) {
+    lines.push(`${labels.summaryLastVisitOutcome}: ${formatOutcome(outcomeRaw) || labels.summaryNotSpecified}.`);
+  }
+  if (amount > 0) {
+    lines.push(`${labels.summaryLastVisitAmountReceived}: ${formatMoney(amount)}.`);
+  }
+  if (arabicRemark) {
+    lines.push(`${labels.summaryLastVisitRemarkArabic}: ${arabicRemark}.`);
+  }
+  if (englishRemark) {
+    lines.push(`${labels.summaryLastVisitRemarkEnglish}: ${englishRemark}.`);
+  }
+
+  return lines;
+}
 
 export function formatCollectionOutcomeLabel(outcome, labels = OUTCOME_LABELS) {
   const key = String(outcome || "").trim().toUpperCase();
@@ -132,6 +176,13 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
     distanceFromPrevious: labels.distanceFromPrevious,
     estWaiting: labels.estWaiting,
   }));
+  const lastVisitLines = formatCollectionLastVisitWhatsappLines(options.lastVisit, {
+    labels,
+    formatOutcome: (outcome) => formatCollectionOutcomeLabel(outcome, OUTCOME_LABELS),
+  });
+  if (lastVisitLines.length > 0) {
+    lines.push("", ...lastVisitLines);
+  }
   return lines.join("\n");
 }
 
@@ -179,6 +230,7 @@ export function patchCollectionVisitSummaryVisitDistance(
   if (!text) return text;
 
   const distanceLines = formatVisitDistanceWhatsappLines(metrics, {
+    gps: labels.gps,
     distanceFromCustomer: labels.distanceFromCustomer,
     distanceFromPrevious: labels.distanceFromPrevious,
     estWaiting: labels.estWaiting,
@@ -186,12 +238,19 @@ export function patchCollectionVisitSummaryVisitDistance(
   const block = distanceLines.join("\n").replace(/^\n/, "");
   if (!block) return text;
 
+  // Replace only the GPS/distance/waiting block so trailing last-visit lines stay intact.
   const distanceBlockPattern = new RegExp(
-    `(?:\\n|^)${escapeRegExp(labels.distanceFromCustomer)}:[\\s\\S]*$`,
+    `(?:\\n|^)(?:${escapeRegExp(labels.gps)}:\\s*[^\\n]*\\n)?${escapeRegExp(labels.distanceFromCustomer)}:\\s*[^\\n]*\\n${escapeRegExp(labels.distanceFromPrevious)}:\\s*[^\\n]*\\n${escapeRegExp(labels.estWaiting)}:\\s*[^\\n]*`,
     "m",
   );
   if (distanceBlockPattern.test(text)) {
     return text.replace(distanceBlockPattern, `\n${block}`);
+  }
+
+  const lastVisitAnchor = labels.summaryLastVisitDate || "Last visit date";
+  const lastVisitPattern = new RegExp(`\\n${escapeRegExp(lastVisitAnchor)}:`);
+  if (lastVisitPattern.test(text)) {
+    return text.replace(lastVisitPattern, `\n\n${block}\n\n${lastVisitAnchor}:`);
   }
 
   return `${text.trimEnd()}\n\n${block}`;

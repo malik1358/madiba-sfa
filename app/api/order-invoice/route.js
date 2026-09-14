@@ -12,6 +12,20 @@ import { expandMutualGroupScopeIdentities } from "../../lib/mutualSalesmanGroups
 import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
 import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess.js";
+import {
+  ORDER_STATUS_INVOICE_MADE,
+  ORDER_STATUS_PENDING_APPROVAL,
+  ORDER_STATUS_PENDING_INVOICE_CREATION,
+  canApprovePendingOrders,
+  isPendingForApprovalStatus,
+  isPendingForInvoiceCreationStatus,
+  isSubmittedWithoutUploadedInvoice,
+  isSupportedInvoiceStatus,
+  isValidRejectionReason,
+  shouldAutoMarkPendingApproval,
+  shouldAutoMarkPendingInvoiceCreation,
+  statusForRejectionReason,
+} from "../../lib/orderApproval.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -19,13 +33,7 @@ export const maxDuration = 60;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const STATUS_PENDING_CREDIT = "Pending for credit approval";
-const STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
-const STATUS_QUOTATION_WAITING_PAYMENT = "Quotation submitted waiting for the payment";
-const STATUS_REJECTED = "Rejected by management";
-const STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
-const STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
-const STATUS_INVOICE_MADE = "Invoice made";
+const STATUS_INVOICE_MADE = ORDER_STATUS_INVOICE_MADE;
 const QUERY_CHUNK = 150;
 
 function chunkList(items, size = QUERY_CHUNK) {
@@ -524,42 +532,244 @@ export async function POST(request) {
       return NextResponse.json({ success: true, item: hydrated, prospectLink: linked.prospectLink });
     }
 
-    if (mode !== "set-status") {
+    if (!["set-status", "approve-order", "reject-order", "mark-pending-approvals", "mark-pending-invoice-creation"].includes(mode)) {
       return NextResponse.json({ success: false, error: "Unsupported action." }, { status: 400 });
+    }
+
+    if (mode === "mark-pending-approvals" || mode === "mark-pending-invoice-creation") {
+      if (!canApprovePendingOrders(scope.role) && !canManageOrderInvoice(scope.role)) {
+        return NextResponse.json({
+          success: false,
+          error: "Only admin, manager, or invoice maker can update pending invoice statuses.",
+        }, { status: 403 });
+      }
+
+      const targetStatus = mode === "mark-pending-approvals"
+        ? ORDER_STATUS_PENDING_APPROVAL
+        : ORDER_STATUS_PENDING_INVOICE_CREATION;
+      const requestedIds = Array.isArray(body?.orderIds)
+        ? body.orderIds.map((id) => String(id || "").trim()).filter(Boolean)
+        : [];
+      const uniqueIds = [...new Set(requestedIds)].slice(0, 500);
+      if (uniqueIds.length === 0) {
+        return NextResponse.json({ success: true, items: {}, marked: 0 });
+      }
+
+      const orders = [];
+      for (const idChunk of chunkList(uniqueIds, 100)) {
+        const { data, error } = await admin
+          .from("sales_orders")
+          .select("id,status,customer_code,created_by,salesman_code")
+          .in("id", idChunk);
+        if (error) throw error;
+        orders.push(...(data || []));
+      }
+
+      const visibleOrders = [];
+      for (const order of orders) {
+        try {
+          await ensureOrderVisible(admin, order.id, scope);
+          visibleOrders.push(order);
+        } catch {
+          // Skip orders outside the caller's scope.
+        }
+      }
+
+      const visibleIds = visibleOrders.map((order) => String(order.id));
+      const existingMap = await readMetaMap(admin, visibleIds);
+      const nowIso = new Date().toISOString();
+      const items = {};
+      let marked = 0;
+      const approvalRequiredIds = new Set(
+        (Array.isArray(body?.approvalRequiredOrderIds) ? body.approvalRequiredOrderIds : [])
+          .map((id) => String(id || "").trim())
+          .filter(Boolean),
+      );
+
+      for (const order of visibleOrders) {
+        const orderId = String(order.id);
+        const existing = existingMap.get(orderId) || { orderId };
+        const approvalRequired = approvalRequiredIds.has(orderId)
+          ? true
+          : null;
+
+        const shouldMark = mode === "mark-pending-approvals"
+          ? shouldAutoMarkPendingApproval({ order, meta: existing, approvalRequired: true })
+          : shouldAutoMarkPendingInvoiceCreation({
+            order,
+            meta: existing,
+            approvalRequired,
+          });
+
+        if (!shouldMark) {
+          items[orderId] = existing;
+          continue;
+        }
+
+        if (mode === "mark-pending-approvals"
+          && isPendingForApprovalStatus(existing.status)
+          && String(existing.status || "").trim() === ORDER_STATUS_PENDING_APPROVAL) {
+          items[orderId] = existing;
+          continue;
+        }
+
+        if (mode === "mark-pending-invoice-creation"
+          && isPendingForInvoiceCreationStatus(existing.status)) {
+          items[orderId] = existing;
+          continue;
+        }
+
+        const updated = {
+          ...existing,
+          orderId,
+          status: targetStatus,
+          updatedAt: nowIso,
+          statusUpdatedAt: nowIso,
+          statusUpdatedBy: scope.userId,
+        };
+
+        if (mode === "mark-pending-approvals") {
+          updated.rejectionReason = "";
+          updated.rejectedAt = "";
+          updated.rejectedBy = "";
+          updated.approvedAt = "";
+          updated.approvedBy = "";
+        }
+
+        await upsertMeta(admin, updated);
+        items[orderId] = await withSignedUrl(admin, updated);
+        marked += 1;
+      }
+
+      return NextResponse.json({ success: true, items, marked });
+    }
+
+    const orderId = String(body?.orderId || "").trim();
+    if (!orderId) {
+      return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
+    }
+
+    await ensureOrderVisible(admin, orderId, scope);
+    const existingMap = await readMetaMap(admin, [orderId]);
+    const existing = existingMap.get(orderId) || { orderId };
+    const nowIso = new Date().toISOString();
+
+    async function loadLiveOrder() {
+      const { data: liveOrder, error } = await admin
+        .from("sales_orders")
+        .select("id,status")
+        .eq("id", orderId)
+        .maybeSingle();
+      if (error) throw error;
+      return liveOrder;
+    }
+
+    if (mode === "approve-order") {
+      if (!canApprovePendingOrders(scope.role)) {
+        return NextResponse.json({ success: false, error: "Only admin or manager can approve orders." }, { status: 403 });
+      }
+      const liveOrder = await loadLiveOrder();
+      if (!isPendingForApprovalStatus(existing.status)
+        && !isSubmittedWithoutUploadedInvoice(liveOrder, existing)) {
+        return NextResponse.json({
+          success: false,
+          error: "Order is not pending for approval.",
+        }, { status: 400 });
+      }
+
+      const updated = {
+        ...existing,
+        orderId,
+        status: ORDER_STATUS_PENDING_INVOICE_CREATION,
+        approvedAt: nowIso,
+        approvedBy: scope.userId,
+        rejectionReason: "",
+        rejectedAt: "",
+        rejectedBy: "",
+        updatedAt: nowIso,
+        statusUpdatedAt: nowIso,
+        statusUpdatedBy: scope.userId,
+      };
+
+      await upsertMeta(admin, updated);
+      const hydrated = await withSignedUrl(admin, updated);
+      return NextResponse.json({ success: true, item: hydrated });
+    }
+
+    if (mode === "reject-order") {
+      if (!canApprovePendingOrders(scope.role)) {
+        return NextResponse.json({ success: false, error: "Only admin or manager can reject orders." }, { status: 403 });
+      }
+      const rejectionReason = String(body?.rejectionReason || "").trim();
+      if (!isValidRejectionReason(rejectionReason)) {
+        return NextResponse.json({
+          success: false,
+          error: "Select a rejection reason: Credit limit, Discount or price problem, or Stock not available.",
+        }, { status: 400 });
+      }
+      const liveOrder = await loadLiveOrder();
+      if (!isPendingForApprovalStatus(existing.status)
+        && !isSubmittedWithoutUploadedInvoice(liveOrder, existing)) {
+        return NextResponse.json({
+          success: false,
+          error: "Order is not pending for approval.",
+        }, { status: 400 });
+      }
+
+      const updated = {
+        ...existing,
+        orderId,
+        status: statusForRejectionReason(rejectionReason),
+        rejectionReason,
+        rejectedAt: nowIso,
+        rejectedBy: scope.userId,
+        approvedAt: "",
+        approvedBy: "",
+        updatedAt: nowIso,
+        statusUpdatedAt: nowIso,
+        statusUpdatedBy: scope.userId,
+      };
+
+      await upsertMeta(admin, updated);
+      const hydrated = await withSignedUrl(admin, updated);
+      return NextResponse.json({ success: true, item: hydrated });
     }
 
     if (!canManageOrderInvoice(scope.role)) {
       return NextResponse.json({ success: false, error: "Only admin, manager, or invoice maker can set invoice status." }, { status: 403 });
     }
 
-    const orderId = String(body?.orderId || "").trim();
     const status = String(body?.status || "").trim();
-
-    if (!orderId) {
-      return NextResponse.json({ success: false, error: "Order id is required." }, { status: 400 });
-    }
-
-    if (![STATUS_PENDING_CREDIT, STATUS_WAITING_CREDIT_APPLICATION, STATUS_QUOTATION_WAITING_PAYMENT, STATUS_REJECTED, STATUS_STOCK_UNAVAILABLE, STATUS_WAITING_STOCK_TRANSFER, STATUS_INVOICE_MADE].includes(status)) {
+    if (!isSupportedInvoiceStatus(status)) {
       return NextResponse.json({ success: false, error: "Unsupported status value." }, { status: 400 });
     }
-
-    await ensureOrderVisible(admin, orderId, scope);
-    const existingMap = await readMetaMap(admin, [orderId]);
-    const existing = existingMap.get(orderId) || { orderId };
 
     if (status === STATUS_INVOICE_MADE && !existing.invoiceFilePath) {
       return NextResponse.json({ success: false, error: "Upload invoice PDF before setting status to Invoice made." }, { status: 400 });
     }
 
-    const nowIso = new Date().toISOString();
     const updated = {
       ...existing,
       orderId,
-      status,
+      status: status === ORDER_STATUS_PENDING_APPROVAL || isPendingForApprovalStatus(status)
+        ? ORDER_STATUS_PENDING_APPROVAL
+        : status,
       updatedAt: nowIso,
       statusUpdatedAt: nowIso,
       statusUpdatedBy: scope.userId,
     };
+
+    if (status === ORDER_STATUS_PENDING_APPROVAL || isPendingForApprovalStatus(status)) {
+      updated.rejectionReason = "";
+      updated.rejectedAt = "";
+      updated.rejectedBy = "";
+      updated.approvedAt = "";
+      updated.approvedBy = "";
+    }
+
+    if (status === ORDER_STATUS_PENDING_INVOICE_CREATION || isPendingForInvoiceCreationStatus(status)) {
+      updated.status = ORDER_STATUS_PENDING_INVOICE_CREATION;
+    }
 
     await upsertMeta(admin, updated);
     const hydrated = await withSignedUrl(admin, updated);

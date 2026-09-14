@@ -20,10 +20,12 @@ import {
   CUSTOMER_LOCATION_UPDATE_CANCEL,
   CUSTOMER_LOCATION_UPDATE_SKIP,
   CUSTOMER_LOCATION_UPDATE_UPDATE,
+  customerWithUpdatedLocation,
   evaluateCustomerLocationUpdatePrompt,
 } from "../../lib/customerLocation";
 import { promptCustomerMobileUpdateIfMissing } from "../../lib/customerContact";
-import { postFormDataResilient } from "../../lib/offlineApi";
+import { postFormDataResilient, processOfflineQueue, sendJsonResilient } from "../../lib/offlineApi";
+import { shouldRequireGpsAccessGate } from "../../lib/moduleAccess";
 import {
   buildOptimisticLatestCollection,
   incrementLocalCollectionVisitCount,
@@ -59,7 +61,9 @@ import {
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
+import { formatCollectionLastVisitWhatsappLines } from "../../lib/collectionVisitSummary";
 import { getSupabaseClient } from "../../lib/supabase";
+
 import { buildDueCollectionQueueExport } from "../../lib/collectionQueueExport";
 import { buildVisibleDueQueuePriorityMap } from "../../lib/collectionVisitPriority";
 import { formatKsaDateOnly, formatKsaDateTime, getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity";
@@ -256,6 +260,10 @@ const TEXT = {
     en: "Working offline from saved queue. Visits save on this device and sync automatically when connection improves.",
     ar: "العمل دون اتصال من القائمة المحفوظة. تُحفظ الزيارات على الجهاز وتُزامَن تلقائياً عند تحسن الاتصال.",
   },
+  offlineQueueMissing: {
+    en: "No saved collection queue on this device. Open Collections once while online, then try again offline.",
+    ar: "لا توجد قائمة تحصيل محفوظة على هذا الجهاز. افتح التحصيل مرة واحدة الاتصال متصل، ثم أعد المحاولة دون اتصال.",
+  },
   staleQueueBanner: {
     en: "Showing saved collection queue while the server reconnects.",
     ar: "عرض قائمة التحصيل المحفوظة أثناء إعادة الاتصال بالخادم.",
@@ -304,12 +312,18 @@ const TEXT = {
   summaryReceiptMode: { en: "Receipt mode", ar: "طريقة الاستلام" },
   summaryNextVisit: { en: "Next visit", ar: "الزيارة القادمة" },
   summaryVisitNumber: { en: "Visit number today", ar: "رقم الزيارة لليوم" },
+  summaryLastVisitDate: { en: "Last visit date", ar: "تاريخ آخر زيارة" },
+  summaryLastVisitOutcome: { en: "Last visit outcome", ar: "نتيجة آخر زيارة" },
+  summaryLastVisitAmountReceived: { en: "Last visit amount received", ar: "المبلغ المستلم في آخر زيارة" },
+  summaryLastVisitRemarkArabic: { en: "Last visit remark (Arabic)", ar: "ملاحظة آخر زيارة (عربي)" },
+  summaryLastVisitRemarkEnglish: { en: "Last visit remark (English)", ar: "ملاحظة آخر زيارة (انجليزي)" },
   summaryGps: { en: "GPS", ar: "GPS" },
   summaryDistanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
   summaryDistanceFromPrevious: { en: "Distance from previous", ar: "المسافة من السابق" },
   summaryEstWaiting: { en: "Est. waiting", ar: "وقت الانتظار التقديري" },
   summaryOutstanding: { en: "Outstanding", ar: "المديونية" },
   summaryNotSpecified: { en: "not specified", ar: "غير محدد" },
+
   viewPaymentCopy: { en: "Payment Copy", ar: "صورة الدفع" },
   viewReceiptCopy: { en: "Receipt Copy", ar: "صورة الإيصال" },
   customerFilterPlaceholder: { en: "Filter customer name/code", ar: "تصفية اسم/كود العميل" },
@@ -457,10 +471,24 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
     distanceFromPrevious: t("summaryDistanceFromPrevious"),
     estWaiting: t("summaryEstWaiting"),
   }));
+  const lastVisitLines = formatCollectionLastVisitWhatsappLines(options.lastVisit, {
+    labels: {
+      summaryLastVisitDate: t("summaryLastVisitDate"),
+      summaryLastVisitOutcome: t("summaryLastVisitOutcome"),
+      summaryLastVisitAmountReceived: t("summaryLastVisitAmountReceived"),
+      summaryLastVisitRemarkArabic: t("summaryLastVisitRemarkArabic"),
+      summaryLastVisitRemarkEnglish: t("summaryLastVisitRemarkEnglish"),
+      summaryNotSpecified: t("summaryNotSpecified"),
+    },
+    formatOutcome: (outcome) => formatOutcomeLabel(outcome, t),
+  });
+  if (lastVisitLines.length > 0) {
+    lines.push("", ...lastVisitLines);
+  }
   return lines.join("\n");
 }
 
-function buildStoredVisitReport(row, englishRemark, t, visit = null) {
+function buildStoredVisitReport(row, englishRemark, t, visit = null, options = {}) {
   const selectedVisit = visit || row?.latest_collection;
   if (!selectedVisit) return "";
 
@@ -477,7 +505,11 @@ function buildStoredVisitReport(row, englishRemark, t, visit = null) {
     nextVisitAt: toDateInputValue(selectedVisit.next_visit_at),
     remarkArabic: selectedVisit.remark_arabic || "",
     remarkEnglish: englishRemark || selectedVisit.remark_english || "",
-  }, englishRemark || selectedVisit.remark_english || "", t);
+  }, englishRemark || selectedVisit.remark_english || "", t, {
+    lastVisit: options.lastVisit || null,
+    visitNumberForDay: selectedVisit.visit_number_for_day || 0,
+    queuePriority: selectedVisit.queue_priority || 0,
+  });
 }
 
 async function buildVisitReportText(row, t) {
@@ -492,7 +524,10 @@ async function buildVisitReportText(row, t) {
   for (let index = 0; index < visits.length; index += 1) {
     const visit = visits[index];
     const englishRemark = await resolveEnglishRemark(visit.remark_arabic, visit.remark_english);
-    const report = buildStoredVisitReport(row, englishRemark, t, visit);
+    const previousVisit = visits[index + 1] || null;
+    const report = buildStoredVisitReport(row, englishRemark, t, visit, {
+      lastVisit: previousVisit,
+    });
     if (!report) continue;
 
     if (index > 0) {
@@ -1101,9 +1136,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
     return { dueCustomers: due, notDueCustomers: notDue, legalCustomers: legal };
   }
 
-  async function loadQueue(preferredKey = "") {
+  async function loadQueue(preferredKey = "", options = {}) {
     const supabase = getSupabaseClient();
     const seq = ++loadSeqRef.current;
+    const forceRefresh = Boolean(options.forceRefresh);
 
     if (!supabase) {
       setLoading(false);
@@ -1125,9 +1161,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (!session?.access_token || !session?.user?.id) throw new Error("Please login again.");
 
-      let cachedQueues = await readCollectionQueuesForUser(session.user.id);
+      let cachedQueues = forceRefresh ? null : await readCollectionQueuesForUser(session.user.id);
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
-      if (!queueHasRows(cachedQueues) && getDataRefreshStatus().active) {
+      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+      if (!forceRefresh && !queueHasRows(cachedQueues) && getDataRefreshStatus().active && !offline) {
         setLoading(true);
         cachedQueues = await waitForHydratedCollectionQueues(session.user.id);
         if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
@@ -1135,7 +1172,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (queueHasRows(cachedQueues)) {
         cachedResult = await applyQueuePayload(cachedQueues, preferredKey);
         setQueueFromCache(true);
+        setQueueOffline(offline);
         setLoading(false);
+        if (offline) {
+          setRefreshingQueue(false);
+          setError("");
+          return cachedResult;
+        }
         setRefreshingQueue(true);
       } else {
         setLoading(true);
@@ -1156,6 +1199,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       queueRefreshWatchdogRef.current = watchdog;
 
       const queueResult = await fetchCollectionQueuesCached(session.access_token, session.user.id, {
+        forceRefresh,
         onUpdate: (freshQueues) => {
           if (loadSeqRef.current !== seq) return;
           if (queueRefreshWatchdogRef.current === watchdog) {
@@ -1194,7 +1238,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
       }
 
       const message = String(err.message || "");
-      if (message === "SESSION_TIMEOUT") {
+      const offlineNow = typeof navigator !== "undefined" && navigator.onLine === false;
+      if (offlineNow) {
+        setError(t("offlineQueueMissing"));
+      } else if (message === "SESSION_TIMEOUT") {
         setError("Session check timed out. Please refresh the page or login again.");
       } else if (message.includes("timed out")) {
         setError(t("msgQueueLoadTimeout"));
@@ -1622,21 +1669,35 @@ export default function PaymentCollectionsView({ view = "due" }) {
     customerName,
     entryLocation,
     accessToken,
+    customer = null,
   }) {
+    const offline = typeof navigator !== "undefined" && navigator.onLine === false;
     const promptDetails = await evaluateCustomerLocationUpdatePrompt({
       language,
       customerCode,
       customerName,
       entryLocation,
       accessToken,
+      customer,
+      skipReverseGeocode: offline,
     });
-    if (!promptDetails) return CUSTOMER_LOCATION_UPDATE_SKIP;
+    if (!promptDetails) {
+      return { choice: CUSTOMER_LOCATION_UPDATE_SKIP, customer };
+    }
 
     const choice = await promptCustomerLocationChoice(promptDetails);
+    let nextCustomer = customer;
     if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE) {
-      await applyCustomerLocationUpdateFromPrompt(promptDetails);
+      try {
+        await applyCustomerLocationUpdateFromPrompt(promptDetails);
+      } catch (locationError) {
+        // Location sync is best-effort; do not block the collection save.
+        console.warn("Customer location update skipped", locationError);
+      }
+      // Always use the accepted GPS for distance-from-customer in the visit summary.
+      nextCustomer = customerWithUpdatedLocation(customer, promptDetails.updatePayload);
     }
-    return choice;
+    return { choice, customer: nextCustomer };
   }
 
   async function saveVisit(row, options = {}) {
@@ -1712,16 +1773,26 @@ export default function PaymentCollectionsView({ view = "due" }) {
         setForm((current) => ({ ...current, remarkEnglish: effectiveEnglishRemark }));
       }
 
-      const locationChoice = gps
+      const locationUpdate = gps
         ? await resolveLocationUpdateBeforeAction({
           customerCode: row.customer_code,
           customerName: row.customer_name,
           entryLocation: gps,
           accessToken: session.access_token,
+          customer: row,
         })
-        : CUSTOMER_LOCATION_UPDATE_SKIP;
+        : { choice: CUSTOMER_LOCATION_UPDATE_SKIP, customer: row };
+      const locationChoice = locationUpdate.choice;
       if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
         return;
+      }
+
+      let salesScope = null;
+      try {
+        const scopeResult = await fetchSalesScopeCached();
+        salesScope = scopeResult?.scope || null;
+      } catch {
+        salesScope = null;
       }
 
       await promptCustomerMobileUpdateIfMissing({
@@ -1730,6 +1801,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         customerCode: row.customer_code,
         customerName: row.customer_name,
         accessToken: session.access_token,
+        scope: salesScope,
       });
 
       const customerCodeKey = String(row.customer_code || "").trim().toUpperCase();
@@ -1741,7 +1813,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         supabase,
         userId: session.user.id,
         location: gps,
-        customer: row,
+        customer: locationUpdate.customer || row,
         savedAt: new Date().toISOString(),
       });
 
@@ -1754,6 +1826,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           visitNumberForDay,
           queuePriority: resolvedQueuePriority,
           visitDistance,
+          lastVisit: row?.latest_collection || null,
         },
       );
 
@@ -1845,7 +1918,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (!saveResult.queued) {
         await loadQueue(rowKey(row));
       } else {
-        const { scope } = await fetchSalesScopeCached();
+        const scope = salesScope || (await fetchSalesScopeCached().catch(() => null))?.scope;
         await persistOptimisticVisitSave(row, {
           visitOutcome: selectedOutcome,
           paymentStatus,
@@ -1993,36 +2066,43 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (!session?.access_token) throw new Error(t("msgLoginAgain"));
 
-      const gps = await captureGpsLocationWithFallbackConfirm(language, {
-        customerCode: row.customer_code,
-        customerName: row.customer_name,
-        accessToken: session.access_token,
-        role: access.role,
-        skipCustomerLocationUpdate: true,
-      });
+      // Office remove (admin/manager) should not wait on GPS — that blocked legal
+      // removals on desktop and made the row look stuck.
+      const skipGpsForOfficeRemove = action === "remove" && !shouldRequireGpsAccessGate(access.role);
+      const gps = skipGpsForOfficeRemove
+        ? null
+        : await captureGpsLocationWithFallbackConfirm(language, {
+          customerCode: row.customer_code,
+          customerName: row.customer_name,
+          accessToken: session.access_token,
+          role: access.role,
+          skipCustomerLocationUpdate: true,
+          customer: row,
+        });
       const locationChoice = gps
-        ? await resolveLocationUpdateBeforeAction({
+        ? (await resolveLocationUpdateBeforeAction({
           customerCode: row.customer_code,
           customerName: row.customer_name,
           entryLocation: gps,
           accessToken: session.access_token,
-        })
+          customer: row,
+        })).choice
         : CUSTOMER_LOCATION_UPDATE_SKIP;
       if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
         return;
       }
-      const platform = await resolveGpsCapturePlatform();
+      const platform = skipGpsForOfficeRemove ? "web" : await resolveGpsCapturePlatform();
       const legalNote = String(
         (activeRowKey === rowKey(row) ? form.legalNote : "") || row.legal_transfer?.note || "",
       ).trim();
 
-      const response = await fetch("/api/payment-collections", {
+      const saveResult = await sendJsonResilient({
+        url: "/api/payment-collections",
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
         },
-        body: JSON.stringify({
+        jsonBody: {
           customerCode: row.customer_code,
           customerName: row.customer_name,
           note: legalNote,
@@ -2031,32 +2111,57 @@ export default function PaymentCollectionsView({ view = "due" }) {
           longitude: gps?.longitude ?? null,
           gpsAccuracyMeters: gps?.accuracy ?? null,
           platform,
-        }),
+        },
+        metadata: {
+          type: "collection_legal_transfer",
+          customerCode: row.customer_code,
+          action,
+        },
+        // Legal remove used to time out at the default 4s while the API rebuilt
+        // the whole outstanding queue, so the delete never reached the database.
+        timeoutMs: 60000,
+        queueFirst: typeof navigator !== "undefined" && navigator.onLine === false,
       });
 
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to update legal transfer status.");
+      if (!saveResult.success) {
+        throw new Error(saveResult.message || "Unable to update legal transfer status.");
       }
 
       showPopup({
-        message: action === "remove"
-          ? `${row.customer_name} ${t("msgLegalRemoved")}`
-          : `${row.customer_name} ${t("msgLegalTransferred")}`,
+        message: saveResult.queued
+          ? t("msgSavedOffline")
+          : (action === "remove"
+            ? `${row.customer_name} ${t("msgLegalRemoved")}`
+            : `${row.customer_name} ${t("msgLegalTransferred")}`),
         variant: "success",
       });
       if (action === "remove") {
         const removedKey = rowKey(row);
         setActiveRowKey("");
-        setLegalCustomers((current) => current.filter((item) => rowKey(item) !== removedKey));
+        const nextLegal = (queuesRef.current.legalCustomers || []).filter((item) => rowKey(item) !== removedKey);
+        const patchedQueues = {
+          ...queuesRef.current,
+          legalCustomers: nextLegal,
+        };
+        queuesRef.current = patchedQueues;
+        setLegalCustomers(nextLegal);
+        if (!saveResult.queued) {
+          await invalidateCollectionQueuesForUser(session.user.id);
+          // Force a network reload so the on-device queue cache cannot put the
+          // customer back on the Legal tab after a successful remove.
+          await loadQueue("", { forceRefresh: true });
+        }
+      } else if (!saveResult.queued) {
         await invalidateCollectionQueuesForUser(session.user.id);
-        await loadQueue("");
-      } else {
-        await invalidateCollectionQueuesForUser(session.user.id);
-        await loadQueue(rowKey(row));
+        await loadQueue(rowKey(row), { forceRefresh: true });
         if (view !== "legal") {
           setActiveRowKey("");
         }
+      } else if (view !== "legal") {
+        setActiveRowKey("");
+      }
+      if (saveResult.queued) {
+        void processOfflineQueue(async () => session.access_token);
       }
     } catch (err) {
       showPopup({ message: localizeApiMessage(err.message || t("msgLegalUpdateFailed")), variant: "error" });
@@ -2847,6 +2952,28 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   <section className="moduleMetricCard"><span>{t("probability")}</span><strong>{isNotDue ? "N/A" : row.probability_label}</strong></section>
                                 </div>
 
+                                <div className="moduleSectionHeader" style={{ marginTop: "4px" }}>
+                                  <h2>{t("latestVisit")}</h2>
+                                </div>
+                                {Array.isArray(row.collection_history) && row.collection_history.length > 0 ? (
+                                  <div className="moduleHint" style={{ marginBottom: "12px" }}>
+                                    <strong>{t("lastThreeVisits")}</strong>
+                                    {row.collection_history.map((visit, index) => (
+                                      <div key={`${row.customer_code || key}-visit-${visit.saved_at || index}`} style={{ marginTop: index === 0 ? "8px" : "4px" }}>
+                                        {formatVisitHistoryItem(visit, t)}
+                                      </div>
+                                    ))}
+                                    {row.latest_collection?.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
+                                    {row.latest_collection?.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
+                                  </div>
+                                ) : row.latest_collection ? (
+                                  <div className="moduleHint" style={{ marginBottom: "12px" }}>
+                                    {formatVisitHistoryItem(row.latest_collection, t)}
+                                    {row.latest_collection.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
+                                    {row.latest_collection.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
+                                  </div>
+                                ) : <div className="moduleHint" style={{ marginBottom: "12px" }}>{t("noLatestVisit")}</div>}
+
                                 <div className="moduleFilterRow moduleCollectorFormGrid">
                                   <label>
                                     {t("visitOutcome")}
@@ -3012,28 +3139,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                     {copyStatus ? <span className="moduleHint">{copyStatus}</span> : null}
                                   </div>
                                 ) : null}
-
-                                <div className="moduleSectionHeader" style={{ marginTop: "14px" }}>
-                                  <h2>{t("latestVisit")}</h2>
-                                </div>
-                                {Array.isArray(row.collection_history) && row.collection_history.length > 0 ? (
-                                  <div className="moduleHint">
-                                    <strong>{t("lastThreeVisits")}</strong>
-                                    {row.collection_history.map((visit, index) => (
-                                      <div key={`${row.customer_code || key}-visit-${visit.saved_at || index}`} style={{ marginTop: index === 0 ? "8px" : "4px" }}>
-                                        {formatVisitHistoryItem(visit, t)}
-                                      </div>
-                                    ))}
-                                    {row.latest_collection?.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
-                                    {row.latest_collection?.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
-                                  </div>
-                                ) : row.latest_collection ? (
-                                  <div className="moduleHint">
-                                    {formatVisitHistoryItem(row.latest_collection, t)}
-                                    {row.latest_collection.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
-                                    {row.latest_collection.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
-                                  </div>
-                                ) : <div className="moduleHint">{t("noLatestVisit")}</div>}
                               </div>
                             </td>
                           </tr>

@@ -17,6 +17,7 @@ import {
   formatWholePercent,
   growthPercent,
   ingestCategoryGrowthRows,
+  emptyItemGrowthFilters,
   pickBiMeasure,
   monthChangeTone,
   monthGridTotals,
@@ -109,6 +110,11 @@ test("category growth report tracks yearly expansion since first sale", () => {
 test("status lights flag year-over-year drops and new categories", () => {
   assert.equal(classifyCategoryStatus({ yoyPercent: -20 }).status, "red");
   assert.equal(classifyCategoryStatus({ momPercent: -16 }).status, "red");
+  assert.equal(classifyCategoryStatus({
+    momPercent: -100,
+    currentMonthAmount: 88957,
+    peakMonthAmount: 88957,
+  }).code, "record_month");
   assert.equal(classifyCategoryStatus({ decliningMonths: 3 }).status, "red");
   assert.equal(classifyCategoryStatus({ yoyPercent: -8 }).status, "orange");
   assert.equal(classifyCategoryStatus({ yoyPercent: 12 }).status, "green");
@@ -127,6 +133,14 @@ test("filters and group-by slice the same sales into different rows", () => {
   const salesmanReport = buildCategoryGrowthReport(salesmanAcc, { asOfDate: "2026-09-11" });
   assert.equal(salesmanReport.groups.length, 2);
   assert.equal(salesmanReport.groups.some((row) => row.label === "Ali · S1"), true);
+
+  const itemAcc = createCategoryGrowthAccumulator();
+  ingestCategoryGrowthRows(itemAcc, rows, { groupBy: "item" });
+  const itemReport = buildCategoryGrowthReport(itemAcc, { asOfDate: "2026-09-11" });
+  assert.equal(emptyItemGrowthFilters().groupBy, "item");
+  assert.equal(itemReport.groups.length, 2);
+  assert.equal(itemReport.groups.some((row) => row.label === "Ice · I1"), true);
+  assert.equal(itemReport.groups.find((row) => row.label === "Ice · I1").lifetime, 180);
 
   const fridgeAcc = createCategoryGrowthAccumulator();
   ingestCategoryGrowthRows(fridgeAcc, rows, {

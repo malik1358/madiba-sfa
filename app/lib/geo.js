@@ -79,7 +79,69 @@ function delayMs(ms) {
   });
 }
 
-export function probeGpsLocation(options = {}) {
+export function normalizeGpsCoords(coords = {}) {
+  const latitudeRaw = coords?.latitude;
+  const longitudeRaw = coords?.longitude;
+  if (latitudeRaw === null || latitudeRaw === undefined || latitudeRaw === "") {
+    throw new Error(GPS_POSITION_UNAVAILABLE_ERROR);
+  }
+  if (longitudeRaw === null || longitudeRaw === undefined || longitudeRaw === "") {
+    throw new Error(GPS_POSITION_UNAVAILABLE_ERROR);
+  }
+
+  const latitude = Number(latitudeRaw);
+  const longitude = Number(longitudeRaw);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    throw new Error(GPS_POSITION_UNAVAILABLE_ERROR);
+  }
+
+  const accuracyRaw = coords?.accuracy;
+  const accuracy = accuracyRaw === null || accuracyRaw === undefined || accuracyRaw === ""
+    ? null
+    : Number(accuracyRaw);
+
+  return {
+    latitude: Number(latitude.toFixed(6)),
+    longitude: Number(longitude.toFixed(6)),
+    accuracy: Number.isFinite(accuracy) ? Number(accuracy.toFixed(1)) : null,
+  };
+}
+
+export function mapGeolocationFailure(error) {
+  const code = Number(error?.code);
+  if (code === 1) return new Error(GPS_PERMISSION_DENIED_ERROR);
+  if (code === 2) return new Error(GPS_POSITION_UNAVAILABLE_ERROR);
+  return new Error(GPS_LOCATION_FAILED_ERROR);
+}
+
+async function isNativeCapacitorPlatform() {
+  if (typeof window === "undefined") return false;
+  try {
+    const { Capacitor } = await import("@capacitor/core");
+    return Boolean(Capacitor.isNativePlatform?.() || Capacitor.getPlatform?.() === "android" || Capacitor.getPlatform?.() === "ios");
+  } catch {
+    return false;
+  }
+}
+
+async function probeNativeGpsLocation(options = {}) {
+  const timeoutMs = Number(options.timeoutMs || 10000);
+  const maximumAge = Number.isFinite(Number(options.maximumAge)) ? Number(options.maximumAge) : 0;
+  const { Geolocation } = await import("@capacitor/geolocation");
+
+  try {
+    const position = await Geolocation.getCurrentPosition({
+      enableHighAccuracy: true,
+      timeout: timeoutMs,
+      maximumAge,
+    });
+    return normalizeGpsCoords(position?.coords);
+  } catch (error) {
+    throw mapGeolocationFailure(error);
+  }
+}
+
+function probeBrowserGpsLocation(options = {}) {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     return Promise.reject(new Error(GPS_UNSUPPORTED_ERROR));
   }
@@ -90,26 +152,33 @@ export function probeGpsLocation(options = {}) {
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        resolve({
-          latitude: Number(position.coords.latitude.toFixed(6)),
-          longitude: Number(position.coords.longitude.toFixed(6)),
-          accuracy: Number(position.coords.accuracy.toFixed(1)),
-        });
+        try {
+          resolve(normalizeGpsCoords(position?.coords));
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(GPS_POSITION_UNAVAILABLE_ERROR));
+        }
       },
       (error) => {
-        if (error?.code === 1) {
-          reject(new Error(GPS_PERMISSION_DENIED_ERROR));
-          return;
-        }
-        if (error?.code === 2) {
-          reject(new Error(GPS_POSITION_UNAVAILABLE_ERROR));
-          return;
-        }
-        reject(new Error(GPS_LOCATION_FAILED_ERROR));
+        reject(mapGeolocationFailure(error));
       },
       { enableHighAccuracy: true, timeout: timeoutMs, maximumAge },
     );
   });
+}
+
+export async function probeGpsLocation(options = {}) {
+  if (await isNativeCapacitorPlatform()) {
+    try {
+      return await probeNativeGpsLocation(options);
+    } catch (error) {
+      // Permission denied on native is definitive; other failures can still try the WebView GPS API.
+      if (error?.message === GPS_PERMISSION_DENIED_ERROR) {
+        throw error;
+      }
+    }
+  }
+
+  return probeBrowserGpsLocation(options);
 }
 
 export async function probeGpsLocationWithRetries(options = {}) {

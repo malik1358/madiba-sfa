@@ -79,3 +79,39 @@ test("buildFieldVisitWhatsappSummary includes live visit distance metrics at the
   assert.match(summary, /Distance from previous: 3.40 km/);
   assert.match(summary, /Est. waiting: 25 min/);
 });
+
+test("buildFieldVisitWhatsappSummary stays English when UI language is Arabic", () => {
+  const summary = buildFieldVisitWhatsappSummary({
+    customer: {
+      customer_code: "1034",
+      customer_name: "Al Fursan Train Trading Company",
+    },
+    visitForm: {
+      outcome: "COME_BACK_LATER",
+      nextVisitAt: "2026-09-15T10:00",
+    },
+    salesmanName: "OSAMA (OSAMA)",
+    language: "ar",
+    visitDistance: {
+      latitude: 24.594595,
+      longitude: 46.705838,
+      distanceFromCustomerKm: 0.68,
+      distanceFromPreviousKm: 0,
+      waitingMinutes: 13,
+    },
+  });
+
+  assert.match(summary, /^Field visit report/);
+  assert.match(summary, /Customer: Al Fursan Train Trading Company/);
+  assert.match(summary, /Code: 1034/);
+  assert.match(summary, /Salesman: OSAMA \(OSAMA\)/);
+  assert.match(summary, /Outcome: Asked to come back later/);
+  assert.match(summary, /Next visit: 15\/09\/2026/);
+  assert.match(summary, /Outstanding:/);
+  assert.match(summary, /0-30: 0/);
+  assert.match(summary, /Total: 0/);
+  assert.doesNotMatch(summary, /تقرير زيارة ميدانية/);
+  assert.doesNotMatch(summary, /طلب العودة لاحقاً/);
+  assert.doesNotMatch(summary, /العميل:/);
+  assert.doesNotMatch(summary, /المستحقات:/);
+});

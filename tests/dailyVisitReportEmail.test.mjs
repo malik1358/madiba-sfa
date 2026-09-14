@@ -290,6 +290,25 @@ test("collectVisitReportTeamLeaders walks the reporting chain", () => {
   assert.deepEqual(leaders.map((row) => row.id), ["nabil", "soyeb"]);
 });
 
+test("collectVisitReportTeamLeaders includes salesman heads who have a team", () => {
+  const profiles = [
+    { id: "junaid", salesman_code: "JUNAID", salesman_name: "JUNAID", role: "salesman" },
+    { id: "parvez", salesman_code: "PARVEZ", salesman_name: "PARVEZ", role: "salesman" },
+    { id: "soyeb", salesman_code: "SOYEB", salesman_name: "SOYEB", role: "manager" },
+  ];
+  const authUsers = [
+    { id: "junaid", user_metadata: { head_salesman_code: "SOYEB" } },
+    { id: "parvez", user_metadata: { head_salesman_code: "JUNAID" } },
+    { id: "soyeb", user_metadata: {} },
+  ];
+  const leaders = collectVisitReportTeamLeaders({
+    recipients: [{ user: { userId: "junaid" }, profile: profiles[0] }],
+    profiles,
+    authUsers,
+  });
+  assert.deepEqual(leaders.map((row) => row.id), ["soyeb", "junaid"]);
+});
+
 test("isEmailConfigured requires from plus SMTP or Resend", () => {
   assert.equal(isEmailConfigured(getMailerConfig({})), false);
   assert.equal(isEmailConfigured(getMailerConfig({ SMTP_HOST: "smtp.office365.com", SMTP_FROM: "sfa@madiba.com" })), true);
@@ -435,6 +454,57 @@ test("runDailyVisitReportEmailCycle skips when email is not configured", async (
   assert.equal(result.reason, "email_not_configured");
 });
 
+test("runDailyVisitReportEmailCycle does not send personal reports for admin", async () => {
+  const sent = [];
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-09-13",
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+      DAILY_VISIT_REPORT_TO: "manager@madiba.com",
+    },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadReport: async () => ({
+      date: "2026-09-13",
+      thresholdKm: 0.5,
+      users: [
+        {
+          userId: "admin1",
+          userName: "malik@pinasz.com",
+          email: "malik@pinasz.com",
+          visitCount: 2,
+          farFromCustomerCount: 2,
+          totalRouteDistanceKm: 0,
+          entries: [{ id: "e1" }, { id: "e2" }],
+          daySummary: { lines: ["Two visits."] },
+        },
+        {
+          userId: "u1",
+          userName: "Sales One",
+          email: "one@madiba.com",
+          visitCount: 1,
+          farFromCustomerCount: 0,
+          totalRouteDistanceKm: 3,
+          entries: [],
+          daySummary: { lines: ["One visit."] },
+        },
+      ],
+    }),
+    loadProfiles: async () => ([
+      { id: "admin1", role: "admin", email: "malik@pinasz.com", salesman_name: "Malik", is_active: true },
+      { id: "u1", role: "salesman", email: "one@madiba.com", report_email: "one@company.com", salesman_name: "Sales One", is_active: true },
+    ]),
+    loadSummary: async () => ({ daySummary: { lines: ["No visits today."] } }),
+  });
+
+  assert.equal(result.userCount, 1);
+  assert.equal(sent.some((message) => /malik@pinasz\.com|Malik/.test(message.subject)), false);
+  assert.equal(sent.some((message) => message.subject.includes("Sales One")), true);
+});
+
 test("runDailyVisitReportEmailCycle can send only selected users", async () => {
   const sent = [];
   const result = await runDailyVisitReportEmailCycle({}, {
@@ -540,4 +610,176 @@ test("runDailyVisitReportEmailCycle sends bosses one team target vs achievement 
   assert.equal(teamEmails.some((message) => message.html.includes("Team members")), true);
   assert.equal(teamEmails.some((message) => message.html.includes("Belal (BELAL)")), true);
   assert.equal(sent.filter((message) => message.subject.includes("Belal") && !/Team target vs achievement/.test(message.subject)).length, 1);
+});
+
+test("salesman heads get team target vs achievement inside their own visit email", async () => {
+  const sent = [];
+  const junaidSnapshot = buildPerformanceSnapshot({
+    reportDate: "2026-09-13",
+    salesmanCode: "JUNAID",
+    salesmanName: "JUNAID",
+    actuals: { officeSupplies: 12071, otherSales: 12825, collection: 113993, newCustomers: 3, repeatCustomers: 3 },
+    targets: { officeSupplies: 0, otherSales: 50000, collection: 0, newCustomers: 10, repeatCustomers: 0 },
+  });
+  const parvezSnapshot = buildPerformanceSnapshot({
+    reportDate: "2026-09-13",
+    salesmanCode: "PARVEZ",
+    salesmanName: "PARVEZ",
+    actuals: { officeSupplies: 5000, otherSales: 7000, collection: 20000, newCustomers: 1, repeatCustomers: 2 },
+    targets: { officeSupplies: 10000, otherSales: 15000, collection: 30000, newCustomers: 3, repeatCustomers: 4 },
+  });
+
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-09-13",
+    userIds: ["junaid", "parvez"],
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+      DAILY_VISIT_REPORT_TO: "office@madiba.com",
+    },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadReport: async () => ({
+      date: "2026-09-13",
+      thresholdKm: 0.5,
+      users: [
+        {
+          userId: "junaid",
+          userName: "JUNAID (JUNAID)",
+          email: "junaid@madiba-sfa.local",
+          visitCount: 0,
+          farFromCustomerCount: 0,
+          totalRouteDistanceKm: 0,
+          entries: [],
+          daySummary: { lines: ["No visits today."] },
+        },
+        {
+          userId: "parvez",
+          userName: "PARVEZ (PARVEZ)",
+          email: "parvez@madiba-sfa.local",
+          visitCount: 2,
+          farFromCustomerCount: 0,
+          totalRouteDistanceKm: 4,
+          entries: [],
+          daySummary: { lines: ["Two visits."] },
+        },
+      ],
+    }),
+    loadProfiles: async () => ([
+      {
+        id: "junaid",
+        role: "salesman",
+        salesman_code: "JUNAID",
+        salesman_name: "JUNAID",
+        email: null,
+        report_email: "junaid.thonse@noorshukran.com",
+        is_active: true,
+      },
+      {
+        id: "parvez",
+        role: "salesman",
+        salesman_code: "PARVEZ",
+        salesman_name: "PARVEZ",
+        email: null,
+        report_email: "parvez.patagar@noorshukran.com",
+        is_active: true,
+      },
+      {
+        id: "soyeb",
+        role: "manager",
+        salesman_code: "SOYEB",
+        salesman_name: "SOYEB",
+        email: "soyeb@madiba-sfa.local",
+        report_email: "soyeb@company.com",
+        is_active: true,
+      },
+    ]),
+    loadAuthUsers: async () => ([
+      { id: "junaid", user_metadata: { head_salesman_code: "SOYEB" } },
+      { id: "parvez", user_metadata: { head_salesman_code: "JUNAID", head_salesman_name: "JUNAID" } },
+      { id: "soyeb", user_metadata: {} },
+    ]),
+    loadSummary: async () => ({ daySummary: { lines: ["No visits today."] } }),
+    loadKpis: async (_admin, { salesmen }) => salesmen.map((row) => (
+      row.userId === "junaid" ? junaidSnapshot : parvezSnapshot
+    )),
+    loadTeamTargets: async () => new Map([
+      ["TEAM::JUNAID", {
+        targets: { officeSupplies: 0, otherSales: 80000, collection: 0, newCustomers: 15, repeatCustomers: 0, totalSales: 80000 },
+      }],
+    ]),
+  });
+
+  const junaidEmail = sent.find((message) => (
+    message.subject.includes("JUNAID") && !/Team target vs achievement/.test(message.subject)
+  ));
+  assert.ok(junaidEmail);
+  assert.match(junaidEmail.html, /Monthly KPI status/);
+  assert.match(junaidEmail.html, /Team target vs achievement/);
+  assert.match(junaidEmail.html, /PARVEZ \(PARVEZ\)/);
+  assert.match(junaidEmail.text, /Team target vs achievement/);
+  assert.equal(result.results.some((row) => row.userId === "junaid" && row.hasTeamKpis), true);
+
+  // Standalone team email is only for heads who did not already get team KPIs in a personal report.
+  assert.equal(
+    sent.some((message) => (
+      /Team target vs achievement/.test(message.subject)
+      && message.to.includes("junaid.thonse@noorshukran.com")
+    )),
+    false,
+  );
+  assert.equal(
+    sent.some((message) => (
+      /Team target vs achievement/.test(message.subject)
+      && message.to.includes("soyeb@company.com")
+    )),
+    true,
+  );
+});
+
+test("buildUserVisitReportEmail can include team target vs achievement for bosses", () => {
+  const team = buildPerformanceSnapshot({
+    reportDate: "2026-09-13",
+    salesmanCode: "TEAM",
+    salesmanName: "JUNAID — team",
+    actuals: { officeSupplies: 17071, otherSales: 19825, collection: 133993, newCustomers: 4, repeatCustomers: 5 },
+    targets: { officeSupplies: 0, otherSales: 80000, collection: 0, newCustomers: 15, repeatCustomers: 0 },
+  });
+  const members = [
+    buildPerformanceSnapshot({
+      reportDate: "2026-09-13",
+      salesmanCode: "JUNAID",
+      salesmanName: "JUNAID",
+      actuals: { officeSupplies: 12071, otherSales: 12825, collection: 113993, newCustomers: 3, repeatCustomers: 3 },
+      targets: { officeSupplies: 0, otherSales: 50000, collection: 0, newCustomers: 10, repeatCustomers: 0 },
+    }),
+    buildPerformanceSnapshot({
+      reportDate: "2026-09-13",
+      salesmanCode: "PARVEZ",
+      salesmanName: "PARVEZ",
+      actuals: { officeSupplies: 5000, otherSales: 7000, collection: 20000, newCustomers: 1, repeatCustomers: 2 },
+      targets: { officeSupplies: 10000, otherSales: 15000, collection: 30000, newCustomers: 3, repeatCustomers: 4 },
+    }),
+  ];
+  const message = buildUserVisitReportEmail({
+    date: "2026-09-13",
+    user: {
+      userName: "JUNAID (JUNAID)",
+      visitCount: 0,
+      farFromCustomerCount: 0,
+      totalRouteDistanceKm: 0,
+      entries: [],
+      performance: members[0],
+    },
+    team,
+    teamMembers: members,
+  });
+
+  assert.match(message.html, /Monthly KPI status/);
+  assert.match(message.html, /Team target vs achievement/);
+  assert.match(message.html, /Team members/);
+  assert.match(message.html, /PARVEZ \(PARVEZ\)/);
+  assert.match(message.text, /Team target vs achievement/);
 });

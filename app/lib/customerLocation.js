@@ -66,6 +66,7 @@ export async function captureGpsLocationWithFallbackConfirm(language = "en", opt
     accessToken: options.accessToken || "",
     skipCustomerLocationUpdate: Boolean(options.skipCustomerLocationUpdate),
     role: options.role || "",
+    customer: options.customer || null,
   });
 }
 
@@ -91,6 +92,7 @@ export async function resolveVisitGpsAndUpdateCustomer({
   accessToken = "",
   skipCustomerLocationUpdate = false,
   role = "",
+  customer = null,
 }) {
   if (!shouldRequireTransactionGps(role)) {
     return null;
@@ -130,11 +132,19 @@ export async function resolveVisitGpsAndUpdateCustomer({
     && !isProspectCustomerCode(customerCode)
   ) {
     if (saveCustomerGps) {
-      await saveCustomerGpsFromVisitLocation({
+      const updated = await saveCustomerGpsFromVisitLocation({
         customerCode,
         entryLocation: location,
         accessToken,
       });
+      if (customer && updated) {
+        applyCustomerLocation(customer, updated);
+      } else if (customer) {
+        applyCustomerLocation(customer, {
+          latitude: location.latitude,
+          longitude: location.longitude,
+        });
+      }
     } else {
       await maybePromptCustomerLocationUpdate({
         customerCode,
@@ -142,6 +152,7 @@ export async function resolveVisitGpsAndUpdateCustomer({
         entryLocation: location,
         accessToken,
         language,
+        customer,
       });
     }
   }
@@ -187,7 +198,7 @@ export async function fetchCustomerLocation(accessToken, customerCode) {
     if (!response.ok || !payload.success) return null;
     return payload.customer || null;
   } catch {
-    // Timeout/network during GPS prompts must not block Save Draft / Submit Order.
+    // Timeout/offline/flaky networks must not block Save Draft / Submit Order or visits.
     return null;
   }
 }
@@ -206,21 +217,77 @@ export async function updateCustomerLocation(accessToken, customerCode, location
     payload.city = location.city;
   }
 
-  const response = await fetchWithTimeout("/api/customers/location", {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.success) {
-    throw new Error(result.error || "Unable to update customer location.");
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (offline || !accessToken) {
+    if (accessToken) {
+      try {
+        const { sendJsonResilient } = await import("./offlineApi.js");
+        await sendJsonResilient({
+          url: "/api/customers/location",
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          jsonBody: payload,
+          metadata: {
+            type: "customer_location_update",
+            customerCode,
+          },
+          queueFirst: true,
+        });
+      } catch {
+        // Keep the local location even if the offline queue is unavailable.
+      }
+    }
+    return {
+      customer_code: customerCode,
+      ...payload,
+    };
   }
 
-  return result.customer;
+  try {
+    const response = await fetchWithTimeout("/api/customers/location", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || "Unable to update customer location.");
+    }
+
+    return result.customer;
+  } catch (error) {
+    const { isOfflineLikeError } = await import("./offlineSyncQueue.js");
+    if (!isOfflineLikeError(error)) throw error;
+
+    try {
+      const { sendJsonResilient } = await import("./offlineApi.js");
+      await sendJsonResilient({
+        url: "/api/customers/location",
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        jsonBody: payload,
+        metadata: {
+          type: "customer_location_update",
+          customerCode,
+        },
+        queueFirst: true,
+      });
+    } catch {
+      // Keep the local location even if the offline queue is unavailable.
+    }
+    return {
+      customer_code: customerCode,
+      ...payload,
+    };
+  }
 }
 
 function buildLocationUpdatePayload(entryLocation, customer, geocoded = {}) {
@@ -235,12 +302,23 @@ function buildLocationUpdatePayload(entryLocation, customer, geocoded = {}) {
   };
 }
 
+export function customerWithUpdatedLocation(customer, updatePayload) {
+  if (!customer || !updatePayload) return customer;
+  const next = { ...customer };
+  if (updatePayload.latitude !== undefined) next.latitude = updatePayload.latitude;
+  if (updatePayload.longitude !== undefined) next.longitude = updatePayload.longitude;
+  if (updatePayload.area) next.area = updatePayload.area;
+  if (updatePayload.city) next.city = updatePayload.city;
+  return next;
+}
+
 function applyCustomerLocation(customer, updatePayload) {
-  if (!customer) return;
-  customer.latitude = updatePayload.latitude;
-  customer.longitude = updatePayload.longitude;
-  if (updatePayload.area) customer.area = updatePayload.area;
-  if (updatePayload.city) customer.city = updatePayload.city;
+  if (!customer || !updatePayload) return;
+  const next = customerWithUpdatedLocation(customer, updatePayload);
+  customer.latitude = next.latitude;
+  customer.longitude = next.longitude;
+  if (next.area) customer.area = next.area;
+  if (next.city) customer.city = next.city;
 }
 
 function buildCustomerLocationUpdateMessage({
@@ -279,6 +357,9 @@ export async function evaluateCustomerLocationUpdatePrompt({
     return null;
   }
 
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const skipGeocode = skipReverseGeocode || offline;
+
   const skipLocationWrite = shouldSkipCustomerLocationWrite(customerCode, knownCustomer);
   let customer = knownCustomer && typeof knownCustomer === "object" ? knownCustomer : null;
   if (!customer && !skipLocationWrite) {
@@ -289,13 +370,17 @@ export async function evaluateCustomerLocationUpdatePrompt({
   const displayName = customerName || customer?.customer_name || customerCode;
 
   let geocoded = { area: "", street: "", city: "" };
-  if (!skipReverseGeocode && !skipLocationWrite && !customerHasArea(customer)) {
-    geocoded = await reverseGeocodeCoordinates(entryLocation.latitude, entryLocation.longitude);
-    const detectedArea = String(geocoded.area || "").trim();
-    const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
-    if (detectedArea) {
-      await updateCustomerLocation(accessToken, customerCode, updatePayload);
-      applyCustomerLocation(customer, updatePayload);
+  if (!skipGeocode && !skipLocationWrite && !customerHasArea(customer)) {
+    try {
+      geocoded = await reverseGeocodeCoordinates(entryLocation.latitude, entryLocation.longitude);
+      const detectedArea = String(geocoded.area || "").trim();
+      const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
+      if (detectedArea) {
+        await updateCustomerLocation(accessToken, customerCode, updatePayload);
+        applyCustomerLocation(customer, updatePayload);
+      }
+    } catch {
+      // Offline / geocode failures should not block the visit.
     }
   }
 
@@ -354,11 +439,19 @@ export async function maybePromptCustomerLocationUpdate({
     customer,
     skipReverseGeocode,
   });
-  if (!promptDetails) return;
+  if (!promptDetails) return CUSTOMER_LOCATION_UPDATE_SKIP;
 
   const resolveChoice = promptChoice || defaultLegacyLocationUpdatePrompt;
   const choice = await resolveChoice(promptDetails);
   if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE && !shouldSkipCustomerLocationWrite(customerCode, customer)) {
-    await applyCustomerLocationUpdateFromPrompt(promptDetails);
+    try {
+      await applyCustomerLocationUpdateFromPrompt(promptDetails);
+    } catch (locationError) {
+      // Keep visiting/order flows unblocked; still use accepted GPS for distance.
+      console.warn("Customer location update skipped", locationError);
+    }
+    // Keep in-memory customer GPS in sync so distance-from-customer uses the new point.
+    applyCustomerLocation(customer, promptDetails.updatePayload);
   }
+  return choice;
 }

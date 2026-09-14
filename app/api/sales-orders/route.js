@@ -11,12 +11,59 @@ import {
   resolveProspectCustomerCode,
 } from "../../lib/prospects.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
+import {
+  ORDER_STATUS_PENDING_APPROVAL,
+  ORDER_STATUS_PENDING_INVOICE_CREATION,
+} from "../../lib/orderApproval.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+function invoiceMetaKey(orderId) {
+  return `order_invoice_meta:${String(orderId || "").trim()}`;
+}
+
+async function markOrderInvoiceQueueStatus(admin, orderId, userId, status) {
+  const key = invoiceMetaKey(orderId);
+  const { data: existingRow } = await admin
+    .from("system_settings")
+    .select("setting_value")
+    .eq("setting_key", key)
+    .maybeSingle();
+
+  let existing = { orderId: String(orderId) };
+  try {
+    const parsed = JSON.parse(existingRow?.setting_value || "null");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      existing = { ...parsed, orderId: String(orderId) };
+    }
+  } catch {
+    // Keep default meta when stored JSON is invalid.
+  }
+
+  if (String(existing.status || "").trim()) {
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  const updated = {
+    ...existing,
+    orderId: String(orderId),
+    status,
+    updatedAt: nowIso,
+    statusUpdatedAt: nowIso,
+    statusUpdatedBy: userId || "",
+  };
+
+  const { error } = await admin.from("system_settings").upsert({
+    setting_key: key,
+    setting_value: JSON.stringify(updated),
+  }, { onConflict: "setting_key" });
+  if (error) throw error;
+}
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase();
@@ -491,6 +538,7 @@ export async function POST(request) {
     const capturePlatform = normalizeGpsCapturePlatform(body?.platform);
     const loadedOrderStatus = String(body?.loadedOrderStatus || "DRAFT").trim().toUpperCase();
     const requestedOrderId = body?.orderId ? Number(body.orderId) : null;
+    const creditApprovalRequired = Boolean(body?.creditApprovalRequired);
 
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer is required." }, { status: 400 });
@@ -616,6 +664,16 @@ export async function POST(request) {
           platform: capturePlatform,
         });
       }
+
+      // Queue for approval when required; otherwise wait for invoice creation.
+      await markOrderInvoiceQueueStatus(
+        admin,
+        orderId,
+        user.id,
+        creditApprovalRequired
+          ? ORDER_STATUS_PENDING_APPROVAL
+          : ORDER_STATUS_PENDING_INVOICE_CREATION,
+      );
 
       status = "SUBMITTED";
     }

@@ -87,6 +87,42 @@ test("findPreviousVisitDistanceAnchors skips later rows and idle pings for waiti
   assert.equal(anchors.previousVisitRow.transactionType, "VISIT_REPORT");
 });
 
+test("resolveVisitDistanceMetrics ignores idle GPS ping at current customer for distance from previous", () => {
+  // 1126C-style case: idle pings land at the customer before the visit is saved,
+  // so distance-from-last-ping is ~0 while the previous stop was elsewhere.
+  const previousVisit = {
+    savedAt: "2026-09-14T10:00:00.000Z",
+    transactionType: "COLLECTION_VISIT",
+    latitude: 24.70,
+    longitude: 46.70,
+  };
+  const idlePingAtCustomer = {
+    savedAt: "2026-09-14T10:55:00.000Z",
+    transactionType: "GPS_PING",
+    latitude: 24.558559,
+    longitude: 46.771646,
+  };
+  const metrics = resolveVisitDistanceMetrics({
+    location: { latitude: 24.558559, longitude: 46.771646 },
+    customer: { latitude: 24.558559, longitude: 46.771646 },
+    previousGpsRow: idlePingAtCustomer,
+    previousVisitRow: previousVisit,
+    savedAt: "2026-09-14T11:00:00.000Z",
+  });
+
+  assert.equal(metrics.distanceFromCustomerKm, 0);
+  assert.ok(metrics.distanceFromPreviousKm > 15);
+  assert.ok(metrics.waitingMinutes > 0);
+  assert.match(
+    formatVisitDistanceWhatsappLines(metrics)[3],
+    /Distance from previous: \d+\.\d{2} km/,
+  );
+  assert.doesNotMatch(
+    formatVisitDistanceWhatsappLines(metrics)[3],
+    /Distance from previous: 0\.00 km/,
+  );
+});
+
 test("resolveVisitDistanceMetrics matches report waiting when prior collection visit is present", () => {
   // Same customer revisited 39 minutes later at the same GPS (1216C case).
   const previousCollection = {
@@ -105,7 +141,7 @@ test("resolveVisitDistanceMetrics matches report waiting when prior collection v
 
   assert.equal(metrics.waitingMinutes, 39);
   assert.equal(metrics.distanceFromPreviousKm, 0);
-  assert.match(formatVisitDistanceWhatsappLines(metrics)[3], /Est\. waiting: 39 min/);
+  assert.match(formatVisitDistanceWhatsappLines(metrics)[4], /Est\. waiting: 39 min/);
 });
 
 test("findPreviousVisitDistanceAnchors prefers prior collection visit over older field visit", () => {

@@ -75,11 +75,16 @@ export function resolveVisitDistanceMetrics({
   savedAt = "",
 } = {}) {
   const distanceFromCustomer = distanceFromCustomerKm(location, customer);
+  // Prefer the previous real visit/stop (same anchor as Est. waiting). Idle GPS
+  // pings often sit at the current customer and would wrongly report 0.00 km.
+  const previousDistanceRow = (
+    hasGpsCoordinates(previousVisitRow) ? previousVisitRow : previousGpsRow
+  );
   let distanceFromPreviousKm = null;
-  if (hasGpsCoordinates(location) && hasGpsCoordinates(previousGpsRow)) {
+  if (hasGpsCoordinates(location) && hasGpsCoordinates(previousDistanceRow)) {
     distanceFromPreviousKm = haversineDistanceKm(
-      Number(previousGpsRow.latitude),
-      Number(previousGpsRow.longitude),
+      Number(previousDistanceRow.latitude),
+      Number(previousDistanceRow.longitude),
       Number(location.latitude),
       Number(location.longitude),
     );
@@ -91,14 +96,8 @@ export function resolveVisitDistanceMetrics({
     && hasGpsCoordinates(location)
     && hasGpsCoordinates(previousVisitRow)
   ) {
-    const waitingDistanceKm = haversineDistanceKm(
-      Number(previousVisitRow.latitude),
-      Number(previousVisitRow.longitude),
-      Number(location.latitude),
-      Number(location.longitude),
-    );
     waitingMinutes = computeWaitingMinutes(
-      waitingDistanceKm,
+      distanceFromPreviousKm,
       previousVisitRow.savedAt || previousVisitRow.saved_at,
       savedAt,
     );
@@ -210,12 +209,15 @@ export async function loadVisitDistanceMetrics({
   const capturedAt = savedAt || new Date().toISOString();
   let previousGpsRow = null;
   let previousVisitRow = null;
-  try {
-    const timeline = await loadTodayVisitTimelineRows(supabase, userId);
-    ({ previousGpsRow, previousVisitRow } = findPreviousVisitDistanceAnchors(timeline, capturedAt));
-  } catch {
-    previousGpsRow = null;
-    previousVisitRow = null;
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (!offline) {
+    try {
+      const timeline = await loadTodayVisitTimelineRows(supabase, userId);
+      ({ previousGpsRow, previousVisitRow } = findPreviousVisitDistanceAnchors(timeline, capturedAt));
+    } catch {
+      previousGpsRow = null;
+      previousVisitRow = null;
+    }
   }
 
   return resolveVisitDistanceMetrics({

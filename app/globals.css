@@ -6498,6 +6498,13 @@ th:has(.moduleTableColumnFilterInput) {
   font-weight: 700;
 }
 
+.dayRouteMapStops .dayRouteMapUnloggedIdle,
+.dayRouteMapStops .dayRouteMapUnloggedIdle strong,
+.dayRouteMapStops .dayRouteMapUnloggedIdle a {
+  color: #dc2626;
+  font-weight: 700;
+}
+
 .dayRouteMapLegendBubble {
   width: 16px !important;
   height: 16px !important;
@@ -6760,6 +6767,26 @@ th:has(.moduleTableColumnFilterInput) {
   color: #0f4c5c;
 }
 
+.moduleBiPeriodField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f4c5c;
+}
+
+.moduleBiPeriodSelect {
+  min-width: 168px;
+}
+
+.moduleBiPeriodRange {
+  font-size: 12px;
+  font-weight: 700;
+  font-style: normal;
+  color: #0e7490;
+}
+
 .moduleBiDashKpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
@@ -6770,12 +6797,25 @@ th:has(.moduleTableColumnFilterInput) {
 .moduleBiDashKpi {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
+  width: 100%;
   padding: 12px 14px;
   border-radius: 14px;
   background: linear-gradient(180deg, #f0fdfa 0%, #e0f2fe 100%);
   border: 1px solid #99f6e4;
   color: #0f4c5c;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.moduleBiDashKpi:hover,
+button.moduleBiDashKpi:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(15, 76, 92, 0.16);
+  outline: 2px solid #0f4c5c;
+  outline-offset: 1px;
 }
 
 .moduleBiDashKpi span,
@@ -6846,6 +6886,41 @@ th:has(.moduleTableColumnFilterInput) {
   background: #0e7490;
 }
 
+.moduleBiDashLaunchCard--cyan {
+  background: #0f766e;
+}
+
+.moduleBiDashLaunchCard--purple {
+  background: #6d28d9;
+}
+
+.moduleBiDashRowLink {
+  cursor: pointer;
+}
+
+.moduleBiDashLaunchCard:hover,
+.moduleBiDashLaunchCard:focus-visible {
+  filter: brightness(1.08);
+  outline: 2px solid #0f4c5c;
+  outline-offset: 2px;
+}
+
+.moduleBiDashSectionLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.moduleBiDashSectionLink:hover,
+.moduleBiDashSectionLink:focus-visible {
+  color: #0e7490;
+}
+
 .moduleBiDashLaunchCard--green {
   background: #166534;
 }
@@ -6865,6 +6940,18 @@ th:has(.moduleTableColumnFilterInput) {
 
 .moduleBiTable {
   min-width: 980px;
+}
+
+.moduleBiNameLink {
+  color: #0e7490;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.moduleBiNameLink:hover,
+.moduleBiNameLink:focus-visible {
+  color: #0f4c5c;
 }
 
 /* Stick the label row only. A second header row (filters) stacks under it. */
@@ -7275,7 +7362,28 @@ th:has(.moduleTableColumnFilterInput) {
 }
 
 .moduleVisitPlanTable {
+  table-layout: fixed;
   min-width: 1280px;
+  width: max-content;
+}
+
+.moduleVisitPlanTable th.moduleVisitPlanMoneyNarrow,
+.moduleVisitPlanTable td.moduleVisitPlanMoneyNarrow {
+  width: 4.75rem;
+  max-width: 4.75rem;
+  min-width: 4.75rem;
+  box-sizing: border-box;
+  padding-left: 4px;
+  padding-right: 4px;
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.moduleVisitPlanTable thead th.moduleVisitPlanMoneyNarrow {
+  text-align: right;
 }
 
 .moduleVisitPlanTable th.moduleBiTotalCol,

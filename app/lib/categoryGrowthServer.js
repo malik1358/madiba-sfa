@@ -12,6 +12,9 @@ import { cubeSupportsFilters, monthAlignGrowthFilters, salesBiFactToGrowthRow } 
 import { loadSalesBiCube, pageActiveSales, rebuildSalesBiCube } from "./salesBiCubeServer.js";
 import { rollupTeamGrowthFromRows, rollupTeamGrowthGroups } from "./salesmanTeamMom.js";
 import { loadSalesmanTeamMembers } from "./salesmanTeamMomServer.js";
+import { applyCustomerGrowthHoldsToReport } from "./customerGrowthHold.js";
+import { readOutstandingDataset } from "./customerMasterQuery.js";
+import { isMissingRelationError } from "./schemaGuards.js";
 
 const SALES_SELECTS = [
   "transaction_date,category,sales_amount,profit_amount,quantity,salesman_code,salesman_name,customer_code,customer_name,item_code,item_name,voucher_type,voucher_number,reference,local_import,abc_class",
@@ -22,6 +25,24 @@ const SALES_SELECTS = [
   "transaction_date,category,sales_amount",
   "transaction_date,sales_amount",
 ];
+
+async function loadLegalTransfers(admin) {
+  const { data, error } = await admin
+    .from("legal_transfers")
+    .select("customer_code,is_transferred");
+
+  if (error && isMissingRelationError(error)) return [];
+  if (error) throw error;
+  return Array.isArray(data) ? data.filter((row) => row?.is_transferred) : [];
+}
+
+async function loadCustomerGrowthHoldContext(admin) {
+  const [legalTransfers, outstandingDataset] = await Promise.all([
+    loadLegalTransfers(admin),
+    readOutstandingDataset(admin).catch(() => null),
+  ]);
+  return { legalTransfers, outstandingDataset };
+}
 
 function isMissingTableError(error) {
   const message = String(error?.message || error?.details || "").toLowerCase();
@@ -196,6 +217,15 @@ export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters }
     const live = await reportFromLiveSales(admin, { asOfDate, filters: normalized });
     report = live.report;
     sourceRows = live.rows || [];
+  }
+
+  if (normalized.groupBy === "customer") {
+    try {
+      const holdContext = await loadCustomerGrowthHoldContext(admin);
+      report = applyCustomerGrowthHoldsToReport(report, holdContext);
+    } catch (error) {
+      console.error("Hiding held customers from customer growth failed:", error);
+    }
   }
 
   if (normalized.groupBy === "salesman") {

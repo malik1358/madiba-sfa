@@ -22,7 +22,8 @@ import {
 
 export { buildScopeHash } from "./scopeHash.js";
 
-export const SNAPSHOT_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+/** Auto-refresh device customer/item snapshot when older than this. */
+export const SNAPSHOT_STALE_AFTER_MS = 60 * 60 * 1000;
 export const COLLECTION_QUEUES_READY_EVENT = "madiba-collection-queues-ready";
 const MOBILE_SNAPSHOT_META_KEY = "mobileSnapshot:meta:v1";
 const COLLECTION_QUEUE_HYDRATE_WAIT_MS = 45000;
@@ -51,7 +52,8 @@ function customersCacheKey(scope, enriched = false) {
 }
 
 function customerHistoryCacheKey(scope, customerCode) {
-  return `history:v1:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
+  // v3: history payloads include receipt register rows mapped to the customer.
+  return `history:v3:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
 }
 
 function itemsMasterCacheKey() {
@@ -111,9 +113,12 @@ export function subscribeOutstandingCacheCleared(handler) {
   };
 }
 
-function collectionQueuesCacheKey(scope) {
-  // v5: ignore empty queues left behind by the v4 hydrate-wait race.
-  return `collectionQueues:v5:${buildScopeHash(scope)}`;
+const COLLECTION_QUEUE_CACHE_VERSION = 6;
+// Keep reading older queue caches so an app update does not blank the offline list.
+const LEGACY_COLLECTION_QUEUE_CACHE_VERSIONS = [5, 4];
+
+function collectionQueuesCacheKey(scope, version = COLLECTION_QUEUE_CACHE_VERSION) {
+  return `collectionQueues:v${version}:${buildScopeHash(scope)}`;
 }
 
 export function collectionQueuesHaveRows(queues) {
@@ -122,6 +127,36 @@ export function collectionQueuesHaveRows(queues) {
     || queues?.notDueCustomers?.length
     || queues?.legalCustomers?.length,
   );
+}
+
+async function readCollectionQueuesEntryForScope(scope) {
+  const currentKey = collectionQueuesCacheKey(scope);
+  const current = await readCacheEntry(currentKey);
+  if (collectionQueuesHaveRows(current?.value)) {
+    return { key: currentKey, entry: current, migrated: false };
+  }
+
+  for (const version of LEGACY_COLLECTION_QUEUE_CACHE_VERSIONS) {
+    const legacyKey = collectionQueuesCacheKey(scope, version);
+    const legacy = await readCacheEntry(legacyKey);
+    if (!collectionQueuesHaveRows(legacy?.value)) continue;
+
+    await writeCacheEntry(currentKey, legacy.value, {
+      ttlMs: CACHE_TTL.collectionQueuesMs,
+      savedAt: legacy.savedAt,
+    });
+    return {
+      key: currentKey,
+      entry: {
+        ...legacy,
+        key: currentKey,
+        value: legacy.value,
+      },
+      migrated: true,
+    };
+  }
+
+  return { key: currentKey, entry: current || null, migrated: false };
 }
 
 function isBrowserOnline() {
@@ -195,9 +230,16 @@ async function fetchVisibleCustomersNetwork(accessToken, { enriched = false } = 
   return payload.customers || [];
 }
 
-async function fetchCustomerHistoryNetwork(accessToken, customerCode) {
+async function fetchCustomerHistoryNetwork(accessToken, customerCode, customerName = "") {
+  const params = new URLSearchParams({
+    customerCode: String(customerCode || ""),
+  });
+  if (String(customerName || "").trim()) {
+    params.set("customerName", String(customerName).trim());
+  }
+
   const response = await fetch(
-    `/api/customer-history?customerCode=${encodeURIComponent(customerCode)}`,
+    `/api/customer-history?${params.toString()}`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -212,6 +254,7 @@ async function fetchCustomerHistoryNetwork(accessToken, customerCode) {
   return {
     transactions: Array.isArray(payload.transactions) ? payload.transactions : [],
     peerTransactions: Array.isArray(payload.peerTransactions) ? payload.peerTransactions : [],
+    receipts: Array.isArray(payload.receipts) ? payload.receipts : [],
   };
 }
 
@@ -322,6 +365,26 @@ export async function upsertLocalVisibleCustomer(scope, customer) {
   return true;
 }
 
+export async function findCachedVisibleCustomerByCode(scope, customerCode) {
+  const code = String(customerCode || "").trim().toUpperCase();
+  if (!scope || !code) return null;
+
+  const basicEntry = await readCacheEntry(customersCacheKey(scope, false));
+  const basicRows = Array.isArray(basicEntry?.value) ? basicEntry.value : [];
+  const basicMatch = basicRows.find((row) => String(row?.customer_code || "").trim().toUpperCase() === code);
+  if (basicMatch) return basicMatch;
+
+  const enrichedEntry = await readCacheEntry(customersCacheKey(scope, true));
+  const enrichedValue = enrichedEntry?.value && typeof enrichedEntry.value === "object"
+    ? enrichedEntry.value
+    : null;
+  const enrichedRows = [
+    ...(Array.isArray(enrichedValue?.customers) ? enrichedValue.customers : []),
+    ...(Array.isArray(enrichedValue?.inactiveCustomers) ? enrichedValue.inactiveCustomers : []),
+  ];
+  return enrichedRows.find((row) => String(row?.customer_code || "").trim().toUpperCase() === code) || null;
+}
+
 export async function fetchVisibleCustomersCached(accessToken, scope, options = {}) {
   const enriched = Boolean(options.enriched);
   const ttlMs = enriched ? CACHE_TTL.customersEnrichedMs : CACHE_TTL.customersBasicMs;
@@ -335,11 +398,16 @@ export async function fetchVisibleCustomersCached(accessToken, scope, options = 
 }
 
 export async function fetchCustomerHistoryCached(accessToken, scope, customerCode, options = {}) {
+  const customerName = options.customerName || "";
   return fetchWithLocalCache(
     customerHistoryCacheKey(scope, customerCode),
     CACHE_TTL.customerHistoryMs,
-    () => fetchCustomerHistoryNetwork(accessToken, customerCode),
-    { onUpdate: options.onUpdate },
+    () => fetchCustomerHistoryNetwork(accessToken, customerCode, customerName),
+    {
+      onUpdate: options.onUpdate,
+      // Empty history was often a failed code-only lookup; always revalidate those.
+      forceRefresh: Boolean(options.forceRefresh),
+    },
   );
 }
 
@@ -413,17 +481,35 @@ export async function invalidateVisibleCustomersCache(scope) {
   ]);
 }
 
+function toCollectionScope(scope) {
+  return {
+    hasAllAccess: Boolean(scope?.hasAllAccess),
+    visibleSalesmanCodes: Array.isArray(scope?.visibleSalesmanCodes) ? scope.visibleSalesmanCodes : [],
+  };
+}
+
 export async function invalidateCollectionQueuesForUser(userId) {
   const { removeCacheEntry } = await import("./localDataStore.js");
-  const scopeEntry = await readCacheEntry(collectionScopeCacheKey(userId));
-  if (!scopeEntry?.value) return;
-  await removeCacheEntry(collectionQueuesCacheKey(scopeEntry.value));
+  // Clear every collection-queue cache key across current and legacy versions.
+  // Scope hashes can drift between the provisional sales-scope and the API
+  // scope, and a single-key delete leaves stale legal/due rows that
+  // "Remove From Legal" then reloads from disk.
+  await removeCacheEntriesByPrefix("collectionQueues:v");
+  if (!userId) return;
+  await removeCacheEntry(collectionScopeCacheKey(userId));
 }
 
 export async function readCollectionQueuesForUser(userId) {
   const scopeEntry = await readCacheEntry(collectionScopeCacheKey(userId));
-  if (!scopeEntry?.value) return null;
-  const entry = await readCacheEntry(collectionQueuesCacheKey(scopeEntry.value));
+  let scope = scopeEntry?.value || null;
+  if (!scope) {
+    const salesScopeEntry = await readCacheEntry(scopeCacheKey(userId));
+    if (salesScopeEntry?.value) {
+      scope = toCollectionScope(salesScopeEntry.value);
+    }
+  }
+  if (!scope) return null;
+  const { entry } = await readCollectionQueuesEntryForScope(toCollectionScope(scope));
   return entry?.value || null;
 }
 
@@ -516,20 +602,23 @@ export async function writeCollectionQueuesForUser(userId, scope, queues) {
 
 async function resolveCollectionScopeForUser(accessToken, userId, preferredScope = null) {
   if (preferredScope) {
-    return {
-      hasAllAccess: Boolean(preferredScope?.hasAllAccess),
-      visibleSalesmanCodes: Array.isArray(preferredScope?.visibleSalesmanCodes) ? preferredScope.visibleSalesmanCodes : [],
-    };
+    return toCollectionScope(preferredScope);
   }
 
   const cachedScope = await readCacheEntry(collectionScopeCacheKey(userId));
-  if (cachedScope?.value) return cachedScope.value;
+  if (cachedScope?.value) return toCollectionScope(cachedScope.value);
+
+  const salesScopeCached = await readCacheEntry(scopeCacheKey(userId));
+  if (salesScopeCached?.value) {
+    return toCollectionScope(salesScopeCached.value);
+  }
+
+  if (!isBrowserOnline()) {
+    throw new Error("Collection queue is not available offline yet. Open Collections once while online.");
+  }
 
   const salesScope = await fetchSalesScopeNetwork(accessToken);
-  return {
-    hasAllAccess: Boolean(salesScope?.hasAllAccess),
-    visibleSalesmanCodes: Array.isArray(salesScope?.visibleSalesmanCodes) ? salesScope.visibleSalesmanCodes : [],
-  };
+  return toCollectionScope(salesScope);
 }
 
 export async function fetchCollectionQueuesCached(accessToken, userId, options = {}) {
@@ -538,12 +627,20 @@ export async function fetchCollectionQueuesCached(accessToken, userId, options =
   }
 
   const scope = await resolveCollectionScopeForUser(accessToken, userId, options.scope);
-  const cacheKey = collectionQueuesCacheKey(scope);
-  const cached = await readCacheEntry(cacheKey);
+  const { key: cacheKey, entry: cached } = await readCollectionQueuesEntryForScope(scope);
   const emptyCached = !collectionQueuesHaveRows(cached?.value);
   // Empty queues must not stick for the full TTL — refetch while online.
   const forceRefresh = Boolean(options.forceRefresh)
     || (emptyCached && isBrowserOnline());
+
+  if (!forceRefresh && !isBrowserOnline() && !emptyCached) {
+    return {
+      queues: cached.value,
+      fromCache: true,
+      stale: true,
+      offline: true,
+    };
+  }
 
   const result = await fetchWithLocalCacheResilient(
     cacheKey,

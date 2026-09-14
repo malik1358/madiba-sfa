@@ -9,12 +9,25 @@ import {
 } from "../app/lib/dailyVisitReportEmail.js";
 import {
   collectVisitReportTeamLeaders,
+  isExcludedVisitReportEmailSalesman,
   runDailyVisitReportEmailCycle,
   resolveDailyVisitReportEmailSchedule,
   resolveVisitReportChainEmails,
 } from "../app/lib/dailyVisitReportEmailServer.js";
 import { buildPerformanceSnapshot } from "../app/lib/performanceKpis.js";
 import { getMailerConfig, isDeliverableEmail, isEmailConfigured, parseEmailList } from "../app/lib/mailer.js";
+
+test("isExcludedVisitReportEmailSalesman matches Fazlur by code or display name", () => {
+  assert.equal(isExcludedVisitReportEmailSalesman({
+    profile: { salesman_code: "FAZLUR RAHMAN", salesman_name: "FAZLUR RAHMAN" },
+  }), true);
+  assert.equal(isExcludedVisitReportEmailSalesman({
+    user: { userName: "FAZLUR RAHMAN (FAZLUR RAHMAN)" },
+  }), true);
+  assert.equal(isExcludedVisitReportEmailSalesman({
+    profile: { salesman_code: "BELAL", salesman_name: "Belal" },
+  }), false);
+});
 
 test("parseEmailList splits mixed separators and ignores invalid values", () => {
   assert.deepEqual(
@@ -438,6 +451,63 @@ test("resolveVisitReportChainEmails uses each head report inbox", () => {
       { report_email: "", email: "soyeb@company.com" },
     ]),
     ["ahmed.nabil@noorshukran.com", "soyeb@company.com"],
+  );
+});
+
+test("runDailyVisitReportEmailCycle skips Fazlur Rahman", async () => {
+  const sent = [];
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-09-13",
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+      DAILY_VISIT_REPORT_TO: "manager@madiba.com",
+    },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadReport: async () => ({
+      date: "2026-09-13",
+      thresholdKm: 0.5,
+      users: [],
+    }),
+    loadProfiles: async () => ([
+      {
+        id: "fazlur",
+        role: "salesman",
+        salesman_code: "FAZLUR RAHMAN",
+        salesman_name: "FAZLUR RAHMAN",
+        email: "fazlur@madiba-sfa.local",
+        report_email: "fazlur.rahiman@noorshukran.com",
+        is_active: true,
+      },
+      {
+        id: "belal",
+        role: "salesman",
+        salesman_code: "BELAL",
+        salesman_name: "Belal",
+        email: "belal@madiba-sfa.local",
+        report_email: "belal@company.com",
+        is_active: true,
+      },
+    ]),
+    loadSummary: async () => ({ daySummary: { lines: ["No visits today."] } }),
+  });
+
+  assert.equal(result.sentCount, 1);
+  assert.equal(result.skippedCount, 1);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].subject, /Belal/);
+  assert.equal(sent.some((message) => /FAZLUR/i.test(message.subject)), false);
+  assert.deepEqual(
+    result.results.find((row) => row.userId === "fazlur"),
+    {
+      userId: "fazlur",
+      userName: "FAZLUR RAHMAN (FAZLUR RAHMAN)",
+      status: "skipped",
+      reason: "excluded_salesman",
+    },
   );
 });
 

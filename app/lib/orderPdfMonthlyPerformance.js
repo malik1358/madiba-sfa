@@ -1,4 +1,3 @@
-import { selectMonthlyPerformanceMonths } from "./monthlyPerformanceMonths.js";
 import { monthName, numberFormat } from "../management/customer-audit/lib/format.js";
 
 const TITLE_HEIGHT = 18;
@@ -40,7 +39,11 @@ export function monthTrend(current, previous, hasPrevious = true) {
 export function buildMonthlyPerformancePdfModel(analytics, { currentMonthKey } = {}) {
   const sourceMonths = Array.isArray(analytics?.months) ? analytics.months : [];
   const sourceSummary = Array.isArray(analytics?.monthlySummary) ? analytics.monthlySummary : [];
-  const months = selectMonthlyPerformanceMonths(sourceMonths, currentMonthKey);
+  // Trust the audit window (already includes receipt-only months). Re-selecting
+  // would drop older sales months when receipt gaps are filled in.
+  const months = sourceMonths
+    .map((month) => String(month || "").slice(0, 7))
+    .filter((month) => /^\d{4}-\d{2}$/.test(month));
   const summaryByMonth = new Map(sourceSummary.map((month) => [month.month, month]));
   const monthlySummary = months.map((month) => summaryByMonth.get(month)).filter(Boolean);
   if (!months.length || monthlySummary.length !== months.length) return null;

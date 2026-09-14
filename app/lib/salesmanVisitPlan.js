@@ -2,9 +2,16 @@ import { buildCollectionPriority } from "./paymentCollections.js";
 import { parseEmailList, isLikelyEmail, normalizeDeliverableEmail } from "./mailer.js";
 import { escapeHtml } from "./dailyVisitReportEmail.js";
 import { resolveAppOrigin } from "./inactivityEmail.js";
+import { activeScheduledVisitDate, visitCalendarDateKey } from "./nextVisitDate.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
 export const DEFAULT_VISITS_PER_SALESMAN = 12;
+/** System suggestions prefer customers not visited for at least this many days. */
+export const MIN_SYSTEM_VISIT_GAP_DAYS = 7;
+export const PLAN_SOURCE_APPOINTMENT = "appointment";
+export const PLAN_SOURCE_SYSTEM = "system";
+export const PLAN_SOURCE_APPOINTMENT_LABEL = "Scheduled appointment";
+export const PLAN_SOURCE_SYSTEM_LABEL = "System suggested";
 export const DEFAULT_SALESMAN_VISIT_PLAN_EMAIL_TO = "malik@pinasz.com";
 export const SALESMAN_VISIT_PLAN_SNAPSHOT_KEY = "salesman_visit_plan_snapshot_v1";
 export const SALESMAN_VISIT_PLAN_REBUILD_STATUS_KEY = "salesman_visit_plan_rebuild_status_v1";
@@ -141,6 +148,30 @@ export function daysSinceDate(value, todayIso = new Date().toISOString()) {
   return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
 }
 
+/** Lower sales upside when the customer was visited too recently (prefer ≥7 day gap). */
+export function visitGapSalesFactor(daysSinceLastVisit) {
+  if (daysSinceLastVisit == null || daysSinceLastVisit === "") return 1;
+  const days = Math.max(0, toNumber(daysSinceLastVisit));
+  if (!Number.isFinite(days) || days >= MIN_SYSTEM_VISIT_GAP_DAYS) return 1;
+  if (days <= 2) return 0.2;
+  if (days <= 4) return 0.35;
+  return 0.5;
+}
+
+export function hasAdequateVisitGap(row = {}, minDays = MIN_SYSTEM_VISIT_GAP_DAYS) {
+  const days = row?.days_since_last_visit;
+  if (days == null || days === "") return true;
+  return toNumber(days) >= minDays;
+}
+
+export function isDueScheduledAppointment(row = {}, todayKey = getKsaDateString()) {
+  const scheduled = visitCalendarDateKey(
+    row.scheduled_visit_date || row.scheduled_revisit_at || row.next_visit_at || "",
+  );
+  if (!scheduled || !todayKey) return false;
+  return scheduled <= todayKey;
+}
+
 export function buildSalesOpportunityScore(row = {}) {
   const recentSales = Math.max(toNumber(row.recent_sales_value), 0);
   const recent30d = Math.max(toNumber(row.recent_30d_sales_value), 0);
@@ -182,6 +213,16 @@ export function buildSalesOpportunityScore(row = {}) {
   if (freshBuyerShare >= 0.85 || daysSince < 25) {
     const factor = daysSince < 14 ? 0.35 : daysSince < 25 ? 0.5 : 0.55;
     score = Math.round(score * factor);
+  }
+
+  // Visited 1–6 days ago → low chance of another order; prefer ≥7 day gap.
+  const visitGapFactor = visitGapSalesFactor(
+    row.days_since_last_visit == null
+      ? null
+      : row.days_since_last_visit,
+  );
+  if (visitGapFactor < 1) {
+    score = Math.round(score * visitGapFactor);
   }
 
   return Math.max(0, Math.min(100, score));
@@ -311,6 +352,17 @@ export function scoreVisitPlanCustomer(row = {}, todayIso = new Date().toISOStri
     toNumber(row.total_due_amount),
     outstanding_0_30 + outstanding_30_60 + outstanding_61_90 + outstanding_91_120 + outstanding_above_120,
   );
+  const lastVisitRaw = String(row.last_visit_date || row.latest_collection?.saved_at || "").trim();
+  const lastVisitDate = lastVisitRaw.slice(0, 10) || null;
+  const scheduledVisitDate = activeScheduledVisitDate(
+    row.scheduled_visit_date
+      || row.scheduled_revisit_at
+      || row.next_visit_at
+      || row.latest_collection?.next_visit_at,
+    lastVisitRaw || null,
+  ) || null;
+  const todayKey = getKsaDateString(new Date(todayIso));
+  const isAppointment = Boolean(scheduledVisitDate && scheduledVisitDate <= todayKey);
 
   return {
     customer_code: normalizeCode(row.customer_code),
@@ -322,7 +374,9 @@ export function scoreVisitPlanCustomer(row = {}, todayIso = new Date().toISOStri
     recent_sales_value: Math.max(toNumber(row.recent_sales_value), 0),
     recent_30d_sales_value: Math.max(toNumber(row.recent_30d_sales_value), 0),
     average_monthly_purchase: Math.max(toNumber(row.average_monthly_purchase), 0),
-    last_visit_date: String(row.last_visit_date || row.latest_collection?.saved_at || "").trim().slice(0, 10) || null,
+    last_visit_date: lastVisitDate,
+    scheduled_visit_date: scheduledVisitDate,
+    is_scheduled_appointment: isAppointment,
     days_since_last_invoice: row.days_since_last_invoice == null
       ? daysSinceDate(row.latest_transaction_date || row.last_invoice_date, todayIso)
       : Math.max(0, toNumber(row.days_since_last_invoice)),
@@ -373,52 +427,113 @@ function compareBySalesThenCombined(left, right) {
   );
 }
 
-export function selectVisitPlanMix(scoredRows = [], limit = DEFAULT_VISITS_PER_SALESMAN) {
+export function selectVisitPlanMix(scoredRows = [], limit = DEFAULT_VISITS_PER_SALESMAN, todayIso = new Date().toISOString()) {
+  const todayKey = getKsaDateString(new Date(todayIso));
   const { capped, salesTarget, collectionTarget } = visitPlanMixTargets(limit);
-  const collectionPool = [...scoredRows]
+
+  const appointments = [...scoredRows]
+    .filter((row) => row.is_scheduled_appointment || isDueScheduledAppointment(row, todayKey))
+    .sort((left, right) => {
+      const byDate = String(left.scheduled_visit_date || "").localeCompare(String(right.scheduled_visit_date || ""));
+      if (byDate !== 0) return byDate;
+      const byCombined = right.combined_score - left.combined_score;
+      if (byCombined !== 0) return byCombined;
+      return String(left.customer_name || left.customer_code).localeCompare(
+        String(right.customer_name || right.customer_code),
+      );
+    })
+    .map((row) => ({
+      ...row,
+      is_scheduled_appointment: true,
+      plan_source: PLAN_SOURCE_APPOINTMENT,
+      source_label: PLAN_SOURCE_APPOINTMENT_LABEL,
+    }));
+
+  const used = new Set(appointments.map((row) => row.customer_code));
+  const remainingSlots = Math.max(0, capped - appointments.length);
+  const remainingTargets = visitPlanMixTargets(remainingSlots || 1);
+  const systemSalesTarget = remainingSlots > 0 ? remainingTargets.salesTarget : 0;
+  const systemCollectionTarget = remainingSlots > 0 ? remainingTargets.collectionTarget : 0;
+
+  const systemCandidates = scoredRows.filter((row) => !used.has(row.customer_code));
+  const preferred = systemCandidates.filter((row) => hasAdequateVisitGap(row));
+  const recentOnly = systemCandidates.filter((row) => !hasAdequateVisitGap(row));
+
+  const preferredCollection = preferred
     .filter((row) => row.focus === "Collection")
     .sort(compareByCollectionThenCombined);
-  const salesPool = [...scoredRows]
+  const preferredSales = preferred
+    .filter((row) => row.focus !== "Collection")
+    .sort(compareBySalesThenCombined);
+  const recentCollection = recentOnly
+    .filter((row) => row.focus === "Collection")
+    .sort(compareByCollectionThenCombined);
+  const recentSales = recentOnly
     .filter((row) => row.focus !== "Collection")
     .sort(compareBySalesThenCombined);
 
-  const used = new Set();
   const salesPicked = [];
   const collectionPicked = [];
 
-  for (const row of collectionPool) {
-    if (collectionPicked.length >= collectionTarget) break;
-    if (used.has(row.customer_code)) continue;
-    used.add(row.customer_code);
-    collectionPicked.push({ ...row, focus: "Collection" });
+  function takeFromPools(pools, target, bucket, focusOverride) {
+    for (const pool of pools) {
+      for (const row of pool) {
+        if (bucket.length >= target) return;
+        if (used.has(row.customer_code)) continue;
+        used.add(row.customer_code);
+        bucket.push({
+          ...row,
+          focus: focusOverride
+            || (row.focus === "Both" ? "Both" : row.focus === "Collection" ? "Collection" : "Sales"),
+          is_scheduled_appointment: false,
+          plan_source: PLAN_SOURCE_SYSTEM,
+          source_label: PLAN_SOURCE_SYSTEM_LABEL,
+        });
+      }
+    }
   }
 
-  for (const row of salesPool) {
-    if (salesPicked.length >= salesTarget) break;
-    if (used.has(row.customer_code)) continue;
-    used.add(row.customer_code);
-    salesPicked.push({ ...row, focus: row.focus === "Both" ? "Both" : "Sales" });
-  }
+  takeFromPools([preferredCollection, recentCollection], systemCollectionTarget, collectionPicked, "Collection");
+  takeFromPools(
+    [preferredSales, recentSales],
+    systemSalesTarget,
+    salesPicked,
+    null,
+  );
 
-  // Fill leftover slots from the other pool so the plan still reaches the visit limit.
-  const leftovers = [...collectionPool, ...salesPool]
-    .filter((row) => !used.has(row.customer_code));
-
-  for (const row of leftovers) {
-    if (salesPicked.length + collectionPicked.length >= capped) break;
+  // Fill leftover system slots — prefer ≥7 day gap, then recent visits only if needed.
+  const leftoverPools = [
+    ...preferredCollection,
+    ...preferredSales,
+    ...recentCollection,
+    ...recentSales,
+  ];
+  for (const row of leftoverPools) {
+    if (salesPicked.length + collectionPicked.length >= remainingSlots) break;
     if (used.has(row.customer_code)) continue;
     if (outstandingAbove60Amount(row) > 0 || row.focus === "Collection") {
       used.add(row.customer_code);
-      collectionPicked.push({ ...row, focus: "Collection" });
+      collectionPicked.push({
+        ...row,
+        focus: "Collection",
+        is_scheduled_appointment: false,
+        plan_source: PLAN_SOURCE_SYSTEM,
+        source_label: PLAN_SOURCE_SYSTEM_LABEL,
+      });
       continue;
     }
     used.add(row.customer_code);
-    salesPicked.push({ ...row, focus: row.focus === "Both" ? "Both" : "Sales" });
+    salesPicked.push({
+      ...row,
+      focus: row.focus === "Both" ? "Both" : "Sales",
+      is_scheduled_appointment: false,
+      plan_source: PLAN_SOURCE_SYSTEM,
+      source_label: PLAN_SOURCE_SYSTEM_LABEL,
+    });
   }
 
-  // Prefer sales stops first (70%), then collection (30%).
-  return [...salesPicked, ...collectionPicked]
-    .slice(0, capped)
+  // Appointments first (due today or earlier), then system 70/30 mix.
+  return [...appointments, ...salesPicked, ...collectionPicked]
     .map((row, index) => ({ ...row, rank: index + 1 }));
 }
 
@@ -426,11 +541,17 @@ export function rankSalesmanVisitPlan(customers = [], {
   limit = DEFAULT_VISITS_PER_SALESMAN,
   todayIso = new Date().toISOString(),
 } = {}) {
+  const todayKey = getKsaDateString(new Date(todayIso));
   const scored = (customers || [])
     .map((row) => scoreVisitPlanCustomer(row, todayIso))
-    .filter((row) => row.customer_code && (row.sales_score > 0 || row.collection_score > 0));
+    .filter((row) => row.customer_code && (
+      row.is_scheduled_appointment
+      || isDueScheduledAppointment(row, todayKey)
+      || row.sales_score > 0
+      || row.collection_score > 0
+    ));
 
-  return selectVisitPlanMix(scored, limit);
+  return selectVisitPlanMix(scored, limit, todayIso);
 }
 
 export function salesmanVisitPlanDisplayName(plan = {}) {
@@ -538,6 +659,14 @@ function focusCellStyle(focus) {
   return "background:#e8f7ee;color:#166534;font-weight:700;";
 }
 
+function sourceCellStyle(source) {
+  const normalized = String(source || "").trim().toLowerCase();
+  if (normalized === PLAN_SOURCE_APPOINTMENT || normalized.includes("appointment")) {
+    return "background:#ffedd5;color:#9a3412;font-weight:700;";
+  }
+  return "background:#e0f2fe;color:#075985;font-weight:600;";
+}
+
 function customerAuditUrl(customerCode, origin = resolveAppOrigin()) {
   const code = encodeURIComponent(normalizeCode(customerCode));
   const base = String(origin || "").replace(/\/+$/, "");
@@ -567,6 +696,7 @@ export function buildSalesmanVisitPlanEmail(plan, {
       <td style="border:1px solid #c5d4de;padding:6px;text-align:right;white-space:nowrap;">${escapeHtml(formatMoney(visit.recent_30d_sales_value))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:right;white-space:nowrap;">${escapeHtml(formatMoney(visit.average_monthly_purchase))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${focusCellStyle(visit.focus)}">${escapeHtml(visit.focus)}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${sourceCellStyle(visit.plan_source || visit.source_label)}">${escapeHtml(visit.source_label || PLAN_SOURCE_SYSTEM_LABEL)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${scoreCellStyle(visit.combined_label)}">${escapeHtml(visit.combined_score)} · ${escapeHtml(visit.combined_label)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${scoreCellStyle(visit.sales_label)}">${escapeHtml(visit.sales_score)} · ${escapeHtml(visit.sales_label)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${scoreCellStyle(visit.collection_label)}">${escapeHtml(visit.collection_score)} · ${escapeHtml(visit.collection_label)}</td>
@@ -594,7 +724,7 @@ export function buildSalesmanVisitPlanEmail(plan, {
     </div>
     <div style="padding:16px 20px;">
       ${previewBanner}
-      <p style="margin:0 0 12px;">Target mix: <strong>70% sales</strong> / <strong>30% collection</strong>. Any customer with outstanding &gt;60 days is collection-only.</p>
+      <p style="margin:0 0 12px;">Scheduled appointments (today or earlier) are listed first — they are not system suggestions. System picks prefer customers not visited for at least 7 days. Target mix for suggestions: <strong>70% sales</strong> / <strong>30% collection</strong>. Any customer with outstanding &gt;60 days is collection-only.</p>
       <p style="margin:0 0 16px;color:#475569;">
         Visits: <strong>${escapeHtml(visits.length)}</strong>
         · Sales focus: <strong>${escapeHtml(plan?.totals?.salesVisits ?? 0)}</strong>
@@ -615,6 +745,7 @@ export function buildSalesmanVisitPlanEmail(plan, {
             <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">30d</th>
             <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Avg/mo</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Focus</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;">Source</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Combined</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Sales</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Collection</th>
@@ -627,14 +758,14 @@ export function buildSalesmanVisitPlanEmail(plan, {
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml || `<tr><td colspan="19" style="padding:12px;border:1px solid #c5d4de;">No recommended visits.</td></tr>`}
+          ${rowsHtml || `<tr><td colspan="20" style="padding:12px;border:1px solid #c5d4de;">No recommended visits.</td></tr>`}
         </tbody>
         <tfoot>
           <tr style="background:#e8f1f4;font-weight:700;">
             <td colspan="6" style="border:1px solid #c5d4de;padding:6px;">Total</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.recentSales || 0))}</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.recent30dSales || 0))}</td>
-            <td colspan="5" style="border:1px solid #c5d4de;padding:6px;"></td>
+            <td colspan="6" style="border:1px solid #c5d4de;padding:6px;"></td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.dueAmount || 0))}</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_0_30 || 0))}</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_30_60 || 0))}</td>
@@ -657,7 +788,7 @@ export function buildSalesmanVisitPlanEmail(plan, {
     ...visits.map((visit) => [
       `${visit.rank}. ${visit.customer_name || visit.customer_code} (${visit.customer_code})`,
       `  Days invoice ${visit.days_since_last_invoice ?? "-"}; days visit ${visit.days_since_last_visit ?? "-"}; last visit ${formatVisitDate(visit.last_visit_date)}; recent 6M ${formatMoney(visit.recent_sales_value)}; last 30d ${formatMoney(visit.recent_30d_sales_value)}; avg monthly ${formatMoney(visit.average_monthly_purchase)}`,
-      `  Focus ${visit.focus}; combined ${visit.combined_score} ${visit.combined_label}`,
+      `  Focus ${visit.focus}; source ${visit.source_label || PLAN_SOURCE_SYSTEM_LABEL}; combined ${visit.combined_score} ${visit.combined_label}`,
       `  Sales ${visit.sales_score}; collection ${visit.collection_score}; due ${formatMoney(visit.total_due_amount)}`,
       `  Buckets 0-30 ${formatMoney(visit.outstanding_0_30)} | 31-60 ${formatMoney(visit.outstanding_30_60)} | 61-90 ${formatMoney(visit.outstanding_61_90)} | 91-120 ${formatMoney(visit.outstanding_91_120)} | >120 ${formatMoney(visit.outstanding_above_120)}`,
       `  Audit: ${customerAuditUrl(visit.customer_code, origin)}`,

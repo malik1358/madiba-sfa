@@ -315,8 +315,15 @@ export function prospectIsConverted(prospect) {
   return Boolean(String(prospect?.converted_customer_code || "").trim());
 }
 
+export function prospectIsRejected(prospect) {
+  return String(prospect?.status || "").trim().toUpperCase() === "REJECTED";
+}
+
 export function isOpenProspectForOrderScreens(prospect) {
-  return Boolean(prospect) && !prospectHasOrders(prospect) && !prospectIsConverted(prospect);
+  return Boolean(prospect)
+    && !prospectHasOrders(prospect)
+    && !prospectIsConverted(prospect)
+    && !prospectIsRejected(prospect);
 }
 
 export function hiddenProspectCustomerCodes(prospects) {

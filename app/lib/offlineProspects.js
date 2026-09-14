@@ -2,6 +2,7 @@ import { readCacheEntry, writeCacheEntry } from "./localDataStore.js";
 import {
   buildOfflineProspectCustomerCode,
   extractOfflineIdFromRemarks,
+  isOpenProspectForOrderScreens,
   resolveProspectCustomerCode,
 } from "./prospects.js";
 
@@ -48,5 +49,20 @@ export async function upsertLocalProspect(prospect) {
 
 export async function listLocalProspectsAsCustomers() {
   const prospects = await readLocalProspects();
-  return prospects.map(prospectToOrderCustomer).filter((row) => row.customer_code && row.customer_name);
+  return prospects
+    .filter(isOpenProspectForOrderScreens)
+    .map(prospectToOrderCustomer)
+    .filter((row) => row.customer_code && row.customer_name);
+}
+
+export async function markLocalProspectRejected(prospectLike) {
+  const offlineId = String(prospectLike?.offline_id || "").trim();
+  const prospectId = Number(prospectLike?.id);
+  const current = await readLocalProspects();
+  const match = current.find((row) => (
+    (offlineId && String(row.offline_id || "") === offlineId)
+    || (Number.isFinite(prospectId) && prospectId > 0 && Number(row.id) === prospectId)
+  ));
+  if (!match) return current;
+  return upsertLocalProspect({ ...match, status: "REJECTED", follow_up_date: null });
 }

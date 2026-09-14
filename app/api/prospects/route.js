@@ -272,6 +272,31 @@ export async function PATCH(request) {
       });
     }
 
+    if (action === "reject" || action === "foreclose") {
+      const remarksNote = String(body.remarks || "").trim();
+      const updatePayload = { status: "REJECTED", follow_up_date: null };
+      if (remarksNote) {
+        const { data: currentRow } = await admin
+          .from("prospects")
+          .select("remarks")
+          .eq("id", existing.id)
+          .maybeSingle();
+        const existingRemarks = String(currentRow?.remarks || "").trim();
+        updatePayload.remarks = [existingRemarks, remarksNote].filter(Boolean).join("\n");
+      }
+
+      const { data, error: updateError } = await admin
+        .from("prospects")
+        .update(updatePayload)
+        .eq("id", existing.id)
+        .select("id,status,follow_up_date,salesman_code,remarks")
+        .single();
+
+      if (updateError) throw updateError;
+
+      return NextResponse.json({ success: true, data });
+    }
+
     const followUpDate = validateNextVisitDate(body.follow_up_date, { required: true });
 
     const { data, error: updateError } = await admin

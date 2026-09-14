@@ -7,14 +7,16 @@ import {
   ORDER_REJECTION_REASON_STOCK,
   ORDER_STATUS_PENDING_APPROVAL,
   ORDER_STATUS_PENDING_CREDIT,
+  ORDER_STATUS_PENDING_INVOICE_CREATION,
   ORDER_STATUS_REJECTED,
   ORDER_STATUS_STOCK_UNAVAILABLE,
   canApprovePendingOrders,
   displayInvoiceStatus,
   isPendingForApprovalStatus,
-  isSubmittedAwaitingInvoiceApproval,
+  isSubmittedWithoutUploadedInvoice,
   isValidRejectionReason,
   shouldAutoMarkPendingApproval,
+  shouldAutoMarkPendingInvoiceCreation,
   shouldShowPendingApprovalActions,
   statusForRejectionReason,
 } from "../app/lib/orderApproval.js";
@@ -29,28 +31,48 @@ test("orders needing approval display Pending for approval", () => {
     displayInvoiceStatus({ status: ORDER_STATUS_PENDING_APPROVAL }, {}),
     ORDER_STATUS_PENDING_APPROVAL,
   );
+});
+
+test("approved orders without invoice show Pending for invoice creation", () => {
   assert.equal(
     displayInvoiceStatus({ approvedAt: "2026-09-14T10:00:00.000Z" }, { approvalRequired: true }),
-    "-",
+    ORDER_STATUS_PENDING_INVOICE_CREATION,
+  );
+  assert.equal(
+    displayInvoiceStatus({
+      status: ORDER_STATUS_PENDING_INVOICE_CREATION,
+      approvedAt: "2026-09-14T10:00:00.000Z",
+    }, {}),
+    ORDER_STATUS_PENDING_INVOICE_CREATION,
   );
 });
 
-test("submitted orders without invoice upload show Pending for approval", () => {
+test("submitted orders that do not need approval show Pending for invoice creation", () => {
   const order = { id: 12, status: "SUBMITTED" };
-  assert.equal(isSubmittedAwaitingInvoiceApproval(order, null), true);
-  assert.equal(shouldAutoMarkPendingApproval({ order, meta: null }), true);
-  assert.equal(shouldShowPendingApprovalActions(order, null), true);
-  assert.equal(displayInvoiceStatus(null, { order }), ORDER_STATUS_PENDING_APPROVAL);
+  assert.equal(isSubmittedWithoutUploadedInvoice(order, null), true);
+  assert.equal(shouldAutoMarkPendingInvoiceCreation({ order, meta: null, approvalRequired: false }), true);
+  assert.equal(shouldAutoMarkPendingApproval({ order, meta: null, approvalRequired: false }), false);
+  assert.equal(shouldShowPendingApprovalActions(order, null, { approvalRequired: false }), false);
+  assert.equal(displayInvoiceStatus(null, { order, approvalRequired: false }), ORDER_STATUS_PENDING_INVOICE_CREATION);
 });
 
-test("submitted orders with invoice uploaded are not queued for approval", () => {
+test("submitted orders needing approval stay in Pending for approval", () => {
+  const order = { id: 12, status: "SUBMITTED" };
+  assert.equal(shouldAutoMarkPendingApproval({ order, meta: null, approvalRequired: true }), true);
+  assert.equal(shouldAutoMarkPendingInvoiceCreation({ order, meta: null, approvalRequired: true }), false);
+  assert.equal(shouldShowPendingApprovalActions(order, null, { approvalRequired: true }), true);
+  assert.equal(displayInvoiceStatus(null, { order, approvalRequired: true }), ORDER_STATUS_PENDING_APPROVAL);
+});
+
+test("submitted orders with invoice uploaded are not queued", () => {
   const order = { id: 12, status: "SUBMITTED" };
   const meta = {
     invoiceFilePath: "invoices/12.pdf",
     invoiceUploadedAt: "2026-09-14T10:00:00.000Z",
   };
-  assert.equal(isSubmittedAwaitingInvoiceApproval(order, meta), false);
-  assert.equal(shouldAutoMarkPendingApproval({ order, meta }), false);
+  assert.equal(isSubmittedWithoutUploadedInvoice(order, meta), false);
+  assert.equal(shouldAutoMarkPendingApproval({ order, meta, approvalRequired: true }), false);
+  assert.equal(shouldAutoMarkPendingInvoiceCreation({ order, meta, approvalRequired: false }), false);
   assert.equal(shouldShowPendingApprovalActions(order, meta), false);
 });
 
@@ -60,23 +82,27 @@ test("pending for approval includes legacy credit status", () => {
   assert.equal(isPendingForApprovalStatus(ORDER_STATUS_REJECTED), false);
 });
 
-test("auto-mark runs when approval is required and status is empty or legacy", () => {
-  assert.equal(shouldAutoMarkPendingApproval({ approvalRequired: true, meta: null }), true);
+test("auto-mark approval only when required", () => {
+  assert.equal(shouldAutoMarkPendingApproval({ approvalRequired: true, meta: null, order: { status: "SUBMITTED" } }), true);
   assert.equal(shouldAutoMarkPendingApproval({
     approvalRequired: true,
+    order: { status: "SUBMITTED" },
     meta: { status: ORDER_STATUS_PENDING_CREDIT },
   }), true);
   assert.equal(shouldAutoMarkPendingApproval({
     approvalRequired: true,
+    order: { status: "SUBMITTED" },
     meta: { status: ORDER_STATUS_PENDING_APPROVAL },
   }), false);
   assert.equal(shouldAutoMarkPendingApproval({
     approvalRequired: true,
     meta: { approvedAt: "2026-09-14T10:00:00.000Z" },
+    order: { status: "SUBMITTED" },
   }), false);
   assert.equal(shouldAutoMarkPendingApproval({
     approvalRequired: false,
     meta: null,
+    order: { status: "SUBMITTED" },
   }), false);
 });
 

@@ -101,7 +101,7 @@ export function useCustomerData({ setError, setMessage }) {
             ...(scope.mutualSalesmanCodes || []),
             ...(scope.visibleMembers || []).map((member) => member.salesman_code),
           ].filter(Boolean)),
-        ].sort());
+        ].sort();
 
         setSalesmen(salesmanCodes);
       })(), LOAD_TIMEOUT_MS, 'Customer data load timed out. Please refresh the page or login again.');

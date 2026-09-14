@@ -1135,9 +1135,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
     return { dueCustomers: due, notDueCustomers: notDue, legalCustomers: legal };
   }
 
-  async function loadQueue(preferredKey = "") {
+  async function loadQueue(preferredKey = "", options = {}) {
     const supabase = getSupabaseClient();
     const seq = ++loadSeqRef.current;
+    const forceRefresh = Boolean(options.forceRefresh);
 
     if (!supabase) {
       setLoading(false);
@@ -1159,10 +1160,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       if (!session?.access_token || !session?.user?.id) throw new Error("Please login again.");
 
-      let cachedQueues = await readCollectionQueuesForUser(session.user.id);
+      let cachedQueues = forceRefresh ? null : await readCollectionQueuesForUser(session.user.id);
       if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
       const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-      if (!queueHasRows(cachedQueues) && getDataRefreshStatus().active && !offline) {
+      if (!forceRefresh && !queueHasRows(cachedQueues) && getDataRefreshStatus().active && !offline) {
         setLoading(true);
         cachedQueues = await waitForHydratedCollectionQueues(session.user.id);
         if (loadSeqRef.current !== seq) return { dueCustomers: [], notDueCustomers: [], legalCustomers: [] };
@@ -1197,6 +1198,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       queueRefreshWatchdogRef.current = watchdog;
 
       const queueResult = await fetchCollectionQueuesCached(session.access_token, session.user.id, {
+        forceRefresh,
         onUpdate: (freshQueues) => {
           if (loadSeqRef.current !== seq) return;
           if (queueRefreshWatchdogRef.current === watchdog) {
@@ -2126,14 +2128,22 @@ export default function PaymentCollectionsView({ view = "due" }) {
       if (action === "remove") {
         const removedKey = rowKey(row);
         setActiveRowKey("");
-        setLegalCustomers((current) => current.filter((item) => rowKey(item) !== removedKey));
+        const nextLegal = (queuesRef.current.legalCustomers || []).filter((item) => rowKey(item) !== removedKey);
+        const patchedQueues = {
+          ...queuesRef.current,
+          legalCustomers: nextLegal,
+        };
+        queuesRef.current = patchedQueues;
+        setLegalCustomers(nextLegal);
         if (!saveResult.queued) {
           await invalidateCollectionQueuesForUser(session.user.id);
-          await loadQueue("");
+          // Force a network reload so the on-device queue cache cannot put the
+          // customer back on the Legal tab after a successful remove.
+          await loadQueue("", { forceRefresh: true });
         }
       } else if (!saveResult.queued) {
         await invalidateCollectionQueuesForUser(session.user.id);
-        await loadQueue(rowKey(row));
+        await loadQueue(rowKey(row), { forceRefresh: true });
         if (view !== "legal") {
           setActiveRowKey("");
         }

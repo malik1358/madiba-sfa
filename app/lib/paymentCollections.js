@@ -446,14 +446,27 @@ export function findLegalTransferForCustomer(transfers, customerCode) {
   const target = String(customerCode || "").trim();
   if (!target || !Array.isArray(transfers) || transfers.length === 0) return null;
 
-  const direct = transfers.find((transfer) => String(transfer?.customer_code || "").trim() === target);
+  const active = (transfers || []).filter((transfer) => Boolean(transfer?.is_transferred));
+  const direct = active.find((transfer) => String(transfer?.customer_code || "").trim() === target);
   if (direct) return direct;
 
-  return transfers.find((transfer) => customerAccountCodesMatch(transfer?.customer_code, target)) || null;
+  return active.find((transfer) => customerAccountCodesMatch(transfer?.customer_code, target)) || null;
 }
 
 export function findLegalTransferCustomerCode(transfers, customerCode) {
   return String(findLegalTransferForCustomer(transfers, customerCode)?.customer_code || "").trim();
+}
+
+export function findAllLegalTransferCustomerCodes(transfers, customerCode) {
+  const target = String(customerCode || "").trim();
+  if (!target || !Array.isArray(transfers) || transfers.length === 0) return [];
+
+  return [...new Set(
+    transfers
+      .filter((transfer) => customerAccountCodesMatch(transfer?.customer_code, target))
+      .map((transfer) => String(transfer?.customer_code || "").trim())
+      .filter(Boolean),
+  )];
 }
 
 export function buildCollectionQueues(records, todayIso = new Date().toISOString()) {

@@ -14,6 +14,7 @@ import {
   redactCollectionVisitScheduleForViewer,
   filterCollectionQueueInvoices,
   findLegalTransferCustomerCode,
+  findAllLegalTransferCustomerCodes,
   findLegalTransferForCustomer,
   formatLatestCollectionVisitRemark,
   hasCollectionVisit,
@@ -253,6 +254,29 @@ test("findLegalTransferForCustomer matches numeric suffix variants", () => {
   assert.equal(findLegalTransferCustomerCode(transfers, "1468C"), "1468C");
   assert.equal(findLegalTransferForCustomer(transfers, "1468")?.note, "Legal");
   assert.equal(findLegalTransferCustomerCode(transfers, "1173C"), "");
+});
+
+test("findLegalTransferForCustomer ignores inactive transfer rows", () => {
+  const transfers = [{
+    customer_code: "1468C",
+    is_transferred: false,
+    note: "Cleared",
+  }];
+
+  assert.equal(findLegalTransferCustomerCode(transfers, "1468C"), "");
+  assert.equal(findLegalTransferForCustomer(transfers, "1468C"), null);
+});
+
+test("findAllLegalTransferCustomerCodes returns every matching account variant", () => {
+  const transfers = [
+    { customer_code: "1468", is_transferred: true },
+    { customer_code: "1468C", is_transferred: false },
+    { customer_code: "1173C", is_transferred: true },
+  ];
+
+  assert.deepEqual(findAllLegalTransferCustomerCodes(transfers, "1468").sort(), ["1468", "1468C"]);
+  assert.deepEqual(findAllLegalTransferCustomerCodes(transfers, "1173"), ["1173C"]);
+  assert.deepEqual(findAllLegalTransferCustomerCodes(transfers, "9999"), []);
 });
 
 test("buildCollectionQueues lists only past-due customers and routes legal ones separately", () => {

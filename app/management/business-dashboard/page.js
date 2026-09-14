@@ -22,7 +22,7 @@ import {
   formatBiReportPeriodRange,
   resolveBiReportPeriod,
 } from "../../lib/biReportPeriod";
-import { emptyCustomerGrowthFilters, emptyGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
+import { emptyCustomerGrowthFilters, emptyGrowthFilters, emptyItemGrowthFilters, pickBiMeasure } from "../../lib/categoryGrowth";
 import { GrowthBarChart, GrowthChartPanel, GrowthSignalChart } from "./GrowthCharts";
 
 const TEXT = {
@@ -36,6 +36,7 @@ const TEXT = {
   overview: { en: "Dashboard", ar: "اللوحة" },
   categoryGrowth: { en: "Category growth", ar: "نمو الفئات" },
   customerGrowth: { en: "Customer growth", ar: "نمو العملاء" },
+  itemGrowth: { en: "Item growth", ar: "نمو الأصناف" },
   salesmanMom: { en: "Salesman MoM", ar: "المندوب شهرياً" },
   operations: { en: "Daily operations", ar: "التشغيل اليومي" },
   date: { en: "Report date", ar: "تاريخ التقرير" },
@@ -97,6 +98,12 @@ export default function BusinessDashboardPage() {
   const [customerApplied, setCustomerApplied] = useState(() => emptyCustomerGrowthFilters());
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerStatusFilter, setCustomerStatusFilter] = useState([]);
+  const [itemLoading, setItemLoading] = useState(true);
+  const [itemReport, setItemReport] = useState(null);
+  const [itemDraft, setItemDraft] = useState(() => emptyItemGrowthFilters());
+  const [itemApplied, setItemApplied] = useState(() => emptyItemGrowthFilters());
+  const [itemSearch, setItemSearch] = useState("");
+  const [itemStatusFilter, setItemStatusFilter] = useState([]);
   const [salesmanLoading, setSalesmanLoading] = useState(true);
   const [salesmanReport, setSalesmanReport] = useState(null);
   const [salesmanDraft, setSalesmanDraft] = useState(() => emptySalesmanMomFilters());
@@ -128,6 +135,10 @@ export default function BusinessDashboardPage() {
     () => pickBiMeasure(customerReport, amountMeasure),
     [customerReport, amountMeasure],
   );
+  const visibleItemReport = useMemo(
+    () => pickBiMeasure(itemReport, amountMeasure),
+    [itemReport, amountMeasure],
+  );
 
   usePopupMessages({ error });
 
@@ -135,13 +146,14 @@ export default function BusinessDashboardPage() {
     if (!reportFocus || view === "overview") return;
     if (view === "category-growth" && growthLoading) return;
     if (view === "customer-growth" && customerLoading) return;
+    if (view === "item-growth" && itemLoading) return;
     if (view === "salesman-mom" && salesmanLoading) return;
     if (view === "operations" && loading) return;
     const node = document.getElementById(reportFocus);
     if (!node) return;
     node.scrollIntoView({ behavior: "smooth", block: "start" });
     setReportFocus("");
-  }, [reportFocus, view, growthLoading, customerLoading, salesmanLoading, loading]);
+  }, [reportFocus, view, growthLoading, customerLoading, itemLoading, salesmanLoading, loading]);
 
   useEffect(() => {
     if (reportPeriod === "custom" && (!periodRange.dateFrom || !periodRange.dateTo)) return;
@@ -149,6 +161,8 @@ export default function BusinessDashboardPage() {
     setGrowthApplied((current) => applyBiReportPeriod(current, periodRange));
     setCustomerDraft((current) => applyBiReportPeriod(current, periodRange));
     setCustomerApplied((current) => applyBiReportPeriod({ ...current, groupBy: "customer" }, periodRange));
+    setItemDraft((current) => applyBiReportPeriod(current, periodRange));
+    setItemApplied((current) => applyBiReportPeriod({ ...current, groupBy: "item" }, periodRange));
     setSalesmanDraft((current) => applyBiReportPeriod(current, periodRange));
     setSalesmanApplied((current) => applyBiReportPeriod({ ...current, groupBy: "salesman" }, periodRange));
   }, [periodRange, reportPeriod]);
@@ -367,6 +381,78 @@ export default function BusinessDashboardPage() {
 
     const stopSafetyTimer = startReportSafetyTimer(() => {
       if (cancelled) return;
+      setItemLoading(false);
+      setError((current) => current || "Item growth timed out. Please refresh.");
+    });
+
+    async function loadItems() {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        stopSafetyTimer();
+        setItemLoading(false);
+        return;
+      }
+
+      setItemLoading(true);
+      setError("");
+
+      try {
+        const session = await resolveAuthSession(supabase, 12000);
+        if (cancelled) return;
+        if (!session?.access_token) throw new Error("Please login again.");
+
+        const { response, payload } = await fetchJsonWithTimeout(
+          "/api/business-dashboard/category-growth",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ filters: itemApplied }),
+          },
+          60000,
+        );
+
+        if (cancelled) return;
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load item growth.");
+        }
+
+        setItemReport(payload);
+        if (payload.catalogs) setGrowthCatalogs(payload.catalogs);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.message || "Unable to load item growth.");
+        setItemReport(null);
+      } finally {
+        stopSafetyTimer();
+        if (!cancelled) setItemLoading(false);
+      }
+    }
+
+    if (view !== "item-growth" && view !== "overview") {
+      stopSafetyTimer();
+      setItemLoading(false);
+      return () => {
+        cancelled = true;
+        stopSafetyTimer();
+      };
+    }
+
+    loadItems();
+
+    return () => {
+      cancelled = true;
+      stopSafetyTimer();
+    };
+  }, [view, itemApplied]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const stopSafetyTimer = startReportSafetyTimer(() => {
+      if (cancelled) return;
       setSalesmanLoading(false);
       setError((current) => current || "Salesman performance timed out. Please refresh.");
     });
@@ -506,6 +592,15 @@ export default function BusinessDashboardPage() {
               <button
                 type="button"
                 role="tab"
+                aria-selected={view === "item-growth"}
+                className={`moduleBiTab${view === "item-growth" ? " isActive" : ""}`}
+                onClick={() => setView("item-growth")}
+              >
+                {t("itemGrowth")}
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={view === "salesman-mom"}
                 className={`moduleBiTab${view === "salesman-mom" ? " isActive" : ""}`}
                 onClick={() => setView("salesman-mom")}
@@ -524,7 +619,7 @@ export default function BusinessDashboardPage() {
             </div>
           </section>
 
-          {view === "overview" || view === "category-growth" || view === "customer-growth" || view === "salesman-mom" ? (
+          {view === "overview" || view === "category-growth" || view === "customer-growth" || view === "item-growth" || view === "salesman-mom" ? (
             <section className="moduleSection">
               <div className="moduleBiMeasureBar">
                 <span>{t("period")}</span>
@@ -590,10 +685,11 @@ export default function BusinessDashboardPage() {
           {view === "overview" ? (
             <BiOverviewDashboard
               language={language}
-              loading={growthLoading || salesmanLoading || customerLoading}
+              loading={growthLoading || salesmanLoading || customerLoading || itemLoading}
               growthReport={visibleGrowthReport}
               salesmanReport={visibleSalesmanReport}
               customerReport={visibleCustomerReport}
+              itemReport={visibleItemReport}
               operations={{
                 redAlerts: redAlerts.length,
                 orangeAlerts: orangeAlerts.length,
@@ -657,6 +753,33 @@ export default function BusinessDashboardPage() {
                 setCustomerApplied(empty);
                 setCustomerSearch("");
                 setCustomerStatusFilter([]);
+              }}
+            />
+          ) : null}
+
+          {view === "item-growth" ? (
+            <CategoryGrowthReport
+              language={language}
+              loading={itemLoading}
+              measure={amountMeasure}
+              report={visibleItemReport}
+              draft={itemDraft}
+              catalogs={growthCatalogs}
+              applied={itemApplied}
+              search={itemSearch}
+              statusFilter={itemStatusFilter}
+              lockGroupBy="item"
+              onSearchChange={setItemSearch}
+              onStatusFilterChange={setItemStatusFilter}
+              onDraftChange={setItemDraft}
+              onGroupByChange={() => {}}
+              onApply={() => setItemApplied({ ...itemDraft, groupBy: "item" })}
+              onClear={() => {
+                const empty = applyBiReportPeriod(emptyItemGrowthFilters(), periodRange);
+                setItemDraft(empty);
+                setItemApplied(empty);
+                setItemSearch("");
+                setItemStatusFilter([]);
               }}
             />
           ) : null}

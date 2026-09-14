@@ -8,12 +8,14 @@ function rankByLifetime(rows = [], limit = 8) {
     .slice(0, limit);
 }
 
-export function buildBiOverviewModel({ growth = null, salesman = null, customer = null } = {}) {
+export function buildBiOverviewModel({ growth = null, salesman = null, customer = null, item = null } = {}) {
   const categories = growth?.groups || growth?.categories || [];
   const customers = customer?.groups || customer?.categories || [];
+  const items = item?.groups || item?.categories || [];
   const topCategories = rankByLifetime(categories, 8);
   const topCustomers = rankByLifetime(customers, 8);
-  const recentMonths = (growth?.recentMonths || customer?.recentMonths || []).slice(-6);
+  const topItems = rankByLifetime(items, 8);
+  const recentMonths = (growth?.recentMonths || customer?.recentMonths || item?.recentMonths || []).slice(-6);
   const salesmanRows = buildSalesmanMomRows(salesman || {});
   const teamRows = buildTeamMomRows(salesman || {});
   const salesmanSummary = summarizeSalesmanMom(salesmanRows);
@@ -31,8 +33,12 @@ export function buildBiOverviewModel({ growth = null, salesman = null, customer 
     customerCount: customers.length,
     customerGrowingCount: Number(customer?.meta?.growingCount || 0),
     customerDecliningCount: Number(customer?.meta?.decliningCount || 0),
+    itemCount: items.length,
+    itemGrowingCount: Number(item?.meta?.growingCount || 0),
+    itemDecliningCount: Number(item?.meta?.decliningCount || 0),
     topCategories,
     topCustomers,
+    topItems,
     contributionRows: buildContributionGridRows(topCategories, recentMonths),
     recentMonths,
     currentMonth: growth?.currentMonth || "",

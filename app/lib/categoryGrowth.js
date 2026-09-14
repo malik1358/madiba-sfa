@@ -184,6 +184,40 @@ export function previousMonthKey(monthKey) {
   return `${String(prev.year).padStart(4, "0")}-${String(prev.month).padStart(2, "0")}`;
 }
 
+export function daysInMonthKey(monthKey) {
+  const match = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return 0;
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]), 0)).getUTCDate();
+}
+
+export function lastThirtyDayAmount(byMonth, asOfDate) {
+  const asOf = salesDateKey(asOfDate);
+  if (!asOf || !byMonth) return 0;
+  const currentMonth = asOf.slice(0, 7);
+  const day = Number(asOf.slice(8, 10));
+  const currentAmount = Number(byMonth.get?.(currentMonth) ?? byMonth[currentMonth] ?? 0);
+  const priorMonth = previousMonthKey(currentMonth);
+  const priorAmount = Number(byMonth.get?.(priorMonth) ?? byMonth[priorMonth] ?? 0);
+  const priorDays = daysInMonthKey(priorMonth);
+  const daysFromPrior = Math.max(0, 30 - Math.max(1, day));
+  const priorSlice = priorDays > 0 ? priorAmount * (daysFromPrior / priorDays) : 0;
+  return currentAmount + priorSlice;
+}
+
+export function lastSixMonthAverage(byMonth, asOfDate) {
+  const asOf = salesDateKey(asOfDate);
+  if (!asOf || !byMonth) return 0;
+  let cursor = previousMonthKey(asOf.slice(0, 7));
+  let sum = 0;
+  let count = 0;
+  for (let index = 0; index < 6 && cursor; index += 1) {
+    sum += Number(byMonth.get?.(cursor) ?? byMonth[cursor] ?? 0);
+    count += 1;
+    cursor = previousMonthKey(cursor);
+  }
+  return count ? sum / count : 0;
+}
+
 export function nextMonthKey(monthKey) {
   const match = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
   if (!match) return "";
@@ -466,23 +500,37 @@ export function classifyCategoryStatus({
   yearCount = 0,
   currentMonthAmount = 0,
   peakMonthAmount = 0,
+  last30Amount = 0,
+  sixMonthAverage = 0,
 } = {}) {
   const current = Number(currentMonthAmount || 0);
   const peak = Number(peakMonthAmount || 0);
+  const last30 = Number(last30Amount || 0);
+  const sixMonthAvg = Number(sixMonthAverage || 0);
+  const pacePercent = sixMonthAvg > 0 ? (last30 / sixMonthAvg) * 100 : null;
   if (current > 0 && peak > 0 && current >= peak) {
     return { status: "green", code: "record_month", label: "Record month" };
   }
-  if (silentMonths >= 2) {
+  if (pacePercent != null && pacePercent >= 100) {
+    return { status: "green", code: "on_pace", label: "On 6-month pace" };
+  }
+  if (silentMonths >= 2 && last30 <= 0) {
     return { status: "red", code: "silent", label: "No recent sales" };
   }
-  if (yoyPercent != null && yoyPercent <= -15) {
+  if (pacePercent != null && pacePercent < 70) {
+    return { status: "red", code: "behind_pace", label: "Behind 6-month pace" };
+  }
+  if (yoyPercent != null && yoyPercent <= -15 && (pacePercent == null || pacePercent < 100)) {
     return { status: "red", code: "yoy_down", label: "Down vs last year" };
   }
-  if (decliningMonths >= 3) {
+  if (decliningMonths >= 3 && (pacePercent == null || pacePercent < 100)) {
     return { status: "red", code: "streak_down", label: "Falling 3 months" };
   }
-  if (momPercent != null && momPercent <= -15) {
+  if (momPercent != null && momPercent <= -15 && (pacePercent == null || pacePercent < 85)) {
     return { status: "red", code: "mom_down", label: "Latest month down" };
+  }
+  if (pacePercent != null && pacePercent < 85) {
+    return { status: "orange", code: "soft_pace", label: "Soft vs 6-month pace" };
   }
   if ((yoyPercent != null && yoyPercent < -5) || (momPercent != null && momPercent < -5)) {
     return { status: "orange", code: "softening", label: "Softening" };
@@ -647,6 +695,8 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
       ? growthPercent(currentMonthAmount, latestMonthAmount > 0 ? latestMonthAmount : priorMonthAmount)
       : momPercent;
     const recoveredThisMonth = currentMonthAmount > 0 && currentMonthAmount >= Math.max(latestMonthAmount, priorMonthAmount);
+    const last30Amount = lastThirtyDayAmount(entry.byMonth, asOfDate || lastDate);
+    const sixMonthAverage = lastSixMonthAverage(entry.byMonth, asOfDate || lastDate);
     const firstFullYear = years.find((year) => yearValues[year] > 0) || "";
     const lastFullYear = latestMonthIsPartial
       ? years.filter((year) => year < latestYear && yearValues[year] > 0).at(-1) || ""
@@ -663,6 +713,8 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
       yearCount: years.filter((year) => yearValues[year] > 0).length,
       currentMonthAmount,
       peakMonthAmount,
+      last30Amount,
+      sixMonthAverage,
     });
 
     return {

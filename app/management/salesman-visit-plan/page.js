@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
@@ -19,6 +19,12 @@ function planLabel(plan) {
   return name || code || "Unknown salesman";
 }
 
+function clampVisitLimit(value, fallback = 12) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return Math.max(1, Math.min(50, Math.round(number)));
+}
+
 const TEXT = {
   title: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },
   subtitle: {
@@ -31,9 +37,13 @@ const TEXT = {
   salesman: { en: "Salesman", ar: "المندوب" },
   allSalesmen: { en: "All salesmen", ar: "كل المندوبين" },
   visitsPerSalesman: { en: "Visits per salesman", ar: "زيارات لكل مندوب" },
+  visitsPerSalesmanHint: {
+    en: "Changing this number rebuilds the snapshot automatically.",
+    ar: "تغيير هذا الرقم يعيد بناء اللقطة تلقائياً.",
+  },
   previewEmail: { en: "Send email now", ar: "إرسال البريد الآن" },
   rebuildSnapshot: { en: "Rebuild midnight snapshot", ar: "إعادة بناء لقطة منتصف الليل" },
-  rebuilding: { en: "Rebuilding...", ar: "جاري إعادة البناء..." },
+  rebuilding: { en: "Rebuilding for new visit limit...", ar: "جاري إعادة البناء لحد الزيارات الجديد..." },
   rebuildQueued: {
     en: "Rebuild started in the background. Waiting for the new snapshot...",
     ar: "بدأت إعادة البناء في الخلفية. بانتظار اللقطة الجديدة...",
@@ -176,6 +186,7 @@ export default function SalesmanVisitPlanPage() {
   const [accessMeta, setAccessMeta] = useState(null);
   const [salesmanFilter, setSalesmanFilter] = useState("");
   const [visitLimit, setVisitLimit] = useState("12");
+  const [snapshotVisitLimit, setSnapshotVisitLimit] = useState(null);
   const [summary, setSummary] = useState({
     salesmanCount: 0,
     visitCount: 0,
@@ -184,8 +195,14 @@ export default function SalesmanVisitPlanPage() {
     missingSnapshot: false,
     rebuildStatus: null,
   });
+  const builtAtRef = useRef("");
+  const rebuildingRef = useRef(false);
 
   usePopupMessages({ error, message });
+
+  useEffect(() => {
+    builtAtRef.current = String(summary.builtAt || "").trim();
+  }, [summary.builtAt]);
 
   const canAccess = access.canAccess("salesmanVisitPlan");
 
@@ -207,7 +224,7 @@ export default function SalesmanVisitPlanPage() {
       if (!session?.access_token) throw new Error("Please login again.");
 
       const params = new URLSearchParams({
-        limit: String(Math.max(1, Math.min(50, Number(visitLimit) || 12))),
+        limit: String(clampVisitLimit(visitLimit)),
       });
 
       const { response, payload: data } = await fetchJsonWithTimeout(
@@ -223,6 +240,10 @@ export default function SalesmanVisitPlanPage() {
       }
       setAllPlans(data.plans || []);
       setAccessMeta(data.access || null);
+      const storedLimit = Number(data.visitLimit);
+      if (Number.isFinite(storedLimit) && storedLimit > 0) {
+        setSnapshotVisitLimit(clampVisitLimit(storedLimit));
+      }
       setSummary({
         salesmanCount: data.salesmanCount || 0,
         visitCount: data.visitCount || 0,
@@ -272,62 +293,16 @@ export default function SalesmanVisitPlanPage() {
     return acc;
   }, { dueAmount: 0, recentSales: 0, visits: 0 }), [plans]);
 
-  async function sendPreviewEmail() {
+  const rebuildSnapshot = useCallback(async (limitOverride) => {
     const supabase = getSupabaseClient();
-    if (!supabase) return;
+    if (!supabase || rebuildingRef.current) return;
 
-    setSending(true);
-    setError("");
-    setMessage("");
-    try {
-      const session = await resolveAuthSession(supabase, 8000);
-      if (!session?.access_token) throw new Error("Please login again.");
-
-      const { response, payload: data } = await fetchJsonWithTimeout(
-        "/api/admin/salesman-visit-plan",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            action: "email",
-            salesman: salesmanFilter || undefined,
-            limit: Math.max(1, Math.min(50, Number(visitLimit) || 12)),
-            forcePreview: false,
-          }),
-        },
-        120000,
-      );
-
-      if (data?.skipped && (data?.reason === "email_disabled_until_approved" || data?.reason === "email_disabled")) {
-        setMessage(t("emailSkipped"));
-        return;
-      }
-      if (!response.ok || (!data?.success && data?.failedCount)) {
-        throw new Error(data?.error || "Preview email failed.");
-      }
-      if (data?.skipped) {
-        setMessage(t("emailSkipped"));
-        return;
-      }
-      setMessage(t("emailSent"));
-    } catch (err) {
-      setError(err.message || "Unable to send preview email.");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function rebuildSnapshot() {
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-
+    const limit = clampVisitLimit(limitOverride ?? visitLimit);
+    rebuildingRef.current = true;
     setRebuilding(true);
     setError("");
     setMessage("");
-    const previousBuiltAt = String(summary.builtAt || "").trim();
+    const previousBuiltAt = builtAtRef.current;
     try {
       const session = await resolveAuthSession(supabase, 8000);
       if (!session?.access_token) throw new Error("Please login again.");
@@ -342,7 +317,7 @@ export default function SalesmanVisitPlanPage() {
           },
           body: JSON.stringify({
             action: "rebuild",
-            limit: Math.max(1, Math.min(50, Number(visitLimit) || 12)),
+            limit,
           }),
         },
         30000,
@@ -376,11 +351,86 @@ export default function SalesmanVisitPlanPage() {
       if (!done) {
         throw new Error(t("rebuildFailed"));
       }
+      setSnapshotVisitLimit(limit);
       setMessage(t("rebuilt"));
     } catch (err) {
       setError(err.message || "Unable to rebuild visit plan snapshot.");
     } finally {
+      rebuildingRef.current = false;
       setRebuilding(false);
+    }
+  }, [visitLimit, loadPlans, t]);
+
+  useEffect(() => {
+    if (!isAdmin || accessLoading || !canAccess) return;
+    if (snapshotVisitLimit == null) return;
+    if (rebuildingRef.current || rebuilding) return;
+
+    const raw = Number(visitLimit);
+    if (!Number.isFinite(raw) || raw <= 0) return;
+    const limit = clampVisitLimit(raw);
+    if (limit === snapshotVisitLimit) return;
+
+    const timer = setTimeout(() => {
+      rebuildSnapshot(limit);
+    }, 900);
+
+    return () => clearTimeout(timer);
+  }, [
+    visitLimit,
+    snapshotVisitLimit,
+    isAdmin,
+    accessLoading,
+    canAccess,
+    rebuilding,
+    rebuildSnapshot,
+  ]);
+
+  async function sendPreviewEmail() {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    setSending(true);
+    setError("");
+    setMessage("");
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const { response, payload: data } = await fetchJsonWithTimeout(
+        "/api/admin/salesman-visit-plan",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "email",
+            salesman: salesmanFilter || undefined,
+            limit: clampVisitLimit(visitLimit),
+            forcePreview: false,
+          }),
+        },
+        120000,
+      );
+
+      if (data?.skipped && (data?.reason === "email_disabled_until_approved" || data?.reason === "email_disabled")) {
+        setMessage(t("emailSkipped"));
+        return;
+      }
+      if (!response.ok || (!data?.success && data?.failedCount)) {
+        throw new Error(data?.error || "Preview email failed.");
+      }
+      if (data?.skipped) {
+        setMessage(t("emailSkipped"));
+        return;
+      }
+      setMessage(t("emailSent"));
+    } catch (err) {
+      setError(err.message || "Unable to send preview email.");
+    } finally {
+      setSending(false);
     }
   }
 
@@ -454,10 +504,16 @@ export default function SalesmanVisitPlanPage() {
               min="1"
               max="50"
               value={visitLimit}
+              disabled={rebuilding}
               onChange={(event) => setVisitLimit(event.target.value)}
+              onBlur={() => {
+                const next = clampVisitLimit(visitLimit);
+                if (String(next) !== String(visitLimit).trim()) setVisitLimit(String(next));
+              }}
             />
+            {isAdmin ? <span className="moduleHint">{t("visitsPerSalesmanHint")}</span> : null}
           </label>
-          <button type="button" className="moduleInlineButton" onClick={loadPlans} disabled={loading || rebuilding}>
+          <button type="button" className="moduleInlineButton" onClick={() => loadPlans()} disabled={loading || rebuilding}>
             {loading ? t("loading") : t("refresh")}
           </button>
           {isAdmin ? (
@@ -465,7 +521,7 @@ export default function SalesmanVisitPlanPage() {
               <button type="button" className="moduleInlineButton" onClick={sendPreviewEmail} disabled={sending || loading || rebuilding || summary.missingSnapshot}>
                 {sending ? t("sending") : t("previewEmail")}
               </button>
-              <button type="button" className="moduleInlineButton" onClick={rebuildSnapshot} disabled={rebuilding || loading}>
+              <button type="button" className="moduleInlineButton" onClick={() => rebuildSnapshot()} disabled={rebuilding || loading}>
                 {rebuilding ? t("rebuilding") : t("rebuildSnapshot")}
               </button>
             </>

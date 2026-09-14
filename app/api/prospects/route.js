@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 import {
+  canAccessProspectRecord,
   canAccessProspectSalesmanCode,
   findProspectByOfflineId,
   insertProspectWithColumnFallback,
@@ -73,7 +74,7 @@ export async function GET(request) {
       return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
     }
 
-    const { admin, scope } = await resolveRequestScope(request);
+    const { admin, user, scope } = await resolveRequestScope(request);
     const url = new URL(request.url);
     const linkSuggestionsFor = Number(url.searchParams.get("linkSuggestionsFor"));
     const offlineId = String(url.searchParams.get("offlineId") || "").trim();
@@ -83,7 +84,7 @@ export async function GET(request) {
       if (!prospect?.id) {
         return NextResponse.json({ success: true, found: false });
       }
-      if (!canAccessProspectSalesmanCode(scope, prospect.salesman_code)) {
+      if (!canAccessProspectRecord(scope, prospect, user.id)) {
         return NextResponse.json({ success: false, error: "You do not have access to this prospect." }, { status: 403 });
       }
       return NextResponse.json({
@@ -96,18 +97,28 @@ export async function GET(request) {
     }
 
     if (Number.isFinite(linkSuggestionsFor) && linkSuggestionsFor > 0) {
-      const { data: prospect, error: prospectError } = await admin
+      let prospect = null;
+      let prospectError = null;
+      ({ data: prospect, error: prospectError } = await admin
         .from("prospects")
-        .select("id,salesman_code,company_name,shop_name,customer_name,latitude,longitude,city,area,status,converted_customer_code")
+        .select("id,salesman_code,company_name,shop_name,customer_name,latitude,longitude,city,area,status,converted_customer_code,created_by")
         .eq("id", linkSuggestionsFor)
-        .maybeSingle();
+        .maybeSingle());
+
+      if (prospectError && /created_by/i.test(String(prospectError.message || ""))) {
+        ({ data: prospect, error: prospectError } = await admin
+          .from("prospects")
+          .select("id,salesman_code,company_name,shop_name,customer_name,latitude,longitude,city,area,status,converted_customer_code")
+          .eq("id", linkSuggestionsFor)
+          .maybeSingle());
+      }
 
       if (prospectError) throw prospectError;
       if (!prospect?.id) {
         return NextResponse.json({ success: false, error: "Prospect not found." }, { status: 404 });
       }
 
-      if (!canAccessProspectSalesmanCode(scope, prospect.salesman_code)) {
+      if (!canAccessProspectRecord(scope, prospect, user.id)) {
         return NextResponse.json({ success: false, error: "You do not have access to this prospect." }, { status: 403 });
       }
 
@@ -119,7 +130,9 @@ export async function GET(request) {
       });
     }
 
-    const prospects = await listProspectsWithOrdersForScope(admin, scope);
+    const prospects = await listProspectsWithOrdersForScope(admin, scope, {
+      createdByUserId: user.id,
+    });
 
     return NextResponse.json({
       success: true,
@@ -139,7 +152,7 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
     }
 
-    const { admin, scope } = await resolveRequestScope(request);
+    const { admin, user, scope } = await resolveRequestScope(request);
     const body = await request.json().catch(() => ({}));
 
     const salesmanCode = resolveSalesmanCode(scope, body.salesman_code);
@@ -172,6 +185,7 @@ export async function POST(request) {
       latitude: body.latitude == null ? null : Number(body.latitude),
       longitude: body.longitude == null ? null : Number(body.longitude),
       salesman_code: salesmanCode,
+      created_by: user.id,
       remarks: withOfflineIdRemarks(body.remarks, offlineId),
       offline_id: offlineId || null,
     };
@@ -180,7 +194,11 @@ export async function POST(request) {
 
     return NextResponse.json({
       success: true,
-      data: { ...data, offline_id: offlineId || data?.offline_id || null },
+      data: {
+        ...data,
+        offline_id: offlineId || data?.offline_id || null,
+        created_by: data?.created_by || user.id,
+      },
       removedColumns,
     });
   } catch (error) {
@@ -196,18 +214,27 @@ export async function PATCH(request) {
       return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
     }
 
-    const { admin, scope } = await resolveRequestScope(request);
+    const { admin, user, scope } = await resolveRequestScope(request);
     const body = await request.json().catch(() => ({}));
     const prospectId = Number(body.id);
     const offlineId = String(body.offline_id || "").trim();
     let existing = null;
 
     if (Number.isFinite(prospectId) && prospectId > 0) {
-      const { data, error: loadError } = await admin
+      let data = null;
+      let loadError = null;
+      ({ data, error: loadError } = await admin
         .from("prospects")
-        .select("id,salesman_code")
+        .select("id,salesman_code,created_by")
         .eq("id", prospectId)
-        .maybeSingle();
+        .maybeSingle());
+      if (loadError && /created_by/i.test(String(loadError.message || ""))) {
+        ({ data, error: loadError } = await admin
+          .from("prospects")
+          .select("id,salesman_code")
+          .eq("id", prospectId)
+          .maybeSingle());
+      }
       if (loadError) throw loadError;
       existing = data;
     }
@@ -220,7 +247,7 @@ export async function PATCH(request) {
       return NextResponse.json({ success: false, error: "Prospect not found." }, { status: 404 });
     }
 
-    if (!canAccessProspectSalesmanCode(scope, existing.salesman_code)) {
+    if (!canAccessProspectRecord(scope, existing, user.id)) {
       return NextResponse.json({ success: false, error: "You do not have access to this prospect." }, { status: 403 });
     }
 

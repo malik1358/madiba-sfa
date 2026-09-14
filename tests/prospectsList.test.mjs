@@ -17,6 +17,7 @@ import {
   mergeUniqueCustomersByCode,
   prospectDisplayName,
   resolveProspectCustomerCode,
+  canAccessProspectRecord,
   visibleCustomerFromProspect,
 } from "../app/lib/prospects.js";
 
@@ -112,6 +113,27 @@ test("open prospect helpers keep unordered prospects and hide ordered or convert
     [{ customer_code: "PROSPECT-11", customer_name: "New Shop" }],
     [{ customer_code: "prospect-11", customer_name: "Duplicate" }, { customer_code: "1173C", customer_name: "Real" }],
   ).map((row) => row.customer_code).join(","), "PROSPECT-11,1173C");
+});
+
+test("canAccessProspectRecord keeps creators linked to their own prospects", () => {
+  const scope = {
+    hasAllAccess: false,
+    currentSalesmanCode: "OSAMA",
+    visibleSalesmanCodes: ["OSAMA"],
+  };
+
+  assert.equal(
+    canAccessProspectRecord(scope, { salesman_code: "JUNAID", created_by: "user-osama" }, "user-osama"),
+    true,
+  );
+  assert.equal(
+    canAccessProspectRecord(scope, { salesman_code: "JUNAID", created_by: "user-other" }, "user-osama"),
+    false,
+  );
+  assert.equal(
+    canAccessProspectRecord(scope, { salesman_code: "OSAMA", created_by: "user-other" }, "user-osama"),
+    true,
+  );
 });
 
 test("visibleCustomerFromProspect maps a visit-report customer from a prospect row", () => {

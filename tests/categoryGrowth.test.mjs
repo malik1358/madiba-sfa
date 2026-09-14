@@ -109,6 +109,11 @@ test("category growth report tracks yearly expansion since first sale", () => {
 test("status lights flag year-over-year drops and new categories", () => {
   assert.equal(classifyCategoryStatus({ yoyPercent: -20 }).status, "red");
   assert.equal(classifyCategoryStatus({ momPercent: -16 }).status, "red");
+  assert.equal(classifyCategoryStatus({
+    momPercent: -100,
+    currentMonthAmount: 88957,
+    peakMonthAmount: 88957,
+  }).code, "record_month");
   assert.equal(classifyCategoryStatus({ decliningMonths: 3 }).status, "red");
   assert.equal(classifyCategoryStatus({ yoyPercent: -8 }).status, "orange");
   assert.equal(classifyCategoryStatus({ yoyPercent: 12 }).status, "green");

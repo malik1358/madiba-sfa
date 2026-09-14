@@ -464,7 +464,14 @@ export function classifyCategoryStatus({
   silentMonths = 0,
   decliningMonths = 0,
   yearCount = 0,
+  currentMonthAmount = 0,
+  peakMonthAmount = 0,
 } = {}) {
+  const current = Number(currentMonthAmount || 0);
+  const peak = Number(peakMonthAmount || 0);
+  if (current > 0 && peak > 0 && current >= peak) {
+    return { status: "green", code: "record_month", label: "Record month" };
+  }
   if (silentMonths >= 2) {
     return { status: "red", code: "silent", label: "No recent sales" };
   }
@@ -632,8 +639,14 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
     const priorYtd = sumMonths(entry.byMonth, priorYtdMonths);
     const latestMonthAmount = Number(entry.byMonth.get(latestCompleteMonth) || 0);
     const priorMonthAmount = Number(entry.byMonth.get(priorCompleteMonth) || 0);
+    const currentMonthAmount = Number(entry.byMonth.get(currentMonth) || 0);
+    const peakMonthAmount = Math.max(0, ...[...entry.byMonth.values()].map((value) => Number(value || 0)));
     const yoyPercent = growthPercent(currentYtd, priorYtd);
     const momPercent = growthPercent(latestMonthAmount, priorMonthAmount);
+    const statusMomPercent = currentMonthAmount > 0
+      ? growthPercent(currentMonthAmount, latestMonthAmount > 0 ? latestMonthAmount : priorMonthAmount)
+      : momPercent;
+    const recoveredThisMonth = currentMonthAmount > 0 && currentMonthAmount >= Math.max(latestMonthAmount, priorMonthAmount);
     const firstFullYear = years.find((year) => yearValues[year] > 0) || "";
     const lastFullYear = latestMonthIsPartial
       ? years.filter((year) => year < latestYear && yearValues[year] > 0).at(-1) || ""
@@ -644,10 +657,12 @@ export function buildCategoryGrowthReport(acc, { asOfDate = "" } = {}) {
     const lastSaleMonth = entry.lastDate.slice(0, 7);
     const status = classifyCategoryStatus({
       yoyPercent,
-      momPercent,
+      momPercent: statusMomPercent,
       silentMonths: silentMonthCount(lastSaleMonth, lastDataMonth),
-      decliningMonths: consecutiveDecliningMonths(entry.byMonth, latestCompleteMonth),
+      decliningMonths: recoveredThisMonth ? 0 : consecutiveDecliningMonths(entry.byMonth, latestCompleteMonth),
       yearCount: years.filter((year) => yearValues[year] > 0).length,
+      currentMonthAmount,
+      peakMonthAmount,
     });
 
     return {

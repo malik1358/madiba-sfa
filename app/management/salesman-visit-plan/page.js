@@ -49,8 +49,8 @@ const TEXT = {
     ar: "ليس لديك صلاحية لخطط زيارات المندوبين.",
   },
   previewBanner: {
-    en: "Plans are built once at midnight KSA and saved. This page only shows the ready plan — it does not rebuild live.",
-    ar: "تُبنى الخطط مرة عند منتصف الليل بتوقيت السعودية وتُحفظ. هذه الصفحة تعرض الخطة الجاهزة فقط — دون إعادة بناء مباشرة.",
+    en: "Visit-plan email is paused until the list is finalized. Plans are still built/saved for this page — cron and salesman mail stay off.",
+    ar: "بريد خطة الزيارة متوقف حتى اعتماد القائمة. الخطط ما زالت تُبنى وتُحفظ لهذه الصفحة — الكرون وبريد المندوبين متوقفان.",
   },
   builtAt: { en: "Built at", ar: "بُنيت في" },
   notReady: {

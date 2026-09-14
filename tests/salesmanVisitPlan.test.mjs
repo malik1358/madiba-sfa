@@ -247,9 +247,9 @@ test("email builders include ranked visit rows", () => {
   assert.match(digest.html, /Sale One/);
 });
 
-test("feature flags default on after promotion", () => {
-  assert.equal(isSalesmanVisitPlanEmailEnabled({}), true);
-  assert.equal(isSalesmanVisitPlanSendToUsersEnabled({}), true);
+test("feature flags default off until visit plan is finalized", () => {
+  assert.equal(isSalesmanVisitPlanEmailEnabled({}), false);
+  assert.equal(isSalesmanVisitPlanSendToUsersEnabled({}), false);
   assert.equal(isSalesmanVisitPlanSalesmanAccessApproved({}), true);
   assert.equal(isSalesmanVisitPlanEmailEnabled({ SALESMAN_VISIT_PLAN_EMAIL_ENABLED: "false" }), false);
   assert.equal(isSalesmanVisitPlanSalesmanAccessApproved({

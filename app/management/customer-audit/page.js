@@ -47,6 +47,7 @@ import FullItemList from "./components/FullItemList";
 import OrderBar from "./components/OrderBar";
 import OrderReview from "./components/OrderReview";
 import TransactionHistory from "./components/TransactionHistory";
+import VisitHistory from "./components/VisitHistory";
 import LoadingScreen from "./components/LoadingScreen";
 import EmptyState from "./components/EmptyState";
 import { useCustomerData } from "./hooks/useCustomerData";
@@ -108,6 +109,8 @@ function CustomerAuditPageContent() {
     selectedCustomer,
     transactions,
     peerTransactions,
+    visits,
+    loadingVisits,
     itemMaster,
     itemMasterStatus,
     loading,
@@ -666,6 +669,8 @@ function CustomerAuditPageContent() {
             />
           </>
         ) : null}
+
+        <VisitHistory visits={visits} loading={loadingVisits} />
 
         <div className="auditVersion">Page updated: {PAGE_VERSION}</div>
         <div className="auditPageFooter">

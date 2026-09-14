@@ -18,6 +18,8 @@ export function useCustomerData({ setError, setMessage }) {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [peerTransactions, setPeerTransactions] = useState([]);
+  const [visits, setVisits] = useState([]);
+  const [loadingVisits, setLoadingVisits] = useState(false);
   const [itemMaster, setItemMaster] = useState([]);
   const [itemMasterStatus, setItemMasterStatus] = useState('Not loaded');
   const [loading, setLoading] = useState(true);
@@ -126,7 +128,9 @@ export function useCustomerData({ setError, setMessage }) {
     setSelectedCustomer(customer);
     setTransactions([]);
     setPeerTransactions([]);
+    setVisits([]);
     setLoadingCustomer(true);
+    setLoadingVisits(true);
     setExpandedCategories({});
     setError('');
     setMessage('');
@@ -138,7 +142,7 @@ export function useCustomerData({ setError, setMessage }) {
       }
 
       const scope = accessScope || (await fetchSalesScopeCached()).scope;
-      const historyResult = await fetchCustomerHistoryCached(
+      const historyPromise = fetchCustomerHistoryCached(
         session.access_token,
         scope,
         customer.customer_code,
@@ -151,12 +155,37 @@ export function useCustomerData({ setError, setMessage }) {
         },
       );
 
+      const visitsPromise = fetch(
+        `/api/customer-visits?customerCode=${encodeURIComponent(customer.customer_code)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        },
+      ).then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || 'Unable to load customer visits.');
+        }
+        return Array.isArray(payload.visits) ? payload.visits : [];
+      });
+
+      const [historyResult, visitRows] = await Promise.all([
+        historyPromise,
+        visitsPromise.catch((visitError) => {
+          setError(visitError.message || 'Unable to load customer visits.');
+          return [];
+        }),
+      ]);
+
       setTransactions(historyResult.data.transactions || []);
       setPeerTransactions(historyResult.data.peerTransactions || []);
+      setVisits(visitRows);
     } catch (err) {
       setError(err.message || 'Unable to load customer history.');
     } finally {
       setLoadingCustomer(false);
+      setLoadingVisits(false);
     }
   }, [accessScope, setError, setMessage]);
 
@@ -171,6 +200,8 @@ export function useCustomerData({ setError, setMessage }) {
     setSelectedCustomer(null);
     setTransactions([]);
     setPeerTransactions([]);
+    setVisits([]);
+    setLoadingVisits(false);
     setExpandedCategories({});
     setError('');
     setMessage('');
@@ -190,6 +221,8 @@ export function useCustomerData({ setError, setMessage }) {
     selectedCustomer,
     transactions,
     peerTransactions,
+    visits,
+    loadingVisits,
     itemMaster,
     itemMasterStatus,
     loading,

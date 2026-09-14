@@ -24,6 +24,8 @@ export const DEFAULT_MISSING_INVOICE_EMAIL_TO = [
 ];
 export const DEFAULT_MISSING_INVOICE_EMAIL_CC = [
   "jenil.modi@noorshukran.com",
+  "soyeb@noorshukran.com",
+  "fazlur.rahiman@noorshukran.com",
 ];
 
 const IST_WEEKDAY_INDEX = {

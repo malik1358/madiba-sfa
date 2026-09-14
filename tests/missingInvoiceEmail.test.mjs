@@ -57,7 +57,7 @@ test("resolveMissingInvoiceEmailCc includes Jenil and extra CC addresses", () =>
     [...DEFAULT_MISSING_INVOICE_EMAIL_CC, "extra-cc@madiba.com"],
   );
   assert.deepEqual(
-    resolveMissingInvoiceEmailCc({}, [...DEFAULT_MISSING_INVOICE_EMAIL_TO, "jenil.modi@noorshukran.com"]),
+    resolveMissingInvoiceEmailCc({}, [...DEFAULT_MISSING_INVOICE_EMAIL_TO, ...DEFAULT_MISSING_INVOICE_EMAIL_CC]),
     [],
   );
 });

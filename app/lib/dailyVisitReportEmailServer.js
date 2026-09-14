@@ -65,6 +65,10 @@ function envFlagEnabled(value, defaultValue = true) {
   return raw !== "0" && raw !== "false" && raw !== "no";
 }
 
+function isAdminVisitReportProfile(profile) {
+  return String(profile?.role || "").trim().toLowerCase() === "admin";
+}
+
 function reportDisplayName(profile) {
   const name = String(profile?.salesman_name || "").trim();
   const code = String(profile?.salesman_code || "").trim();
@@ -265,13 +269,15 @@ export async function runDailyVisitReportEmailCycle(admin, {
   if (requestedUserIds.length) {
     requestedUserIds.forEach((userId) => {
       if (seen.has(userId)) return;
-      seen.add(userId);
       const reportUser = reportByUserId.get(userId);
       const profile = profileById.get(userId) || {
         id: userId,
         email: reportUser?.email,
         salesman_name: reportUser?.userName,
       };
+      // Admins are not field users; never send them a personal daily visit report.
+      if (isAdminVisitReportProfile(profile)) return;
+      seen.add(userId);
       recipients.push({
         profile,
         user: reportUser || stubUserReport(profile),
@@ -279,6 +285,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
     });
   } else {
     profiles.forEach((profile) => {
+      if (isAdminVisitReportProfile(profile)) return;
       if (!shouldEmailVisitReportForRole(profile.role) && !reportByUserId.has(profile.id)) {
         return;
       }
@@ -292,9 +299,15 @@ export async function runDailyVisitReportEmailCycle(admin, {
 
     report.users.forEach((user) => {
       if (seen.has(user.userId)) return;
+      const profile = profileById.get(user.userId) || {
+        id: user.userId,
+        email: user.email,
+        salesman_name: user.userName,
+      };
+      if (isAdminVisitReportProfile(profile)) return;
       seen.add(user.userId);
       recipients.push({
-        profile: { id: user.userId, email: user.email, salesman_name: user.userName },
+        profile,
         user,
       });
     });

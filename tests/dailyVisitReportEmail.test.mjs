@@ -435,6 +435,57 @@ test("runDailyVisitReportEmailCycle skips when email is not configured", async (
   assert.equal(result.reason, "email_not_configured");
 });
 
+test("runDailyVisitReportEmailCycle does not send personal reports for admin", async () => {
+  const sent = [];
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-09-13",
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+      DAILY_VISIT_REPORT_TO: "manager@madiba.com",
+    },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadReport: async () => ({
+      date: "2026-09-13",
+      thresholdKm: 0.5,
+      users: [
+        {
+          userId: "admin1",
+          userName: "malik@pinasz.com",
+          email: "malik@pinasz.com",
+          visitCount: 2,
+          farFromCustomerCount: 2,
+          totalRouteDistanceKm: 0,
+          entries: [{ id: "e1" }, { id: "e2" }],
+          daySummary: { lines: ["Two visits."] },
+        },
+        {
+          userId: "u1",
+          userName: "Sales One",
+          email: "one@madiba.com",
+          visitCount: 1,
+          farFromCustomerCount: 0,
+          totalRouteDistanceKm: 3,
+          entries: [],
+          daySummary: { lines: ["One visit."] },
+        },
+      ],
+    }),
+    loadProfiles: async () => ([
+      { id: "admin1", role: "admin", email: "malik@pinasz.com", salesman_name: "Malik", is_active: true },
+      { id: "u1", role: "salesman", email: "one@madiba.com", report_email: "one@company.com", salesman_name: "Sales One", is_active: true },
+    ]),
+    loadSummary: async () => ({ daySummary: { lines: ["No visits today."] } }),
+  });
+
+  assert.equal(result.userCount, 1);
+  assert.equal(sent.some((message) => /malik@pinasz\.com|Malik/.test(message.subject)), false);
+  assert.equal(sent.some((message) => message.subject.includes("Sales One")), true);
+});
+
 test("runDailyVisitReportEmailCycle can send only selected users", async () => {
   const sent = [];
   const result = await runDailyVisitReportEmailCycle({}, {

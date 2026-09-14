@@ -1192,7 +1192,10 @@ export default function NewOrderPage() {
   }, [buildOrderSnapshot, language, presentOrderWhatsappShare, saveDraft]);
 
   const handleSubmitOrder = useCallback(async () => {
-    const saved = await submitOrder({ silent: true });
+    const saved = await submitOrder({
+      silent: true,
+      creditApprovalRequired: Boolean(creditApproval?.required),
+    });
     if (!saved?.orderId) return;
 
     const snapshot = buildOrderSnapshot(saved.orderId, "Submitted", saved.orderNumber, saved.visitDistance);
@@ -1210,7 +1213,7 @@ export default function NewOrderPage() {
         : `Order #${orderNumber} submitted.`);
 
     await presentOrderWhatsappShare(snapshot, { savedMessage, queued });
-  }, [buildOrderSnapshot, language, presentOrderWhatsappShare, submitOrder]);
+  }, [buildOrderSnapshot, creditApproval?.required, language, presentOrderWhatsappShare, submitOrder]);
 
   const shareText = useMemo(() => {
     if (!lastSavedOrder) return "";

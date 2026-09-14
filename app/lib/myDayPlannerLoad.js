@@ -15,7 +15,13 @@ export function visitReportsSinceIso(now = new Date(), days = MY_DAY_VISIT_LOOKB
   return new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
-export function applyLatestVisitFromLogRow(latestVisitByCustomer, nextVisitByCustomer, row, getSortTimestamp) {
+export function applyLatestVisitFromLogRow(
+  latestVisitByCustomer,
+  nextVisitByCustomer,
+  row,
+  getSortTimestamp,
+  scheduleMetaByCustomer = null,
+) {
   if (!row?.note) return;
 
   try {
@@ -27,10 +33,18 @@ export function applyLatestVisitFromLogRow(latestVisitByCustomer, nextVisitByCus
     const current = latestVisitByCustomer.get(customerCode);
     if (!current || getSortTimestamp(visitAt) > getSortTimestamp(current)) {
       latestVisitByCustomer.set(customerCode, visitAt);
-      nextVisitByCustomer.set(
-        customerCode,
-        activeScheduledVisitDate(parsed?.next_visit_at, visitAt) || null,
-      );
+      const nextVisitAt = activeScheduledVisitDate(parsed?.next_visit_at, visitAt) || null;
+      nextVisitByCustomer.set(customerCode, nextVisitAt);
+      if (scheduleMetaByCustomer) {
+        const scheduledByUserId = String(
+          row.user_id || parsed?.saved_by_user_id || parsed?.created_by || "",
+        ).trim();
+        scheduleMetaByCustomer.set(customerCode, {
+          scheduled_by_user_id: scheduledByUserId || null,
+          scheduled_at: visitAt || row.created_at || null,
+          next_visit_at: nextVisitAt,
+        });
+      }
     }
   } catch {
     // Ignore malformed notes.

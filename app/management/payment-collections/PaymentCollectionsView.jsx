@@ -70,7 +70,6 @@ import { formatKsaDateOnly, formatKsaDateTime, getKsaDateString, ksaDayBounds } 
 import { getScheduleTodayKey, isScheduleDateInWindow } from "../../lib/scheduleDateWindow";
 import {
   getTodayDateKey,
-  nextVisitDateInputValue,
   validateNextVisitDate,
 } from "../../lib/nextVisitDate";
 import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
@@ -160,6 +159,8 @@ const TEXT = {
   noLegal: { en: "No customers transferred to legal department.", ar: "لا يوجد عملاء محولون إلى القسم القانوني." },
   visitForm: { en: "Collection Visit", ar: "زيارة تحصيل" },
   visitOutcome: { en: "Visit Outcome", ar: "نتيجة الزيارة" },
+  selectOutcome: { en: "Select outcome", ar: "اختر النتيجة" },
+  selectReceiptMode: { en: "Select mode", ar: "اختر الطريقة" },
   fundsReceived: { en: "Funds received", ar: "تم استلام مبلغ" },
   askedComeLater: { en: "Asked to come later", ar: "طلب الحضور لاحقاً" },
   responsibleAbsent: { en: "Responsible not available", ar: "المسؤول غير متاح" },
@@ -910,30 +911,21 @@ async function copyTextToClipboard(text) {
   }
 }
 
-function mapInitialOutcome(row) {
-  const stored = String(row?.latest_collection?.visit_outcome || "").trim().toUpperCase();
-  if (stored) return stored;
-  const status = String(row?.latest_collection?.payment_status || "").trim().toUpperCase();
-  if (status === "PAID" || status === "PARTIAL") return "FUNDS_RECEIVED";
-  if (status === "PROMISED") return "ASKED_COME_LATER";
-  return "RESPONSIBLE_NOT_AVAILABLE";
-}
-
 const QUEUE_NETWORK_TIMEOUT_MS = 45000;
 
 function queueHasRows(queues) {
   return collectionQueuesHaveRows(queues);
 }
 
-function buildInitialForm(row) {
+function buildInitialForm() {
   return {
-    visitOutcome: mapInitialOutcome(row),
-    amountReceived: row?.latest_collection?.amount_received ? String(row.latest_collection.amount_received) : "",
-    receiptMode: row?.latest_collection?.receipt_mode || "",
-    nextVisitAt: nextVisitDateInputValue(row?.latest_collection?.next_visit_at),
-    remarkArabic: row?.latest_collection?.remark_arabic || "",
-    remarkEnglish: row?.latest_collection?.remark_english || "",
-    legalNote: row?.legal_transfer?.note || "",
+    visitOutcome: "",
+    amountReceived: "",
+    receiptMode: "",
+    nextVisitAt: "",
+    remarkArabic: "",
+    remarkEnglish: "",
+    legalNote: "",
     paymentCopy: null,
     receiptCopy: null,
   };
@@ -941,7 +933,7 @@ function buildInitialForm(row) {
 
 function collectionFormIsDirty(form, row) {
   if (!row || !form) return false;
-  const initial = buildInitialForm(row);
+  const initial = buildInitialForm();
   const keys = ["visitOutcome", "amountReceived", "receiptMode", "nextVisitAt", "remarkArabic", "remarkEnglish", "legalNote"];
   if (keys.some((key) => String(form[key] || "") !== String(initial[key] || ""))) return true;
   return Boolean(form.paymentCopy || form.receiptCopy);
@@ -961,7 +953,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [dueCustomers, setDueCustomers] = useState([]);
   const [notDueCustomers, setNotDueCustomers] = useState([]);
   const [legalCustomers, setLegalCustomers] = useState([]);
-  const [form, setForm] = useState(buildInitialForm(null));
+  const [form, setForm] = useState(buildInitialForm());
   const [savingCustomerCode, setSavingCustomerCode] = useState("");
   const [legalBusyCode, setLegalBusyCode] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
@@ -1090,7 +1082,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   useEffect(() => {
     if (activeRow) {
-      setForm(buildInitialForm(activeRow));
+      setForm(buildInitialForm());
     }
   }, [activeRow]);
 
@@ -2989,6 +2981,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                         }));
                                       }}
                                     >
+                                      <option value="">{t("selectOutcome")}</option>
                                       <option value="FUNDS_RECEIVED">{t("fundsReceived")}</option>
                                       <option value="ASKED_COME_LATER">{t("askedComeLater")}</option>
                                       <option value="RESPONSIBLE_NOT_AVAILABLE">{t("responsibleAbsent")}</option>
@@ -3004,6 +2997,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   <label>
                                     {t("modeOfReceipt")}
                                     <select className="moduleInput" value={form.receiptMode} onChange={(event) => setForm((current) => ({ ...current, receiptMode: event.target.value }))} disabled={form.visitOutcome !== "FUNDS_RECEIVED"}>
+                                      <option value="">{t("selectReceiptMode")}</option>
                                       <option value="CASH">{t("cash")}</option>
                                       <option value="CHEQUE">{t("cheque")}</option>
                                       <option value="BANK_TRANSFER">{t("bankTransfer")}</option>

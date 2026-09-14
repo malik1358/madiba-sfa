@@ -28,6 +28,7 @@ import {
   yearGridTotals,
 } from "../../lib/categoryGrowth";
 import { translate } from "../../lib/appLanguage";
+import BiCustomerNameLink from "./BiCustomerNameLink";
 
 function formatPreparedAt(value) {
   if (!value) return "";
@@ -65,6 +66,10 @@ const TEXT = {
     ar: "جدول المبيعات غير متاح بعد، لذلك لا يمكن بناء هذا التقرير.",
   },
   summary: { en: "Category growth since first sale", ar: "نمو الفئات منذ أول بيع" },
+  summaryCustomer: { en: "Customer sales and growth since first sale", ar: "مبيعات العملاء ونموهم منذ أول بيع" },
+  summaryCustomerProfit: { en: "Customer profit and growth since first sale", ar: "ربح العملاء ونموهم منذ أول بيع" },
+  summaryItem: { en: "Item sales and growth since first sale", ar: "مبيعات الأصناف ونموها منذ أول بيع" },
+  summaryItemProfit: { en: "Item profit and growth since first sale", ar: "ربح الأصناف ونموها منذ أول بيع" },
   summaryHint: {
     en: "Growth is calculated on the current slice of uploaded sales. Current year is year-to-date through the latest invoice date in the slice.",
     ar: "يُحسب النمو على شريحة المبيعات الحالية. السنة الحالية حتى تاريخ آخر فاتورة في الشريحة.",
@@ -83,7 +88,15 @@ const TEXT = {
   range: { en: "Sales history", ar: "تاريخ المبيعات" },
   rangeProfit: { en: "Profit history", ar: "تاريخ الربح" },
   redAlerts: { en: "Categories needing attention", ar: "فئات تحتاج متابعة" },
+  redAlertsCustomer: { en: "Customers needing attention", ar: "عملاء يحتاجون متابعة" },
+  redAlertsItem: { en: "Items needing attention", ar: "أصناف تحتاج متابعة" },
   noAlerts: { en: "No category red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على الفئات من المبيعات المرفوعة." },
+  noAlertsCustomer: { en: "No customer red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على العملاء من المبيعات المرفوعة." },
+  noAlertsItem: { en: "No item red lights from uploaded sales.", ar: "لا توجد إشارات حمراء على الأصناف من المبيعات المرفوعة." },
+  holdHintCustomer: {
+    en: "Customers transferred to legal, or with outstanding older than 60 days, are hidden. We are not selling them until they pay.",
+    ar: "العملاء المحوّلون للقانوني أو الذين لديهم مستحقات أكثر من 60 يوماً مخفيون. لا نبيع لهم حتى يسددوا.",
+  },
   yearly: { en: "Sales by year since inception", ar: "المبيعات حسب السنة منذ البداية" },
   yearlyProfit: { en: "Profit by year since inception", ar: "الربح حسب السنة منذ البداية" },
   yearlyHint: {
@@ -162,6 +175,7 @@ function YearlyGrowthTable({
   years,
   currentYear,
   t,
+  linkNames = false,
 }) {
   const keys = useMemo(
     () => ["name", "first", "last", "lifetime", "share", "cagr", "yoy", "mom", "status", ...years, "__total__"],
@@ -228,7 +242,7 @@ function YearlyGrowthTable({
         <tbody>
           {visibleRows.map((row, rowIndex) => (
             <tr key={row.label || row.category}>
-              <td>{row.label || row.category}</td>
+              <td><BiCustomerNameLink row={row} enabled={linkNames} /></td>
               <td>{row.firstDate}</td>
               <td>{row.lastDate}</td>
               <td>{formatMoneyAmount(row.lifetime)}</td>
@@ -330,11 +344,16 @@ export default function CategoryGrowthReport({
   onGroupByChange,
   onApply,
   onClear,
+  lockGroupBy = "",
 }) {
   const amountMeasure = measure === "profit" || report?.measure === "profit" ? "profit" : "sales";
   const t = translateForMeasure(language, TEXT, amountMeasure);
-  const groupBy = applied?.groupBy || report?.filters?.groupBy || "category";
+  const groupBy = lockGroupBy || applied?.groupBy || report?.filters?.groupBy || "category";
   const groupLabel = growthDimensionLabel(groupBy, language);
+  const headingSuffix = groupBy === "item" ? "Item" : groupBy === "customer" ? "Customer" : "";
+  const heading = (key) => (headingSuffix ? t(`${key}${headingSuffix}`) : t(key));
+  const reportAnchor = groupBy === "item" ? "bi-item-growth" : groupBy === "customer" ? "bi-customer-growth" : "bi-category-growth";
+  const contributionAnchor = groupBy === "item" ? "bi-item-contribution" : groupBy === "customer" ? "bi-customer-contribution" : "bi-contribution";
   const allRows = report?.groups || report?.categories || [];
   const categories = useMemo(
     () => filterGrowthRows(allRows, { search, statusFilter }),
@@ -402,6 +421,7 @@ export default function CategoryGrowthReport({
       onGroupByChange={onGroupByChange}
       onApply={onApply}
       onClear={onClear}
+      lockGroupBy={lockGroupBy}
     />
   );
 
@@ -435,9 +455,9 @@ export default function CategoryGrowthReport({
   return (
     <>
       {filters}
-      <section className="moduleSection">
+      <section id={reportAnchor} className="moduleSection">
         <div className="moduleSectionHeader">
-          <h2>{t("summary")}</h2>
+          <h2>{heading("summary")}</h2>
         </div>
         <p className="moduleHint">{t("summaryHint")}</p>
         {report.meta?.preparedAt ? (
@@ -486,16 +506,17 @@ export default function CategoryGrowthReport({
 
       <section className="moduleSection">
         <div className="moduleSectionHeader">
-          <h2>{t("redAlerts")}</h2>
+          <h2>{heading("redAlerts")}</h2>
         </div>
+        {groupBy === "customer" ? <p className="moduleHint">{t("holdHintCustomer")}</p> : null}
         {(report.alerts || []).length === 0 ? (
-          <div className="moduleHint">{t("noAlerts")}</div>
+          <div className="moduleHint">{heading("noAlerts")}</div>
         ) : (
           <div className="moduleBusinessAlertList">
             {(report.alerts || []).map((alert) => (
               <article key={alert.code} className="moduleBusinessAlert moduleBusinessAlert--red">
                 <div className="moduleBusinessAlertBody">
-                  <strong>{alert.title}</strong>
+                  <strong><BiCustomerNameLink row={{ label: alert.title }} enabled={groupBy === "customer"} /></strong>
                   <p>{alert.detail}</p>
                 </div>
               </article>
@@ -529,6 +550,7 @@ export default function CategoryGrowthReport({
           years={years}
           currentYear={currentYear}
           t={t}
+          linkNames={groupBy === "customer"}
         />
         )}
       </section>
@@ -555,6 +577,7 @@ export default function CategoryGrowthReport({
             filename={`sales-growth-${groupBy}-quarters`}
             sheetName="Last 8 Quarters"
             rowHeader={groupLabel}
+            linkNames={groupBy === "customer"}
             rows={categories}
             periods={recentQuarters}
             currentPeriod={currentQuarter}
@@ -589,6 +612,7 @@ export default function CategoryGrowthReport({
             filename={`sales-growth-${groupBy}-months`}
             sheetName="Last 12 Months"
             rowHeader={groupLabel}
+            linkNames={groupBy === "customer"}
             rows={categories}
             periods={recentMonths}
             currentPeriod={currentMonth}
@@ -600,7 +624,7 @@ export default function CategoryGrowthReport({
         )}
       </section>
 
-      <section className="moduleSection">
+      <section id={contributionAnchor} className="moduleSection">
         <div className="moduleSectionHeader">
           <h2>{t("contribution")}</h2>
         </div>
@@ -614,6 +638,7 @@ export default function CategoryGrowthReport({
               filename={`contribution-${groupBy}-years`}
               sheetName="Yearly contribution"
               rowHeader={groupLabel}
+            linkNames={groupBy === "customer"}
               rows={yearContributionRows}
               periods={years}
               currentPeriod={currentYear}
@@ -629,6 +654,7 @@ export default function CategoryGrowthReport({
               filename={`contribution-${groupBy}-quarters`}
               sheetName="Quarterly contribution"
               rowHeader={groupLabel}
+            linkNames={groupBy === "customer"}
               rows={quarterContributionRows}
               periods={recentQuarters}
               currentPeriod={currentQuarter}
@@ -644,6 +670,7 @@ export default function CategoryGrowthReport({
               filename={`contribution-${groupBy}-months`}
               sheetName="Monthly contribution"
               rowHeader={groupLabel}
+            linkNames={groupBy === "customer"}
               rows={monthContributionRows}
               periods={recentMonths}
               currentPeriod={currentMonth}

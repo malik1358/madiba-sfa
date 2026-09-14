@@ -89,3 +89,5 @@ curl -X POST https://YOUR_DOMAIN/api/admin/price-sync \
 - Browser pages use /api/pricing/cache
 - /api/pricing/cache reads from public.price_catalog_cache
 - /api/admin/price-sync inserts a dump into public.price_catalog_snapshots and updates public.price_catalog_cache
+- Price sync also records changed item prices into public.item_price_history (see [sql/setup_item_price_history.sql](sql/setup_item_price_history.sql))
+- Field users can open **Item Price History** under Management to view at least the last 5 catalog prices with dates for an item

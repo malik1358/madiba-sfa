@@ -14,11 +14,11 @@ export default function CustomerHeader({ customer, analytics, outstandingSalesma
       <section className="auditSummaryGrid">
         <div className="auditSummaryCard">
           <span>Orders</span>
-          <strong>{analytics.orderCount}</strong>
+          <strong>{analytics?.orderCount ?? 0}</strong>
         </div>
         <div className="auditSummaryCard">
           <span>Last Purchase</span>
-          <strong>{analytics.latestDate}</strong>
+          <strong>{analytics?.latestDate || "-"}</strong>
         </div>
       </section>
     </section>

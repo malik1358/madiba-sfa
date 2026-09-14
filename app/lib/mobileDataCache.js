@@ -22,7 +22,8 @@ import {
 
 export { buildScopeHash } from "./scopeHash.js";
 
-export const SNAPSHOT_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+/** Auto-refresh device customer/item snapshot when older than this. */
+export const SNAPSHOT_STALE_AFTER_MS = 60 * 60 * 1000;
 export const COLLECTION_QUEUES_READY_EVENT = "madiba-collection-queues-ready";
 const MOBILE_SNAPSHOT_META_KEY = "mobileSnapshot:meta:v1";
 const COLLECTION_QUEUE_HYDRATE_WAIT_MS = 45000;
@@ -51,7 +52,8 @@ function customersCacheKey(scope, enriched = false) {
 }
 
 function customerHistoryCacheKey(scope, customerCode) {
-  return `history:v1:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
+  // v3: history payloads include receipt register rows mapped to the customer.
+  return `history:v3:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
 }
 
 function itemsMasterCacheKey() {
@@ -228,9 +230,16 @@ async function fetchVisibleCustomersNetwork(accessToken, { enriched = false } = 
   return payload.customers || [];
 }
 
-async function fetchCustomerHistoryNetwork(accessToken, customerCode) {
+async function fetchCustomerHistoryNetwork(accessToken, customerCode, customerName = "") {
+  const params = new URLSearchParams({
+    customerCode: String(customerCode || ""),
+  });
+  if (String(customerName || "").trim()) {
+    params.set("customerName", String(customerName).trim());
+  }
+
   const response = await fetch(
-    `/api/customer-history?customerCode=${encodeURIComponent(customerCode)}`,
+    `/api/customer-history?${params.toString()}`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -245,6 +254,7 @@ async function fetchCustomerHistoryNetwork(accessToken, customerCode) {
   return {
     transactions: Array.isArray(payload.transactions) ? payload.transactions : [],
     peerTransactions: Array.isArray(payload.peerTransactions) ? payload.peerTransactions : [],
+    receipts: Array.isArray(payload.receipts) ? payload.receipts : [],
   };
 }
 
@@ -388,11 +398,16 @@ export async function fetchVisibleCustomersCached(accessToken, scope, options = 
 }
 
 export async function fetchCustomerHistoryCached(accessToken, scope, customerCode, options = {}) {
+  const customerName = options.customerName || "";
   return fetchWithLocalCache(
     customerHistoryCacheKey(scope, customerCode),
     CACHE_TTL.customerHistoryMs,
-    () => fetchCustomerHistoryNetwork(accessToken, customerCode),
-    { onUpdate: options.onUpdate },
+    () => fetchCustomerHistoryNetwork(accessToken, customerCode, customerName),
+    {
+      onUpdate: options.onUpdate,
+      // Empty history was often a failed code-only lookup; always revalidate those.
+      forceRefresh: Boolean(options.forceRefresh),
+    },
   );
 }
 
@@ -475,15 +490,13 @@ function toCollectionScope(scope) {
 
 export async function invalidateCollectionQueuesForUser(userId) {
   const { removeCacheEntry } = await import("./localDataStore.js");
-  const scopeEntry = await readCacheEntry(collectionScopeCacheKey(userId));
-  if (!scopeEntry?.value) return;
-  const scope = scopeEntry.value;
-  await Promise.all([
-    removeCacheEntry(collectionQueuesCacheKey(scope)),
-    ...LEGACY_COLLECTION_QUEUE_CACHE_VERSIONS.map((version) => (
-      removeCacheEntry(collectionQueuesCacheKey(scope, version))
-    )),
-  ]);
+  // Clear every collection-queue cache key across current and legacy versions.
+  // Scope hashes can drift between the provisional sales-scope and the API
+  // scope, and a single-key delete leaves stale legal/due rows that
+  // "Remove From Legal" then reloads from disk.
+  await removeCacheEntriesByPrefix("collectionQueues:v");
+  if (!userId) return;
+  await removeCacheEntry(collectionScopeCacheKey(userId));
 }
 
 export async function readCollectionQueuesForUser(userId) {

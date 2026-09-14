@@ -54,9 +54,10 @@ test("data refresh job tracks done versus pending steps", () => {
   assert.equal(status.steps.length, 0);
 });
 
-test("isDataRefreshStale flags dumps older than six hours", () => {
+test("isDataRefreshStale flags dumps older than one hour", () => {
   const now = Date.parse("2026-09-07T12:00:00.000Z");
+  assert.equal(isDataRefreshStale({ lastSavedAt: now - 30 * 60 * 1000 }, undefined, now), false);
+  assert.equal(isDataRefreshStale({ lastSavedAt: now - 2 * 60 * 60 * 1000 }, undefined, now), true);
   assert.equal(isDataRefreshStale({ lastSavedAt: now - 2 * 60 * 60 * 1000 }, 6 * 60 * 60 * 1000, now), false);
-  assert.equal(isDataRefreshStale({ lastSavedAt: now - 8 * 60 * 60 * 1000 }, 6 * 60 * 60 * 1000, now), true);
-  assert.equal(isDataRefreshStale({ lastSavedAt: 0, lastBuiltAt: "" }, 6 * 60 * 60 * 1000, now), true);
+  assert.equal(isDataRefreshStale({ lastSavedAt: 0, lastBuiltAt: "" }, undefined, now), true);
 });

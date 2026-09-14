@@ -521,6 +521,7 @@ async function fetchInactiveCustomers(admin, scope) {
 async function attachRecentSalesValues(admin, customers) {
   const canonicalCodeByCandidate = new Map();
   const salesValueByCustomer = new Map();
+  const sales30dByCustomer = new Map();
   const monthlySalesByCustomer = new Map();
   const latestSalesDateByCustomer = new Map();
 
@@ -534,6 +535,9 @@ async function attachRecentSalesValues(admin, customers) {
   const candidateCodes = [...canonicalCodeByCandidate.keys()];
   const fromDate = new Date();
   fromDate.setUTCMonth(fromDate.getUTCMonth() - 6);
+  const from30Date = new Date();
+  from30Date.setUTCDate(from30Date.getUTCDate() - 30);
+  const from30Iso = from30Date.toISOString().slice(0, 10);
 
   for (let start = 0; start < candidateCodes.length; start += 200) {
     const codeChunk = candidateCodes.slice(start, start + 200);
@@ -567,13 +571,16 @@ async function attachRecentSalesValues(admin, customers) {
       const amount = Math.max(Number(row.sales_amount || 0), 0);
       const currentValue = salesValueByCustomer.get(canonicalCode) || 0;
       salesValueByCustomer.set(canonicalCode, currentValue + amount);
+      const saleDate = laterDateOnly(row.transaction_date);
+      if (saleDate && saleDate >= from30Iso) {
+        sales30dByCustomer.set(canonicalCode, (sales30dByCustomer.get(canonicalCode) || 0) + amount);
+      }
       const monthKey = monthKeyFromDate(row.transaction_date);
       if (monthKey && amount > 0) {
         const months = monthlySalesByCustomer.get(canonicalCode) || new Map();
         months.set(monthKey, (months.get(monthKey) || 0) + amount);
         monthlySalesByCustomer.set(canonicalCode, months);
       }
-      const saleDate = laterDateOnly(row.transaction_date);
       const currentDate = latestSalesDateByCustomer.get(canonicalCode) || "";
       if (saleDate && saleDate > currentDate) {
         latestSalesDateByCustomer.set(canonicalCode, saleDate);
@@ -588,6 +595,7 @@ async function attachRecentSalesValues(admin, customers) {
     return {
       ...customer,
       recent_sales_value: salesValueByCustomer.get(code) || 0,
+      recent_30d_sales_value: sales30dByCustomer.get(code) || 0,
       average_monthly_purchase: monthlyStats.averageMonthlyPurchase,
       highest_monthly_sales: monthlyStats.highestMonthlySales,
       operational_months: monthlyStats.operationalMonths,
@@ -732,6 +740,7 @@ export async function buildVisibleCustomersForScope(admin, scope, options = {}) 
       responseCustomers = responseCustomers.map((customer) => ({
         ...customer,
         recent_sales_value: Number(customer?.recent_sales_value || 0),
+        recent_30d_sales_value: Number(customer?.recent_30d_sales_value || 0),
         average_monthly_purchase: Number(customer?.average_monthly_purchase || 0),
         highest_monthly_sales: Number(customer?.highest_monthly_sales || 0),
         operational_months: Number(customer?.operational_months || 0),

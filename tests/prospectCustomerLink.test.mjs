@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildCustomerGpsUpdateFromProspect,
+  buildCustomerSalesmanAssignmentFromProspect,
   buildProspectNameSearchTokens,
   customerRecordMatchesCode,
   formatCustomerLookupPreview,
@@ -37,6 +38,25 @@ test("buildCustomerGpsUpdateFromProspect skips copy when customer already has GP
   );
 
   assert.equal(update, null);
+});
+
+test("buildCustomerSalesmanAssignmentFromProspect assigns linked customers to the prospect creator", () => {
+  const update = buildCustomerSalesmanAssignmentFromProspect(
+    { salesman_code: "OSAMA" },
+    { current_salesman_code: "JUNAID", previous_salesman_code: null },
+  );
+
+  assert.equal(update.current_salesman_code, "OSAMA");
+  assert.equal(update.previous_salesman_code, "JUNAID");
+  assert.ok(update.updated_at);
+
+  assert.equal(
+    buildCustomerSalesmanAssignmentFromProspect(
+      { salesman_code: "OSAMA" },
+      { current_salesman_code: "OSAMA" },
+    ),
+    null,
+  );
 });
 
 test("buildCustomerGpsUpdateFromProspect can overwrite existing customer GPS", () => {

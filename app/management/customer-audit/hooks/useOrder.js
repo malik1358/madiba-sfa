@@ -39,6 +39,7 @@ function buildOrderPayload({
   location,
   capturedAt,
   platform,
+  creditApprovalRequired = false,
 }) {
   const pricedLines = priceOrderLines(
     orderItems.map((item) => ({
@@ -69,6 +70,7 @@ function buildOrderPayload({
     capturedAt,
     location,
     platform,
+    creditApprovalRequired: Boolean(creditApprovalRequired),
     lines: pricedLines,
   };
 }
@@ -92,6 +94,7 @@ export function useOrder({
   schemes = [],
   pricingRegion = 'riyadh',
   setPricingRegion = null,
+  creditApprovalRequired = false,
 }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
   const [orderQuantities, setOrderQuantities] = useState({});
@@ -289,6 +292,7 @@ export function useOrder({
         customerName: selectedCustomer.customer_name,
         accessToken: session.access_token,
         role: userRole,
+        customer: selectedCustomer,
       });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
@@ -419,6 +423,7 @@ export function useOrder({
         customerName: selectedCustomer?.customer_name,
         accessToken: session.access_token,
         role: userRole,
+        customer: selectedCustomer,
       });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
@@ -448,6 +453,7 @@ export function useOrder({
           location,
           capturedAt,
           platform,
+          creditApprovalRequired: Boolean(options.creditApprovalRequired ?? creditApprovalRequired),
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -512,7 +518,7 @@ export function useOrder({
     } finally {
       setSubmittingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, creditApprovalRequired, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

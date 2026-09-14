@@ -86,15 +86,24 @@ export async function findProspectByOfflineId(admin, offlineId) {
 
   const { data: byColumn, error: columnError } = await admin
     .from("prospects")
-    .select("id,salesman_code,company_name,remarks,status,follow_up_date")
+    .select("id,salesman_code,company_name,remarks,status,follow_up_date,offline_id,created_by")
     .eq("offline_id", id)
     .maybeSingle();
 
   if (!columnError && byColumn?.id) return byColumn;
 
+  if (columnError && /created_by/i.test(String(columnError.message || ""))) {
+    const { data: withoutCreatedBy, error: retryError } = await admin
+      .from("prospects")
+      .select("id,salesman_code,company_name,remarks,status,follow_up_date,offline_id")
+      .eq("offline_id", id)
+      .maybeSingle();
+    if (!retryError && withoutCreatedBy?.id) return withoutCreatedBy;
+  }
+
   const { data: byRemarks } = await admin
     .from("prospects")
-    .select("id,salesman_code,company_name,remarks,status,follow_up_date")
+    .select("id,salesman_code,company_name,remarks,status,follow_up_date,offline_id")
     .ilike("remarks", `%OfflineId: ${id}%`)
     .limit(5);
 
@@ -145,6 +154,17 @@ export function canAccessProspectSalesmanCode(scope, salesmanCode) {
   if (allowed.has(target)) return true;
 
   return normalizeProspectSalesmanCode(scope.currentSalesmanCode) === target;
+}
+
+export function canAccessProspectRecord(scope, prospect, userId = "") {
+  if (!scope || !prospect) return false;
+  if (scope.hasAllAccess) return true;
+
+  const creatorId = String(prospect.created_by || "").trim();
+  const viewerId = String(userId || scope.currentUserId || "").trim();
+  if (creatorId && viewerId && creatorId === viewerId) return true;
+
+  return canAccessProspectSalesmanCode(scope, prospect.salesman_code);
 }
 
 export function buildProspectCustomerCode(prospectId) {
@@ -349,7 +369,9 @@ export function enrichProspectsWithOrders(prospects, orders) {
   });
 }
 
-export async function listProspectsForScope(admin, scope) {
+export async function listProspectsForScope(admin, scope, options = {}) {
+  const createdByUserId = String(options.createdByUserId || scope?.currentUserId || "").trim();
+
   let query = admin
     .from("prospects")
     .select("*")
@@ -360,15 +382,43 @@ export async function listProspectsForScope(admin, scope) {
       .map((code) => normalizeProspectSalesmanCode(code))
       .filter(Boolean);
 
-    if (visibleCodes.length > 0) {
+    if (visibleCodes.length > 0 && createdByUserId) {
+      const quotedCodes = visibleCodes
+        .map((code) => `"${String(code).replace(/"/g, "\\\"")}"`)
+        .join(",");
+      query = query.or(`salesman_code.in.(${quotedCodes}),created_by.eq.${createdByUserId}`);
+    } else if (visibleCodes.length > 0) {
       query = query.in("salesman_code", visibleCodes);
+    } else if (createdByUserId) {
+      query = query.eq("created_by", createdByUserId);
     } else if (scope?.currentSalesmanCode) {
       query = query.eq("salesman_code", normalizeProspectSalesmanCode(scope.currentSalesmanCode));
     }
   }
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) {
+    // Older deployments may not have created_by yet — fall back to salesman scope only.
+    const message = String(error.message || error.details || error || "");
+    if (/created_by/i.test(message) && !scope?.hasAllAccess) {
+      let fallback = admin
+        .from("prospects")
+        .select("*")
+        .order("created_at", { ascending: false });
+      const visibleCodes = (Array.isArray(scope?.visibleSalesmanCodes) ? scope.visibleSalesmanCodes : [])
+        .map((code) => normalizeProspectSalesmanCode(code))
+        .filter(Boolean);
+      if (visibleCodes.length > 0) {
+        fallback = fallback.in("salesman_code", visibleCodes);
+      } else if (scope?.currentSalesmanCode) {
+        fallback = fallback.eq("salesman_code", normalizeProspectSalesmanCode(scope.currentSalesmanCode));
+      }
+      const retry = await fallback;
+      if (retry.error) throw retry.error;
+      return retry.data || [];
+    }
+    throw error;
+  }
   return data || [];
 }
 
@@ -395,8 +445,8 @@ export async function fetchProspectOrders(admin, prospectsOrIds) {
   ));
 }
 
-export async function listProspectsWithOrdersForScope(admin, scope) {
-  const prospects = await listProspectsForScope(admin, scope);
+export async function listProspectsWithOrdersForScope(admin, scope, options = {}) {
+  const prospects = await listProspectsForScope(admin, scope, options);
   const orders = await fetchProspectOrders(admin, prospects);
   return enrichProspectsWithOrders(prospects, orders);
 }

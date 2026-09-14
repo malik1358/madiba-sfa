@@ -45,7 +45,13 @@ import {
 import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { slimVisitStockChecks } from "../../lib/visitReportSave";
-import { buildGpsActivityNote, formatCollectorDisplayName, requireGpsLocation, resolveGpsCapturePlatform } from "../../lib/geo";
+import {
+  buildGpsActivityNote,
+  formatCollectionUserDisplayName,
+  formatCollectorDisplayName,
+  requireGpsLocation,
+  resolveGpsCapturePlatform,
+} from "../../lib/geo";
 import {
   isMorningAttendanceRequiredForRole,
   notifyMorningAttendanceComplete,
@@ -69,7 +75,7 @@ import {
   nextVisitDateInputValue,
   validateNextVisitDate,
 } from "../../lib/nextVisitDate";
-import { formatKsaDateTime, formatKsaTime, getKsaDateString } from "../../lib/workdayActivity";
+import { formatKsaDateOnly, formatKsaDateTime, formatKsaTime, getKsaDateString } from "../../lib/workdayActivity";
 
 const PAGE_TEXT = {
   title: { en: "My Day", ar: "يومي" },
@@ -110,6 +116,9 @@ const PAGE_TEXT = {
   pastScheduledVisits: { en: "Past dates", ar: "التواريخ السابقة" },
   calendarDate: { en: "Date", ar: "التاريخ" },
   calendarTime: { en: "Time", ar: "الوقت" },
+  visitWhen: { en: "Visit when", ar: "موعد الزيارة" },
+  scheduledBy: { en: "Scheduled by", ar: "جدولها" },
+  scheduledOn: { en: "Scheduled on", ar: "تاريخ الجدولة" },
   unscheduledVisits: { en: "Unscheduled visits", ar: "زيارات بدون موعد" },
   noRoutes: { en: "No routes", ar: "لا توجد مسارات" },
   customersCount: { en: "customers", ar: "عميل" },
@@ -753,7 +762,15 @@ export default function MyDayPage({ mode = "default" } = {}) {
             newProspectsCount = (newProspectsRes.data || []).length;
           }
           if (!scheduledProspectsRes.error) {
-            loadedProspectScheduleRows = buildProspectScheduleRows(scheduledProspectsRes.data);
+            loadedProspectScheduleRows = buildProspectScheduleRows(scheduledProspectsRes.data).map((row) => {
+              const salesmanCode = String(row.salesman_code || "").trim().toUpperCase();
+              return {
+                ...row,
+                salesman_name: salesmanNameByCode.get(salesmanCode) || salesmanCode,
+                scheduled_by_name: salesmanNameByCode.get(salesmanCode) || salesmanCode || "",
+                scheduled_at: null,
+              };
+            });
             setProspectScheduleRows(loadedProspectScheduleRows);
           }
         } else {
@@ -796,10 +813,17 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
         const latestVisitByCustomer = new Map();
         const nextVisitByCustomer = new Map();
+        const scheduleMetaByCustomer = new Map();
 
         if (logsCheck.available) {
           (visitReportsRes.data || []).forEach((row) => {
-            applyLatestVisitFromLogRow(latestVisitByCustomer, nextVisitByCustomer, row, getSortTimestamp);
+            applyLatestVisitFromLogRow(
+              latestVisitByCustomer,
+              nextVisitByCustomer,
+              row,
+              getSortTimestamp,
+              scheduleMetaByCustomer,
+            );
           });
         } else {
           (fallbackReportsRes.data || []).forEach((row) => {
@@ -809,13 +833,38 @@ export default function MyDayPage({ mode = "default" } = {}) {
               applyLatestVisitFromLogRow(
                 latestVisitByCustomer,
                 nextVisitByCustomer,
-                { note: JSON.stringify(parsed), created_at: parsed?.captured_at || parsed?.saved_at || null },
+                {
+                  note: JSON.stringify(parsed),
+                  created_at: parsed?.captured_at || parsed?.saved_at || null,
+                  user_id: parsed?.saved_by_user_id || null,
+                },
                 getSortTimestamp,
+                scheduleMetaByCustomer,
               );
             } catch {
               // Ignore malformed fallback records.
             }
           });
+        }
+
+        const schedulerNameByUserId = new Map();
+        const schedulerUserIds = [...new Set(
+          [...scheduleMetaByCustomer.values()]
+            .map((meta) => String(meta?.scheduled_by_user_id || "").trim())
+            .filter(Boolean),
+        )];
+        if (schedulerUserIds.length > 0) {
+          const { data: schedulerProfiles, error: schedulerProfilesError } = await supabase
+            .from("profiles")
+            .select("id,role,salesman_code,salesman_name,email")
+            .in("id", schedulerUserIds);
+          if (!schedulerProfilesError) {
+            (schedulerProfiles || []).forEach((profileRow) => {
+              const id = String(profileRow.id || "").trim();
+              if (!id) return;
+              schedulerNameByUserId.set(id, formatCollectionUserDisplayName(profileRow));
+            });
+          }
         }
 
         latestVisitByCustomer.forEach((visitAt, customerCode) => {
@@ -853,6 +902,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
         function mapVisitStatusRow(row) {
           const customerCode = String(row.customer_code || "").trim().toUpperCase();
           const salesmanCode = String(row.current_salesman_code || row.salesman_code || "").trim().toUpperCase();
+          const scheduleMeta = scheduleMetaByCustomer.get(customerCode) || null;
+          const scheduledByUserId = String(scheduleMeta?.scheduled_by_user_id || "").trim();
           return withVisitLastInvoice({
             customer_code: row.customer_code,
             customer_name: row.customer_name,
@@ -869,6 +920,11 @@ export default function MyDayPage({ mode = "default" } = {}) {
               nextVisitByCustomer.get(customerCode),
               latestVisitByCustomer.get(customerCode),
             ) || null,
+            scheduled_by_user_id: scheduledByUserId || null,
+            scheduled_by_name: scheduledByUserId
+              ? (schedulerNameByUserId.get(scheduledByUserId) || scheduledByUserId)
+              : "",
+            scheduled_at: scheduleMeta?.scheduled_at || null,
             recent_sales_value: Number(row.recent_sales_value || 0),
             average_monthly_purchase: Number(row.average_monthly_purchase || 0),
             highest_monthly_sales: Number(row.highest_monthly_sales || 0),
@@ -1322,6 +1378,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
             days_since_last_visit: 0,
             status: "Visited",
             next_visit_at: activeScheduledVisitDate(visitForm.nextVisitAt, capturedAt) || null,
+            scheduled_by_user_id: session.user.id,
+            scheduled_by_name: formatCollectionUserDisplayName(profile || {}) || formatCollectorDisplayName(profile || {}),
+            scheduled_at: capturedAt,
           };
         })
       );
@@ -2109,7 +2168,10 @@ export default function MyDayPage({ mode = "default" } = {}) {
                 <table className="moduleTable moduleScheduleTable">
                   <thead>
                     <tr>
+                      <th>{t("visitWhen")}</th>
                       <th>{t("calendarTime")}</th>
+                      <th>{t("scheduledBy")}</th>
+                      <th>{t("scheduledOn")}</th>
                       <th>{t("customer")}</th>
                       <th>{t("cityArea")}</th>
                       <th>{t("actions")}</th>
@@ -2118,7 +2180,10 @@ export default function MyDayPage({ mode = "default" } = {}) {
                   <tbody>
                     {day.rows.map((row) => (
                       <tr key={`planned-${day.dateKey}-${row.customer_code}`} id={`visit-customer-${row.customer_code}`}>
+                        <td data-label={t("visitWhen")}>{formatKsaDateOnly(row.schedule_date || row.next_visit_at)}</td>
                         <td data-label={t("calendarTime")}>{row.is_prospect || !/T\d{2}:\d{2}/.test(String(row.next_visit_at || "")) ? "-" : formatKsaTime(row.next_visit_at)}</td>
+                        <td data-label={t("scheduledBy")}>{row.scheduled_by_name || row.salesman_name || "-"}</td>
+                        <td data-label={t("scheduledOn")}>{row.scheduled_at ? formatKsaDateTime(row.scheduled_at) : "-"}</td>
                         <td data-label={t("customer")} className="moduleScheduleCellPrimary">{row.customer_name || row.customer_code}</td>
                         <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                         <td data-label={t("actions")} className="moduleScheduleCellActions">

@@ -61,12 +61,22 @@ export function buildMonthlyPerformancePdfModel(analytics, { currentMonthKey } =
     trend: monthTrend(month.sales, index > 0 ? monthlySummary[index - 1].sales : 0, index > 0),
   }));
 
+  const receiptCells = monthlySummary.map((month, index) => ({
+    text: numberFormat(month.receipts || 0),
+    trend: monthTrend(
+      month.receipts || 0,
+      index > 0 ? monthlySummary[index - 1].receipts || 0 : 0,
+      index > 0,
+    ),
+  }));
+
   const skuCells = monthlySummary.map((month, index) => ({
     text: String(month.skuCount ?? 0),
     trend: monthTrend(month.skuCount, index > 0 ? monthlySummary[index - 1].skuCount : 0, index > 0),
   }));
 
   const salesTotal = monthlySummary.reduce((total, month) => total + Number(month.sales || 0), 0);
+  const receiptTotal = monthlySummary.reduce((total, month) => total + Number(month.receipts || 0), 0);
 
   return {
     title: "Monthly Performance",
@@ -80,6 +90,11 @@ export function buildMonthlyPerformancePdfModel(analytics, { currentMonthKey } =
         label: "Sales",
         cells: salesCells,
         total: numberFormat(salesTotal),
+      },
+      {
+        label: "Receipts",
+        cells: receiptCells,
+        total: numberFormat(analytics.receiptTotal ?? receiptTotal),
       },
       {
         label: "SKUs Sold",

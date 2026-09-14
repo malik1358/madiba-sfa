@@ -447,7 +447,7 @@ export default function SalesmanMomReport({
   return (
     <>
       {filters}
-      <section className="moduleSection">
+      <section id="bi-salesman-mom" className="moduleSection">
         <div className="moduleSectionHeader">
           <h2>{t("summary")}</h2>
         </div>
@@ -600,7 +600,7 @@ export default function SalesmanMomReport({
         )}
       </section>
 
-      <section className="moduleSection">
+      <section id="bi-teams" className="moduleSection">
         <div className="moduleSectionHeader">
           <h2>{t("teamSummary")}</h2>
         </div>

@@ -6498,6 +6498,13 @@ th:has(.moduleTableColumnFilterInput) {
   font-weight: 700;
 }
 
+.dayRouteMapStops .dayRouteMapUnloggedIdle,
+.dayRouteMapStops .dayRouteMapUnloggedIdle strong,
+.dayRouteMapStops .dayRouteMapUnloggedIdle a {
+  color: #dc2626;
+  font-weight: 700;
+}
+
 .dayRouteMapLegendBubble {
   width: 16px !important;
   height: 16px !important;

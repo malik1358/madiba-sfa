@@ -297,7 +297,16 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   const routeHtml = routeSvg
     ? `<h2 style="font-size: 16px;">Day route</h2>
       <div style="margin: 0 0 16px;">${routeSvg}</div>
-      ${workdayStops.length ? `<ul style="font-size: 12px; padding-inline-start: 18px; margin-bottom: 0;">${workdayStops.map((stop) => `<li>${escapeHtml(stop.label)}${stop.mapsUrl ? ` · <a href="${escapeHtml(stop.mapsUrl)}">Open this place</a>` : ""}</li>`).join("")}</ul>` : ""}
+      ${workdayStops.length ? `<ul style="font-size: 12px; padding-inline-start: 18px; margin-bottom: 0;">${workdayStops.map((stop) => {
+        const isUnloggedIdle = stop.kind === "idle";
+        const labelHtml = isUnloggedIdle
+          ? `<strong style="color:#dc2626;">${escapeHtml(stop.label)}</strong>`
+          : escapeHtml(stop.label);
+        const linkHtml = stop.mapsUrl
+          ? ` · <a href="${escapeHtml(stop.mapsUrl)}" style="${isUnloggedIdle ? "color:#dc2626;font-weight:700;" : ""}">Open this place</a>`
+          : "";
+        return `<li style="${isUnloggedIdle ? "color:#dc2626;font-weight:700;" : ""}">${labelHtml}${linkHtml}</li>`;
+      }).join("")}</ul>` : ""}
       ${workingHoursHtml}`
     : "";
 

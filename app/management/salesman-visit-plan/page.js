@@ -73,6 +73,7 @@ const TEXT = {
   bucket120plus: { en: ">120", ar: ">120" },
   daysSinceInvoice: { en: "Days from last invoice", ar: "أيام منذ آخر فاتورة" },
   daysSinceVisit: { en: "Days from last visit", ar: "أيام منذ آخر زيارة" },
+  lastVisitDate: { en: "Last visit date by anyone", ar: "تاريخ آخر زيارة من أي أحد" },
   total: { en: "Total", ar: "الإجمالي" },
   salesFocusCount: { en: "Sales focus", ar: "تركيز المبيعات" },
   collectionFocusCount: { en: "Collection focus", ar: "تركيز التحصيل" },
@@ -90,6 +91,12 @@ function formatMoney(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) return "0";
   return number.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function formatVisitDate(value) {
+  const text = String(value || "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "-";
+  return text;
 }
 
 function formatBuiltAt(value) {
@@ -469,6 +476,7 @@ export default function SalesmanVisitPlanPage() {
                     <th>{t("cityArea")}</th>
                     <th>{t("daysSinceInvoice")}</th>
                     <th>{t("daysSinceVisit")}</th>
+                    <th>{t("lastVisitDate")}</th>
                     <th>{t("recentSales")}</th>
                     <th>{t("avgMonthly")}</th>
                     <th>{t("focus")}</th>
@@ -498,6 +506,7 @@ export default function SalesmanVisitPlanPage() {
                       <td>{[visit.city, visit.area].filter(Boolean).join(" / ") || "-"}</td>
                       <td>{visit.days_since_last_invoice == null ? "-" : visit.days_since_last_invoice}</td>
                       <td>{visit.days_since_last_visit == null ? "-" : visit.days_since_last_visit}</td>
+                      <td>{formatVisitDate(visit.last_visit_date)}</td>
                       <td>{formatMoney(visit.recent_sales_value)}</td>
                       <td>{formatMoney(visit.average_monthly_purchase)}</td>
                       <td className={focusClass(visit.focus)}>{visit.focus}</td>
@@ -527,7 +536,7 @@ export default function SalesmanVisitPlanPage() {
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={5} className="moduleBiTotalCol"><strong>{t("total")}</strong></td>
+                    <td colSpan={6} className="moduleBiTotalCol"><strong>{t("total")}</strong></td>
                     <td className="moduleBiTotalCol"><strong>{formatMoney(plan.totals?.recentSales)}</strong></td>
                     <td className="moduleBiTotalCol" />
                     <td colSpan={4} className="moduleBiTotalCol" />

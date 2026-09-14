@@ -22,7 +22,8 @@ import {
 
 export { buildScopeHash } from "./scopeHash.js";
 
-export const SNAPSHOT_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+/** Auto-refresh device customer/item snapshot when older than this. */
+export const SNAPSHOT_STALE_AFTER_MS = 60 * 60 * 1000;
 export const COLLECTION_QUEUES_READY_EVENT = "madiba-collection-queues-ready";
 const MOBILE_SNAPSHOT_META_KEY = "mobileSnapshot:meta:v1";
 const COLLECTION_QUEUE_HYDRATE_WAIT_MS = 45000;

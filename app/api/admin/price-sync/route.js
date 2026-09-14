@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../../lib/offlineDataBroadcast.js";
+import { recordItemPriceHistory } from "../../../lib/itemPriceHistory.js";
 import { isBuildingMaterialItem, parseCsvToRows, parsePricePayload } from "../../../lib/pricePayload.js";
 import { PRICE_SHEET_GID, PRICE_SHEET_ID, PRICE_SOURCE_URL } from "../../../lib/priceApiConfig.js";
 import { withRegionFallbacks } from "../../../lib/regionalPricing.js";
@@ -472,18 +473,27 @@ async function runSync(sourcePayload = null) {
   const nowIso = new Date().toISOString();
   const priceCount = Object.keys(parsed.priceMap).length;
 
-  const { error: snapshotError } = await admin.from("price_catalog_snapshots").insert({
+  const regionPriceMaps = withRegionFallbacks(parsed.regionPriceMaps, parsed.priceMap);
+
+  const snapshotRow = {
     source_url: PRICE_SOURCE_URL,
     payload,
+    price_map: parsed.priceMap,
     price_count: priceCount,
     created_at: nowIso,
-  });
+  };
+
+  let { error: snapshotError } = await admin.from("price_catalog_snapshots").insert(snapshotRow);
+
+  // Older databases may not have price_map on snapshots yet.
+  if (snapshotError && /price_map/i.test(String(snapshotError.message || ""))) {
+    delete snapshotRow.price_map;
+    ({ error: snapshotError } = await admin.from("price_catalog_snapshots").insert(snapshotRow));
+  }
 
   if (snapshotError) {
     throw new Error(`Snapshot write failed: ${snapshotError.message}`);
   }
-
-  const regionPriceMaps = withRegionFallbacks(parsed.regionPriceMaps, parsed.priceMap);
 
   const { error: cacheError } = await admin.from("price_catalog_cache").upsert(
     {
@@ -519,6 +529,18 @@ async function runSync(sourcePayload = null) {
     throw new Error(`Pricing rules cache write failed: ${rulesError.message}`);
   }
 
+  let historyInserted = 0;
+  try {
+    const historyResult = await recordItemPriceHistory(admin, {
+      regionPriceMaps,
+      recordedAt: nowIso,
+      source: "price_sync",
+    });
+    historyInserted = Number(historyResult?.inserted || 0);
+  } catch (historyError) {
+    console.error("Item price history write failed:", historyError);
+  }
+
   return {
     ok: true,
     syncedAt: nowIso,
@@ -526,6 +548,7 @@ async function runSync(sourcePayload = null) {
     sheetItemCount: enrichedSheetItems.length,
     cashDiscountCount: Object.keys(parsed.cashDiscountMap || {}).length,
     valueDiscountCount: Object.keys(parsed.valueDiscountMap || {}).length,
+    historyInserted,
     sourceUrlUsed: PRICE_SOURCE_URL,
     sourceGeneratedAt: normalizeText(payload?.generatedAt) || null,
     sourceMode: sourcePayload ? "provided_payload" : "fetched_from_source",

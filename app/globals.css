@@ -7354,6 +7354,18 @@ button.moduleBiDashKpi:focus-visible {
   min-width: 1280px;
 }
 
+.moduleVisitPlanTable th.moduleVisitPlanMoneyNarrow,
+.moduleVisitPlanTable td.moduleVisitPlanMoneyNarrow {
+  max-width: 6.75rem;
+  width: 6.75rem;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.moduleVisitPlanTable thead th.moduleVisitPlanMoneyNarrow {
+  text-align: right;
+}
+
 .moduleVisitPlanTable th.moduleBiTotalCol,
 .moduleVisitPlanTable td.moduleBiTotalCol {
   position: static;

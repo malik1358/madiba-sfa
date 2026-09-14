@@ -36,6 +36,7 @@ function recomputePlanTotals(visits = []) {
     acc.combinedScore += Number(visit.combined_score || 0);
     acc.dueAmount += Number(visit.total_due_amount || 0);
     acc.recentSales += Number(visit.recent_sales_value || 0);
+    acc.recent30dSales += Number(visit.recent_30d_sales_value || 0);
     acc.outstanding_0_30 += Number(visit.outstanding_0_30 || 0);
     acc.outstanding_30_60 += Number(visit.outstanding_30_60 || 0);
     acc.outstanding_61_90 += Number(visit.outstanding_61_90 || 0);
@@ -48,6 +49,7 @@ function recomputePlanTotals(visits = []) {
     combinedScore: 0,
     dueAmount: 0,
     recentSales: 0,
+    recent30dSales: 0,
     outstanding_0_30: 0,
     outstanding_30_60: 0,
     outstanding_61_90: 0,
@@ -288,6 +290,7 @@ export function scoreVisitPlanCustomer(row = {}, todayIso = new Date().toISOStri
     city: String(row.city || "").trim(),
     area: String(row.area || "").trim(),
     recent_sales_value: Math.max(toNumber(row.recent_sales_value), 0),
+    recent_30d_sales_value: Math.max(toNumber(row.recent_30d_sales_value), 0),
     average_monthly_purchase: Math.max(toNumber(row.average_monthly_purchase), 0),
     last_visit_date: String(row.last_visit_date || row.latest_collection?.saved_at || "").trim().slice(0, 10) || null,
     days_since_last_invoice: row.days_since_last_invoice == null
@@ -434,6 +437,7 @@ export function groupVisitPlansBySalesman(customers = [], {
       acc.combinedScore += visit.combined_score;
       acc.dueAmount += visit.total_due_amount;
       acc.recentSales += visit.recent_sales_value;
+      acc.recent30dSales += visit.recent_30d_sales_value || 0;
       acc.outstanding_0_30 += visit.outstanding_0_30 || 0;
       acc.outstanding_30_60 += visit.outstanding_30_60 || 0;
       acc.outstanding_61_90 += visit.outstanding_61_90 || 0;
@@ -446,6 +450,7 @@ export function groupVisitPlansBySalesman(customers = [], {
       combinedScore: 0,
       dueAmount: 0,
       recentSales: 0,
+      recent30dSales: 0,
       outstanding_0_30: 0,
       outstanding_30_60: 0,
       outstanding_61_90: 0,
@@ -528,8 +533,9 @@ export function buildSalesmanVisitPlanEmail(plan, {
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;">${escapeHtml(visit.days_since_last_invoice == null ? "-" : visit.days_since_last_invoice)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;">${escapeHtml(visit.days_since_last_visit == null ? "-" : visit.days_since_last_visit)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;">${escapeHtml(formatVisitDate(visit.last_visit_date))}</td>
-      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.recent_sales_value))}</td>
-      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(visit.average_monthly_purchase))}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;white-space:nowrap;">${escapeHtml(formatMoney(visit.recent_sales_value))}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;white-space:nowrap;">${escapeHtml(formatMoney(visit.recent_30d_sales_value))}</td>
+      <td style="border:1px solid #c5d4de;padding:6px;text-align:right;white-space:nowrap;">${escapeHtml(formatMoney(visit.average_monthly_purchase))}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${focusCellStyle(visit.focus)}">${escapeHtml(visit.focus)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${scoreCellStyle(visit.combined_label)}">${escapeHtml(visit.combined_score)} · ${escapeHtml(visit.combined_label)}</td>
       <td style="border:1px solid #c5d4de;padding:6px;text-align:center;${scoreCellStyle(visit.sales_label)}">${escapeHtml(visit.sales_score)} · ${escapeHtml(visit.sales_label)}</td>
@@ -575,8 +581,9 @@ export function buildSalesmanVisitPlanEmail(plan, {
             <th style="border:1px solid #0c3d4a;padding:8px;">Days from last invoice</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Days from last visit</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Last visit date by anyone</th>
-            <th style="border:1px solid #0c3d4a;padding:8px;">Recent 6M value</th>
-            <th style="border:1px solid #0c3d4a;padding:8px;">Avg monthly purchase</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Recent 6M</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Last 30 days purchase</th>
+            <th style="border:1px solid #0c3d4a;padding:8px;white-space:nowrap;">Avg monthly purchase</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Focus</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Combined</th>
             <th style="border:1px solid #0c3d4a;padding:8px;">Sales</th>
@@ -590,12 +597,13 @@ export function buildSalesmanVisitPlanEmail(plan, {
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml || `<tr><td colspan="18" style="padding:12px;border:1px solid #c5d4de;">No recommended visits.</td></tr>`}
+          ${rowsHtml || `<tr><td colspan="19" style="padding:12px;border:1px solid #c5d4de;">No recommended visits.</td></tr>`}
         </tbody>
         <tfoot>
           <tr style="background:#e8f1f4;font-weight:700;">
             <td colspan="6" style="border:1px solid #c5d4de;padding:6px;">Total</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.recentSales || 0))}</td>
+            <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.recent30dSales || 0))}</td>
             <td colspan="5" style="border:1px solid #c5d4de;padding:6px;"></td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.dueAmount || 0))}</td>
             <td style="border:1px solid #c5d4de;padding:6px;text-align:right;">${escapeHtml(formatMoney(plan?.totals?.outstanding_0_30 || 0))}</td>
@@ -618,7 +626,7 @@ export function buildSalesmanVisitPlanEmail(plan, {
     "",
     ...visits.map((visit) => [
       `${visit.rank}. ${visit.customer_name || visit.customer_code} (${visit.customer_code})`,
-      `  Days invoice ${visit.days_since_last_invoice ?? "-"}; days visit ${visit.days_since_last_visit ?? "-"}; last visit ${formatVisitDate(visit.last_visit_date)}; recent 6M ${formatMoney(visit.recent_sales_value)}; avg monthly ${formatMoney(visit.average_monthly_purchase)}`,
+      `  Days invoice ${visit.days_since_last_invoice ?? "-"}; days visit ${visit.days_since_last_visit ?? "-"}; last visit ${formatVisitDate(visit.last_visit_date)}; recent 6M ${formatMoney(visit.recent_sales_value)}; last 30d ${formatMoney(visit.recent_30d_sales_value)}; avg monthly ${formatMoney(visit.average_monthly_purchase)}`,
       `  Focus ${visit.focus}; combined ${visit.combined_score} ${visit.combined_label}`,
       `  Sales ${visit.sales_score}; collection ${visit.collection_score}; due ${formatMoney(visit.total_due_amount)}`,
       `  Buckets 0-30 ${formatMoney(visit.outstanding_0_30)} | 31-60 ${formatMoney(visit.outstanding_30_60)} | 61-90 ${formatMoney(visit.outstanding_61_90)} | 91-120 ${formatMoney(visit.outstanding_91_120)} | >120 ${formatMoney(visit.outstanding_above_120)}`,

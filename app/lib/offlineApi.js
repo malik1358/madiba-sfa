@@ -4,23 +4,10 @@ import {
   isOfflineLikeError,
   processOfflineQueue,
 } from "./offlineSyncQueue.js";
+import { isAbortError, toFriendlyAbortError } from "./abortError.js";
 
 const ONLINE_PROBE_TIMEOUT_MS = 4000;
 const FORM_UPLOAD_TIMEOUT_MS = 90000;
-
-function isFetchAbortError(error) {
-  if (!error) return false;
-  if (error.name === "AbortError") return true;
-  const message = String(error?.message || "").toLowerCase();
-  return message.includes("aborted") || message.includes("abort");
-}
-
-function toFriendlyFetchError(error, fallback = "Request failed.") {
-  if (isFetchAbortError(error)) {
-    return new Error("Request timed out. Please check your connection and try again.");
-  }
-  return error instanceof Error ? error : new Error(fallback);
-}
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = ONLINE_PROBE_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -32,7 +19,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = ONLINE_PROBE_TIME
       signal: controller.signal,
     });
   } catch (error) {
-    throw toFriendlyFetchError(error);
+    throw toFriendlyAbortError(error);
   } finally {
     clearTimeout(timer);
   }
@@ -107,7 +94,7 @@ export async function postFormDataResilient({
       payload: body,
     };
   } catch (error) {
-    if (queueOnTimeout && isFetchAbortError(error)) {
+    if (queueOnTimeout && (isAbortError(error) || isOfflineLikeError(error))) {
       return queueForSync();
     }
 
@@ -175,12 +162,12 @@ export async function sendJsonResilient({
       payload: body,
     };
   } catch (error) {
-    if (!isOfflineLikeError(error) && !isFetchAbortError(error)) {
+    if (!isOfflineLikeError(error) && !isAbortError(error)) {
       throw error;
     }
 
-    if (isFetchAbortError(error) && typeof navigator !== "undefined" && navigator.onLine && !queueFirst) {
-      throw toFriendlyFetchError(error);
+    if (isAbortError(error) && typeof navigator !== "undefined" && navigator.onLine && !queueFirst) {
+      throw toFriendlyAbortError(error);
     }
 
     return queueForSync();

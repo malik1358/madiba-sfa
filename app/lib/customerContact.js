@@ -1,4 +1,5 @@
 import { resolveCustomerMasterExportFields } from "./customerCode.js";
+import { toFriendlyAbortError } from "./abortError.js";
 
 export const CUSTOMER_MOBILE_REQUIRED_ERROR = "Please update the customer phone number before posting.";
 const CUSTOMER_CONTACT_FETCH_TIMEOUT_MS = 8000;
@@ -142,6 +143,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = CUSTOMER_CONTACT_
       ...options,
       signal: controller.signal,
     });
+  } catch (error) {
+    throw toFriendlyAbortError(error);
   } finally {
     clearTimeout(timer);
   }
@@ -192,7 +195,7 @@ export async function fetchCustomerContact(accessToken, customerCode) {
     if (!response.ok || !payload.success) return null;
     return payload.customer || null;
   } catch {
-    // Offline / flaky networks should not block collection or order posting.
+    // Timeout/offline/flaky networks must not block Save Draft / Submit Order or collections.
     return null;
   }
 }

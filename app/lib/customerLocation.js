@@ -7,6 +7,7 @@ import {
   hasGpsCoordinates,
   reverseGeocodeCoordinates,
 } from "./geo.js";
+import { toFriendlyAbortError } from "./abortError.js";
 
 export const CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM = 0.5;
 export const GPS_CANCELLED_ERROR = "Location update cancelled.";
@@ -24,6 +25,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = CUSTOMER_LOCATION
       ...options,
       signal: controller.signal,
     });
+  } catch (error) {
+    throw toFriendlyAbortError(error);
   } finally {
     clearTimeout(timer);
   }
@@ -195,7 +198,7 @@ export async function fetchCustomerLocation(accessToken, customerCode) {
     if (!response.ok || !payload.success) return null;
     return payload.customer || null;
   } catch {
-    // Offline / flaky networks should not block visit or collection posting.
+    // Timeout/offline/flaky networks must not block Save Draft / Submit Order or visits.
     return null;
   }
 }

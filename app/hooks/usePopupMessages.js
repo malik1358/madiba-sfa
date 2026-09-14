@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useAppPopup } from "../components/AppPopupProvider";
+import { friendlyErrorMessage } from "../lib/abortError";
 
 export function usePopupMessages({ message = "", error = "", warnings = [] } = {}) {
   const { showPopup } = useAppPopup();
@@ -12,7 +13,8 @@ export function usePopupMessages({ message = "", error = "", warnings = [] } = {
   });
 
   useEffect(() => {
-    const nextError = String(error || "").trim();
+    const rawError = String(error || "").trim();
+    const nextError = rawError ? friendlyErrorMessage({ message: rawError }, rawError) : "";
     if (nextError && nextError !== seenRef.current.error) {
       seenRef.current.error = nextError;
       showPopup({ message: nextError, variant: "error" });

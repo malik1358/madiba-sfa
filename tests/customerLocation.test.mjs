@@ -8,12 +8,82 @@ import {
   isFarFromCustomer,
 } from "../app/lib/customerLocation.js";
 
-test("distanceFromCustomerKm returns null when customer location is missing", () => {
-  const distance = distanceFromCustomerKm(
-    { latitude: 24.7136, longitude: 46.6753 },
-    { latitude: null, longitude: null },
-  );
-  assert.equal(distance, null);
+test("customerWithUpdatedLocation replaces GPS used for distance-from-customer", async () => {
+  const { customerWithUpdatedLocation, distanceFromCustomerKm } = await import("../app/lib/customerLocation.js");
+  const entry = { latitude: 26.437766, longitude: 50.102296 };
+  const customer = {
+    customer_code: "1183",
+    customer_name: "Masco Saudi Trading Company",
+    latitude: 26.25,
+    longitude: 50.0,
+  };
+
+  const before = distanceFromCustomerKm(entry, customer);
+  assert.ok(before > 1);
+
+  const updated = customerWithUpdatedLocation(customer, {
+    latitude: entry.latitude,
+    longitude: entry.longitude,
+  });
+  const after = distanceFromCustomerKm(entry, updated);
+  assert.ok(after !== null && after < 0.01);
+  // Original customer object stays unchanged.
+  assert.equal(customer.latitude, 26.25);
+  assert.equal(customer.longitude, 50.0);
+});
+
+test("maybePromptCustomerLocationUpdate syncs in-memory customer GPS when accepted", async () => {
+  const originalFetch = globalThis.fetch;
+  const customer = {
+    customer_code: "1183",
+    customer_name: "Masco Saudi Trading Company",
+    latitude: 26.25,
+    longitude: 50.0,
+    area: "Dammam",
+  };
+  const entry = { latitude: 26.437766, longitude: 50.102296 };
+
+  globalThis.fetch = async (url, options = {}) => {
+    if (String(options.method || "GET").toUpperCase() === "PATCH") {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          customer: {
+            ...customer,
+            latitude: entry.latitude,
+            longitude: entry.longitude,
+          },
+        }),
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  try {
+    const {
+      CUSTOMER_LOCATION_UPDATE_UPDATE,
+      distanceFromCustomerKm,
+      maybePromptCustomerLocationUpdate,
+    } = await import("../app/lib/customerLocation.js");
+
+    const choice = await maybePromptCustomerLocationUpdate({
+      customerCode: "1183",
+      customerName: "Masco Saudi Trading Company",
+      entryLocation: entry,
+      accessToken: "token",
+      customer,
+      skipReverseGeocode: true,
+      promptChoice: async () => CUSTOMER_LOCATION_UPDATE_UPDATE,
+    });
+
+    assert.equal(choice, CUSTOMER_LOCATION_UPDATE_UPDATE);
+    assert.equal(customer.latitude, entry.latitude);
+    assert.equal(customer.longitude, entry.longitude);
+    assert.ok(distanceFromCustomerKm(entry, customer) < 0.01);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("isFarFromCustomer flags entries beyond threshold", () => {

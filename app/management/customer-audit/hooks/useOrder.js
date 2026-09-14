@@ -289,6 +289,7 @@ export function useOrder({
         customerName: selectedCustomer.customer_name,
         accessToken: session.access_token,
         role: userRole,
+        customer: selectedCustomer,
       });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();
@@ -419,6 +420,7 @@ export function useOrder({
         customerName: selectedCustomer?.customer_name,
         accessToken: session.access_token,
         role: userRole,
+        customer: selectedCustomer,
       });
       const capturedAt = new Date().toISOString();
       const platform = await resolveGpsCapturePlatform();

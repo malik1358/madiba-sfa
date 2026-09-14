@@ -20,6 +20,7 @@ import {
   CUSTOMER_LOCATION_UPDATE_CANCEL,
   CUSTOMER_LOCATION_UPDATE_SKIP,
   CUSTOMER_LOCATION_UPDATE_UPDATE,
+  customerWithUpdatedLocation,
   evaluateCustomerLocationUpdatePrompt,
 } from "../../lib/customerLocation";
 import { promptCustomerMobileUpdateIfMissing } from "../../lib/customerContact";
@@ -1677,9 +1678,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
       customer,
       skipReverseGeocode: offline,
     });
-    if (!promptDetails) return CUSTOMER_LOCATION_UPDATE_SKIP;
+    if (!promptDetails) {
+      return { choice: CUSTOMER_LOCATION_UPDATE_SKIP, customer };
+    }
 
     const choice = await promptCustomerLocationChoice(promptDetails);
+    let nextCustomer = customer;
     if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE) {
       try {
         await applyCustomerLocationUpdateFromPrompt(promptDetails);
@@ -1687,8 +1691,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
         // Location sync is best-effort; do not block the collection save.
         console.warn("Customer location update skipped", locationError);
       }
+      // Always use the accepted GPS for distance-from-customer in the visit summary.
+      nextCustomer = customerWithUpdatedLocation(customer, promptDetails.updatePayload);
     }
-    return choice;
+    return { choice, customer: nextCustomer };
   }
 
   async function saveVisit(row, options = {}) {
@@ -1764,7 +1770,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         setForm((current) => ({ ...current, remarkEnglish: effectiveEnglishRemark }));
       }
 
-      const locationChoice = gps
+      const locationUpdate = gps
         ? await resolveLocationUpdateBeforeAction({
           customerCode: row.customer_code,
           customerName: row.customer_name,
@@ -1772,7 +1778,8 @@ export default function PaymentCollectionsView({ view = "due" }) {
           accessToken: session.access_token,
           customer: row,
         })
-        : CUSTOMER_LOCATION_UPDATE_SKIP;
+        : { choice: CUSTOMER_LOCATION_UPDATE_SKIP, customer: row };
+      const locationChoice = locationUpdate.choice;
       if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
         return;
       }
@@ -1803,7 +1810,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         supabase,
         userId: session.user.id,
         location: gps,
-        customer: row,
+        customer: locationUpdate.customer || row,
         savedAt: new Date().toISOString(),
       });
 
@@ -2064,13 +2071,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
         skipCustomerLocationUpdate: true,
       });
       const locationChoice = gps
-        ? await resolveLocationUpdateBeforeAction({
+        ? (await resolveLocationUpdateBeforeAction({
           customerCode: row.customer_code,
           customerName: row.customer_name,
           entryLocation: gps,
           accessToken: session.access_token,
           customer: row,
-        })
+        })).choice
         : CUSTOMER_LOCATION_UPDATE_SKIP;
       if (locationChoice === CUSTOMER_LOCATION_UPDATE_CANCEL) {
         return;

@@ -22,6 +22,13 @@ export function nextMonthStart(monthKey) {
   return `${String(next.year).padStart(4, "0")}-${String(next.month).padStart(2, "0")}-01`;
 }
 
+export function shiftMonthKey(monthKey, deltaMonths = 0) {
+  const match = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1 + Number(deltaMonths || 0), 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 export function selectMonthlyPerformanceMonths(allMonths, currentKey = ksaMonthKey()) {
   const current = String(currentKey || "").slice(0, 7);
   const unique = [];
@@ -38,4 +45,40 @@ export function selectMonthlyPerformanceMonths(allMonths, currentKey = ksaMonthK
   const historic = unique.filter((month) => month < current);
   const currentMonths = current && unique.includes(current) ? [current] : [];
   return [...historic.slice(-HISTORIC_PERFORMANCE_MONTHS), ...currentMonths];
+}
+
+/** Merge receipt-only months into an already-selected sales window without dropping sales months. */
+export function mergeReceiptMonthsIntoPerformanceWindow(
+  selectedMonths,
+  receiptMonths,
+  currentKey = ksaMonthKey(),
+) {
+  const current = String(currentKey || "").slice(0, 7);
+  const selected = [];
+  const seen = new Set();
+
+  (Array.isArray(selectedMonths) ? selectedMonths : []).forEach((month) => {
+    const key = String(month || "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(key) || seen.has(key)) return;
+    seen.add(key);
+    selected.push(key);
+  });
+
+  selected.sort();
+  const calendarLo = /^\d{4}-\d{2}$/.test(current)
+    ? shiftMonthKey(current, -HISTORIC_PERFORMANCE_MONTHS)
+    : "";
+  const windowLo = [selected[0], calendarLo].filter(Boolean).sort()[0] || "";
+  const windowHi = current || selected[selected.length - 1] || "";
+
+  (Array.isArray(receiptMonths) ? receiptMonths : []).forEach((month) => {
+    const key = String(month || "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(key) || seen.has(key)) return;
+    if (windowLo && key < windowLo) return;
+    if (windowHi && key > windowHi) return;
+    seen.add(key);
+    selected.push(key);
+  });
+
+  return selected.sort();
 }

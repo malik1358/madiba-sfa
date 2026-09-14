@@ -1,4 +1,4 @@
-import { selectMonthlyPerformanceMonths } from '../../../lib/monthlyPerformanceMonths.js';
+import { mergeReceiptMonthsIntoPerformanceWindow, selectMonthlyPerformanceMonths } from '../../../lib/monthlyPerformanceMonths.js';
 import { attachMonthlyReceipts, monthKeyFromReceiptDate } from '../../../lib/receiptRegister.js';
 import { monthKey, parseDateValue, salesUnitQty } from './format';
 
@@ -33,11 +33,26 @@ export function buildAnalytics(transactions, { currentMonthKey, receipts = [] } 
     monthOrder.set(month, Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), 1));
   });
 
-  const allMonths = Array.from(monthOrder.entries())
+  const allSalesMonths = Array.from(monthOrder.entries())
     .sort((a, b) => a[1] - b[1])
     .map(([month]) => month);
 
-  const months = selectMonthlyPerformanceMonths(allMonths, currentMonthKey);
+  const receiptList = Array.isArray(receipts) ? receipts : [];
+  const receiptMonths = [];
+  const receiptMonthSeen = new Set();
+  receiptList.forEach((row) => {
+    const month = monthKeyFromReceiptDate(row?.receipt_date);
+    if (!month || receiptMonthSeen.has(month)) return;
+    receiptMonthSeen.add(month);
+    receiptMonths.push(month);
+  });
+
+  const salesWindowMonths = selectMonthlyPerformanceMonths(allSalesMonths, currentMonthKey);
+  const months = mergeReceiptMonthsIntoPerformanceWindow(
+    salesWindowMonths,
+    receiptMonths,
+    currentMonthKey,
+  );
   const monthSet = new Set(months);
 
   const monthlyMap = new Map();
@@ -170,8 +185,8 @@ export function buildAnalytics(transactions, { currentMonthKey, receipts = [] } 
       const monthData = {};
       months.forEach((month) => {
         monthData[month] = {
-          sales: category.months[month].sales,
-          skuCount: category.months[month].skus.size,
+          sales: category.months[month]?.sales || 0,
+          skuCount: category.months[month]?.skus?.size || 0,
         };
       });
 
@@ -214,7 +229,6 @@ export function buildAnalytics(transactions, { currentMonthKey, receipts = [] } 
     transactionCount: transactions.length,
   };
 
-  const receiptList = Array.isArray(receipts) ? receipts : [];
   if (!receiptList.length) {
     return {
       ...base,
@@ -223,7 +237,6 @@ export function buildAnalytics(transactions, { currentMonthKey, receipts = [] } 
     };
   }
 
-  // Keep receipt months that fall inside the selected performance window.
   const scopedReceipts = receiptList.filter((row) => monthSet.has(monthKeyFromReceiptDate(row?.receipt_date)));
   return attachMonthlyReceipts(base, scopedReceipts);
 }

@@ -115,17 +115,23 @@ export default function DayRouteMap({
         <div className="dayRouteMapStops">
           <h4>{stopsTitle}</h4>
           <ul>
-            {stops.map((stop) => (
-              <li key={`${stop.kind}-${stop.ts}-${stop.label}`}>
-                {stop.label}
-                {stop.mapsUrl ? (
-                  <>
-                    {" "}
-                    <a href={stop.mapsUrl} target="_blank" rel="noreferrer">{openPlaceLabel}</a>
-                  </>
-                ) : null}
-              </li>
-            ))}
+            {stops.map((stop) => {
+              const isUnloggedIdle = stop.kind === "idle";
+              return (
+                <li
+                  key={`${stop.kind}-${stop.ts}-${stop.label}`}
+                  className={isUnloggedIdle ? "dayRouteMapUnloggedIdle" : undefined}
+                >
+                  {isUnloggedIdle ? <strong>{stop.label}</strong> : stop.label}
+                  {stop.mapsUrl ? (
+                    <>
+                      {" "}
+                      <a href={stop.mapsUrl} target="_blank" rel="noreferrer">{openPlaceLabel}</a>
+                    </>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
           {workingHours.value !== "-" ? (
             <p className="dayRouteMapWorkingHours">

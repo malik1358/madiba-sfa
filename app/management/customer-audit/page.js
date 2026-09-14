@@ -422,27 +422,8 @@ function CustomerAuditPageContent() {
     );
   }
 
-  if (!analytics) {
-    return (
-      <main className="auditPage" dir={dir}>
-        <div className="auditShell">
-          <div className="auditTop">
-            <div>
-              <div className="auditBrand">MADIBA SFA</div>
-              <h1>{t("title")}</h1>
-              <p className="auditSubtitle">{t("subtitle")}</p>
-            </div>
-            <div className="moduleHeaderMeta"><AppLanguageSwitch language={language} setLanguage={setLanguage} /><a href="/management" className="auditHomeButton">{t("home")}</a></div>
-          </div>
-          <button type="button" className="auditBackButton" onClick={handleCloseCustomer}>{t("customers")}</button>
-          <EmptyState title="No sales history" message={`No sales history was found for ${selectedCustomer.customer_name}.`} />
-          <div className="auditVersion">Page updated: {PAGE_VERSION}</div>
-        </div>
-      </main>
-    );
-  }
-
   return (
+
     <MorningAttendanceGate>
     <main className="auditPage" dir={dir}>
       <div className="auditShell">
@@ -462,6 +443,13 @@ function CustomerAuditPageContent() {
           analytics={analytics}
           outstandingSalesman={outstandingSalesman}
         />
+
+        {!analytics ? (
+          <EmptyState
+            title="No sales history"
+            message={`No sales history was found for ${selectedCustomer.customer_name}. Outstanding and customer details are still shown below.`}
+          />
+        ) : null}
 
         <section className="auditSection">
           <div className="auditTransactionHeader">
@@ -591,94 +579,98 @@ function CustomerAuditPageContent() {
           </div>
         </section>
 
+        {analytics ? (
+          <>
         <MonthlyPerformance analytics={analytics} />
 
-        <CategoryPerformance
-          analytics={analytics}
-          itemCatalog={itemMaster}
-          expandedCategories={expandedCategories}
-          toggleCategory={toggleCategory}
-          orderQuantities={orderQuantities}
-          decreaseOrderQty={decreaseQty}
-          increaseOrderQty={increaseQty}
-          changeOrderQty={updateQty}
-          priceList={regionPriceList}
-          cashDiscountMap={cashDiscountMap}
-          valueDiscountMap={valueDiscountMap}
-          paymentType={paymentType}
-          schemeApplications={schemeApplications}
-        />
+            <CategoryPerformance
+              analytics={analytics}
+              itemCatalog={itemMaster}
+              expandedCategories={expandedCategories}
+              toggleCategory={toggleCategory}
+              orderQuantities={orderQuantities}
+              decreaseOrderQty={decreaseQty}
+              increaseOrderQty={increaseQty}
+              changeOrderQty={updateQty}
+              priceList={regionPriceList}
+              cashDiscountMap={cashDiscountMap}
+              valueDiscountMap={valueDiscountMap}
+              paymentType={paymentType}
+              schemeApplications={schemeApplications}
+            />
 
-        <QuickOrder
-          quickOrderSuggestions={quickOrderSuggestions}
-          orderQuantities={orderQuantities}
-          decreaseOrderQty={decreaseQty}
-          increaseOrderQty={increaseQty}
-          changeOrderQty={updateQty}
-          priceList={regionPriceList}
-          cashDiscountMap={cashDiscountMap}
-          valueDiscountMap={valueDiscountMap}
-          paymentType={paymentType}
-          schemeApplications={schemeApplications}
-        />
+            <QuickOrder
+              quickOrderSuggestions={quickOrderSuggestions}
+              orderQuantities={orderQuantities}
+              decreaseOrderQty={decreaseQty}
+              increaseOrderQty={increaseQty}
+              changeOrderQty={updateQty}
+              priceList={regionPriceList}
+              cashDiscountMap={cashDiscountMap}
+              valueDiscountMap={valueDiscountMap}
+              paymentType={paymentType}
+              schemeApplications={schemeApplications}
+            />
 
-        <FullItemList
-          itemCatalog={itemMaster}
-          priceSheetItems={priceSheetItems}
-          orderQuantities={orderQuantities}
-          decreaseOrderQty={decreaseQty}
-          increaseOrderQty={increaseQty}
-          changeOrderQty={updateQty}
-          priceList={regionPriceList}
-          cashDiscountMap={cashDiscountMap}
-          valueDiscountMap={valueDiscountMap}
-          paymentType={paymentType}
-          schemeApplications={schemeApplications}
-        />
+            <FullItemList
+              itemCatalog={itemMaster}
+              priceSheetItems={priceSheetItems}
+              orderQuantities={orderQuantities}
+              decreaseOrderQty={decreaseQty}
+              increaseOrderQty={increaseQty}
+              changeOrderQty={updateQty}
+              priceList={regionPriceList}
+              cashDiscountMap={cashDiscountMap}
+              valueDiscountMap={valueDiscountMap}
+              paymentType={paymentType}
+              schemeApplications={schemeApplications}
+            />
 
-        <OrderBar
-          orderItems={orderItems}
-          orderSummary={orderSummary}
-          savingOrder={savingOrder}
-          submittingOrder={submittingOrder}
-          saveDraft={saveDraft}
-          setShowOrderReview={setShowOrderReview}
-          priceList={displayPriceList}
-          draftOrderId={draftOrderId}
-        />
+            <OrderBar
+              orderItems={orderItems}
+              orderSummary={orderSummary}
+              savingOrder={savingOrder}
+              submittingOrder={submittingOrder}
+              saveDraft={saveDraft}
+              setShowOrderReview={setShowOrderReview}
+              priceList={displayPriceList}
+              draftOrderId={draftOrderId}
+            />
 
-        <OrderReview
-          showOrderReview={showOrderReview}
-          orderItems={orderItems}
-          orderSummary={orderSummary}
-          priceList={displayPriceList}
-          savingOrder={savingOrder}
-          submittingOrder={submittingOrder}
-          saveDraft={saveDraft}
-          submitOrder={submitOrder}
-          setShowOrderReview={setShowOrderReview}
-          draftOrderId={draftOrderId}
-          decreaseOrderQty={decreaseQty}
-          increaseOrderQty={increaseQty}
-          changeOrderQty={updateQty}
-        />
+            <OrderReview
+              showOrderReview={showOrderReview}
+              orderItems={orderItems}
+              orderSummary={orderSummary}
+              priceList={displayPriceList}
+              savingOrder={savingOrder}
+              submittingOrder={submittingOrder}
+              saveDraft={saveDraft}
+              submitOrder={submitOrder}
+              setShowOrderReview={setShowOrderReview}
+              draftOrderId={draftOrderId}
+              decreaseOrderQty={decreaseQty}
+              increaseOrderQty={increaseQty}
+              changeOrderQty={updateQty}
+            />
 
-        {draftOrderId && (
-          <div className="auditDraftNotice">
-            <span>Draft Order</span>
-            <small>Changes are not final until the order is submitted.</small>
-          </div>
-        )}
+            {draftOrderId && (
+              <div className="auditDraftNotice">
+                <span>Draft Order</span>
+                <small>Changes are not final until the order is submitted.</small>
+              </div>
+            )}
 
-        <TransactionHistory
-          transactions={transactions}
-          analytics={analytics}
-        />
+            <TransactionHistory
+              transactions={transactions}
+              analytics={analytics}
+            />
+          </>
+        ) : null}
 
         <div className="auditVersion">Page updated: {PAGE_VERSION}</div>
         <div className="auditPageFooter">
           <span>
-            Latest sales data: <strong>{shortDate(analytics.latestDate)}</strong>
+            Latest sales data: <strong>{analytics ? shortDate(analytics.latestDate) : "-"}</strong>
           </span>
           <span>
             Customer: <strong>{selectedCustomer.customer_code}</strong>

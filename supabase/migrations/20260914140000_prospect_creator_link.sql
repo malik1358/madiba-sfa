@@ -7,24 +7,47 @@ ALTER TABLE public.prospects
 CREATE INDEX IF NOT EXISTS idx_prospects_created_by
   ON public.prospects (created_by);
 
+-- Helper functions used by prospect RLS (may be missing on older production DBs).
+CREATE OR REPLACE FUNCTION public.normalized_salesman_code(value text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT upper(trim(regexp_replace(coalesce(value, ''), '\s+', ' ', 'g')));
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_subordinate_salesman_code(target_code text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO public, auth
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM auth.users u
+    INNER JOIN public.profiles p ON p.id = u.id
+    WHERE public.normalized_salesman_code(u.raw_user_meta_data->>'head_salesman_code')
+        = public.normalized_salesman_code(public.current_salesman_code())
+      AND public.normalized_salesman_code(p.salesman_code)
+        = public.normalized_salesman_code(target_code)
+  );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.normalized_salesman_code(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_subordinate_salesman_code(text) TO authenticated;
+
 -- Past: prefer the first order creator for PROSPECT-{id} rows.
 UPDATE public.prospects AS p
 SET created_by = src.created_by
 FROM (
-  SELECT
+  SELECT DISTINCT ON (upper(trim(so.customer_code)))
     substring(upper(trim(so.customer_code)) from '^PROSPECT-([0-9]+)$')::bigint AS prospect_id,
-    (
-      SELECT so2.created_by
-      FROM public.sales_orders AS so2
-      WHERE upper(trim(so2.customer_code)) = upper(trim(so.customer_code))
-        AND so2.created_by IS NOT NULL
-      ORDER BY so2.created_at ASC NULLS LAST, so2.id ASC
-      LIMIT 1
-    ) AS created_by
+    so.created_by
   FROM public.sales_orders AS so
   WHERE so.customer_code ~* '^PROSPECT-[0-9]+$'
     AND so.created_by IS NOT NULL
-  GROUP BY upper(trim(so.customer_code))
+  ORDER BY upper(trim(so.customer_code)), so.created_at ASC NULLS LAST, so.id ASC
 ) AS src
 WHERE p.id = src.prospect_id
   AND p.created_by IS NULL

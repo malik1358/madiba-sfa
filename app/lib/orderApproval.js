@@ -7,6 +7,7 @@ export const ORDER_STATUS_QUOTATION_WAITING_PAYMENT = "Quotation submitted waiti
 export const ORDER_STATUS_REJECTED = "Rejected by management";
 export const ORDER_STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
 export const ORDER_STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
+export const ORDER_STATUS_WAITING_OVERDUE_COLLECTION = "Waiting for overdue collection";
 export const ORDER_STATUS_INVOICE_MADE = "Invoice made";
 
 export const ORDER_REJECTION_REASON_CREDIT_LIMIT = "Credit limit";
@@ -28,6 +29,7 @@ export const ORDER_INVOICE_STATUSES = [
   ORDER_STATUS_REJECTED,
   ORDER_STATUS_STOCK_UNAVAILABLE,
   ORDER_STATUS_WAITING_STOCK_TRANSFER,
+  ORDER_STATUS_WAITING_OVERDUE_COLLECTION,
   ORDER_STATUS_INVOICE_MADE,
 ];
 
@@ -44,6 +46,11 @@ export function isPendingForApprovalStatus(status) {
 export function isPendingForInvoiceCreationStatus(status) {
   return normalizeInvoiceStatus(status).toLowerCase()
     === ORDER_STATUS_PENDING_INVOICE_CREATION.toLowerCase();
+}
+
+export function isWaitingForOverdueCollectionStatus(status) {
+  return normalizeInvoiceStatus(status).toLowerCase()
+    === ORDER_STATUS_WAITING_OVERDUE_COLLECTION.toLowerCase();
 }
 
 export function isSubmittedOrder(order) {

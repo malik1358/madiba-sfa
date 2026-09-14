@@ -47,6 +47,7 @@ import {
   ORDER_STATUS_STOCK_UNAVAILABLE,
   ORDER_STATUS_WAITING_CREDIT_APPLICATION,
   ORDER_STATUS_WAITING_STOCK_TRANSFER,
+  ORDER_STATUS_WAITING_OVERDUE_COLLECTION,
   canApprovePendingOrders,
   displayInvoiceStatus,
   isPendingForApprovalStatus,
@@ -85,6 +86,7 @@ const INVOICE_STATUS_QUOTATION_WAITING_PAYMENT = ORDER_STATUS_QUOTATION_WAITING_
 const INVOICE_STATUS_REJECTED = ORDER_STATUS_REJECTED;
 const INVOICE_STATUS_STOCK_UNAVAILABLE = ORDER_STATUS_STOCK_UNAVAILABLE;
 const INVOICE_STATUS_WAITING_STOCK_TRANSFER = ORDER_STATUS_WAITING_STOCK_TRANSFER;
+const INVOICE_STATUS_WAITING_OVERDUE_COLLECTION = ORDER_STATUS_WAITING_OVERDUE_COLLECTION;
 const INVOICE_STATUS_MADE = ORDER_STATUS_INVOICE_MADE;
 const OUTSTANDING_API = "/api/outstanding";
 const EMPTY_FILTERS = {
@@ -1533,6 +1535,7 @@ export default function PendingOrdersPage() {
                                           <option value={INVOICE_STATUS_REJECTED}>{INVOICE_STATUS_REJECTED}</option>
                                           <option value={INVOICE_STATUS_STOCK_UNAVAILABLE}>{INVOICE_STATUS_STOCK_UNAVAILABLE}</option>
                                           <option value={INVOICE_STATUS_WAITING_STOCK_TRANSFER}>{INVOICE_STATUS_WAITING_STOCK_TRANSFER}</option>
+                                          <option value={INVOICE_STATUS_WAITING_OVERDUE_COLLECTION}>{INVOICE_STATUS_WAITING_OVERDUE_COLLECTION}</option>
                                           <option value={INVOICE_STATUS_MADE} disabled={!meta?.invoiceFilePath}>{INVOICE_STATUS_MADE}</option>
                                         </select>
                                       </label>

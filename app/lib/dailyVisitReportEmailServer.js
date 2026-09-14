@@ -59,6 +59,47 @@ export function normalizeVisitReportEmailUserIds(value) {
   return [...new Set(raw.map((id) => String(id || "").trim()).filter(Boolean))];
 }
 
+/** Office / non-field accounts that must not receive a personal daily visit report email. */
+export const EXCLUDED_VISIT_REPORT_EMAIL_SALESMEN = [
+  "FAZLUR RAHMAN",
+];
+
+function comparableVisitReportName(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function visitReportEmailIdentities({ profile = {}, user = {} } = {}) {
+  const identities = new Set();
+  [
+    profile.salesman_code,
+    profile.salesman_name,
+    user.salesmanCode,
+    user.salesmanName,
+    user.userName,
+  ].forEach((value) => {
+    const comparable = comparableVisitReportName(value);
+    if (comparable) identities.add(comparable);
+    const parenthetical = String(value || "").match(/\(([^)]+)\)/);
+    if (parenthetical) {
+      const alias = comparableVisitReportName(parenthetical[1]);
+      if (alias) identities.add(alias);
+    }
+  });
+  return identities;
+}
+
+export function isExcludedVisitReportEmailSalesman({ profile = {}, user = {} } = {}) {
+  const identities = visitReportEmailIdentities({ profile, user });
+  return EXCLUDED_VISIT_REPORT_EMAIL_SALESMEN.some((name) => (
+    identities.has(comparableVisitReportName(name))
+  ));
+}
+
 function envFlagEnabled(value, defaultValue = true) {
   const raw = String(value ?? "").trim().toLowerCase();
   if (!raw) return defaultValue;
@@ -302,6 +343,23 @@ export async function runDailyVisitReportEmailCycle(admin, {
 
   recipients.sort((left, right) => String(left.user.userName || "").localeCompare(String(right.user.userName || "")));
 
+  const results = [];
+  const activeRecipients = [];
+  recipients.forEach((entry) => {
+    if (isExcludedVisitReportEmailSalesman(entry)) {
+      results.push({
+        userId: entry.user.userId,
+        userName: entry.user.userName || reportDisplayName(entry.profile),
+        status: "skipped",
+        reason: "excluded_salesman",
+      });
+      return;
+    }
+    activeRecipients.push(entry);
+  });
+  const consideredUserCount = recipients.length;
+  recipients = activeRecipients;
+
   const kpiSalesmen = recipients
     .map(({ profile, user }) => ({
       userId: user.userId,
@@ -322,8 +380,6 @@ export async function runDailyVisitReportEmailCycle(admin, {
       kpiByUserId = new Map();
     }
   }
-
-  const results = [];
 
   for (const { profile, user } of recipients) {
     let userReport = {
@@ -506,7 +562,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   return {
     date: reportDate,
     skipped: false,
-    userCount: recipients.length,
+    userCount: consideredUserCount,
     sentCount,
     failedCount,
     skippedCount,

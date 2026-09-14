@@ -223,13 +223,42 @@ export function buildTeamVisitReportEmail({
   return { subject, html, text };
 }
 
-export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}) {
+export function buildUserVisitReportEmail({
+  date,
+  user,
+  thresholdKm = 0.5,
+  team = null,
+  teamMembers = [],
+} = {}) {
   const userName = String(user?.userName || "User").trim() || "User";
   const subject = `Daily Visit Report — ${userName} — ${date}`;
   const entries = Array.isArray(user?.entries) ? user.entries : [];
   const performance = user?.performance || null;
+  const memberSnapshots = (teamMembers || []).filter(Boolean);
+  const teamSnapshot = team && kpiRows(team).length ? team : null;
   const kpiText = buildPerformanceKpiStatusText(performance);
   const kpiHtml = buildPerformanceKpiStatusHtml(performance);
+  const teamKpiHtml = teamSnapshot
+    ? [
+      buildPerformanceKpiStatusHtml(teamSnapshot, { heading: "Team target vs achievement" }),
+      buildTeamKpiMembersHtml(memberSnapshots),
+    ].join("")
+    : "";
+  const teamKpiText = teamSnapshot
+    ? [
+      ...buildPerformanceKpiStatusText(teamSnapshot, { heading: "Team target vs achievement:" }),
+      ...(memberSnapshots.length
+        ? [
+          "Team members:",
+          ...memberSnapshots.map((member) => {
+            const lines = kpiRows(member).map((kpi) => formatPerformanceKpiLine(kpi)).join("; ");
+            return `- ${memberDisplayName(member)}: ${lines}`;
+          }),
+          "",
+        ]
+        : []),
+    ]
+    : [];
 
   const idleGaps = Array.isArray(user?.idleGaps) ? user.idleGaps : (user?.daySummary?.idleGaps || []);
   const routePoints = Array.isArray(user?.routePoints) && user.routePoints.length
@@ -259,6 +288,7 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
     ...locationNotes,
     "",
     ...kpiText,
+    ...teamKpiText,
     ...entries.map((entry) => {
       const waiting = entry.waitingMinutesFromPrevious == null
         ? "-"
@@ -358,6 +388,7 @@ export function buildUserVisitReportEmail({ date, user, thresholdKm = 0.5 } = {}
   ${splitHtml}
   ${coachingHtml}
   ${kpiHtml}
+  ${teamKpiHtml}
   ${routeHtml}
   ${legendHtml}
   <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%;">

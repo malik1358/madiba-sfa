@@ -149,27 +149,39 @@ async function loadLatestHistoryPrices(admin, codes, region) {
   if (normalizedCodes.length === 0) return previous;
 
   const resolvedRegion = normalizePricingRegion(region);
-  // Fetch recent rows per chunk and keep the newest per item.
+
   for (let i = 0; i < normalizedCodes.length; i += 200) {
     const chunk = normalizedCodes.slice(i, i + 200);
-    const { data, error } = await admin
-      .from("item_price_history")
-      .select("item_code,price,recorded_at")
-      .eq("region", resolvedRegion)
-      .in("item_code", chunk)
-      .order("recorded_at", { ascending: false })
-      .limit(Math.max(chunk.length * 3, 100));
+    const remaining = new Set(chunk);
 
-    if (error) {
-      if (isMissingHistoryTableError(error)) return previous;
-      throw error;
+    while (remaining.size > 0) {
+      const { data, error } = await admin
+        .from("item_price_history")
+        .select("item_code,price,recorded_at")
+        .eq("region", resolvedRegion)
+        .in("item_code", [...remaining])
+        .order("recorded_at", { ascending: false })
+        .limit(1000);
+
+      if (error) {
+        if (isMissingHistoryTableError(error)) return previous;
+        throw error;
+      }
+
+      if (!Array.isArray(data) || data.length === 0) break;
+
+      let newlyFound = 0;
+      data.forEach((row) => {
+        const code = normalizeCode(row.item_code);
+        if (!code || !remaining.has(code)) return;
+        previous.set(`${code}::${resolvedRegion}`, toPositiveNumber(row.price));
+        remaining.delete(code);
+        newlyFound += 1;
+      });
+
+      // No new codes resolved in this page — stop to avoid a tight loop.
+      if (newlyFound === 0) break;
     }
-
-    (data || []).forEach((row) => {
-      const code = normalizeCode(row.item_code);
-      if (!code || previous.has(`${code}::${resolvedRegion}`)) return;
-      previous.set(`${code}::${resolvedRegion}`, toPositiveNumber(row.price));
-    });
   }
 
   return previous;

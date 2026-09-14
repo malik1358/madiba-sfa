@@ -5925,6 +5925,32 @@ th:has(.moduleTableColumnFilterInput) {
   color: #0b5364;
 }
 
+.uploadMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.uploadDownloadButton {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid #0f6172;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0d6071;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.uploadDownloadButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .fileDrop {
   display: grid;
   gap: 6px;

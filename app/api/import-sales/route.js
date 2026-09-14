@@ -12,6 +12,10 @@ import {
   parseImportNumber,
   summarizeProfitImport,
 } from "../../lib/salesImportHeaders.js";
+import {
+  saveSalesUploadFileMeta,
+  storeUploadedExcel,
+} from "../../lib/uploadFilesStorage.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -1107,6 +1111,23 @@ export async function POST(request) {
 
     if (uploadBatchError) {
       throw uploadBatchError;
+    }
+
+    /* ========================================================
+       14b. STORE ORIGINAL EXCEL FOR DOWNLOAD
+       ======================================================== */
+
+    try {
+      const storedFile = await storeUploadedExcel(admin, {
+        kind: "sales",
+        fileName,
+        bytes: Buffer.from(bytes),
+        uploadedAt: new Date().toISOString(),
+        batchId: liveBatchId,
+      });
+      await saveSalesUploadFileMeta(admin, storedFile);
+    } catch (storeError) {
+      console.error("Could not store sales upload file for download:", storeError);
     }
 
     /* ========================================================

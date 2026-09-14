@@ -34,6 +34,9 @@ AS $$
   );
 $$;
 
+GRANT EXECUTE ON FUNCTION public.normalized_salesman_code(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_subordinate_salesman_code(text) TO authenticated;
+
 UPDATE public.prospects AS p
 SET created_by = src.created_by
 FROM (

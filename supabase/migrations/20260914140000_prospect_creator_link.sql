@@ -7,6 +7,36 @@ ALTER TABLE public.prospects
 CREATE INDEX IF NOT EXISTS idx_prospects_created_by
   ON public.prospects (created_by);
 
+-- Helper functions used by prospect RLS (may be missing on older production DBs).
+CREATE OR REPLACE FUNCTION public.normalized_salesman_code(value text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT upper(trim(regexp_replace(coalesce(value, ''), '\s+', ' ', 'g')));
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_subordinate_salesman_code(target_code text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO public, auth
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM auth.users u
+    INNER JOIN public.profiles p ON p.id = u.id
+    WHERE public.normalized_salesman_code(u.raw_user_meta_data->>'head_salesman_code')
+        = public.normalized_salesman_code(public.current_salesman_code())
+      AND public.normalized_salesman_code(p.salesman_code)
+        = public.normalized_salesman_code(target_code)
+  );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.normalized_salesman_code(text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_subordinate_salesman_code(text) TO authenticated;
+
 -- Past: prefer the first order creator for PROSPECT-{id} rows.
 UPDATE public.prospects AS p
 SET created_by = src.created_by

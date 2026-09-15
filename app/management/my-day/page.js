@@ -1934,10 +1934,14 @@ export default function MyDayPage({ mode = "default" } = {}) {
     [visitStatusRows, prospectScheduleRows]
   );
 
+  function visitScheduleSalesmanKey(row) {
+    return String(row?.scheduled_by_name || row?.salesman_name || "").trim() || "__UNASSIGNED__";
+  }
+
   const visitScheduleSalesmanOptions = useMemo(
     () => [...new Set(
       plannedVisitRows
-        .map((row) => String(row.salesman_name || row.scheduled_by_name || "").trim() || "__UNASSIGNED__")
+        .map((row) => visitScheduleSalesmanKey(row))
         .filter(Boolean)
     )].sort((a, b) => a.localeCompare(b)),
     [plannedVisitRows]
@@ -1956,9 +1960,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     if (selectedVisitScheduleSalesmen.length === 0) return plannedVisitRows;
 
     return plannedVisitRows.filter((row) =>
-      selectedVisitScheduleSalesmen.includes(
-        String(row.salesman_name || row.scheduled_by_name || "").trim() || "__UNASSIGNED__"
-      )
+      selectedVisitScheduleSalesmen.includes(visitScheduleSalesmanKey(row))
     );
   }, [plannedVisitRows, selectedVisitScheduleSalesmen]);
 

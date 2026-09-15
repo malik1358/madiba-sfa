@@ -427,6 +427,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   const [foreclosingLeadCode, setForeclosingLeadCode] = useState("");
   const [visitStatusSearch, setVisitStatusSearch] = useState("");
   const [selectedVisitStatusSalesmen, setSelectedVisitStatusSalesmen] = useState([]);
+  const [selectedVisitScheduleSalesmen, setSelectedVisitScheduleSalesmen] = useState([]);
   const [dictationSupported, setDictationSupported] = useState(false);
   const [dictationActive, setDictationActive] = useState(false);
   const speechRecognitionRef = useRef(null);
@@ -1933,12 +1934,40 @@ export default function MyDayPage({ mode = "default" } = {}) {
     [visitStatusRows, prospectScheduleRows]
   );
 
+  const visitScheduleSalesmanOptions = useMemo(
+    () => [...new Set(
+      plannedVisitRows
+        .map((row) => String(row.salesman_name || row.scheduled_by_name || "").trim() || "__UNASSIGNED__")
+        .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b)),
+    [plannedVisitRows]
+  );
+
+  function toggleVisitScheduleSalesman(salesmanName) {
+    setSelectedVisitScheduleSalesmen((current) => {
+      if (current.includes(salesmanName)) {
+        return current.filter((entry) => entry !== salesmanName);
+      }
+      return [...current, salesmanName];
+    });
+  }
+
+  const filteredPlannedVisitRows = useMemo(() => {
+    if (selectedVisitScheduleSalesmen.length === 0) return plannedVisitRows;
+
+    return plannedVisitRows.filter((row) =>
+      selectedVisitScheduleSalesmen.includes(
+        String(row.salesman_name || row.scheduled_by_name || "").trim() || "__UNASSIGNED__"
+      )
+    );
+  }, [plannedVisitRows, selectedVisitScheduleSalesmen]);
+
   const visitCalendar = useMemo(() => {
     const todayKey = getScheduleTodayKey();
     const unscheduled = [];
     const datedRows = [];
 
-    plannedVisitRows.forEach((row) => {
+    filteredPlannedVisitRows.forEach((row) => {
       const time = getSortTimestamp(row.next_visit_at);
       if (!time) {
         unscheduled.push(row);
@@ -1965,7 +1994,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
     }));
 
     return { days, unscheduled };
-  }, [plannedVisitRows, language]);
+  }, [filteredPlannedVisitRows, language]);
 
   const activeVisitRow = useMemo(() => {
     const code = String(activeVisitCustomerCode || "").trim();
@@ -2239,6 +2268,33 @@ export default function MyDayPage({ mode = "default" } = {}) {
             <span>{visitCalendar.days.reduce((count, day) => count + day.rows.length, 0)} {t("plannedVisitsCount")}</span>
           </div>
           <div className="moduleHint">{t("scheduleWindowHint")}</div>
+          <details style={{ marginBottom: "10px" }}>
+            <summary className="moduleInlineButton" style={{ width: "fit-content", cursor: "pointer" }}>
+              {selectedVisitScheduleSalesmen.length === 0
+                ? `${t("searchSalesman")}: ${t("allSalesmen")}`
+                : `${t("searchSalesman")}: ${selectedVisitScheduleSalesmen.length}`}
+            </summary>
+            <div className="moduleList" style={{ marginTop: "8px" }}>
+              <label style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={selectedVisitScheduleSalesmen.length === 0}
+                  onChange={() => setSelectedVisitScheduleSalesmen([])}
+                />
+                <span>{t("allSalesmen")}</span>
+              </label>
+              {visitScheduleSalesmanOptions.map((salesmanName) => (
+                <label key={salesmanName} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedVisitScheduleSalesmen.includes(salesmanName)}
+                    onChange={() => toggleVisitScheduleSalesman(salesmanName)}
+                  />
+                  <span>{salesmanName === "__UNASSIGNED__" ? t("unassignedSalesman") : salesmanName}</span>
+                </label>
+              ))}
+            </div>
+          </details>
           {visitOnlyMode ? (
             <NearestCustomerSuggestions
               suggestions={nearestCustomerSuggestions}

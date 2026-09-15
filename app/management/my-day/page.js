@@ -34,7 +34,7 @@ import {
   visitReportsSinceIso,
 } from "../../lib/myDayPlannerLoad";
 import { isVisitStatusCustomer } from "./customerEligibility";
-import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
+import { buildProspectScheduleRows, filterAndRankVisitCustomers, mergePlannedVisitRows, splitVisitCustomersByOutstanding, visitScheduleSalesmanKey } from "./visitPriority";
 import { resolveVisitLastInvoiceDate, customerHasOutstandingBalance, CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR } from "../../lib/outstanding";
 import {
   CUSTOMER_LOCATION_UPDATE_SKIP,
@@ -788,7 +788,9 @@ export default function MyDayPage({ mode = "default" } = {}) {
               return {
                 ...row,
                 salesman_name: salesmanNameByCode.get(salesmanCode) || salesmanCode,
-                scheduled_by_name: salesmanNameByCode.get(salesmanCode) || salesmanCode || "",
+                // Do not invent Scheduled by from the assigned salesman — that
+                // collides with visit-status rows that know the real scheduler.
+                scheduled_by_name: "",
                 scheduled_at: null,
               };
             });
@@ -1924,19 +1926,17 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
   const plannedVisitRows = useMemo(
     () =>
-      [...visitStatusRows, ...prospectScheduleRows]
-        .filter((row) => activeScheduledVisitDate(row.next_visit_at, row.last_visit_date))
-        .sort((a, b) => {
-          const bySchedule = getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at);
-          if (bySchedule !== 0) return bySchedule;
-          return String(a.customer_name || a.customer_code || "").localeCompare(String(b.customer_name || b.customer_code || ""));
-        }),
+      mergePlannedVisitRows(
+        visitStatusRows,
+        prospectScheduleRows,
+        (row) => Boolean(activeScheduledVisitDate(row.next_visit_at, row.last_visit_date)),
+      ).sort((a, b) => {
+        const bySchedule = getSortTimestamp(a.next_visit_at) - getSortTimestamp(b.next_visit_at);
+        if (bySchedule !== 0) return bySchedule;
+        return String(a.customer_name || a.customer_code || "").localeCompare(String(b.customer_name || b.customer_code || ""));
+      }),
     [visitStatusRows, prospectScheduleRows]
   );
-
-  function visitScheduleSalesmanKey(row) {
-    return String(row?.scheduled_by_name || row?.salesman_name || "").trim() || "__UNASSIGNED__";
-  }
 
   const visitScheduleSalesmanOptions = useMemo(
     () => [...new Set(
@@ -2337,11 +2337,13 @@ export default function MyDayPage({ mode = "default" } = {}) {
                     </tr>
                   </thead>
                   <tbody>
-                    {day.rows.map((row) => (
-                      <tr key={`planned-${day.dateKey}-${row.customer_code}`} id={`visit-customer-${row.customer_code}`}>
+                    {day.rows.map((row, rowIndex) => {
+                      const scheduledByLabel = visitScheduleSalesmanKey(row);
+                      return (
+                      <tr key={`planned-${day.dateKey}-${row.customer_code}-${scheduledByLabel}-${rowIndex}`} id={`visit-customer-${row.customer_code}`}>
                         <td data-label={t("visitWhen")}>{formatKsaDateOnly(row.schedule_date || row.next_visit_at)}</td>
                         <td data-label={t("calendarTime")}>{row.is_prospect || !/T\d{2}:\d{2}/.test(String(row.next_visit_at || "")) ? "-" : formatKsaTime(row.next_visit_at)}</td>
-                        <td data-label={t("scheduledBy")}>{row.scheduled_by_name || row.salesman_name || "-"}</td>
+                        <td data-label={t("scheduledBy")}>{scheduledByLabel === "__UNASSIGNED__" ? "-" : scheduledByLabel}</td>
                         <td data-label={t("scheduledOn")}>{row.scheduled_at ? formatKsaDateTime(row.scheduled_at) : "-"}</td>
                         <td data-label={t("customer")} className="moduleScheduleCellPrimary">{row.customer_name || row.customer_code}</td>
                         <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
@@ -2380,7 +2382,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </ExportableTable>

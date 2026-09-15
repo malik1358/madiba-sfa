@@ -3,6 +3,12 @@ import { createClient } from "@supabase/supabase-js";
 import { ensureCustomerVisibleToScope, withSalesScopeMatchers } from "../../lib/customerAccess.js";
 import { shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
+import {
+  CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR,
+  OUTSTANDING_DATASET_KEY,
+  customerHasOutstandingBalance,
+  findOutstandingForCustomer,
+} from "../../lib/outstanding.js";
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { slimVisitStockChecks } from "../../lib/visitReportSave.js";
@@ -93,6 +99,37 @@ export async function PATCH(request) {
 
     const visibleCustomer = await ensureCustomerVisible(admin, customerCode, scope);
     const storedCustomerCode = normalizeCode(visibleCustomer.customer_code || customerCode);
+    const markingInactive = body?.isActive === false;
+
+    if (markingInactive) {
+      const { data: outstandingSetting, error: outstandingError } = await admin
+        .from("system_settings")
+        .select("setting_value")
+        .eq("setting_key", OUTSTANDING_DATASET_KEY)
+        .maybeSingle();
+
+      if (outstandingError) throw outstandingError;
+
+      let outstandingDataset = null;
+      try {
+        outstandingDataset = JSON.parse(outstandingSetting?.setting_value || "null");
+      } catch {
+        outstandingDataset = null;
+      }
+
+      const outstanding = findOutstandingForCustomer(
+        outstandingDataset,
+        storedCustomerCode,
+        visibleCustomer.customer_name,
+      );
+
+      if (customerHasOutstandingBalance(outstanding)) {
+        return NextResponse.json(
+          { success: false, error: CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR },
+          { status: 400 },
+        );
+      }
+    }
 
     const { data: updatedCustomer, error: updateError } = await admin
       .from("customers")

@@ -35,7 +35,7 @@ import {
 } from "../../lib/myDayPlannerLoad";
 import { isVisitStatusCustomer } from "./customerEligibility";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, splitVisitCustomersByOutstanding } from "./visitPriority";
-import { resolveVisitLastInvoiceDate } from "../../lib/outstanding";
+import { resolveVisitLastInvoiceDate, customerHasOutstandingBalance, CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR } from "../../lib/outstanding";
 import {
   CUSTOMER_LOCATION_UPDATE_SKIP,
   CUSTOMER_LOCATION_UPDATE_UPDATE,
@@ -155,6 +155,10 @@ const PAGE_TEXT = {
   openAudit: { en: "Customer Details", ar: "تفاصيل العميل" },
   markInactive: { en: "Mark Inactive", ar: "تعطيل العميل" },
   markingInactive: { en: "Marking...", ar: "جاري التعطيل..." },
+  inactiveBlockedOutstanding: {
+    en: "Customers with outstanding cannot be marked inactive.",
+    ar: "لا يمكن تعطيل العملاء الذين لديهم مستحقات.",
+  },
   markActive: { en: "Mark Active", ar: "إعادة التفعيل" },
   markingActive: { en: "Activating...", ar: "جاري التفعيل..." },
   forecloseLead: { en: "Foreclose Lead", ar: "إغلاق العميل المحتمل" },
@@ -1429,6 +1433,11 @@ export default function MyDayPage({ mode = "default" } = {}) {
     const code = String(customer?.customer_code || "").trim();
     if (!code) return;
 
+    if (customerHasOutstandingBalance(customer)) {
+      setError(t("inactiveBlockedOutstanding"));
+      return;
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) {
       setError("Supabase is not configured.");
@@ -1462,7 +1471,11 @@ export default function MyDayPage({ mode = "default" } = {}) {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result?.success) {
-        throw new Error(result?.error || "Unable to mark customer inactive.");
+        throw new Error(
+          result?.error === CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR
+            ? t("inactiveBlockedOutstanding")
+            : (result?.error || "Unable to mark customer inactive."),
+        );
       }
 
       setVisitStatusRows((current) => current.filter((row) => row.customer_code !== code));
@@ -2480,7 +2493,15 @@ export default function MyDayPage({ mode = "default" } = {}) {
                           type="button"
                           className="moduleInlineButton moduleActionButton"
                           onClick={() => markCustomerInactive(row)}
-                          disabled={inactiveCustomerCode === row.customer_code}
+                          disabled={
+                            inactiveCustomerCode === row.customer_code
+                            || customerHasOutstandingBalance(row)
+                          }
+                          title={
+                            customerHasOutstandingBalance(row)
+                              ? t("inactiveBlockedOutstanding")
+                              : undefined
+                          }
                         >
                           {inactiveCustomerCode === row.customer_code ? t("markingInactive") : t("markInactive")}
                         </button>

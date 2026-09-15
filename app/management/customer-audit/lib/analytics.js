@@ -1,8 +1,18 @@
 import { mergeReceiptMonthsIntoPerformanceWindow, selectMonthlyPerformanceMonths } from '../../../lib/monthlyPerformanceMonths.js';
 import { attachMonthlyReceipts, monthKeyFromReceiptDate } from '../../../lib/receiptRegister.js';
+import { buildPaymentBehavior, emptyPaymentBehavior } from '../../../lib/paymentBehavior.js';
 import { monthKey, parseDateValue, salesUnitQty } from './format';
 
-export function buildAnalytics(transactions, { currentMonthKey, receipts = [] } = {}) {
+export function buildAnalytics(transactions, {
+  currentMonthKey,
+  receipts = [],
+  lifetimeSales = null,
+  lifetimeSkuCount = null,
+  lifetimeReceipts = null,
+  outstandingCustomer = null,
+  outstandingInvoices = [],
+  todayIso,
+} = {}) {
   if (!transactions.length) {
     return null;
   }
@@ -216,6 +226,24 @@ export function buildAnalytics(transactions, { currentMonthKey, receipts = [] } 
     .filter((category) => category.totalSales !== 0 || category.totalSkuCount > 0)
     .sort((a, b) => b.totalSales - a.totalSales);
 
+  const lifetimeSalesTotal = lifetimeSales == null
+    ? transactions.reduce((total, row) => total + Number(row.sales_amount || 0), 0)
+    : Number(lifetimeSales || 0);
+  const lifetimeSkuTotal = lifetimeSkuCount == null
+    ? itemMap.size
+    : Number(lifetimeSkuCount || 0);
+  const lifetimeReceiptTotal = lifetimeReceipts == null
+    ? receiptList.reduce((total, row) => total + Number(row.amount || 0), 0)
+    : Number(lifetimeReceipts || 0);
+
+  const paymentBehavior = buildPaymentBehavior({
+    transactions,
+    receipts: receiptList,
+    outstandingCustomer,
+    outstandingInvoices,
+    todayIso,
+  });
+
   const base = {
     latestDate,
     months,
@@ -225,8 +253,11 @@ export function buildAnalytics(transactions, { currentMonthKey, receipts = [] } 
     items,
     itemLookup,
     orderCount: orderSet.size,
-    itemCount: itemMap.size,
+    itemCount: lifetimeSkuTotal,
+    salesTotal: lifetimeSalesTotal,
+    receiptTotal: lifetimeReceiptTotal,
     transactionCount: transactions.length,
+    paymentBehavior: paymentBehavior || emptyPaymentBehavior(),
   };
 
   if (!receiptList.length) {
@@ -238,5 +269,12 @@ export function buildAnalytics(transactions, { currentMonthKey, receipts = [] } 
   }
 
   const scopedReceipts = receiptList.filter((row) => monthSet.has(monthKeyFromReceiptDate(row?.receipt_date)));
-  return attachMonthlyReceipts(base, scopedReceipts);
+  const withMonthlyReceipts = attachMonthlyReceipts(base, scopedReceipts);
+  return {
+    ...withMonthlyReceipts,
+    // Keep lifetime totals (all history), not the visible-window sum.
+    salesTotal: lifetimeSalesTotal,
+    receiptTotal: lifetimeReceiptTotal,
+    itemCount: lifetimeSkuTotal,
+  };
 }

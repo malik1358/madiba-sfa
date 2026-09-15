@@ -783,7 +783,10 @@ export default function NewOrderPage() {
     [priceList, pricingRegion, regionPriceMaps]
   );
 
-  const analytics = useAnalytics(transactions, receipts);
+  const analytics = useAnalytics(transactions, receipts, {}, {
+    customer: outstandingInfo.customer,
+    customerInvoices: outstandingInfo.customerInvoices,
+  });
   const quickOrderSuggestions = useQuickOrder({
     analytics,
     transactions,
@@ -1630,6 +1633,28 @@ export default function NewOrderPage() {
           {!selectedCustomer && <div className="moduleHint">Select a customer to view outstanding details.</div>}
 
           {selectedCustomer && outstandingLoading && <div className="moduleLoading">Loading outstanding details...</div>}
+
+          {selectedCustomer && !outstandingLoading && analytics?.paymentBehavior ? (
+            <div className="moduleHint" style={{ marginTop: "10px" }}>
+              <strong>Payment behavior:</strong>{" "}
+              {analytics.paymentBehavior.avgDaysToPay != null
+                ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay`
+                : "Avg days to pay unavailable (need sales + receipts)"}
+              {analytics.paymentBehavior.medianDaysToPay != null
+                && analytics.paymentBehavior.medianDaysToPay !== analytics.paymentBehavior.avgDaysToPay
+                ? ` · median ${analytics.paymentBehavior.medianDaysToPay}`
+                : ""}
+              {Number(analytics.paymentBehavior.outstandingTotal || 0) > 0
+                ? ` · unpaid ${Number(analytics.paymentBehavior.outstandingTotal).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+                : ""}
+              {Number(analytics.paymentBehavior.outstandingOldestDays || 0) > 0
+                ? ` · oldest open ${analytics.paymentBehavior.outstandingOldestDays}d`
+                : ""}
+              {Number(analytics.paymentBehavior.outstandingOverdueCount || 0) > 0
+                ? ` · ${analytics.paymentBehavior.outstandingOverdueCount} overdue`
+                : ""}
+            </div>
+          ) : null}
 
           {selectedCustomer && !outstandingLoading && (
             <>

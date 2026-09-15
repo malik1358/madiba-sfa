@@ -46,8 +46,12 @@ const TEXT = {
   cleanDirtyCustomers: { en: "Clean dirty customer codes", ar: "تنظيف أكواد العملاء الخاطئة" },
   cleaningDirtyCustomers: { en: "Cleaning customer master...", ar: "جاري تنظيف بيانات العملاء..." },
   cleanedDirtyCustomers: {
-    en: "Removed dirty duplicate customer codes and remapped sales/invoices.",
-    ar: "تم حذف أكواد العملاء المكررة الخاطئة وإعادة ربط المبيعات/الفواتير.",
+    en: "Removed dirty duplicate customer codes, remapped sales, and rebuilt BI.",
+    ar: "تم حذف أكواد العملاء المكررة الخاطئة، وإعادة ربط المبيعات، وإعادة بناء الذكاء التجاري.",
+  },
+  cleanedDirtyNone: {
+    en: "No dirty duplicate customer codes were found.",
+    ar: "لم يتم العثور على أكواد عملاء مكررة خاطئة.",
   },
   rebuilding: { en: "Rebuilding for new visit limit...", ar: "جاري إعادة البناء لحد الزيارات الجديد..." },
   rebuildQueued: {
@@ -421,10 +425,15 @@ export default function SalesmanVisitPlanPage() {
         throw new Error(data?.error || "Unable to clean dirty customer codes.");
       }
 
-      setMessage(
-        `${t("cleanedDirtyCustomers")} Removed ${Number(data.removed || 0)}.`
-        + (data.remappedSalesRaw ? ` Sales rows remapped: ${data.remappedSalesRaw}.` : ""),
-      );
+      const removed = Number(data.removed || 0);
+      const detail = [
+        removed > 0 ? t("cleanedDirtyCustomers") : t("cleanedDirtyNone"),
+        `Removed ${removed}.`,
+        data.scannedCustomers != null ? `Scanned ${data.scannedCustomers} customers.` : "",
+        data.remappedActiveSales ? `Active sales remapped: ${data.remappedActiveSales}.` : "",
+        data.biRebuilt ? "BI cube rebuilt." : "",
+      ].filter(Boolean).join(" ");
+      setMessage(detail);
     } catch (err) {
       setError(err.message || "Unable to clean dirty customer codes.");
     } finally {
@@ -527,6 +536,9 @@ export default function SalesmanVisitPlanPage() {
             </>
           ) : null}
         </div>
+
+        {error ? <div className="moduleError" role="alert">{error}</div> : null}
+        {message ? <div className="moduleSuccess" role="status">{message}</div> : null}
 
         <section className="moduleFilterRow" style={{ marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
           <label className="moduleField">

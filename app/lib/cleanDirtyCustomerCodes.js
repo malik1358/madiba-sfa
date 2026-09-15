@@ -1,7 +1,10 @@
 /**
  * Remove customer master duplicates where code is "123C  Company Name"
- * and a clean twin "123C" already exists. Remaps sales/invoice refs first.
+ * and a clean twin "123C" already exists. Remaps sales/invoice refs first,
+ * then rebuilds the BI cube so dashboards pick up the change.
  */
+
+import { clearSalesBiCubeMemory, rebuildSalesBiCube } from "./salesBiCubeServer.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -38,6 +41,25 @@ export function buildDirtyCustomerTwinMap(customers = []) {
   return twins;
 }
 
+async function loadAllCustomers(admin) {
+  const pageSize = 1000;
+  const rows = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await admin
+      .from("customers")
+      .select("id,customer_code,customer_name,latest_transaction_date")
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message || "Unable to load customers.");
+    const chunk = data || [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+  return rows;
+}
+
 async function updateCustomerCodeInTable(admin, table, dirtyCode, cleanCode, { withName = false, cleanName = "" } = {}) {
   const payload = withName
     ? {
@@ -52,32 +74,37 @@ async function updateCustomerCodeInTable(admin, table, dirtyCode, cleanCode, { w
     .eq("customer_code", dirtyCode);
 
   if (error) {
+    // Some environments may not expose every table; skip missing ones.
+    const message = String(error.message || "").toLowerCase();
+    if (error.code === "42P01" || message.includes("does not exist") || message.includes("could not find")) {
+      return 0;
+    }
     throw new Error(`${table}: ${error.message || "update failed"}`);
   }
   return Number(count || 0);
 }
 
-export async function cleanDirtyCustomerCodeDuplicates(admin) {
-  const { data: customers, error } = await admin
-    .from("customers")
-    .select("id,customer_code,customer_name,latest_transaction_date");
-
-  if (error) throw new Error(error.message || "Unable to load customers.");
-
-  const twins = buildDirtyCustomerTwinMap(customers || []);
+export async function cleanDirtyCustomerCodeDuplicates(admin, { rebuildBi = true } = {}) {
+  const customers = await loadAllCustomers(admin);
+  const twins = buildDirtyCustomerTwinMap(customers);
   if (!twins.length) {
     return {
       removed: 0,
       remappedSalesRaw: 0,
       remappedSalesOrders: 0,
       remappedInvoices: 0,
+      remappedActiveSales: 0,
+      biRebuilt: false,
+      scannedCustomers: customers.length,
       twins: [],
+      message: "No dirty duplicate customer codes found.",
     };
   }
 
   let remappedSalesRaw = 0;
   let remappedSalesOrders = 0;
   let remappedInvoices = 0;
+  let remappedActiveSales = 0;
 
   for (const twin of twins) {
     remappedSalesRaw += await updateCustomerCodeInTable(
@@ -100,9 +127,16 @@ export async function cleanDirtyCustomerCodeDuplicates(admin) {
       twin.dirtyCode,
       twin.cleanCode,
     );
+    remappedActiveSales += await updateCustomerCodeInTable(
+      admin,
+      "active_sales",
+      twin.dirtyCode,
+      twin.cleanCode,
+      { withName: true, cleanName: twin.cleanName },
+    );
 
     if (twin.dirtyLatestTxn) {
-      const cleanRow = (customers || []).find((row) => row.id === twin.cleanId);
+      const cleanRow = customers.find((row) => row.id === twin.cleanId);
       const current = cleanRow?.latest_transaction_date || null;
       if (!current || String(twin.dirtyLatestTxn) > String(current)) {
         const { error: dateError } = await admin
@@ -125,14 +159,26 @@ export async function cleanDirtyCustomerCodeDuplicates(admin) {
 
   if (deleteError) throw new Error(deleteError.message || "Unable to delete dirty customers.");
 
+  let biRebuilt = false;
+  if (rebuildBi) {
+    clearSalesBiCubeMemory();
+    await rebuildSalesBiCube(admin);
+    biRebuilt = true;
+  }
+
+  const removed = Number(removedCount || dirtyIds.length);
   return {
-    removed: Number(removedCount || dirtyIds.length),
+    removed,
     remappedSalesRaw,
     remappedSalesOrders,
     remappedInvoices,
+    remappedActiveSales,
+    biRebuilt,
+    scannedCustomers: customers.length,
     twins: twins.map((twin) => ({
       dirtyCode: twin.dirtyCode,
       cleanCode: twin.cleanCode,
     })),
+    message: `Removed ${removed} dirty duplicate customer code(s). Remapped sales/invoices and rebuilt BI.`,
   };
 }

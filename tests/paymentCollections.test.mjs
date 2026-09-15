@@ -18,6 +18,10 @@ import {
   findLegalTransferForCustomer,
   formatLatestCollectionVisitRemark,
   hasCollectionVisit,
+  assertCollectionVisitRemark,
+  collectionVisitRequiresRemark,
+  hasCollectionVisitRemark,
+  COLLECTION_VISIT_REMARK_REQUIRED_ERROR,
   invoiceHasCashRef,
   isCashOnlyQueueCustomer,
   isCashQueueCustomer,
@@ -1020,4 +1024,38 @@ test("formatLatestCollectionVisitRemark joins Arabic and English remarks", () =>
     remark_arabic: "Tomorrow",
     remark_english: "Tomorrow",
   }), "Tomorrow");
+});
+
+test("collection visit remark is required when full overdue is not received", () => {
+  assert.equal(collectionVisitRequiresRemark("PAID", "FUNDS_RECEIVED"), false);
+  assert.equal(collectionVisitRequiresRemark("PARTIAL", "FUNDS_RECEIVED"), true);
+  assert.equal(collectionVisitRequiresRemark("PROMISED", "ASKED_COME_LATER"), true);
+  assert.equal(collectionVisitRequiresRemark("NOT_PAID", "RESPONSIBLE_NOT_AVAILABLE"), true);
+  assert.equal(collectionVisitRequiresRemark("NOT_PAID", "TRANSFER_TO_LEGAL"), false);
+
+  assert.equal(hasCollectionVisitRemark(" غداً ", ""), true);
+  assert.equal(hasCollectionVisitRemark("", "Tomorrow"), true);
+  assert.equal(hasCollectionVisitRemark("  ", ""), false);
+
+  assert.doesNotThrow(() => assertCollectionVisitRemark({
+    paymentStatus: "PAID",
+    visitOutcome: "FUNDS_RECEIVED",
+    remarkArabic: "",
+    remarkEnglish: "",
+  }));
+  assert.doesNotThrow(() => assertCollectionVisitRemark({
+    paymentStatus: "PARTIAL",
+    visitOutcome: "FUNDS_RECEIVED",
+    remarkArabic: "دفع جزئي",
+    remarkEnglish: "",
+  }));
+  assert.throws(
+    () => assertCollectionVisitRemark({
+      paymentStatus: "PARTIAL",
+      visitOutcome: "FUNDS_RECEIVED",
+      remarkArabic: "",
+      remarkEnglish: "",
+    }),
+    { message: COLLECTION_VISIT_REMARK_REQUIRED_ERROR },
+  );
 });

@@ -46,6 +46,8 @@ import { getDataRefreshStatus } from "../../lib/dataRefreshStatus";
 import { resolveAuthSession } from "../../lib/authSession";
 import { requestLoginFirstCustomerHintCheck } from "../../lib/loginFirstCustomerHint";
 import {
+  assertCollectionVisitRemark,
+  collectionVisitRequiresRemark,
   isCashOnlyQueueCustomer,
   isCashQueueCustomer,
   isScheduledRevisitQueueCustomer,
@@ -230,6 +232,7 @@ const TEXT = {
   msgModeRequired: { en: "Mode of receipt is required for funds received outcome.", ar: "طريقة الاستلام مطلوبة عند اختيار تم استلام مبلغ." },
   msgReceiptRequired: { en: "Receipt copy is compulsory when funds are received.", ar: "صورة الإيصال إلزامية عند استلام مبلغ." },
   msgNextVisitRequired: { en: "Next visit date is required when full overdue is not received.", ar: "تاريخ الزيارة القادمة مطلوب عند عدم استلام كامل المبلغ المستحق." },
+  msgRemarkRequired: { en: "Remark is required when full overdue is not received.", ar: "الملاحظة مطلوبة عند عدم استلام كامل المبلغ المستحق." },
   msgNextVisitPast: { en: "Next visit date cannot be in the past.", ar: "لا يمكن أن يكون تاريخ الزيارة القادمة في الماضي." },
   msgSaveFailed: { en: "Unable to save collection visit.", ar: "تعذر حفظ زيارة التحصيل." },
   msgRequestTimeout: {
@@ -1023,6 +1026,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (text.includes("Mode of receipt is required")) return t("msgModeRequired");
     if (text.includes("Receipt copy is compulsory")) return t("msgReceiptRequired");
     if (text.includes("Next visit date is required") || text.includes("Next visit is required")) return t("msgNextVisitRequired");
+    if (text.includes("Remark is required when full overdue is not received")) return t("msgRemarkRequired");
     if (text.includes("Next visit date cannot be in the past")) return t("msgNextVisitPast");
     if (text.includes("GPS is required") || text === GPS_REQUIRED_ERROR) return t("msgGpsRequired");
     if (text.includes("Unable to save collection visit")) return t("msgSaveFailed");
@@ -1729,6 +1733,16 @@ export default function PaymentCollectionsView({ view = "due" }) {
         && paymentStatus !== "PAID";
       if (requiresNextVisit && !form.nextVisitAt) {
         throw new Error(t("msgNextVisitRequired"));
+      }
+      try {
+        assertCollectionVisitRemark({
+          paymentStatus,
+          visitOutcome: selectedOutcome,
+          remarkArabic: form.remarkArabic,
+          remarkEnglish: form.remarkEnglish,
+        });
+      } catch {
+        throw new Error(t("msgRemarkRequired"));
       }
       if (form.nextVisitAt) {
         try {
@@ -3030,7 +3044,16 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   </label>
                                   <label className="moduleFieldFull">
                                     {t("remarkArabic")}
-                                    <textarea className="moduleTextArea" rows={3} value={form.remarkArabic} onChange={(event) => setForm((current) => ({ ...current, remarkArabic: event.target.value }))} />
+                                    <textarea
+                                      className="moduleTextArea"
+                                      rows={3}
+                                      value={form.remarkArabic}
+                                      required={collectionVisitRequiresRemark(
+                                        determinePaymentStatus(form.visitOutcome, form.amountReceived, row.total_due_amount),
+                                        form.visitOutcome,
+                                      )}
+                                      onChange={(event) => setForm((current) => ({ ...current, remarkArabic: event.target.value }))}
+                                    />
                                   </label>
                                   <div className="moduleInlineStack" style={{ marginTop: "4px", marginBottom: "4px" }}>
                                     <button type="button" className="moduleInlineButton moduleActionButton" onClick={startDictation}>{isDictating ? `${t("dictation")}...` : t("dictation")}</button>
@@ -3038,7 +3061,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                   </div>
                                   <label className="moduleFieldFull">
                                     {t("remarkEnglish")}
-                                    <textarea className="moduleTextArea" rows={3} value={form.remarkEnglish} onChange={(event) => setForm((current) => ({ ...current, remarkEnglish: event.target.value }))} />
+                                    <textarea
+                                      className="moduleTextArea"
+                                      rows={3}
+                                      value={form.remarkEnglish}
+                                      onChange={(event) => setForm((current) => ({ ...current, remarkEnglish: event.target.value }))}
+                                    />
                                   </label>
                                   <label>
                                     {t("paymentCopy")}

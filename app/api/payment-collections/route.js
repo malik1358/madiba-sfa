@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import {
+  assertCollectionVisitRemark,
   buildCollectionQueues,
   customerMatchesCollectionScope,
   filterCollectionQueueInvoices,
@@ -994,6 +995,12 @@ export async function POST(request) {
     if (visitOutcome === "FUNDS_RECEIVED" && !receiptMode) {
       throw new Error("Mode of receipt is required for funds received outcome");
     }
+    assertCollectionVisitRemark({
+      paymentStatus,
+      visitOutcome,
+      remarkArabic,
+      remarkEnglish,
+    });
     const requiresNextVisit = paymentStatus !== "PAID" && visitOutcome !== "TRANSFER_TO_LEGAL";
     const validatedNextVisitAt = validateNextVisitDate(nextVisitAt, { required: requiresNextVisit });
 

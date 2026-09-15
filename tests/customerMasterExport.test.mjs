@@ -3,6 +3,40 @@ import assert from "node:assert/strict";
 import { resolveCustomerMasterExportFields } from "../app/lib/customerCode.js";
 import { customerMasterExportRows, customerMatchesMasterSearch, dedupeCustomerMasterRows, looksLikeCustomerCodeSearch, postgrestIlikeContains } from "../app/lib/customerMasterQuery.js";
 
+test("resolveCustomerMasterExportFields canonicalizes underscore branch codes", () => {
+  const display = resolveCustomerMasterExportFields({
+    customer_code: "1409_RAWA'I",
+    customer_name: "Al-Kutub Trading Company",
+  });
+
+  assert.equal(display.customer_code, "1409");
+  assert.equal(display.customer_name, "Al-Kutub Trading Company");
+});
+
+test("dedupeCustomerMasterRows merges 1409 and 1409_RAWA'I as one account", () => {
+  const rows = dedupeCustomerMasterRows([
+    {
+      customer_code: "1409_RAWA'I",
+      customer_name: "Al-Kutub Trading Company",
+      latitude: null,
+      longitude: null,
+      latest_transaction_date: "2026-08-10",
+    },
+    {
+      customer_code: "1409",
+      customer_name: "Rawa'i Al-Kutub Trading Company",
+      latitude: null,
+      longitude: null,
+      latest_transaction_date: "2026-09-13",
+    },
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].customer_code, "1409");
+  assert.equal(rows[0].customer_name, "Rawa'i Al-Kutub Trading Company");
+  assert.equal(rows[0].latest_transaction_date, "2026-09-13");
+});
+
 test("resolveCustomerMasterExportFields splits numeric leading code from party name", () => {
   const display = resolveCustomerMasterExportFields({
     customer_code: "",

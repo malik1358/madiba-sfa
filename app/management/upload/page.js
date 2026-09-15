@@ -339,7 +339,7 @@ export default function UploadSalesPage() {
 
   async function uploadReceiptFile() {
     if (!receiptFile) {
-      setReceiptError("Please select a DayBook / receipt Excel file first.");
+      setReceiptError("Please select a receipt Excel file first.");
       return;
     }
 
@@ -658,11 +658,12 @@ export default function UploadSalesPage() {
 
         <div className="uploadCard" style={{ marginTop: "18px" }}>
           <div className="uploadWarning">
-            <strong>Receipt Register / DayBook Upload</strong>
+            <strong>Receipt Register Upload</strong>
             <p>
-              Upload the Tally DayBook receipt register (monthly or date range).
+              Upload the receipt Excel export (columns: TRANSACTIONDATE, VOUCHERTYPENAME,
+              VOUCHERNUMBER, LEDGERNAME, Cr). Receipt and JV-Collection rows are imported.
               Only the receipt dates found in this file are replaced. Other dates stay unchanged,
-              same as sales uploads. Particulars are mapped to customers by code/name.
+              same as sales uploads. Ledger names are mapped to customers by code/name.
             </p>
           </div>
 
@@ -684,7 +685,7 @@ export default function UploadSalesPage() {
 
           <label className="fileDrop">
             <div className="fileIcon">🧾</div>
-            <strong>{receiptFile ? receiptFile.name : "Choose DayBook / Receipt Excel File"}</strong>
+            <strong>{receiptFile ? receiptFile.name : "Choose Receipt Excel File"}</strong>
             <span>{receiptFile ? `${(receiptFile.size / 1024 / 1024).toFixed(2)} MB` : ".xlsx or .xls"}</span>
 
             <input
@@ -712,8 +713,8 @@ export default function UploadSalesPage() {
               <div>
                 <strong>Please keep this page open</strong>
                 <p>
-                  Reading DayBook receipts, mapping particulars to customers, and updating only the
-                  dates found in the file.
+                  Reading receipt rows (Receipt + JV-Collection), mapping ledger names to customers,
+                  and updating only the dates found in the file.
                 </p>
               </div>
             </div>

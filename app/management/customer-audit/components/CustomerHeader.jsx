@@ -1,4 +1,4 @@
-import { formatPaymentDaysLabel } from "../../lib/paymentBehavior.js";
+import { formatPaymentDaysLabel } from "../../../lib/paymentBehavior.js";
 
 export default function CustomerHeader({ customer, analytics, outstandingSalesman = "" }) {
   const salesmanLabel = String(outstandingSalesman || "").trim()

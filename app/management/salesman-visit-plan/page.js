@@ -43,6 +43,12 @@ const TEXT = {
   },
   previewEmail: { en: "Send email now", ar: "إرسال البريد الآن" },
   rebuildSnapshot: { en: "Rebuild midnight snapshot", ar: "إعادة بناء لقطة منتصف الليل" },
+  cleanDirtyCustomers: { en: "Clean dirty customer codes", ar: "تنظيف أكواد العملاء الخاطئة" },
+  cleaningDirtyCustomers: { en: "Cleaning customer master...", ar: "جاري تنظيف بيانات العملاء..." },
+  cleanedDirtyCustomers: {
+    en: "Removed dirty duplicate customer codes and remapped sales/invoices.",
+    ar: "تم حذف أكواد العملاء المكررة الخاطئة وإعادة ربط المبيعات/الفواتير.",
+  },
   rebuilding: { en: "Rebuilding for new visit limit...", ar: "جاري إعادة البناء لحد الزيارات الجديد..." },
   rebuildQueued: {
     en: "Rebuild started in the background. Waiting for the new snapshot...",
@@ -180,6 +186,7 @@ export default function SalesmanVisitPlanPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [allPlans, setAllPlans] = useState([]);
@@ -386,6 +393,45 @@ export default function SalesmanVisitPlanPage() {
     rebuildSnapshot,
   ]);
 
+  async function cleanDirtyCustomers() {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    setCleaning(true);
+    setError("");
+    setMessage("");
+    try {
+      const session = await resolveAuthSession(supabase, 8000);
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const { response, payload: data } = await fetchJsonWithTimeout(
+        "/api/admin/clean-dirty-customers",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        },
+        300000,
+      );
+
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || "Unable to clean dirty customer codes.");
+      }
+
+      setMessage(
+        `${t("cleanedDirtyCustomers")} Removed ${Number(data.removed || 0)}.`
+        + (data.remappedSalesRaw ? ` Sales rows remapped: ${data.remappedSalesRaw}.` : ""),
+      );
+    } catch (err) {
+      setError(err.message || "Unable to clean dirty customer codes.");
+    } finally {
+      setCleaning(false);
+    }
+  }
+
   async function sendPreviewEmail() {
     const supabase = getSupabaseClient();
     if (!supabase) return;
@@ -513,16 +559,19 @@ export default function SalesmanVisitPlanPage() {
             />
             {isAdmin ? <span className="moduleHint">{t("visitsPerSalesmanHint")}</span> : null}
           </label>
-          <button type="button" className="moduleInlineButton" onClick={() => loadPlans()} disabled={loading || rebuilding}>
+          <button type="button" className="moduleInlineButton" onClick={() => loadPlans()} disabled={loading || rebuilding || cleaning}>
             {loading ? t("loading") : t("refresh")}
           </button>
           {isAdmin ? (
             <>
-              <button type="button" className="moduleInlineButton" onClick={sendPreviewEmail} disabled={sending || loading || rebuilding || summary.missingSnapshot}>
+              <button type="button" className="moduleInlineButton" onClick={sendPreviewEmail} disabled={sending || loading || rebuilding || cleaning || summary.missingSnapshot}>
                 {sending ? t("sending") : t("previewEmail")}
               </button>
-              <button type="button" className="moduleInlineButton" onClick={() => rebuildSnapshot()} disabled={rebuilding || loading}>
+              <button type="button" className="moduleInlineButton" onClick={() => rebuildSnapshot()} disabled={rebuilding || loading || cleaning}>
                 {rebuilding ? t("rebuilding") : t("rebuildSnapshot")}
+              </button>
+              <button type="button" className="moduleInlineButton" onClick={cleanDirtyCustomers} disabled={cleaning || loading || rebuilding}>
+                {cleaning ? t("cleaningDirtyCustomers") : t("cleanDirtyCustomers")}
               </button>
             </>
           ) : null}

@@ -53,6 +53,7 @@ import {
   isPendingForApprovalStatus,
   shouldAutoMarkPendingApproval,
   shouldAutoMarkPendingInvoiceCreation,
+  shouldAutoRejectLegacyUninvoicedOrder,
   shouldShowPendingApprovalActions,
 } from "../../lib/orderApproval";
 import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
@@ -126,7 +127,7 @@ function matchesColumnFilter(value, filter) {
   return matchesExcelColumnFilter(value, filter);
 }
 
-function pendingOrderFilterValues(order, meta, approvalRequired = false) {
+function pendingOrderFilterValues(order, meta, approvalRequired = null) {
   return {
     orderId: displayOrDash(formatSalesOrderNumber(order) || order.id),
     customer: displayOrDash(order.customer_name || order.customer_code),
@@ -212,7 +213,7 @@ function subscribeDurationTick(listener) {
   };
 }
 
-function TimeToMakeClock({ order, meta, approvalRequired = false }) {
+function TimeToMakeClock({ order, meta, approvalRequired = null }) {
   const invoiceStatus = invoiceStatusText(meta, order, approvalRequired);
   const live = shouldRunTimeToMakeClock(invoiceStatus);
   const nowMs = useSyncExternalStore(
@@ -232,11 +233,18 @@ function daysOld(fromDate) {
   return Math.max(0, Math.floor((now - then) / (1000 * 60 * 60 * 24)));
 }
 
-function invoiceStatusText(meta, order = null, approvalRequired = false) {
+/** Tri-state: true / false when evaluated, null when credit check has not run yet. */
+function creditApprovalRequiredFlag(creditApprovalByOrder, orderId) {
+  const evaluation = creditApprovalByOrder?.[orderId];
+  if (!evaluation || typeof evaluation.required !== "boolean") return null;
+  return evaluation.required;
+}
+
+function invoiceStatusText(meta, order = null, approvalRequired = null) {
   if (order?.queuedLocally) {
     return order.syncStatus === "failed" ? "Sync failed" : "On this device";
   }
-  if (!meta && !approvalRequired && String(order?.status || "").trim().toUpperCase() !== "SUBMITTED") {
+  if (!meta && approvalRequired == null && String(order?.status || "").trim().toUpperCase() !== "SUBMITTED") {
     return "-";
   }
   return displayInvoiceStatus(meta, { approvalRequired, order });
@@ -356,8 +364,9 @@ export default function PendingOrdersPage() {
   }
 
   async function ensurePendingApprovalStatus(orderId, evaluation, meta = null, order = null) {
+    const approvalRequired = typeof evaluation?.required === "boolean" ? evaluation.required : null;
     if (shouldAutoMarkPendingApproval({
-      approvalRequired: Boolean(evaluation?.required),
+      approvalRequired: approvalRequired === true,
       meta,
       order,
     })) {
@@ -382,7 +391,7 @@ export default function PendingOrdersPage() {
     }
 
     if (shouldAutoMarkPendingInvoiceCreation({
-      approvalRequired: Boolean(evaluation?.required),
+      approvalRequired,
       meta,
       order,
     })) {
@@ -416,7 +425,12 @@ export default function PendingOrdersPage() {
       if (!evaluation || typeof evaluation.required !== "boolean") return null;
       return evaluation.required;
     };
+    const legacyRejectIds = source
+      .filter((order) => shouldAutoRejectLegacyUninvoicedOrder(order, metaByOrder?.[order.id] || null))
+      .map((order) => String(order.id));
+    const legacyRejectSet = new Set(legacyRejectIds);
     const approvalIds = source
+      .filter((order) => !legacyRejectSet.has(String(order.id)))
       .filter((order) => shouldAutoMarkPendingApproval({
         order,
         meta: metaByOrder?.[order.id] || null,
@@ -424,6 +438,7 @@ export default function PendingOrdersPage() {
       }))
       .map((order) => String(order.id));
     const invoiceIds = source
+      .filter((order) => !legacyRejectSet.has(String(order.id)))
       .filter((order) => !approvalIds.includes(String(order.id)))
       .filter((order) => shouldAutoMarkPendingInvoiceCreation({
         order,
@@ -432,7 +447,9 @@ export default function PendingOrdersPage() {
       }))
       .map((order) => String(order.id));
 
-    if (approvalIds.length === 0 && invoiceIds.length === 0) return metaByOrder;
+    if (legacyRejectIds.length === 0 && approvalIds.length === 0 && invoiceIds.length === 0) {
+      return metaByOrder;
+    }
 
     try {
       const token = await getAuthToken();
@@ -440,33 +457,37 @@ export default function PendingOrdersPage() {
 
       async function postMark(mode, orderIds) {
         if (orderIds.length === 0) return;
-        const response = await fetch("/api/order-invoice", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ mode, orderIds }),
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.error || "Unable to update pending invoice statuses.");
-        }
-        const items = payload.items && typeof payload.items === "object" ? payload.items : {};
-        nextMeta = { ...nextMeta, ...items };
-        setInvoiceMetaByOrder((current) => ({
-          ...current,
-          ...items,
-        }));
-        setStatusDraftByOrder((current) => {
-          const next = { ...current };
-          Object.entries(items).forEach(([orderId, meta]) => {
-            next[orderId] = String(meta?.status || "");
+        for (let index = 0; index < orderIds.length; index += 500) {
+          const chunk = orderIds.slice(index, index + 500);
+          const response = await fetch("/api/order-invoice", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ mode, orderIds: chunk }),
           });
-          return next;
-        });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.success) {
+            throw new Error(payload.error || "Unable to update pending invoice statuses.");
+          }
+          const items = payload.items && typeof payload.items === "object" ? payload.items : {};
+          nextMeta = { ...nextMeta, ...items };
+          setInvoiceMetaByOrder((current) => ({
+            ...current,
+            ...items,
+          }));
+          setStatusDraftByOrder((current) => {
+            const next = { ...current };
+            Object.entries(items).forEach(([orderId, meta]) => {
+              next[orderId] = String(meta?.status || "");
+            });
+            return next;
+          });
+        }
       }
 
+      await postMark("mark-legacy-uninvoiced-rejected", legacyRejectIds);
       await postMark("mark-pending-approvals", approvalIds);
       await postMark("mark-pending-invoice-creation", invoiceIds);
       return nextMeta;
@@ -616,10 +637,89 @@ export default function PendingOrdersPage() {
       });
 
       const sourceOrders = Array.isArray(orderList) ? orderList : (ordersRef.current || []);
-      await markSubmittedOrdersInvoiceQueue(sourceOrders, { ...(invoiceMetaByOrder || {}), ...items });
+      const mergedMeta = { ...(invoiceMetaByOrder || {}), ...items };
+      await markSubmittedOrdersInvoiceQueue(sourceOrders, mergedMeta);
+      await hydrateCreditApprovalsForRecentOrders(sourceOrders, mergedMeta, token);
     } catch (err) {
       console.warn(err.message || "Unable to load invoice status.");
     }
+  }
+
+  async function hydrateCreditApprovalsForRecentOrders(orderList, metaByOrder = {}, token = "") {
+    const accessToken = token || await getAuthToken().catch(() => "");
+    if (!accessToken) return metaByOrder;
+
+    const candidates = (orderList || [])
+      .filter((order) => !isQueuedPendingOrderId(order?.id))
+      .filter((order) => String(order?.status || "").trim().toUpperCase() === "SUBMITTED")
+      .filter((order) => {
+        const updated = String(order?.updated_at || order?.created_at || "");
+        return updated && updated >= startOfTodayIso;
+      })
+      .filter((order) => {
+        const meta = metaByOrder?.[order.id] || null;
+        if (meta?.approvedAt || meta?.invoiceFilePath || meta?.invoiceUploadedAt) return false;
+        const status = String(meta?.status || "").trim().toLowerCase();
+        return !status
+          || status === "invoice not uploaded"
+          || status === INVOICE_STATUS_PENDING_INVOICE_CREATION.toLowerCase()
+          || status === INVOICE_STATUS_PENDING_CREDIT.toLowerCase();
+      })
+      .slice(0, 25);
+
+    if (candidates.length === 0) return metaByOrder;
+
+    let nextMeta = { ...metaByOrder };
+    const evaluations = {};
+
+    for (const order of candidates) {
+      try {
+        const [outstandingResponse, documentsResponse] = await Promise.all([
+          fetch(
+            `${OUTSTANDING_API}?customerCode=${encodeURIComponent(order?.customer_code || "")}&customerName=${encodeURIComponent(order?.customer_name || "")}`,
+            { headers: { Authorization: `Bearer ${accessToken}` } },
+          ),
+          fetch(
+            `/api/customer-documents?customerCode=${encodeURIComponent(order?.customer_code || "")}`,
+            { headers: { Authorization: `Bearer ${accessToken}` } },
+          ),
+        ]);
+        const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
+        const documentsPayload = await documentsResponse.json().catch(() => ({}));
+        const outstandingCustomer = outstandingResponse.ok && outstandingPayload.success
+          ? outstandingPayload.customer
+          : null;
+        const evaluation = evaluateCreditApproval({
+          outstanding: outstandingCustomer || {},
+          orderValue: Number(order?.total_value || 0),
+          creditApplication: documentsResponse.ok && documentsPayload.success
+            ? documentsPayload.compliance?.creditApplication
+            : { present: false },
+          paymentType: order?.payment_type || outstandingCustomer?.payment_type || "credit",
+        });
+        evaluations[order.id] = evaluation;
+        const updatedMeta = await ensurePendingApprovalStatus(
+          order.id,
+          evaluation,
+          nextMeta?.[order.id] || null,
+          order,
+        );
+        if (updatedMeta) {
+          nextMeta = { ...nextMeta, [order.id]: updatedMeta };
+        }
+      } catch {
+        // Keep queue usable if a single credit hydrate fails.
+      }
+    }
+
+    if (Object.keys(evaluations).length > 0) {
+      setCreditApprovalByOrder((current) => ({ ...current, ...evaluations }));
+    }
+
+    return markSubmittedOrdersInvoiceQueue(
+      candidates,
+      nextMeta,
+    );
   }
 
   async function refreshInvoiceComparison(orderId) {
@@ -959,7 +1059,7 @@ export default function PendingOrdersPage() {
         const values = pendingOrderFilterValues(
           order,
           invoiceMetaByOrder?.[order.id] || null,
-          Boolean(creditApprovalByOrder?.[order.id]?.required),
+          creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
         );
         return rowMatchesOtherExcelFilters(values, columnFilters, key, HEADING_FILTER_KEYS, matchesColumnFilter);
       });
@@ -967,7 +1067,7 @@ export default function PendingOrdersPage() {
         matching.map((order) => pendingOrderFilterValues(
           order,
           invoiceMetaByOrder?.[order.id] || null,
-          Boolean(creditApprovalByOrder?.[order.id]?.required),
+          creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
         )[key]),
       );
     });
@@ -987,7 +1087,7 @@ export default function PendingOrdersPage() {
       const values = pendingOrderFilterValues(
         order,
         invoiceMetaByOrder?.[order.id] || null,
-        Boolean(creditApprovalByOrder?.[order.id]?.required),
+        creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
       );
       return HEADING_FILTER_KEYS.every((key) => matchesColumnFilter(values[key], effectiveColumnFilters[key]));
     });
@@ -1102,7 +1202,7 @@ export default function PendingOrdersPage() {
         "Invoice Status": invoiceStatusText(
           invoiceMetaByOrder?.[order.id],
           order,
-          Boolean(creditApprovalByOrder?.[order.id]?.required),
+          creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
         ),
         "Invoice Uploaded At": formatDateTime(invoiceMetaByOrder?.[order.id]?.invoiceUploadedAt),
         "Invoice Build Time": formatPendingDuration(pendingOrderTimeToMakeSeconds(
@@ -1142,8 +1242,12 @@ export default function PendingOrdersPage() {
     }
   }
 
-  async function saveInvoiceStatus(orderId) {
-    const status = String(statusDraftByOrder?.[orderId] || "").trim();
+  async function saveInvoiceStatus(orderId, nextStatus = null) {
+    const status = String(
+      nextStatus != null && nextStatus !== ""
+        ? nextStatus
+        : (statusDraftByOrder?.[orderId] || ""),
+    ).trim();
     if (!status) {
       setError("Choose invoice status first.");
       return;
@@ -1151,6 +1255,10 @@ export default function PendingOrdersPage() {
 
     setSavingInvoiceStatus(true);
     setError("");
+    setStatusDraftByOrder((current) => ({
+      ...current,
+      [orderId]: status,
+    }));
 
     try {
       const token = await getAuthToken();
@@ -1172,9 +1280,14 @@ export default function PendingOrdersPage() {
         throw new Error(payload.error || "Unable to save invoice status.");
       }
 
+      const item = payload.item || { orderId, status };
       setInvoiceMetaByOrder((current) => ({
         ...current,
-        [orderId]: payload.item || { orderId, status },
+        [orderId]: item,
+      }));
+      setStatusDraftByOrder((current) => ({
+        ...current,
+        [orderId]: String(item.status || status || ""),
       }));
     } catch (err) {
       setError(err.message || "Unable to save invoice status.");
@@ -1324,7 +1437,7 @@ export default function PendingOrdersPage() {
                   {filteredOrders.map((order) => {
                     const age = daysOld(order.updated_at || order.created_at);
                     const meta = invoiceMetaByOrder?.[order.id] || null;
-                    const approvalRequired = Boolean(creditApprovalByOrder?.[order.id]?.required);
+                    const approvalRequired = creditApprovalRequiredFlag(creditApprovalByOrder, order.id);
                     const pendingApproval = shouldShowPendingApprovalActions(
                       order,
                       meta,
@@ -1357,6 +1470,38 @@ export default function PendingOrdersPage() {
                               >
                                 {activeOrderId === order.id ? "Close" : "Open"}
                               </button>
+                              {canManageInvoice ? (
+                                <select
+                                  className="moduleInput"
+                                  style={{ minWidth: "190px" }}
+                                  value={statusDraftByOrder?.[order.id] || ""}
+                                  onChange={(event) => {
+                                    const next = event.target.value;
+                                    if (!next) {
+                                      setStatusDraftByOrder((current) => ({
+                                        ...current,
+                                        [order.id]: "",
+                                      }));
+                                      return;
+                                    }
+                                    void saveInvoiceStatus(order.id, next);
+                                  }}
+                                  disabled={savingInvoiceStatus || busyApproval}
+                                  aria-label="Change invoice status"
+                                >
+                                  <option value="">Invoice status...</option>
+                                  <option value={INVOICE_STATUS_PENDING_APPROVAL}>{INVOICE_STATUS_PENDING_APPROVAL}</option>
+                                  <option value={INVOICE_STATUS_PENDING_INVOICE_CREATION}>{INVOICE_STATUS_PENDING_INVOICE_CREATION}</option>
+                                  <option value={INVOICE_STATUS_PENDING_CREDIT}>{INVOICE_STATUS_PENDING_CREDIT}</option>
+                                  <option value={INVOICE_STATUS_WAITING_CREDIT_APPLICATION}>{INVOICE_STATUS_WAITING_CREDIT_APPLICATION}</option>
+                                  <option value={INVOICE_STATUS_QUOTATION_WAITING_PAYMENT}>{INVOICE_STATUS_QUOTATION_WAITING_PAYMENT}</option>
+                                  <option value={INVOICE_STATUS_REJECTED}>{INVOICE_STATUS_REJECTED}</option>
+                                  <option value={INVOICE_STATUS_STOCK_UNAVAILABLE}>{INVOICE_STATUS_STOCK_UNAVAILABLE}</option>
+                                  <option value={INVOICE_STATUS_WAITING_STOCK_TRANSFER}>{INVOICE_STATUS_WAITING_STOCK_TRANSFER}</option>
+                                  <option value={INVOICE_STATUS_WAITING_OVERDUE_COLLECTION}>{INVOICE_STATUS_WAITING_OVERDUE_COLLECTION}</option>
+                                  <option value={INVOICE_STATUS_MADE} disabled={!meta?.invoiceFilePath}>{INVOICE_STATUS_MADE}</option>
+                                </select>
+                              ) : null}
                               {canApproveOrders && pendingApproval ? (
                                 <>
                                   <button

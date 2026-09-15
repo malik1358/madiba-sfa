@@ -16,6 +16,8 @@ import {
   ORDER_STATUS_INVOICE_MADE,
   ORDER_STATUS_PENDING_APPROVAL,
   ORDER_STATUS_PENDING_INVOICE_CREATION,
+  ORDER_STATUS_REJECTED,
+  ORDER_REJECTION_REASON_LEGACY_UNINVOICED,
   canApprovePendingOrders,
   isPendingForApprovalStatus,
   isPendingForInvoiceCreationStatus,
@@ -24,6 +26,7 @@ import {
   isValidRejectionReason,
   shouldAutoMarkPendingApproval,
   shouldAutoMarkPendingInvoiceCreation,
+  shouldAutoRejectLegacyUninvoicedOrder,
   statusForRejectionReason,
 } from "../../lib/orderApproval.js";
 
@@ -532,8 +535,80 @@ export async function POST(request) {
       return NextResponse.json({ success: true, item: hydrated, prospectLink: linked.prospectLink });
     }
 
-    if (!["set-status", "approve-order", "reject-order", "mark-pending-approvals", "mark-pending-invoice-creation"].includes(mode)) {
+    if (!["set-status", "approve-order", "reject-order", "mark-pending-approvals", "mark-pending-invoice-creation", "mark-legacy-uninvoiced-rejected"].includes(mode)) {
       return NextResponse.json({ success: false, error: "Unsupported action." }, { status: 400 });
+    }
+
+    if (mode === "mark-legacy-uninvoiced-rejected") {
+      if (!canApprovePendingOrders(scope.role) && !canManageOrderInvoice(scope.role)) {
+        return NextResponse.json({
+          success: false,
+          error: "Only admin, manager, or invoice maker can reject legacy uninvoiced orders.",
+        }, { status: 403 });
+      }
+
+      const requestedIds = Array.isArray(body?.orderIds)
+        ? body.orderIds.map((id) => String(id || "").trim()).filter(Boolean)
+        : [];
+      const uniqueIds = [...new Set(requestedIds)].slice(0, 500);
+      if (uniqueIds.length === 0) {
+        return NextResponse.json({ success: true, items: {}, marked: 0 });
+      }
+
+      const orders = [];
+      for (const idChunk of chunkList(uniqueIds, 100)) {
+        const { data, error } = await admin
+          .from("sales_orders")
+          .select("id,status,customer_code,created_by,salesman_code,created_at")
+          .in("id", idChunk);
+        if (error) throw error;
+        orders.push(...(data || []));
+      }
+
+      const visibleOrders = [];
+      for (const order of orders) {
+        try {
+          await ensureOrderVisible(admin, order.id, scope);
+          visibleOrders.push(order);
+        } catch {
+          // Skip orders outside the caller's scope.
+        }
+      }
+
+      const visibleIds = visibleOrders.map((order) => String(order.id));
+      const existingMap = await readMetaMap(admin, visibleIds);
+      const nowIso = new Date().toISOString();
+      const items = {};
+      let marked = 0;
+
+      for (const order of visibleOrders) {
+        const orderId = String(order.id);
+        const existing = existingMap.get(orderId) || { orderId };
+        if (!shouldAutoRejectLegacyUninvoicedOrder(order, existing)) {
+          items[orderId] = existing;
+          continue;
+        }
+
+        const updated = {
+          ...existing,
+          orderId,
+          status: ORDER_STATUS_REJECTED,
+          rejectionReason: ORDER_REJECTION_REASON_LEGACY_UNINVOICED,
+          rejectedAt: nowIso,
+          rejectedBy: scope.userId,
+          approvedAt: "",
+          approvedBy: "",
+          updatedAt: nowIso,
+          statusUpdatedAt: nowIso,
+          statusUpdatedBy: scope.userId,
+        };
+
+        await upsertMeta(admin, updated);
+        items[orderId] = await withSignedUrl(admin, updated);
+        marked += 1;
+      }
+
+      return NextResponse.json({ success: true, items, marked });
     }
 
     if (mode === "mark-pending-approvals" || mode === "mark-pending-invoice-creation") {
@@ -580,25 +655,18 @@ export async function POST(request) {
       const nowIso = new Date().toISOString();
       const items = {};
       let marked = 0;
-      const approvalRequiredIds = new Set(
-        (Array.isArray(body?.approvalRequiredOrderIds) ? body.approvalRequiredOrderIds : [])
-          .map((id) => String(id || "").trim())
-          .filter(Boolean),
-      );
-
       for (const order of visibleOrders) {
         const orderId = String(order.id);
         const existing = existingMap.get(orderId) || { orderId };
-        const approvalRequired = approvalRequiredIds.has(orderId)
-          ? true
-          : null;
-
+        // Caller already curated the id lists. For invoice-creation marks, treat
+        // approval as known-not-required so unknown credit state cannot block a
+        // deliberate queue update (and cannot invent marks when approval is unknown).
         const shouldMark = mode === "mark-pending-approvals"
           ? shouldAutoMarkPendingApproval({ order, meta: existing, approvalRequired: true })
           : shouldAutoMarkPendingInvoiceCreation({
             order,
             meta: existing,
-            approvalRequired,
+            approvalRequired: false,
           });
 
         if (!shouldMark) {

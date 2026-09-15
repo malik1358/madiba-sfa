@@ -50,8 +50,12 @@ const TEXT = {
     ar: "تم حذف أكواد العملاء المكررة الخاطئة، وإعادة ربط المبيعات، وإعادة بناء الذكاء التجاري.",
   },
   cleanedDirtyNone: {
-    en: "No dirty duplicate customer codes were found.",
-    ar: "لم يتم العثور على أكواد عملاء مكررة خاطئة.",
+    en: "No dirty duplicate customer codes were found in master or sales.",
+    ar: "لم يتم العثور على أكواد عملاء مكررة خاطئة في البيانات الرئيسية أو المبيعات.",
+  },
+  cleanedDirtySalesRemapped: {
+    en: "Remapped dirty codes still present in sales history and rebuilt BI.",
+    ar: "تمت إعادة ربط الأكواد الخاطئة المتبقية في سجل المبيعات وإعادة بناء الذكاء التجاري.",
   },
   rebuilding: { en: "Rebuilding for new visit limit...", ar: "جاري إعادة البناء لحد الزيارات الجديد..." },
   rebuildQueued: {
@@ -426,11 +430,21 @@ export default function SalesmanVisitPlanPage() {
       }
 
       const removed = Number(data.removed || 0);
+      const remappedActive = Number(data.remappedActiveSales || 0);
+      const remappedRaw = Number(data.remappedSalesRaw || 0);
+      const remappedAny = remappedActive > 0 || remappedRaw > 0 || Number(data.remappedSalesOrders || 0) > 0;
+      const headline = removed > 0
+        ? t("cleanedDirtyCustomers")
+        : remappedAny
+          ? t("cleanedDirtySalesRemapped")
+          : t("cleanedDirtyNone");
       const detail = [
-        removed > 0 ? t("cleanedDirtyCustomers") : t("cleanedDirtyNone"),
+        headline,
         `Removed ${removed}.`,
         data.scannedCustomers != null ? `Scanned ${data.scannedCustomers} customers.` : "",
-        data.remappedActiveSales ? `Active sales remapped: ${data.remappedActiveSales}.` : "",
+        data.scannedSpacedSalesCodes != null ? `Spaced sales codes: ${data.scannedSpacedSalesCodes}.` : "",
+        remappedActive ? `Active sales remapped: ${remappedActive}.` : "",
+        remappedRaw ? `Sales raw remapped: ${remappedRaw}.` : "",
         data.biRebuilt ? "BI cube rebuilt." : "",
       ].filter(Boolean).join(" ");
       setMessage(detail);

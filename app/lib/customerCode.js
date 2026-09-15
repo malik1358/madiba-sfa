@@ -62,10 +62,19 @@ export function splitPartyByLeadingCode(partyRaw) {
     return { customer_code: "", customer_name: "" };
   }
 
+  // Treat 1409_RAWA'I / 1409-BRANCH as code 1409 (same account).
+  const embedded = text.match(/^(\d{3,6}[A-Za-z]?)[_\-]+(.+)$/i);
+  if (embedded) {
+    return {
+      customer_code: normalizeCode(embedded[1]),
+      customer_name: String(embedded[2] || "").trim(),
+    };
+  }
+
   const [firstWord, ...restWords] = text.split(/\s+/);
   if (firstWordLooksLikeCustomerCode(firstWord)) {
     return {
-      customer_code: normalizeCode(firstWord),
+      customer_code: normalizeCode(canonicalCustomerCode(firstWord) || firstWord),
       customer_name: restWords.join(" ").trim(),
     };
   }
@@ -91,8 +100,28 @@ export function buildCustomerPartyRaw(row) {
 export function resolveCustomerMasterExportFields(row) {
   const partyRaw = buildCustomerPartyRaw(row);
   const parsed = splitPartyByLeadingCode(partyRaw);
-  const customer_code = parsed.customer_code;
-  const customer_name = parsed.customer_name || (customer_code ? "" : partyRaw);
+  const rawCode = String(row?.customer_code || "").trim();
+  const rawName = String(row?.customer_name || "").trim();
+
+  const customer_code =
+    canonicalCustomerCode(parsed.customer_code) ||
+    canonicalCustomerCode(rawCode) ||
+    parsed.customer_code ||
+    "";
+
+  let customer_name = "";
+  if (rawName) {
+    const nameParsed = splitPartyByLeadingCode(rawName);
+    const nameCode = canonicalCustomerCode(nameParsed.customer_code || rawName);
+    if (nameCode && customer_code && nameCode === customer_code) {
+      customer_name = nameParsed.customer_name || "";
+    } else if (!nameCode || nameCode !== customer_code) {
+      customer_name = rawName;
+    }
+  }
+  if (!customer_name) {
+    customer_name = parsed.customer_name || (customer_code ? "" : partyRaw);
+  }
 
   return {
     partyName: customer_code ? `${customer_code} ${customer_name}`.trim() : (customer_name || partyRaw),

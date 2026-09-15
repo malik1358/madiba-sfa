@@ -1,5 +1,5 @@
 import { findOutstandingForCustomer, OUTSTANDING_DATASET_KEY } from "./outstanding.js";
-import { normalizeCustomerNameKey, resolveCustomerMasterExportFields } from "./customerCode.js";
+import { canonicalCustomerCode, normalizeCustomerNameKey, resolveCustomerMasterExportFields } from "./customerCode.js";
 import {
   CUSTOMER_MASTER_GPS_SELECT,
   CUSTOMER_MASTER_GPS_SELECT_FALLBACK,
@@ -164,7 +164,11 @@ function customerMasterRowScore(row) {
 
 export function customerMasterDedupeKey(row) {
   const display = resolveCustomerMasterExportFields(row);
-  return display.customer_code || normalizeCustomerNameKey(display.customer_name);
+  return (
+    canonicalCustomerCode(display.customer_code || row?.customer_code) ||
+    display.customer_code ||
+    normalizeCustomerNameKey(display.customer_name || row?.customer_name)
+  );
 }
 
 export function dedupeCustomerMasterRows(rows) {

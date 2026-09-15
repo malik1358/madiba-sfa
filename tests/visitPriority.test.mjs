@@ -5,8 +5,11 @@ import {
   buildProspectScheduleRows,
   buildRecentSalesByCustomer,
   filterAndRankVisitCustomers,
+  mergePlannedVisitRows,
+  normalizeVisitScheduleSalesmanLabel,
   summarizeMonthlySales,
   splitVisitCustomersByOutstanding,
+  visitScheduleSalesmanKey,
 } from "../app/management/my-day/visitPriority.js";
 
 test("prospect follow-ups become scheduled visits", () => {
@@ -25,6 +28,44 @@ test("prospect follow-ups become scheduled visits", () => {
     salesman_code: "S1",
     is_prospect: true,
   }]);
+});
+
+test("mergePlannedVisitRows prefers visit-status scheduler over prospect follow-up duplicate", () => {
+  const merged = mergePlannedVisitRows(
+    [{
+      customer_code: "PROSPECT-9",
+      customer_name: "YESLA",
+      salesman_name: "OSAMA",
+      scheduled_by_name: "MOINUDIN KHAJA",
+      next_visit_at: "2026-09-10T00:00:00",
+    }],
+    [{
+      customer_code: "PROSPECT-9",
+      customer_name: "YESLA",
+      salesman_name: "OSAMA",
+      scheduled_by_name: "OSAMA",
+      next_visit_at: "2026-09-10T00:00:00",
+    }],
+  );
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].scheduled_by_name, "MOINUDIN KHAJA");
+  assert.equal(visitScheduleSalesmanKey(merged[0]), "MOINUDIN KHAJA");
+  assert.equal(["OSAMA"].includes(visitScheduleSalesmanKey(merged[0])), false);
+});
+
+test("visit schedule salesman labels collapse Name (Code) duplicates", () => {
+  assert.equal(normalizeVisitScheduleSalesmanLabel("OSAMA"), "OSAMA");
+  assert.equal(normalizeVisitScheduleSalesmanLabel("OSAMA (OSAMA)"), "OSAMA");
+  assert.equal(normalizeVisitScheduleSalesmanLabel("Thamer (SM002)"), "Thamer");
+  assert.equal(
+    visitScheduleSalesmanKey({ scheduled_by_name: "OSAMA (OSAMA)", salesman_name: "OSAMA" }),
+    "OSAMA",
+  );
+  assert.equal(
+    visitScheduleSalesmanKey({ scheduled_by_name: "", salesman_name: "OSAMA" }),
+    "OSAMA",
+  );
 });
 
 test("recent customer sales are aggregated by normalized code", () => {

@@ -122,3 +122,40 @@ export function buildProspectScheduleRows(rows) {
       is_prospect: true,
     }));
 }
+
+export function normalizeVisitScheduleSalesmanLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "__UNASSIGNED__";
+  if (text === "__UNASSIGNED__") return text;
+
+  // Collapse "OSAMA (OSAMA)" / "Thamer (SM002)" to the bare name so one person
+  // is not listed twice when rows use different display formatters.
+  const match = text.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  if (!match) return text;
+  const name = match[1].trim();
+  return name || text;
+}
+
+export function visitScheduleSalesmanKey(row) {
+  const raw = String(row?.scheduled_by_name || row?.salesman_name || "").trim();
+  return normalizeVisitScheduleSalesmanLabel(raw || "__UNASSIGNED__");
+}
+
+/** Prefer visit-status rows (real Scheduled by) over prospect follow-up duplicates. */
+export function mergePlannedVisitRows(visitStatusRows = [], prospectScheduleRows = [], isActiveSchedule = () => true) {
+  const merged = [];
+  const seen = new Set();
+
+  function pushUnique(row) {
+    if (!row || !isActiveSchedule(row)) return;
+    const code = normalizeCode(row.customer_code);
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    merged.push(row);
+  }
+
+  (visitStatusRows || []).forEach(pushUnique);
+  (prospectScheduleRows || []).forEach(pushUnique);
+
+  return merged;
+}

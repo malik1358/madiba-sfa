@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import {
   extractLeadingCustomerCodeAndName,
+  formatSheetDateValue,
   isSameOutstandingCustomer,
   normalizeCode,
   normalizeName,
@@ -11,13 +12,43 @@ import { parsePartyName, splitPartyByLeadingCode } from "./customerCode.js";
 export const RECEIPT_DATASET_KEY = "receipt_register_dataset_v1";
 
 const HEADER_ALIASES = {
-  date: ["date", "voucher date", "vch date", "receipt date"],
-  particulars: ["particulars", "party", "party name", "account", "customer", "ledger"],
+  date: [
+    "transaction date",
+    "transactiondate",
+    "date",
+    "voucher date",
+    "vch date",
+    "receipt date",
+  ],
+  particulars: [
+    "ledger name",
+    "ledgername",
+    "particulars",
+    "party",
+    "party name",
+    "account",
+    "customer",
+    "ledger",
+  ],
   salesman: ["salesman", "sales man", "sales person", "executive"],
   city: ["city"],
   state: ["state", "region"],
-  vchType: ["vch type", "voucher type", "type"],
-  vchNo: ["vch no", "vch no.", "voucher no", "voucher number", "ref no", "receipt no"],
+  vchType: [
+    "voucher type name",
+    "vouchertypename",
+    "vch type",
+    "voucher type",
+    "type",
+  ],
+  vchNo: [
+    "voucher number",
+    "vouchernumber",
+    "vch no",
+    "vch no.",
+    "voucher no",
+    "ref no",
+    "receipt no",
+  ],
   debit: ["debit", "dr"],
   credit: ["credit", "cr", "amount", "receipt amount", "received"],
 };
@@ -25,7 +56,7 @@ const HEADER_ALIASES = {
 function cellText(value) {
   if (value === undefined || value === null) return "";
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
+    return formatSheetDateValue(value) || value.toISOString().slice(0, 10);
   }
   return String(value).trim();
 }
@@ -34,10 +65,22 @@ function normalizeHeader(value) {
   return cellText(value).toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function compactHeader(value) {
+  return normalizeHeader(value).replace(/[^a-z0-9]+/g, "");
+}
+
 function findColumnIndex(headerRow, aliases) {
   const normalized = (headerRow || []).map(normalizeHeader);
+  const compacted = normalized.map((cell) => cell.replace(/[^a-z0-9]+/g, ""));
   for (const alias of aliases) {
-    const index = normalized.findIndex((cell) => cell === alias || cell.includes(alias));
+    const aliasNorm = normalizeHeader(alias);
+    const aliasCompact = compactHeader(alias);
+    const index = normalized.findIndex((cell, cellIndex) => (
+      cell === aliasNorm
+      || cell.includes(aliasNorm)
+      || compacted[cellIndex] === aliasCompact
+      || (aliasCompact.length >= 3 && compacted[cellIndex].includes(aliasCompact))
+    ));
     if (index >= 0) return index;
   }
   return -1;
@@ -46,8 +89,11 @@ function findColumnIndex(headerRow, aliases) {
 export function excelDateToIso(value) {
   if (!value && value !== 0) return "";
 
+  const fromSheet = formatSheetDateValue(value);
+  if (fromSheet) return fromSheet;
+
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
+    return formatSheetDateValue(value);
   }
 
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -71,7 +117,7 @@ export function excelDateToIso(value) {
 
   const parsed = new Date(text);
   if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10);
+    return formatSheetDateValue(parsed) || parsed.toISOString().slice(0, 10);
   }
 
   return "";
@@ -111,7 +157,7 @@ export function parseParticularsParty(particularsRaw) {
   }
 
   const split = splitPartyByLeadingCode(text);
-  if (split.customer_code) {
+  if (split.customer_code && /\d/.test(split.customer_code)) {
     return {
       customer_code: normalizeCode(split.customer_code),
       customer_name: split.customer_name || text,
@@ -120,7 +166,7 @@ export function parseParticularsParty(particularsRaw) {
   }
 
   const extracted = extractLeadingCustomerCodeAndName(text);
-  if (extracted.customer_code) {
+  if (extracted.customer_code && /\d/.test(extracted.customer_code)) {
     return {
       customer_code: normalizeCode(extracted.customer_code),
       customer_name: extracted.customer_name || text,
@@ -129,9 +175,17 @@ export function parseParticularsParty(particularsRaw) {
   }
 
   const parsed = parsePartyName(text);
+  if (parsed.customer_code && /\d/.test(parsed.customer_code)) {
+    return {
+      customer_code: normalizeCode(parsed.customer_code),
+      customer_name: parsed.customer_name || text,
+      particulars: text,
+    };
+  }
+
   return {
-    customer_code: normalizeCode(parsed.customer_code),
-    customer_name: parsed.customer_name || text,
+    customer_code: "",
+    customer_name: text,
     particulars: text,
   };
 }
@@ -145,7 +199,11 @@ function isTotalRow(particulars, dateValue) {
 function looksLikeReceiptType(value) {
   const text = normalizeName(value);
   if (!text) return true;
-  return text.includes("RECEIPT");
+  return text.includes("RECEIPT")
+    || text.includes("COLLECTION")
+    || text === "JV"
+    || text.startsWith("JV ")
+    || text.startsWith("JV-");
 }
 
 export function buildCustomerLookup(customers = []) {
@@ -306,6 +364,7 @@ export function prioritizeReceiptSheets(sheetNames = []) {
       const text = String(name || "").toLowerCase();
       if (text.includes("receipt")) return 0;
       if (text.includes("daybook") || text.includes("day book")) return 1;
+      if (text === "export" || text.includes("export")) return 2;
       return 5;
     };
     return score(left) - score(right);

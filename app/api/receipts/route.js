@@ -159,7 +159,7 @@ export async function POST(request) {
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    const workbook = XLSX.read(Buffer.from(arrayBuffer), { type: "buffer", cellDates: true });
+    const workbook = XLSX.read(Buffer.from(arrayBuffer), { type: "buffer", cellDates: false });
 
     if (!Array.isArray(workbook.SheetNames) || workbook.SheetNames.length === 0) {
       throw new Error("Excel file does not contain any sheet.");

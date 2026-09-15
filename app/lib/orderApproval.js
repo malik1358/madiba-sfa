@@ -1,3 +1,5 @@
+import { ksaDayBounds } from "./workdayActivity.js";
+
 export const ORDER_STATUS_PENDING_APPROVAL = "Pending for approval";
 /** Legacy status kept for existing invoice meta rows. */
 export const ORDER_STATUS_PENDING_CREDIT = "Pending for credit approval";
@@ -13,6 +15,11 @@ export const ORDER_STATUS_INVOICE_MADE = "Invoice made";
 export const ORDER_REJECTION_REASON_CREDIT_LIMIT = "Credit limit";
 export const ORDER_REJECTION_REASON_DISCOUNT_PRICE = "Discount or price problem";
 export const ORDER_REJECTION_REASON_STOCK = "Stock not available";
+/** Bulk close-out for submitted orders created through August 2026 with no invoice. */
+export const ORDER_REJECTION_REASON_LEGACY_UNINVOICED = "Pre-September 2026 — invoice not uploaded";
+
+/** KSA calendar cutoff: orders created before this day are legacy for invoice chase. */
+export const LEGACY_UNINVOICED_REJECT_BEFORE = "2026-09-01";
 
 export const ORDER_REJECTION_REASONS = [
   ORDER_REJECTION_REASON_CREDIT_LIMIT,
@@ -35,6 +42,32 @@ export const ORDER_INVOICE_STATUSES = [
 
 export function normalizeInvoiceStatus(value) {
   return String(value || "").trim();
+}
+
+export function legacyUninvoicedRejectCutoffIso() {
+  return ksaDayBounds(LEGACY_UNINVOICED_REJECT_BEFORE).startIso;
+}
+
+export function isOrderCreatedBeforeLegacyInvoiceCutoff(order) {
+  const createdAt = Date.parse(String(order?.created_at || ""));
+  if (!Number.isFinite(createdAt)) return false;
+  return createdAt < Date.parse(legacyUninvoicedRejectCutoffIso());
+}
+
+export function isRejectedByManagementStatus(status) {
+  return normalizeInvoiceStatus(status).toLowerCase() === ORDER_STATUS_REJECTED.toLowerCase();
+}
+
+/**
+ * Submitted orders created through August 2026 (KSA) with no invoice uploaded
+ * should be closed as Rejected by management.
+ */
+export function shouldAutoRejectLegacyUninvoicedOrder(order, meta = null) {
+  if (!isSubmittedOrder(order)) return false;
+  if (!isOrderCreatedBeforeLegacyInvoiceCutoff(order)) return false;
+  if (hasUploadedInvoice(meta)) return false;
+  if (isRejectedByManagementStatus(meta?.status)) return false;
+  return true;
 }
 
 export function isPendingForApprovalStatus(status) {
@@ -86,15 +119,27 @@ export function isSubmittedWithoutUploadedInvoice(order, meta = null) {
 }
 
 export function displayInvoiceStatus(meta, {
-  approvalRequired = false,
+  approvalRequired = null,
   order = null,
 } = {}) {
   const status = normalizeInvoiceStatus(meta?.status);
+  if (shouldAutoRejectLegacyUninvoicedOrder(order, meta)) {
+    return meta?.rejectionReason
+      ? `${ORDER_STATUS_REJECTED} (${meta.rejectionReason})`
+      : ORDER_STATUS_REJECTED;
+  }
   if (hasUploadedInvoice(meta) && (!status || status.toLowerCase() === "invoice not uploaded")) {
     return ORDER_STATUS_INVOICE_MADE;
   }
   if (isPendingForApprovalStatus(status)) {
     return ORDER_STATUS_PENDING_APPROVAL;
+  }
+  // Credit-needed orders must not stay labeled as invoice-creation, even if
+  // an earlier auto-mark wrote that status before approval was evaluated.
+  if (approvalRequired === true && !meta?.approvedAt && !hasUploadedInvoice(meta)) {
+    if (isPendingForInvoiceCreationStatus(status) || !status || status.toLowerCase() === "invoice not uploaded") {
+      return ORDER_STATUS_PENDING_APPROVAL;
+    }
   }
   if (isPendingForInvoiceCreationStatus(status)) {
     return ORDER_STATUS_PENDING_INVOICE_CREATION;
@@ -111,11 +156,14 @@ export function displayInvoiceStatus(meta, {
   if (meta?.approvedAt && !hasUploadedInvoice(meta)) {
     return ORDER_STATUS_PENDING_INVOICE_CREATION;
   }
-  if (approvalRequired && !meta?.approvedAt) {
+  if (approvalRequired === true && !meta?.approvedAt) {
     return ORDER_STATUS_PENDING_APPROVAL;
   }
   if (isSubmittedWithoutUploadedInvoice(order, meta)) {
-    return ORDER_STATUS_PENDING_INVOICE_CREATION;
+    if (approvalRequired === false) return ORDER_STATUS_PENDING_INVOICE_CREATION;
+    if (approvalRequired === true) return ORDER_STATUS_PENDING_APPROVAL;
+    // Credit check not evaluated yet — do not assume invoice creation.
+    return "-";
   }
   if (hasUploadedInvoice(meta)) {
     return ORDER_STATUS_INVOICE_MADE;
@@ -144,11 +192,14 @@ export function canApprovePendingOrders(role) {
   return normalized === "admin" || normalized === "manager";
 }
 
-export function shouldShowPendingApprovalActions(order, meta = null, { approvalRequired = false } = {}) {
+export function shouldShowPendingApprovalActions(order, meta = null, { approvalRequired = null } = {}) {
+  if (shouldAutoRejectLegacyUninvoicedOrder(order, meta)) return false;
   if (hasUploadedInvoice(meta) || meta?.approvedAt) return false;
-  if (isPendingForInvoiceCreationStatus(meta?.status)) return false;
   if (isPendingForApprovalStatus(meta?.status)) return true;
-  if (approvalRequired && isSubmittedWithoutUploadedInvoice(order, meta)) return true;
+  // Wrongly auto-marked "invoice creation" rows still need Approve/Reject once
+  // credit control says approval is required.
+  if (approvalRequired === true && isSubmittedWithoutUploadedInvoice(order, meta)) return true;
+  if (isPendingForInvoiceCreationStatus(meta?.status)) return false;
   return false;
 }
 
@@ -157,6 +208,7 @@ export function shouldAutoMarkPendingApproval({
   order = null,
   meta = null,
 } = {}) {
+  if (shouldAutoRejectLegacyUninvoicedOrder(order, meta)) return false;
   if (approvalRequired !== true) return false;
   if (meta?.approvedAt) return false;
   if (hasUploadedInvoice(meta)) return false;
@@ -178,6 +230,9 @@ export function shouldAutoMarkPendingInvoiceCreation({
   order = null,
   meta = null,
 } = {}) {
+  // Never mark invoice-creation while credit approval is still unknown — that
+  // race is what put credit-blocked orders onto "Pending for invoice creation".
+  if (shouldAutoRejectLegacyUninvoicedOrder(order, meta)) return false;
   if (approvalRequired === true) return false;
   if (hasUploadedInvoice(meta)) return false;
   if (!isSubmittedWithoutUploadedInvoice(order, meta) && !meta?.approvedAt) return false;
@@ -191,6 +246,10 @@ export function shouldAutoMarkPendingInvoiceCreation({
     return approvalRequired === false;
   }
 
+  // Already approved → invoice creation is the next step.
   if (meta?.approvedAt) return true;
+
+  // Only auto-mark when credit control explicitly says approval is not required.
+  if (approvalRequired !== false) return false;
   return !status || status.toLowerCase() === "invoice not uploaded";
 }

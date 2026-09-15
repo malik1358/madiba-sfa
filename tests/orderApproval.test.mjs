@@ -12,11 +12,13 @@ import {
   ORDER_STATUS_STOCK_UNAVAILABLE,
   canApprovePendingOrders,
   displayInvoiceStatus,
+  isOrderCreatedBeforeLegacyInvoiceCutoff,
   isPendingForApprovalStatus,
   isSubmittedWithoutUploadedInvoice,
   isValidRejectionReason,
   shouldAutoMarkPendingApproval,
   shouldAutoMarkPendingInvoiceCreation,
+  shouldAutoRejectLegacyUninvoicedOrder,
   shouldShowPendingApprovalActions,
   statusForRejectionReason,
 } from "../app/lib/orderApproval.js";
@@ -62,6 +64,24 @@ test("submitted orders needing approval stay in Pending for approval", () => {
   assert.equal(shouldAutoMarkPendingInvoiceCreation({ order, meta: null, approvalRequired: true }), false);
   assert.equal(shouldShowPendingApprovalActions(order, null, { approvalRequired: true }), true);
   assert.equal(displayInvoiceStatus(null, { order, approvalRequired: true }), ORDER_STATUS_PENDING_APPROVAL);
+});
+
+test("unknown credit check does not auto-mark Pending for invoice creation", () => {
+  const order = { id: 437, status: "SUBMITTED" };
+  assert.equal(shouldAutoMarkPendingInvoiceCreation({ order, meta: null, approvalRequired: null }), false);
+  assert.equal(shouldAutoMarkPendingInvoiceCreation({ order, meta: null }), false);
+  assert.equal(displayInvoiceStatus(null, { order, approvalRequired: null }), "-");
+});
+
+test("credit-required overrides a wrong Pending for invoice creation mark", () => {
+  const order = { id: 437, status: "SUBMITTED" };
+  const meta = { status: ORDER_STATUS_PENDING_INVOICE_CREATION };
+  assert.equal(
+    displayInvoiceStatus(meta, { order, approvalRequired: true }),
+    ORDER_STATUS_PENDING_APPROVAL,
+  );
+  assert.equal(shouldShowPendingApprovalActions(order, meta, { approvalRequired: true }), true);
+  assert.equal(shouldAutoMarkPendingApproval({ order, meta, approvalRequired: true }), true);
 });
 
 test("submitted orders with invoice uploaded are not queued", () => {
@@ -134,4 +154,26 @@ test("admin and manager can approve pending orders", () => {
   assert.equal(canApprovePendingOrders("manager"), true);
   assert.equal(canApprovePendingOrders("invoice-maker"), false);
   assert.equal(canApprovePendingOrders("salesman"), false);
+});
+
+test("submitted orders through August 2026 without invoice are rejected by management", () => {
+  const legacy = { id: 10, status: "SUBMITTED", created_at: "2026-08-31T20:00:00.000Z" };
+  const september = { id: 11, status: "SUBMITTED", created_at: "2026-09-01T00:00:00.000+03:00" };
+  assert.equal(isOrderCreatedBeforeLegacyInvoiceCutoff(legacy), true);
+  assert.equal(isOrderCreatedBeforeLegacyInvoiceCutoff(september), false);
+  assert.equal(shouldAutoRejectLegacyUninvoicedOrder(legacy, null), true);
+  assert.equal(shouldAutoRejectLegacyUninvoicedOrder(legacy, { status: ORDER_STATUS_PENDING_INVOICE_CREATION }), true);
+  assert.equal(shouldAutoRejectLegacyUninvoicedOrder(legacy, {
+    invoiceFilePath: "invoices/10.pdf",
+    invoiceUploadedAt: "2026-08-20T10:00:00.000Z",
+  }), false);
+  assert.equal(shouldAutoRejectLegacyUninvoicedOrder(legacy, { status: ORDER_STATUS_REJECTED }), false);
+  assert.equal(shouldAutoRejectLegacyUninvoicedOrder(september, null), false);
+  assert.equal(shouldAutoMarkPendingInvoiceCreation({ order: legacy, meta: null, approvalRequired: false }), false);
+  assert.equal(shouldAutoMarkPendingApproval({ order: legacy, meta: null, approvalRequired: true }), false);
+  assert.equal(displayInvoiceStatus(null, { order: legacy }), ORDER_STATUS_REJECTED);
+  assert.equal(
+    displayInvoiceStatus({ status: ORDER_STATUS_PENDING_INVOICE_CREATION }, { order: legacy }),
+    ORDER_STATUS_REJECTED,
+  );
 });

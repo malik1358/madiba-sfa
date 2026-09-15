@@ -1417,6 +1417,27 @@ export function visitOutstandingSummaryFromRow(row) {
   };
 }
 
+export const CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR =
+  "Customers with outstanding cannot be marked inactive.";
+
+export function visitOutstandingTotal(row) {
+  const summary = visitOutstandingSummaryFromRow(row);
+  return summary.days0To30 + summary.days30To60 + summary.days61To90 + summary.daysAbove90;
+}
+
+export function customerHasOutstandingBalance(source) {
+  if (!source) return false;
+  if (toNumber(source.total_outstanding) > 0) return true;
+  if (visitOutstandingTotal(source) > 0) return true;
+
+  const buckets = source.buckets;
+  if (buckets && typeof buckets === "object") {
+    return Object.values(buckets).some((value) => toNumber(value) > 0);
+  }
+
+  return false;
+}
+
 function subtractDaysFromDateOnly(todayIso, days) {
   const today = parseOutstandingSheetDate(todayIso) || new Date().toISOString().slice(0, 10);
   const dt = new Date(`${today}T00:00:00Z`);

@@ -7671,6 +7671,11 @@ button.moduleBiDashKpi:focus-visible {
   color: #b42318;
 }
 
+.paymentSettleStatus--reversed {
+  background: #eef1f4;
+  color: #4a5560;
+}
+
 .paymentSettleTable tfoot td {
   background: #e8f1f3;
   font-weight: 700;
@@ -7680,4 +7685,157 @@ button.moduleBiDashKpi:focus-visible {
   background: #f3f8f9 !important;
   color: #4a646b;
   font-size: 12px;
+}
+
+/* ==========================================================
+   SALES QTY LIMITS (mobile-friendly cards + item search)
+   ========================================================== */
+
+.moduleQtyLimitsPage .moduleSubtitle {
+  max-width: 42rem;
+}
+
+.moduleQtyLimitList {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.moduleQtyLimitCard {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d5e1e4;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 1px 0 rgba(15, 76, 92, 0.04);
+}
+
+.moduleQtyLimitCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.moduleQtyLimitStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f4c5c;
+}
+
+.moduleQtyLimitField {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.moduleQtyLimitField > span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4a646b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.moduleQtyLimitFieldNarrow {
+  max-width: 180px;
+}
+
+.moduleQtyLimitItemMeta {
+  margin: 0;
+}
+
+.moduleQtyLimitSummary {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f3fbfb;
+  color: #073f4c;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.moduleQtyLimitFooter {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  gap: 10px;
+  padding: 12px 0 4px;
+  background: linear-gradient(180deg, rgba(248, 251, 252, 0), #f8fbfc 28%);
+}
+
+.moduleQtyLimitTotals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #0f4c5c;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.moduleQtyLimitTotals strong {
+  font-weight: 800;
+}
+
+.moduleQtyLimitActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.moduleQtyLimitActions .moduleInlineButton,
+.moduleQtyLimitActions .modulePrimaryButton {
+  width: 100%;
+  min-height: 44px;
+}
+
+.moduleQtyItemSearch .moduleCustomerSuggestions strong {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.moduleQtyItemCategory {
+  color: #607b82;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+@media (min-width: 901px) {
+  .moduleQtyLimitList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .moduleQtyLimitActions {
+    grid-template-columns: auto auto;
+    justify-content: start;
+  }
+
+  .moduleQtyLimitActions .moduleInlineButton,
+  .moduleQtyLimitActions .modulePrimaryButton {
+    width: auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .moduleQtyLimitsPage .moduleHeaderMeta {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .moduleQtyLimitFieldNarrow {
+    max-width: none;
+  }
 }

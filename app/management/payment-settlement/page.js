@@ -28,8 +28,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Open amounts follow the outstanding upload (book truth). FIFO only estimates payment days from receipts. Invoices fully reversed by a same-day credit note are excluded. Other credit notes in the ledger are why sales−receipts alone can disagree.",
-    ar: "المبالغ المفتوحة تتبع ملف المستحقات (دفتر الحسابات). الأقدم أولاً يقدّر أيام الدفع فقط من الإيصالات. الفواتير الملغاة بنفس اليوم بإشعار دائن تُستبعد.",
+    en: "Open amounts follow the outstanding upload (book truth). FIFO only estimates payment days from receipts. Invoices reversed immediately by credit notes are excluded from avg days and listed separately.",
+    ar: "المبالغ المفتوحة تتبع ملف المستحقات (دفتر الحسابات). الأقدم أولاً يقدّر أيام الدفع فقط من الإيصالات. الفواتير الملغاة فوراً بإشعار دائن تُستبعد من متوسط الأيام وتُعرض بشكل منفصل.",
   },
 };
 
@@ -44,6 +44,7 @@ function formatCount(value) {
 function statusClass(status) {
   if (status === "Paid") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Partial") return "paymentSettleStatus paymentSettleStatus--partial";
+  if (status === "Reversed") return "paymentSettleStatus paymentSettleStatus--reversed";
   return "paymentSettleStatus paymentSettleStatus--open";
 }
 
@@ -401,6 +402,63 @@ export default function PaymentSettlementPage() {
                         <td><strong>{formatMoney(ledger.totals.paid_amount)}</strong></td>
                         <td><strong>{formatMoney(ledger.totals.open_sales_amount)}</strong></td>
                         <td colSpan={3} />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </ExportableTable>
+              </section>
+
+              <section className="moduleSection">
+                <div className="moduleSectionHeader">
+                  <h2>Reversed by Credit Note</h2>
+                  <span>
+                    {formatCount(ledger.totals.reversed_invoice_count || 0)} excluded from avg days to pay
+                  </span>
+                </div>
+                <p className="moduleHint">
+                  Same-day or next-day credit notes that fully reverse an invoice. These are not customer payments.
+                </p>
+                <ExportableTable filename="payment-settlement-reversed" sheetName="Reversed" className="moduleTableWrap">
+                  <table className="moduleTable moduleBiTable paymentSettleTable">
+                    <thead>
+                      <tr>
+                        <th>Sales Date</th>
+                        <th>Invoice Voucher</th>
+                        <th>Sales excl VAT</th>
+                        <th>Sales incl VAT</th>
+                        <th>Credit Note Date</th>
+                        <th>Credit Note Voucher</th>
+                        <th>Credit Note Amount</th>
+                        <th>Reversal Days</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(ledger.reversedInvoices || []).map((row) => (
+                        <tr key={`${row.invoice_date}::${row.voucher_number}::${row.credit_note_voucher}`}>
+                          <td>{row.invoice_date || "—"}</td>
+                          <td>{row.voucher_number || "—"}</td>
+                          <td>{formatMoney(row.amount_excl_vat)}</td>
+                          <td>{formatMoney(row.amount_incl_vat)}</td>
+                          <td>{row.credit_note_date || "—"}</td>
+                          <td>{row.credit_note_voucher || "—"}</td>
+                          <td>{formatMoney(row.credit_note_amount)}</td>
+                          <td>{row.reversal_days != null ? row.reversal_days : "—"}</td>
+                          <td><span className={statusClass("Reversed")}>Reversed</span></td>
+                        </tr>
+                      ))}
+                      {!(ledger.reversedInvoices || []).length && (
+                        <tr>
+                          <td colSpan={9}>No immediate credit-note reversals for this customer.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={2}><strong>Total</strong></td>
+                        <td><strong>{formatMoney(ledger.totals.reversed_sales_excl_vat || 0)}</strong></td>
+                        <td><strong>{formatMoney(ledger.totals.reversed_sales_incl_vat || 0)}</strong></td>
+                        <td colSpan={5} />
                       </tr>
                     </tfoot>
                   </table>

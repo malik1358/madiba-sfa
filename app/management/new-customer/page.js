@@ -15,6 +15,7 @@ import { isMostlyLatinLetters } from "../../lib/translateText";
 import { detectTable } from "../../lib/schemaGuards";
 import { captureGpsLocation, insertGpsActivityLog, requireGpsLocation } from "../../lib/geo";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
+import { useAppPopup } from "../../components/AppPopupProvider";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
 import { resolveAuthSession } from "../../lib/authSession";
@@ -24,11 +25,13 @@ import {
   normalizeProspectSalesmanCode,
   resolveProspectCustomerCode,
 } from "../../lib/prospects";
+import { buildProspectFollowUpWhatsappSummary } from "../../lib/prospectWhatsapp";
 import { postJsonResilient } from "../../lib/offlineApi";
 import { prospectToOrderCustomer, readLocalProspects, upsertLocalProspect } from "../../lib/offlineProspects";
 import { fetchVisibleCustomersCached, upsertLocalVisibleCustomer } from "../../lib/mobileDataCache";
 import { getTodayDateKey, validateNextVisitDate } from "../../lib/nextVisitDate";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
+import { copyTextToClipboard } from "../../lib/whatsappShare";
 import {
   formatExistingCustomerDuplicateMessage,
   isValidKsaMobile,
@@ -48,6 +51,7 @@ const TEXT = {
   nextVisitDate: { en: "Next Visit Date", ar: "تاريخ الزيارة القادمة" },
   saveFollowUp: { en: "Save Follow-up", ar: "حفظ المتابعة" },
   savingFollowUp: { en: "Saving...", ar: "جاري الحفظ..." },
+  followUpSaved: { en: "Follow-up visit scheduled. Opening WhatsApp...", ar: "تم تحديد زيارة المتابعة. جاري فتح واتساب..." },
   linkCustomer: { en: "Link Customer", ar: "ربط عميل" },
   linkCustomerTitle: { en: "Link prospect to customer", ar: "ربط العميل المحتمل بعميل" },
   linkCustomerHint: {
@@ -219,6 +223,7 @@ export default function NewCustomerPage() {
   const router = useRouter();
   const { language, dir, setLanguage } = useAppLanguage();
   const { access } = useModuleAccess();
+  const { showPopup } = useAppPopup();
   const requireGps = shouldRequireTransactionGps(access.role);
   const t = translate(language, TEXT);
   const [loading, setLoading] = useState(true);
@@ -774,6 +779,24 @@ export default function NewCustomerPage() {
         companyName: form.customer_name_en || form.shop_name,
       });
 
+      const salesmanCode = String(form.salesman_code || currentSalesmanCode || "").trim();
+      const salesmanRow = salesmen.find(
+        (row) => normalizeProspectSalesmanCode(row.salesman_code) === normalizeProspectSalesmanCode(salesmanCode)
+      );
+      const salesmanName = salesmanRow
+        ? `${salesmanRow.salesman_name || salesmanRow.salesman_code}${salesmanRow.salesman_code ? ` (${salesmanRow.salesman_code})` : ""}`
+        : salesmanCode;
+      const whatsappSummary = buildProspectFollowUpWhatsappSummary({
+        form,
+        prospect: {
+          id: savedProspect.id,
+          offline_id: savedProspect.offlineId,
+        },
+        followUpDate,
+        salesmanName,
+        salesmanCode,
+      });
+
       setRecent((current) => current.map((row) => (
         row.id === savedProspect.id || row.offline_id === savedProspect.offlineId
           ? { ...row, status: "FOLLOW_UP", follow_up_date: followUpDate }
@@ -785,7 +808,14 @@ export default function NewCustomerPage() {
       setForm((current) => ({ ...INITIAL_FORM, salesman_code: current.salesman_code }));
       setDocuments([]);
       setArabicNameEdited(false);
-      setMessage(`Follow-up visit scheduled for ${followUpDate}.`);
+      setMessage("");
+      void copyTextToClipboard(whatsappSummary);
+      showPopup({
+        message: t("followUpSaved"),
+        variant: "success",
+        whatsappText: whatsappSummary,
+        autoShareWhatsapp: true,
+      });
     } catch (err) {
       setError(err.message || "Unable to schedule follow-up visit.");
     } finally {

@@ -746,11 +746,12 @@ export default function NewCustomerPage() {
         offline_id: savedProspect.offlineId,
       });
       const customerName = String(form.customer_name_en || form.shop_name || "").trim() || customerCode;
+      const parsedGps = parseGpsCoordinates(form.gps_location);
       const prospectCustomer = {
         customer_code: customerCode,
         customer_name: customerName,
-        latitude: form.gps_location ? Number(String(form.gps_location).split(",")[0]) : null,
-        longitude: form.gps_location ? Number(String(form.gps_location).split(",")[1]) : null,
+        latitude: parsedGps?.lat ?? null,
+        longitude: parsedGps?.lng ?? null,
       };
       const visitDistance = await loadVisitDistanceMetrics({
         supabase,

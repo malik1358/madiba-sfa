@@ -227,6 +227,7 @@ export default function ManagementPage() {
       "dailyVisitReport",
       "userActivity",
       "customerAudit",
+      "paymentSettlement",
       "customerMaster",
       "outstandingNoGps",
       "salesmanVisitPlan",

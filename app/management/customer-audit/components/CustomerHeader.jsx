@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatPaymentDaysLabel } from "../../../lib/paymentBehavior.js";
 
 export default function CustomerHeader({ customer, analytics, outstandingSalesman = "" }) {
@@ -8,6 +9,7 @@ export default function CustomerHeader({ customer, analytics, outstandingSalesma
   const avgDaysLabel = formatPaymentDaysLabel(payment);
   const unpaidTotal = Number(payment?.outstandingTotal || 0);
   const unpaidOldest = Number(payment?.outstandingOldestDays || 0);
+  const settlementHref = `/management/payment-settlement?customer_code=${encodeURIComponent(customer.customer_code || "")}`;
 
   return (
     <section className="auditCustomerHero">
@@ -29,6 +31,9 @@ export default function CustomerHeader({ customer, analytics, outstandingSalesma
         <div className="auditSummaryCard">
           <span>Avg Days to Pay</span>
           <strong>{avgDaysLabel}</strong>
+          <Link href={settlementHref} className="auditSummaryCardLink">
+            Settlement detail
+          </Link>
         </div>
         <div className="auditSummaryCard">
           <span>Unpaid Bills</span>

@@ -487,6 +487,12 @@ function CustomerAuditPageContent() {
               {Number(analytics.paymentBehavior.outstandingOldestDays || 0) > 0
                 ? ` · oldest open ${analytics.paymentBehavior.outstandingOldestDays}d`
                 : ""}
+              {" · "}
+              <Link
+                href={`/management/payment-settlement?customer_code=${encodeURIComponent(selectedCustomer.customer_code || "")}`}
+              >
+                View settlement
+              </Link>
             </div>
           ) : null}
 

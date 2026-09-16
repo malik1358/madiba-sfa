@@ -4,6 +4,7 @@ import {
   resolveOverdueDaysFromDueDate,
   toNumber,
 } from "./outstanding.js";
+import { amountInclVatFromExcl, vatRateForProduct } from "./regionalPricing.js";
 
 function dateOnly(value) {
   return parseOutstandingSheetDate(value) || String(value || "").slice(0, 10);
@@ -20,6 +21,7 @@ function isoDaysBetween(laterIso, earlierIso) {
 }
 
 function roundDays(value) {
+  if (value == null || value === "") return null;
   const number = Number(value);
   if (!Number.isFinite(number)) return null;
   return Math.round(number);
@@ -37,6 +39,8 @@ function median(values) {
 
 /**
  * Collapse sales history lines into invoice-level rows (voucher + date).
+ * Sales amounts are exclusive of VAT; receipts are inclusive, so each line is
+ * grossed up at 15% unless it is a gloves (VAT-exempt) product.
  */
 export function buildSalesInvoices(transactions = []) {
   const map = new Map();
@@ -44,18 +48,27 @@ export function buildSalesInvoices(transactions = []) {
   (Array.isArray(transactions) ? transactions : []).forEach((row) => {
     const invoiceDate = dateOnly(row?.transaction_date);
     if (!invoiceDate) return;
-    const amount = toNumber(row?.sales_amount);
-    if (amount <= 0) return;
+    const amountExclVat = toNumber(row?.sales_amount);
+    if (amountExclVat <= 0) return;
+
+    const vatRate = vatRateForProduct({
+      category: row?.category,
+      item_name: row?.item_name,
+      item_code: row?.item_code,
+    });
+    const amountInclVat = amountInclVatFromExcl(amountExclVat, vatRate);
 
     const voucher = String(row?.voucher_number || row?.reference || "").trim();
     const key = `${invoiceDate}::${voucher || "NO-VOUCHER"}`;
     const current = map.get(key) || {
       invoice_date: invoiceDate,
       voucher_number: voucher,
+      amount_excl_vat: 0,
       amount: 0,
       remaining: 0,
     };
-    current.amount += amount;
+    current.amount_excl_vat += amountExclVat;
+    current.amount += amountInclVat;
     current.remaining = current.amount;
     map.set(key, current);
   });
@@ -109,6 +122,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
           invoice_date: invoice.invoice_date,
           voucher_number: invoice.voucher_number,
           receipt_date: receipt.receipt_date,
+          vch_no: receipt.vch_no,
           amount: applied,
           days,
         });
@@ -257,3 +271,162 @@ export function formatPaymentDaysLabel(behavior) {
   if (!behavior || behavior.avgDaysToPay == null) return "—";
   return `${behavior.avgDaysToPay} days`;
 }
+
+function invoiceKey(invoiceDate, voucherNumber) {
+  return `${dateOnly(invoiceDate)}::${String(voucherNumber || "").trim()}`;
+}
+
+/**
+ * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
+ */
+export function buildPaymentSettlementLedger({
+  transactions = [],
+  receipts = [],
+  outstandingCustomer = null,
+  outstandingInvoices = [],
+  todayIso = new Date().toISOString().slice(0, 10),
+} = {}) {
+  const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
+  const { invoices, allocations, unmatchedReceiptAmount } = matchPaymentsFifo(transactions, receipts);
+  const summary = buildPaymentBehavior({
+    transactions,
+    receipts,
+    outstandingCustomer,
+    outstandingInvoices,
+    todayIso: today,
+  });
+
+  const settlementsByInvoice = new Map();
+  allocations.forEach((row) => {
+    const key = invoiceKey(row.invoice_date, row.voucher_number);
+    const list = settlementsByInvoice.get(key) || [];
+    list.push({ ...row });
+    settlementsByInvoice.set(key, list);
+  });
+
+  const invoiceRows = invoices.map((invoice) => {
+    const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
+    const settlements = (settlementsByInvoice.get(key) || []).sort((left, right) => {
+      if (left.receipt_date !== right.receipt_date) {
+        return left.receipt_date.localeCompare(right.receipt_date);
+      }
+      return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
+    });
+    const paidAmount = settlements.reduce((total, row) => total + toNumber(row.amount), 0);
+    const remaining = toNumber(invoice.remaining);
+    const weightedDays = paidAmount > 0
+      ? settlements.reduce((total, row) => total + (Number(row.days || 0) * toNumber(row.amount)), 0) / paidAmount
+      : null;
+    let status = "Open";
+    if (remaining <= 0.009 && paidAmount > 0) status = "Paid";
+    else if (paidAmount > 0.009 && remaining > 0.009) status = "Partial";
+
+    return {
+      invoice_date: invoice.invoice_date,
+      voucher_number: invoice.voucher_number,
+      amount_excl_vat: toNumber(invoice.amount_excl_vat),
+      amount_incl_vat: toNumber(invoice.amount),
+      paid_amount: paidAmount,
+      remaining,
+      status,
+      payment_days: roundDays(weightedDays),
+      open_days: remaining > 0.009 ? (isoDaysBetween(today, invoice.invoice_date) || 0) : 0,
+      settlements,
+    };
+  });
+
+  const salesByDateMap = new Map();
+  invoiceRows.forEach((row) => {
+    const current = salesByDateMap.get(row.invoice_date) || {
+      date: row.invoice_date,
+      invoice_count: 0,
+      sales_excl_vat: 0,
+      sales_incl_vat: 0,
+      paid_amount: 0,
+      open_amount: 0,
+    };
+    current.invoice_count += 1;
+    current.sales_excl_vat += row.amount_excl_vat;
+    current.sales_incl_vat += row.amount_incl_vat;
+    current.paid_amount += row.paid_amount;
+    current.open_amount += row.remaining;
+    salesByDateMap.set(row.invoice_date, current);
+  });
+
+  const collectionsByDateMap = new Map();
+  buildSortedReceipts(receipts).forEach((row) => {
+    const current = collectionsByDateMap.get(row.receipt_date) || {
+      date: row.receipt_date,
+      receipt_count: 0,
+      collected_amount: 0,
+    };
+    current.receipt_count += 1;
+    current.collected_amount += toNumber(row.amount);
+    collectionsByDateMap.set(row.receipt_date, current);
+  });
+
+  const allDates = [...new Set([
+    ...salesByDateMap.keys(),
+    ...collectionsByDateMap.keys(),
+  ])].sort();
+
+  const datewise = allDates.map((date) => {
+    const sales = salesByDateMap.get(date) || {
+      date,
+      invoice_count: 0,
+      sales_excl_vat: 0,
+      sales_incl_vat: 0,
+      paid_amount: 0,
+      open_amount: 0,
+    };
+    const collections = collectionsByDateMap.get(date) || {
+      date,
+      receipt_count: 0,
+      collected_amount: 0,
+    };
+    return {
+      date,
+      invoice_count: sales.invoice_count,
+      sales_excl_vat: sales.sales_excl_vat,
+      sales_incl_vat: sales.sales_incl_vat,
+      receipt_count: collections.receipt_count,
+      collected_amount: collections.collected_amount,
+      paid_against_sales: sales.paid_amount,
+      open_sales_amount: sales.open_amount,
+    };
+  });
+
+  const settlementEvents = [...allocations]
+    .sort((left, right) => {
+      if (left.receipt_date !== right.receipt_date) {
+        return left.receipt_date.localeCompare(right.receipt_date);
+      }
+      if (left.invoice_date !== right.invoice_date) {
+        return left.invoice_date.localeCompare(right.invoice_date);
+      }
+      return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+    });
+
+  const totals = {
+    sales_excl_vat: invoiceRows.reduce((total, row) => total + row.amount_excl_vat, 0),
+    sales_incl_vat: invoiceRows.reduce((total, row) => total + row.amount_incl_vat, 0),
+    collected_amount: buildSortedReceipts(receipts).reduce((total, row) => total + toNumber(row.amount), 0),
+    paid_amount: invoiceRows.reduce((total, row) => total + row.paid_amount, 0),
+    open_sales_amount: invoiceRows.reduce((total, row) => total + row.remaining, 0),
+    unmatched_receipt_amount: toNumber(unmatchedReceiptAmount),
+    invoice_count: invoiceRows.length,
+    paid_invoice_count: invoiceRows.filter((row) => row.status === "Paid").length,
+    partial_invoice_count: invoiceRows.filter((row) => row.status === "Partial").length,
+    open_invoice_count: invoiceRows.filter((row) => row.status === "Open").length,
+  };
+
+  return {
+    summary,
+    totals,
+    invoices: invoiceRows,
+    datewise,
+    settlementEvents,
+    outstandingInvoices: summarizeOutstandingUnpaid(outstandingCustomer, outstandingInvoices, today).invoices,
+  };
+}
+

@@ -385,7 +385,7 @@ export function buildPaymentBehavior({
 
   let summaryLabel = "Payment days unavailable";
   if (avgDaysToPay != null) {
-    summaryLabel = `Avg ${avgDaysToPay} days to pay`;
+    summaryLabel = `Avg ${avgDaysToPay} days to pay from receipts`;
     if (medianDaysToPay != null && medianDaysToPay !== avgDaysToPay) {
       summaryLabel += ` (median ${medianDaysToPay})`;
     }
@@ -395,14 +395,14 @@ export function buildPaymentBehavior({
     summaryLabel += avgDaysToPay != null ? " · " : "";
     summaryLabel += `Unpaid ${outstanding.totalOutstanding.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
     if (outstanding.oldestOpenDays > 0) {
-      summaryLabel += ` / oldest ${outstanding.oldestOpenDays}d`;
+      summaryLabel += ` / oldest open ${outstanding.oldestOpenDays}d`;
     }
   } else if (unpaidFromSales.length > 0) {
     const unpaidAmount = unpaidFromSales.reduce((total, row) => total + toNumber(row.remaining), 0);
     summaryLabel += avgDaysToPay != null ? " · " : "";
     summaryLabel += `Open sales ${unpaidAmount.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
     if (unpaidFromSales[0]?.open_days > 0) {
-      summaryLabel += ` / oldest ${unpaidFromSales[0].open_days}d`;
+      summaryLabel += ` / oldest open ${unpaidFromSales[0].open_days}d`;
     }
   }
 

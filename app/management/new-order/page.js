@@ -1638,7 +1638,7 @@ export default function NewOrderPage() {
             <div className="moduleHint" style={{ marginTop: "10px" }}>
               <strong>Payment behavior:</strong>{" "}
               {analytics.paymentBehavior.avgDaysToPay != null
-                ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay`
+                ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay from collected receipts`
                 : "Avg days to pay unavailable (need sales + receipts)"}
               {analytics.paymentBehavior.medianDaysToPay != null
                 && analytics.paymentBehavior.medianDaysToPay !== analytics.paymentBehavior.avgDaysToPay
@@ -1648,7 +1648,7 @@ export default function NewOrderPage() {
                 ? ` · unpaid ${Number(analytics.paymentBehavior.outstandingTotal).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
                 : ""}
               {Number(analytics.paymentBehavior.outstandingOldestDays || 0) > 0
-                ? ` · oldest open ${analytics.paymentBehavior.outstandingOldestDays}d`
+                ? ` · oldest unpaid invoice ${analytics.paymentBehavior.outstandingOldestDays}d`
                 : ""}
               {Number(analytics.paymentBehavior.outstandingOverdueCount || 0) > 0
                 ? ` · ${analytics.paymentBehavior.outstandingOverdueCount} overdue`

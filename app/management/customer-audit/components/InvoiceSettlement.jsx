@@ -91,6 +91,19 @@ export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-s
             <strong>
               {summary.avgDaysToPay != null ? `${summary.avgDaysToPay} days` : "—"}
             </strong>
+            <em className="auditSummaryCardMeta">
+              {summary.avgDaysToPay != null
+                ? "From collected receipts only — not open invoice age"
+                : "Needs sales + receipts"}
+            </em>
+            {Number(summary.outstandingOldestDays || 0) > 0 ? (
+              <em className="auditSummaryCardMeta">
+                Oldest unpaid invoice: {formatCount(summary.outstandingOldestDays)}d
+                {Number(summary.outstandingOverdueCount || 0) > 0
+                  ? ` · ${formatCount(summary.outstandingOverdueCount)} overdue`
+                  : ""}
+              </em>
+            ) : null}
           </div>
           <div className="auditSummaryCard">
             <span>Sales incl. VAT</span>

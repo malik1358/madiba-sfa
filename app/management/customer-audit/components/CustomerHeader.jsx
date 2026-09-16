@@ -31,6 +31,16 @@ export default function CustomerHeader({ customer, analytics, outstandingSalesma
         <div className="auditSummaryCard">
           <span>Avg Days to Pay</span>
           <strong>{avgDaysLabel}</strong>
+          {payment?.avgDaysToPay != null ? (
+            <em className="auditSummaryCardMeta">
+              From collected receipts only — not open invoice age
+            </em>
+          ) : null}
+          {unpaidTotal > 0 && unpaidOldest > 0 ? (
+            <em className="auditSummaryCardMeta">
+              Oldest unpaid invoice: {unpaidOldest}d
+            </em>
+          ) : null}
           <Link href={settlementHref} className="auditSummaryCardLink">
             Settlement detail
           </Link>

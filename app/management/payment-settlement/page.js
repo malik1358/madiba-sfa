@@ -345,6 +345,19 @@ export default function PaymentSettlementPage() {
                     <strong>
                       {ledger.summary.avgDaysToPay != null ? `${ledger.summary.avgDaysToPay} days` : "—"}
                     </strong>
+                    <em className="auditSummaryCardMeta">
+                      {ledger.summary.avgDaysToPay != null
+                        ? "From collected receipts only — not open invoice age"
+                        : "Needs sales + receipts"}
+                    </em>
+                    {Number(ledger.summary.outstandingOldestDays || 0) > 0 ? (
+                      <em className="auditSummaryCardMeta">
+                        Oldest unpaid invoice: {formatCount(ledger.summary.outstandingOldestDays)}d
+                        {Number(ledger.summary.outstandingOverdueCount || 0) > 0
+                          ? ` · ${formatCount(ledger.summary.outstandingOverdueCount)} overdue`
+                          : ""}
+                      </em>
+                    ) : null}
                   </div>
                   <div className="auditSummaryCard">
                     <span>Sales incl. VAT</span>

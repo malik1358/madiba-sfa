@@ -502,7 +502,7 @@ function CustomerAuditPageContent() {
             <div className="auditSectionNote" style={{ marginTop: "8px" }}>
               <strong>Payment behavior:</strong>{" "}
               {analytics.paymentBehavior.avgDaysToPay != null
-                ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay from sales date to receipt date`
+                ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay from collected receipts (sales date → receipt date)`
                 : "Avg days to pay unavailable (need sales + receipts)"}
               {analytics.paymentBehavior.matchedInvoiceCount
                 ? ` · ${analytics.paymentBehavior.matchedInvoiceCount} invoices matched`
@@ -511,7 +511,7 @@ function CustomerAuditPageContent() {
                 ? ` · unpaid ${formatAmount(analytics.paymentBehavior.outstandingTotal)}`
                 : ""}
               {Number(analytics.paymentBehavior.outstandingOldestDays || 0) > 0
-                ? ` · oldest open ${analytics.paymentBehavior.outstandingOldestDays}d`
+                ? ` · oldest unpaid invoice ${analytics.paymentBehavior.outstandingOldestDays}d (Invoice Day — not used in avg)`
                 : ""}
               {" · "}
               <Link

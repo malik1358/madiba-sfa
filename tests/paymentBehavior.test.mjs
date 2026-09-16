@@ -78,8 +78,9 @@ test("buildPaymentBehavior returns weighted average days and unpaid outstanding 
   assert.equal(behavior.outstandingTotal, 750);
   assert.equal(behavior.outstandingOpenInvoices, 2);
   assert.ok(behavior.outstandingOldestDays >= 40);
-  assert.match(behavior.summaryLabel, /Avg 20 days to pay/);
+  assert.match(behavior.summaryLabel, /Avg 20 days to pay from receipts/);
   assert.match(behavior.summaryLabel, /Unpaid 750/);
+  assert.match(behavior.summaryLabel, /oldest open/);
 });
 
 test("FIFO applies oldest invoice first when one receipt covers two bills", () => {

@@ -16,6 +16,7 @@ export const ORDER_STATUS_INVOICE_MADE = "Invoice made";
 export const ORDER_REJECTION_REASON_CREDIT_LIMIT = "Credit limit";
 export const ORDER_REJECTION_REASON_DISCOUNT_PRICE = "Discount or price problem";
 export const ORDER_REJECTION_REASON_STOCK = "Stock not available";
+export const ORDER_REJECTION_REASON_MADE_BY_MISTAKE = "Made by mistake";
 /** Bulk close-out for submitted orders created through August 2026 with no invoice. */
 export const ORDER_REJECTION_REASON_LEGACY_UNINVOICED = "Pre-September 2026 — invoice not uploaded";
 
@@ -26,6 +27,7 @@ export const ORDER_REJECTION_REASONS = [
   ORDER_REJECTION_REASON_CREDIT_LIMIT,
   ORDER_REJECTION_REASON_DISCOUNT_PRICE,
   ORDER_REJECTION_REASON_STOCK,
+  ORDER_REJECTION_REASON_MADE_BY_MISTAKE,
 ];
 
 export const ORDER_INVOICE_STATUSES = [

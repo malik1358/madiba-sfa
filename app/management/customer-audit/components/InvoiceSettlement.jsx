@@ -66,18 +66,72 @@ export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-s
   if (!ledger) return null;
 
   const totals = ledger.totals || {};
+  const summary = ledger.summary || {};
   const invoices = Array.isArray(ledger.invoices) ? ledger.invoices : [];
   const reversed = Array.isArray(ledger.reversedInvoices) ? ledger.reversedInvoices : [];
   const invoicePaidTotal = Number(totals.paid_amount || 0) - Number(totals.reversed_sales_incl_vat || 0);
+  const salesInclVat = Number(
+    totals.net_sales_incl_vat != null ? totals.net_sales_incl_vat : totals.sales_incl_vat || 0,
+  );
+  const collected = Number(totals.collected_amount || 0);
+  const openAmount = Number(totals.open_sales_amount || 0);
+  const salesMinusCollected = Number(
+    totals.sales_minus_collected != null ? totals.sales_minus_collected : salesInclVat - collected,
+  );
+  const balanceMatches = totals.sales_collected_matches_open !== false;
+  const openMatchesOutstanding = totals.open_matches_outstanding !== false;
+  const creditNoteAmount = Number(totals.credit_note_amount || 0);
 
   return (
     <>
+      <section className="auditSection">
+        <div className="auditSummaryGrid" style={{ marginBottom: "12px" }}>
+          <div className="auditSummaryCard">
+            <span>Avg Days to Pay</span>
+            <strong>
+              {summary.avgDaysToPay != null ? `${summary.avgDaysToPay} days` : "—"}
+            </strong>
+          </div>
+          <div className="auditSummaryCard">
+            <span>Sales incl. VAT</span>
+            <strong>{formatMoney(salesInclVat)}</strong>
+            {creditNoteAmount > 0.009 ? (
+              <em className="auditSummaryCardMeta">
+                After credit notes {formatMoney(creditNoteAmount)}
+              </em>
+            ) : (
+              <em className="auditSummaryCardMeta">Gloves stay excl. VAT</em>
+            )}
+          </div>
+          <div className="auditSummaryCard">
+            <span>Collected</span>
+            <strong>{formatMoney(collected)}</strong>
+          </div>
+          <div className="auditSummaryCard">
+            <span>Open / Outstanding</span>
+            <strong>{formatMoney(openAmount)}</strong>
+            {openMatchesOutstanding === false ? (
+              <em className="auditSummaryCardMeta">
+                Does not match outstanding upload {formatMoney(totals.outstanding_unpaid)}
+              </em>
+            ) : balanceMatches === false ? (
+              <em className="auditSummaryCardMeta">
+                Sales − Collected {formatMoney(salesMinusCollected)} (gap {formatMoney(totals.balance_delta)})
+              </em>
+            ) : (
+              <em className="auditSummaryCardMeta">Sales − Collected = Open (matches outstanding)</em>
+            )}
+          </div>
+        </div>
+      </section>
+
       <section className="auditSection">
         <div className="auditTransactionHeader">
           <div>
             <h3>Invoices & Settlement</h3>
             <p className="auditSectionNote">
               FIFO payment days from receipts. Open amounts follow the outstanding upload when available.
+              Gloves are sold without VAT; other lines are grossed up at 15%.
             </p>
           </div>
           <span>

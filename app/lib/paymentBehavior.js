@@ -648,24 +648,54 @@ export function buildPaymentSettlementLedger({
     }
     return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
   });
+
+  const invoiceSalesExclVat = invoiceRows.reduce((total, row) => total + row.amount_excl_vat, 0);
+  const invoiceSalesInclVat = invoiceRows.reduce((total, row) => total + row.amount_incl_vat, 0);
+  const reversedSalesExclVat = reversedRows.reduce((total, row) => total + toNumber(row.amount_excl_vat), 0);
+  const reversedSalesInclVat = reversedRows.reduce((total, row) => total + toNumber(row.amount_incl_vat), 0);
+  // KPI Sales includes reversed invoices (still excluded from FIFO / avg days).
+  const salesExclVat = invoiceSalesExclVat + reversedSalesExclVat;
+  const salesInclVat = invoiceSalesInclVat + reversedSalesInclVat;
+  const paidAmount = invoiceRows.reduce((total, row) => total + row.paid_amount, 0) + reversedSalesInclVat;
+  const collectedAmount = buildSortedReceipts(receipts).reduce((total, row) => total + toNumber(row.amount), 0);
+
+  // Credit notes already paired as immediate reversals are not deducted again.
+  // Remaining credit notes reduce billable sales so: Sales − CN − Collected = Open.
+  const pairedCreditNoteKeys = new Set(
+    reversedRows.map((row) => invoiceKey(row.credit_note_date, row.credit_note_voucher)),
+  );
+  const unmatchedCreditNotes = buildCreditNotes(transactions).filter(
+    (note) => !pairedCreditNoteKeys.has(invoiceKey(note.credit_date, note.voucher_number)),
+  );
+  const creditNoteAmount = unmatchedCreditNotes.reduce((total, note) => total + toNumber(note.amount), 0);
+  const netSalesInclVat = salesInclVat - creditNoteAmount;
+  const balanceDelta = netSalesInclVat - collectedAmount - openSalesAmount;
+
   const totals = {
-    sales_excl_vat: invoiceRows.reduce((total, row) => total + row.amount_excl_vat, 0),
-    sales_incl_vat: invoiceRows.reduce((total, row) => total + row.amount_incl_vat, 0),
-    collected_amount: buildSortedReceipts(receipts).reduce((total, row) => total + toNumber(row.amount), 0),
-    paid_amount: invoiceRows.reduce((total, row) => total + row.paid_amount, 0),
+    sales_excl_vat: salesExclVat,
+    sales_incl_vat: salesInclVat,
+    invoice_sales_excl_vat: invoiceSalesExclVat,
+    invoice_sales_incl_vat: invoiceSalesInclVat,
+    credit_note_amount: creditNoteAmount,
+    net_sales_incl_vat: netSalesInclVat,
+    collected_amount: collectedAmount,
+    paid_amount: paidAmount,
     open_sales_amount: openSalesAmount,
     outstanding_unpaid: hasOutstandingRows ? outstanding.totalOutstanding : openSalesAmount,
     open_matches_outstanding: hasOutstandingRows
       ? Math.abs(openSalesAmount - outstanding.totalOutstanding) <= 0.02
       : true,
+    sales_minus_collected: netSalesInclVat - collectedAmount,
+    balance_delta: balanceDelta,
+    sales_collected_matches_open: Math.abs(balanceDelta) <= 0.02,
     unmatched_receipt_amount: toNumber(unmatchedReceiptAmount),
     invoice_count: invoiceRows.length,
     paid_invoice_count: invoiceRows.filter((row) => row.status === "Paid").length,
     partial_invoice_count: invoiceRows.filter((row) => row.status === "Partial").length,
     open_invoice_count: invoiceRows.filter((row) => row.status === "Open").length,
     reversed_invoice_count: reversedRows.length,
-    reversed_sales_excl_vat: reversedRows.reduce((total, row) => total + toNumber(row.amount_excl_vat), 0),
-    reversed_sales_incl_vat: reversedRows.reduce((total, row) => total + toNumber(row.amount_incl_vat), 0),
+    reversed_sales_excl_vat: reversedSalesExclVat,
+    reversed_sales_incl_vat: reversedSalesInclVat,
   };
 
   return {

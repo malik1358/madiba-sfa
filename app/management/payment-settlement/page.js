@@ -28,8 +28,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Open amounts follow the outstanding upload (book truth). FIFO only estimates payment days from receipts. Invoices reversed immediately by credit notes are excluded from avg days and listed separately.",
-    ar: "المبالغ المفتوحة تتبع ملف المستحقات (دفتر الحسابات). الأقدم أولاً يقدّر أيام الدفع فقط من الإيصالات. الفواتير الملغاة فوراً بإشعار دائن تُستبعد من متوسط الأيام وتُعرض بشكل منفصل.",
+    en: "Open follows the outstanding upload. Sales − Collected should equal Open (unpaired credit notes are netted from Sales; immediate reversals stay in Sales but are excluded from avg days).",
+    ar: "المفتوح يتبع ملف المستحقات. المبيعات − التحصيل يجب أن تساوي المفتوح (إشعارات الدائن غير المزدوجة تُخصم من المبيعات؛ العكس الفوري يبقى في المبيعات ويُستبعد من متوسط الأيام).",
   },
 };
 
@@ -127,10 +127,27 @@ export default function PaymentSettlementPage() {
     const outstandingUnpaid = Number(
       ledger.totals.outstanding_unpaid || ledger.summary?.outstandingTotal || 0,
     );
+    const salesInclVat = Number(
+      ledger.totals.net_sales_incl_vat != null
+        ? ledger.totals.net_sales_incl_vat
+        : ledger.totals.sales_incl_vat || 0,
+    );
+    const collected = Number(ledger.totals.collected_amount || 0);
+    const salesMinusCollected = Number(
+      ledger.totals.sales_minus_collected != null
+        ? ledger.totals.sales_minus_collected
+        : salesInclVat - collected,
+    );
     return {
       openAmount,
       outstandingUnpaid,
       matches: ledger.totals.open_matches_outstanding !== false,
+      salesInclVat,
+      collected,
+      salesMinusCollected,
+      creditNoteAmount: Number(ledger.totals.credit_note_amount || 0),
+      balanceMatches: ledger.totals.sales_collected_matches_open !== false,
+      balanceDelta: Number(ledger.totals.balance_delta || 0),
     };
   }, [ledger]);
 
@@ -331,7 +348,14 @@ export default function PaymentSettlementPage() {
                   </div>
                   <div className="auditSummaryCard">
                     <span>Sales incl. VAT</span>
-                    <strong>{formatMoney(ledger.totals.sales_incl_vat)}</strong>
+                    <strong>{formatMoney(unpaidSummary?.salesInclVat || ledger.totals.sales_incl_vat)}</strong>
+                    {unpaidSummary?.creditNoteAmount > 0.009 ? (
+                      <em className="auditSummaryCardMeta">
+                        After credit notes {formatMoney(unpaidSummary.creditNoteAmount)}
+                      </em>
+                    ) : (
+                      <em className="auditSummaryCardMeta">Gloves stay excl. VAT · other lines +15%</em>
+                    )}
                   </div>
                   <div className="auditSummaryCard">
                     <span>Collected</span>
@@ -344,8 +368,12 @@ export default function PaymentSettlementPage() {
                       <em className="auditSummaryCardMeta">
                         Does not match outstanding upload {formatMoney(unpaidSummary.outstandingUnpaid)}
                       </em>
+                    ) : unpaidSummary?.balanceMatches === false ? (
+                      <em className="auditSummaryCardMeta">
+                        Sales − Collected {formatMoney(unpaidSummary.salesMinusCollected)} (gap {formatMoney(unpaidSummary.balanceDelta)})
+                      </em>
                     ) : (
-                      <em className="auditSummaryCardMeta">Matches outstanding upload</em>
+                      <em className="auditSummaryCardMeta">Sales − Collected = Open (matches outstanding)</em>
                     )}
                   </div>
                 </div>
@@ -397,9 +425,11 @@ export default function PaymentSettlementPage() {
                     <tfoot>
                       <tr>
                         <td colSpan={2}><strong>Total</strong></td>
-                        <td><strong>{formatMoney(ledger.totals.sales_excl_vat)}</strong></td>
-                        <td><strong>{formatMoney(ledger.totals.sales_incl_vat)}</strong></td>
-                        <td><strong>{formatMoney(ledger.totals.paid_amount)}</strong></td>
+                        <td><strong>{formatMoney(ledger.totals.invoice_sales_excl_vat ?? ledger.totals.sales_excl_vat)}</strong></td>
+                        <td><strong>{formatMoney(ledger.totals.invoice_sales_incl_vat ?? ledger.totals.sales_incl_vat)}</strong></td>
+                        <td><strong>{formatMoney(
+                          Number(ledger.totals.paid_amount || 0) - Number(ledger.totals.reversed_sales_incl_vat || 0),
+                        )}</strong></td>
                         <td><strong>{formatMoney(ledger.totals.open_sales_amount)}</strong></td>
                         <td colSpan={3} />
                       </tr>
@@ -504,8 +534,8 @@ export default function PaymentSettlementPage() {
                       <tr>
                         <td><strong>Total</strong></td>
                         <td><strong>{formatCount(ledger.totals.invoice_count)}</strong></td>
-                        <td><strong>{formatMoney(ledger.totals.sales_excl_vat)}</strong></td>
-                        <td><strong>{formatMoney(ledger.totals.sales_incl_vat)}</strong></td>
+                        <td><strong>{formatMoney(ledger.totals.invoice_sales_excl_vat ?? ledger.totals.sales_excl_vat)}</strong></td>
+                        <td><strong>{formatMoney(ledger.totals.invoice_sales_incl_vat ?? ledger.totals.sales_incl_vat)}</strong></td>
                         <td />
                         <td><strong>{formatMoney(ledger.totals.collected_amount)}</strong></td>
                         <td><strong>{formatMoney(ledger.totals.open_sales_amount)}</strong></td>

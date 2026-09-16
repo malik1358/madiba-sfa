@@ -148,8 +148,10 @@ function summarizeOutstandingUnpaid(outstandingCustomer = null, outstandingInvoi
       if (pending <= 0) return null;
       const invoiceDate = dateOnly(invoice?.invoice_date);
       const overdueDays = resolveOverdueDaysFromDueDate(invoice, todayIso);
+      // Prefer the outstanding file's invoice age so Unpaid / oldest matches the upload table.
       const invoiceDays = resolveInvoiceDays(invoice, todayIso);
-      const openDays = Math.max(overdueDays, invoiceDays, invoiceDate ? (isoDaysBetween(todayIso, invoiceDate) || 0) : 0);
+      const calendarDays = invoiceDate ? (isoDaysBetween(todayIso, invoiceDate) || 0) : 0;
+      const openDays = invoiceDays > 0 ? invoiceDays : calendarDays;
       return {
         invoice_date: invoiceDate,
         ref_no: String(invoice?.ref_no || "").trim(),
@@ -161,9 +163,20 @@ function summarizeOutstandingUnpaid(outstandingCustomer = null, outstandingInvoi
     .filter(Boolean)
     .sort((left, right) => right.open_days - left.open_days || right.pending_amount - left.pending_amount);
 
-  const totalOutstanding = toNumber(outstandingCustomer?.total_outstanding)
-    || invoices.reduce((total, row) => total + row.pending_amount, 0);
-  const openInvoiceCount = toNumber(outstandingCustomer?.open_invoices) || invoices.length;
+  // Prefer invoice / bucket totals so Unpaid Bills matches the outstanding tables
+  // (customer total_outstanding can be a rounded/header figure off by ~1).
+  const invoiceSum = invoices.reduce((total, row) => total + row.pending_amount, 0);
+  const bucketSum = Object.values(outstandingCustomer?.buckets || {}).reduce(
+    (total, value) => total + toNumber(value),
+    0,
+  );
+  const headerTotal = toNumber(outstandingCustomer?.total_outstanding);
+  const totalOutstanding = invoiceSum > 0
+    ? invoiceSum
+    : (bucketSum > 0 ? bucketSum : headerTotal);
+  const openInvoiceCount = invoices.length > 0
+    ? invoices.length
+    : (toNumber(outstandingCustomer?.open_invoices) || 0);
   const oldestOpenDays = invoices.length ? invoices[0].open_days : 0;
   const overdueCount = invoices.filter((row) => row.overdue_days > 0).length;
 
@@ -276,6 +289,10 @@ function invoiceKey(invoiceDate, voucherNumber) {
   return `${dateOnly(invoiceDate)}::${String(voucherNumber || "").trim()}`;
 }
 
+function normalizeRef(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
 /**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
  */
@@ -294,6 +311,13 @@ export function buildPaymentSettlementLedger({
     outstandingCustomer,
     outstandingInvoices,
     todayIso: today,
+  });
+  const outstanding = summarizeOutstandingUnpaid(outstandingCustomer, outstandingInvoices, today);
+  const outstandingByRef = new Map();
+  outstanding.invoices.forEach((row) => {
+    const key = normalizeRef(row.ref_no);
+    if (!key) return;
+    outstandingByRef.set(key, row);
   });
 
   const settlementsByInvoice = new Map();
@@ -320,6 +344,7 @@ export function buildPaymentSettlementLedger({
     let status = "Open";
     if (remaining <= 0.009 && paidAmount > 0) status = "Paid";
     else if (paidAmount > 0.009 && remaining > 0.009) status = "Partial";
+    const outstandingMatch = outstandingByRef.get(normalizeRef(invoice.voucher_number)) || null;
 
     return {
       invoice_date: invoice.invoice_date,
@@ -328,6 +353,7 @@ export function buildPaymentSettlementLedger({
       amount_incl_vat: toNumber(invoice.amount),
       paid_amount: paidAmount,
       remaining,
+      outstanding_pending: outstandingMatch ? toNumber(outstandingMatch.pending_amount) : null,
       status,
       payment_days: roundDays(weightedDays),
       open_days: remaining > 0.009 ? (isoDaysBetween(today, invoice.invoice_date) || 0) : 0,
@@ -413,6 +439,7 @@ export function buildPaymentSettlementLedger({
     collected_amount: buildSortedReceipts(receipts).reduce((total, row) => total + toNumber(row.amount), 0),
     paid_amount: invoiceRows.reduce((total, row) => total + row.paid_amount, 0),
     open_sales_amount: invoiceRows.reduce((total, row) => total + row.remaining, 0),
+    outstanding_unpaid: outstanding.totalOutstanding,
     unmatched_receipt_amount: toNumber(unmatchedReceiptAmount),
     invoice_count: invoiceRows.length,
     paid_invoice_count: invoiceRows.filter((row) => row.status === "Paid").length,
@@ -426,7 +453,7 @@ export function buildPaymentSettlementLedger({
     invoices: invoiceRows,
     datewise,
     settlementEvents,
-    outstandingInvoices: summarizeOutstandingUnpaid(outstandingCustomer, outstandingInvoices, today).invoices,
+    outstandingInvoices: outstanding.invoices,
   };
 }
 

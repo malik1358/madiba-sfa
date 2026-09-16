@@ -57,6 +57,11 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
         <td>{formatMoney(invoice.amount_incl_vat)}</td>
         <td>{formatMoney(invoice.paid_amount)}</td>
         <td>{formatMoney(invoice.remaining)}</td>
+        <td>
+          {invoice.outstanding_pending != null
+            ? formatMoney(invoice.outstanding_pending)
+            : "—"}
+        </td>
         <td><span className={statusClass(invoice.status)}>{invoice.status}</span></td>
         <td>
           {invoice.payment_days != null
@@ -79,8 +84,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           </td>
           <td colSpan={2} />
           <td>{formatMoney(settlement.amount)}</td>
-          <td />
-          <td />
+          <td colSpan={2} />
           <td>{settlement.days != null ? `${settlement.days} days` : "—"}</td>
           <td />
         </tr>
@@ -119,6 +123,19 @@ export default function PaymentSettlementPage() {
       ))
       .slice(0, 40);
   }, [customerSearch, customers]);
+
+  const unpaidSummary = useMemo(() => {
+    if (!ledger?.totals) return null;
+    const fifoOpen = Number(ledger.totals.open_sales_amount || 0);
+    const outstandingUnpaid = Number(
+      ledger.totals.outstanding_unpaid || ledger.summary?.outstandingTotal || 0,
+    );
+    return {
+      fifoOpen,
+      outstandingUnpaid,
+      showGap: outstandingUnpaid > 0 && Math.abs(fifoOpen - outstandingUnpaid) > 1,
+    };
+  }, [ledger]);
 
   const loadCustomers = useCallback(async () => {
     const supabase = getSupabaseClient();
@@ -324,11 +341,21 @@ export default function PaymentSettlementPage() {
                     <strong>{formatMoney(ledger.totals.collected_amount)}</strong>
                   </div>
                   <div className="auditSummaryCard">
-                    <span>Open from Sales</span>
-                    <strong>{formatMoney(ledger.totals.open_sales_amount)}</strong>
-                    <em className="auditSummaryCardMeta">
-                      Outstanding upload: {formatMoney(ledger.summary.outstandingTotal)}
-                    </em>
+                    <span>Unpaid (outstanding)</span>
+                    <strong>
+                      {formatMoney(
+                        (unpaidSummary?.outstandingUnpaid || 0) > 0
+                          ? unpaidSummary.outstandingUnpaid
+                          : unpaidSummary?.fifoOpen || 0,
+                      )}
+                    </strong>
+                    {unpaidSummary?.showGap ? (
+                      <em className="auditSummaryCardMeta">
+                        FIFO open from sales: {formatMoney(unpaidSummary.fifoOpen)}
+                        {" "}
+                        (receipts vs sales may not tie to every bill)
+                      </em>
+                    ) : null}
                   </div>
                 </div>
               </section>
@@ -351,7 +378,8 @@ export default function PaymentSettlementPage() {
                         <th>Sales excl VAT</th>
                         <th>Sales incl VAT</th>
                         <th>Paid</th>
-                        <th>Open</th>
+                        <th>Open (FIFO)</th>
+                        <th>Outstanding</th>
                         <th>Status</th>
                         <th>Payment Days</th>
                         <th>Detail</th>
@@ -372,7 +400,7 @@ export default function PaymentSettlementPage() {
                       })}
                       {!ledger.invoices.length && (
                         <tr>
-                          <td colSpan={9}>No sales invoices found for this customer in history.</td>
+                          <td colSpan={10}>No sales invoices found for this customer in history.</td>
                         </tr>
                       )}
                     </tbody>
@@ -383,6 +411,7 @@ export default function PaymentSettlementPage() {
                         <td><strong>{formatMoney(ledger.totals.sales_incl_vat)}</strong></td>
                         <td><strong>{formatMoney(ledger.totals.paid_amount)}</strong></td>
                         <td><strong>{formatMoney(ledger.totals.open_sales_amount)}</strong></td>
+                        <td><strong>{formatMoney(ledger.totals.outstanding_unpaid || 0)}</strong></td>
                         <td colSpan={3} />
                       </tr>
                     </tfoot>

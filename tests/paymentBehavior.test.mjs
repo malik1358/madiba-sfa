@@ -144,6 +144,56 @@ test("buildPaymentSettlementLedger returns invoice settlement and datewise rows"
   assert.ok(ledger.totals.open_sales_amount > 0);
 });
 
+test("buildPaymentBehavior prefers invoice sum over rounded header total", () => {
+  const behavior = buildPaymentBehavior({
+    transactions: [],
+    receipts: [],
+    outstandingCustomer: {
+      total_outstanding: 76108,
+      open_invoices: 2,
+    },
+    outstandingInvoices: [
+      {
+        invoice_date: "2026-05-24",
+        ref_no: "NFD/868",
+        pending_amount: 14795,
+        invoice_day: 112,
+      },
+      {
+        invoice_date: "2026-07-29",
+        ref_no: "RNFD/158",
+        pending_amount: 61312,
+        invoice_day: 46,
+      },
+    ],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(behavior.outstandingTotal, 76107);
+  assert.equal(behavior.outstandingOldestDays, 112);
+});
+
+test("buildPaymentSettlementLedger exposes outstanding unpaid total separate from FIFO open", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-04-12", voucher_number: "NFD/414", sales_amount: 50580, category: "Paper" },
+      { transaction_date: "2026-05-24", voucher_number: "NFD/868", sales_amount: 29870, category: "Paper" },
+    ],
+    receipts: [{ receipt_date: "2026-08-01", amount: 2225.98 }],
+    outstandingCustomer: { total_outstanding: 76108, open_invoices: 2 },
+    outstandingInvoices: [
+      { ref_no: "NFD/868", pending_amount: 14795 },
+      { ref_no: "RNFD/158", pending_amount: 61312 },
+    ],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(ledger.totals.outstanding_unpaid, 76107);
+  assert.ok(ledger.totals.open_sales_amount > ledger.totals.outstanding_unpaid);
+  const matched = ledger.invoices.find((row) => String(row.voucher_number || "").includes("868"));
+  assert.equal(matched?.outstanding_pending, 14795);
+});
+
 test("buildPaymentSettlementLedger leaves avg days blank when customer never paid", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [

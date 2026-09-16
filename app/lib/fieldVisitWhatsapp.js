@@ -35,6 +35,7 @@ export function buildFieldVisitWhatsappSummary({
   salesmanCode = "",
   language: _language = "en",
   visitDistance = {},
+  includeOutstanding = true,
 } = {}) {
   const labels = {
     title: "Field visit report",
@@ -71,18 +72,21 @@ export function buildFieldVisitWhatsappSummary({
     lines.push(`${labels.notes}: ${note}`);
   }
 
-  const bucket0To30 = Number(customer.outstanding_0_30 || 0);
-  const bucket31To60 = Number(customer.outstanding_30_60 || 0);
-  const bucket61To90 = Number(customer.outstanding_61_90 || 0);
-  const bucketAbove90 = Number(customer.outstanding_above_90 || 0);
-  const totalOutstanding = bucket0To30 + bucket31To60 + bucket61To90 + bucketAbove90;
+  if (includeOutstanding !== false) {
+    const bucket0To30 = Number(customer.outstanding_0_30 || 0);
+    const bucket31To60 = Number(customer.outstanding_30_60 || 0);
+    const bucket61To90 = Number(customer.outstanding_61_90 || 0);
+    const bucketAbove90 = Number(customer.outstanding_above_90 || 0);
+    const totalOutstanding = bucket0To30 + bucket31To60 + bucket61To90 + bucketAbove90;
 
-  lines.push(`${labels.outstanding}:`);
-  lines.push(`${labels.bucket0To30}: ${formatMoney(bucket0To30)}`);
-  lines.push(`${labels.bucket31To60}: ${formatMoney(bucket31To60)}`);
-  lines.push(`${labels.bucket61To90}: ${formatMoney(bucket61To90)}`);
-  lines.push(`${labels.bucketAbove90}: ${formatMoney(bucketAbove90)}`);
-  lines.push(`${labels.totalOutstanding}: ${formatMoney(totalOutstanding)}`);
+    lines.push(`${labels.outstanding}:`);
+    lines.push(`${labels.bucket0To30}: ${formatMoney(bucket0To30)}`);
+    lines.push(`${labels.bucket31To60}: ${formatMoney(bucket31To60)}`);
+    lines.push(`${labels.bucket61To90}: ${formatMoney(bucket61To90)}`);
+    lines.push(`${labels.bucketAbove90}: ${formatMoney(bucketAbove90)}`);
+    lines.push(`${labels.totalOutstanding}: ${formatMoney(totalOutstanding)}`);
+  }
+
   lines.push(...formatVisitDistanceWhatsappLines(visitDistance));
 
   return lines.join("\n");

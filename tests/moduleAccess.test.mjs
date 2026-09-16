@@ -83,6 +83,16 @@ test("admins and managers can manage customer book shares", () => {
   assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("customerBookShares"), false);
 });
 
+test("admins and managers can configure order quantity controls", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("orderQuantityControls"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("orderQuantityControls"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("orderQuantityControls"), false);
+  assert.equal(
+    moduleLabelForPath("/management/order-quantity-controls", "en"),
+    "Order Quantity Controls",
+  );
+});
+
 test("listAccessibleModules returns only allowed modules", () => {
   const access = buildModuleAccess({ role: "admin" });
   const modules = listAccessibleModules(access, [

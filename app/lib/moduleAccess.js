@@ -35,6 +35,7 @@ export const MODULES = {
   customerBookShares: { href: "/management/customer-book-shares", label: "Customer Book Shares" },
   kpiTargets: { href: "/management/kpi-targets", label: "KPI Targets" },
   schemes: { href: "/management/schemes", label: "Schemes" },
+  orderQuantityControls: { href: "/management/order-quantity-controls", label: "Order Quantity Controls" },
   itemPriceHistory: { href: "/management/item-price-history", label: "Item Price History" },
   gpsMap: { href: "/management/gps-map", label: "GPS Map" },
   upload: { href: "/management/upload", label: "Imports" },
@@ -61,7 +62,7 @@ export const NAV_GROUPS = [
   {
     key: "admin",
     label: "Admin",
-    modules: ["businessDashboard", "customerMaster", "outstandingNoGps", "userActivity", "salesmanHierarchy", "customerBookShares", "kpiTargets", "schemes", "gpsMap", "upload"],
+    modules: ["businessDashboard", "customerMaster", "outstandingNoGps", "userActivity", "salesmanHierarchy", "customerBookShares", "kpiTargets", "schemes", "orderQuantityControls", "gpsMap", "upload"],
   },
 ];
 
@@ -158,6 +159,7 @@ export function buildModuleAccess(context = {}) {
       customerBookShares: isAdmin || isManager,
       kpiTargets: isAdmin || isManager,
       schemes: isAdmin || isManager,
+      orderQuantityControls: isAdmin || isManager,
       itemPriceHistory: (isAdmin || isManager || isInvoiceMaker || isSalesman || isProductPromoter) && !isCollector,
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
       upload: isAdmin || isManager || isInvoiceMaker,
@@ -231,6 +233,7 @@ export const MODULE_LABELS = {
   customerBookShares: { en: "Customer Book Shares", ar: "مشاركة دفاتر العملاء" },
   kpiTargets: { en: "KPI Targets", ar: "أهداف الأداء" },
   schemes: { en: "Schemes", ar: "العروض" },
+  orderQuantityControls: { en: "Order Quantity Controls", ar: "حدود كميات الطلب" },
   itemPriceHistory: { en: "Item Price History", ar: "سجل أسعار الأصناف" },
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },
   upload: { en: "Imports", ar: "الاستيراد" },

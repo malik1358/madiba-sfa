@@ -112,6 +112,35 @@ test("gloves sales stay excl VAT when matching receipts", () => {
   assert.equal(Number(paper.amount.toFixed(2)), 1150);
 });
 
+test("settlement Sales total keeps gloves without VAT and paper with 15%", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "G1", sales_amount: 1000, category: "Gloves", item_name: "Nitrile Gloves" },
+      { transaction_date: "2026-01-01", voucher_number: "P1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-01-01", voucher_number: "REV", sales_amount: 400, category: "Paper" },
+      { transaction_date: "2026-01-01", voucher_number: "CN", sales_amount: -400, category: "Paper" },
+    ],
+    // sales = gloves 1000 + paper 1150 + reversed 460 = 2610
+    // open 610 on P1 → collected must be 2000 for identity
+    receipts: [{ receipt_date: "2026-01-20", amount: 2000 }],
+    outstandingCustomer: { total_outstanding: 610, open_invoices: 1 },
+    outstandingInvoices: [
+      { invoice_date: "2026-01-01", ref_no: "P1", pending_amount: 610, invoice_day: 19 },
+    ],
+    todayIso: "2026-01-20",
+  });
+
+  const gloves = ledger.invoices.find((row) => row.voucher_number === "G1");
+  const paper = ledger.invoices.find((row) => row.voucher_number === "P1");
+  assert.equal(gloves.amount_incl_vat, 1000);
+  assert.equal(Number(paper.amount_incl_vat.toFixed(2)), 1150);
+  assert.equal(Number(ledger.totals.net_sales_incl_vat.toFixed(2)), 2610);
+  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 2000);
+  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 610);
+  assert.equal(ledger.totals.sales_collected_matches_open, true);
+  assert.equal(ledger.reversedInvoices.length, 1);
+});
+
 test("buildPaymentSettlementLedger returns invoice settlement and datewise rows", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [

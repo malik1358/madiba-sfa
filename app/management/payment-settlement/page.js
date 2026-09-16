@@ -353,7 +353,9 @@ export default function PaymentSettlementPage() {
                       <em className="auditSummaryCardMeta">
                         After credit notes {formatMoney(unpaidSummary.creditNoteAmount)}
                       </em>
-                    ) : null}
+                    ) : (
+                      <em className="auditSummaryCardMeta">Gloves stay excl. VAT · other lines +15%</em>
+                    )}
                   </div>
                   <div className="auditSummaryCard">
                     <span>Collected</span>

@@ -44,6 +44,7 @@ import MonthlyPerformance from "./components/MonthlyPerformance";
 import CategoryPerformance from "./components/CategoryPerformance";
 import QuickOrder from "./components/QuickOrder";
 import FullItemList from "./components/FullItemList";
+import InvoiceSettlement from "./components/InvoiceSettlement";
 import OrderBar from "./components/OrderBar";
 import OrderReview from "./components/OrderReview";
 import TransactionHistory from "./components/TransactionHistory";
@@ -56,6 +57,7 @@ import { useQuickOrder } from "./hooks/useQuickOrder";
 import { useOrder } from "./hooks/useOrder";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { buildOrderCatalog } from "./lib/orderHelpers";
+import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString("en-US", {
@@ -135,6 +137,24 @@ function CustomerAuditPageContent() {
     customer: outstandingInfo.customer,
     customerInvoices: outstandingInfo.customerInvoices,
   });
+  const paymentSettlement = useMemo(() => {
+    if (analytics?.paymentSettlement) return analytics.paymentSettlement;
+    if (!transactions?.length && !receipts?.length && !(outstandingInfo.customerInvoices || []).length) {
+      return null;
+    }
+    return buildPaymentSettlementLedger({
+      transactions: transactions || [],
+      receipts: receipts || [],
+      outstandingCustomer: outstandingInfo.customer || null,
+      outstandingInvoices: outstandingInfo.customerInvoices || [],
+    });
+  }, [
+    analytics?.paymentSettlement,
+    outstandingInfo.customer,
+    outstandingInfo.customerInvoices,
+    receipts,
+    transactions,
+  ]);
   const quickOrderSuggestions = useQuickOrder({ analytics, transactions, peerTransactions, itemMaster });
   const allowedPricingRegions = useMemo(
     () => allowedOrderPricingRegions({
@@ -578,6 +598,10 @@ function CustomerAuditPageContent() {
             <div className="auditEmpty">No outstanding row found for this customer in latest upload. Showing zeros.</div>
           )}
         </section>
+
+        {!outstandingLoading && paymentSettlement ? (
+          <InvoiceSettlement ledger={paymentSettlement} />
+        ) : null}
 
         <section className="auditSection">
           <div className="auditTransactionHeader">

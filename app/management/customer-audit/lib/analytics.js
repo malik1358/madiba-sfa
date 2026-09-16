@@ -1,6 +1,10 @@
 import { mergeReceiptMonthsIntoPerformanceWindow, selectMonthlyPerformanceMonths } from '../../../lib/monthlyPerformanceMonths.js';
 import { attachMonthlyReceipts, monthKeyFromReceiptDate } from '../../../lib/receiptRegister.js';
-import { buildPaymentBehavior, emptyPaymentBehavior } from '../../../lib/paymentBehavior.js';
+import {
+  buildPaymentBehavior,
+  buildPaymentSettlementLedger,
+  emptyPaymentBehavior,
+} from '../../../lib/paymentBehavior.js';
 import { monthKey, parseDateValue, salesUnitQty } from './format';
 
 export function buildAnalytics(transactions, {
@@ -243,6 +247,13 @@ export function buildAnalytics(transactions, {
     outstandingInvoices,
     todayIso,
   });
+  const paymentSettlement = buildPaymentSettlementLedger({
+    transactions,
+    receipts: receiptList,
+    outstandingCustomer,
+    outstandingInvoices,
+    todayIso,
+  });
 
   const base = {
     latestDate,
@@ -258,6 +269,7 @@ export function buildAnalytics(transactions, {
     receiptTotal: lifetimeReceiptTotal,
     transactionCount: transactions.length,
     paymentBehavior: paymentBehavior || emptyPaymentBehavior(),
+    paymentSettlement: paymentSettlement || null,
   };
 
   if (!receiptList.length) {

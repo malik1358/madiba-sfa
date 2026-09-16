@@ -15,6 +15,7 @@ import {
   ORDER_STATUS_PENDING_APPROVAL,
   ORDER_STATUS_PENDING_INVOICE_CREATION,
 } from "../../lib/orderApproval.js";
+import { assertOrderQuantityControls } from "../../lib/orderQuantityControlsServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -582,6 +583,21 @@ export async function POST(request) {
       paymentType: requestedPaymentType,
     });
     const pricedLines = priceOrderLines(lines, pricedCatalog);
+
+    const controlCustomerCode = await resolvePersistedCustomerCode(admin, customerCode);
+    const quantityControlCheck = await assertOrderQuantityControls({
+      admin,
+      customerCode: controlCustomerCode,
+      lines: pricedLines,
+      excludeOrderId: requestedOrderId,
+    });
+    if (!quantityControlCheck.ok) {
+      return NextResponse.json({
+        success: false,
+        error: quantityControlCheck.error,
+        quantityControlViolations: quantityControlCheck.violations,
+      }, { status: 400 });
+    }
 
     const { orderId, orderNumber, customerCode: persistedCustomerCode, changeSet, nowIso } = await persistDraftOrder(admin, {
       userId: user.id,

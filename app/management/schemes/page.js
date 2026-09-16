@@ -26,6 +26,7 @@ const TEXT = {
     ar: "إعداد عروض الكراتين التي تُطبَّق تلقائياً في الطلب الجديد وتدقيق العملاء.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
+  qtyLimits: { en: "Sales Qty Limits", ar: "حدود كمية البيع للعميل" },
   loading: { en: "Loading schemes...", ar: "جاري تحميل العروض..." },
   save: { en: "Save schemes", ar: "حفظ العروض" },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
@@ -204,6 +205,7 @@ export default function SchemesPage() {
             </div>
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
+              <Link href="/management/order-quantity-controls" className="moduleInlineButton">{t("qtyLimits")}</Link>
               <Link href="/management" className="moduleBackLink">{t("back")}</Link>
             </div>
           </div>

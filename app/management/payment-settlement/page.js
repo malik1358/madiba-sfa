@@ -52,6 +52,10 @@ function statusClass(status) {
 }
 
 function InvoiceSettlementRow({ invoice, open, onToggle }) {
+  const receiptCount = Array.isArray(invoice.settlements) ? invoice.settlements.length : 0;
+  const creditCount = Array.isArray(invoice.credit_notes) ? invoice.credit_notes.length : 0;
+  const detailCount = receiptCount + creditCount;
+
   return (
     <>
       <tr>
@@ -68,15 +72,15 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
             : (invoice.open_days > 0 ? `Open ${invoice.open_days}d` : "—")}
         </td>
         <td>
-          {invoice.settlements.length ? (
+          {detailCount ? (
             <button type="button" className="moduleInlineButton" onClick={onToggle}>
-              {open ? "Hide" : `Show ${invoice.settlements.length}`}
+              {open ? "Hide" : `Show ${detailCount}`}
             </button>
           ) : "—"}
         </td>
       </tr>
-      {open && invoice.settlements.map((settlement, index) => (
-        <tr key={`${invoice.invoice_date}-${settlement.receipt_date}-${index}`} className="paymentSettleChildRow">
+      {open && (invoice.settlements || []).map((settlement, index) => (
+        <tr key={`${invoice.invoice_date}-rcpt-${settlement.receipt_date}-${index}`} className="paymentSettleChildRow">
           <td colSpan={2} style={{ paddingLeft: 18 }}>
             Paid on {settlement.receipt_date}
             {settlement.vch_no ? ` · Rcpt ${settlement.vch_no}` : ""}
@@ -86,6 +90,22 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           <td />
           <td />
           <td>{settlement.days != null ? `${settlement.days} days` : "—"}</td>
+          <td />
+        </tr>
+      ))}
+      {open && (invoice.credit_notes || []).map((note, index) => (
+        <tr key={`${invoice.invoice_date}-cn-${note.voucher_number}-${index}`} className="paymentSettleChildRow paymentSettleChildRow--credit">
+          <td colSpan={2} style={{ paddingLeft: 18 }}>
+            {note.kind || "Credit note"}
+            {" · "}
+            {note.voucher_number || "—"}
+            {note.credit_date ? ` · ${note.credit_date}` : ""}
+          </td>
+          <td colSpan={2} />
+          <td>{formatMoney(note.amount)}</td>
+          <td />
+          <td><span className={statusClass("Credit")}>{note.kind || "Credit"}</span></td>
+          <td>Not in avg days</td>
           <td />
         </tr>
       ))}
@@ -507,7 +527,8 @@ export default function PaymentSettlementPage() {
                 </div>
                 <p className="moduleHint">
                   Partial credit notes, later credit notes, and sales returns (negative sales).
-                  These reduce net Sales; the related invoice stays in Invoices & Settlement with Open from outstanding.
+                  Also nested under the related invoice next to cash receipts for display only —
+                  they are never included in avg days to pay or collected cash.
                 </p>
                 <ExportableTable filename="payment-settlement-credit-notes" sheetName="CreditNotes" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">
@@ -517,6 +538,7 @@ export default function PaymentSettlementPage() {
                         <th>Voucher</th>
                         <th>Type</th>
                         <th>Reference</th>
+                        <th>Applied To</th>
                         <th>Excl VAT</th>
                         <th>Incl VAT</th>
                         <th>Status</th>
@@ -529,6 +551,7 @@ export default function PaymentSettlementPage() {
                           <td>{row.voucher_number || "—"}</td>
                           <td>{row.kind || row.voucher_type || "Credit Note"}</td>
                           <td>{row.reference || "—"}</td>
+                          <td>{row.applied_to_voucher || "—"}</td>
                           <td>{formatMoney(row.amount_excl_vat)}</td>
                           <td>{formatMoney(row.amount_incl_vat)}</td>
                           <td><span className={statusClass("Credit")}>{row.kind || "Credit"}</span></td>
@@ -536,13 +559,13 @@ export default function PaymentSettlementPage() {
                       ))}
                       {!(ledger.creditNotes || []).length && (
                         <tr>
-                          <td colSpan={7}>No partial credit notes or sales returns for this customer.</td>
+                          <td colSpan={8}>No partial credit notes or sales returns for this customer.</td>
                         </tr>
                       )}
                     </tbody>
                     <tfoot>
                       <tr>
-                        <td colSpan={4}><strong>Total</strong></td>
+                        <td colSpan={5}><strong>Total</strong></td>
                         <td><strong>{formatMoney(ledger.totals.credit_note_excl_vat || 0)}</strong></td>
                         <td><strong>{formatMoney(ledger.totals.credit_note_amount || 0)}</strong></td>
                         <td />

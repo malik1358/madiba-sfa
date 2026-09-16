@@ -159,6 +159,93 @@ export function classifyCreditNoteKind(voucherType = "", voucherNumber = "") {
 }
 
 /**
+ * Attach unpaired credit notes / sales returns under matching invoices for display.
+ * Matching prefers reference → invoice voucher. Does not affect payment-days / FIFO.
+ */
+export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) {
+  const invoices = Array.isArray(invoiceRows) ? invoiceRows : [];
+  invoices.forEach((invoice) => {
+    if (!Array.isArray(invoice.credit_notes)) invoice.credit_notes = [];
+  });
+
+  const notes = (Array.isArray(creditNotes) ? creditNotes : []).map((note) => ({
+    ...note,
+    remaining: toNumber(note.amount_incl_vat ?? note.amount),
+    applied_to_voucher: note.applied_to_voucher || "",
+    applied_to_date: note.applied_to_date || "",
+  }));
+
+  function pushCreditChild(invoice, note, amount) {
+    if (amount <= AMOUNT_TOLERANCE) return;
+    invoice.credit_notes.push({
+      type: "credit_note",
+      credit_date: note.credit_date,
+      voucher_number: note.voucher_number,
+      kind: note.kind || classifyCreditNoteKind(note.voucher_type, note.voucher_number),
+      reference: note.reference || "",
+      amount,
+      // Explicitly not a payment-collection day measure.
+      days: null,
+    });
+    note.remaining = Math.max(0, toNumber(note.remaining) - amount);
+    note.applied_to_voucher = invoice.voucher_number;
+    note.applied_to_date = invoice.invoice_date;
+  }
+
+  // Pass 1: reference points at invoice voucher.
+  notes.forEach((note) => {
+    const ref = normalizeRef(note.reference);
+    if (!ref || toNumber(note.remaining) <= AMOUNT_TOLERANCE) return;
+    const invoice = invoices.find((row) => {
+      const voucher = normalizeRef(row.voucher_number);
+      if (!voucher) return false;
+      if (String(note.credit_date || "") < String(row.invoice_date || "")) return false;
+      return ref.includes(voucher) || voucher.includes(ref);
+    });
+    if (!invoice) return;
+    pushCreditChild(invoice, note, toNumber(note.remaining));
+  });
+
+  // Pass 2: leftover notes — attach to oldest invoice on/before the credit date
+  // for display only (still excluded from payment days).
+  const sortedInvoices = [...invoices].sort((left, right) => {
+    if (left.invoice_date !== right.invoice_date) {
+      return String(left.invoice_date || "").localeCompare(String(right.invoice_date || ""));
+    }
+    return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+  });
+
+  notes.forEach((note) => {
+    let remaining = toNumber(note.remaining);
+    if (remaining <= AMOUNT_TOLERANCE) return;
+    for (const invoice of sortedInvoices) {
+      if (remaining <= AMOUNT_TOLERANCE) break;
+      if (String(note.credit_date || "") < String(invoice.invoice_date || "")) continue;
+      const capacity = Math.max(0, toNumber(invoice.amount_incl_vat) - (invoice.credit_notes || [])
+        .reduce((total, row) => total + toNumber(row.amount), 0));
+      if (capacity <= AMOUNT_TOLERANCE) continue;
+      const applied = Math.min(remaining, capacity);
+      pushCreditChild(invoice, note, applied);
+      remaining = toNumber(note.remaining);
+    }
+  });
+
+  invoices.forEach((invoice) => {
+    invoice.credit_notes.sort((left, right) => {
+      if (left.credit_date !== right.credit_date) {
+        return String(left.credit_date || "").localeCompare(String(right.credit_date || ""));
+      }
+      return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+    });
+  });
+
+  return notes.map((note) => {
+    const { remaining, ...rest } = note;
+    return rest;
+  });
+}
+
+/**
  * Pair invoices with credit notes posted the same day or next day for the same amount.
  * These are voids/reversals, not customer payments — exclude from avg days to pay.
  */
@@ -553,9 +640,11 @@ export function buildPaymentSettlementLedger({
       outstanding_pending: outstandingPending,
       open_source: openSource,
       status,
+      // Payment days only from cash receipt FIFO — credit notes never enter this average.
       payment_days: fifoPaid > 0.009 ? roundDays(weightedDays) : null,
       open_days: openDays,
       settlements,
+      credit_notes: [],
     };
   });
 
@@ -577,6 +666,7 @@ export function buildPaymentSettlementLedger({
       payment_days: null,
       open_days: row.open_days || 0,
       settlements: [],
+      credit_notes: [],
     });
   });
 
@@ -701,7 +791,12 @@ export function buildPaymentSettlementLedger({
       }
       return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
     });
-  const creditNoteAmount = unmatchedCreditNotes.reduce((total, note) => total + toNumber(note.amount_incl_vat), 0);
+
+  // Display-only: nest partial CNs / returns under invoices next to cash receipts.
+  // Never feeds FIFO payment-days or collected_amount.
+  const creditNotes = attachCreditNotesToInvoices(invoiceRows, unmatchedCreditNotes);
+
+  const creditNoteAmount = creditNotes.reduce((total, note) => total + toNumber(note.amount_incl_vat), 0);
   const netSalesInclVat = salesInclVat - creditNoteAmount;
   const balanceDelta = netSalesInclVat - collectedAmount - openSalesAmount;
 
@@ -711,7 +806,7 @@ export function buildPaymentSettlementLedger({
     invoice_sales_excl_vat: invoiceSalesExclVat,
     invoice_sales_incl_vat: invoiceSalesInclVat,
     credit_note_amount: creditNoteAmount,
-    credit_note_excl_vat: unmatchedCreditNotes.reduce((total, note) => total + toNumber(note.amount_excl_vat), 0),
+    credit_note_excl_vat: creditNotes.reduce((total, note) => total + toNumber(note.amount_excl_vat), 0),
     net_sales_incl_vat: netSalesInclVat,
     collected_amount: collectedAmount,
     paid_amount: paidAmount,
@@ -731,7 +826,7 @@ export function buildPaymentSettlementLedger({
     reversed_invoice_count: reversedRows.length,
     reversed_sales_excl_vat: reversedSalesExclVat,
     reversed_sales_incl_vat: reversedSalesInclVat,
-    credit_note_count: unmatchedCreditNotes.length,
+    credit_note_count: creditNotes.length,
   };
 
   return {
@@ -739,7 +834,7 @@ export function buildPaymentSettlementLedger({
     totals,
     invoices: invoiceRows,
     reversedInvoices: reversedRows,
-    creditNotes: unmatchedCreditNotes,
+    creditNotes,
     datewise,
     settlementEvents,
     outstandingInvoices: outstanding.invoices,

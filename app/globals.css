@@ -7692,6 +7692,11 @@ button.moduleBiDashKpi:focus-visible {
   font-size: 12px;
 }
 
+.paymentSettleChildRow--credit td {
+  background: #f7f3fb !important;
+  color: #5a4a6a;
+}
+
 /* ==========================================================
    SALES QTY LIMITS (mobile-friendly cards + item search)
    ========================================================== */

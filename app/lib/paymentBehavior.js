@@ -105,7 +105,8 @@ export function buildSalesInvoices(transactions = []) {
 }
 
 /**
- * Collapse negative sales lines into credit-note vouchers (absolute amounts, VAT-incl).
+ * Collapse negative sales lines into credit-note / sales-return vouchers
+ * (absolute amounts, VAT-incl). Gloves stay excl. VAT.
  */
 export function buildCreditNotes(transactions = []) {
   const map = new Map();
@@ -120,11 +121,14 @@ export function buildCreditNotes(transactions = []) {
     const amountInclVat = lineVatInclAmount(row, absExcl);
     const voucher = String(row?.voucher_number || row?.reference || "").trim();
     const reference = String(row?.reference || "").trim();
+    const voucherType = String(row?.voucher_type || "").trim();
     const key = `${creditDate}::${voucher || "NO-VOUCHER"}`;
     const current = map.get(key) || {
       credit_date: creditDate,
       voucher_number: voucher,
       reference,
+      voucher_type: voucherType,
+      kind: classifyCreditNoteKind(voucherType, voucher),
       amount_excl_vat: 0,
       amount: 0,
       remaining: 0,
@@ -133,10 +137,25 @@ export function buildCreditNotes(transactions = []) {
     current.amount += amountInclVat;
     current.remaining = current.amount;
     if (reference && !current.reference) current.reference = reference;
+    if (voucherType && !current.voucher_type) {
+      current.voucher_type = voucherType;
+      current.kind = classifyCreditNoteKind(voucherType, voucher);
+    }
     map.set(key, current);
   });
 
   return sortVoucherRows([...map.values()]);
+}
+
+export function classifyCreditNoteKind(voucherType = "", voucherNumber = "") {
+  const haystack = `${voucherType} ${voucherNumber}`.toUpperCase();
+  if (/\bSR\b/.test(haystack) || haystack.includes("SALES RETURN") || haystack.includes("RETURN")) {
+    return "Sales Return";
+  }
+  if (/\bCN\b/.test(haystack) || haystack.includes("CREDIT")) {
+    return "Credit Note";
+  }
+  return "Credit Note / Return";
 }
 
 /**
@@ -664,10 +683,25 @@ export function buildPaymentSettlementLedger({
   const pairedCreditNoteKeys = new Set(
     reversedRows.map((row) => invoiceKey(row.credit_note_date, row.credit_note_voucher)),
   );
-  const unmatchedCreditNotes = buildCreditNotes(transactions).filter(
-    (note) => !pairedCreditNoteKeys.has(invoiceKey(note.credit_date, note.voucher_number)),
-  );
-  const creditNoteAmount = unmatchedCreditNotes.reduce((total, note) => total + toNumber(note.amount), 0);
+  const unmatchedCreditNotes = buildCreditNotes(transactions)
+    .filter((note) => !pairedCreditNoteKeys.has(invoiceKey(note.credit_date, note.voucher_number)))
+    .map((note) => ({
+      credit_date: note.credit_date,
+      voucher_number: note.voucher_number,
+      reference: note.reference || "",
+      voucher_type: note.voucher_type || "",
+      kind: note.kind || classifyCreditNoteKind(note.voucher_type, note.voucher_number),
+      amount_excl_vat: toNumber(note.amount_excl_vat),
+      amount_incl_vat: toNumber(note.amount),
+      status: "Credit",
+    }))
+    .sort((left, right) => {
+      if (left.credit_date !== right.credit_date) {
+        return String(left.credit_date || "").localeCompare(String(right.credit_date || ""));
+      }
+      return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+    });
+  const creditNoteAmount = unmatchedCreditNotes.reduce((total, note) => total + toNumber(note.amount_incl_vat), 0);
   const netSalesInclVat = salesInclVat - creditNoteAmount;
   const balanceDelta = netSalesInclVat - collectedAmount - openSalesAmount;
 
@@ -677,6 +711,7 @@ export function buildPaymentSettlementLedger({
     invoice_sales_excl_vat: invoiceSalesExclVat,
     invoice_sales_incl_vat: invoiceSalesInclVat,
     credit_note_amount: creditNoteAmount,
+    credit_note_excl_vat: unmatchedCreditNotes.reduce((total, note) => total + toNumber(note.amount_excl_vat), 0),
     net_sales_incl_vat: netSalesInclVat,
     collected_amount: collectedAmount,
     paid_amount: paidAmount,
@@ -696,6 +731,7 @@ export function buildPaymentSettlementLedger({
     reversed_invoice_count: reversedRows.length,
     reversed_sales_excl_vat: reversedSalesExclVat,
     reversed_sales_incl_vat: reversedSalesInclVat,
+    credit_note_count: unmatchedCreditNotes.length,
   };
 
   return {
@@ -703,6 +739,7 @@ export function buildPaymentSettlementLedger({
     totals,
     invoices: invoiceRows,
     reversedInvoices: reversedRows,
+    creditNotes: unmatchedCreditNotes,
     datewise,
     settlementEvents,
     outstandingInvoices: outstanding.invoices,

@@ -43,7 +43,8 @@ export function buildPaymentSettlementPdfModel(ledger) {
   if (!ledger || !Array.isArray(ledger.invoices)) return null;
   const invoices = ledger.invoices;
   const reversed = Array.isArray(ledger.reversedInvoices) ? ledger.reversedInvoices : [];
-  if (!invoices.length && !reversed.length) return null;
+  const creditNotes = Array.isArray(ledger.creditNotes) ? ledger.creditNotes : [];
+  if (!invoices.length && !reversed.length && !creditNotes.length) return null;
 
   const totals = ledger.totals || {};
   const summary = ledger.summary || {};
@@ -85,6 +86,19 @@ export function buildPaymentSettlementPdfModel(ledger) {
       credit_note_amount: formatMoney(row.credit_note_amount),
       status: "Reversed",
     })),
+    creditNotes: creditNotes.map((row) => ({
+      credit_date: row.credit_date || "—",
+      voucher_number: row.voucher_number || "—",
+      kind: row.kind || "Credit Note",
+      reference: row.reference || "—",
+      amount_excl_vat: formatMoney(row.amount_excl_vat),
+      amount_incl_vat: formatMoney(row.amount_incl_vat),
+      status: row.kind || "Credit",
+    })),
+    creditNoteTotals: {
+      amount_excl_vat: formatMoney(totals.credit_note_excl_vat || 0),
+      amount_incl_vat: formatMoney(totals.credit_note_amount || 0),
+    },
   };
 }
 
@@ -274,6 +288,85 @@ export function appendPaymentSettlementToPdf(doc, {
       cursorY += ROW_HEIGHT;
     });
     cursorY += AFTER_TABLE_GAP;
+  }
+
+  if ((model.creditNotes || []).length) {
+    drawTitle(
+      "Credit Notes & Sales Returns",
+      `${model.creditNotes.length} partial / later (not full immediate reverse)`,
+    );
+    const cnCols = [
+      { key: "credit_date", label: "Date", width: 62 },
+      { key: "voucher_number", label: "Voucher", width: 72 },
+      { key: "kind", label: "Type", width: 90 },
+      { key: "reference", label: "Reference", width: 72 },
+      { key: "amount_excl_vat", label: "Excl VAT", width: 62, align: "right" },
+      { key: "amount_incl_vat", label: "Incl VAT", width: 62, align: "right" },
+      { key: "status", label: "Status", width: Math.max(40, tableWidth - (62 + 72 + 90 + 72 + 62 + 62)) },
+    ];
+
+    const drawCnHeader = () => {
+      fillHeader(doc, x, cursorY, tableWidth, HEADER_HEIGHT);
+      doc.setFont(undefined, "bold");
+      doc.setTextColor(...COLORS.headerText);
+      let colX = x;
+      cnCols.forEach((col) => {
+        drawCellText(doc, col.label, colX, cursorY + 12, col.width, {
+          align: col.align || "left",
+          color: COLORS.headerText,
+        });
+        colX += col.width;
+      });
+      cursorY += HEADER_HEIGHT;
+      doc.setFont(undefined, "normal");
+    };
+
+    drawCnHeader();
+    model.creditNotes.forEach((row, index) => {
+      if (cursorY + ROW_HEIGHT > doc.internal.pageSize.getHeight() - 52) {
+        doc.addPage();
+        cursorY = 48;
+        drawCnHeader();
+      }
+      if (index % 2 === 1) {
+        doc.setFillColor(...COLORS.zebraBg);
+        doc.rect(x, cursorY, tableWidth, ROW_HEIGHT, "F");
+      }
+      let colX = x;
+      cnCols.forEach((col) => {
+        doc.rect(colX, cursorY, col.width, ROW_HEIGHT);
+        drawCellText(doc, row[col.key], colX, cursorY + 11, col.width, {
+          align: col.align || "left",
+          color: COLORS.bodyText,
+        });
+        colX += col.width;
+      });
+      cursorY += ROW_HEIGHT;
+    });
+
+    ensureSpace(FOOTER_HEIGHT + 8);
+    doc.setFillColor(...COLORS.totalBg);
+    doc.rect(x, cursorY, tableWidth, FOOTER_HEIGHT, "F");
+    doc.setFont(undefined, "bold");
+    let footerX = x;
+    const cnFooter = {
+      credit_date: "Total",
+      voucher_number: "",
+      kind: "",
+      reference: "",
+      amount_excl_vat: model.creditNoteTotals.amount_excl_vat,
+      amount_incl_vat: model.creditNoteTotals.amount_incl_vat,
+      status: "",
+    };
+    cnCols.forEach((col) => {
+      doc.rect(footerX, cursorY, col.width, FOOTER_HEIGHT);
+      drawCellText(doc, cnFooter[col.key], footerX, cursorY + 12, col.width, {
+        align: col.align || "left",
+      });
+      footerX += col.width;
+    });
+    cursorY += FOOTER_HEIGHT + AFTER_TABLE_GAP;
+    doc.setFont(undefined, "normal");
   }
 
   doc.setTextColor(...COLORS.bodyText);

@@ -45,6 +45,9 @@ function statusClass(status) {
   if (status === "Paid") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Partial") return "paymentSettleStatus paymentSettleStatus--partial";
   if (status === "Reversed") return "paymentSettleStatus paymentSettleStatus--reversed";
+  if (status === "Credit" || status === "Sales Return" || status === "Credit Note") {
+    return "paymentSettleStatus paymentSettleStatus--credit";
+  }
   return "paymentSettleStatus paymentSettleStatus--open";
 }
 
@@ -489,6 +492,60 @@ export default function PaymentSettlementPage() {
                         <td><strong>{formatMoney(ledger.totals.reversed_sales_excl_vat || 0)}</strong></td>
                         <td><strong>{formatMoney(ledger.totals.reversed_sales_incl_vat || 0)}</strong></td>
                         <td colSpan={5} />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </ExportableTable>
+              </section>
+
+              <section className="moduleSection">
+                <div className="moduleSectionHeader">
+                  <h2>Credit Notes & Sales Returns</h2>
+                  <span>
+                    {formatCount(ledger.totals.credit_note_count || 0)} not full immediate reversals
+                  </span>
+                </div>
+                <p className="moduleHint">
+                  Partial credit notes, later credit notes, and sales returns (negative sales).
+                  These reduce net Sales; the related invoice stays in Invoices & Settlement with Open from outstanding.
+                </p>
+                <ExportableTable filename="payment-settlement-credit-notes" sheetName="CreditNotes" className="moduleTableWrap">
+                  <table className="moduleTable moduleBiTable paymentSettleTable">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Voucher</th>
+                        <th>Type</th>
+                        <th>Reference</th>
+                        <th>Excl VAT</th>
+                        <th>Incl VAT</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(ledger.creditNotes || []).map((row) => (
+                        <tr key={`${row.credit_date}::${row.voucher_number}`}>
+                          <td>{row.credit_date || "—"}</td>
+                          <td>{row.voucher_number || "—"}</td>
+                          <td>{row.kind || row.voucher_type || "Credit Note"}</td>
+                          <td>{row.reference || "—"}</td>
+                          <td>{formatMoney(row.amount_excl_vat)}</td>
+                          <td>{formatMoney(row.amount_incl_vat)}</td>
+                          <td><span className={statusClass("Credit")}>{row.kind || "Credit"}</span></td>
+                        </tr>
+                      ))}
+                      {!(ledger.creditNotes || []).length && (
+                        <tr>
+                          <td colSpan={7}>No partial credit notes or sales returns for this customer.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={4}><strong>Total</strong></td>
+                        <td><strong>{formatMoney(ledger.totals.credit_note_excl_vat || 0)}</strong></td>
+                        <td><strong>{formatMoney(ledger.totals.credit_note_amount || 0)}</strong></td>
+                        <td />
                       </tr>
                     </tfoot>
                   </table>

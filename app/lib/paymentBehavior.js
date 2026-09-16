@@ -27,6 +27,10 @@ function roundDays(value) {
   return Math.round(number);
 }
 
+function invoiceKey(invoiceDate, voucherNumber) {
+  return `${dateOnly(invoiceDate)}::${String(voucherNumber || "").trim()}`;
+}
+
 function median(values) {
   const sorted = [...values].filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
   if (!sorted.length) return null;
@@ -37,10 +41,78 @@ function median(values) {
   return sorted[mid];
 }
 
+/** Gross-up that preserves sign so credit-note lines stay negative. */
+function signedAmountInclVat(amountExclVat, vatRate) {
+  const excl = toNumber(amountExclVat);
+  if (excl === 0) return 0;
+  const absIncl = amountInclVatFromExcl(Math.abs(excl), vatRate);
+  return excl < 0 ? -absIncl : absIncl;
+}
+
+function amountsMatch(left, right, tolerance = 0.02) {
+  return Math.abs(toNumber(left) - toNumber(right)) <= tolerance;
+}
+
+/**
+ * Drop invoices that were fully reversed by a same-day credit note (and the
+ * credit notes themselves). Same-voucher nets that cancel out are also dropped.
+ * Later credit notes are kept out of FIFO so real collection days stay clean;
+ * only immediate (same calendar day) full reversals are excluded here.
+ */
+export function excludeImmediateCreditNoteReversals(invoices = []) {
+  const rows = (Array.isArray(invoices) ? invoices : [])
+    .map((invoice) => ({
+      ...invoice,
+      amount_excl_vat: toNumber(invoice?.amount_excl_vat),
+      amount: toNumber(invoice?.amount),
+      remaining: toNumber(invoice?.amount),
+    }))
+    .filter((invoice) => Math.abs(invoice.amount) > 0.009);
+
+  const sales = rows
+    .filter((invoice) => invoice.amount > 0.009)
+    .sort((left, right) => {
+      if (left.invoice_date !== right.invoice_date) {
+        return left.invoice_date.localeCompare(right.invoice_date);
+      }
+      return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+    });
+  const creditNotes = rows
+    .filter((invoice) => invoice.amount < -0.009)
+    .sort((left, right) => {
+      if (left.invoice_date !== right.invoice_date) {
+        return left.invoice_date.localeCompare(right.invoice_date);
+      }
+      return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+    });
+
+  const reversedSalesKeys = new Set();
+  const usedCreditNoteKeys = new Set();
+
+  creditNotes.forEach((creditNote) => {
+    const creditKey = invoiceKey(creditNote.invoice_date, creditNote.voucher_number);
+    if (usedCreditNoteKeys.has(creditKey)) return;
+    const creditAbs = Math.abs(creditNote.amount);
+    const match = sales.find((sale) => {
+      const saleKey = invoiceKey(sale.invoice_date, sale.voucher_number);
+      if (reversedSalesKeys.has(saleKey)) return false;
+      if (sale.invoice_date !== creditNote.invoice_date) return false;
+      return amountsMatch(sale.amount, creditAbs);
+    });
+    if (!match) return;
+    reversedSalesKeys.add(invoiceKey(match.invoice_date, match.voucher_number));
+    usedCreditNoteKeys.add(creditKey);
+  });
+
+  return sales.filter((sale) => !reversedSalesKeys.has(invoiceKey(sale.invoice_date, sale.voucher_number)));
+}
+
 /**
  * Collapse sales history lines into invoice-level rows (voucher + date).
  * Sales amounts are exclusive of VAT; receipts are inclusive, so each line is
  * grossed up at 15% unless it is a gloves (VAT-exempt) product.
+ * Credit-note lines (negative sales) net within a voucher; invoices fully
+ * reversed by a same-day credit note are excluded from settlement.
  */
 export function buildSalesInvoices(transactions = []) {
   const map = new Map();
@@ -49,14 +121,14 @@ export function buildSalesInvoices(transactions = []) {
     const invoiceDate = dateOnly(row?.transaction_date);
     if (!invoiceDate) return;
     const amountExclVat = toNumber(row?.sales_amount);
-    if (amountExclVat <= 0) return;
+    if (amountExclVat === 0) return;
 
     const vatRate = vatRateForProduct({
       category: row?.category,
       item_name: row?.item_name,
       item_code: row?.item_code,
     });
-    const amountInclVat = amountInclVatFromExcl(amountExclVat, vatRate);
+    const amountInclVat = signedAmountInclVat(amountExclVat, vatRate);
 
     const voucher = String(row?.voucher_number || row?.reference || "").trim();
     const key = `${invoiceDate}::${voucher || "NO-VOUCHER"}`;
@@ -73,12 +145,7 @@ export function buildSalesInvoices(transactions = []) {
     map.set(key, current);
   });
 
-  return [...map.values()].sort((left, right) => {
-    if (left.invoice_date !== right.invoice_date) {
-      return left.invoice_date.localeCompare(right.invoice_date);
-    }
-    return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
-  });
+  return excludeImmediateCreditNoteReversals([...map.values()]);
 }
 
 export function buildSortedReceipts(receipts = []) {
@@ -283,10 +350,6 @@ export function buildPaymentBehavior({
 export function formatPaymentDaysLabel(behavior) {
   if (!behavior || behavior.avgDaysToPay == null) return "—";
   return `${behavior.avgDaysToPay} days`;
-}
-
-function invoiceKey(invoiceDate, voucherNumber) {
-  return `${dateOnly(invoiceDate)}::${String(voucherNumber || "").trim()}`;
 }
 
 function normalizeRef(value) {

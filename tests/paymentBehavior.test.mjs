@@ -4,6 +4,7 @@ import {
   buildPaymentBehavior,
   buildPaymentSettlementLedger,
   buildSalesInvoices,
+  excludeImmediateCreditNoteReversals,
   matchPaymentsFifo,
 } from "../app/lib/paymentBehavior.js";
 
@@ -17,6 +18,74 @@ test("buildSalesInvoices aggregates voucher lines by date and adds 15% VAT", () 
   assert.equal(invoices.length, 2);
   assert.equal(Number(invoices[0].amount.toFixed(2)), 172.5);
   assert.equal(Number(invoices[1].amount.toFixed(2)), 230);
+});
+
+test("buildSalesInvoices excludes invoices fully reversed by a same-day credit note", () => {
+  const invoices = buildSalesInvoices([
+    { transaction_date: "2026-04-07", voucher_number: "NFD/10", sales_amount: 100, category: "Paper" },
+    { transaction_date: "2026-04-07", voucher_number: "CN/10", sales_amount: -100, category: "Paper" },
+    { transaction_date: "2026-04-08", voucher_number: "NFD/11", sales_amount: 200, category: "Paper" },
+  ]);
+
+  assert.equal(invoices.length, 1);
+  assert.equal(invoices[0].voucher_number, "NFD/11");
+  assert.equal(Number(invoices[0].amount.toFixed(2)), 230);
+});
+
+test("buildSalesInvoices drops vouchers that net to zero via credit lines", () => {
+  const invoices = buildSalesInvoices([
+    { transaction_date: "2026-04-07", voucher_number: "NFD/20", sales_amount: 80, category: "Paper" },
+    { transaction_date: "2026-04-07", voucher_number: "NFD/20", sales_amount: -80, category: "Paper" },
+    { transaction_date: "2026-04-07", voucher_number: "NFD/21", sales_amount: 50, category: "Paper" },
+  ]);
+
+  assert.equal(invoices.length, 1);
+  assert.equal(invoices[0].voucher_number, "NFD/21");
+});
+
+test("later credit notes do not remove the original invoice from settlement", () => {
+  const invoices = buildSalesInvoices([
+    { transaction_date: "2026-04-07", voucher_number: "NFD/30", sales_amount: 100, category: "Paper" },
+    { transaction_date: "2026-04-10", voucher_number: "CN/30", sales_amount: -100, category: "Paper" },
+  ]);
+
+  assert.equal(invoices.length, 1);
+  assert.equal(invoices[0].voucher_number, "NFD/30");
+});
+
+test("excludeImmediateCreditNoteReversals pairs equal same-day amounts only once", () => {
+  const kept = excludeImmediateCreditNoteReversals([
+    { invoice_date: "2026-04-07", voucher_number: "A", amount_excl_vat: 100, amount: 115 },
+    { invoice_date: "2026-04-07", voucher_number: "B", amount_excl_vat: 100, amount: 115 },
+    { invoice_date: "2026-04-07", voucher_number: "CN-A", amount_excl_vat: -100, amount: -115 },
+  ]);
+
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].voucher_number, "B");
+});
+
+test("buildPaymentSettlementLedger omits immediately reversed invoices from paid counts", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-04-07", voucher_number: "NFD/40", sales_amount: 100, category: "Paper" },
+      { transaction_date: "2026-04-07", voucher_number: "CN/40", sales_amount: -100, category: "Paper" },
+      { transaction_date: "2026-05-01", voucher_number: "NFD/41", sales_amount: 200, category: "Paper" },
+    ],
+    receipts: [],
+    outstandingCustomer: { total_outstanding: 230, open_invoices: 1 },
+    outstandingInvoices: [
+      { invoice_date: "2026-05-01", ref_no: "NFD/41", pending_amount: 230, invoice_day: 138 },
+    ],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(ledger.invoices.length, 1);
+  assert.equal(ledger.invoices[0].voucher_number, "NFD/41");
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "NFD/40"), false);
+  assert.equal(ledger.totals.paid_invoice_count, 0);
+  assert.equal(ledger.totals.open_invoice_count, 1);
+  assert.equal(ledger.totals.invoice_count, 1);
+  assert.equal(Number(ledger.totals.sales_incl_vat.toFixed(2)), 230);
 });
 
 test("matchPaymentsFifo measures days from sales date to receipt date", () => {

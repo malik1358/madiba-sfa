@@ -28,8 +28,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Open amounts follow the outstanding upload (book truth). FIFO only estimates payment days from receipts. Credit notes in the ledger are why sales−receipts alone can disagree.",
-    ar: "المبالغ المفتوحة تتبع ملف المستحقات (دفتر الحسابات). الأقدم أولاً يقدّر أيام الدفع فقط من الإيصالات.",
+    en: "Open amounts follow the outstanding upload (book truth). FIFO only estimates payment days from receipts. Invoices fully reversed by a same-day credit note are excluded. Other credit notes in the ledger are why sales−receipts alone can disagree.",
+    ar: "المبالغ المفتوحة تتبع ملف المستحقات (دفتر الحسابات). الأقدم أولاً يقدّر أيام الدفع فقط من الإيصالات. الفواتير الملغاة بنفس اليوم بإشعار دائن تُستبعد.",
   },
 };
 

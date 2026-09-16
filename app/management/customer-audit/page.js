@@ -71,6 +71,12 @@ function formatCount(value) {
   });
 }
 
+function sumOutstandingPending(invoices) {
+  return (Array.isArray(invoices) ? invoices : []).reduce(
+    (total, row) => total + parseOutstandingNumber(row?.pending_amount),
+    0,
+  );
+}
 
 function CustomerAuditPageContent() {
   const { language, dir, setLanguage } = useAppLanguage();
@@ -517,7 +523,12 @@ function CustomerAuditPageContent() {
                         <td key={`audit-out-val-${label}`}>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]))}</td>
                       ))}
                       <td>{formatCount(parseOutstandingNumber(outstandingInfo.customer?.open_invoices))}</td>
-                      <td>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.total_outstanding))}</td>
+                      <td>
+                        {formatAmount(
+                          sumOutstandingPending(outstandingInfo.customerInvoices)
+                          || parseOutstandingNumber(outstandingInfo.customer?.total_outstanding),
+                        )}
+                      </td>
                     </tr>
                   </tbody>
                 </table>

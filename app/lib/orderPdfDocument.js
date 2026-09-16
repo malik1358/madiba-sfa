@@ -2,6 +2,7 @@ import { lookupPositiveRate } from "./itemCodeAliases.js";
 import { addPdfBuildFooter } from "./buildInfo.js";
 import { appendCreditControlRemarkToPdf } from "./creditApproval.js";
 import { appendMonthlyPerformanceToPdf } from "./orderPdfMonthlyPerformance.js";
+import { appendPaymentSettlementToPdf } from "./orderPdfPaymentSettlement.js";
 import {
   buildOutstandingPdfBucketRows,
   sortBucketLabels,
@@ -408,10 +409,16 @@ export async function enrichOrderPdfLiveData(snapshot, {
 
   if (analytics && (paymentHistory.transactions.length || paymentHistory.receipts.length || next.outstanding.customer)) {
     try {
-      const { buildPaymentBehavior } = await import("./paymentBehavior.js");
+      const { buildPaymentBehavior, buildPaymentSettlementLedger } = await import("./paymentBehavior.js");
       analytics = {
         ...analytics,
         paymentBehavior: buildPaymentBehavior({
+          transactions: paymentHistory.transactions,
+          receipts: paymentHistory.receipts,
+          outstandingCustomer: next.outstanding.customer,
+          outstandingInvoices: next.outstanding.customerInvoices,
+        }),
+        paymentSettlement: buildPaymentSettlementLedger({
           transactions: paymentHistory.transactions,
           receipts: paymentHistory.receipts,
           outstandingCustomer: next.outstanding.customer,
@@ -915,6 +922,15 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   });
 
   cursorY = appendMonthlyPerformanceToPdf(doc, {
+    analytics,
+    x: marginX,
+    y: () => cursorY,
+    maxWidth: contentWidth,
+    ensureSpace,
+  });
+
+  cursorY = appendPaymentSettlementToPdf(doc, {
+    ledger: analytics?.paymentSettlement || null,
     analytics,
     x: marginX,
     y: () => cursorY,

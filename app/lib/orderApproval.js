@@ -6,6 +6,7 @@ export const ORDER_STATUS_PENDING_CREDIT = "Pending for credit approval";
 export const ORDER_STATUS_PENDING_INVOICE_CREATION = "Pending for invoice creation";
 export const ORDER_STATUS_WAITING_CREDIT_APPLICATION = "Waiting for credit application";
 export const ORDER_STATUS_QUOTATION_WAITING_PAYMENT = "Quotation submitted waiting for the payment";
+export const ORDER_STATUS_PENDING_WITH_SALESMAN = "Pending with salesman";
 export const ORDER_STATUS_REJECTED = "Rejected by management";
 export const ORDER_STATUS_STOCK_UNAVAILABLE = "Stock unavailable";
 export const ORDER_STATUS_WAITING_STOCK_TRANSFER = "Waiting for stock transfer";
@@ -33,6 +34,7 @@ export const ORDER_INVOICE_STATUSES = [
   ORDER_STATUS_PENDING_INVOICE_CREATION,
   ORDER_STATUS_WAITING_CREDIT_APPLICATION,
   ORDER_STATUS_QUOTATION_WAITING_PAYMENT,
+  ORDER_STATUS_PENDING_WITH_SALESMAN,
   ORDER_STATUS_REJECTED,
   ORDER_STATUS_STOCK_UNAVAILABLE,
   ORDER_STATUS_WAITING_STOCK_TRANSFER,
@@ -84,6 +86,16 @@ export function isPendingForInvoiceCreationStatus(status) {
 export function isWaitingForOverdueCollectionStatus(status) {
   return normalizeInvoiceStatus(status).toLowerCase()
     === ORDER_STATUS_WAITING_OVERDUE_COLLECTION.toLowerCase();
+}
+
+export function isQuotationWaitingPaymentStatus(status) {
+  return normalizeInvoiceStatus(status).toLowerCase()
+    === ORDER_STATUS_QUOTATION_WAITING_PAYMENT.toLowerCase();
+}
+
+export function isPendingWithSalesmanStatus(status) {
+  return normalizeInvoiceStatus(status).toLowerCase()
+    === ORDER_STATUS_PENDING_WITH_SALESMAN.toLowerCase();
 }
 
 export function isSubmittedOrder(order) {

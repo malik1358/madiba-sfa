@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildCreditNotes,
   buildPaymentBehavior,
   buildPaymentSettlementLedger,
   buildSalesInvoices,
+  findImmediateCreditNoteReversals,
   matchPaymentsFifo,
 } from "../app/lib/paymentBehavior.js";
 
@@ -142,6 +144,7 @@ test("buildPaymentSettlementLedger returns invoice settlement and datewise rows"
   assert.equal(ledger.totals.paid_invoice_count, 1);
   assert.equal(ledger.totals.partial_invoice_count, 1);
   assert.ok(ledger.totals.open_sales_amount > 0);
+  assert.equal(ledger.reversedInvoices.length, 0);
 });
 
 test("buildPaymentBehavior prefers invoice sum over rounded header total", () => {
@@ -223,4 +226,76 @@ test("buildPaymentSettlementLedger leaves avg days blank when customer never pai
   assert.equal(ledger.invoices[0].open_days, 31);
   assert.equal(ledger.settlementEvents.length, 0);
   assert.equal(ledger.summary.outstandingTotal, 1150);
+});
+
+test("buildCreditNotes aggregates negative sales lines with VAT", () => {
+  const notes = buildCreditNotes([
+    { transaction_date: "2026-01-01", voucher_number: "CN1", sales_amount: -100, category: "Paper" },
+    { transaction_date: "2026-01-01", voucher_number: "CN1", sales_amount: -50, category: "Paper" },
+    { transaction_date: "2026-01-02", voucher_number: "INV1", sales_amount: 200, category: "Paper" },
+  ]);
+
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].voucher_number, "CN1");
+  assert.equal(Number(notes[0].amount.toFixed(2)), 172.5);
+});
+
+test("immediate same-day credit note reversal is excluded from avg days to pay", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      // Reversed invoice sorts first (older date) so without exclusion FIFO would
+      // consume the receipt against it and distort avg days.
+      { transaction_date: "2025-12-20", voucher_number: "INV-REV", sales_amount: 400, category: "Paper" },
+      { transaction_date: "2025-12-20", voucher_number: "CN-REV", reference: "INV-REV", sales_amount: -400, category: "Paper" },
+      { transaction_date: "2026-01-01", voucher_number: "INV-KEEP", sales_amount: 1000, category: "Paper" },
+    ],
+    receipts: [
+      { receipt_date: "2026-01-31", amount: 1150, vch_no: "R1" },
+    ],
+    outstandingInvoices: [],
+    todayIso: "2026-02-15",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 1);
+  assert.equal(ledger.reversedInvoices[0].voucher_number, "INV-REV");
+  assert.equal(ledger.reversedInvoices[0].credit_note_voucher, "CN-REV");
+  assert.equal(ledger.reversedInvoices[0].reversal_days, 0);
+  assert.equal(ledger.totals.reversed_invoice_count, 1);
+
+  assert.equal(ledger.invoices.length, 1);
+  assert.equal(ledger.invoices[0].voucher_number, "INV-KEEP");
+  assert.equal(ledger.invoices[0].status, "Paid");
+  assert.equal(ledger.invoices[0].payment_days, 30);
+  assert.equal(ledger.summary.avgDaysToPay, 30);
+  assert.equal(ledger.settlementEvents.length, 1);
+  assert.equal(ledger.settlementEvents[0].voucher_number, "INV-KEEP");
+});
+
+test("next-day matching credit note still counts as immediate reversal", () => {
+  const invoices = buildSalesInvoices([
+    { transaction_date: "2026-03-10", voucher_number: "S1", sales_amount: 500, category: "Paper" },
+  ]);
+  const notes = buildCreditNotes([
+    { transaction_date: "2026-03-11", voucher_number: "CN1", sales_amount: -500, category: "Paper" },
+  ]);
+  const { reversals, reversedKeys } = findImmediateCreditNoteReversals(invoices, notes);
+
+  assert.equal(reversals.length, 1);
+  assert.equal(reversals[0].reversal_days, 1);
+  assert.equal(reversedKeys.has("2026-03-10::S1"), true);
+});
+
+test("credit note several days later is not treated as immediate reversal", () => {
+  const { allocations, reversedInvoices, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-01-01", voucher_number: "S1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-01-10", voucher_number: "CN1", sales_amount: -1000, category: "Paper" },
+    ],
+    [{ receipt_date: "2026-01-20", amount: 1150 }],
+  );
+
+  assert.equal(reversedInvoices.length, 0);
+  assert.equal(invoices.length, 1);
+  assert.equal(allocations.length, 1);
+  assert.equal(allocations[0].days, 19);
 });

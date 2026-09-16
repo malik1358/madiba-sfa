@@ -37,6 +37,40 @@ function median(values) {
   return sorted[mid];
 }
 
+/** Same-day or next-day credit notes count as an immediate reverse (not payment). */
+export const IMMEDIATE_REVERSAL_MAX_DAYS = 1;
+const AMOUNT_TOLERANCE = 0.02;
+
+function invoiceKey(invoiceDate, voucherNumber) {
+  return `${dateOnly(invoiceDate)}::${String(voucherNumber || "").trim()}`;
+}
+
+function normalizeRef(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function amountsMatch(left, right, tolerance = AMOUNT_TOLERANCE) {
+  return Math.abs(toNumber(left) - toNumber(right)) <= tolerance;
+}
+
+function lineVatInclAmount(row, amountExclVat) {
+  const vatRate = vatRateForProduct({
+    category: row?.category,
+    item_name: row?.item_name,
+    item_code: row?.item_code,
+  });
+  return amountInclVatFromExcl(amountExclVat, vatRate);
+}
+
+function sortVoucherRows(rows) {
+  return [...rows].sort((left, right) => {
+    const leftDate = left.invoice_date || left.credit_date || "";
+    const rightDate = right.invoice_date || right.credit_date || "";
+    if (leftDate !== rightDate) return String(leftDate).localeCompare(String(rightDate));
+    return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+  });
+}
+
 /**
  * Collapse sales history lines into invoice-level rows (voucher + date).
  * Sales amounts are exclusive of VAT; receipts are inclusive, so each line is
@@ -51,13 +85,7 @@ export function buildSalesInvoices(transactions = []) {
     const amountExclVat = toNumber(row?.sales_amount);
     if (amountExclVat <= 0) return;
 
-    const vatRate = vatRateForProduct({
-      category: row?.category,
-      item_name: row?.item_name,
-      item_code: row?.item_code,
-    });
-    const amountInclVat = amountInclVatFromExcl(amountExclVat, vatRate);
-
+    const amountInclVat = lineVatInclAmount(row, amountExclVat);
     const voucher = String(row?.voucher_number || row?.reference || "").trim();
     const key = `${invoiceDate}::${voucher || "NO-VOUCHER"}`;
     const current = map.get(key) || {
@@ -73,12 +101,120 @@ export function buildSalesInvoices(transactions = []) {
     map.set(key, current);
   });
 
-  return [...map.values()].sort((left, right) => {
-    if (left.invoice_date !== right.invoice_date) {
-      return left.invoice_date.localeCompare(right.invoice_date);
-    }
-    return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+  return sortVoucherRows([...map.values()]);
+}
+
+/**
+ * Collapse negative sales lines into credit-note vouchers (absolute amounts, VAT-incl).
+ */
+export function buildCreditNotes(transactions = []) {
+  const map = new Map();
+
+  (Array.isArray(transactions) ? transactions : []).forEach((row) => {
+    const creditDate = dateOnly(row?.transaction_date);
+    if (!creditDate) return;
+    const amountExclVat = toNumber(row?.sales_amount);
+    if (amountExclVat >= 0) return;
+
+    const absExcl = Math.abs(amountExclVat);
+    const amountInclVat = lineVatInclAmount(row, absExcl);
+    const voucher = String(row?.voucher_number || row?.reference || "").trim();
+    const reference = String(row?.reference || "").trim();
+    const key = `${creditDate}::${voucher || "NO-VOUCHER"}`;
+    const current = map.get(key) || {
+      credit_date: creditDate,
+      voucher_number: voucher,
+      reference,
+      amount_excl_vat: 0,
+      amount: 0,
+      remaining: 0,
+    };
+    current.amount_excl_vat += absExcl;
+    current.amount += amountInclVat;
+    current.remaining = current.amount;
+    if (reference && !current.reference) current.reference = reference;
+    map.set(key, current);
   });
+
+  return sortVoucherRows([...map.values()]);
+}
+
+/**
+ * Pair invoices with credit notes posted the same day or next day for the same amount.
+ * These are voids/reversals, not customer payments — exclude from avg days to pay.
+ */
+export function findImmediateCreditNoteReversals(
+  invoices = [],
+  creditNotes = [],
+  { maxDays = IMMEDIATE_REVERSAL_MAX_DAYS } = {},
+) {
+  const unusedNotes = (Array.isArray(creditNotes) ? creditNotes : []).map((note) => ({
+    ...note,
+    remaining: toNumber(note.amount),
+  }));
+  const reversals = [];
+  const reversedKeys = new Set();
+
+  for (const invoice of (Array.isArray(invoices) ? invoices : [])) {
+    const invoiceAmount = toNumber(invoice.amount);
+    if (invoiceAmount <= AMOUNT_TOLERANCE) continue;
+
+    const candidates = unusedNotes
+      .map((note, index) => {
+        if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) return null;
+        if (String(note.credit_date || "") < String(invoice.invoice_date || "")) return null;
+        const days = isoDaysBetween(note.credit_date, invoice.invoice_date);
+        if (days == null || days > maxDays) return null;
+
+        const amountOk = amountsMatch(note.remaining, invoiceAmount)
+          || amountsMatch(note.amount, invoiceAmount);
+        const noteRef = normalizeRef(note.reference || note.voucher_number);
+        const invoiceRef = normalizeRef(invoice.voucher_number);
+        const refHit = Boolean(
+          invoiceRef
+          && noteRef
+          && (noteRef.includes(invoiceRef) || invoiceRef.includes(noteRef)),
+        );
+        if (!amountOk && !refHit) return null;
+        if (!amountOk && refHit && toNumber(note.remaining) + AMOUNT_TOLERANCE < invoiceAmount) {
+          return null;
+        }
+        // Full reverse only — partial credit notes stay in the normal ledger.
+        if (!amountsMatch(note.remaining, invoiceAmount) && !amountsMatch(note.amount, invoiceAmount)) {
+          return null;
+        }
+
+        return {
+          note,
+          index,
+          days,
+          score: (refHit ? 1000 : 0) + (amountOk ? 100 : 0) - days,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+
+    const best = candidates[0];
+    if (!best) continue;
+
+    best.note.remaining = 0;
+    const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
+    reversedKeys.add(key);
+    reversals.push({
+      invoice_date: invoice.invoice_date,
+      voucher_number: invoice.voucher_number,
+      amount_excl_vat: toNumber(invoice.amount_excl_vat),
+      amount_incl_vat: invoiceAmount,
+      credit_note_date: best.note.credit_date,
+      credit_note_voucher: best.note.voucher_number,
+      credit_note_amount: toNumber(best.note.amount),
+      credit_note_reference: best.note.reference || "",
+      reversal_days: best.days,
+      status: "Reversed",
+    });
+  }
+
+  return { reversals, reversedKeys };
 }
 
 export function buildSortedReceipts(receipts = []) {
@@ -100,9 +236,15 @@ export function buildSortedReceipts(receipts = []) {
 /**
  * FIFO-match receipts onto sales invoices to estimate days-to-pay.
  * Receipts have no invoice ref, so oldest open invoice is paid first.
+ * Invoices reversed immediately by credit notes are excluded from matching.
  */
 export function matchPaymentsFifo(transactions = [], receipts = []) {
-  const invoices = buildSalesInvoices(transactions).map((invoice) => ({ ...invoice }));
+  const allInvoices = buildSalesInvoices(transactions).map((invoice) => ({ ...invoice }));
+  const creditNotes = buildCreditNotes(transactions);
+  const { reversals, reversedKeys } = findImmediateCreditNoteReversals(allInvoices, creditNotes);
+  const invoices = allInvoices
+    .filter((invoice) => !reversedKeys.has(invoiceKey(invoice.invoice_date, invoice.voucher_number)))
+    .map((invoice) => ({ ...invoice, remaining: toNumber(invoice.amount) }));
   const paymentRows = buildSortedReceipts(receipts);
   const allocations = [];
   let unmatchedReceiptAmount = 0;
@@ -138,6 +280,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
     invoices,
     allocations,
     unmatchedReceiptAmount,
+    reversedInvoices: reversals,
   };
 }
 
@@ -285,18 +428,11 @@ export function formatPaymentDaysLabel(behavior) {
   return `${behavior.avgDaysToPay} days`;
 }
 
-function invoiceKey(invoiceDate, voucherNumber) {
-  return `${dateOnly(invoiceDate)}::${String(voucherNumber || "").trim()}`;
-}
-
-function normalizeRef(value) {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
-}
-
 /**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
  * When outstanding invoice rows exist, Open / status follow that upload (book truth), not FIFO residual.
  * FIFO is kept for payment-days on historically settled chunks.
+ * Invoices reversed immediately by credit notes are listed separately and excluded from avg days.
  */
 export function buildPaymentSettlementLedger({
   transactions = [],
@@ -306,7 +442,12 @@ export function buildPaymentSettlementLedger({
   todayIso = new Date().toISOString().slice(0, 10),
 } = {}) {
   const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
-  const { invoices, allocations, unmatchedReceiptAmount } = matchPaymentsFifo(transactions, receipts);
+  const {
+    invoices,
+    allocations,
+    unmatchedReceiptAmount,
+    reversedInvoices = [],
+  } = matchPaymentsFifo(transactions, receipts);
   const summary = buildPaymentBehavior({
     transactions,
     receipts,
@@ -501,6 +642,12 @@ export function buildPaymentSettlementLedger({
     });
 
   const openSalesAmount = invoiceRows.reduce((total, row) => total + toNumber(row.remaining), 0);
+  const reversedRows = [...reversedInvoices].sort((left, right) => {
+    if (left.invoice_date !== right.invoice_date) {
+      return String(left.invoice_date || "").localeCompare(String(right.invoice_date || ""));
+    }
+    return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+  });
   const totals = {
     sales_excl_vat: invoiceRows.reduce((total, row) => total + row.amount_excl_vat, 0),
     sales_incl_vat: invoiceRows.reduce((total, row) => total + row.amount_incl_vat, 0),
@@ -516,12 +663,16 @@ export function buildPaymentSettlementLedger({
     paid_invoice_count: invoiceRows.filter((row) => row.status === "Paid").length,
     partial_invoice_count: invoiceRows.filter((row) => row.status === "Partial").length,
     open_invoice_count: invoiceRows.filter((row) => row.status === "Open").length,
+    reversed_invoice_count: reversedRows.length,
+    reversed_sales_excl_vat: reversedRows.reduce((total, row) => total + toNumber(row.amount_excl_vat), 0),
+    reversed_sales_incl_vat: reversedRows.reduce((total, row) => total + toNumber(row.amount_incl_vat), 0),
   };
 
   return {
     summary,
     totals,
     invoices: invoiceRows,
+    reversedInvoices: reversedRows,
     datewise,
     settlementEvents,
     outstandingInvoices: outstanding.invoices,

@@ -20,6 +20,8 @@ on:
         required: false
         default: "true"
 
+permissions: {}
+
 jobs:
   email:
     runs-on: ubuntu-latest

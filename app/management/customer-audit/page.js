@@ -4,12 +4,12 @@ const PRICE_CACHE_API = "/api/pricing/cache";
 
 const PAGE_VERSION = "Quick Order V5";
 const TEXT = {
-  title: { en: "Customer Details", ar: "ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ø¹Ù…ÙŠÙ„" },
-  subtitle: { en: "Management sales history validation", ar: "Ù…Ø±Ø§Ø¬Ø¹Ø© Ø³Ø¬Ù„ Ù…Ø¨ÙŠØ¹Ø§Øª Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡" },
-  home: { en: "â† Home", ar: "â† Ø§Ù„Ø±Ø¦ÙŠØ³ÙŠØ©" },
-  customers: { en: "â† Customers", ar: "â† Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡" },
-  loadingCustomer: { en: "Loading customer history...", ar: "Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ Ø³Ø¬Ù„ Ø§Ù„Ø¹Ù…ÙŠÙ„..." },
-  cacheRefreshing: { en: "Showing saved data. Refreshing in background...", ar: "Ø¹Ø±Ø¶ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù…Ø­ÙÙˆØ¸Ø©. Ø¬Ø§Ø±ÙŠ Ø§Ù„ØªØ­Ø¯ÙŠØ« ÙÙŠ Ø§Ù„Ø®Ù„ÙÙŠØ©..." },
+  title: { en: "Customer Details", ar: "تفاصيل العميل" },
+  subtitle: { en: "Management sales history validation", ar: "مراجعة سجل مبيعات العملاء" },
+  home: { en: "← Home", ar: "← الرئيسية" },
+  customers: { en: "← Customers", ar: "← العملاء" },
+  loadingCustomer: { en: "Loading customer history...", ar: "جاري تحميل سجل العميل..." },
+  cacheRefreshing: { en: "Showing saved data. Refreshing in background...", ar: "عرض البيانات المحفوظة. جاري التحديث في الخلفية..." },
 };
 
 import { Suspense, useEffect, useMemo, useState } from "react";
@@ -588,7 +588,7 @@ function CustomerAuditPageContent() {
             <button type="button" className="auditTransactionToggle" onClick={() => window.print()}>Print / Save PDF</button>
           </div>
           <div className="auditEmpty" style={{ marginTop: "8px" }}>
-            Loaded {Object.keys(regionPriceList).length} {pricingRegionLabel(pricingRegion)} prices â€¢ Item master {itemMasterStatus}
+            Loaded {Object.keys(regionPriceList).length} {pricingRegionLabel(pricingRegion)} prices • Item master {itemMasterStatus}
           </div>
           <div className="moduleFilterRow" style={{ marginTop: "10px" }}>
             {allowedPricingRegions.length > 1 ? (

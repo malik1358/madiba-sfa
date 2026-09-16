@@ -31,6 +31,7 @@ import { prospectToOrderCustomer, readLocalProspects, upsertLocalProspect } from
 import { fetchVisibleCustomersCached, upsertLocalVisibleCustomer } from "../../lib/mobileDataCache";
 import { getTodayDateKey, validateNextVisitDate } from "../../lib/nextVisitDate";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
+import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { copyTextToClipboard } from "../../lib/whatsappShare";
 import {
   formatExistingCustomerDuplicateMessage,
@@ -739,6 +740,25 @@ export default function NewCustomerPage() {
       if (!session?.user) throw new Error("Please login again.");
 
       const location = await requireGpsLocation({ role: access.role });
+      const capturedAt = new Date().toISOString();
+      const customerCode = resolveProspectCustomerCode({
+        id: savedProspect.id,
+        offline_id: savedProspect.offlineId,
+      });
+      const customerName = String(form.customer_name_en || form.shop_name || "").trim() || customerCode;
+      const prospectCustomer = {
+        customer_code: customerCode,
+        customer_name: customerName,
+        latitude: form.gps_location ? Number(String(form.gps_location).split(",")[0]) : null,
+        longitude: form.gps_location ? Number(String(form.gps_location).split(",")[1]) : null,
+      };
+      const visitDistance = await loadVisitDistanceMetrics({
+        supabase,
+        userId: session.user.id,
+        location,
+        customer: prospectCustomer,
+        savedAt: capturedAt,
+      });
 
       const result = await postJsonResilient({
         url: "/api/prospects",
@@ -791,10 +811,13 @@ export default function NewCustomerPage() {
         prospect: {
           id: savedProspect.id,
           offline_id: savedProspect.offlineId,
+          latitude: prospectCustomer.latitude,
+          longitude: prospectCustomer.longitude,
         },
         followUpDate,
         salesmanName,
         salesmanCode,
+        visitDistance,
       });
 
       setRecent((current) => current.map((row) => (

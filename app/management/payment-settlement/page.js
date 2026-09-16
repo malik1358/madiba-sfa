@@ -347,9 +347,18 @@ export default function PaymentSettlementPage() {
                     </strong>
                     <em className="auditSummaryCardMeta">
                       {ledger.summary.avgDaysToPay != null
-                        ? "From collected receipts only — not open invoice age"
-                        : "Needs sales + receipts"}
+                        ? (Number(ledger.summary.openAmountInAvg || 0) > 0.009
+                          ? "Paid receipts + open unpaid at current Invoice Day"
+                          : "From collected receipts")
+                        : "Needs sales, receipts, or open invoices"}
                     </em>
+                    {ledger.summary.avgDaysPaidOnly != null
+                      && Number(ledger.summary.openAmountInAvg || 0) > 0.009
+                      && ledger.summary.avgDaysPaidOnly !== ledger.summary.avgDaysToPay ? (
+                      <em className="auditSummaryCardMeta">
+                        Paid-only avg: {formatCount(ledger.summary.avgDaysPaidOnly)}d
+                      </em>
+                    ) : null}
                     {Number(ledger.summary.outstandingOldestDays || 0) > 0 ? (
                       <em className="auditSummaryCardMeta">
                         Oldest unpaid invoice: {formatCount(ledger.summary.outstandingOldestDays)}d

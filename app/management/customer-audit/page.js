@@ -502,8 +502,16 @@ function CustomerAuditPageContent() {
             <div className="auditSectionNote" style={{ marginTop: "8px" }}>
               <strong>Payment behavior:</strong>{" "}
               {analytics.paymentBehavior.avgDaysToPay != null
-                ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay from collected receipts (sales date → receipt date)`
-                : "Avg days to pay unavailable (need sales + receipts)"}
+                ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay`
+                  + (Number(analytics.paymentBehavior.openAmountInAvg || 0) > 0.009
+                    ? " (paid receipts + open unpaid at current Invoice Day)"
+                    : " from collected receipts")
+                : "Avg days to pay unavailable (need sales + receipts or open invoices)"}
+              {analytics.paymentBehavior.avgDaysPaidOnly != null
+                && Number(analytics.paymentBehavior.openAmountInAvg || 0) > 0.009
+                && analytics.paymentBehavior.avgDaysPaidOnly !== analytics.paymentBehavior.avgDaysToPay
+                ? ` · paid-only ${analytics.paymentBehavior.avgDaysPaidOnly}d`
+                : ""}
               {analytics.paymentBehavior.matchedInvoiceCount
                 ? ` · ${analytics.paymentBehavior.matchedInvoiceCount} invoices matched`
                 : ""}
@@ -511,7 +519,7 @@ function CustomerAuditPageContent() {
                 ? ` · unpaid ${formatAmount(analytics.paymentBehavior.outstandingTotal)}`
                 : ""}
               {Number(analytics.paymentBehavior.outstandingOldestDays || 0) > 0
-                ? ` · oldest unpaid invoice ${analytics.paymentBehavior.outstandingOldestDays}d (Invoice Day — not used in avg)`
+                ? ` · oldest unpaid invoice ${analytics.paymentBehavior.outstandingOldestDays}d`
                 : ""}
               {" · "}
               <Link

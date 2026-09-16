@@ -93,9 +93,18 @@ export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-s
             </strong>
             <em className="auditSummaryCardMeta">
               {summary.avgDaysToPay != null
-                ? "From collected receipts only — not open invoice age"
-                : "Needs sales + receipts"}
+                ? (Number(summary.openAmountInAvg || 0) > 0.009
+                  ? "Paid receipts + open unpaid at current Invoice Day"
+                  : "From collected receipts")
+                : "Needs sales, receipts, or open invoices"}
             </em>
+            {summary.avgDaysPaidOnly != null
+              && Number(summary.openAmountInAvg || 0) > 0.009
+              && summary.avgDaysPaidOnly !== summary.avgDaysToPay ? (
+              <em className="auditSummaryCardMeta">
+                Paid-only avg: {formatCount(summary.avgDaysPaidOnly)}d
+              </em>
+            ) : null}
             {Number(summary.outstandingOldestDays || 0) > 0 ? (
               <em className="auditSummaryCardMeta">
                 Oldest unpaid invoice: {formatCount(summary.outstandingOldestDays)}d

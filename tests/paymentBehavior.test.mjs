@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildCreditNotes,
+  buildDaysToPayObservations,
   buildPaymentBehavior,
   buildPaymentSettlementLedger,
   buildSalesInvoices,
   findImmediateCreditNoteReversals,
   matchPaymentsFifo,
+  weightedAverageDays,
 } from "../app/lib/paymentBehavior.js";
 
 test("buildSalesInvoices aggregates voucher lines by date and adds 15% VAT", () => {
@@ -40,7 +42,7 @@ test("matchPaymentsFifo measures days from sales date to receipt date", () => {
   assert.equal(invoices.every((row) => row.remaining === 0), true);
 });
 
-test("buildPaymentBehavior returns weighted average days and unpaid outstanding stats", () => {
+test("buildPaymentBehavior blends paid receipts with open unpaid at current age", () => {
   const behavior = buildPaymentBehavior({
     transactions: [
       { transaction_date: "2026-01-01", voucher_number: "1", sales_amount: 1000, category: "Stationery" },
@@ -73,14 +75,35 @@ test("buildPaymentBehavior returns weighted average days and unpaid outstanding 
     todayIso: "2026-03-15",
   });
 
-  // 10 days on 1150 + 30 days on 1150 => weighted avg 20
-  assert.equal(behavior.avgDaysToPay, 20);
+  // Paid-only: 10d on 1150 + 30d on 1150 => 20
+  // Blended: + 90d on 500 + 14d on 250 => 94500 / 3050 ≈ 31
+  assert.equal(behavior.avgDaysPaidOnly, 20);
+  assert.equal(behavior.avgDaysToPay, 31);
+  assert.equal(behavior.openAmountInAvg, 750);
   assert.equal(behavior.outstandingTotal, 750);
   assert.equal(behavior.outstandingOpenInvoices, 2);
   assert.ok(behavior.outstandingOldestDays >= 40);
-  assert.match(behavior.summaryLabel, /Avg 20 days to pay from receipts/);
+  assert.match(behavior.summaryLabel, /Avg 31 days to pay \(paid \+ open at current age\)/);
+  assert.match(behavior.summaryLabel, /paid-only 20d/);
   assert.match(behavior.summaryLabel, /Unpaid 750/);
   assert.match(behavior.summaryLabel, /oldest open/);
+});
+
+test("avg days includes old open invoices that paid-only would hide", () => {
+  // Mirrors 1209C shape: paid avg ~107, open 9953@251 + 3613@183
+  const observations = buildDaysToPayObservations({
+    allocations: [{ amount: 18000, days: 107 }],
+    openInvoices: [
+      { pending_amount: 9953, open_days: 251 },
+      { pending_amount: 3613, open_days: 183 },
+    ],
+  });
+  const blended = Math.round(weightedAverageDays(observations));
+  const paidOnly = Math.round(weightedAverageDays(observations.filter((row) => row.source === "paid")));
+
+  assert.equal(paidOnly, 107);
+  assert.equal(blended, 161);
+  assert.ok(blended > paidOnly);
 });
 
 test("FIFO applies oldest invoice first when one receipt covers two bills", () => {
@@ -170,7 +193,10 @@ test("buildPaymentSettlementLedger returns invoice settlement and datewise rows"
 
   assert.equal(ledger.datewise.length, 4);
   assert.equal(ledger.settlementEvents.length, 2);
-  assert.equal(ledger.summary.avgDaysToPay, 29);
+  // Paid: 1150@30 + 200@21; open FIFO residual 375@26 (Jan 20→Feb 15)
+  // => (34500 + 4200 + 9750) / 1725 ≈ 28
+  assert.equal(ledger.summary.avgDaysPaidOnly, 29);
+  assert.equal(ledger.summary.avgDaysToPay, 28);
   assert.equal(ledger.totals.paid_invoice_count, 1);
   assert.equal(ledger.totals.partial_invoice_count, 1);
   assert.ok(ledger.totals.open_sales_amount > 0);
@@ -204,6 +230,9 @@ test("buildPaymentBehavior prefers invoice sum over rounded header total", () =>
 
   assert.equal(behavior.outstandingTotal, 76107);
   assert.equal(behavior.outstandingOldestDays, 112);
+  // Open-only avg: (14795*112 + 61312*46) / 76107 ≈ 59
+  assert.equal(behavior.avgDaysToPay, 59);
+  assert.equal(behavior.avgDaysPaidOnly, null);
 });
 
 test("buildPaymentSettlementLedger open amounts follow outstanding upload", () => {
@@ -240,17 +269,21 @@ test("buildPaymentSettlementLedger open amounts follow outstanding upload", () =
   assert.equal(Number(rnfd.remaining.toFixed(2)), 61312.25);
 });
 
-test("buildPaymentSettlementLedger leaves avg days blank when customer never paid", () => {
+test("buildPaymentSettlementLedger uses open invoice age when customer never paid", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-01-01", voucher_number: "1", sales_amount: 1000, category: "Paper" },
     ],
     receipts: [],
     outstandingCustomer: { total_outstanding: 1150, open_invoices: 1 },
+    outstandingInvoices: [
+      { invoice_date: "2026-01-01", ref_no: "1", pending_amount: 1150, invoice_day: 31 },
+    ],
     todayIso: "2026-02-01",
   });
 
-  assert.equal(ledger.summary.avgDaysToPay, null);
+  assert.equal(ledger.summary.avgDaysToPay, 31);
+  assert.equal(ledger.summary.avgDaysPaidOnly, null);
   assert.equal(ledger.invoices[0].status, "Open");
   assert.equal(ledger.invoices[0].payment_days, null);
   assert.equal(ledger.invoices[0].open_days, 31);

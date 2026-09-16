@@ -33,7 +33,16 @@ export default function CustomerHeader({ customer, analytics, outstandingSalesma
           <strong>{avgDaysLabel}</strong>
           {payment?.avgDaysToPay != null ? (
             <em className="auditSummaryCardMeta">
-              From collected receipts only — not open invoice age
+              {Number(payment.openAmountInAvg || 0) > 0.009
+                ? "Paid + open unpaid at current Invoice Day"
+                : "From collected receipts"}
+            </em>
+          ) : null}
+          {payment?.avgDaysPaidOnly != null
+            && Number(payment.openAmountInAvg || 0) > 0.009
+            && payment.avgDaysPaidOnly !== payment.avgDaysToPay ? (
+            <em className="auditSummaryCardMeta">
+              Paid-only avg: {payment.avgDaysPaidOnly}d
             </em>
           ) : null}
           {unpaidTotal > 0 && unpaidOldest > 0 ? (

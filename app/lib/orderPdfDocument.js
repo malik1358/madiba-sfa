@@ -705,9 +705,21 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const paymentBehavior = analytics?.paymentBehavior || null;
   const paymentBehaviorLines = [];
   if (paymentBehavior?.avgDaysToPay != null) {
-    paymentBehaviorLines.push(`Avg days to pay from receipts: ${paymentBehavior.avgDaysToPay}`);
+    paymentBehaviorLines.push(`Avg days to pay: ${paymentBehavior.avgDaysToPay}`);
+    if (Number(paymentBehavior.openAmountInAvg || 0) > 0.009) {
+      paymentBehaviorLines[0] += " (paid + open at current age)";
+    } else {
+      paymentBehaviorLines[0] += " from receipts";
+    }
     if (paymentBehavior.medianDaysToPay != null && paymentBehavior.medianDaysToPay !== paymentBehavior.avgDaysToPay) {
       paymentBehaviorLines[0] += ` (median ${paymentBehavior.medianDaysToPay})`;
+    }
+    if (
+      paymentBehavior.avgDaysPaidOnly != null
+      && Number(paymentBehavior.openAmountInAvg || 0) > 0.009
+      && paymentBehavior.avgDaysPaidOnly !== paymentBehavior.avgDaysToPay
+    ) {
+      paymentBehaviorLines[0] += ` · paid-only ${paymentBehavior.avgDaysPaidOnly}`;
     }
   }
   if (Number(paymentBehavior?.outstandingTotal || 0) > 0) {

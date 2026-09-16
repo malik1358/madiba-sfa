@@ -1638,11 +1638,19 @@ export default function NewOrderPage() {
             <div className="moduleHint" style={{ marginTop: "10px" }}>
               <strong>Payment behavior:</strong>{" "}
               {analytics.paymentBehavior.avgDaysToPay != null
-                ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay from collected receipts`
-                : "Avg days to pay unavailable (need sales + receipts)"}
+                ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay`
+                  + (Number(analytics.paymentBehavior.openAmountInAvg || 0) > 0.009
+                    ? " (paid + open at current age)"
+                    : " from collected receipts")
+                : "Avg days to pay unavailable (need sales + receipts or open invoices)"}
               {analytics.paymentBehavior.medianDaysToPay != null
                 && analytics.paymentBehavior.medianDaysToPay !== analytics.paymentBehavior.avgDaysToPay
                 ? ` · median ${analytics.paymentBehavior.medianDaysToPay}`
+                : ""}
+              {analytics.paymentBehavior.avgDaysPaidOnly != null
+                && Number(analytics.paymentBehavior.openAmountInAvg || 0) > 0.009
+                && analytics.paymentBehavior.avgDaysPaidOnly !== analytics.paymentBehavior.avgDaysToPay
+                ? ` · paid-only ${analytics.paymentBehavior.avgDaysPaidOnly}d`
                 : ""}
               {Number(analytics.paymentBehavior.outstandingTotal || 0) > 0
                 ? ` · unpaid ${Number(analytics.paymentBehavior.outstandingTotal).toLocaleString("en-US", { maximumFractionDigits: 0 })}`

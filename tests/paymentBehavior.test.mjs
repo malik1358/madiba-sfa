@@ -173,25 +173,38 @@ test("buildPaymentBehavior prefers invoice sum over rounded header total", () =>
   assert.equal(behavior.outstandingOldestDays, 112);
 });
 
-test("buildPaymentSettlementLedger exposes outstanding unpaid total separate from FIFO open", () => {
+test("buildPaymentSettlementLedger open amounts follow outstanding upload", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-04-12", voucher_number: "NFD/414", sales_amount: 50580, category: "Paper" },
       { transaction_date: "2026-05-24", voucher_number: "NFD/868", sales_amount: 29870, category: "Paper" },
+      { transaction_date: "2026-07-29", voucher_number: "RNFD/158", sales_amount: 53315, category: "Paper" },
     ],
     receipts: [{ receipt_date: "2026-08-01", amount: 2225.98 }],
-    outstandingCustomer: { total_outstanding: 76108, open_invoices: 2 },
+    outstandingCustomer: { total_outstanding: 76107.6, open_invoices: 2 },
     outstandingInvoices: [
-      { ref_no: "NFD/868", pending_amount: 14795 },
-      { ref_no: "RNFD/158", pending_amount: 61312 },
+      { invoice_date: "2026-05-24", ref_no: "NFD/868", pending_amount: 14795.35, invoice_day: 112 },
+      { invoice_date: "2026-07-29", ref_no: "RNFD/158", pending_amount: 61312.25, invoice_day: 46 },
     ],
     todayIso: "2026-09-16",
   });
 
-  assert.equal(ledger.totals.outstanding_unpaid, 76107);
-  assert.ok(ledger.totals.open_sales_amount > ledger.totals.outstanding_unpaid);
-  const matched = ledger.invoices.find((row) => String(row.voucher_number || "").includes("868"));
-  assert.equal(matched?.outstanding_pending, 14795);
+  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 76107.6);
+  assert.equal(Number(ledger.totals.outstanding_unpaid.toFixed(2)), 76107.6);
+  assert.equal(ledger.totals.open_matches_outstanding, true);
+
+  const nfd414 = ledger.invoices.find((row) => row.voucher_number === "NFD/414");
+  assert.equal(nfd414.status, "Paid");
+  assert.equal(nfd414.remaining, 0);
+
+  const nfd868 = ledger.invoices.find((row) => row.voucher_number === "NFD/868");
+  assert.equal(nfd868.status, "Partial");
+  assert.equal(Number(nfd868.remaining.toFixed(2)), 14795.35);
+  assert.equal(Number(nfd868.paid_amount.toFixed(2)), Number((34350.5 - 14795.35).toFixed(2)));
+
+  const rnfd = ledger.invoices.find((row) => row.voucher_number === "RNFD/158");
+  assert.equal(rnfd.status, "Open");
+  assert.equal(Number(rnfd.remaining.toFixed(2)), 61312.25);
 });
 
 test("buildPaymentSettlementLedger leaves avg days blank when customer never paid", () => {

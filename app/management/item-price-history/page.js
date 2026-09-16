@@ -111,11 +111,11 @@ export default function ItemPriceHistoryPage() {
         region: nextRegion,
         limit: "12",
       });
-      const payload = await fetchJsonWithTimeout(`/api/admin/item-price-history?${params}`, {
+      const { response, payload } = await fetchJsonWithTimeout(`/api/admin/item-price-history?${params}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
 
-      if (!payload?.success) {
+      if (!response.ok || !payload?.success) {
         if (payload?.error && /only sales/i.test(payload.error)) {
           setAccessDenied(true);
         }
@@ -163,11 +163,11 @@ export default function ItemPriceHistoryPage() {
         const session = await resolveAuthSession(supabase);
         if (!session?.access_token) return;
         const params = new URLSearchParams({ q: needle, region });
-        const payload = await fetchJsonWithTimeout(`/api/admin/item-price-history?${params}`, {
+        const { response, payload } = await fetchJsonWithTimeout(`/api/admin/item-price-history?${params}`, {
           headers: { Authorization: `Bearer ${session.access_token}` },
         });
         if (cancelled) return;
-        if (!payload?.success) {
+        if (!response.ok || !payload?.success) {
           if (payload?.error && /only sales/i.test(payload.error)) {
             setAccessDenied(true);
           }

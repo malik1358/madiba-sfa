@@ -31,10 +31,6 @@ export function buildProspectFollowUpWhatsappSummary({
     customer: {
       customer_code: customerCode,
       customer_name: customerName || customerCode,
-      outstanding_0_30: 0,
-      outstanding_30_60: 0,
-      outstanding_61_90: 0,
-      outstanding_above_90: 0,
       latitude: prospect.latitude ?? form.latitude,
       longitude: prospect.longitude ?? form.longitude,
     },
@@ -46,5 +42,6 @@ export function buildProspectFollowUpWhatsappSummary({
     salesmanName,
     salesmanCode,
     visitDistance,
+    includeOutstanding: false,
   });
 }

@@ -115,3 +115,27 @@ test("buildFieldVisitWhatsappSummary stays English when UI language is Arabic", 
   assert.doesNotMatch(summary, /العميل:/);
   assert.doesNotMatch(summary, /المستحقات:/);
 });
+
+test("buildFieldVisitWhatsappSummary can omit outstanding details", () => {
+  const summary = buildFieldVisitWhatsappSummary({
+    customer: {
+      customer_code: "PROSPECT-64",
+      customer_name: "Al Noor Trading",
+      outstanding_above_90: 5100.19,
+    },
+    visitForm: {
+      outcome: "Order not received",
+      nextVisitAt: "2026-09-20",
+      note: "Order not received",
+    },
+    salesmanName: "Administrator (ADMIN)",
+    includeOutstanding: false,
+  });
+
+  assert.match(summary, /^Field visit report/);
+  assert.match(summary, /Outcome: Order not received/);
+  assert.doesNotMatch(summary, /Outstanding:/);
+  assert.doesNotMatch(summary, /0-30:/);
+  assert.doesNotMatch(summary, /Total:/);
+  assert.doesNotMatch(summary, /5,100/);
+});

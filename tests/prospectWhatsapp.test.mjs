@@ -34,12 +34,9 @@ test("buildProspectFollowUpWhatsappSummary matches field visit report format", (
   assert.match(summary, /Outcome: Order not received/);
   assert.match(summary, /Next visit: 20\/09\/2026/);
   assert.match(summary, /Notes: Order not received/);
-  assert.match(summary, /Outstanding:/);
-  assert.match(summary, /0-30: 0/);
-  assert.match(summary, /31-60: 0/);
-  assert.match(summary, /61-90: 0/);
-  assert.match(summary, />90: 0/);
-  assert.match(summary, /Total: 0/);
+  assert.doesNotMatch(summary, /Outstanding:/);
+  assert.doesNotMatch(summary, /0-30:/);
+  assert.doesNotMatch(summary, /Total:/);
   assert.match(summary, /GPS: https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=24\.7136%2C46\.6753/);
   assert.match(summary, /Distance from customer: 0.12 km/);
   assert.match(summary, /Distance from previous: 3.40 km/);
@@ -69,5 +66,6 @@ test("buildProspectFollowUpWhatsappSummary uses custom notes and offline code", 
   assert.match(summary, /Next visit: 18\/09\/2026/);
   assert.match(summary, /Notes: Asked to bring catalogue\./);
   assert.match(summary, /Salesman: S09/);
-  assert.match(summary, /Total: 0/);
+  assert.doesNotMatch(summary, /Outstanding:/);
+  assert.doesNotMatch(summary, /Total:/);
 });

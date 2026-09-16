@@ -15,10 +15,17 @@ function statusClass(status) {
   if (status === "Paid") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Partial") return "paymentSettleStatus paymentSettleStatus--partial";
   if (status === "Reversed") return "paymentSettleStatus paymentSettleStatus--reversed";
+  if (status === "Credit" || status === "Sales Return" || status === "Credit Note") {
+    return "paymentSettleStatus paymentSettleStatus--credit";
+  }
   return "paymentSettleStatus paymentSettleStatus--open";
 }
 
 function InvoiceSettlementRow({ invoice, open, onToggle }) {
+  const receiptCount = Array.isArray(invoice.settlements) ? invoice.settlements.length : 0;
+  const creditCount = Array.isArray(invoice.credit_notes) ? invoice.credit_notes.length : 0;
+  const detailCount = receiptCount + creditCount;
+
   return (
     <>
       <tr>
@@ -35,15 +42,15 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
             : (invoice.open_days > 0 ? `Open ${invoice.open_days}d` : "—")}
         </td>
         <td>
-          {invoice.settlements?.length ? (
+          {detailCount ? (
             <button type="button" className="moduleInlineButton" onClick={onToggle}>
-              {open ? "Hide" : `Show ${invoice.settlements.length}`}
+              {open ? "Hide" : `Show ${detailCount}`}
             </button>
           ) : "—"}
         </td>
       </tr>
       {open && (invoice.settlements || []).map((settlement, index) => (
-        <tr key={`${invoice.invoice_date}-${settlement.receipt_date}-${index}`} className="paymentSettleChildRow">
+        <tr key={`${invoice.invoice_date}-rcpt-${settlement.receipt_date}-${index}`} className="paymentSettleChildRow">
           <td colSpan={2} style={{ paddingLeft: 18 }}>
             Paid on {settlement.receipt_date}
             {settlement.vch_no ? ` · Rcpt ${settlement.vch_no}` : ""}
@@ -53,6 +60,22 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           <td />
           <td />
           <td>{settlement.days != null ? `${settlement.days} days` : "—"}</td>
+          <td />
+        </tr>
+      ))}
+      {open && (invoice.credit_notes || []).map((note, index) => (
+        <tr key={`${invoice.invoice_date}-cn-${note.voucher_number}-${index}`} className="paymentSettleChildRow paymentSettleChildRow--credit">
+          <td colSpan={2} style={{ paddingLeft: 18 }}>
+            {note.kind || "Credit note"}
+            {" · "}
+            {note.voucher_number || "—"}
+            {note.credit_date ? ` · ${note.credit_date}` : ""}
+          </td>
+          <td colSpan={2} />
+          <td>{formatMoney(note.amount)}</td>
+          <td />
+          <td><span className={statusClass("Credit")}>{note.kind || "Credit"}</span></td>
+          <td>Not in avg days</td>
           <td />
         </tr>
       ))}
@@ -69,6 +92,7 @@ export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-s
   const summary = ledger.summary || {};
   const invoices = Array.isArray(ledger.invoices) ? ledger.invoices : [];
   const reversed = Array.isArray(ledger.reversedInvoices) ? ledger.reversedInvoices : [];
+  const creditNotes = Array.isArray(ledger.creditNotes) ? ledger.creditNotes : [];
   const invoicePaidTotal = Number(totals.paid_amount || 0) - Number(totals.reversed_sales_incl_vat || 0);
   const salesInclVat = Number(
     totals.net_sales_incl_vat != null ? totals.net_sales_incl_vat : totals.sales_incl_vat || 0,
@@ -241,6 +265,63 @@ export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-s
                 <td><strong>{formatMoney(totals.reversed_sales_excl_vat || 0)}</strong></td>
                 <td><strong>{formatMoney(totals.reversed_sales_incl_vat || 0)}</strong></td>
                 <td colSpan={5} />
+              </tr>
+            </tfoot>
+          </table>
+        </ExportableTable>
+      </section>
+
+      <section className="auditSection">
+        <div className="auditTransactionHeader">
+          <div>
+            <h3>Credit Notes & Sales Returns</h3>
+            <p className="auditSectionNote">
+              Partial or later credit notes and sales returns. Nested under the invoice with cash
+              receipts for display only — never included in avg days to pay or collected cash.
+            </p>
+          </div>
+          <span>{formatCount(totals.credit_note_count || creditNotes.length)} vouchers</span>
+        </div>
+
+        <ExportableTable filename={`${filenamePrefix}-credit-notes`} sheetName="CreditNotes" className="moduleTableWrap" style={{ marginTop: "10px" }}>
+          <table className="moduleTable moduleBiTable paymentSettleTable">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Voucher</th>
+                <th>Type</th>
+                <th>Reference</th>
+                <th>Applied To</th>
+                <th>Excl VAT</th>
+                <th>Incl VAT</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {creditNotes.map((row) => (
+                <tr key={`${row.credit_date}::${row.voucher_number}`}>
+                  <td>{row.credit_date || "—"}</td>
+                  <td>{row.voucher_number || "—"}</td>
+                  <td>{row.kind || row.voucher_type || "Credit Note"}</td>
+                  <td>{row.reference || "—"}</td>
+                  <td>{row.applied_to_voucher || "—"}</td>
+                  <td>{formatMoney(row.amount_excl_vat)}</td>
+                  <td>{formatMoney(row.amount_incl_vat)}</td>
+                  <td><span className={statusClass("Credit")}>{row.kind || "Credit"}</span></td>
+                </tr>
+              ))}
+              {!creditNotes.length && (
+                <tr>
+                  <td colSpan={8}>No partial credit notes or sales returns for this customer.</td>
+                </tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={5}><strong>Total</strong></td>
+                <td><strong>{formatMoney(totals.credit_note_excl_vat || 0)}</strong></td>
+                <td><strong>{formatMoney(totals.credit_note_amount || 0)}</strong></td>
+                <td />
               </tr>
             </tfoot>
           </table>

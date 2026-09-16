@@ -349,6 +349,8 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   });
 
   assert.equal(ledger.reversedInvoices.length, 0);
+  assert.equal(ledger.creditNotes.length, 1);
+  assert.equal(ledger.creditNotes[0].voucher_number, "CN1");
   assert.equal(Number(ledger.totals.sales_incl_vat.toFixed(2)), 1150);
   assert.equal(Number(ledger.totals.credit_note_amount.toFixed(2)), 230);
   assert.equal(Number(ledger.totals.net_sales_incl_vat.toFixed(2)), 920);
@@ -356,6 +358,53 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 420);
   assert.equal(Number(ledger.totals.sales_minus_collected.toFixed(2)), 420);
   assert.equal(ledger.totals.sales_collected_matches_open, true);
+});
+
+test("partial credit note and sales return appear in creditNotes table, not reversed", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "INV1", sales_amount: 1000, category: "Paper" },
+      // Partial CN same day — not a full reverse
+      {
+        transaction_date: "2026-01-01",
+        voucher_number: "CN-PART",
+        voucher_type: "Credit Note",
+        reference: "INV1",
+        sales_amount: -200,
+        category: "Paper",
+      },
+      // Sales return a week later
+      {
+        transaction_date: "2026-01-08",
+        voucher_number: "SR-1",
+        voucher_type: "SR",
+        sales_amount: -100,
+        category: "Paper",
+      },
+    ],
+    receipts: [{ receipt_date: "2026-01-20", amount: 400 }],
+    outstandingInvoices: [
+      { invoice_date: "2026-01-01", ref_no: "INV1", pending_amount: 405, invoice_day: 14 },
+    ],
+    todayIso: "2026-01-15",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 0);
+  assert.equal(ledger.creditNotes.length, 2);
+  assert.equal(ledger.creditNotes[0].kind, "Credit Note");
+  assert.equal(ledger.creditNotes[1].kind, "Sales Return");
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "INV1"), true);
+
+  const invoice = ledger.invoices.find((row) => row.voucher_number === "INV1");
+  assert.equal(invoice.credit_notes.length, 2);
+  assert.equal(invoice.credit_notes[0].voucher_number, "CN-PART");
+  assert.equal(invoice.credit_notes[0].days, null);
+  assert.equal(invoice.settlements.length, 1);
+  // Payment days only from the cash receipt — CN amounts ignored.
+  assert.equal(invoice.payment_days, 19);
+  assert.equal(ledger.creditNotes[0].applied_to_voucher, "INV1");
+  assert.equal(Number(ledger.totals.credit_note_amount.toFixed(2)), 345);
+  assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 400);
 });
 
 test("next-day matching credit note still counts as immediate reversal", () => {

@@ -7676,6 +7676,11 @@ button.moduleBiDashKpi:focus-visible {
   color: #4a5560;
 }
 
+.paymentSettleStatus--credit {
+  background: #f3eef8;
+  color: #6b4f8a;
+}
+
 .paymentSettleTable tfoot td {
   background: #e8f1f3;
   font-weight: 700;
@@ -7685,6 +7690,11 @@ button.moduleBiDashKpi:focus-visible {
   background: #f3f8f9 !important;
   color: #4a646b;
   font-size: 12px;
+}
+
+.paymentSettleChildRow--credit td {
+  background: #f7f3fb !important;
+  color: #5a4a6a;
 }
 
 /* ==========================================================

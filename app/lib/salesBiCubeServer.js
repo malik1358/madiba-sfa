@@ -1,3 +1,5 @@
+import { applyCustomerSalesmanOwnershipToRows } from "./customerSalesmanOwnership.js";
+import { loadCustomerSalesmanOwnershipMap } from "./customerSalesmanOwnershipServer.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
 import {
   createSalesBiCube,
@@ -158,12 +160,18 @@ async function writeCubeToTable(admin, facts) {
 async function buildCubeFromActiveSales(admin) {
   const cube = createSalesBiCube();
   let lastError = null;
+  const ownershipMap = await loadCustomerSalesmanOwnershipMap(admin).catch((error) => {
+    console.error("Customer salesman ownership unavailable for BI cube:", error);
+    return new Map();
+  });
 
   for (const select of SALES_SELECTS) {
     cube.facts.clear();
     cube.sourceRowCount = 0;
     try {
-      await pageActiveSales(admin, select, (rows) => ingestSalesRowsIntoCube(cube, rows));
+      await pageActiveSales(admin, select, (rows) => {
+        ingestSalesRowsIntoCube(cube, applyCustomerSalesmanOwnershipToRows(rows, ownershipMap));
+      });
       lastError = null;
       break;
     } catch (error) {

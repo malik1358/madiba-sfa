@@ -89,7 +89,7 @@ test("admins and managers can configure order quantity controls", () => {
   assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("orderQuantityControls"), false);
   assert.equal(
     moduleLabelForPath("/management/order-quantity-controls", "en"),
-    "Order Quantity Controls",
+    "Sales Qty Limits",
   );
 });
 

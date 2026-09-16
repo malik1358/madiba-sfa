@@ -16,12 +16,13 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 
 const TEXT = {
-  title: { en: "Order Quantity Controls", ar: "حدود كميات الطلب" },
+  title: { en: "Sales Qty Limits", ar: "حدود كمية البيع للعميل" },
   subtitle: {
-    en: "Limit how many cartons of an item a customer can order per week. Disable a rule to pause enforcement.",
-    ar: "حدد الحد الأقصى لكراتين الصنف التي يمكن للعميل طلبها أسبوعياً. عطّل القاعدة لإيقاف التطبيق.",
+    en: "Control how many cartons of an item each customer can buy per week. Find this under Management → Sales Qty Limits.",
+    ar: "تحكم في الحد الأقصى لكراتين الصنف التي يمكن لكل عميل شراؤها أسبوعياً. متاحة من الإدارة ← حدود كمية البيع للعميل.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
+  schemes: { en: "Schemes", ar: "العروض" },
   loading: { en: "Loading controls...", ar: "جاري تحميل الحدود..." },
   save: { en: "Save controls", ar: "حفظ الحدود" },
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
@@ -37,6 +38,8 @@ const TEXT = {
   },
   enabled: { en: "Enabled", ar: "مفعّل" },
   disabled: { en: "Disabled", ar: "معطّل" },
+  totalRules: { en: "Total rules", ar: "إجمالي القواعد" },
+  activeRules: { en: "Active", ar: "مفعّلة" },
 };
 
 function newControlId() {
@@ -198,6 +201,7 @@ export default function OrderQuantityControlsPage() {
             </div>
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
+              <Link href="/management/schemes" className="moduleInlineButton">{t("schemes")}</Link>
               <Link href="/management" className="moduleBackLink">{t("back")}</Link>
             </div>
           </div>
@@ -268,6 +272,15 @@ export default function OrderQuantityControlsPage() {
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr className="modulePendingOrdersTotalRow">
+                      <td colSpan={3}>{t("totalRules")}</td>
+                      <td className="moduleBiTotalCol">{controls.length}</td>
+                      <td colSpan={2}>
+                        {t("activeRules")}: {controls.filter((control) => control.active !== false).length}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
 

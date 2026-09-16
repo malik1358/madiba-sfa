@@ -237,6 +237,7 @@ export default function ManagementPage() {
       "customerBookShares",
       "kpiTargets",
       "schemes",
+      "orderQuantityControls",
       "gpsMap",
       "pendingOrders",
       "newCustomer",

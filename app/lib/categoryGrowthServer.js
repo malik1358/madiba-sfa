@@ -7,6 +7,8 @@ import {
   ingestCategoryGrowthRows,
   normalizeGrowthFilters,
 } from "./categoryGrowth.js";
+import { applyCustomerSalesmanOwnershipToRows } from "./customerSalesmanOwnership.js";
+import { loadCustomerSalesmanOwnershipMap } from "./customerSalesmanOwnershipServer.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { cubeSupportsFilters, monthAlignGrowthFilters, salesBiFactToGrowthRow } from "./salesBiCube.js";
 import { loadSalesBiCube, pageActiveSales, rebuildSalesBiCube } from "./salesBiCubeServer.js";
@@ -121,8 +123,12 @@ function reportFromRows(rows, { asOfDate, filters, extraMeta = {}, alignDates = 
   };
 }
 
-function reportFromFacts(facts, { asOfDate, filters, extraMeta = {} }) {
-  return reportFromRows((facts || []).map((fact) => salesBiFactToGrowthRow(fact)), {
+function reportFromFacts(facts, { asOfDate, filters, extraMeta = {}, ownershipMap = null }) {
+  const growthRows = applyCustomerSalesmanOwnershipToRows(
+    (facts || []).map((fact) => salesBiFactToGrowthRow(fact)),
+    ownershipMap,
+  );
+  return reportFromRows(growthRows, {
     asOfDate,
     filters,
     extraMeta: {
@@ -133,14 +139,14 @@ function reportFromFacts(facts, { asOfDate, filters, extraMeta = {} }) {
   });
 }
 
-async function reportFromLiveSales(admin, { asOfDate, filters }) {
+async function reportFromLiveSales(admin, { asOfDate, filters, ownershipMap = null }) {
   let lastError = null;
 
   for (const select of SALES_SELECTS) {
     try {
       const rows = [];
       await pageActiveSales(admin, select, (page) => {
-        rows.push(...(page || []));
+        rows.push(...applyCustomerSalesmanOwnershipToRows(page || [], ownershipMap));
       });
       return {
         report: reportFromRows(rows, {
@@ -184,6 +190,10 @@ export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters }
   const normalized = normalizeGrowthFilters(filters);
   let report;
   let sourceRows = [];
+  const ownershipMap = await loadCustomerSalesmanOwnershipMap(admin).catch((error) => {
+    console.error("Customer salesman ownership unavailable for category growth:", error);
+    return new Map();
+  });
 
   if (cubeSupportsFilters(normalized)) {
     try {
@@ -195,10 +205,14 @@ export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters }
           extraMeta: { missingTable: true, filtered: false, source: "sales_bi_cube" },
         });
       } else if (cube?.facts) {
-        sourceRows = (cube.facts || []).map((fact) => salesBiFactToGrowthRow(fact));
+        sourceRows = applyCustomerSalesmanOwnershipToRows(
+          (cube.facts || []).map((fact) => salesBiFactToGrowthRow(fact)),
+          ownershipMap,
+        );
         report = reportFromFacts(cube.facts, {
           asOfDate,
           filters: normalized,
+          ownershipMap,
           extraMeta: {
             preparedAt: cube.builtAt || null,
             stale: cube.stale === true,
@@ -214,7 +228,11 @@ export async function loadCategoryGrowthReport(admin, { asOfDate = "", filters }
   }
 
   if (!report) {
-    const live = await reportFromLiveSales(admin, { asOfDate, filters: normalized });
+    const live = await reportFromLiveSales(admin, {
+      asOfDate,
+      filters: normalized,
+      ownershipMap,
+    });
     report = live.report;
     sourceRows = live.rows || [];
   }

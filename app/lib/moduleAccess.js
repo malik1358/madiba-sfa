@@ -15,6 +15,7 @@ export const MODULES = {
   management: { href: "/management", label: "Management" },
   myDay: { href: "/management/my-day", label: "My Day" },
   customerAudit: { href: "/management/customer-audit", label: "Customers Audit" },
+  paymentSettlement: { href: "/management/payment-settlement", label: "Payment Settlement" },
   newOrder: { href: "/management/new-order", label: "New Order" },
   visitWithoutOrder: { href: "/management/visit-without-order", label: "Visit Without Order" },
   pendingOrders: { href: "/management/pending-orders", label: "Old Pending Orders" },
@@ -34,6 +35,7 @@ export const MODULES = {
   customerBookShares: { href: "/management/customer-book-shares", label: "Customer Book Shares" },
   kpiTargets: { href: "/management/kpi-targets", label: "KPI Targets" },
   schemes: { href: "/management/schemes", label: "Schemes" },
+  orderQuantityControls: { href: "/management/order-quantity-controls", label: "Sales Qty Limits" },
   itemPriceHistory: { href: "/management/item-price-history", label: "Item Price History" },
   gpsMap: { href: "/management/gps-map", label: "GPS Map" },
   upload: { href: "/management/upload", label: "Imports" },
@@ -45,7 +47,7 @@ export const NAV_GROUPS = [
   {
     key: "field",
     label: "Field Sales",
-    modules: ["myDay", "customerAudit", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "salesmanVisitPlan", "itemPriceHistory"],
+    modules: ["myDay", "customerAudit", "paymentSettlement", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "salesmanVisitPlan", "itemPriceHistory"],
   },
   {
     key: "collections",
@@ -60,7 +62,7 @@ export const NAV_GROUPS = [
   {
     key: "admin",
     label: "Admin",
-    modules: ["businessDashboard", "customerMaster", "outstandingNoGps", "userActivity", "salesmanHierarchy", "customerBookShares", "kpiTargets", "schemes", "gpsMap", "upload"],
+    modules: ["businessDashboard", "customerMaster", "outstandingNoGps", "userActivity", "salesmanHierarchy", "customerBookShares", "kpiTargets", "schemes", "orderQuantityControls", "gpsMap", "upload"],
   },
 ];
 
@@ -131,6 +133,7 @@ export function buildModuleAccess(context = {}) {
       management: isAdmin || isManager || isInvoiceMaker || isCollector,
       myDay: isFieldSales && !isCollector,
       customerAudit: isFieldSales && !isCollector,
+      paymentSettlement: isFieldSales && !isCollector,
       newOrder: isFieldSales && !isCollector,
       visitWithoutOrder: isFieldSales && !isCollector,
       pendingOrders: isFieldSales && !isCollector,
@@ -156,6 +159,7 @@ export function buildModuleAccess(context = {}) {
       customerBookShares: isAdmin || isManager,
       kpiTargets: isAdmin || isManager,
       schemes: isAdmin || isManager,
+      orderQuantityControls: isAdmin || isManager,
       itemPriceHistory: (isAdmin || isManager || isInvoiceMaker || isSalesman || isProductPromoter) && !isCollector,
       gpsMap: isAdmin || isInvoiceMaker || isProductPromoter,
       upload: isAdmin || isManager || isInvoiceMaker,
@@ -209,6 +213,7 @@ export const MODULE_LABELS = {
   management: { en: "Management", ar: "الإدارة" },
   myDay: { en: "My Day", ar: "يومي" },
   customerAudit: { en: "Customers Audit", ar: "عملائي" },
+  paymentSettlement: { en: "Payment Settlement", ar: "تسوية المدفوعات" },
   newOrder: { en: "New Order", ar: "طلب جديد" },
   visitWithoutOrder: { en: "Visit Without Order", ar: "زيارة بدون طلب" },
   pendingOrders: { en: "Old Pending Orders", ar: "طلبات معلقة قديمة" },
@@ -228,6 +233,7 @@ export const MODULE_LABELS = {
   customerBookShares: { en: "Customer Book Shares", ar: "مشاركة دفاتر العملاء" },
   kpiTargets: { en: "KPI Targets", ar: "أهداف الأداء" },
   schemes: { en: "Schemes", ar: "العروض" },
+  orderQuantityControls: { en: "Sales Qty Limits", ar: "حدود كمية البيع للعميل" },
   itemPriceHistory: { en: "Item Price History", ar: "سجل أسعار الأصناف" },
   gpsMap: { en: "GPS Map", ar: "خريطة GPS" },
   upload: { en: "Imports", ar: "الاستيراد" },

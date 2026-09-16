@@ -192,6 +192,30 @@ export function formatLatestCollectionVisitRemark(latestCollection) {
   return arabic || english;
 }
 
+export const COLLECTION_VISIT_REMARK_REQUIRED_ERROR =
+  "Remark is required when full overdue is not received.";
+
+/** Same gate as next-visit: remark is required whenever the visit does not clear full overdue. */
+export function collectionVisitRequiresRemark(paymentStatus, visitOutcome) {
+  return String(paymentStatus || "").trim().toUpperCase() !== "PAID"
+    && String(visitOutcome || "").trim().toUpperCase() !== "TRANSFER_TO_LEGAL";
+}
+
+export function hasCollectionVisitRemark(remarkArabic, remarkEnglish) {
+  return Boolean(String(remarkArabic || "").trim() || String(remarkEnglish || "").trim());
+}
+
+export function assertCollectionVisitRemark({
+  paymentStatus,
+  visitOutcome,
+  remarkArabic,
+  remarkEnglish,
+}) {
+  if (!collectionVisitRequiresRemark(paymentStatus, visitOutcome)) return;
+  if (hasCollectionVisitRemark(remarkArabic, remarkEnglish)) return;
+  throw new Error(COLLECTION_VISIT_REMARK_REQUIRED_ERROR);
+}
+
 function scheduledRevisitTier(record, today) {
   const revisitAt = scheduledRevisitDate(record);
   if (revisitAt && revisitAt > today) return 1;

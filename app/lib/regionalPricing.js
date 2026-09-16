@@ -4,6 +4,38 @@ export const DEFAULT_PAYMENT_TYPE = "credit";
 export const VALUE_DISCOUNT_THRESHOLD_SAR = 5000;
 export const VAT_RATE = 0.15;
 
+/** Gloves are the only catalog products sold without VAT. */
+export function isVatExemptProduct({
+  category = "",
+  item_name = "",
+  item_code = "",
+  vatExempt,
+} = {}) {
+  if (vatExempt === true) return true;
+  if (vatExempt === false) return false;
+  const haystack = `${category} ${item_name} ${item_code}`.toUpperCase();
+  return haystack.includes("GLOVE") || haystack.includes("قفاز");
+}
+
+export function vatRateForProduct(product = {}) {
+  return isVatExemptProduct(product) ? 0 : VAT_RATE;
+}
+
+export function amountInclVatFromExcl(amountExclVat, vatRate = VAT_RATE) {
+  const excl = Number(amountExclVat || 0);
+  const rate = Number(vatRate);
+  if (!Number.isFinite(excl) || excl <= 0) return 0;
+  if (!Number.isFinite(rate) || rate <= 0) return excl;
+  return excl * (1 + rate);
+}
+
+export function vatAmountFromExcl(amountExclVat, vatRate = VAT_RATE) {
+  const excl = Number(amountExclVat || 0);
+  const rate = Number(vatRate);
+  if (!Number.isFinite(excl) || excl <= 0 || !Number.isFinite(rate) || rate <= 0) return 0;
+  return excl * rate;
+}
+
 export const REGION_PRICE_COLUMNS = {
   riyadh: "CB",
   dammam: "CF",

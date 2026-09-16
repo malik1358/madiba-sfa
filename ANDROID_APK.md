@@ -59,6 +59,8 @@ Submitted orders from **September 2026 onward** with **no invoice uploaded after
 
 At **00:20 KSA**, GitHub Actions workflow **Daily Supplier Order Email** calls `/api/cron/daily-supplier-order-email` for the previous KSA day: each salesman receives all orders they raised (every invoice status) with **hierarchy bosses on CC**, and invoice-ops receive the combined digest. Older orders still waiting on billing stay on the list. Values are **including VAT**, with colorful status badges and a **total row**. Friday follows the visit-report holiday skip. The same email also runs after each **sales Excel upload**.
 
+At **00:25 KSA**, GitHub Actions workflow **Outstanding Without GPS Email** calls `/api/cron/outstanding-no-gps-email`: each salesman receives their customers who have an **outstanding balance and no saved GPS** on the customer master (Zia, Asrar Ahmed, and legal transfers excluded), with **hierarchy bosses on CC**. The email asks them to visit those customers and update GPS from Customer Master. Friday is skipped like other salesman emails. Optional management digest addresses can be set via `OUTSTANDING_NO_GPS_EMAIL_TO` / `OUTSTANDING_NO_GPS_EMAIL_CC`.
+
 Every field transaction (visit, order, collection, prospect, attendance, etc.) also sends **push alerts up the reporting chain** â€” each boss in **Salesman Hierarchy** receives the alert, and if that boss also has a head, the alert continues to the top.
 
 Admins can also send a manual push:

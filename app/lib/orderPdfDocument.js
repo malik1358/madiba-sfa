@@ -260,6 +260,10 @@ export async function enrichOrderPdfLiveData(snapshot, {
   };
 
   let analytics = analyticsFallback;
+  let paymentHistory = {
+    transactions: [],
+    receipts: [],
+  };
   const authHeaders = accessToken ? { Authorization: `Bearer ${accessToken}` } : null;
 
   if (authHeaders) {
@@ -358,11 +362,14 @@ export async function enrichOrderPdfLiveData(snapshot, {
           const { buildAnalytics } = await import("../management/customer-audit/lib/analytics.js");
           const { attachMonthlyReceipts } = await import("./receiptRegister.js");
           const receipts = Array.isArray(historyPayload.receipts) ? historyPayload.receipts : [];
+          const transactions = Array.isArray(historyPayload.transactions) ? historyPayload.transactions : [];
+          paymentHistory = { transactions, receipts };
           if (!analytics?.monthlySummary?.length) {
-            analytics = buildAnalytics(
-              Array.isArray(historyPayload.transactions) ? historyPayload.transactions : [],
-              { receipts },
-            );
+            analytics = buildAnalytics(transactions, {
+              receipts,
+              outstandingCustomer: next.outstanding?.customer,
+              outstandingInvoices: next.outstanding?.customerInvoices,
+            });
           } else {
             analytics = attachMonthlyReceipts(analytics, receipts);
           }
@@ -398,6 +405,23 @@ export async function enrichOrderPdfLiveData(snapshot, {
     next.outstanding.customer,
     next.outstanding.customerInvoices,
   );
+
+  if (analytics && (paymentHistory.transactions.length || paymentHistory.receipts.length || next.outstanding.customer)) {
+    try {
+      const { buildPaymentBehavior } = await import("./paymentBehavior.js");
+      analytics = {
+        ...analytics,
+        paymentBehavior: buildPaymentBehavior({
+          transactions: paymentHistory.transactions,
+          receipts: paymentHistory.receipts,
+          outstandingCustomer: next.outstanding.customer,
+          outstandingInvoices: next.outstanding.customerInvoices,
+        }),
+      };
+    } catch {
+      // Keep analytics without refreshed payment behavior.
+    }
+  }
 
   return { snapshot: next, analytics };
 }
@@ -671,6 +695,30 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const outstandingCustomer = snapshot.outstanding?.customer || null;
   const outstandingBuckets = Array.isArray(snapshot.outstanding?.bucketLabels) ? snapshot.outstanding.bucketLabels : [];
   const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
+  const paymentBehavior = analytics?.paymentBehavior || null;
+  const paymentBehaviorLines = [];
+  if (paymentBehavior?.avgDaysToPay != null) {
+    paymentBehaviorLines.push(`Avg days to pay: ${paymentBehavior.avgDaysToPay}`);
+    if (paymentBehavior.medianDaysToPay != null && paymentBehavior.medianDaysToPay !== paymentBehavior.avgDaysToPay) {
+      paymentBehaviorLines[0] += ` (median ${paymentBehavior.medianDaysToPay})`;
+    }
+  }
+  if (Number(paymentBehavior?.outstandingTotal || 0) > 0) {
+    paymentBehaviorLines.push(
+      `Unpaid bills: ${formatReceivableMoney(paymentBehavior.outstandingTotal)}`
+      + (paymentBehavior.outstandingOpenInvoices ? ` · ${paymentBehavior.outstandingOpenInvoices} open` : "")
+      + (paymentBehavior.outstandingOldestDays ? ` · oldest ${paymentBehavior.outstandingOldestDays}d` : "")
+      + (paymentBehavior.outstandingOverdueCount ? ` · ${paymentBehavior.outstandingOverdueCount} overdue` : ""),
+    );
+  } else if (Number(paymentBehavior?.unpaidFromSalesAmount || 0) > 0) {
+    paymentBehaviorLines.push(
+      `Open sales not covered by receipts: ${formatReceivableMoney(paymentBehavior.unpaidFromSalesAmount)}`
+      + (paymentBehavior.oldestUnpaidFromSalesDays ? ` · oldest ${paymentBehavior.oldestUnpaidFromSalesDays}d` : ""),
+    );
+  }
+  const paymentBehaviorHeight = paymentBehaviorLines.length
+    ? 14 + paymentBehaviorLines.length * 12 + 8
+    : 0;
 
   function formatOutstandingValue(value, digits = 0, withCurrency = true) {
     const number = parseOutstandingNumber(value);
@@ -697,19 +745,34 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   ];
   const summaryBoxHeight = 16 + summaryRows.length * 16 + 28;
   const combinedSectionHeight = hasOutstandingBuckets
-    ? outstandingBlockHeight + 12 + summaryBoxHeight
-    : summaryBoxHeight;
+    ? paymentBehaviorHeight + outstandingBlockHeight + 12 + summaryBoxHeight
+    : paymentBehaviorHeight + summaryBoxHeight;
 
   ensureSpace(combinedSectionHeight + 16);
   const sectionY = cursorY;
   let summaryY = sectionY;
+  let blockY = sectionY;
+
+  if (paymentBehaviorLines.length) {
+    doc.setFont(undefined, "bold");
+    doc.text("Payment Behavior", marginX, blockY);
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(9);
+    paymentBehaviorLines.forEach((line, index) => {
+      doc.text(line, marginX, blockY + 14 + index * 12);
+    });
+    doc.setFontSize(10);
+    blockY += paymentBehaviorHeight;
+    cursorY = blockY;
+    summaryY = blockY;
+  }
 
   if (hasOutstandingBuckets) {
     doc.setFont(undefined, "bold");
-    doc.text("Outstanding Details", marginX, sectionY);
+    doc.text("Outstanding Details", marginX, blockY);
     doc.setFont(undefined, "normal");
 
-    let bucketY = sectionY + 14;
+    let bucketY = blockY + 14;
     const labelW = 220;
     const valueW = 120;
 

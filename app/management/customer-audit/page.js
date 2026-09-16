@@ -4,12 +4,12 @@ const PRICE_CACHE_API = "/api/pricing/cache";
 
 const PAGE_VERSION = "Quick Order V5";
 const TEXT = {
-  title: { en: "Customer Details", ar: "تفاصيل العميل" },
-  subtitle: { en: "Management sales history validation", ar: "مراجعة سجل مبيعات العملاء" },
-  home: { en: "← Home", ar: "← الرئيسية" },
-  customers: { en: "← Customers", ar: "← العملاء" },
-  loadingCustomer: { en: "Loading customer history...", ar: "جاري تحميل سجل العميل..." },
-  cacheRefreshing: { en: "Showing saved data. Refreshing in background...", ar: "عرض البيانات المحفوظة. جاري التحديث في الخلفية..." },
+  title: { en: "Customer Details", ar: "ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ø¹Ù…ÙŠÙ„" },
+  subtitle: { en: "Management sales history validation", ar: "Ù…Ø±Ø§Ø¬Ø¹Ø© Ø³Ø¬Ù„ Ù…Ø¨ÙŠØ¹Ø§Øª Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡" },
+  home: { en: "â† Home", ar: "â† Ø§Ù„Ø±Ø¦ÙŠØ³ÙŠØ©" },
+  customers: { en: "â† Customers", ar: "â† Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡" },
+  loadingCustomer: { en: "Loading customer history...", ar: "Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ Ø³Ø¬Ù„ Ø§Ù„Ø¹Ù…ÙŠÙ„..." },
+  cacheRefreshing: { en: "Showing saved data. Refreshing in background...", ar: "Ø¹Ø±Ø¶ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù…Ø­ÙÙˆØ¸Ø©. Ø¬Ø§Ø±ÙŠ Ø§Ù„ØªØ­Ø¯ÙŠØ« ÙÙŠ Ø§Ù„Ø®Ù„ÙÙŠØ©..." },
 };
 
 import { Suspense, useEffect, useMemo, useState } from "react";
@@ -71,6 +71,12 @@ function formatCount(value) {
   });
 }
 
+function sumOutstandingPending(invoices) {
+  return (Array.isArray(invoices) ? invoices : []).reduce(
+    (total, row) => total + parseOutstandingNumber(row?.pending_amount),
+    0,
+  );
+}
 
 function CustomerAuditPageContent() {
   const { language, dir, setLanguage } = useAppLanguage();
@@ -125,7 +131,10 @@ function CustomerAuditPageContent() {
   } = useCustomerData({ setError, setMessage });
 
   const { access } = useModuleAccess();
-  const analytics = useAnalytics(transactions, receipts);
+  const analytics = useAnalytics(transactions, receipts, {}, {
+    customer: outstandingInfo.customer,
+    customerInvoices: outstandingInfo.customerInvoices,
+  });
   const quickOrderSuggestions = useQuickOrder({ analytics, transactions, peerTransactions, itemMaster });
   const allowedPricingRegions = useMemo(
     () => allowedOrderPricingRegions({
@@ -469,6 +478,30 @@ function CustomerAuditPageContent() {
 
           {outstandingLoading && <div className="auditEmpty">Loading outstanding buckets...</div>}
 
+          {!outstandingLoading && analytics?.paymentBehavior ? (
+            <div className="auditSectionNote" style={{ marginTop: "8px" }}>
+              <strong>Payment behavior:</strong>{" "}
+              {analytics.paymentBehavior.avgDaysToPay != null
+                ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay from sales date to receipt date`
+                : "Avg days to pay unavailable (need sales + receipts)"}
+              {analytics.paymentBehavior.matchedInvoiceCount
+                ? ` · ${analytics.paymentBehavior.matchedInvoiceCount} invoices matched`
+                : ""}
+              {Number(analytics.paymentBehavior.outstandingTotal || 0) > 0
+                ? ` · unpaid ${formatAmount(analytics.paymentBehavior.outstandingTotal)}`
+                : ""}
+              {Number(analytics.paymentBehavior.outstandingOldestDays || 0) > 0
+                ? ` · oldest open ${analytics.paymentBehavior.outstandingOldestDays}d`
+                : ""}
+              {" · "}
+              <Link
+                href={`/management/payment-settlement?customer_code=${encodeURIComponent(selectedCustomer.customer_code || "")}`}
+              >
+                View settlement
+              </Link>
+            </div>
+          ) : null}
+
           {!outstandingLoading && (
             <>
               <ExportableTable filename="customer-outstanding-buckets" sheetName="Outstanding" className="moduleTableWrap" style={{ marginTop: "10px" }}>
@@ -490,7 +523,12 @@ function CustomerAuditPageContent() {
                         <td key={`audit-out-val-${label}`}>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.buckets?.[label]))}</td>
                       ))}
                       <td>{formatCount(parseOutstandingNumber(outstandingInfo.customer?.open_invoices))}</td>
-                      <td>{formatAmount(parseOutstandingNumber(outstandingInfo.customer?.total_outstanding))}</td>
+                      <td>
+                        {formatAmount(
+                          sumOutstandingPending(outstandingInfo.customerInvoices)
+                          || parseOutstandingNumber(outstandingInfo.customer?.total_outstanding),
+                        )}
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -550,7 +588,7 @@ function CustomerAuditPageContent() {
             <button type="button" className="auditTransactionToggle" onClick={() => window.print()}>Print / Save PDF</button>
           </div>
           <div className="auditEmpty" style={{ marginTop: "8px" }}>
-            Loaded {Object.keys(regionPriceList).length} {pricingRegionLabel(pricingRegion)} prices • Item master {itemMasterStatus}
+            Loaded {Object.keys(regionPriceList).length} {pricingRegionLabel(pricingRegion)} prices â€¢ Item master {itemMasterStatus}
           </div>
           <div className="moduleFilterRow" style={{ marginTop: "10px" }}>
             {allowedPricingRegions.length > 1 ? (

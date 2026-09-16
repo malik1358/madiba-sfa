@@ -7510,3 +7510,174 @@ button.moduleBiDashKpi:focus-visible {
   box-shadow: -2px 0 8px rgba(6, 47, 58, 0.12);
 }
 
+
+.auditCustomerHero {
+  margin: 0 0 22px;
+  padding: 18px 18px 16px;
+  background: #ffffff;
+  border: 1px solid #d1dde0;
+  border-radius: 14px;
+}
+
+.auditHeroCode {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  margin-bottom: 8px;
+  background: #e9f3f5;
+  color: #07566a;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.auditCustomerHero h2 {
+  margin: 0;
+  color: #073b49;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.auditHeroSalesman {
+  margin-top: 8px;
+  color: #5f7880;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.auditSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.auditSummaryCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 84px;
+  padding: 12px 14px;
+  background: #f7fbfc;
+  border: 1px solid #d7e4e8;
+  border-radius: 12px;
+}
+
+.auditSummaryCard > span {
+  display: block;
+  color: #6a8289;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.auditSummaryCard > strong {
+  display: block;
+  color: #073b49;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.auditSummaryCardMeta {
+  display: block;
+  margin-top: 2px;
+  color: #6f858b;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .auditSummaryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .auditSummaryGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.auditSummaryCardLink {
+  display: inline-block;
+  margin-top: 4px;
+  color: #0f4c5c;
+  text-decoration: underline;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.paymentSettleCustomerList {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid #d5e3e7;
+  border-radius: 10px;
+  background: #f8fbfc;
+}
+
+.paymentSettleCustomerButton {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #e2eef1;
+  background: transparent;
+  color: #355860;
+  text-align: left;
+  cursor: pointer;
+}
+
+.paymentSettleCustomerButton:last-child {
+  border-bottom: 0;
+}
+
+.paymentSettleCustomerButton:hover {
+  background: #eaf3f5;
+}
+
+.paymentSettleStatus {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.paymentSettleStatus--paid {
+  background: #e6f6ea;
+  color: #1f7a3a;
+}
+
+.paymentSettleStatus--partial {
+  background: #fff4df;
+  color: #9a6700;
+}
+
+.paymentSettleStatus--open {
+  background: #fde8e8;
+  color: #b42318;
+}
+
+.paymentSettleTable tfoot td {
+  background: #e8f1f3;
+  font-weight: 700;
+}
+
+.paymentSettleChildRow td {
+  background: #f3f8f9 !important;
+  color: #4a646b;
+  font-size: 12px;
+}

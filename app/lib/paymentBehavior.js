@@ -295,6 +295,8 @@ function normalizeRef(value) {
 
 /**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
+ * When outstanding invoice rows exist, Open / status follow that upload (book truth), not FIFO residual.
+ * FIFO is kept for payment-days on historically settled chunks.
  */
 export function buildPaymentSettlementLedger({
   transactions = [],
@@ -319,6 +321,7 @@ export function buildPaymentSettlementLedger({
     if (!key) return;
     outstandingByRef.set(key, row);
   });
+  const hasOutstandingRows = outstanding.invoices.length > 0;
 
   const settlementsByInvoice = new Map();
   allocations.forEach((row) => {
@@ -328,6 +331,8 @@ export function buildPaymentSettlementLedger({
     settlementsByInvoice.set(key, list);
   });
 
+  const matchedOutstandingRefs = new Set();
+
   const invoiceRows = invoices.map((invoice) => {
     const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
     const settlements = (settlementsByInvoice.get(key) || []).sort((left, right) => {
@@ -336,33 +341,95 @@ export function buildPaymentSettlementLedger({
       }
       return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
     });
-    const paidAmount = settlements.reduce((total, row) => total + toNumber(row.amount), 0);
-    const remaining = toNumber(invoice.remaining);
-    const weightedDays = paidAmount > 0
-      ? settlements.reduce((total, row) => total + (Number(row.days || 0) * toNumber(row.amount)), 0) / paidAmount
-      : null;
-    let status = "Open";
-    if (remaining <= 0.009 && paidAmount > 0) status = "Paid";
-    else if (paidAmount > 0.009 && remaining > 0.009) status = "Partial";
+    const fifoPaid = settlements.reduce((total, row) => total + toNumber(row.amount), 0);
+    const fifoRemaining = toNumber(invoice.remaining);
+    const amountInclVat = toNumber(invoice.amount);
     const outstandingMatch = outstandingByRef.get(normalizeRef(invoice.voucher_number)) || null;
+    if (outstandingMatch) {
+      matchedOutstandingRefs.add(normalizeRef(invoice.voucher_number));
+    }
+
+    let remaining = fifoRemaining;
+    let paidAmount = fifoPaid;
+    let outstandingPending = null;
+    let openSource = "fifo";
+
+    if (hasOutstandingRows) {
+      openSource = "outstanding";
+      outstandingPending = outstandingMatch ? toNumber(outstandingMatch.pending_amount) : 0;
+      remaining = outstandingPending;
+      // Book-settled amount = sales incl VAT − outstanding pending (credit notes / extra receipts).
+      paidAmount = Math.max(0, amountInclVat - remaining);
+    }
+
+    const weightedDays = fifoPaid > 0
+      ? settlements.reduce((total, row) => total + (Number(row.days || 0) * toNumber(row.amount)), 0) / fifoPaid
+      : null;
+
+    let status = "Open";
+    if (remaining <= 0.009) {
+      status = amountInclVat > 0.009 || fifoPaid > 0.009 ? "Paid" : "Open";
+      if (remaining <= 0.009 && amountInclVat <= 0.009 && fifoPaid <= 0.009) status = "Paid";
+    } else if (paidAmount > 0.009 && remaining > 0.009) {
+      status = "Partial";
+    }
+
+    const openDays = remaining > 0.009
+      ? (
+        outstandingMatch?.open_days
+        || isoDaysBetween(today, invoice.invoice_date)
+        || 0
+      )
+      : 0;
 
     return {
       invoice_date: invoice.invoice_date,
       voucher_number: invoice.voucher_number,
       amount_excl_vat: toNumber(invoice.amount_excl_vat),
-      amount_incl_vat: toNumber(invoice.amount),
+      amount_incl_vat: amountInclVat,
       paid_amount: paidAmount,
       remaining,
-      outstanding_pending: outstandingMatch ? toNumber(outstandingMatch.pending_amount) : null,
+      fifo_remaining: fifoRemaining,
+      outstanding_pending: outstandingPending,
+      open_source: openSource,
       status,
-      payment_days: roundDays(weightedDays),
-      open_days: remaining > 0.009 ? (isoDaysBetween(today, invoice.invoice_date) || 0) : 0,
+      payment_days: fifoPaid > 0.009 ? roundDays(weightedDays) : null,
+      open_days: openDays,
       settlements,
     };
   });
 
+  // Outstanding refs not found in sales history still belong in Open.
+  outstanding.invoices.forEach((row) => {
+    const ref = normalizeRef(row.ref_no);
+    if (!ref || matchedOutstandingRefs.has(ref)) return;
+    invoiceRows.push({
+      invoice_date: row.invoice_date || "",
+      voucher_number: row.ref_no,
+      amount_excl_vat: 0,
+      amount_incl_vat: toNumber(row.pending_amount),
+      paid_amount: 0,
+      remaining: toNumber(row.pending_amount),
+      fifo_remaining: null,
+      outstanding_pending: toNumber(row.pending_amount),
+      open_source: "outstanding",
+      status: "Open",
+      payment_days: null,
+      open_days: row.open_days || 0,
+      settlements: [],
+    });
+  });
+
+  invoiceRows.sort((left, right) => {
+    if (left.invoice_date !== right.invoice_date) {
+      return String(left.invoice_date || "").localeCompare(String(right.invoice_date || ""));
+    }
+    return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+  });
+
   const salesByDateMap = new Map();
   invoiceRows.forEach((row) => {
+    if (!row.invoice_date) return;
     const current = salesByDateMap.get(row.invoice_date) || {
       date: row.invoice_date,
       invoice_count: 0,
@@ -433,13 +500,17 @@ export function buildPaymentSettlementLedger({
       return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
     });
 
+  const openSalesAmount = invoiceRows.reduce((total, row) => total + toNumber(row.remaining), 0);
   const totals = {
     sales_excl_vat: invoiceRows.reduce((total, row) => total + row.amount_excl_vat, 0),
     sales_incl_vat: invoiceRows.reduce((total, row) => total + row.amount_incl_vat, 0),
     collected_amount: buildSortedReceipts(receipts).reduce((total, row) => total + toNumber(row.amount), 0),
     paid_amount: invoiceRows.reduce((total, row) => total + row.paid_amount, 0),
-    open_sales_amount: invoiceRows.reduce((total, row) => total + row.remaining, 0),
-    outstanding_unpaid: outstanding.totalOutstanding,
+    open_sales_amount: openSalesAmount,
+    outstanding_unpaid: hasOutstandingRows ? outstanding.totalOutstanding : openSalesAmount,
+    open_matches_outstanding: hasOutstandingRows
+      ? Math.abs(openSalesAmount - outstanding.totalOutstanding) <= 0.02
+      : true,
     unmatched_receipt_amount: toNumber(unmatchedReceiptAmount),
     invoice_count: invoiceRows.length,
     paid_invoice_count: invoiceRows.filter((row) => row.status === "Paid").length,

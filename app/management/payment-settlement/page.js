@@ -28,8 +28,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Sales are excl. VAT (gloves 0%, others +15%). Collections are incl. VAT. Payments settle oldest open invoices first.",
-    ar: "المبيعات بدون ضريبة (القفازات 0% والباقي +15%). التحصيل شامل الضريبة. الدفع يسدد أقدم الفواتير أولاً.",
+    en: "Open amounts follow the outstanding upload (book truth). FIFO only estimates payment days from receipts. Credit notes in the ledger are why sales−receipts alone can disagree.",
+    ar: "المبالغ المفتوحة تتبع ملف المستحقات (دفتر الحسابات). الأقدم أولاً يقدّر أيام الدفع فقط من الإيصالات.",
   },
 };
 
@@ -51,17 +51,12 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
   return (
     <>
       <tr>
-        <td>{invoice.invoice_date}</td>
+        <td>{invoice.invoice_date || "—"}</td>
         <td>{invoice.voucher_number || "—"}</td>
         <td>{formatMoney(invoice.amount_excl_vat)}</td>
         <td>{formatMoney(invoice.amount_incl_vat)}</td>
         <td>{formatMoney(invoice.paid_amount)}</td>
         <td>{formatMoney(invoice.remaining)}</td>
-        <td>
-          {invoice.outstanding_pending != null
-            ? formatMoney(invoice.outstanding_pending)
-            : "—"}
-        </td>
         <td><span className={statusClass(invoice.status)}>{invoice.status}</span></td>
         <td>
           {invoice.payment_days != null
@@ -84,7 +79,8 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           </td>
           <td colSpan={2} />
           <td>{formatMoney(settlement.amount)}</td>
-          <td colSpan={2} />
+          <td />
+          <td />
           <td>{settlement.days != null ? `${settlement.days} days` : "—"}</td>
           <td />
         </tr>
@@ -126,14 +122,14 @@ export default function PaymentSettlementPage() {
 
   const unpaidSummary = useMemo(() => {
     if (!ledger?.totals) return null;
-    const fifoOpen = Number(ledger.totals.open_sales_amount || 0);
+    const openAmount = Number(ledger.totals.open_sales_amount || 0);
     const outstandingUnpaid = Number(
       ledger.totals.outstanding_unpaid || ledger.summary?.outstandingTotal || 0,
     );
     return {
-      fifoOpen,
+      openAmount,
       outstandingUnpaid,
-      showGap: outstandingUnpaid > 0 && Math.abs(fifoOpen - outstandingUnpaid) > 1,
+      matches: ledger.totals.open_matches_outstanding !== false,
     };
   }, [ledger]);
 
@@ -341,21 +337,15 @@ export default function PaymentSettlementPage() {
                     <strong>{formatMoney(ledger.totals.collected_amount)}</strong>
                   </div>
                   <div className="auditSummaryCard">
-                    <span>Unpaid (outstanding)</span>
-                    <strong>
-                      {formatMoney(
-                        (unpaidSummary?.outstandingUnpaid || 0) > 0
-                          ? unpaidSummary.outstandingUnpaid
-                          : unpaidSummary?.fifoOpen || 0,
-                      )}
-                    </strong>
-                    {unpaidSummary?.showGap ? (
+                    <span>Open / Outstanding</span>
+                    <strong>{formatMoney(unpaidSummary?.openAmount || 0)}</strong>
+                    {unpaidSummary?.matches === false ? (
                       <em className="auditSummaryCardMeta">
-                        FIFO open from sales: {formatMoney(unpaidSummary.fifoOpen)}
-                        {" "}
-                        (receipts vs sales may not tie to every bill)
+                        Does not match outstanding upload {formatMoney(unpaidSummary.outstandingUnpaid)}
                       </em>
-                    ) : null}
+                    ) : (
+                      <em className="auditSummaryCardMeta">Matches outstanding upload</em>
+                    )}
                   </div>
                 </div>
               </section>
@@ -378,8 +368,7 @@ export default function PaymentSettlementPage() {
                         <th>Sales excl VAT</th>
                         <th>Sales incl VAT</th>
                         <th>Paid</th>
-                        <th>Open (FIFO)</th>
-                        <th>Outstanding</th>
+                        <th>Open</th>
                         <th>Status</th>
                         <th>Payment Days</th>
                         <th>Detail</th>
@@ -400,7 +389,7 @@ export default function PaymentSettlementPage() {
                       })}
                       {!ledger.invoices.length && (
                         <tr>
-                          <td colSpan={10}>No sales invoices found for this customer in history.</td>
+                          <td colSpan={9}>No sales invoices found for this customer in history.</td>
                         </tr>
                       )}
                     </tbody>
@@ -411,7 +400,6 @@ export default function PaymentSettlementPage() {
                         <td><strong>{formatMoney(ledger.totals.sales_incl_vat)}</strong></td>
                         <td><strong>{formatMoney(ledger.totals.paid_amount)}</strong></td>
                         <td><strong>{formatMoney(ledger.totals.open_sales_amount)}</strong></td>
-                        <td><strong>{formatMoney(ledger.totals.outstanding_unpaid || 0)}</strong></td>
                         <td colSpan={3} />
                       </tr>
                     </tfoot>

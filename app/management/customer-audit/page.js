@@ -504,7 +504,7 @@ function CustomerAuditPageContent() {
               {analytics.paymentBehavior.avgDaysToPay != null
                 ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay`
                   + (Number(analytics.paymentBehavior.openAmountInAvg || 0) > 0.009
-                    ? " (paid receipts + open unpaid at current Invoice Day)"
+                    ? " (paid avg + open invoices older than that avg)"
                     : " from collected receipts")
                 : "Avg days to pay unavailable (need sales + receipts or open invoices)"}
               {analytics.paymentBehavior.avgDaysPaidOnly != null

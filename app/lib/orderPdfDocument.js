@@ -707,7 +707,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   if (paymentBehavior?.avgDaysToPay != null) {
     paymentBehaviorLines.push(`Avg days to pay: ${paymentBehavior.avgDaysToPay}`);
     if (Number(paymentBehavior.openAmountInAvg || 0) > 0.009) {
-      paymentBehaviorLines[0] += " (paid + open at current age)";
+      paymentBehaviorLines[0] += " (paid avg + open older than that avg)";
     } else {
       paymentBehaviorLines[0] += " from receipts";
     }

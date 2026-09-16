@@ -334,15 +334,20 @@ function summarizeOutstandingUnpaid(outstandingCustomer = null, outstandingInvoi
 
 /**
  * Days observations for amount-weighted avg days to pay.
- * Paid chunks use sales→receipt days. Open unpaid use current age as a
- * right-censored lower bound (best practice for credit risk — paid-only
- * averages hide slow payers with old open bills).
+ * Paid chunks use sales→receipt days. Open unpaid use current age, but only
+ * when older than the paid-only average so fresh large invoices cannot pull
+ * the avg down — open age can raise the metric, never reduce it.
+ *
+ * @param {number|null} [minOpenDaysExclusive] When set, open invoices with
+ *   open_days <= this floor are excluded from the blend.
  */
 export function buildDaysToPayObservations({
   allocations = [],
   openInvoices = [],
+  minOpenDaysExclusive = null,
 } = {}) {
   const observations = [];
+  const openFloor = minOpenDaysExclusive == null ? null : Number(minOpenDaysExclusive);
 
   (Array.isArray(allocations) ? allocations : []).forEach((row) => {
     const amount = toNumber(row?.amount);
@@ -355,9 +360,9 @@ export function buildDaysToPayObservations({
   (Array.isArray(openInvoices) ? openInvoices : []).forEach((row) => {
     const amount = toNumber(row?.pending_amount ?? row?.remaining);
     const days = Number(row?.open_days);
-    if (amount > 0.009 && Number.isFinite(days) && days >= 0) {
-      observations.push({ amount, days, source: "open" });
-    }
+    if (!(amount > 0.009 && Number.isFinite(days) && days >= 0)) return;
+    if (openFloor != null && Number.isFinite(openFloor) && !(days > openFloor)) return;
+    observations.push({ amount, days, source: "open" });
   });
 
   return observations;
@@ -396,8 +401,9 @@ export function emptyPaymentBehavior() {
 
 /**
  * Combine sales+receipt FIFO days-to-pay with outstanding unpaid bill stats.
- * Avg days blends collected receipts with open unpaid at current Invoice Day
- * (amount-weighted). Paid-only avg is kept as avgDaysPaidOnly for comparison.
+ * Avg days starts from paid receipts, then blends only open unpaid invoices
+ * older than that paid-only avg (so open age can raise, never reduce, the avg).
+ * Paid-only avg is kept as avgDaysPaidOnly for comparison.
  */
 export function buildPaymentBehavior({
   transactions = [],
@@ -424,17 +430,23 @@ export function buildPaymentBehavior({
     : unpaidFromSales;
 
   const paidObservations = buildDaysToPayObservations({ allocations, openInvoices: [] });
+  const paidAmount = paidObservations.reduce((total, row) => total + row.amount, 0);
+  const paidAvgRaw = weightedAverageDays(paidObservations);
+  const avgDaysPaidOnly = roundDays(paidAvgRaw);
+
+  // Only open invoices older than paid-only avg can enter the blend.
+  // With no paid history, all open invoices are included (no floor to spoil).
+  const openFloor = paidAvgRaw != null ? paidAvgRaw : null;
   const blendedObservations = buildDaysToPayObservations({
     allocations,
     openInvoices: openForAvg,
+    minOpenDaysExclusive: openFloor,
   });
 
-  const paidAmount = paidObservations.reduce((total, row) => total + row.amount, 0);
   const openAmountInAvg = blendedObservations
     .filter((row) => row.source === "open")
     .reduce((total, row) => total + row.amount, 0);
 
-  const avgDaysPaidOnly = roundDays(weightedAverageDays(paidObservations));
   const avgDaysToPay = roundDays(weightedAverageDays(blendedObservations));
   const medianDaysToPay = roundDays(median(blendedObservations.map((row) => row.days)));
   const matchedInvoiceCount = new Set(
@@ -445,7 +457,7 @@ export function buildPaymentBehavior({
   if (avgDaysToPay != null) {
     summaryLabel = `Avg ${avgDaysToPay} days to pay`;
     if (openAmountInAvg > 0.009) {
-      summaryLabel += " (paid + open at current age)";
+      summaryLabel += " (paid + open older than paid avg)";
     } else {
       summaryLabel += " from receipts";
     }
@@ -504,7 +516,8 @@ export function formatPaymentDaysLabel(behavior) {
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
  * When outstanding invoice rows exist, Open / status follow that upload (book truth), not FIFO residual.
  * FIFO is kept for payment-days on historically settled chunks; avg days also
- * includes open unpaid at current age (blended credit-risk metric).
+ * includes open unpaid older than the paid-only avg (open age can raise, never
+ * reduce, the metric).
  * Invoices reversed immediately by credit notes are listed separately and excluded from avg days.
  */
 export function buildPaymentSettlementLedger({

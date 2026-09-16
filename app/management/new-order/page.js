@@ -1640,7 +1640,7 @@ export default function NewOrderPage() {
               {analytics.paymentBehavior.avgDaysToPay != null
                 ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay`
                   + (Number(analytics.paymentBehavior.openAmountInAvg || 0) > 0.009
-                    ? " (paid + open at current age)"
+                    ? " (paid avg + open older than that avg)"
                     : " from collected receipts")
                 : "Avg days to pay unavailable (need sales + receipts or open invoices)"}
               {analytics.paymentBehavior.medianDaysToPay != null

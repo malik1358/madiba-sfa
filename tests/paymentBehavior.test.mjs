@@ -42,7 +42,7 @@ test("matchPaymentsFifo measures days from sales date to receipt date", () => {
   assert.equal(invoices.every((row) => row.remaining === 0), true);
 });
 
-test("buildPaymentBehavior blends paid receipts with open unpaid at current age", () => {
+test("buildPaymentBehavior blends only open invoices older than paid-only avg", () => {
   const behavior = buildPaymentBehavior({
     transactions: [
       { transaction_date: "2026-01-01", voucher_number: "1", sales_amount: 1000, category: "Stationery" },
@@ -76,34 +76,62 @@ test("buildPaymentBehavior blends paid receipts with open unpaid at current age"
   });
 
   // Paid-only: 10d on 1150 + 30d on 1150 => 20
-  // Blended: + 90d on 500 + 14d on 250 => 94500 / 3050 ≈ 31
+  // Open 14d is below paid avg → excluded; open 90d is included
+  // Blended: (11500 + 34500 + 45000) / 2800 ≈ 32.5 → 33
   assert.equal(behavior.avgDaysPaidOnly, 20);
-  assert.equal(behavior.avgDaysToPay, 31);
-  assert.equal(behavior.openAmountInAvg, 750);
+  assert.equal(behavior.avgDaysToPay, 33);
+  assert.equal(behavior.openAmountInAvg, 500);
   assert.equal(behavior.outstandingTotal, 750);
   assert.equal(behavior.outstandingOpenInvoices, 2);
   assert.ok(behavior.outstandingOldestDays >= 40);
-  assert.match(behavior.summaryLabel, /Avg 31 days to pay \(paid \+ open at current age\)/);
+  assert.match(behavior.summaryLabel, /Avg 33 days to pay \(paid \+ open older than paid avg\)/);
   assert.match(behavior.summaryLabel, /paid-only 20d/);
   assert.match(behavior.summaryLabel, /Unpaid 750/);
   assert.match(behavior.summaryLabel, /oldest open/);
 });
 
-test("avg days includes old open invoices that paid-only would hide", () => {
-  // Mirrors 1209C shape: paid avg ~107, open 9953@251 + 3613@183
-  const observations = buildDaysToPayObservations({
+test("fresh large open invoice cannot pull avg days below paid-only avg", () => {
+  // Paid avg 107; old open raises; brand-new 50k@1d must not dilute
+  const withFresh = buildDaysToPayObservations({
+    allocations: [{ amount: 18000, days: 107 }],
+    openInvoices: [
+      { pending_amount: 9953, open_days: 251 },
+      { pending_amount: 3613, open_days: 183 },
+      { pending_amount: 50000, open_days: 1 },
+    ],
+    minOpenDaysExclusive: 107,
+  });
+  const withoutFresh = buildDaysToPayObservations({
     allocations: [{ amount: 18000, days: 107 }],
     openInvoices: [
       { pending_amount: 9953, open_days: 251 },
       { pending_amount: 3613, open_days: 183 },
     ],
+    minOpenDaysExclusive: 107,
   });
-  const blended = Math.round(weightedAverageDays(observations));
-  const paidOnly = Math.round(weightedAverageDays(observations.filter((row) => row.source === "paid")));
 
-  assert.equal(paidOnly, 107);
-  assert.equal(blended, 161);
-  assert.ok(blended > paidOnly);
+  assert.equal(withFresh.filter((row) => row.source === "open").length, 2);
+  assert.equal(Math.round(weightedAverageDays(withFresh)), Math.round(weightedAverageDays(withoutFresh)));
+  assert.equal(Math.round(weightedAverageDays(withFresh)), 161);
+  assert.ok(Math.round(weightedAverageDays(withFresh)) > 107);
+});
+
+test("open invoices younger than paid avg are ignored so avg cannot fall", () => {
+  const behavior = buildPaymentBehavior({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "1", sales_amount: 1000, category: "Paper" },
+    ],
+    receipts: [{ receipt_date: "2026-04-11", amount: 1150 }],
+    outstandingInvoices: [
+      { invoice_date: "2026-04-10", ref_no: "NEW", pending_amount: 20000, invoice_day: 1 },
+    ],
+    todayIso: "2026-04-11",
+  });
+
+  // Paid-only = 100 days; open 1d < 100 → excluded
+  assert.equal(behavior.avgDaysPaidOnly, 100);
+  assert.equal(behavior.avgDaysToPay, 100);
+  assert.equal(behavior.openAmountInAvg, 0);
 });
 
 test("FIFO applies oldest invoice first when one receipt covers two bills", () => {
@@ -193,10 +221,11 @@ test("buildPaymentSettlementLedger returns invoice settlement and datewise rows"
 
   assert.equal(ledger.datewise.length, 4);
   assert.equal(ledger.settlementEvents.length, 2);
-  // Paid: 1150@30 + 200@21; open FIFO residual 375@26 (Jan 20→Feb 15)
-  // => (34500 + 4200 + 9750) / 1725 ≈ 28
+  // Paid: 1150@30 + 200@21 => paid-only ≈ 29
+  // Open FIFO residual 375@26 is younger than paid avg → excluded
   assert.equal(ledger.summary.avgDaysPaidOnly, 29);
-  assert.equal(ledger.summary.avgDaysToPay, 28);
+  assert.equal(ledger.summary.avgDaysToPay, 29);
+  assert.equal(ledger.summary.openAmountInAvg, 0);
   assert.equal(ledger.totals.paid_invoice_count, 1);
   assert.equal(ledger.totals.partial_invoice_count, 1);
   assert.ok(ledger.totals.open_sales_amount > 0);

@@ -94,7 +94,7 @@ export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-s
             <em className="auditSummaryCardMeta">
               {summary.avgDaysToPay != null
                 ? (Number(summary.openAmountInAvg || 0) > 0.009
-                  ? "Paid receipts + open unpaid at current Invoice Day"
+                  ? "Paid avg + open invoices older than that avg only"
                   : "From collected receipts")
                 : "Needs sales, receipts, or open invoices"}
             </em>

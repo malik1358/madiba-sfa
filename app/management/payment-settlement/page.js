@@ -28,8 +28,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Open follows the outstanding upload. Sales − Collected should equal Open (unpaired credit notes are netted from Sales; immediate reversals stay in Sales but are excluded from avg days).",
-    ar: "المفتوح يتبع ملف المستحقات. المبيعات − التحصيل يجب أن تساوي المفتوح (إشعارات الدائن غير المزدوجة تُخصم من المبيعات؛ العكس الفوري يبقى في المبيعات ويُستبعد من متوسط الأيام).",
+    en: "Open follows the outstanding upload. Avg days uses paid receipts, then only open invoices older than that paid avg (so fresh bills cannot pull the avg down). Immediate credit-note reversals stay in Sales but are excluded from avg days.",
+    ar: "المفتوح يتبع ملف المستحقات. متوسط الأيام من الإيصالات المدفوعة ثم فقط الفواتير المفتوحة الأقدم من ذلك المتوسط (فلا تخفض الفواتير الجديدة المتوسط). العكس الفوري بإشعار دائن يبقى في المبيعات ويُستبعد من متوسط الأيام.",
   },
 };
 
@@ -348,7 +348,7 @@ export default function PaymentSettlementPage() {
                     <em className="auditSummaryCardMeta">
                       {ledger.summary.avgDaysToPay != null
                         ? (Number(ledger.summary.openAmountInAvg || 0) > 0.009
-                          ? "Paid receipts + open unpaid at current Invoice Day"
+                          ? "Paid avg + open invoices older than that avg only"
                           : "From collected receipts")
                         : "Needs sales, receipts, or open invoices"}
                     </em>

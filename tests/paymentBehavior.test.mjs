@@ -498,3 +498,44 @@ test("credit note several days later is not treated as immediate reversal", () =
   assert.equal(allocations.length, 1);
   assert.equal(allocations[0].days, 19);
 });
+
+test("typed Credit Note with positive amount reverses matching invoice next day (NFD/402 / CN 149)", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      {
+        transaction_date: "2026-04-11",
+        voucher_number: "NFD/402",
+        sales_amount: 50580,
+        category: "Paper",
+        voucher_type: "SALES-NON FOOD DIVISION",
+      },
+      // Tally credit notes often land as typed rows with a positive amount column.
+      {
+        transaction_date: "2026-04-12",
+        voucher_number: "149",
+        sales_amount: 50580,
+        category: "Paper",
+        voucher_type: "Credit Note",
+      },
+      {
+        transaction_date: "2026-04-12",
+        voucher_number: "NFD/414",
+        sales_amount: 50580,
+        category: "Paper",
+        voucher_type: "SALES-NON FOOD DIVISION",
+      },
+    ],
+    receipts: [{ receipt_date: "2026-05-22", amount: 35000 }],
+    outstandingInvoices: [],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 1);
+  assert.equal(ledger.reversedInvoices[0].voucher_number, "NFD/402");
+  assert.equal(ledger.reversedInvoices[0].credit_note_voucher, "149");
+  assert.equal(ledger.reversedInvoices[0].reversal_days, 1);
+
+  const live = ledger.invoices.map((row) => row.voucher_number);
+  assert.ok(!live.includes("NFD/402"));
+  assert.ok(live.includes("NFD/414"));
+});

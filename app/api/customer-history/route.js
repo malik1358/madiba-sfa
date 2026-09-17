@@ -39,7 +39,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const HISTORY_LIMIT = 30000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 11;
+const CACHE_VERSION = 12;
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -216,7 +216,7 @@ function monthStartFromKey(key) {
   return `${match[1]}-${match[2]}-01`;
 }
 
-const HISTORY_ROW_SELECT = "id,import_batch_id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class";
+const HISTORY_ROW_SELECT = "id,import_batch_id,transaction_date,voucher_number,voucher_type,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class";
 
 async function fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate, customerName = "") {
   const codeCandidates = buildCustomerHistoryCodeCandidates(customerCode);
@@ -746,7 +746,7 @@ async function fetchPeerTransactions(admin, scope, selectedMonthKeys, customerCo
 
   let query = admin
     .from("active_sales")
-    .select("id,transaction_date,voucher_number,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
+    .select("id,transaction_date,voucher_number,voucher_type,reference,customer_code,customer_name,salesman_code,salesman_name,item_code,item_name,category,quantity,sales_amount,rate,first_purchase_date,abc_class")
     .neq("customer_code", customerCode)
     .order("transaction_date", { ascending: false })
     .order("id", { ascending: false })

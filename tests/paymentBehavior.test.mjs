@@ -539,3 +539,31 @@ test("typed Credit Note with positive amount reverses matching invoice next day 
   assert.ok(!live.includes("NFD/402"));
   assert.ok(live.includes("NFD/414"));
 });
+
+test("Tally vs FIFO discrepancy report flags over-allocated paid on partial invoice", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-05-24", voucher_number: "NFD/868", sales_amount: 29870, category: "Paper" },
+      { transaction_date: "2026-07-29", voucher_number: "RNFD/158", sales_amount: 53315, category: "Paper" },
+    ],
+    receipts: [{ receipt_date: "2026-07-29", amount: 22956.11, vch_no: "1346" }],
+    outstandingCustomer: { total_outstanding: 76107.6, open_invoices: 2 },
+    outstandingInvoices: [
+      { invoice_date: "2026-05-24", ref_no: "NFD/868", pending_amount: 14795.35, invoice_day: 112 },
+      { invoice_date: "2026-07-29", ref_no: "RNFD/158", pending_amount: 61312.25, invoice_day: 46 },
+    ],
+    todayIso: "2026-09-16",
+  });
+
+  const nfd868 = ledger.invoices.find((row) => row.voucher_number === "NFD/868");
+  assert.equal(Number(nfd868.paid_amount.toFixed(2)), 19555.15);
+  assert.equal(Number(nfd868.fifo_paid.toFixed(2)), 22956.11);
+
+  const gap = ledger.tallyFifoDiscrepancies.find((row) => row.voucher_number === "NFD/868");
+  assert.ok(gap);
+  assert.equal(Number(gap.paid_delta.toFixed(2)), 3400.96);
+  assert.equal(Number(gap.open_delta.toFixed(2)), -3400.96);
+  assert.match(gap.note, /over-allocated/i);
+  assert.equal(gap.receipt_chunks[0].vch_no, "1346");
+  assert.ok(ledger.totals.tally_fifo_over_allocated > 3400);
+});

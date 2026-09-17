@@ -639,6 +639,107 @@ export function formatPaymentDaysLabel(behavior) {
 }
 
 /**
+ * Compare Tally/outstanding book settlement vs FIFO receipt allocation per invoice.
+ * paid_delta > 0 means FIFO put more cash on this bill than outstanding implies.
+ * The counterpart usually appears as paid_delta < 0 on other invoices (or unmatched receipts).
+ */
+export function buildTallyFifoDiscrepancies(invoiceRows = [], {
+  unmatchedReceiptAmount = 0,
+  hasOutstandingRows = false,
+} = {}) {
+  if (!hasOutstandingRows) {
+    return {
+      rows: [],
+      totals: {
+        book_paid: 0,
+        fifo_paid: 0,
+        paid_delta: 0,
+        book_open: 0,
+        fifo_open: 0,
+        open_delta: 0,
+        over_allocated: 0,
+        under_allocated: 0,
+        unmatched_receipt_amount: toNumber(unmatchedReceiptAmount),
+        discrepancy_count: 0,
+      },
+    };
+  }
+
+  const rows = (Array.isArray(invoiceRows) ? invoiceRows : [])
+    .map((row) => {
+      const salesIncl = toNumber(row.amount_incl_vat);
+      const bookOpen = toNumber(row.remaining);
+      const bookPaid = toNumber(row.paid_amount);
+      const fifoPaid = toNumber(row.fifo_paid);
+      const fifoOpen = row.fifo_remaining == null
+        ? Math.max(0, salesIncl - fifoPaid)
+        : toNumber(row.fifo_remaining);
+      const paidDelta = fifoPaid - bookPaid;
+      const openDelta = fifoOpen - bookOpen;
+      if (Math.abs(paidDelta) <= 0.02 && Math.abs(openDelta) <= 0.02) return null;
+
+      let note = "";
+      if (paidDelta > 0.02) {
+        note = "FIFO over-allocated cash to this bill vs Tally outstanding";
+      } else if (paidDelta < -0.02) {
+        note = "FIFO under-allocated cash to this bill vs Tally outstanding";
+      } else if (openDelta > 0.02) {
+        note = "FIFO open higher than Tally outstanding";
+      } else {
+        note = "FIFO open lower than Tally outstanding";
+      }
+
+      const receiptChunks = (Array.isArray(row.settlements) ? row.settlements : []).map((chunk) => ({
+        receipt_date: chunk.receipt_date,
+        vch_no: chunk.vch_no || "",
+        amount: toNumber(chunk.amount),
+        days: chunk.days,
+      }));
+
+      return {
+        invoice_date: row.invoice_date,
+        voucher_number: row.voucher_number,
+        sales_incl_vat: salesIncl,
+        book_paid: bookPaid,
+        fifo_paid: fifoPaid,
+        paid_delta: paidDelta,
+        book_open: bookOpen,
+        fifo_open: fifoOpen,
+        open_delta: openDelta,
+        note,
+        receipt_chunks: receiptChunks,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => Math.abs(right.paid_delta) - Math.abs(left.paid_delta)
+      || Math.abs(right.open_delta) - Math.abs(left.open_delta)
+      || String(left.invoice_date || "").localeCompare(String(right.invoice_date || "")));
+
+  const overAllocated = rows
+    .filter((row) => row.paid_delta > 0.02)
+    .reduce((total, row) => total + row.paid_delta, 0);
+  const underAllocated = rows
+    .filter((row) => row.paid_delta < -0.02)
+    .reduce((total, row) => total + row.paid_delta, 0);
+
+  return {
+    rows,
+    totals: {
+      book_paid: rows.reduce((total, row) => total + row.book_paid, 0),
+      fifo_paid: rows.reduce((total, row) => total + row.fifo_paid, 0),
+      paid_delta: rows.reduce((total, row) => total + row.paid_delta, 0),
+      book_open: rows.reduce((total, row) => total + row.book_open, 0),
+      fifo_open: rows.reduce((total, row) => total + row.fifo_open, 0),
+      open_delta: rows.reduce((total, row) => total + row.open_delta, 0),
+      over_allocated: overAllocated,
+      under_allocated: underAllocated,
+      unmatched_receipt_amount: toNumber(unmatchedReceiptAmount),
+      discrepancy_count: rows.length,
+    },
+  };
+}
+
+/**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
  * When outstanding invoice rows exist, Open / status follow that upload (book truth), not FIFO residual.
  * FIFO is kept for payment-days on historically settled chunks; avg days also
@@ -741,6 +842,7 @@ export function buildPaymentSettlementLedger({
       amount_excl_vat: toNumber(invoice.amount_excl_vat),
       amount_incl_vat: amountInclVat,
       paid_amount: paidAmount,
+      fifo_paid: fifoPaid,
       remaining,
       fifo_remaining: fifoRemaining,
       outstanding_pending: outstandingPending,
@@ -764,6 +866,7 @@ export function buildPaymentSettlementLedger({
       amount_excl_vat: 0,
       amount_incl_vat: toNumber(row.pending_amount),
       paid_amount: 0,
+      fifo_paid: 0,
       remaining: toNumber(row.pending_amount),
       fifo_remaining: null,
       outstanding_pending: toNumber(row.pending_amount),
@@ -906,6 +1009,11 @@ export function buildPaymentSettlementLedger({
   const netSalesInclVat = salesInclVat - creditNoteAmount;
   const balanceDelta = netSalesInclVat - collectedAmount - openSalesAmount;
 
+  const tallyFifo = buildTallyFifoDiscrepancies(invoiceRows, {
+    unmatchedReceiptAmount,
+    hasOutstandingRows,
+  });
+
   const totals = {
     sales_excl_vat: salesExclVat,
     sales_incl_vat: salesInclVat,
@@ -933,6 +1041,9 @@ export function buildPaymentSettlementLedger({
     reversed_sales_excl_vat: reversedSalesExclVat,
     reversed_sales_incl_vat: reversedSalesInclVat,
     credit_note_count: creditNotes.length,
+    tally_fifo_discrepancy_count: tallyFifo.totals.discrepancy_count,
+    tally_fifo_over_allocated: tallyFifo.totals.over_allocated,
+    tally_fifo_under_allocated: tallyFifo.totals.under_allocated,
   };
 
   return {
@@ -941,6 +1052,8 @@ export function buildPaymentSettlementLedger({
     invoices: invoiceRows,
     reversedInvoices: reversedRows,
     creditNotes,
+    tallyFifoDiscrepancies: tallyFifo.rows,
+    tallyFifoTotals: tallyFifo.totals,
     datewise,
     settlementEvents,
     outstandingInvoices: outstanding.invoices,

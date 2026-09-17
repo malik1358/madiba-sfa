@@ -41,6 +41,20 @@ function formatCount(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
+function formatDelta(value) {
+  const number = Number(value || 0);
+  if (Math.abs(number) <= 0.009) return "0";
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${number.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+}
+
+function deltaClass(value) {
+  const number = Number(value || 0);
+  if (number > 0.02) return "moduleBiMonthCell--up";
+  if (number < -0.02) return "moduleBiMonthCell--down";
+  return "";
+}
+
 function statusClass(status) {
   if (status === "Paid") return "paymentSettleStatus paymentSettleStatus--paid";
   if (status === "Partial") return "paymentSettleStatus paymentSettleStatus--partial";
@@ -477,6 +491,95 @@ export default function PaymentSettlementPage() {
                         )}</strong></td>
                         <td><strong>{formatMoney(ledger.totals.open_sales_amount)}</strong></td>
                         <td colSpan={3} />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </ExportableTable>
+              </section>
+
+              <section className="moduleSection">
+                <div className="moduleSectionHeader">
+                  <h2>Tally vs FIFO Discrepancy</h2>
+                  <span>
+                    {formatCount(ledger.totals.tally_fifo_discrepancy_count || 0)} invoices ·{" "}
+                    over {formatMoney(ledger.totals.tally_fifo_over_allocated || 0)} ·{" "}
+                    under {formatMoney(Math.abs(ledger.totals.tally_fifo_under_allocated || 0))}
+                  </span>
+                </div>
+                <p className="moduleHint">
+                  Book Paid / Open come from the outstanding upload (Tally). FIFO Paid / Open come from
+                  applying receipts oldest-first (receipts have no invoice ref). Paid Δ &gt; 0 means FIFO
+                  put more cash on that bill than Tally implies — the counterpart usually appears as
+                  under-allocation on another bill, or unmatched receipts.
+                </p>
+                <ExportableTable filename="payment-settlement-tally-fifo" sheetName="TallyVsFifo" className="moduleTableWrap">
+                  <table className="moduleTable moduleBiTable paymentSettleTable">
+                    <thead>
+                      <tr>
+                        <th>Sales Date</th>
+                        <th>Voucher</th>
+                        <th>Sales incl VAT</th>
+                        <th>Book Paid</th>
+                        <th>FIFO Paid</th>
+                        <th>Paid Δ</th>
+                        <th>Book Open</th>
+                        <th>FIFO Open</th>
+                        <th>Open Δ</th>
+                        <th>Where / note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(ledger.tallyFifoDiscrepancies || []).map((row) => (
+                        <tr key={`disc-${row.invoice_date}-${row.voucher_number}`}>
+                          <td>{row.invoice_date || "—"}</td>
+                          <td>{row.voucher_number || "—"}</td>
+                          <td>{formatMoney(row.sales_incl_vat)}</td>
+                          <td>{formatMoney(row.book_paid)}</td>
+                          <td>{formatMoney(row.fifo_paid)}</td>
+                          <td className={deltaClass(row.paid_delta)}>{formatDelta(row.paid_delta)}</td>
+                          <td>{formatMoney(row.book_open)}</td>
+                          <td>{formatMoney(row.fifo_open)}</td>
+                          <td className={deltaClass(row.open_delta)}>{formatDelta(row.open_delta)}</td>
+                          <td>
+                            {row.note}
+                            {(row.receipt_chunks || []).length ? (
+                              <div className="auditSummaryCardMeta">
+                                {(row.receipt_chunks || []).map((chunk, index) => (
+                                  <div key={`${chunk.receipt_date}-${chunk.vch_no}-${index}`}>
+                                    Rcpt {chunk.vch_no || "—"} on {chunk.receipt_date}: {formatMoney(chunk.amount)}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                      {!(ledger.tallyFifoDiscrepancies || []).length && (
+                        <tr>
+                          <td colSpan={10}>
+                            {Number(ledger.summary?.outstandingTotal || ledger.totals?.outstanding_unpaid || 0) > 0
+                              ? "No Tally vs FIFO paid/open gaps for this customer."
+                              : "Upload outstanding invoice rows to compare Tally book settlement with FIFO."}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={3}><strong>Discrepancy total</strong></td>
+                        <td><strong>{formatMoney(ledger.tallyFifoTotals?.book_paid || 0)}</strong></td>
+                        <td><strong>{formatMoney(ledger.tallyFifoTotals?.fifo_paid || 0)}</strong></td>
+                        <td className={deltaClass(ledger.tallyFifoTotals?.paid_delta || 0)}>
+                          <strong>{formatDelta(ledger.tallyFifoTotals?.paid_delta || 0)}</strong>
+                        </td>
+                        <td><strong>{formatMoney(ledger.tallyFifoTotals?.book_open || 0)}</strong></td>
+                        <td><strong>{formatMoney(ledger.tallyFifoTotals?.fifo_open || 0)}</strong></td>
+                        <td className={deltaClass(ledger.tallyFifoTotals?.open_delta || 0)}>
+                          <strong>{formatDelta(ledger.tallyFifoTotals?.open_delta || 0)}</strong>
+                        </td>
+                        <td>
+                          Unmatched receipts: {formatMoney(ledger.tallyFifoTotals?.unmatched_receipt_amount || 0)}
+                        </td>
                       </tr>
                     </tfoot>
                   </table>

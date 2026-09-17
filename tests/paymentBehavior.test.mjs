@@ -625,3 +625,27 @@ test("orphan CN matches replacement invoice ±1 day by amount and items (2384 �
   assert.equal(reissue.credit_notes.length, 1);
   assert.equal(reissue.credit_notes[0].voucher_number, "2384");
 });
+
+test("CN/ and SR/ voucher codes with positive amounts are sales returns not invoices", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "NFD/100", sales_amount: 1000, category: "Paper" },
+      // Positive amount but CN/ voucher code — should not inflate sales.
+      { transaction_date: "2026-01-20", voucher_number: "CN/55", sales_amount: 200, category: "Paper" },
+      { transaction_date: "2026-02-01", voucher_number: "SR/9", sales_amount: 100, category: "Paper" },
+    ],
+    receipts: [{ receipt_date: "2026-01-31", amount: 500 }],
+    outstandingInvoices: [
+      { invoice_date: "2026-01-01", ref_no: "NFD/100", pending_amount: 505, invoice_day: 40 },
+    ],
+    todayIso: "2026-02-10",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 0);
+  assert.equal(ledger.creditNotes.length, 2);
+  assert.equal(ledger.creditNotes.some((row) => row.voucher_number === "CN/55"), true);
+  assert.equal(ledger.creditNotes.some((row) => row.kind === "Sales Return"), true);
+  assert.equal(ledger.invoices.every((row) => !String(row.voucher_number).startsWith("CN")), true);
+  assert.ok(Number(ledger.totals.credit_note_amount) > 0);
+  assert.ok(Number(ledger.totals.net_sales_incl_vat) < Number(ledger.totals.sales_incl_vat));
+});

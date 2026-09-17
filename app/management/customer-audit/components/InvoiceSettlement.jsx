@@ -83,7 +83,90 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
   );
 }
 
-export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-settlement" }) {
+function CreditNotesTable({
+  creditNotes = [],
+  totals = {},
+  filenamePrefix = "customer-settlement",
+}) {
+  return (
+    <section className="auditSection">
+      <div className="auditTransactionHeader">
+        <div>
+          <h3>Sales Returns & Credit Notes</h3>
+          <p className="auditSectionNote">
+            Partial or later credit notes and sales returns — not same-day / next-day full
+            invoice reversals. Orphans cross to a same-amount invoice ±1 day (items when available).
+            Reduce net sales; never counted as cash collected or avg days to pay.
+          </p>
+        </div>
+        <span>{formatCount(totals.credit_note_count || creditNotes.length)} vouchers</span>
+      </div>
+
+      <ExportableTable filename={`${filenamePrefix}-credit-notes`} sheetName="CreditNotes" className="moduleTableWrap" style={{ marginTop: "10px" }}>
+        <table className="moduleTable moduleBiTable paymentSettleTable">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Ref. No.</th>
+              <th>Type</th>
+              <th>Reference</th>
+              <th>Applied To</th>
+              <th>Amount excl VAT</th>
+              <th>Amount incl VAT</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {creditNotes.map((row) => (
+              <tr key={`${row.credit_date}::${row.voucher_number}`}>
+                <td>{row.credit_date || "—"}</td>
+                <td>{row.voucher_number || "—"}</td>
+                <td>{row.kind || row.voucher_type || "Credit Note"}</td>
+                <td>{row.reference || "—"}</td>
+                <td>{row.applied_to_voucher || "—"}</td>
+                <td>{formatMoney(row.amount_excl_vat)}</td>
+                <td>{formatMoney(row.amount_incl_vat)}</td>
+                <td><span className={statusClass("Credit")}>{row.kind || "Credit"}</span></td>
+              </tr>
+            ))}
+            {!creditNotes.length && (
+              <tr>
+                <td colSpan={8}>No sales returns or partial/later credit notes for this customer.</td>
+              </tr>
+            )}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={5}><strong>Total</strong></td>
+              <td><strong>{formatMoney(totals.credit_note_excl_vat || 0)}</strong></td>
+              <td><strong>{formatMoney(totals.credit_note_amount || 0)}</strong></td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+      </ExportableTable>
+    </section>
+  );
+}
+
+export function SalesReturnsSection({ ledger, filenamePrefix = "customer-settlement" }) {
+  if (!ledger) return null;
+  const creditNotes = Array.isArray(ledger.creditNotes) ? ledger.creditNotes : [];
+  return (
+    <CreditNotesTable
+      creditNotes={creditNotes}
+      totals={ledger.totals || {}}
+      filenamePrefix={filenamePrefix}
+    />
+  );
+}
+
+export default function InvoiceSettlement({
+  ledger,
+  filenamePrefix = "customer-settlement",
+  /** When true, credit-notes table is rendered elsewhere (e.g. under outstanding). */
+  hideCreditNotesTable = false,
+}) {
   const [expandedInvoice, setExpandedInvoice] = useState("");
 
   if (!ledger) return null;
@@ -143,11 +226,20 @@ export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-s
             <strong>{formatMoney(salesInclVat)}</strong>
             {creditNoteAmount > 0.009 ? (
               <em className="auditSummaryCardMeta">
-                After credit notes {formatMoney(creditNoteAmount)}
+                After sales returns {formatMoney(creditNoteAmount)}
               </em>
             ) : (
               <em className="auditSummaryCardMeta">Gloves stay excl. VAT</em>
             )}
+          </div>
+          <div className="auditSummaryCard">
+            <span>Sales Returns</span>
+            <strong>{formatMoney(creditNoteAmount)}</strong>
+            <em className="auditSummaryCardMeta">
+              {creditNotes.length
+                ? `${formatCount(creditNotes.length)} partial / later CN · not cash`
+                : "No partial or later credit notes"}
+            </em>
           </div>
           <div className="auditSummaryCard">
             <span>Collected</span>
@@ -170,6 +262,14 @@ export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-s
           </div>
         </div>
       </section>
+
+      {!hideCreditNotesTable ? (
+        <CreditNotesTable
+          creditNotes={creditNotes}
+          totals={totals}
+          filenamePrefix={filenamePrefix}
+        />
+      ) : null}
 
       <section className="auditSection">
         <div className="auditTransactionHeader">
@@ -287,64 +387,6 @@ export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-s
                 <td><strong>{formatMoney(totals.reversed_sales_excl_vat || 0)}</strong></td>
                 <td><strong>{formatMoney(totals.reversed_sales_incl_vat || 0)}</strong></td>
                 <td colSpan={5} />
-              </tr>
-            </tfoot>
-          </table>
-        </ExportableTable>
-      </section>
-
-      <section className="auditSection">
-        <div className="auditTransactionHeader">
-          <div>
-            <h3>Credit Notes & Sales Returns</h3>
-            <p className="auditSectionNote">
-              Partial or later credit notes and sales returns. Orphans cross to a same-amount
-              invoice 1 day back or front (items when available). Nested under the invoice for
-              display only — never included in avg days to pay or collected cash.
-            </p>
-          </div>
-          <span>{formatCount(totals.credit_note_count || creditNotes.length)} vouchers</span>
-        </div>
-
-        <ExportableTable filename={`${filenamePrefix}-credit-notes`} sheetName="CreditNotes" className="moduleTableWrap" style={{ marginTop: "10px" }}>
-          <table className="moduleTable moduleBiTable paymentSettleTable">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Voucher</th>
-                <th>Type</th>
-                <th>Reference</th>
-                <th>Applied To</th>
-                <th>Excl VAT</th>
-                <th>Incl VAT</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {creditNotes.map((row) => (
-                <tr key={`${row.credit_date}::${row.voucher_number}`}>
-                  <td>{row.credit_date || "—"}</td>
-                  <td>{row.voucher_number || "—"}</td>
-                  <td>{row.kind || row.voucher_type || "Credit Note"}</td>
-                  <td>{row.reference || "—"}</td>
-                  <td>{row.applied_to_voucher || "—"}</td>
-                  <td>{formatMoney(row.amount_excl_vat)}</td>
-                  <td>{formatMoney(row.amount_incl_vat)}</td>
-                  <td><span className={statusClass("Credit")}>{row.kind || "Credit"}</span></td>
-                </tr>
-              ))}
-              {!creditNotes.length && (
-                <tr>
-                  <td colSpan={8}>No partial credit notes or sales returns for this customer.</td>
-                </tr>
-              )}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={5}><strong>Total</strong></td>
-                <td><strong>{formatMoney(totals.credit_note_excl_vat || 0)}</strong></td>
-                <td><strong>{formatMoney(totals.credit_note_amount || 0)}</strong></td>
-                <td />
               </tr>
             </tfoot>
           </table>

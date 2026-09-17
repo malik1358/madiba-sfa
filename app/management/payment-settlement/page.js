@@ -142,6 +142,7 @@ export default function PaymentSettlementPage() {
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingSettlement, setLoadingSettlement] = useState(false);
   const [ledger, setLedger] = useState(null);
+  const [historyMeta, setHistoryMeta] = useState(null);
   const [expandedInvoice, setExpandedInvoice] = useState("");
   const [autoCode, setAutoCode] = useState("");
 
@@ -220,6 +221,7 @@ export default function PaymentSettlementPage() {
     setError("");
     setMessage("");
     setLedger(null);
+    setHistoryMeta(null);
     setExpandedInvoice("");
 
     try {
@@ -229,7 +231,7 @@ export default function PaymentSettlementPage() {
       const name = encodeURIComponent(customer.customer_name || "");
 
       const [historyResponse, outstandingResponse] = await Promise.all([
-        fetch(`/api/customer-history?customerCode=${code}&customerName=${name}`, { headers }),
+        fetch(`/api/customer-history?customerCode=${code}&customerName=${name}&fullHistory=1&scope=settlement`, { headers }),
         fetch(`/api/outstanding?customerCode=${code}&customerName=${name}`, { headers }),
       ]);
 
@@ -240,8 +242,9 @@ export default function PaymentSettlementPage() {
         throw new Error(historyPayload.error || "Unable to load sales/receipt history.");
       }
 
+      const historyTransactions = Array.isArray(historyPayload.transactions) ? historyPayload.transactions : [];
       const nextLedger = buildPaymentSettlementLedger({
-        transactions: Array.isArray(historyPayload.transactions) ? historyPayload.transactions : [],
+        transactions: historyTransactions,
         receipts: Array.isArray(historyPayload.receipts) ? historyPayload.receipts : [],
         outstandingCustomer: outstandingPayload?.customer || null,
         outstandingInvoices: Array.isArray(outstandingPayload?.customerInvoices)
@@ -251,6 +254,11 @@ export default function PaymentSettlementPage() {
 
       setSelectedCustomer(customer);
       setLedger(nextLedger);
+      setHistoryMeta({
+        fromDate: historyPayload.fromDate || "",
+        fullHistory: Boolean(historyPayload.fullHistory),
+        transactionCount: historyTransactions.length,
+      });
       setMessage(
         nextLedger.summary?.summaryLabel
         || `Loaded ${nextLedger.totals.invoice_count} invoices for ${customer.customer_code}.`,
@@ -258,6 +266,7 @@ export default function PaymentSettlementPage() {
     } catch (err) {
       setError(err.message || "Unable to load settlement.");
       setLedger(null);
+      setHistoryMeta(null);
     } finally {
       setLoadingSettlement(false);
     }
@@ -445,6 +454,10 @@ export default function PaymentSettlementPage() {
                     {formatCount(ledger.totals.paid_invoice_count)} paid ·{" "}
                     {formatCount(ledger.totals.partial_invoice_count)} partial ·{" "}
                     {formatCount(ledger.totals.open_invoice_count)} open
+                    {historyMeta?.fromDate ? ` · from ${historyMeta.fromDate}` : ""}
+                    {historyMeta?.transactionCount != null
+                      ? ` · ${formatCount(historyMeta.transactionCount)} sales lines`
+                      : ""}
                   </span>
                 </div>
                 <ExportableTable filename="payment-settlement-invoices" sheetName="Invoices" className="moduleTableWrap">
@@ -652,6 +665,7 @@ export default function PaymentSettlementPage() {
                 </div>
                 <p className="moduleHint">
                   Partial credit notes, later credit notes, and sales returns (negative sales).
+                  Orphans are crossed to a same-amount invoice 1 day back or front (items when available).
                   Also nested under the related invoice next to cash receipts for display only —
                   they are never included in avg days to pay or collected cash.
                 </p>

@@ -136,7 +136,7 @@ function isInvoiceMakerRole(role) {
   return normalized === "invoice_maker" || normalized === "invoice-maker";
 }
 
-function cacheKeyFor(customerCode, scope) {
+function cacheKeyFor(customerCode, scope, { fullHistory = false } = {}) {
   const scopeIdentity = scope.hasAllAccess
     ? "ALL"
     : [...new Set(scope.visibleSalesmanCodes || [])].sort().join("|");
@@ -146,7 +146,8 @@ function cacheKeyFor(customerCode, scope) {
     scopeHash = ((scopeHash * 31) + scopeIdentity.charCodeAt(index)) >>> 0;
   }
 
-  return `customer_history_cache:${normalizeCode(customerCode)}:${scopeHash.toString(36)}`;
+  const historySuffix = fullHistory ? ":full" : "";
+  return `customer_history_cache:${normalizeCode(customerCode)}:${scopeHash.toString(36)}${historySuffix}`;
 }
 
 function parseJson(value) {
@@ -618,7 +619,7 @@ async function loadMasterCustomerName(admin, customerCode) {
   return data?.customer_name || "";
 }
 
-async function fetchCustomerTransactions(admin, customerCode, customerName, scope) {
+async function fetchCustomerTransactions(admin, customerCode, customerName, scope, { fullHistory = false } = {}) {
   const codeCandidates = buildCustomerHistoryCodeCandidates(customerCode);
   const masterCustomerName = await loadMasterCustomerName(admin, customerCode);
   const normalizedCustomerName = resolveCustomerHistoryName(
@@ -710,6 +711,27 @@ async function fetchCustomerTransactions(admin, customerCode, customerName, scop
     });
 
   const currentKey = ksaMonthKey();
+
+  // Settlement / full ledger: keep every sales month for this customer (day 1 → now).
+  // Customer Audit performance window still uses the last 6 historic months + current.
+  if (fullHistory) {
+    const allMonthKeys = [];
+    const seenAll = new Set();
+    for (const row of sortedRows) {
+      const key = monthKey(row.transaction_date);
+      if (!key || seenAll.has(key)) continue;
+      seenAll.add(key);
+      allMonthKeys.push(key);
+    }
+    allMonthKeys.sort();
+    const oldestKey = allMonthKeys[0] || "";
+    return {
+      fromDate: monthStartFromKey(oldestKey),
+      monthKeys: allMonthKeys,
+      transactions: sortedRows.map(({ __stamp, ...row }) => row),
+    };
+  }
+
   const uniqueNewestFirst = [];
   const seenMonths = new Set();
   let historicCount = 0;
@@ -785,13 +807,14 @@ async function fetchPeerTransactions(admin, scope, selectedMonthKeys, customerCo
     .map(({ __stamp, ...row }) => row);
 }
 
-async function refreshCustomerCache(admin, customerCode, cacheKey, scope, customerName = "") {
-  const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope);
+async function refreshCustomerCache(admin, customerCode, cacheKey, scope, customerName = "", { fullHistory = false } = {}) {
+  const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope, { fullHistory });
   const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
   const payload = {
     version: CACHE_VERSION,
     updatedAt: new Date().toISOString(),
     fromDate: fresh.fromDate,
+    fullHistory: Boolean(fullHistory),
     transactions: fresh.transactions,
     peerTransactions,
   };
@@ -815,6 +838,9 @@ export async function GET(request) {
     const customerCode = normalizeCode(url.searchParams.get("customerCode"));
     const customerName = normalizeName(url.searchParams.get("customerName"));
     const forceRefresh = String(url.searchParams.get("refresh") || "").trim() === "1";
+    const scopeParam = String(url.searchParams.get("scope") || "").trim().toLowerCase();
+    const fullHistory = String(url.searchParams.get("fullHistory") || "").trim() === "1"
+      || scopeParam === "settlement";
 
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
@@ -828,7 +854,7 @@ export async function GET(request) {
     const scope = await resolveScope(admin, token);
     await ensureCustomerVisible(admin, customerCode, customerName, scope);
 
-    const key = cacheKeyFor(customerCode, scope);
+    const key = cacheKeyFor(customerCode, scope, { fullHistory });
     const cached = await loadCached(admin, key);
     const receipts = await loadCustomerReceipts(admin, customerCode, customerName);
 
@@ -839,12 +865,13 @@ export async function GET(request) {
       const cachedTransactions = Array.isArray(cached.transactions) ? cached.transactions : [];
 
       if (cachedTransactions.length === 0) {
-        const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope);
+        const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope, { fullHistory });
         const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
         const payload = {
           version: CACHE_VERSION,
           updatedAt: new Date().toISOString(),
           fromDate: fresh.fromDate,
+          fullHistory: Boolean(fullHistory),
           transactions: fresh.transactions,
           peerTransactions,
         };
@@ -854,6 +881,7 @@ export async function GET(request) {
           success: true,
           customerCode,
           fromDate: payload.fromDate,
+          fullHistory: Boolean(fullHistory),
           updatedAt: payload.updatedAt,
           isStale: false,
           isRefreshing: false,
@@ -866,7 +894,7 @@ export async function GET(request) {
 
       if (stale) {
         // Return previous data immediately, refresh snapshot in background.
-        void refreshCustomerCache(admin, customerCode, key, scope, customerName).catch(() => {});
+        void refreshCustomerCache(admin, customerCode, key, scope, customerName, { fullHistory }).catch(() => {});
       }
 
       const transactions = await overlayCurrentMonthTransactions(admin, customerCode, cachedTransactions, customerName);
@@ -875,6 +903,7 @@ export async function GET(request) {
         success: true,
         customerCode,
         fromDate: cached.fromDate || "",
+        fullHistory: Boolean(fullHistory),
         updatedAt: cached.updatedAt || "",
         isStale: stale,
         isRefreshing: stale,
@@ -885,12 +914,13 @@ export async function GET(request) {
       });
     }
 
-    const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope);
+    const fresh = await fetchCustomerTransactions(admin, customerCode, customerName, scope, { fullHistory });
     const peerTransactions = await fetchPeerTransactions(admin, scope, fresh.monthKeys, customerCode);
     const payload = {
       version: CACHE_VERSION,
       updatedAt: new Date().toISOString(),
       fromDate: fresh.fromDate,
+      fullHistory: Boolean(fullHistory),
       transactions: fresh.transactions,
       peerTransactions,
     };
@@ -900,6 +930,7 @@ export async function GET(request) {
       success: true,
       customerCode,
       fromDate: payload.fromDate,
+      fullHistory: Boolean(fullHistory),
       updatedAt: payload.updatedAt,
       isStale: false,
       isRefreshing: false,

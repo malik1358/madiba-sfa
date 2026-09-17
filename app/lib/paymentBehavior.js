@@ -11,13 +11,20 @@ function dateOnly(value) {
 }
 
 function isoDaysBetween(laterIso, earlierIso) {
-  const later = dateOnly(laterIso);
-  const earlier = dateOnly(earlierIso);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(later) || !/^\d{4}-\d{2}-\d{2}$/.test(earlier)) return null;
-  const laterMs = Date.parse(`${later}T00:00:00Z`);
-  const earlierMs = Date.parse(`${earlier}T00:00:00Z`);
-  if (!Number.isFinite(laterMs) || !Number.isFinite(earlierMs)) return null;
-  return Math.max(0, Math.round((laterMs - earlierMs) / 86400000));
+  const offset = isoDayOffset(earlierIso, laterIso);
+  if (offset == null) return null;
+  return Math.max(0, offset);
+}
+
+/** Signed day gap from `fromIso` → `toIso` (negative when toIso is earlier). */
+function isoDayOffset(fromIso, toIso) {
+  const from = dateOnly(fromIso);
+  const to = dateOnly(toIso);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return null;
+  const fromMs = Date.parse(`${from}T00:00:00Z`);
+  const toMs = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return null;
+  return Math.round((toMs - fromMs) / 86400000);
 }
 
 function roundDays(value) {
@@ -60,6 +67,37 @@ function lineVatInclAmount(row, amountExclVat) {
     item_code: row?.item_code,
   });
   return amountInclVatFromExcl(amountExclVat, vatRate);
+}
+
+/** Stable line fingerprint for cross-matching CN ↔ invoice within ±1 day. */
+function lineItemFingerprint(row = {}) {
+  const code = normalizeRef(row.item_code || row.item_name || "");
+  if (!code) return "";
+  const qty = Math.abs(toNumber(row.quantity));
+  const amount = Math.abs(toNumber(row.sales_amount));
+  return `${code}|${qty.toFixed(3)}|${amount.toFixed(2)}`;
+}
+
+function pushItemFingerprint(target, row) {
+  const fingerprint = lineItemFingerprint(row);
+  if (!fingerprint) return;
+  if (!Array.isArray(target.items)) target.items = [];
+  target.items.push(fingerprint);
+}
+
+function itemOverlapCount(leftItems = [], rightItems = []) {
+  const right = new Map();
+  (Array.isArray(rightItems) ? rightItems : []).forEach((key) => {
+    right.set(key, (right.get(key) || 0) + 1);
+  });
+  let overlap = 0;
+  (Array.isArray(leftItems) ? leftItems : []).forEach((key) => {
+    const available = right.get(key) || 0;
+    if (available <= 0) return;
+    overlap += 1;
+    right.set(key, available - 1);
+  });
+  return overlap;
 }
 
 /** Credit notes / sales returns: typed voucher, or negative amount/qty lines. */
@@ -112,10 +150,12 @@ export function buildSalesInvoices(transactions = []) {
       amount_excl_vat: 0,
       amount: 0,
       remaining: 0,
+      items: [],
     };
     current.amount_excl_vat += amountExclVat;
     current.amount += amountInclVat;
     current.remaining = current.amount;
+    pushItemFingerprint(current, row);
     map.set(key, current);
   });
 
@@ -152,10 +192,12 @@ export function buildCreditNotes(transactions = []) {
       amount_excl_vat: 0,
       amount: 0,
       remaining: 0,
+      items: [],
     };
     current.amount_excl_vat += absExcl;
     current.amount += amountInclVat;
     current.remaining = current.amount;
+    pushItemFingerprint(current, row);
     if (reference && !current.reference) current.reference = reference;
     if (voucherType && !current.voucher_type) {
       current.voucher_type = voucherType;
@@ -180,7 +222,12 @@ export function classifyCreditNoteKind(voucherType = "", voucherNumber = "") {
 
 /**
  * Attach unpaired credit notes / sales returns under matching invoices for display.
- * Matching prefers reference → invoice voucher. Does not affect payment-days / FIFO.
+ * Matching order:
+ * 1) reference → invoice voucher
+ * 2) ±1 day same amount (+ item overlap when available) — covers reissue pairs
+ *    like CN dated 31 Dec against replacement invoice 2397 on 1 Jan
+ * 3) oldest invoice on/before the credit date (capacity fill)
+ * Does not affect payment-days / FIFO.
  */
 export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) {
   const invoices = Array.isArray(invoiceRows) ? invoiceRows : [];
@@ -212,7 +259,12 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
     note.applied_to_date = invoice.invoice_date;
   }
 
-  // Pass 1: reference points at invoice voucher.
+  function invoiceCreditCapacity(invoice) {
+    return Math.max(0, toNumber(invoice.amount_incl_vat) - (invoice.credit_notes || [])
+      .reduce((total, row) => total + toNumber(row.amount), 0));
+  }
+
+  // Pass 1: reference points at a live invoice voucher.
   notes.forEach((note) => {
     const ref = normalizeRef(note.reference);
     if (!ref || toNumber(note.remaining) <= AMOUNT_TOLERANCE) return;
@@ -226,7 +278,48 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
     pushCreditChild(invoice, note, toNumber(note.remaining));
   });
 
-  // Pass 2: leftover notes — attach to oldest invoice on/before the credit date
+  // Pass 2: orphan notes — match invoices 1 day back / 1 day front by amount + items.
+  // Typical Tally reissue: voided bill + replacement next day with the same lines.
+  notes.forEach((note) => {
+    const remaining = toNumber(note.remaining);
+    if (remaining <= AMOUNT_TOLERANCE) return;
+
+    const candidates = invoices
+      .map((invoice, index) => {
+        const offset = isoDayOffset(note.credit_date, invoice.invoice_date);
+        if (offset == null || Math.abs(offset) > IMMEDIATE_REVERSAL_MAX_DAYS) return null;
+
+        const invoiceAmount = toNumber(invoice.amount_incl_vat ?? invoice.amount);
+        const amountOk = amountsMatch(remaining, invoiceAmount)
+          || amountsMatch(note.amount_incl_vat ?? note.amount, invoiceAmount);
+        if (!amountOk) return null;
+
+        const capacity = invoiceCreditCapacity(invoice);
+        if (capacity <= AMOUNT_TOLERANCE) return null;
+
+        const overlap = itemOverlapCount(note.items, invoice.items);
+        const noteHasItems = Array.isArray(note.items) && note.items.length > 0;
+        const invoiceHasItems = Array.isArray(invoice.items) && invoice.items.length > 0;
+        // When both sides have item lines, require at least one shared fingerprint.
+        if (noteHasItems && invoiceHasItems && overlap <= 0) return null;
+
+        return {
+          invoice,
+          index,
+          offset,
+          overlap,
+          score: (overlap * 100) + (amountOk ? 50 : 0) - Math.abs(offset),
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+
+    const best = candidates[0];
+    if (!best) return;
+    pushCreditChild(best.invoice, note, Math.min(remaining, invoiceCreditCapacity(best.invoice)));
+  });
+
+  // Pass 3: leftover notes — attach to oldest invoice on/before the credit date
   // for display only (still excluded from payment days).
   const sortedInvoices = [...invoices].sort((left, right) => {
     if (left.invoice_date !== right.invoice_date) {
@@ -241,8 +334,7 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
     for (const invoice of sortedInvoices) {
       if (remaining <= AMOUNT_TOLERANCE) break;
       if (String(note.credit_date || "") < String(invoice.invoice_date || "")) continue;
-      const capacity = Math.max(0, toNumber(invoice.amount_incl_vat) - (invoice.credit_notes || [])
-        .reduce((total, row) => total + toNumber(row.amount), 0));
+      const capacity = invoiceCreditCapacity(invoice);
       if (capacity <= AMOUNT_TOLERANCE) continue;
       const applied = Math.min(remaining, capacity);
       pushCreditChild(invoice, note, applied);
@@ -851,6 +943,7 @@ export function buildPaymentSettlementLedger({
       // Payment days only from cash receipt FIFO — credit notes never enter this average.
       payment_days: fifoPaid > 0.009 ? roundDays(weightedDays) : null,
       open_days: openDays,
+      items: Array.isArray(invoice.items) ? [...invoice.items] : [],
       settlements,
       credit_notes: [],
     };
@@ -992,6 +1085,7 @@ export function buildPaymentSettlementLedger({
       kind: note.kind || classifyCreditNoteKind(note.voucher_type, note.voucher_number),
       amount_excl_vat: toNumber(note.amount_excl_vat),
       amount_incl_vat: toNumber(note.amount),
+      items: Array.isArray(note.items) ? [...note.items] : [],
       status: "Credit",
     }))
     .sort((left, right) => {

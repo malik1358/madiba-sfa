@@ -567,3 +567,61 @@ test("Tally vs FIFO discrepancy report flags over-allocated paid on partial invo
   assert.equal(gap.receipt_chunks[0].vch_no, "1346");
   assert.ok(ledger.totals.tally_fifo_over_allocated > 3400);
 });
+
+test("orphan CN matches replacement invoice ±1 day by amount and items (2384 → 2397)", () => {
+  const item = { item_code: "P-100", item_name: "Paper A4", quantity: 10, category: "Paper" };
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      // Original bill 31 Dec — fully reversed same day by CN 121.
+      {
+        transaction_date: "2025-12-31",
+        voucher_number: "2384",
+        sales_amount: 18026.2,
+        ...item,
+      },
+      {
+        transaction_date: "2025-12-31",
+        voucher_number: "121",
+        voucher_type: "Credit Note",
+        reference: "2384",
+        sales_amount: 18026.2,
+        ...item,
+      },
+      // Orphan CN typed with the voided voucher no. — books apply it to the reissue.
+      {
+        transaction_date: "2025-12-31",
+        voucher_number: "2384",
+        voucher_type: "Credit Note",
+        reference: "2384",
+        sales_amount: 18026.2,
+        ...item,
+      },
+      // Replacement invoice next day — same amount and items.
+      {
+        transaction_date: "2026-01-01",
+        voucher_number: "2397",
+        sales_amount: 18026.2,
+        ...item,
+      },
+    ],
+    receipts: [{ receipt_date: "2026-02-03", amount: 20730.13, vch_no: "R1" }],
+    outstandingInvoices: [
+      { invoice_date: "2026-01-01", ref_no: "2397", pending_amount: 0, invoice_day: 0 },
+    ],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 1);
+  assert.equal(ledger.reversedInvoices[0].voucher_number, "2384");
+  assert.equal(ledger.reversedInvoices[0].credit_note_voucher, "121");
+
+  assert.equal(ledger.creditNotes.length, 1);
+  assert.equal(ledger.creditNotes[0].voucher_number, "2384");
+  assert.equal(ledger.creditNotes[0].applied_to_voucher, "2397");
+  assert.equal(ledger.creditNotes[0].applied_to_date, "2026-01-01");
+
+  const reissue = ledger.invoices.find((row) => row.voucher_number === "2397");
+  assert.ok(reissue);
+  assert.equal(reissue.credit_notes.length, 1);
+  assert.equal(reissue.credit_notes[0].voucher_number, "2384");
+});

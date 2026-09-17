@@ -438,12 +438,61 @@ function summarizeOutstandingUnpaid(outstandingCustomer = null, outstandingInvoi
   };
 }
 
+/**
+ * Days observations for amount-weighted avg days to pay.
+ * Paid chunks use sales→receipt days. Open unpaid use current age, but only
+ * when older than the paid-only average so fresh large invoices cannot pull
+ * the avg down — open age can raise the metric, never reduce it.
+ *
+ * @param {number|null} [minOpenDaysExclusive] When set, open invoices with
+ *   open_days <= this floor are excluded from the blend.
+ */
+export function buildDaysToPayObservations({
+  allocations = [],
+  openInvoices = [],
+  minOpenDaysExclusive = null,
+} = {}) {
+  const observations = [];
+  const openFloor = minOpenDaysExclusive == null ? null : Number(minOpenDaysExclusive);
+
+  (Array.isArray(allocations) ? allocations : []).forEach((row) => {
+    const amount = toNumber(row?.amount);
+    const days = Number(row?.days);
+    if (amount > 0.009 && Number.isFinite(days) && days >= 0) {
+      observations.push({ amount, days, source: "paid" });
+    }
+  });
+
+  (Array.isArray(openInvoices) ? openInvoices : []).forEach((row) => {
+    const amount = toNumber(row?.pending_amount ?? row?.remaining);
+    const days = Number(row?.open_days);
+    if (!(amount > 0.009 && Number.isFinite(days) && days >= 0)) return;
+    if (openFloor != null && Number.isFinite(openFloor) && !(days > openFloor)) return;
+    observations.push({ amount, days, source: "open" });
+  });
+
+  return observations;
+}
+
+export function weightedAverageDays(observations = []) {
+  const totalAmount = (Array.isArray(observations) ? observations : [])
+    .reduce((total, row) => total + toNumber(row.amount), 0);
+  if (totalAmount <= 0.009) return null;
+  const weighted = observations.reduce(
+    (total, row) => total + (Number(row.days) * toNumber(row.amount)),
+    0,
+  );
+  return weighted / totalAmount;
+}
+
 export function emptyPaymentBehavior() {
   return {
     avgDaysToPay: null,
+    avgDaysPaidOnly: null,
     medianDaysToPay: null,
     paidAllocationCount: 0,
     paidAmount: 0,
+    openAmountInAvg: 0,
     matchedInvoiceCount: 0,
     unpaidFromSalesCount: 0,
     unpaidFromSalesAmount: 0,
@@ -458,6 +507,9 @@ export function emptyPaymentBehavior() {
 
 /**
  * Combine sales+receipt FIFO days-to-pay with outstanding unpaid bill stats.
+ * Avg days starts from paid receipts, then blends only open unpaid invoices
+ * older than that paid-only avg (so open age can raise, never reduce, the avg).
+ * Paid-only avg is kept as avgDaysPaidOnly for comparison.
  */
 export function buildPaymentBehavior({
   transactions = [],
@@ -472,19 +524,37 @@ export function buildPaymentBehavior({
     .filter((invoice) => toNumber(invoice.remaining) > 0.009)
     .map((invoice) => ({
       ...invoice,
+      pending_amount: toNumber(invoice.remaining),
       open_days: isoDaysBetween(today, invoice.invoice_date) || 0,
     }))
     .sort((left, right) => right.open_days - left.open_days);
 
-  const paidAmount = allocations.reduce((total, row) => total + row.amount, 0);
-  const weightedDays = paidAmount > 0
-    ? allocations.reduce((total, row) => total + (row.days * row.amount), 0) / paidAmount
-    : null;
-  const medianDays = median(allocations.map((row) => row.days));
   const outstanding = summarizeOutstandingUnpaid(outstandingCustomer, outstandingInvoices, today);
+  // Prefer outstanding upload rows (book truth) for open age; else FIFO residual.
+  const openForAvg = outstanding.invoices.length > 0
+    ? outstanding.invoices
+    : unpaidFromSales;
 
-  const avgDaysToPay = roundDays(weightedDays);
-  const medianDaysToPay = roundDays(medianDays);
+  const paidObservations = buildDaysToPayObservations({ allocations, openInvoices: [] });
+  const paidAmount = paidObservations.reduce((total, row) => total + row.amount, 0);
+  const paidAvgRaw = weightedAverageDays(paidObservations);
+  const avgDaysPaidOnly = roundDays(paidAvgRaw);
+
+  // Only open invoices older than paid-only avg can enter the blend.
+  // With no paid history, all open invoices are included (no floor to spoil).
+  const openFloor = paidAvgRaw != null ? paidAvgRaw : null;
+  const blendedObservations = buildDaysToPayObservations({
+    allocations,
+    openInvoices: openForAvg,
+    minOpenDaysExclusive: openFloor,
+  });
+
+  const openAmountInAvg = blendedObservations
+    .filter((row) => row.source === "open")
+    .reduce((total, row) => total + row.amount, 0);
+
+  const avgDaysToPay = roundDays(weightedAverageDays(blendedObservations));
+  const medianDaysToPay = roundDays(median(blendedObservations.map((row) => row.days)));
   const matchedInvoiceCount = new Set(
     allocations.map((row) => `${row.invoice_date}::${row.voucher_number}`),
   ).size;
@@ -492,8 +562,20 @@ export function buildPaymentBehavior({
   let summaryLabel = "Payment days unavailable";
   if (avgDaysToPay != null) {
     summaryLabel = `Avg ${avgDaysToPay} days to pay`;
+    if (openAmountInAvg > 0.009) {
+      summaryLabel += " (paid + open older than paid avg)";
+    } else {
+      summaryLabel += " from receipts";
+    }
     if (medianDaysToPay != null && medianDaysToPay !== avgDaysToPay) {
-      summaryLabel += ` (median ${medianDaysToPay})`;
+      summaryLabel += ` · median ${medianDaysToPay}`;
+    }
+    if (
+      avgDaysPaidOnly != null
+      && openAmountInAvg > 0.009
+      && avgDaysPaidOnly !== avgDaysToPay
+    ) {
+      summaryLabel += ` · paid-only ${avgDaysPaidOnly}d`;
     }
   }
 
@@ -501,22 +583,24 @@ export function buildPaymentBehavior({
     summaryLabel += avgDaysToPay != null ? " · " : "";
     summaryLabel += `Unpaid ${outstanding.totalOutstanding.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
     if (outstanding.oldestOpenDays > 0) {
-      summaryLabel += ` / oldest ${outstanding.oldestOpenDays}d`;
+      summaryLabel += ` / oldest open ${outstanding.oldestOpenDays}d`;
     }
   } else if (unpaidFromSales.length > 0) {
     const unpaidAmount = unpaidFromSales.reduce((total, row) => total + toNumber(row.remaining), 0);
     summaryLabel += avgDaysToPay != null ? " · " : "";
     summaryLabel += `Open sales ${unpaidAmount.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
     if (unpaidFromSales[0]?.open_days > 0) {
-      summaryLabel += ` / oldest ${unpaidFromSales[0].open_days}d`;
+      summaryLabel += ` / oldest open ${unpaidFromSales[0].open_days}d`;
     }
   }
 
   return {
     avgDaysToPay,
+    avgDaysPaidOnly,
     medianDaysToPay,
     paidAllocationCount: allocations.length,
     paidAmount,
+    openAmountInAvg,
     matchedInvoiceCount,
     unpaidFromSalesCount: unpaidFromSales.length,
     unpaidFromSalesAmount: unpaidFromSales.reduce((total, row) => total + toNumber(row.remaining), 0),
@@ -537,7 +621,9 @@ export function formatPaymentDaysLabel(behavior) {
 /**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
  * When outstanding invoice rows exist, Open / status follow that upload (book truth), not FIFO residual.
- * FIFO is kept for payment-days on historically settled chunks.
+ * FIFO is kept for payment-days on historically settled chunks; avg days also
+ * includes open unpaid older than the paid-only avg (open age can raise, never
+ * reduce, the metric).
  * Invoices reversed immediately by credit notes are listed separately and excluded from avg days.
  */
 export function buildPaymentSettlementLedger({

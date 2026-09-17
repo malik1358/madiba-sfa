@@ -28,8 +28,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Open follows the outstanding upload. Sales − Collected should equal Open (unpaired credit notes are netted from Sales; immediate reversals stay in Sales but are excluded from avg days).",
-    ar: "المفتوح يتبع ملف المستحقات. المبيعات − التحصيل يجب أن تساوي المفتوح (إشعارات الدائن غير المزدوجة تُخصم من المبيعات؛ العكس الفوري يبقى في المبيعات ويُستبعد من متوسط الأيام).",
+    en: "Open follows the outstanding upload. Avg days uses paid receipts, then only open invoices older than that paid avg (so fresh bills cannot pull the avg down). Immediate credit-note reversals stay in Sales but are excluded from avg days.",
+    ar: "المفتوح يتبع ملف المستحقات. متوسط الأيام من الإيصالات المدفوعة ثم فقط الفواتير المفتوحة الأقدم من ذلك المتوسط (فلا تخفض الفواتير الجديدة المتوسط). العكس الفوري بإشعار دائن يبقى في المبيعات ويُستبعد من متوسط الأيام.",
   },
 };
 
@@ -368,6 +368,28 @@ export default function PaymentSettlementPage() {
                     <strong>
                       {ledger.summary.avgDaysToPay != null ? `${ledger.summary.avgDaysToPay} days` : "—"}
                     </strong>
+                    <em className="auditSummaryCardMeta">
+                      {ledger.summary.avgDaysToPay != null
+                        ? (Number(ledger.summary.openAmountInAvg || 0) > 0.009
+                          ? "Paid avg + open invoices older than that avg only"
+                          : "From collected receipts")
+                        : "Needs sales, receipts, or open invoices"}
+                    </em>
+                    {ledger.summary.avgDaysPaidOnly != null
+                      && Number(ledger.summary.openAmountInAvg || 0) > 0.009
+                      && ledger.summary.avgDaysPaidOnly !== ledger.summary.avgDaysToPay ? (
+                      <em className="auditSummaryCardMeta">
+                        Paid-only avg: {formatCount(ledger.summary.avgDaysPaidOnly)}d
+                      </em>
+                    ) : null}
+                    {Number(ledger.summary.outstandingOldestDays || 0) > 0 ? (
+                      <em className="auditSummaryCardMeta">
+                        Oldest unpaid invoice: {formatCount(ledger.summary.outstandingOldestDays)}d
+                        {Number(ledger.summary.outstandingOverdueCount || 0) > 0
+                          ? ` · ${formatCount(ledger.summary.outstandingOverdueCount)} overdue`
+                          : ""}
+                      </em>
+                    ) : null}
                   </div>
                   <div className="auditSummaryCard">
                     <span>Sales incl. VAT</span>

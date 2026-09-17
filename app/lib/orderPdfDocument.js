@@ -706,15 +706,27 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const paymentBehaviorLines = [];
   if (paymentBehavior?.avgDaysToPay != null) {
     paymentBehaviorLines.push(`Avg days to pay: ${paymentBehavior.avgDaysToPay}`);
+    if (Number(paymentBehavior.openAmountInAvg || 0) > 0.009) {
+      paymentBehaviorLines[0] += " (paid avg + open older than that avg)";
+    } else {
+      paymentBehaviorLines[0] += " from receipts";
+    }
     if (paymentBehavior.medianDaysToPay != null && paymentBehavior.medianDaysToPay !== paymentBehavior.avgDaysToPay) {
       paymentBehaviorLines[0] += ` (median ${paymentBehavior.medianDaysToPay})`;
+    }
+    if (
+      paymentBehavior.avgDaysPaidOnly != null
+      && Number(paymentBehavior.openAmountInAvg || 0) > 0.009
+      && paymentBehavior.avgDaysPaidOnly !== paymentBehavior.avgDaysToPay
+    ) {
+      paymentBehaviorLines[0] += ` · paid-only ${paymentBehavior.avgDaysPaidOnly}`;
     }
   }
   if (Number(paymentBehavior?.outstandingTotal || 0) > 0) {
     paymentBehaviorLines.push(
       `Unpaid bills: ${formatReceivableMoney(paymentBehavior.outstandingTotal)}`
       + (paymentBehavior.outstandingOpenInvoices ? ` · ${paymentBehavior.outstandingOpenInvoices} open` : "")
-      + (paymentBehavior.outstandingOldestDays ? ` · oldest ${paymentBehavior.outstandingOldestDays}d` : "")
+      + (paymentBehavior.outstandingOldestDays ? ` · oldest unpaid ${paymentBehavior.outstandingOldestDays}d` : "")
       + (paymentBehavior.outstandingOverdueCount ? ` · ${paymentBehavior.outstandingOverdueCount} overdue` : ""),
     );
   } else if (Number(paymentBehavior?.unpaidFromSalesAmount || 0) > 0) {

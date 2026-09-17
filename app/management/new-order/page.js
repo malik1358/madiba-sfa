@@ -1639,16 +1639,24 @@ export default function NewOrderPage() {
               <strong>Payment behavior:</strong>{" "}
               {analytics.paymentBehavior.avgDaysToPay != null
                 ? `Avg ${analytics.paymentBehavior.avgDaysToPay} days to pay`
-                : "Avg days to pay unavailable (need sales + receipts)"}
+                  + (Number(analytics.paymentBehavior.openAmountInAvg || 0) > 0.009
+                    ? " (paid avg + open older than that avg)"
+                    : " from collected receipts")
+                : "Avg days to pay unavailable (need sales + receipts or open invoices)"}
               {analytics.paymentBehavior.medianDaysToPay != null
                 && analytics.paymentBehavior.medianDaysToPay !== analytics.paymentBehavior.avgDaysToPay
                 ? ` · median ${analytics.paymentBehavior.medianDaysToPay}`
+                : ""}
+              {analytics.paymentBehavior.avgDaysPaidOnly != null
+                && Number(analytics.paymentBehavior.openAmountInAvg || 0) > 0.009
+                && analytics.paymentBehavior.avgDaysPaidOnly !== analytics.paymentBehavior.avgDaysToPay
+                ? ` · paid-only ${analytics.paymentBehavior.avgDaysPaidOnly}d`
                 : ""}
               {Number(analytics.paymentBehavior.outstandingTotal || 0) > 0
                 ? ` · unpaid ${Number(analytics.paymentBehavior.outstandingTotal).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
                 : ""}
               {Number(analytics.paymentBehavior.outstandingOldestDays || 0) > 0
-                ? ` · oldest open ${analytics.paymentBehavior.outstandingOldestDays}d`
+                ? ` · oldest unpaid invoice ${analytics.paymentBehavior.outstandingOldestDays}d`
                 : ""}
               {Number(analytics.paymentBehavior.outstandingOverdueCount || 0) > 0
                 ? ` · ${analytics.paymentBehavior.outstandingOverdueCount} overdue`

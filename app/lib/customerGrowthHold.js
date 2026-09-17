@@ -65,48 +65,14 @@ export function isHeldCustomerGrowthRow(row, { legalTransfers = [], outstandingD
   return customerHasOverSixtyOutstanding(outstanding);
 }
 
-function recountGrowthMeta(groups = []) {
-  return {
-    categoryCount: groups.length,
-    groupCount: groups.length,
-    growingCount: groups.filter((row) => row.status === "green").length,
-    decliningCount: groups.filter((row) => row.status === "red").length,
-    warningCount: groups.filter((row) => row.status === "orange").length,
-  };
+/**
+ * BI sales history must remain visible. Hold detection helpers above are kept for
+ * credit/collection flows; they must not strip customers from BI reports.
+ */
+export function applyCustomerGrowthHolds(report, _holdContext = {}) {
+  return report;
 }
 
-export function applyCustomerGrowthHolds(report, holdContext = {}) {
-  const groupBy = report?.filters?.groupBy || report?.meta?.groupBy;
-  if (!report || groupBy !== "customer") return report;
-
-  const source = report.groups || report.categories || [];
-  const groups = source.filter((row) => !isHeldCustomerGrowthRow(row, holdContext));
-  if (groups.length === source.length) return report;
-
-  const keptLabels = new Set(groups.map((row) => row.label));
-  const alerts = (report.alerts || []).filter((alert) => keptLabels.has(alert.title));
-
-  return {
-    ...report,
-    groups,
-    categories: groups,
-    alerts,
-    meta: {
-      ...report.meta,
-      ...recountGrowthMeta(groups),
-      heldCustomersHidden: source.length - groups.length,
-    },
-  };
-}
-
-export function applyCustomerGrowthHoldsToReport(report, holdContext = {}) {
-  const next = applyCustomerGrowthHolds(report, holdContext);
-  if (!next?.measures) return next;
-  return {
-    ...next,
-    measures: {
-      sales: applyCustomerGrowthHolds(next.measures.sales, holdContext),
-      profit: applyCustomerGrowthHolds(next.measures.profit, holdContext),
-    },
-  };
+export function applyCustomerGrowthHoldsToReport(report, _holdContext = {}) {
+  return report;
 }

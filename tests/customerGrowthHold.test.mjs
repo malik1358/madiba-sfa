@@ -9,7 +9,7 @@ import {
   parseGrowthCustomerLabel,
 } from "../app/lib/customerGrowthHold.js";
 
-test("held customer rows hide legal transfers and 60+ day outstanding", () => {
+test("growth helpers parse labels and detect holds without hiding BI history", () => {
   assert.equal(
     customerAuditHrefFromGrowthRow({ label: "Sheem Al Majd Trading Company · 12558C" }),
     "/management/customer-audit?customer_code=12558C",
@@ -33,7 +33,7 @@ test("held customer rows hide legal transfers and 60+ day outstanding", () => {
     },
   }), true);
 
-  const report = applyCustomerGrowthHolds({
+  const source = {
     filters: { groupBy: "customer" },
     groups: [
       { label: "Sheem Al Majd Trading Company · 12558C", status: "red" },
@@ -43,13 +43,12 @@ test("held customer rows hide legal transfers and 60+ day outstanding", () => {
       { title: "Sheem Al Majd Trading Company · 12558C" },
     ],
     meta: { groupBy: "customer" },
-  }, {
+  };
+  const report = applyCustomerGrowthHolds(source, {
     legalTransfers: [{ customer_code: "12558C", is_transferred: true }],
   });
 
-  assert.equal(report.groups.length, 1);
-  assert.equal(report.groups[0].label, "Active Shop · 10A");
-  assert.equal(report.alerts.length, 0);
-  assert.equal(report.meta.decliningCount, 0);
-  assert.equal(report.meta.heldCustomersHidden, 1);
+  // BI history stays complete — overdue/legal customers are not removed.
+  assert.equal(report.groups.length, 2);
+  assert.equal(report, source);
 });

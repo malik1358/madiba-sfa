@@ -539,3 +539,89 @@ test("typed Credit Note with positive amount reverses matching invoice next day 
   assert.ok(!live.includes("NFD/402"));
   assert.ok(live.includes("NFD/414"));
 });
+
+test("Tally vs FIFO discrepancy report flags over-allocated paid on partial invoice", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-05-24", voucher_number: "NFD/868", sales_amount: 29870, category: "Paper" },
+      { transaction_date: "2026-07-29", voucher_number: "RNFD/158", sales_amount: 53315, category: "Paper" },
+    ],
+    receipts: [{ receipt_date: "2026-07-29", amount: 22956.11, vch_no: "1346" }],
+    outstandingCustomer: { total_outstanding: 76107.6, open_invoices: 2 },
+    outstandingInvoices: [
+      { invoice_date: "2026-05-24", ref_no: "NFD/868", pending_amount: 14795.35, invoice_day: 112 },
+      { invoice_date: "2026-07-29", ref_no: "RNFD/158", pending_amount: 61312.25, invoice_day: 46 },
+    ],
+    todayIso: "2026-09-16",
+  });
+
+  const nfd868 = ledger.invoices.find((row) => row.voucher_number === "NFD/868");
+  assert.equal(Number(nfd868.paid_amount.toFixed(2)), 19555.15);
+  assert.equal(Number(nfd868.fifo_paid.toFixed(2)), 22956.11);
+
+  const gap = ledger.tallyFifoDiscrepancies.find((row) => row.voucher_number === "NFD/868");
+  assert.ok(gap);
+  assert.equal(Number(gap.paid_delta.toFixed(2)), 3400.96);
+  assert.equal(Number(gap.open_delta.toFixed(2)), -3400.96);
+  assert.match(gap.note, /over-allocated/i);
+  assert.equal(gap.receipt_chunks[0].vch_no, "1346");
+  assert.ok(ledger.totals.tally_fifo_over_allocated > 3400);
+});
+
+test("orphan CN matches replacement invoice ±1 day by amount and items (2384 → 2397)", () => {
+  const item = { item_code: "P-100", item_name: "Paper A4", quantity: 10, category: "Paper" };
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      // Original bill 31 Dec — fully reversed same day by CN 121.
+      {
+        transaction_date: "2025-12-31",
+        voucher_number: "2384",
+        sales_amount: 18026.2,
+        ...item,
+      },
+      {
+        transaction_date: "2025-12-31",
+        voucher_number: "121",
+        voucher_type: "Credit Note",
+        reference: "2384",
+        sales_amount: 18026.2,
+        ...item,
+      },
+      // Orphan CN typed with the voided voucher no. — books apply it to the reissue.
+      {
+        transaction_date: "2025-12-31",
+        voucher_number: "2384",
+        voucher_type: "Credit Note",
+        reference: "2384",
+        sales_amount: 18026.2,
+        ...item,
+      },
+      // Replacement invoice next day — same amount and items.
+      {
+        transaction_date: "2026-01-01",
+        voucher_number: "2397",
+        sales_amount: 18026.2,
+        ...item,
+      },
+    ],
+    receipts: [{ receipt_date: "2026-02-03", amount: 20730.13, vch_no: "R1" }],
+    outstandingInvoices: [
+      { invoice_date: "2026-01-01", ref_no: "2397", pending_amount: 0, invoice_day: 0 },
+    ],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 1);
+  assert.equal(ledger.reversedInvoices[0].voucher_number, "2384");
+  assert.equal(ledger.reversedInvoices[0].credit_note_voucher, "121");
+
+  assert.equal(ledger.creditNotes.length, 1);
+  assert.equal(ledger.creditNotes[0].voucher_number, "2384");
+  assert.equal(ledger.creditNotes[0].applied_to_voucher, "2397");
+  assert.equal(ledger.creditNotes[0].applied_to_date, "2026-01-01");
+
+  const reissue = ledger.invoices.find((row) => row.voucher_number === "2397");
+  assert.ok(reissue);
+  assert.equal(reissue.credit_notes.length, 1);
+  assert.equal(reissue.credit_notes[0].voucher_number, "2384");
+});

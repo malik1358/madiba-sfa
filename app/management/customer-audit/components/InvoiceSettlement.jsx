@@ -298,8 +298,9 @@ export default function InvoiceSettlement({ ledger, filenamePrefix = "customer-s
           <div>
             <h3>Credit Notes & Sales Returns</h3>
             <p className="auditSectionNote">
-              Partial or later credit notes and sales returns. Nested under the invoice with cash
-              receipts for display only — never included in avg days to pay or collected cash.
+              Partial or later credit notes and sales returns. Orphans cross to a same-amount
+              invoice 1 day back or front (items when available). Nested under the invoice for
+              display only — never included in avg days to pay or collected cash.
             </p>
           </div>
           <span>{formatCount(totals.credit_note_count || creditNotes.length)} vouchers</span>

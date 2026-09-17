@@ -62,6 +62,23 @@ function lineVatInclAmount(row, amountExclVat) {
   return amountInclVatFromExcl(amountExclVat, vatRate);
 }
 
+/** Credit notes / sales returns: typed voucher, or negative amount/qty lines. */
+export function isCreditNoteTransaction(row = {}) {
+  const type = String(row?.voucher_type || "").trim().toUpperCase();
+  if (
+    type.includes("CREDIT NOTE")
+    || type.includes("CREDITNOTE")
+    || type === "CN"
+    || type.includes("SALES RETURN")
+    || /\bSR\b/.test(type)
+  ) {
+    return true;
+  }
+  if (toNumber(row?.sales_amount) < 0) return true;
+  if (toNumber(row?.quantity) < 0) return true;
+  return false;
+}
+
 function sortVoucherRows(rows) {
   return [...rows].sort((left, right) => {
     const leftDate = left.invoice_date || left.credit_date || "";
@@ -80,6 +97,7 @@ export function buildSalesInvoices(transactions = []) {
   const map = new Map();
 
   (Array.isArray(transactions) ? transactions : []).forEach((row) => {
+    if (isCreditNoteTransaction(row)) return;
     const invoiceDate = dateOnly(row?.transaction_date);
     if (!invoiceDate) return;
     const amountExclVat = toNumber(row?.sales_amount);
@@ -105,19 +123,21 @@ export function buildSalesInvoices(transactions = []) {
 }
 
 /**
- * Collapse negative sales lines into credit-note / sales-return vouchers
- * (absolute amounts, VAT-incl). Gloves stay excl. VAT.
+ * Collapse credit-note / sales-return lines into vouchers (absolute amounts, VAT-incl).
+ * Detects negative sales amounts and Credit Note / Sales Return voucher types
+ * (even when the Excel amount is stored as a positive figure).
  */
 export function buildCreditNotes(transactions = []) {
   const map = new Map();
 
   (Array.isArray(transactions) ? transactions : []).forEach((row) => {
+    if (!isCreditNoteTransaction(row)) return;
     const creditDate = dateOnly(row?.transaction_date);
     if (!creditDate) return;
-    const amountExclVat = toNumber(row?.sales_amount);
-    if (amountExclVat >= 0) return;
+    const rawAmount = toNumber(row?.sales_amount);
+    if (rawAmount === 0) return;
+    const absExcl = Math.abs(rawAmount);
 
-    const absExcl = Math.abs(amountExclVat);
     const amountInclVat = lineVatInclAmount(row, absExcl);
     const voucher = String(row?.voucher_number || row?.reference || "").trim();
     const reference = String(row?.reference || "").trim();

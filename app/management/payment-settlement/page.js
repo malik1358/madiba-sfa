@@ -819,7 +819,9 @@ export default function PaymentSettlementPage() {
                   </span>
                 </div>
                 <p className="moduleHint">
-                  Same-day or next-day credit notes that fully reverse an invoice. These are not customer payments.
+                  Same-day, next-day, or previous-day credit notes that fully reverse an invoice
+                  (including reissue pairs like CN on 31 Dec against invoice on 1 Jan). These are not
+                  customer payments.
                 </p>
                 <ExportableTable filename="payment-settlement-reversed" sheetName="Reversed" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">

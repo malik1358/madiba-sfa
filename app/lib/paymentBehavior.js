@@ -438,7 +438,9 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
 }
 
 /**
- * Pair invoices with credit notes posted the same day or next day for the same amount.
+ * Pair invoices with credit notes within ±1 day for the same full amount.
+ * Covers same-day / next-day voids and reissue pairs where the CN is dated
+ * one day before the replacement invoice (e.g. CN 2384 on 31 Dec → invoice 2397 on 1 Jan).
  * These are voids/reversals, not customer payments — exclude from avg days to pay.
  */
 export function findImmediateCreditNoteReversals(
@@ -460,12 +462,16 @@ export function findImmediateCreditNoteReversals(
     const candidates = unusedNotes
       .map((note, index) => {
         if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) return null;
-        if (String(note.credit_date || "") < String(invoice.invoice_date || "")) return null;
-        const days = isoDaysBetween(note.credit_date, invoice.invoice_date);
-        if (days == null || days > maxDays) return null;
+
+        const offset = isoDayOffset(invoice.invoice_date, note.credit_date);
+        if (offset == null || Math.abs(offset) > maxDays) return null;
+        const days = Math.abs(offset);
 
         const amountOk = amountsMatch(note.remaining, invoiceAmount)
           || amountsMatch(note.amount, invoiceAmount);
+        // Full reverse only — partial credit notes stay in the normal ledger.
+        if (!amountOk) return null;
+
         const noteRef = normalizeRef(note.reference || note.voucher_number);
         const invoiceRef = normalizeRef(invoice.voucher_number);
         const refHit = Boolean(
@@ -473,20 +479,27 @@ export function findImmediateCreditNoteReversals(
           && noteRef
           && (noteRef.includes(invoiceRef) || invoiceRef.includes(noteRef)),
         );
-        if (!amountOk && !refHit) return null;
-        if (!amountOk && refHit && toNumber(note.remaining) + AMOUNT_TOLERANCE < invoiceAmount) {
-          return null;
-        }
-        // Full reverse only — partial credit notes stay in the normal ledger.
-        if (!amountsMatch(note.remaining, invoiceAmount) && !amountsMatch(note.amount, invoiceAmount)) {
-          return null;
-        }
+        const itemOverlap = itemCodeOverlapCount(note.item_codes, invoice.item_codes)
+          || itemOverlapCount(note.items, invoice.items);
+        const noteHasItems = (Array.isArray(note.item_codes) && note.item_codes.length > 0)
+          || (Array.isArray(note.items) && note.items.length > 0);
+        const invoiceHasItems = (Array.isArray(invoice.item_codes) && invoice.item_codes.length > 0)
+          || (Array.isArray(invoice.items) && invoice.items.length > 0);
+        // When both sides have items, require overlap so a same-amount CN does not
+        // reverse the wrong bill within the ±1 day window.
+        if (noteHasItems && invoiceHasItems && itemOverlap <= 0 && !refHit) return null;
 
         return {
           note,
           index,
           days,
-          score: (refHit ? 1000 : 0) + (amountOk ? 100 : 0) - days,
+          score: (refHit ? 1000 : 0)
+            + (itemOverlap * 50)
+            + (amountOk ? 100 : 0)
+            - days
+            // Prefer CN on/after the invoice when scores tie (classic void),
+            // but still allow CN one day before (replacement invoice).
+            + (offset >= 0 ? 5 : 0),
         };
       })
       .filter(Boolean)

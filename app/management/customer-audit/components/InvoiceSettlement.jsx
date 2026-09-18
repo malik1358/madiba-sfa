@@ -340,7 +340,8 @@ export default function InvoiceSettlement({
           <div>
             <h3>Reversed by Credit Note</h3>
             <p className="auditSectionNote">
-              Same-day or next-day credit notes that fully reverse an invoice. Excluded from avg days to pay.
+              Same-day, next-day, or previous-day credit notes that fully reverse an invoice
+              (including reissue pairs). Excluded from avg days to pay.
             </p>
           </div>
           <span>{formatCount(totals.reversed_invoice_count || 0)} excluded from avg days</span>

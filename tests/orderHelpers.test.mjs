@@ -53,3 +53,42 @@ test("buildOrderCatalog hides building material items even when unclassified", (
 
   assert.deepEqual(catalog.map((item) => item.item_code), ["A005425"]);
 });
+
+test("buildOrderCatalog prefers Google Sheet names over do-not-use sales names", () => {
+  const catalog = buildOrderCatalog(
+    [{
+      item_code: "A004187",
+      item_name: "A004187_PAPER JUMBO ROLL DO NOT USEE",
+      category: "Sundry",
+    }],
+    [{
+      item_code: "A004187",
+      item_name: "JUMBO TISSUE ROLL 17.3 * 300MTR 1PLY ROLL X 6 PCS (PTJTR-300)",
+      category: "Sundry",
+    }],
+    { A004187: 42 }
+  );
+
+  assert.equal(catalog.length, 1);
+  assert.equal(catalog[0].item_code, "A004187");
+  assert.match(catalog[0].item_name, /JUMBO TISSUE ROLL/i);
+});
+
+test("buildOrderCatalog keeps a usable replacement name over a do-not-use sheet name", () => {
+  const catalog = buildOrderCatalog(
+    [{
+      item_code: "A004078",
+      item_name: "BOX FILE FIXED MECH ARCH FILE 24PC - ENGLISH",
+      category: "Stationery",
+    }],
+    [{
+      item_code: "A004078",
+      item_name: "BOX FILE DO NOT USE old code",
+      category: "Stationery",
+    }],
+    { A004078: 12 }
+  );
+
+  assert.equal(catalog.length, 1);
+  assert.match(catalog[0].item_name, /BOX FILE FIXED/i);
+});

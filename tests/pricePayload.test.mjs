@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isBuildingMaterialItem, isExcludedCategory, loadPricePayload, parsePricePayload, pickCatalogCategory } from '../app/lib/pricePayload.js';
+import { isBuildingMaterialItem, isExcludedCategory, loadPricePayload, overlayGoogleSheetItemNames, parsePricePayload, pickCatalogCategory } from '../app/lib/pricePayload.js';
 
 test('isExcludedCategory hides building material from order catalogs', () => {
   assert.equal(isExcludedCategory('Building Material'), true);
@@ -44,6 +44,11 @@ test('isBuildingMaterialItem hides unclassified boards, ladders, and fans', () =
     item_code: 'A005425',
     item_name: 'PHOTOCOPY PAPER A4 80GSM 500SHEE/PCK , 5PCK/BOX, GOLDEN STAR',
     category: 'Missing Category',
+  }), false);
+  assert.equal(isBuildingMaterialItem({
+    item_code: 'A004187',
+    item_name: 'JUMBO TISSUE ROLL 17.3 * 300MTR 1PLY ROLL X 6 PCS (PTJTR-300)',
+    category: 'Sundry',
   }), false);
   assert.equal(isBuildingMaterialItem({
     item_code: 'LP00190',
@@ -268,4 +273,42 @@ test('loadPricePayload clears stale browser cache before loading fresh prices', 
 
   delete globalThis.window;
   delete globalThis.fetch;
+});
+
+test('overlayGoogleSheetItemNames prefers live Google Sheet names over do-not-use cache names', () => {
+  const merged = overlayGoogleSheetItemNames(
+    [{
+      item_code: 'A004187',
+      item_name: 'A004187_PAPER JUMBO ROLL DO NOT USEE',
+      category: 'Sundry',
+      source: 'ENRICHED_CACHE',
+    }],
+    [{
+      item_code: 'A004187',
+      item_name: 'JUMBO TISSUE ROLL 17.3 * 300MTR 1PLY ROLL X 6 PCS (PTJTR-300)',
+      category: 'Sundry',
+      source: 'GOOGLE_SHEET',
+    }],
+  );
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].item_code, 'A004187');
+  assert.match(merged[0].item_name, /JUMBO TISSUE ROLL/i);
+  assert.equal(merged[0].source, 'GOOGLE_SHEET');
+});
+
+test('parsePricePayload keeps jumbo tissue sheet rows for ordering', () => {
+  const { sheetItems } = parsePricePayload({
+    priceMap: { A004187: 42 },
+    sheetItems: [{
+      item_code: 'A004187',
+      item_name: 'JUMBO TISSUE ROLL 17.3 * 300MTR 1PLY ROLL X 6 PCS (PTJTR-300)',
+      category: 'Sundry',
+      source: 'GOOGLE_SHEET',
+    }],
+  });
+
+  const item = sheetItems.find((entry) => entry.item_code === 'A004187');
+  assert.ok(item);
+  assert.match(item.item_name, /JUMBO TISSUE ROLL/i);
 });

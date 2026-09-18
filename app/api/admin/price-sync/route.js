@@ -55,6 +55,7 @@ function hasMeaningfulItemName(value, itemCode = "") {
   const text = normalizeText(value);
   if (!text) return false;
   if (isPlaceholderValue(text)) return false;
+  if (/do\s*not\s*use+/i.test(text)) return false;
   if (/^[A-Z][A-Z0-9/.-]{3,20}$/i.test(text)) return false;
   if (normalizeCode(text) === normalizeCode(itemCode)) return false;
   return true;

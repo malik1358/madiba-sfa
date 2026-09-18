@@ -6,6 +6,22 @@ function hasCurrentItemName(value, itemCode) {
   return Boolean(text) && normalizeCode(text) !== normalizeCode(itemCode) && !isDoNotUseItem(text);
 }
 
+/**
+ * Prefer Google Sheet / catalog product names over bare codes and over
+ * discontinued "DO NOT USE" sales names.
+ */
+export function pickCatalogItemName(names, itemCode) {
+  const cleaned = (Array.isArray(names) ? names : [names])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  const usable = cleaned.find((name) => hasCurrentItemName(name, itemCode));
+  if (usable) return usable;
+
+  const nonCode = cleaned.find((name) => normalizeCode(name) !== normalizeCode(itemCode));
+  return nonCode || itemCode;
+}
+
 export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList = {}) {
   const itemMap = new Map();
   const excludedCodes = new Set();
@@ -16,7 +32,7 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
     const nextItem = {
       ...item,
       item_code: code,
-      item_name: String(item.item_name || code).trim(),
+      item_name: pickCatalogItemName([item.item_name], code),
       category: pickCatalogCategory(item.category) || 'Unclassified',
     };
     if (isBuildingMaterialItem(nextItem)) {
@@ -30,14 +46,12 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
     const code = normalizeCode(sheetItem?.item_code);
     if (!code) return;
     const existing = itemMap.get(code);
-    const sheetName = String(sheetItem.item_name || '').trim();
     const sheetCategory = String(sheetItem.category || '').trim();
+    // Sheet name first so Google Sheet labels win over sales/master names.
     const nextItem = {
       ...(existing || {}),
       item_code: code,
-      item_name: hasCurrentItemName(sheetName, code)
-        ? sheetName
-        : (hasCurrentItemName(existing?.item_name, code) ? existing.item_name : code),
+      item_name: pickCatalogItemName([sheetItem.item_name, existing?.item_name], code),
       category: pickCatalogCategory(sheetCategory, existing?.category) || 'Missing Category',
     };
     if (isBuildingMaterialItem(nextItem)) {

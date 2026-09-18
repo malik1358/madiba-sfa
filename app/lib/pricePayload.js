@@ -45,13 +45,67 @@ export function isMissingOrderCategory(value) {
   return compact === "missingcategory";
 }
 
-const PAPER_STATIONERY_NAME_PATTERN = /photocopy|copy\s*paper|\bgsm\b|\breams?\b|(?:\ba4\b.{0,24}\bpaper\b)|(?:\bpaper\b.{0,24}\ba4\b)/i;
+const PAPER_STATIONERY_NAME_PATTERN = /photocopy|copy\s*paper|\bgsm\b|\breams?\b|(?:\ba4\b.{0,24}\bpaper\b)|(?:\bpaper\b.{0,24}\ba4\b)|\btissues?\b|\btoilet\s*papers?\b|\bkitchen\s*towels?\b|\bnapkins?\b|\bjumbo\s*(?:tissue|roll|papers?)\b|\bpaper\s*jumbo\b/i;
 const BUILDING_MATERIAL_NAME_PATTERN = /(?:^|[^a-z0-9])(?:mdf|hdf|osb|hmr|lvl|grade[\s-]*e2|plywood|chipboard|particle\s*boards?|gypsum|plasterboards?|ventilation|ladders?|melamine|blockboards?|sandwich\s*panels?|rebar|concrete|steel\s*mesh|steel\s*bars?|angle\s*irons?|cement\s*boards?|tie\s*rods?|welding\s*rods?|wing\s*nuts?|hessian|jute|curing|mesh)(?:[^a-z0-9]|$)/i;
 const BUILDING_MATERIAL_SHEET_SIZE_PATTERN = /\b\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)?\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in)(?:\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:mm|cm|mtr|meter|metre|inch|in))?\b/i;
 const BUILDING_MATERIAL_FAN_PATTERN = /(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b).{0,24}\bfans?\b|\bfans?\b.{0,24}(?:\b\d+\s*-?\s*inch\b|\bportable\b|\bindustrial\b|\bventilation\b)/i;
 
 export function isPaperStationeryName(value) {
   return PAPER_STATIONERY_NAME_PATTERN.test(normalizeText(value));
+}
+
+export function isUsableCatalogItemName(value, itemCode = "") {
+  const text = normalizeText(value);
+  if (!text) return false;
+  if (/do\s*not\s*use+/i.test(text)) return false;
+  if (looksLikeItemCode(text)) return false;
+  if (normalizeCode(text) === normalizeCode(itemCode)) return false;
+  return true;
+}
+
+/**
+ * Prefer live Google Sheet item names over cached/sales names.
+ * Uses the sheet label whenever it is a real product name.
+ */
+export function overlayGoogleSheetItemNames(sheetItems, googleSheetItems) {
+  const byCode = new Map();
+
+  (Array.isArray(sheetItems) ? sheetItems : []).forEach((item) => {
+    const code = normalizeCode(item?.item_code);
+    if (!code) return;
+    byCode.set(code, {
+      ...item,
+      item_code: code,
+      item_name: normalizeText(item?.item_name) || code,
+      category: normalizeText(item?.category) || "Unclassified",
+    });
+  });
+
+  (Array.isArray(googleSheetItems) ? googleSheetItems : []).forEach((item) => {
+    const code = normalizeCode(item?.item_code);
+    const name = normalizeText(item?.item_name);
+    if (!code || !isUsableCatalogItemName(name, code)) return;
+
+    const existing = byCode.get(code);
+    if (!existing) {
+      byCode.set(code, {
+        item_code: code,
+        item_name: name,
+        category: pickCatalogCategory(item.category) || "Unclassified",
+        source: item.source || "GOOGLE_SHEET",
+      });
+      return;
+    }
+
+    byCode.set(code, {
+      ...existing,
+      item_name: name,
+      category: pickCatalogCategory(item.category, existing.category) || existing.category || "Unclassified",
+      source: "GOOGLE_SHEET",
+    });
+  });
+
+  return Array.from(byCode.values());
 }
 
 export function isBuildingMaterialName(value) {

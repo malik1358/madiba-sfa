@@ -36,6 +36,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import ExportableTable from "../../components/ExportableTable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
+import { pickCatalogItemName } from "../customer-audit/lib/orderHelpers";
 import { qtyFormat } from "../customer-audit/lib/format";
 import { useAnalytics } from "../customer-audit/hooks/useAnalytics";
 import { useQuickOrder } from "../customer-audit/hooks/useQuickOrder";
@@ -658,7 +659,7 @@ export default function NewOrderPage() {
       const nextItem = {
         ...item,
         item_code: code,
-        item_name: String(historyFallback.item_name || item.item_name || code).trim(),
+        item_name: pickCatalogItemName([historyFallback.item_name, item.item_name], code),
         category: pickCatalogCategory(historyFallback.category, item.category) || "Unclassified",
         source: "ITEM_MASTER",
       };
@@ -682,9 +683,8 @@ export default function NewOrderPage() {
         const sheetName = normalizeText(sheetItem.item_name);
         const historyCategory = normalizeText(historyFallback.category);
         const sheetCategory = normalizeText(sheetItem.category);
-        const nextName = hasCurrentItemName(historyName, code)
-          ? historyName
-          : (hasCurrentItemName(sheetName, code) ? sheetName : code);
+        // Google Sheet name first, then sales history.
+        const nextName = pickCatalogItemName([sheetName, historyName], code);
         const nextCategory = pickCatalogCategory(sheetCategory, historyCategory) || MISSING_CATEGORY;
         const nextItem = {
           item_code: code,
@@ -708,12 +708,7 @@ export default function NewOrderPage() {
       const sheetCategory = normalizeText(sheetItem.category);
       const historyFallback = historyCategoryLookup.get(code) || {};
       const historyName = normalizeText(historyFallback.item_name);
-
-      const nextName = hasCurrentItemName(historyName, code)
-        ? historyName
-        : (hasCurrentItemName(sheetName, code)
-          ? sheetName
-          : (hasCurrentItemName(existingName, code) ? existingName : code));
+      const nextName = pickCatalogItemName([sheetName, historyName, existingName], code);
       const nextCategory = pickCatalogCategory(sheetCategory, historyFallback.category, existingCategory) || "Unclassified";
       const nextItem = {
         ...existing,
@@ -735,15 +730,11 @@ export default function NewOrderPage() {
       const code = normalizeCode(rawCode);
       if (!code || itemMap.has(code) || excludedCodes.has(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
-
-      const fallbackName = hasCurrentItemName(historyFallback.item_name, code)
-        ? historyFallback.item_name
-        : "";
       const fallbackCategory = historyFallback.category || "";
 
       itemMap.set(code, {
         item_code: code,
-        item_name: fallbackName || code,
+        item_name: pickCatalogItemName([historyFallback.item_name], code),
         category: pickCatalogCategory(fallbackCategory) || MISSING_CATEGORY,
         source: "PRICE_MAP_ONLY",
       });

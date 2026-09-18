@@ -36,6 +36,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import ExportableTable from "../../components/ExportableTable";
 import { useOrder } from "../customer-audit/hooks/useOrder";
 import { getPrice, isDoNotUseItem } from "../customer-audit/lib/helpers";
+import { pickCatalogItemName } from "../customer-audit/lib/orderHelpers";
 import { qtyFormat } from "../customer-audit/lib/format";
 import { useAnalytics } from "../customer-audit/hooks/useAnalytics";
 import { useQuickOrder } from "../customer-audit/hooks/useQuickOrder";
@@ -655,10 +656,15 @@ export default function NewOrderPage() {
       const code = normalizeCode(item.item_code);
       if (!code) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
+      const picked = pickCatalogItemName([historyFallback.item_name, item.item_name], code);
+      if (picked.exclude) {
+        excludedCodes.add(code);
+        return;
+      }
       const nextItem = {
         ...item,
         item_code: code,
-        item_name: String(historyFallback.item_name || item.item_name || code).trim(),
+        item_name: picked.item_name,
         category: pickCatalogCategory(historyFallback.category, item.category) || "Unclassified",
         source: "ITEM_MASTER",
       };
@@ -682,13 +688,15 @@ export default function NewOrderPage() {
         const sheetName = normalizeText(sheetItem.item_name);
         const historyCategory = normalizeText(historyFallback.category);
         const sheetCategory = normalizeText(sheetItem.category);
-        const nextName = hasCurrentItemName(historyName, code)
-          ? historyName
-          : (hasCurrentItemName(sheetName, code) ? sheetName : code);
+        const picked = pickCatalogItemName([historyName, sheetName], code);
+        if (picked.exclude) {
+          excludedCodes.add(code);
+          return;
+        }
         const nextCategory = pickCatalogCategory(sheetCategory, historyCategory) || MISSING_CATEGORY;
         const nextItem = {
           item_code: code,
-          item_name: nextName,
+          item_name: picked.item_name,
           category: nextCategory,
           source: "PRICE_SHEET_ONLY",
         };
@@ -698,6 +706,7 @@ export default function NewOrderPage() {
           return;
         }
 
+        excludedCodes.delete(code);
         itemMap.set(code, nextItem);
         return;
       }
@@ -708,16 +717,16 @@ export default function NewOrderPage() {
       const sheetCategory = normalizeText(sheetItem.category);
       const historyFallback = historyCategoryLookup.get(code) || {};
       const historyName = normalizeText(historyFallback.item_name);
-
-      const nextName = hasCurrentItemName(historyName, code)
-        ? historyName
-        : (hasCurrentItemName(sheetName, code)
-          ? sheetName
-          : (hasCurrentItemName(existingName, code) ? existingName : code));
+      const picked = pickCatalogItemName([historyName, sheetName, existingName], code);
+      if (picked.exclude) {
+        excludedCodes.add(code);
+        itemMap.delete(code);
+        return;
+      }
       const nextCategory = pickCatalogCategory(sheetCategory, historyFallback.category, existingCategory) || "Unclassified";
       const nextItem = {
         ...existing,
-        item_name: nextName,
+        item_name: picked.item_name,
         category: nextCategory,
         source: existing.source === "PRICE_SHEET_ONLY" || hasMeaningfulValue(sheetCategory) ? "PRICE_SHEET" : existing.source,
       };
@@ -728,6 +737,7 @@ export default function NewOrderPage() {
         return;
       }
 
+      excludedCodes.delete(code);
       itemMap.set(code, nextItem);
     });
 
@@ -735,15 +745,16 @@ export default function NewOrderPage() {
       const code = normalizeCode(rawCode);
       if (!code || itemMap.has(code) || excludedCodes.has(code)) return;
       const historyFallback = historyCategoryLookup.get(code) || {};
-
-      const fallbackName = hasCurrentItemName(historyFallback.item_name, code)
-        ? historyFallback.item_name
-        : "";
+      const picked = pickCatalogItemName([historyFallback.item_name], code);
+      if (picked.exclude) {
+        excludedCodes.add(code);
+        return;
+      }
       const fallbackCategory = historyFallback.category || "";
 
       itemMap.set(code, {
         item_code: code,
-        item_name: fallbackName || code,
+        item_name: picked.item_name,
         category: pickCatalogCategory(fallbackCategory) || MISSING_CATEGORY,
         source: "PRICE_MAP_ONLY",
       });

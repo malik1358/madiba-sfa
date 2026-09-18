@@ -1,8 +1,8 @@
 "use client";
 
 import { Fragment, useDeferredValue, useMemo, useState } from "react";
-import { getPrice, isDoNotUseItem, normalizeCode } from "../lib/helpers";
-import { isBuildingMaterialItem, pickCatalogCategory } from "../../../lib/pricePayload";
+import { getPrice, normalizeCode } from "../lib/helpers";
+import { buildOrderCatalog } from "../lib/orderHelpers";
 import { formatSchemeDetail, lookupSchemeApplication } from "../../../lib/orderSchemes";
 import { formatAppliedDiscount, getPricedOrderLine, lookupDiscountRate } from "../../../lib/regionalPricing";
 import ExportableTable from "../../../components/ExportableTable";
@@ -23,68 +23,6 @@ function normalizeCategoryLabel(value) {
     .join(" ");
 }
 
-function hasCurrentItemName(value, itemCode) {
-  const text = String(value || "").trim();
-  return Boolean(text) && normalizeCode(text) !== normalizeCode(itemCode) && !isDoNotUseItem(text);
-}
-
-function buildCatalog(itemCatalog, priceSheetItems, priceList) {
-  const itemMap = new Map();
-  const excludedCodes = new Set();
-
-  (itemCatalog || []).forEach((item) => {
-    const code = normalizeCode(item?.item_code);
-    if (!code) return;
-    const nextItem = {
-      ...item,
-      item_code: code,
-      item_name: String(item.item_name || code).trim(),
-      category: pickCatalogCategory(item.category) || "Unclassified",
-    };
-    if (isBuildingMaterialItem(nextItem)) {
-      excludedCodes.add(code);
-      return;
-    }
-    itemMap.set(code, nextItem);
-  });
-
-  (priceSheetItems || []).forEach((sheetItem) => {
-    const code = normalizeCode(sheetItem?.item_code);
-    if (!code) return;
-    const existing = itemMap.get(code);
-    const sheetName = String(sheetItem.item_name || "").trim();
-    const sheetCategory = String(sheetItem.category || "").trim();
-    const nextItem = {
-      ...(existing || {}),
-      item_code: code,
-      item_name: hasCurrentItemName(sheetName, code)
-        ? sheetName
-        : (hasCurrentItemName(existing?.item_name, code) ? existing.item_name : code),
-      category: pickCatalogCategory(sheetCategory, existing?.category) || "Missing Category",
-    };
-    if (isBuildingMaterialItem(nextItem)) {
-      excludedCodes.add(code);
-      itemMap.delete(code);
-      return;
-    }
-    itemMap.set(code, nextItem);
-  });
-
-  Object.keys(priceList || {}).forEach((rawCode) => {
-    const code = normalizeCode(rawCode);
-    if (!code || itemMap.has(code) || excludedCodes.has(code)) return;
-    itemMap.set(code, {
-      item_code: code,
-      item_name: code,
-      category: "Missing Category",
-    });
-  });
-
-  return Array.from(itemMap.values())
-    .filter((item) => !isDoNotUseItem(item.item_name) && !isBuildingMaterialItem(item))
-    .sort((left, right) => String(left.item_name || left.item_code).localeCompare(String(right.item_name || right.item_code)));
-}
-
 export default function FullItemList({ itemCatalog, priceSheetItems, orderQuantities, decreaseOrderQty, increaseOrderQty, changeOrderQty, priceList, cashDiscountMap = {}, valueDiscountMap = {}, paymentType = "credit", schemeApplications = {} }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
@@ -93,7 +31,7 @@ export default function FullItemList({ itemCatalog, priceSheetItems, orderQuanti
   const query = normalizedText(deferredSearch);
 
   const catalog = useMemo(
-    () => buildCatalog(itemCatalog, priceSheetItems, priceList),
+    () => buildOrderCatalog(itemCatalog, priceSheetItems, priceList),
     [itemCatalog, priceSheetItems, priceList]
   );
 

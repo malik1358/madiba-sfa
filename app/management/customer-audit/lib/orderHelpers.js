@@ -6,6 +6,29 @@ function hasCurrentItemName(value, itemCode) {
   return Boolean(text) && normalizeCode(text) !== normalizeCode(itemCode) && !isDoNotUseItem(text);
 }
 
+/**
+ * Prefer a real product name. If the only known names are discontinued
+ * ("DO NOT USE"), mark the item excluded instead of falling back to the bare
+ * item code (which previously made discontinued rows look like nameless SKUs).
+ */
+export function pickCatalogItemName(names, itemCode) {
+  const cleaned = (Array.isArray(names) ? names : [names])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  const usable = cleaned.find((name) => hasCurrentItemName(name, itemCode));
+  if (usable) {
+    return { item_name: usable, exclude: false };
+  }
+
+  const discontinued = cleaned.find((name) => isDoNotUseItem(name));
+  if (discontinued) {
+    return { item_name: discontinued, exclude: true };
+  }
+
+  return { item_name: itemCode, exclude: false };
+}
+
 export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList = {}) {
   const itemMap = new Map();
   const excludedCodes = new Set();
@@ -13,10 +36,15 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
   (itemCatalog || []).forEach((item) => {
     const code = normalizeCode(item?.item_code);
     if (!code) return;
+    const picked = pickCatalogItemName([item.item_name], code);
+    if (picked.exclude) {
+      excludedCodes.add(code);
+      return;
+    }
     const nextItem = {
       ...item,
       item_code: code,
-      item_name: String(item.item_name || code).trim(),
+      item_name: picked.item_name,
       category: pickCatalogCategory(item.category) || 'Unclassified',
     };
     if (isBuildingMaterialItem(nextItem)) {
@@ -30,14 +58,17 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
     const code = normalizeCode(sheetItem?.item_code);
     if (!code) return;
     const existing = itemMap.get(code);
-    const sheetName = String(sheetItem.item_name || '').trim();
     const sheetCategory = String(sheetItem.category || '').trim();
+    const picked = pickCatalogItemName([sheetItem.item_name, existing?.item_name], code);
+    if (picked.exclude) {
+      excludedCodes.add(code);
+      itemMap.delete(code);
+      return;
+    }
     const nextItem = {
       ...(existing || {}),
       item_code: code,
-      item_name: hasCurrentItemName(sheetName, code)
-        ? sheetName
-        : (hasCurrentItemName(existing?.item_name, code) ? existing.item_name : code),
+      item_name: picked.item_name,
       category: pickCatalogCategory(sheetCategory, existing?.category) || 'Missing Category',
     };
     if (isBuildingMaterialItem(nextItem)) {
@@ -45,6 +76,7 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
       itemMap.delete(code);
       return;
     }
+    excludedCodes.delete(code);
     itemMap.set(code, nextItem);
   });
 

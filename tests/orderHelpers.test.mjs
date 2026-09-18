@@ -53,3 +53,43 @@ test("buildOrderCatalog hides building material items even when unclassified", (
 
   assert.deepEqual(catalog.map((item) => item.item_code), ["A005425"]);
 });
+
+test("buildOrderCatalog hides discontinued do-not-use items instead of showing bare codes", () => {
+  const catalog = buildOrderCatalog(
+    [{
+      item_code: "A000057",
+      item_name: "PHOTOCOPY PAPER A4 80GSM 500SHEE/PCK",
+      category: "office supplies",
+    }],
+    [{
+      item_code: "A004187",
+      item_name: "A004187_PAPER JUMBO ROLL DO NOT USEE",
+      category: "Sundry",
+    }],
+    { A004187: 42, A000057: 57 }
+  );
+
+  assert.equal(catalog.some((item) => item.item_code === "A004187"), false);
+  assert.equal(catalog.length, 1);
+  assert.equal(catalog[0].item_code, "A000057");
+  assert.match(catalog[0].item_name, /PHOTOCOPY PAPER/i);
+});
+
+test("buildOrderCatalog keeps a usable replacement name over a do-not-use sheet name", () => {
+  const catalog = buildOrderCatalog(
+    [{
+      item_code: "A004078",
+      item_name: "BOX FILE FIXED MECH ARCH FILE 24PC - ENGLISH",
+      category: "Stationery",
+    }],
+    [{
+      item_code: "A004078",
+      item_name: "BOX FILE DO NOT USE old code",
+      category: "Stationery",
+    }],
+    { A004078: 12 }
+  );
+
+  assert.equal(catalog.length, 1);
+  assert.match(catalog[0].item_name, /BOX FILE FIXED/i);
+});

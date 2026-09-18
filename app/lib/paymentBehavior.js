@@ -100,7 +100,7 @@ function itemOverlapCount(leftItems = [], rightItems = []) {
   return overlap;
 }
 
-/** Credit notes / sales returns: typed voucher, or negative amount/qty lines. */
+/** Credit notes / sales returns: typed voucher, CN/SR voucher codes, or negative amount/qty. */
 export function isCreditNoteTransaction(row = {}) {
   const type = String(row?.voucher_type || "").trim().toUpperCase();
   if (
@@ -109,9 +109,24 @@ export function isCreditNoteTransaction(row = {}) {
     || type === "CN"
     || type.includes("SALES RETURN")
     || /\bSR\b/.test(type)
+    || type.includes("RETURN")
   ) {
     return true;
   }
+
+  const voucher = String(row?.voucher_number || "").trim().toUpperCase();
+  const reference = String(row?.reference || "").trim().toUpperCase();
+  const haystack = `${voucher} ${reference}`.trim();
+  // Common Tally-style codes: CN/149, SR-12, CN 88 — even when amount is stored positive.
+  if (
+    /^(CN|SR)([\s\/-]|$)/.test(voucher)
+    || /\b(CN|SR)\b/.test(haystack)
+    || haystack.includes("CREDIT NOTE")
+    || haystack.includes("SALES RETURN")
+  ) {
+    return true;
+  }
+
   if (toNumber(row?.sales_amount) < 0) return true;
   if (toNumber(row?.quantity) < 0) return true;
   return false;

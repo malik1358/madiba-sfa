@@ -44,7 +44,7 @@ import MonthlyPerformance from "./components/MonthlyPerformance";
 import CategoryPerformance from "./components/CategoryPerformance";
 import QuickOrder from "./components/QuickOrder";
 import FullItemList from "./components/FullItemList";
-import InvoiceSettlement from "./components/InvoiceSettlement";
+import InvoiceSettlement, { SalesReturnsSection } from "./components/InvoiceSettlement";
 import OrderBar from "./components/OrderBar";
 import OrderReview from "./components/OrderReview";
 import TransactionHistory from "./components/TransactionHistory";
@@ -599,6 +599,12 @@ function CustomerAuditPageContent() {
                   </tbody>
                 </table>
               </ExportableTable>
+
+              {paymentSettlement ? (
+                <div style={{ marginTop: "12px" }}>
+                  <SalesReturnsSection ledger={paymentSettlement} filenamePrefix="customer-outstanding" />
+                </div>
+              ) : null}
             </>
           )}
 
@@ -608,7 +614,7 @@ function CustomerAuditPageContent() {
         </section>
 
         {!outstandingLoading && paymentSettlement ? (
-          <InvoiceSettlement ledger={paymentSettlement} />
+          <InvoiceSettlement ledger={paymentSettlement} hideCreditNotesTable />
         ) : null}
 
         <section className="auditSection">

@@ -7,9 +7,8 @@ function hasCurrentItemName(value, itemCode) {
 }
 
 /**
- * Prefer a real product name. If the only known names are discontinued
- * ("DO NOT USE"), mark the item excluded instead of falling back to the bare
- * item code (which previously made discontinued rows look like nameless SKUs).
+ * Prefer Google Sheet / catalog product names over bare codes and over
+ * discontinued "DO NOT USE" sales names.
  */
 export function pickCatalogItemName(names, itemCode) {
   const cleaned = (Array.isArray(names) ? names : [names])
@@ -17,16 +16,10 @@ export function pickCatalogItemName(names, itemCode) {
     .filter(Boolean);
 
   const usable = cleaned.find((name) => hasCurrentItemName(name, itemCode));
-  if (usable) {
-    return { item_name: usable, exclude: false };
-  }
+  if (usable) return usable;
 
-  const discontinued = cleaned.find((name) => isDoNotUseItem(name));
-  if (discontinued) {
-    return { item_name: discontinued, exclude: true };
-  }
-
-  return { item_name: itemCode, exclude: false };
+  const nonCode = cleaned.find((name) => normalizeCode(name) !== normalizeCode(itemCode));
+  return nonCode || itemCode;
 }
 
 export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList = {}) {
@@ -36,15 +29,10 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
   (itemCatalog || []).forEach((item) => {
     const code = normalizeCode(item?.item_code);
     if (!code) return;
-    const picked = pickCatalogItemName([item.item_name], code);
-    if (picked.exclude) {
-      excludedCodes.add(code);
-      return;
-    }
     const nextItem = {
       ...item,
       item_code: code,
-      item_name: picked.item_name,
+      item_name: pickCatalogItemName([item.item_name], code),
       category: pickCatalogCategory(item.category) || 'Unclassified',
     };
     if (isBuildingMaterialItem(nextItem)) {
@@ -59,16 +47,11 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
     if (!code) return;
     const existing = itemMap.get(code);
     const sheetCategory = String(sheetItem.category || '').trim();
-    const picked = pickCatalogItemName([sheetItem.item_name, existing?.item_name], code);
-    if (picked.exclude) {
-      excludedCodes.add(code);
-      itemMap.delete(code);
-      return;
-    }
+    // Sheet name first so Google Sheet labels win over sales/master names.
     const nextItem = {
       ...(existing || {}),
       item_code: code,
-      item_name: picked.item_name,
+      item_name: pickCatalogItemName([sheetItem.item_name, existing?.item_name], code),
       category: pickCatalogCategory(sheetCategory, existing?.category) || 'Missing Category',
     };
     if (isBuildingMaterialItem(nextItem)) {
@@ -76,7 +59,6 @@ export function buildOrderCatalog(itemCatalog, priceSheetItems = [], priceList =
       itemMap.delete(code);
       return;
     }
-    excludedCodes.delete(code);
     itemMap.set(code, nextItem);
   });
 

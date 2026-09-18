@@ -54,25 +54,24 @@ test("buildOrderCatalog hides building material items even when unclassified", (
   assert.deepEqual(catalog.map((item) => item.item_code), ["A005425"]);
 });
 
-test("buildOrderCatalog hides discontinued do-not-use items instead of showing bare codes", () => {
+test("buildOrderCatalog prefers Google Sheet names over do-not-use sales names", () => {
   const catalog = buildOrderCatalog(
-    [{
-      item_code: "A000057",
-      item_name: "PHOTOCOPY PAPER A4 80GSM 500SHEE/PCK",
-      category: "office supplies",
-    }],
     [{
       item_code: "A004187",
       item_name: "A004187_PAPER JUMBO ROLL DO NOT USEE",
       category: "Sundry",
     }],
-    { A004187: 42, A000057: 57 }
+    [{
+      item_code: "A004187",
+      item_name: "JUMBO TISSUE ROLL 17.3 * 300MTR 1PLY ROLL X 6 PCS (PTJTR-300)",
+      category: "Sundry",
+    }],
+    { A004187: 42 }
   );
 
-  assert.equal(catalog.some((item) => item.item_code === "A004187"), false);
   assert.equal(catalog.length, 1);
-  assert.equal(catalog[0].item_code, "A000057");
-  assert.match(catalog[0].item_name, /PHOTOCOPY PAPER/i);
+  assert.equal(catalog[0].item_code, "A004187");
+  assert.match(catalog[0].item_name, /JUMBO TISSUE ROLL/i);
 });
 
 test("buildOrderCatalog keeps a usable replacement name over a do-not-use sheet name", () => {

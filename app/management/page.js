@@ -9,7 +9,7 @@ import SupabaseUnavailable from "../components/SupabaseUnavailable";
 import AppLanguageSwitch from "../components/AppLanguageSwitch";
 import { usePopupMessages } from "../hooks/usePopupMessages";
 import { useAppPopup } from "../components/AppPopupProvider";
-import { buildModuleAccess, listAccessibleModules, localizedModuleLabel } from "../lib/moduleAccess";
+import { buildModuleAccess, listAccessibleNavGroups, localizedModuleLabel, localizedNavGroupLabel } from "../lib/moduleAccess";
 import { formatKsaDateTime } from "../lib/workdayActivity";
 import ExportableTable from "../components/ExportableTable";
 
@@ -19,6 +19,7 @@ const TEXT = {
   dashboard: { en: "← Dashboard", ar: "← الرئيسية" },
   loading: { en: "Loading management panel...", ar: "جاري تحميل لوحة الإدارة..." },
   modules: { en: "Management Modules", ar: "وحدات الإدارة" },
+  modulesByCategory: { en: "Modules by category", ar: "الوحدات حسب الفئة" },
   health: { en: "System Health", ar: "حالة النظام" },
   recentOrders: { en: "Recent Orders", ar: "الطلبات الأخيرة" },
   customers: { en: "Customers", ar: "العملاء" },
@@ -219,34 +220,8 @@ export default function ManagementPage() {
     load();
   }, []);
 
-  const managementModules = useMemo(
-    () => listAccessibleModules(moduleAccess, [
-      "myCollections",
-      "paymentCollections",
-      "collectionReport",
-      "dailyVisitReport",
-      "userActivity",
-      "customerAudit",
-      "paymentSettlement",
-      "customerMaster",
-      "outstandingNoGps",
-      "salesmanVisitPlan",
-      "newOrder",
-      "visitWithoutOrder",
-      "salesmanHierarchy",
-      "customerBookShares",
-      "kpiTargets",
-      "schemes",
-      "orderQuantityControls",
-      "gpsMap",
-      "pendingOrders",
-      "newCustomer",
-      "myPerformance",
-      "mySalesInvoices",
-      "myDay",
-      "upload",
-      "stockTake",
-    ]),
+  const managementGroups = useMemo(
+    () => listAccessibleNavGroups(moduleAccess).filter((group) => group.key !== "home"),
     [moduleAccess],
   );
 
@@ -322,14 +297,28 @@ export default function ManagementPage() {
 
         <section className="moduleSection">
           <div className="moduleSectionHeader">
-            <h2>{t("modules")}</h2>
+            <h2>{t("modulesByCategory")}</h2>
+            <span>{managementGroups.reduce((total, group) => total + group.items.length, 0)}</span>
           </div>
-          <div className="moduleNavGrid">
-            {managementModules.map((module) => (
-              <Link key={module.moduleKey} href={module.href} className="moduleNavCard">
-                {localizedModuleLabel(module.moduleKey, language)}
-              </Link>
+          <div className="moduleCategoryStack">
+            {managementGroups.map((group) => (
+              <section key={group.key} className="moduleCategoryBlock">
+                <div className="moduleCategoryHeader">
+                  <h3>{localizedNavGroupLabel(group.key, language)}</h3>
+                  <span>{group.items.length}</span>
+                </div>
+                <div className="moduleNavGrid">
+                  {group.items.map((module) => (
+                    <Link key={module.moduleKey} href={module.href} className="moduleNavCard">
+                      {localizedModuleLabel(module.moduleKey, language)}
+                    </Link>
+                  ))}
+                </div>
+              </section>
             ))}
+            {!managementGroups.length ? (
+              <div className="moduleHint">No modules available for this role.</div>
+            ) : null}
           </div>
         </section>
 

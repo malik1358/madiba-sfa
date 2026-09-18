@@ -4895,6 +4895,42 @@ th:has(.moduleTableColumnFilterInput) {
   gap: 10px;
 }
 
+.moduleCategoryStack {
+  display: grid;
+  gap: 16px;
+}
+
+.moduleCategoryBlock {
+  padding: 12px;
+  border: 1px solid #d5e3e8;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f4fafb 0%, #ffffff 48%);
+}
+
+.moduleCategoryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #0f4c5c;
+  color: #ffffff;
+}
+
+.moduleCategoryHeader h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.moduleCategoryHeader span {
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
 .moduleNavCard {
   display: flex;
   align-items: center;

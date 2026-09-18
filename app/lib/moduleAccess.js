@@ -48,12 +48,40 @@ export const NAV_GROUPS = [
   {
     key: "field",
     label: "Field Sales",
-    modules: ["myDay", "customerAudit", "paymentSettlement", "outstandingCompare", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "salesmanVisitPlan", "itemPriceHistory"],
+    modules: [
+      "myDay",
+      "customerAudit",
+      "newOrder",
+      "visitWithoutOrder",
+      "pendingOrders",
+      "newCustomer",
+      "mySalesInvoices",
+      "salesmanVisitPlan",
+      "itemPriceHistory",
+    ],
   },
   {
     key: "collections",
     label: "Collections",
-    modules: ["paymentCollections", "collectionReport", "dailyVisitReport"],
+    modules: [
+      "paymentCollections",
+      "myCollections",
+      "collectionReport",
+      "paymentSettlement",
+      "outstandingCompare",
+    ],
+  },
+  {
+    key: "reports",
+    label: "Reports",
+    modules: [
+      "businessDashboard",
+      "myPerformance",
+      "dailyVisitReport",
+      "userActivity",
+      "outstandingNoGps",
+      "gpsMap",
+    ],
   },
   {
     key: "warehouse",
@@ -62,8 +90,16 @@ export const NAV_GROUPS = [
   },
   {
     key: "admin",
-    label: "Admin",
-    modules: ["businessDashboard", "customerMaster", "outstandingNoGps", "userActivity", "salesmanHierarchy", "customerBookShares", "kpiTargets", "schemes", "orderQuantityControls", "gpsMap", "upload"],
+    label: "Setup & Admin",
+    modules: [
+      "customerMaster",
+      "salesmanHierarchy",
+      "customerBookShares",
+      "kpiTargets",
+      "schemes",
+      "orderQuantityControls",
+      "upload",
+    ],
   },
 ];
 
@@ -247,8 +283,9 @@ export const NAV_GROUP_LABELS = {
   home: { en: "Home", ar: "الرئيسية" },
   field: { en: "Field Sales", ar: "المبيعات الميدانية" },
   collections: { en: "Collections", ar: "التحصيلات" },
+  reports: { en: "Reports", ar: "التقارير" },
   warehouse: { en: "Warehouse", ar: "المستودع" },
-  admin: { en: "Admin", ar: "الإدارة" },
+  admin: { en: "Setup & Admin", ar: "الإعداد والإدارة" },
 };
 
 export const ROLE_LABELS = {

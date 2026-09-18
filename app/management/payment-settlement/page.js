@@ -325,6 +325,7 @@ export default function PaymentSettlementPage() {
             </div>
             <div className="moduleHeaderMeta">
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
+              <Link href="/management/outstanding-compare" className="moduleBackLink">Outstanding Compare</Link>
               <Link href="/management/customer-audit" className="moduleBackLink">{t("audit")}</Link>
               <Link href="/management" className="moduleBackLink">{t("back")}</Link>
             </div>
@@ -576,9 +577,156 @@ export default function PaymentSettlementPage() {
                 </ExportableTable>
               </section>
 
+              <section className="moduleSection" id="outstanding-compare">
+                <div className="moduleSectionHeader">
+                  <h2>Tally vs Computed Outstanding</h2>
+                  <span>
+                    {formatCount(ledger.outstandingCompareTotals?.discrepancy_count || 0)} gaps ·{" "}
+                    computed {formatMoney(ledger.outstandingCompareTotals?.computed_open || 0)} ·{" "}
+                    Tally {formatMoney(ledger.outstandingCompareTotals?.tally_open || 0)}
+                  </span>
+                </div>
+                <p className="moduleHint">
+                  Computed open = sales − cash receipts (FIFO) − credit notes allocated to that invoice.
+                  Compare that to Tally outstanding. Gaps that remain after credit notes are real
+                  differences between the books and our calculation.
+                </p>
+                <div className="auditSummaryGrid" style={{ marginBottom: 12 }}>
+                  <div className="auditSummaryCard">
+                    <span>Tally outstanding</span>
+                    <strong>{formatMoney(ledger.outstandingCompareTotals?.tally_open || 0)}</strong>
+                  </div>
+                  <div className="auditSummaryCard">
+                    <span>Computed outstanding</span>
+                    <strong>{formatMoney(ledger.outstandingCompareTotals?.computed_open || 0)}</strong>
+                    <em className="auditSummaryCardMeta">
+                      Cash {formatMoney(ledger.outstandingCompareTotals?.cash_settled || 0)}
+                      {" + CN "}
+                      {formatMoney(ledger.outstandingCompareTotals?.credit_note_settled || 0)}
+                    </em>
+                  </div>
+                  <div className="auditSummaryCard">
+                    <span>Open gap (computed − Tally)</span>
+                    <strong className={deltaClass(ledger.outstandingCompareTotals?.open_delta || 0)}>
+                      {formatDelta(ledger.outstandingCompareTotals?.open_delta || 0)}
+                    </strong>
+                    <em className="auditSummaryCardMeta">
+                      Higher {formatMoney(ledger.outstandingCompareTotals?.computed_higher || 0)}
+                      {" · Lower "}
+                      {formatMoney(Math.abs(ledger.outstandingCompareTotals?.computed_lower || 0))}
+                    </em>
+                  </div>
+                </div>
+                <ExportableTable filename="payment-settlement-outstanding-compare" sheetName="OutstandingCompare" className="moduleTableWrap">
+                  <table className="moduleTable moduleBiTable paymentSettleTable">
+                    <thead>
+                      <tr>
+                        <th>Sales Date</th>
+                        <th>Voucher</th>
+                        <th>Sales incl VAT</th>
+                        <th>Cash FIFO</th>
+                        <th>Credit Notes</th>
+                        <th>Computed Settled</th>
+                        <th>Computed Open</th>
+                        <th>Tally Open</th>
+                        <th>Open Δ</th>
+                        <th>Status / note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(
+                        (ledger.outstandingCompareTotals?.has_outstanding_rows
+                          ? ledger.outstandingCompareRows
+                          : ledger.outstandingCompareAllRows)
+                        || []
+                      ).map((row) => (
+                        <tr key={`oc-${row.invoice_date}-${row.voucher_number}`}>
+                          <td>{row.invoice_date || "—"}</td>
+                          <td>{row.voucher_number || "—"}</td>
+                          <td>{formatMoney(row.sales_incl_vat)}</td>
+                          <td>{formatMoney(row.cash_settled)}</td>
+                          <td>{formatMoney(row.credit_note_settled)}</td>
+                          <td className="moduleBiTotalCol">{formatMoney(row.computed_settled)}</td>
+                          <td>{formatMoney(row.computed_open)}</td>
+                          <td>{formatMoney(row.tally_open)}</td>
+                          <td className={deltaClass(row.open_delta)}>{formatDelta(row.open_delta)}</td>
+                          <td>
+                            <span className={statusClass(
+                              row.status === "Match" || row.status === "Computed only"
+                                ? "Paid"
+                                : (row.open_delta > 0 ? "Open" : "Partial"),
+                            )}
+                            >
+                              {row.status}
+                            </span>
+                            <div className="auditSummaryCardMeta">{row.note}</div>
+                            {(row.credit_chunks || []).length ? (
+                              <div className="auditSummaryCardMeta">
+                                {(row.credit_chunks || []).map((chunk, index) => (
+                                  <div key={`cn-${chunk.voucher_number}-${index}`}>
+                                    CN {chunk.voucher_number || "—"}
+                                    {chunk.credit_date ? ` · ${chunk.credit_date}` : ""}
+                                    {`: ${formatMoney(chunk.amount)}`}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            {(row.receipt_chunks || []).length ? (
+                              <div className="auditSummaryCardMeta">
+                                {(row.receipt_chunks || []).map((chunk, index) => (
+                                  <div key={`rc-${chunk.vch_no}-${index}`}>
+                                    Rcpt {chunk.vch_no || "—"} on {chunk.receipt_date}: {formatMoney(chunk.amount)}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                      {!(
+                        (ledger.outstandingCompareTotals?.has_outstanding_rows
+                          ? ledger.outstandingCompareRows
+                          : ledger.outstandingCompareAllRows)
+                        || []
+                      ).length && (
+                        <tr>
+                          <td colSpan={10}>
+                            {Number(ledger.summary?.outstandingTotal || ledger.totals?.outstanding_unpaid || 0) > 0
+                              || ledger.outstandingCompareTotals?.has_outstanding_rows
+                              ? "No Tally vs computed outstanding gaps for this customer."
+                              : "Upload outstanding invoice rows to compare Tally with computed open (cash + CN)."}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={2}><strong>Total</strong></td>
+                        <td><strong>{formatMoney(ledger.outstandingCompareTotals?.sales_incl_vat || 0)}</strong></td>
+                        <td><strong>{formatMoney(ledger.outstandingCompareTotals?.cash_settled || 0)}</strong></td>
+                        <td><strong>{formatMoney(ledger.outstandingCompareTotals?.credit_note_settled || 0)}</strong></td>
+                        <td className="moduleBiTotalCol">
+                          <strong>{formatMoney(ledger.outstandingCompareTotals?.computed_settled || 0)}</strong>
+                        </td>
+                        <td><strong>{formatMoney(ledger.outstandingCompareTotals?.computed_open || 0)}</strong></td>
+                        <td><strong>{formatMoney(ledger.outstandingCompareTotals?.tally_open || 0)}</strong></td>
+                        <td className={deltaClass(ledger.outstandingCompareTotals?.open_delta || 0)}>
+                          <strong>{formatDelta(ledger.outstandingCompareTotals?.open_delta || 0)}</strong>
+                        </td>
+                        <td>
+                          Unmatched receipts {formatMoney(ledger.outstandingCompareTotals?.unmatched_receipt_amount || 0)}
+                          {" · Unapplied CN "}
+                          {formatMoney(ledger.outstandingCompareTotals?.unmatched_credit_note_amount || 0)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </ExportableTable>
+              </section>
+
               <section className="moduleSection">
                 <div className="moduleSectionHeader">
-                  <h2>Tally vs FIFO Discrepancy</h2>
+                  <h2>Cash-only FIFO check</h2>
                   <span>
                     {formatCount(ledger.totals.tally_fifo_discrepancy_count || 0)} invoices ·{" "}
                     over {formatMoney(ledger.totals.tally_fifo_over_allocated || 0)} ·{" "}
@@ -586,10 +734,8 @@ export default function PaymentSettlementPage() {
                   </span>
                 </div>
                 <p className="moduleHint">
-                  Book Paid / Open come from the outstanding upload (Tally). FIFO Paid / Open come from
-                  applying receipts oldest-first (receipts have no invoice ref). Paid Δ &gt; 0 means FIFO
-                  put more cash on that bill than Tally implies — the counterpart usually appears as
-                  under-allocation on another bill, or unmatched receipts.
+                  Same invoices without counting credit notes — useful to see how much of a book gap
+                  is explained by CNs in the table above.
                 </p>
                 <ExportableTable filename="payment-settlement-tally-fifo" sheetName="TallyVsFifo" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">
@@ -637,7 +783,7 @@ export default function PaymentSettlementPage() {
                         <tr>
                           <td colSpan={10}>
                             {Number(ledger.summary?.outstandingTotal || ledger.totals?.outstanding_unpaid || 0) > 0
-                              ? "No Tally vs FIFO paid/open gaps for this customer."
+                              ? "No cash-only Tally vs FIFO gaps for this customer."
                               : "Upload outstanding invoice rows to compare Tally book settlement with FIFO."}
                           </td>
                         </tr>

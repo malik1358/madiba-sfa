@@ -16,6 +16,7 @@ export const MODULES = {
   myDay: { href: "/management/my-day", label: "My Day" },
   customerAudit: { href: "/management/customer-audit", label: "Customers Audit" },
   paymentSettlement: { href: "/management/payment-settlement", label: "Payment Settlement" },
+  outstandingCompare: { href: "/management/outstanding-compare", label: "Outstanding Compare" },
   newOrder: { href: "/management/new-order", label: "New Order" },
   visitWithoutOrder: { href: "/management/visit-without-order", label: "Visit Without Order" },
   pendingOrders: { href: "/management/pending-orders", label: "Old Pending Orders" },
@@ -47,7 +48,7 @@ export const NAV_GROUPS = [
   {
     key: "field",
     label: "Field Sales",
-    modules: ["myDay", "customerAudit", "paymentSettlement", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "salesmanVisitPlan", "itemPriceHistory"],
+    modules: ["myDay", "customerAudit", "paymentSettlement", "outstandingCompare", "newOrder", "visitWithoutOrder", "pendingOrders", "newCustomer", "myPerformance", "mySalesInvoices", "salesmanVisitPlan", "itemPriceHistory"],
   },
   {
     key: "collections",
@@ -134,6 +135,7 @@ export function buildModuleAccess(context = {}) {
       myDay: isFieldSales && !isCollector,
       customerAudit: isFieldSales && !isCollector,
       paymentSettlement: isFieldSales && !isCollector,
+      outstandingCompare: isFieldSales && !isCollector,
       newOrder: isFieldSales && !isCollector,
       visitWithoutOrder: isFieldSales && !isCollector,
       pendingOrders: isFieldSales && !isCollector,
@@ -214,6 +216,7 @@ export const MODULE_LABELS = {
   myDay: { en: "My Day", ar: "يومي" },
   customerAudit: { en: "Customers Audit", ar: "عملائي" },
   paymentSettlement: { en: "Payment Settlement", ar: "تسوية المدفوعات" },
+  outstandingCompare: { en: "Outstanding Compare", ar: "مقارنة المستحقات" },
   newOrder: { en: "New Order", ar: "طلب جديد" },
   visitWithoutOrder: { en: "Visit Without Order", ar: "زيارة بدون طلب" },
   pendingOrders: { en: "Old Pending Orders", ar: "طلبات معلقة قديمة" },

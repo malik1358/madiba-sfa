@@ -649,3 +649,55 @@ test("CN/ and SR/ voucher codes with positive amounts are sales returns not invo
   assert.ok(Number(ledger.totals.credit_note_amount) > 0);
   assert.ok(Number(ledger.totals.net_sales_incl_vat) < Number(ledger.totals.sales_incl_vat));
 });
+
+test("Tally vs computed outstanding includes credit notes in computed open", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      {
+        transaction_date: "2025-11-11",
+        voucher_number: "1691",
+        sales_amount: 6190,
+        item_code: "ITEM-A",
+        quantity: 1,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2025-12-10",
+        voucher_number: "2106",
+        sales_amount: 2250,
+        item_code: "ITEM-B",
+        quantity: 1,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-07-29",
+        voucher_number: "427",
+        voucher_type: "Credit Note",
+        reference: "1691",
+        sales_amount: 2250,
+        item_code: "ITEM-B",
+        quantity: 1,
+        category: "Paper",
+      },
+    ],
+    receipts: [{ receipt_date: "2026-04-02", amount: 4492.48, vch_no: "538" }],
+    outstandingInvoices: [
+      { invoice_date: "2025-11-11", ref_no: "1691", pending_amount: 2626.02, invoice_day: 100 },
+      { invoice_date: "2025-12-10", ref_no: "2106", pending_amount: 0, invoice_day: 0 },
+    ],
+    todayIso: "2026-09-16",
+  });
+
+  assert.ok(ledger.outstandingCompareTotals);
+  assert.equal(ledger.outstandingCompareTotals.has_outstanding_rows, true);
+
+  const row2106 = (ledger.outstandingCompareAllRows || []).find((row) => row.voucher_number === "2106");
+  assert.ok(row2106);
+  assert.ok(row2106.credit_note_settled > 0);
+  assert.equal(Number(row2106.computed_open.toFixed(2)), 0);
+  assert.equal(Number(row2106.tally_open.toFixed(2)), 0);
+  assert.equal(row2106.has_gap, false);
+
+  const cashGap = (ledger.tallyFifoDiscrepancies || []).find((row) => row.voucher_number === "2106");
+  assert.ok(cashGap);
+});

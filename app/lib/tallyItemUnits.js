@@ -389,6 +389,7 @@ export function extractUnitsFromInvoicePdfText(pdfText, orderLines = []) {
 
 /**
  * Upsert tally units on items_master. Safe no-op when columns are missing.
+ * Existing rows are updated in chunks; missing codes are skipped unless createMissing.
  */
 export async function applyTallyUnitUpdates(admin, updates = [], {
   source = TALLY_UNIT_SOURCE_EXCEL,
@@ -400,61 +401,107 @@ export async function applyTallyUnitUpdates(admin, updates = [], {
   }
 
   const nowIso = new Date().toISOString();
-  let updated = 0;
-  let created = 0;
-  let skipped = 0;
-
-  for (const row of rows) {
+  const byCode = new Map();
+  rows.forEach((row) => {
     const itemCode = normalizeItemCode(row.item_code);
-    const payload = {
+    if (!itemCode) return;
+    byCode.set(itemCode, {
+      item_code: itemCode,
+      item_name: row.item_name || row.tally_item_name || itemCode,
       tally_unit: normalizeTallyUnit(row.tally_unit),
+      tally_item_name: String(row.tally_item_name || "").trim() || null,
       tally_unit_source: String(row.source || source).trim() || source,
       tally_unit_updated_at: nowIso,
       updated_at: nowIso,
-    };
-    if (row.tally_item_name) {
-      payload.tally_item_name = String(row.tally_item_name).trim();
-    }
+    });
+  });
 
-    const { data: existing, error: lookupError } = await admin
+  // Map upper(code) -> actual item_code casing stored in DB.
+  const existingByUpper = new Map();
+  let from = 0;
+  const pageSize = 1000;
+  for (;;) {
+    const { data, error } = await admin
       .from("items_master")
-      .select("id,item_code")
-      .eq("item_code", itemCode)
-      .maybeSingle();
+      .select("item_code")
+      .range(from, from + pageSize - 1);
 
-    if (lookupError) {
-      if (isMissingTallyUnitColumn(lookupError)) {
+    if (error) {
+      if (isMissingTallyUnitColumn(error)) {
         throw new Error("Run sql/setup_tally_item_units.sql in Supabase to enable Tally item units.");
       }
-      throw lookupError;
+      throw error;
     }
 
-    if (existing?.id) {
-      const { error } = await admin
-        .from("items_master")
-        .update(payload)
-        .eq("id", existing.id);
-      if (error) throw error;
-      updated += 1;
-      continue;
-    }
-
-    if (!createMissing) {
-      skipped += 1;
-      continue;
-    }
-
-    const { error } = await admin.from("items_master").insert({
-      item_code: itemCode,
-      item_name: row.item_name || row.tally_item_name || itemCode,
-      is_active: true,
-      ...payload,
+    const page = data || [];
+    page.forEach((row) => {
+      const code = String(row.item_code || "").trim();
+      if (!code) return;
+      existingByUpper.set(normalizeItemCode(code), code);
     });
-    if (error) throw error;
-    created += 1;
+
+    if (page.length < pageSize) break;
+    from += pageSize;
   }
 
-  return { updated, created, skipped };
+  const toUpdate = [];
+  const toCreate = [];
+  let skipped = 0;
+
+  byCode.forEach((row, upperCode) => {
+    const existingCode = existingByUpper.get(upperCode);
+    if (existingCode) {
+      const payload = {
+        item_code: existingCode,
+        tally_unit: row.tally_unit,
+        tally_unit_source: row.tally_unit_source,
+        tally_unit_updated_at: row.tally_unit_updated_at,
+        updated_at: row.updated_at,
+      };
+      if (row.tally_item_name) payload.tally_item_name = row.tally_item_name;
+      toUpdate.push(payload);
+      return;
+    }
+    if (createMissing) {
+      toCreate.push({
+        item_code: row.item_code,
+        item_name: row.item_name,
+        is_active: true,
+        tally_unit: row.tally_unit,
+        tally_item_name: row.tally_item_name,
+        tally_unit_source: row.tally_unit_source,
+        tally_unit_updated_at: row.tally_unit_updated_at,
+        updated_at: row.updated_at,
+      });
+      return;
+    }
+    skipped += 1;
+  });
+
+  for (let index = 0; index < toUpdate.length; index += 100) {
+    const chunk = toUpdate.slice(index, index + 100);
+    const { error } = await admin
+      .from("items_master")
+      .upsert(chunk, { onConflict: "item_code" });
+    if (error) {
+      if (isMissingTallyUnitColumn(error)) {
+        throw new Error("Run sql/setup_tally_item_units.sql in Supabase to enable Tally item units.");
+      }
+      throw error;
+    }
+  }
+
+  for (let index = 0; index < toCreate.length; index += 100) {
+    const chunk = toCreate.slice(index, index + 100);
+    const { error } = await admin.from("items_master").insert(chunk);
+    if (error) throw error;
+  }
+
+  return {
+    updated: toUpdate.length,
+    created: toCreate.length,
+    skipped,
+  };
 }
 
 export function isMissingTallyUnitColumn(error) {

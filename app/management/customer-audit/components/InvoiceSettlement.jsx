@@ -21,10 +21,26 @@ function statusClass(status) {
   return "paymentSettleStatus paymentSettleStatus--open";
 }
 
+function formatDelta(value) {
+  const amount = Number(value || 0);
+  if (Math.abs(amount) < 0.005) return "0";
+  const sign = amount > 0 ? "+" : "";
+  return `${sign}${formatMoney(amount)}`;
+}
+
+function deltaClass(value) {
+  const amount = Number(value || 0);
+  if (Math.abs(amount) < 0.005) return "";
+  return amount > 0 ? "moduleBiMonthCell--up" : "moduleBiMonthCell--down";
+}
+
 function InvoiceSettlementRow({ invoice, open, onToggle }) {
   const receiptCount = Array.isArray(invoice.settlements) ? invoice.settlements.length : 0;
   const creditCount = Array.isArray(invoice.credit_notes) ? invoice.credit_notes.length : 0;
   const detailCount = receiptCount + creditCount;
+  const machineOpen = Number(invoice.remaining || 0);
+  const tallyOpen = invoice.outstanding_pending == null ? null : Number(invoice.outstanding_pending || 0);
+  const openDelta = tallyOpen == null ? null : machineOpen - tallyOpen;
 
   return (
     <>
@@ -34,7 +50,11 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
         <td>{formatMoney(invoice.amount_excl_vat)}</td>
         <td>{formatMoney(invoice.amount_incl_vat)}</td>
         <td>{formatMoney(invoice.paid_amount)}</td>
-        <td>{formatMoney(invoice.remaining)}</td>
+        <td>{formatMoney(machineOpen)}</td>
+        <td>{tallyOpen == null ? "—" : formatMoney(tallyOpen)}</td>
+        <td className={openDelta == null ? "" : deltaClass(openDelta)}>
+          {openDelta == null ? "—" : formatDelta(openDelta)}
+        </td>
         <td><span className={statusClass(invoice.status)}>{invoice.status}</span></td>
         <td>
           {invoice.payment_days != null
@@ -57,7 +77,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           </td>
           <td colSpan={2} />
           <td>{formatMoney(settlement.amount)}</td>
-          <td />
+          <td colSpan={3} />
           <td />
           <td>{settlement.days != null ? `${settlement.days} days` : "—"}</td>
           <td />
@@ -73,7 +93,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           </td>
           <td colSpan={2} />
           <td>{formatMoney(note.amount)}</td>
-          <td />
+          <td colSpan={3} />
           <td><span className={statusClass("Credit")}>{note.kind || "Credit"}</span></td>
           <td>Not in avg days</td>
           <td />
@@ -188,6 +208,10 @@ export default function InvoiceSettlement({
   const balanceMatches = totals.sales_collected_matches_open !== false;
   const openMatchesOutstanding = totals.open_matches_outstanding !== false;
   const creditNoteAmount = Number(totals.credit_note_amount || 0);
+  const tallyOpenTotal = invoices.reduce(
+    (total, row) => total + (row.outstanding_pending == null ? 0 : Number(row.outstanding_pending || 0)),
+    0,
+  );
 
   return (
     <>
@@ -276,8 +300,8 @@ export default function InvoiceSettlement({
           <div>
             <h3>Invoices & Settlement</h3>
             <p className="auditSectionNote">
-              FIFO payment days from receipts. Open amounts follow the outstanding upload when available.
-              Gloves are sold without VAT; other lines are grossed up at 15%.
+              Machine Open is FIFO (sales − cash applied). Tally Open is the outstanding upload per invoice.
+              Open Δ shows where they disagree. Gloves are sold without VAT; other lines are grossed up at 15%.
             </p>
           </div>
           <span>
@@ -296,7 +320,9 @@ export default function InvoiceSettlement({
                 <th>Sales excl VAT</th>
                 <th>Sales incl VAT</th>
                 <th>Paid</th>
-                <th>Open</th>
+                <th>Machine Open</th>
+                <th>Tally Open</th>
+                <th>Open Δ</th>
                 <th>Status</th>
                 <th>Payment Days</th>
                 <th>Detail</th>
@@ -317,7 +343,7 @@ export default function InvoiceSettlement({
               })}
               {!invoices.length && (
                 <tr>
-                  <td colSpan={9}>No sales invoices found for this customer in history.</td>
+                  <td colSpan={11}>No sales invoices found for this customer in history.</td>
                 </tr>
               )}
             </tbody>
@@ -328,6 +354,10 @@ export default function InvoiceSettlement({
                 <td><strong>{formatMoney(totals.invoice_sales_incl_vat ?? totals.sales_incl_vat)}</strong></td>
                 <td><strong>{formatMoney(invoicePaidTotal)}</strong></td>
                 <td><strong>{formatMoney(totals.open_sales_amount)}</strong></td>
+                <td><strong>{formatMoney(tallyOpenTotal)}</strong></td>
+                <td className={deltaClass(Number(totals.open_sales_amount || 0) - tallyOpenTotal)}>
+                  <strong>{formatDelta(Number(totals.open_sales_amount || 0) - tallyOpenTotal)}</strong>
+                </td>
                 <td colSpan={3} />
               </tr>
             </tfoot>

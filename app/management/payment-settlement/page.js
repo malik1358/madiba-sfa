@@ -69,6 +69,9 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
   const receiptCount = Array.isArray(invoice.settlements) ? invoice.settlements.length : 0;
   const creditCount = Array.isArray(invoice.credit_notes) ? invoice.credit_notes.length : 0;
   const detailCount = receiptCount + creditCount;
+  const machineOpen = Number(invoice.remaining || 0);
+  const tallyOpen = invoice.outstanding_pending == null ? null : Number(invoice.outstanding_pending || 0);
+  const openDelta = tallyOpen == null ? null : machineOpen - tallyOpen;
 
   return (
     <>
@@ -78,7 +81,11 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
         <td>{formatMoney(invoice.amount_excl_vat)}</td>
         <td>{formatMoney(invoice.amount_incl_vat)}</td>
         <td>{formatMoney(invoice.paid_amount)}</td>
-        <td>{formatMoney(invoice.remaining)}</td>
+        <td>{formatMoney(machineOpen)}</td>
+        <td>{tallyOpen == null ? "—" : formatMoney(tallyOpen)}</td>
+        <td className={openDelta == null ? "" : deltaClass(openDelta)}>
+          {openDelta == null ? "—" : formatDelta(openDelta)}
+        </td>
         <td><span className={statusClass(invoice.status)}>{invoice.status}</span></td>
         <td>
           {invoice.payment_days != null
@@ -101,7 +108,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           </td>
           <td colSpan={2} />
           <td>{formatMoney(settlement.amount)}</td>
-          <td />
+          <td colSpan={3} />
           <td />
           <td>{settlement.days != null ? `${settlement.days} days` : "—"}</td>
           <td />
@@ -117,7 +124,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
           </td>
           <td colSpan={2} />
           <td>{formatMoney(note.amount)}</td>
-          <td />
+          <td colSpan={3} />
           <td><span className={statusClass("Credit")}>{note.kind || "Credit"}</span></td>
           <td>Not in avg days</td>
           <td />
@@ -186,6 +193,11 @@ export default function PaymentSettlementPage() {
       creditNoteAmount: Number(ledger.totals.credit_note_amount || 0),
       balanceMatches: ledger.totals.sales_collected_matches_open !== false,
       balanceDelta: Number(ledger.totals.balance_delta || 0),
+      tallyOpenTotal: (Array.isArray(ledger.invoices) ? ledger.invoices : []).reduce(
+        (total, row) => total + (row.outstanding_pending == null ? 0 : Number(row.outstanding_pending || 0)),
+        0,
+      ),
+      machineOpenTotal: openAmount,
     };
   }, [ledger]);
 
@@ -527,6 +539,11 @@ export default function PaymentSettlementPage() {
                       : ""}
                   </span>
                 </div>
+                <p className="moduleHint">
+                  Machine Open is FIFO (sales − cash applied). Tally Open is the outstanding upload per invoice.
+                  Open Δ highlights where they disagree — use{" "}
+                  <a href="#outstanding-compare">Tally vs Computed Outstanding</a> below for the full gap report.
+                </p>
                 <ExportableTable filename="payment-settlement-invoices" sheetName="Invoices" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable paymentSettleTable">
                     <thead>
@@ -536,7 +553,9 @@ export default function PaymentSettlementPage() {
                         <th>Sales excl VAT</th>
                         <th>Sales incl VAT</th>
                         <th>Paid</th>
-                        <th>Open</th>
+                        <th>Machine Open</th>
+                        <th>Tally Open</th>
+                        <th>Open Δ</th>
                         <th>Status</th>
                         <th>Payment Days</th>
                         <th>Detail</th>
@@ -557,7 +576,7 @@ export default function PaymentSettlementPage() {
                       })}
                       {!ledger.invoices.length && (
                         <tr>
-                          <td colSpan={9}>No sales invoices found for this customer in history.</td>
+                          <td colSpan={11}>No sales invoices found for this customer in history.</td>
                         </tr>
                       )}
                     </tbody>
@@ -569,7 +588,15 @@ export default function PaymentSettlementPage() {
                         <td><strong>{formatMoney(
                           Number(ledger.totals.paid_amount || 0) - Number(ledger.totals.reversed_sales_incl_vat || 0),
                         )}</strong></td>
-                        <td><strong>{formatMoney(ledger.totals.open_sales_amount)}</strong></td>
+                        <td><strong>{formatMoney(unpaidSummary?.machineOpenTotal ?? ledger.totals.open_sales_amount)}</strong></td>
+                        <td><strong>{formatMoney(unpaidSummary?.tallyOpenTotal || 0)}</strong></td>
+                        <td className={deltaClass(
+                          Number(unpaidSummary?.machineOpenTotal || 0) - Number(unpaidSummary?.tallyOpenTotal || 0),
+                        )}>
+                          <strong>{formatDelta(
+                            Number(unpaidSummary?.machineOpenTotal || 0) - Number(unpaidSummary?.tallyOpenTotal || 0),
+                          )}</strong>
+                        </td>
                         <td colSpan={3} />
                       </tr>
                     </tfoot>

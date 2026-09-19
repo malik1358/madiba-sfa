@@ -22,7 +22,7 @@ import {
 } from "../../lib/queuedSalesOrders";
 import { processOfflineQueue } from "../../lib/offlineApi";
 import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
-import { sortBucketLabels } from "../../lib/outstanding";
+import { findOutstandingForCustomer, sortBucketLabels } from "../../lib/outstanding";
 import { evaluateCreditApproval } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -106,6 +106,7 @@ const EMPTY_FILTERS = {
   age: [],
   orderValue: [],
   invoiceValue: [],
+  currentOutstanding: [],
 };
 
 function displayOrDash(value) {
@@ -130,7 +131,24 @@ function matchesColumnFilter(value, filter) {
   return matchesExcelColumnFilter(value, filter);
 }
 
-function pendingOrderFilterValues(order, meta, approvalRequired = null) {
+function formatCurrentOutstanding(value) {
+  if (value == null) return "-";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return number.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function orderCurrentOutstanding(order, outstandingDataset) {
+  if (!outstandingDataset) return null;
+  const row = findOutstandingForCustomer(
+    outstandingDataset,
+    order?.customer_code,
+    order?.customer_name,
+  );
+  return row ? Number(row.total_outstanding || 0) : 0;
+}
+
+function pendingOrderFilterValues(order, meta, approvalRequired = null, outstandingDataset = null) {
   return {
     orderId: displayOrDash(formatSalesOrderNumber(order) || order.id),
     customer: displayOrDash(order.customer_name || order.customer_code),
@@ -146,6 +164,7 @@ function pendingOrderFilterValues(order, meta, approvalRequired = null) {
     age: String(daysOld(order.updated_at || order.created_at)),
     orderValue: formatMoneyInclVat(orderValueInclVat(order)),
     invoiceValue: formatMoneyInclVat(invoiceMadeInclVat(meta)),
+    currentOutstanding: formatCurrentOutstanding(orderCurrentOutstanding(order, outstandingDataset)),
   };
 }
 
@@ -162,6 +181,7 @@ const HEADING_FILTERS = [
   { key: "age", label: "Age (days)" },
   { key: "orderValue", label: "Order value (incl. VAT)" },
   { key: "invoiceValue", label: "Invoice made (incl. VAT)" },
+  { key: "currentOutstanding", label: "Current outstanding" },
 ];
 const HEADING_FILTER_KEYS = HEADING_FILTERS.map(({ key }) => key);
 
@@ -312,6 +332,7 @@ export default function PendingOrdersPage() {
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
   const [savingInvoiceStatus, setSavingInvoiceStatus] = useState(false);
   const [outstandingInfoByOrder, setOutstandingInfoByOrder] = useState({});
+  const [outstandingDataset, setOutstandingDataset] = useState(null);
   const [creditApprovalByOrder, setCreditApprovalByOrder] = useState({});
   const [columnFilters, setColumnFilters] = useState(EMPTY_FILTERS);
   useUnsavedEntryGuard(Boolean(selectedInvoiceFile) || Object.values(statusDraftByOrder || {}).some((value) => String(value || "").trim()));
@@ -967,6 +988,24 @@ export default function PendingOrdersPage() {
         const role = String(scope?.role || "").toLowerCase();
         setUserRole(role);
 
+        async function loadOutstandingSummary(token) {
+          try {
+            const response = await fetch(`${OUTSTANDING_API}?summary=1`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.success) return;
+            if (cancelled) return;
+            setOutstandingDataset({
+              rows: Array.isArray(payload.customers) ? payload.customers : [],
+            });
+          } catch {
+            // Queue still works without outstanding amounts.
+          }
+        }
+
+        void loadOutstandingSummary(session.access_token);
+
         async function applyOrders(serverOrders) {
           const queued = await listQueuedPendingOrders();
           const merged = mergeServerAndQueuedOrders(serverOrders, queued);
@@ -1064,6 +1103,7 @@ export default function PendingOrdersPage() {
           order,
           invoiceMetaByOrder?.[order.id] || null,
           creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
+          outstandingDataset,
         );
         return rowMatchesOtherExcelFilters(values, columnFilters, key, HEADING_FILTER_KEYS, matchesColumnFilter);
       });
@@ -1072,11 +1112,12 @@ export default function PendingOrdersPage() {
           order,
           invoiceMetaByOrder?.[order.id] || null,
           creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
+          outstandingDataset,
         )[key]),
       );
     });
     return options;
-  }, [columnFilters, creditApprovalByOrder, invoiceMetaByOrder, orders]);
+  }, [columnFilters, creditApprovalByOrder, invoiceMetaByOrder, orders, outstandingDataset]);
 
   const effectiveColumnFilters = useMemo(() => {
     const next = { ...columnFilters };
@@ -1092,18 +1133,29 @@ export default function PendingOrdersPage() {
         order,
         invoiceMetaByOrder?.[order.id] || null,
         creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
+        outstandingDataset,
       );
       return HEADING_FILTER_KEYS.every((key) => matchesColumnFilter(values[key], effectiveColumnFilters[key]));
     });
-  }, [creditApprovalByOrder, effectiveColumnFilters, invoiceMetaByOrder, orders]);
+  }, [creditApprovalByOrder, effectiveColumnFilters, invoiceMetaByOrder, orders, outstandingDataset]);
 
   const filteredValueTotals = useMemo(() => {
+    const seenCustomers = new Set();
     return filteredOrders.reduce((totals, order) => {
       totals.orderValue += orderValueInclVat(order) || 0;
       totals.invoiceValue += invoiceMadeInclVat(invoiceMetaByOrder?.[order.id]) || 0;
+      const outstanding = orderCurrentOutstanding(order, outstandingDataset);
+      const customerKey = [
+        String(order?.customer_code || "").trim().toUpperCase(),
+        String(order?.customer_name || "").trim().toUpperCase(),
+      ].join("|");
+      if (!seenCustomers.has(customerKey)) {
+        seenCustomers.add(customerKey);
+        totals.currentOutstanding += Number(outstanding || 0);
+      }
       return totals;
-    }, { orderValue: 0, invoiceValue: 0 });
-  }, [filteredOrders, invoiceMetaByOrder]);
+    }, { orderValue: 0, invoiceValue: 0, currentOutstanding: 0 });
+  }, [filteredOrders, invoiceMetaByOrder, outstandingDataset]);
 
   async function loadOrderPdfSource(orderId) {
     const order = orders.find((entry) => entry.id === orderId) || null;
@@ -1372,6 +1424,7 @@ export default function PendingOrdersPage() {
         "Age (days)": daysOld(order.updated_at || order.created_at),
         "Order value (incl. VAT)": formatMoneyInclVat(orderValueInclVat(order)),
         "Invoice made (incl. VAT)": formatMoneyInclVat(invoiceMadeInclVat(invoiceMetaByOrder?.[order.id])),
+        "Current outstanding": formatCurrentOutstanding(orderCurrentOutstanding(order, outstandingDataset)),
       }));
 
       workbook.Sheets.PendingOrders = XLSX.utils.json_to_sheet(queueRows);
@@ -1616,6 +1669,7 @@ export default function PendingOrdersPage() {
                           <td>{age}</td>
                           <td style={{ textAlign: "right" }}>{formatMoneyInclVat(orderValueInclVat(order))}</td>
                           <td style={{ textAlign: "right" }}>{formatMoneyInclVat(invoiceMadeInclVat(meta))}</td>
+                          <td style={{ textAlign: "right" }}>{formatCurrentOutstanding(orderCurrentOutstanding(order, outstandingDataset))}</td>
                           <td>
                             <div className="moduleActionRow" style={{ flexWrap: "wrap", gap: "6px" }}>
                               <button
@@ -1723,7 +1777,7 @@ export default function PendingOrdersPage() {
 
                         {activeOrderId === order.id && (
                           <tr>
-                            <td colSpan={13}>
+                            <td colSpan={14}>
                               <div style={{ marginTop: "8px", marginBottom: "8px" }}>
                                 <div className="moduleSectionHeader">
                                   <h2>Order #{formatSalesOrderNumber(order) || order.id} Details</h2>
@@ -1979,7 +2033,7 @@ export default function PendingOrdersPage() {
 
                   {filteredOrders.length === 0 && (
                     <tr>
-                      <td colSpan={13}>{orders.length === 0 ? "No pending orders found." : "No orders match the current filters."}</td>
+                      <td colSpan={14}>{orders.length === 0 ? "No pending orders found." : "No orders match the current filters."}</td>
                     </tr>
                   )}
                 </tbody>
@@ -1989,6 +2043,7 @@ export default function PendingOrdersPage() {
                       <td colSpan={10}>Total ({filteredOrders.length} order{filteredOrders.length === 1 ? "" : "s"})</td>
                       <td style={{ textAlign: "right" }}>{filteredValueTotals.orderValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td style={{ textAlign: "right" }}>{filteredValueTotals.invoiceValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td style={{ textAlign: "right" }}>{formatCurrentOutstanding(filteredValueTotals.currentOutstanding)}</td>
                       <td />
                     </tr>
                   </tfoot>

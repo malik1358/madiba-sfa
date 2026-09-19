@@ -117,6 +117,28 @@ export async function GET(request) {
     const url = new URL(request.url);
     const customerCode = String(url.searchParams.get("customerCode") || "").trim();
     const customerName = String(url.searchParams.get("customerName") || "").trim();
+    const wantSummary = ["1", "true", "yes"].includes(
+      String(url.searchParams.get("summary") || "").trim().toLowerCase(),
+    );
+
+    // Lightweight customer list for queue columns (code / name / total only).
+    if (wantSummary && !customerCode && !customerName) {
+      const customers = (dataset.rows || []).map((row) => ({
+        customer_code: String(row?.customer_code || "").trim(),
+        customer_name: String(row?.customer_name || "").trim(),
+        total_outstanding: Number(row?.total_outstanding || 0),
+      }));
+
+      return NextResponse.json({
+        success: true,
+        uploadedAt: dataset.uploadedAt,
+        fileName: dataset.fileName,
+        canDownload: Boolean(String(dataset.filePath || "").trim()),
+        bucketLabels: dataset.bucketLabels,
+        customers,
+        rowsCount: dataset.rows.length,
+      });
+    }
 
     const matchedCustomer = (customerCode || customerName)
       ? findOutstandingForCustomer(dataset, customerCode, customerName)

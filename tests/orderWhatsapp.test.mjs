@@ -28,3 +28,22 @@ test("buildOrderWhatsappSummary includes order totals and pdf note", () => {
   assert.match(summary, /Payment: CASH/);
   assert.match(summary, /Region: dammam/);
 });
+
+test("buildOrderWhatsappSummary includes avg days to pay with blank lines around it", () => {
+  const summary = buildOrderWhatsappSummary({
+    orderId: 470,
+    statusLabel: "Submitted",
+    customerCode: "1417",
+    customerName: "Adwaa Al-Khaleej Markets Company Ltd.",
+    salesmanCode: "OSAMA",
+    itemCount: 3,
+    totalQuantity: 320,
+    grandTotal: 16934.4,
+    paymentType: "credit",
+    pricingRegion: "riyadh",
+  }, "en", {
+    analytics: { paymentBehavior: { avgDaysToPay: 80 } },
+  });
+
+  assert.match(summary, /PDF attached\.\n\nAvg days to pay: 80\n\nGPS:/);
+});

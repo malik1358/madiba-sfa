@@ -47,6 +47,7 @@ import {
   normalizeKsaMobile,
   updateCustomerMobile,
 } from "../../lib/customerContact";
+import { loadCustomerAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
 import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { slimVisitStockChecks } from "../../lib/visitReportSave";
@@ -1332,19 +1333,28 @@ export default function MyDayPage({ mode = "default" } = {}) {
 
       const location = await captureLocation();
       const capturedAt = new Date().toISOString();
-      const visitDistance = await loadVisitDistanceMetrics({
-        supabase,
-        userId: session.user.id,
-        location,
-        customer,
-        savedAt: capturedAt,
-      });
+      const [visitDistance, avgDaysToPay] = await Promise.all([
+        loadVisitDistanceMetrics({
+          supabase,
+          userId: session.user.id,
+          location,
+          customer,
+          savedAt: capturedAt,
+        }),
+        loadCustomerAvgDaysToPay({
+          accessToken: session.access_token,
+          customerCode: customer.customer_code,
+          customerName: customer.customer_name || "",
+          scope: accessScope,
+        }),
+      ]);
       summaryText = buildFieldVisitWhatsappSummary({
         customer,
         visitForm,
         salesmanName: formatCollectorDisplayName(profile || {}),
         salesmanCode: profile?.salesman_code || "",
         visitDistance,
+        avgDaysToPay,
       });
       void copyTextToClipboard(summaryText);
       const platform = await resolveGpsCapturePlatform();

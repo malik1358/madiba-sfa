@@ -1,3 +1,4 @@
+import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
 import { formatSalesOrderNumber } from "./salesOrderNumber.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 
@@ -39,9 +40,6 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     ?? snapshot.paymentBehavior?.avgDaysToPay
     ?? snapshot.avgDaysToPay
     ?? null;
-  const avgDaysLines = avgDaysToPay != null
-    ? ["", `${labels.avgDaysToPay}: ${avgDaysToPay}`]
-    : [];
 
   return [
     labels.title,
@@ -61,7 +59,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     `${labels.vat}: ${formatMoney(vatAmount)}`,
     `${labels.totalInclVat}: ${formatMoney(totalWithVat)}`,
     labels.pdfAttached,
-    ...avgDaysLines,
+    ...formatAvgDaysToPayWhatsappLines(avgDaysToPay, labels),
     ...formatVisitDistanceWhatsappLines(snapshot.visitDistance),
   ].join("\n");
 }

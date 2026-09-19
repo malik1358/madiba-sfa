@@ -62,6 +62,7 @@ import {
 } from "../../lib/collectionQueueSearch";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
+import { formatAvgDaysToPayWhatsappLines, loadCustomerAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { formatCollectionLastVisitWhatsappLines } from "../../lib/collectionVisitSummary";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -321,6 +322,7 @@ const TEXT = {
   summaryLastVisitAmountReceived: { en: "Last visit amount received", ar: "المبلغ المستلم في آخر زيارة" },
   summaryLastVisitRemarkArabic: { en: "Last visit remark (Arabic)", ar: "ملاحظة آخر زيارة (عربي)" },
   summaryLastVisitRemarkEnglish: { en: "Last visit remark (English)", ar: "ملاحظة آخر زيارة (انجليزي)" },
+  summaryAvgDaysToPay: { en: "Avg days to pay", ar: "متوسط أيام الدفع" },
   summaryGps: { en: "GPS", ar: "GPS" },
   summaryDistanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
   summaryDistanceFromPrevious: { en: "Distance from previous", ar: "المسافة من السابق" },
@@ -469,6 +471,10 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   lines.push(`${t("bucket61to90")}: ${formatMoney(row.outstanding_61_90)}`);
   lines.push(`${t("bucket91to120")}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${t("bucket120plus")}: ${formatMoney(row.outstanding_above_120)}`);
+  lines.push(...formatAvgDaysToPayWhatsappLines(
+    options.avgDaysToPay ?? row.avgDaysToPay ?? row.avg_days_to_pay,
+    { avgDaysToPay: t("summaryAvgDaysToPay") },
+  ));
   lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
     gps: t("summaryGps"),
     distanceFromCustomer: t("summaryDistanceFromCustomer"),
@@ -1815,13 +1821,20 @@ export default function PaymentCollectionsView({ view = "due" }) {
         || cashQueuePriorityByKey.get(rowKey(row))
         || 0;
 
-      const visitDistance = await loadVisitDistanceMetrics({
-        supabase,
-        userId: session.user.id,
-        location: gps,
-        customer: locationUpdate.customer || row,
-        savedAt: new Date().toISOString(),
-      });
+      const [visitDistance, avgDaysToPay] = await Promise.all([
+        loadVisitDistanceMetrics({
+          supabase,
+          userId: session.user.id,
+          location: gps,
+          customer: locationUpdate.customer || row,
+          savedAt: new Date().toISOString(),
+        }),
+        loadCustomerAvgDaysToPay({
+          accessToken: session.access_token,
+          customerCode: row.customer_code,
+          customerName: row.customer_name || "",
+        }),
+      ]);
 
       const summaryText = buildVisitSummary(
         row,
@@ -1832,6 +1845,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           visitNumberForDay,
           queuePriority: resolvedQueuePriority,
           visitDistance,
+          avgDaysToPay,
           lastVisit: row?.latest_collection || null,
         },
       );

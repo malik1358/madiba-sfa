@@ -1,6 +1,7 @@
 import { resolveInvoiceAmountExclVat } from "./invoiceAmountFromPdf.js";
 import { compareOrderLinesWithInvoiceText } from "./invoiceOrderCompare.js";
 import { extractPdfText } from "./extractPdfText.js";
+import { updateMasterUnitsFromInvoicePdf } from "./tallyItemUnits.js";
 
 export const INVOICE_BUCKET = "order-invoices";
 
@@ -25,11 +26,20 @@ export async function compareInvoiceBufferWithOrder(admin, orderId, pdfBuffer) {
     diffs: comparisonDiffs,
   });
 
+  // Best-effort: refresh items_master.tally_unit when the invoice PDF shows a UOM.
+  let tallyUnitSync = null;
+  try {
+    tallyUnitSync = await updateMasterUnitsFromInvoicePdf(admin, { pdfText, orderLines });
+  } catch {
+    tallyUnitSync = null;
+  }
+
   return {
     comparisonDiffs,
     comparisonCheckedAt: new Date().toISOString(),
     comparisonMatch: comparisonDiffs.length === 0,
     invoiceAmountExclVat,
+    tallyUnitSync,
   };
 }
 

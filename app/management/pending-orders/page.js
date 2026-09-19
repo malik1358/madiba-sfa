@@ -33,6 +33,7 @@ import {
   createOrderPdfDocument,
   resolveLiveOrderPdfSnapshot,
 } from "../../lib/orderPdfDocument";
+import { buildTallyOrderExportRows, unitMapFromItems } from "../../lib/tallyItemUnits";
 import { PENDING_ORDER_STATUSES } from "../../lib/pendingOrdersQuery";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { canManageOrderInvoice, isInvoiceMakerRole } from "../../lib/moduleAccess";
@@ -299,6 +300,7 @@ export default function PendingOrdersPage() {
   const [orderHistory, setOrderHistory] = useState([]);
   const [loadingLines, setLoadingLines] = useState(false);
   const [downloadingPdfOrderId, setDownloadingPdfOrderId] = useState("");
+  const [downloadingTallyExcelOrderId, setDownloadingTallyExcelOrderId] = useState("");
   const [invoiceMetaByOrder, setInvoiceMetaByOrder] = useState({});
   const [statusDraftByOrder, setStatusDraftByOrder] = useState({});
   const [rejectReasonByOrder, setRejectReasonByOrder] = useState({});
@@ -1248,6 +1250,97 @@ export default function PendingOrdersPage() {
     }
   }
 
+  async function loadTallyUnitMap(lines, token) {
+    const codes = [...new Set(
+      (lines || [])
+        .map((line) => String(line?.item_code || "").trim().toUpperCase())
+        .filter(Boolean),
+    )];
+    if (!codes.length || !token) return {};
+
+    try {
+      const response = await fetch(
+        `/api/tally-item-units?codes=${encodeURIComponent(codes.join(","))}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.success && payload.units) {
+        return payload.units;
+      }
+    } catch {
+      // Fall back to CTN defaults when unit master is unavailable.
+    }
+
+    try {
+      const supabase = getSupabaseClient();
+      if (!supabase) return {};
+      const { data, error: unitsError } = await supabase
+        .from("items_master")
+        .select("item_code,tally_unit,tally_item_name")
+        .in("item_code", codes);
+      if (unitsError || !data) return {};
+      return unitMapFromItems(data);
+    } catch {
+      return {};
+    }
+  }
+
+  async function generateOrderTallyExcel(orderId) {
+    if (!orderId || downloadingTallyExcelOrderId) return;
+
+    setDownloadingTallyExcelOrderId(String(orderId));
+    setError("");
+
+    try {
+      const { order, lines, history } = await loadOrderPdfSource(orderId);
+      if (!lines.length) {
+        setError("This order has no line items to generate Tally Excel.");
+        return;
+      }
+
+      const token = await getAuthToken();
+      if (token && isQueuedPendingOrderId(order.id)) {
+        await processOfflineQueue(async () => token).catch(() => undefined);
+      }
+
+      const snapshot = buildOrderPdfSnapshotFromSavedOrder({
+        order,
+        lines,
+        history,
+        outstanding: outstandingInfoByOrder?.[order.id] || null,
+        creditApprovalRemark: creditApprovalByOrder?.[order.id]?.remark || "",
+      });
+
+      const unitMap = await loadTallyUnitMap(lines, token);
+      const orderNumber = formatSalesOrderNumber(snapshot) || formatSalesOrderNumber(order) || order.id;
+      const exportRows = buildTallyOrderExportRows({
+        order,
+        lines: Array.isArray(snapshot.lines) && snapshot.lines.length ? snapshot.lines : lines,
+        unitMap,
+        orderNumber,
+        pricingRegion: snapshot.pricingRegion,
+        paymentType: snapshot.paymentType,
+        exportDate: new Date(),
+      });
+
+      if (!exportRows.length) {
+        setError("Unable to build Tally Excel rows for this order.");
+        return;
+      }
+
+      const XLSX = await import("xlsx");
+      const sheet = XLSX.utils.json_to_sheet(exportRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, sheet, "TallyImport");
+      const safeOrder = String(orderNumber).replace(/[^\w.-]+/g, "_");
+      XLSX.writeFile(workbook, `tally-order-${safeOrder}.xlsx`);
+    } catch (error) {
+      setError(error?.message || "Unable to prepare Tally Excel for this order.");
+    } finally {
+      setDownloadingTallyExcelOrderId("");
+    }
+  }
+
   async function exportQueueToExcel() {
     try {
       const XLSX = await import("xlsx");
@@ -1537,12 +1630,23 @@ export default function PendingOrdersPage() {
                                 type="button"
                                 className="moduleInlineButton"
                                 onClick={() => generateOrderPdf(order.id)}
-                                disabled={Boolean(downloadingPdfOrderId)}
+                                disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId)}
                                 title="Download PDF with live receipt and outstanding; keeps saved item, qty, and price"
                               >
                                 {String(downloadingPdfOrderId) === String(order.id)
                                   ? "Preparing PDF..."
                                   : "Generate PDF"}
+                              </button>
+                              <button
+                                type="button"
+                                className="moduleInlineButton"
+                                onClick={() => generateOrderTallyExcel(order.id)}
+                                disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId)}
+                                title="Download Tally import Excel for this order"
+                              >
+                                {String(downloadingTallyExcelOrderId) === String(order.id)
+                                  ? "Preparing Excel..."
+                                  : "Generate Excel"}
                               </button>
                               {canManageInvoice ? (
                                 <select
@@ -1799,11 +1903,22 @@ export default function PendingOrdersPage() {
                                     type="button"
                                     className="modulePrimaryButton"
                                     onClick={() => generateOrderPdf(order.id)}
-                                    disabled={Boolean(downloadingPdfOrderId) || loadingLines || orderLines.length === 0}
+                                    disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId) || loadingLines || orderLines.length === 0}
                                   >
                                     {String(downloadingPdfOrderId) === String(order.id)
                                       ? "Preparing PDF..."
                                       : "Generate / Download PDF"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="moduleInlineButton"
+                                    onClick={() => generateOrderTallyExcel(order.id)}
+                                    disabled={Boolean(downloadingPdfOrderId) || Boolean(downloadingTallyExcelOrderId) || loadingLines || orderLines.length === 0}
+                                    title="Download Tally import Excel for this order"
+                                  >
+                                    {String(downloadingTallyExcelOrderId) === String(order.id)
+                                      ? "Preparing Excel..."
+                                      : "Generate Excel"}
                                   </button>
                                   <button type="button" className="moduleInlineButton" onClick={exportQueueToExcel} disabled={orders.length === 0}>
                                     Export Excel

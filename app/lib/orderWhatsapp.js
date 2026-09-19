@@ -5,7 +5,7 @@ function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-export function buildOrderWhatsappSummary(snapshot, language = "en") {
+export function buildOrderWhatsappSummary(snapshot, language = "en", options = {}) {
   const isAr = language === "ar";
   const labels = {
     title: isAr ? "طلب مبيعات" : "Sales order",
@@ -25,6 +25,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
     vat: isAr ? "ضريبة 15%" : "VAT 15%",
     totalInclVat: isAr ? "المبلغ بعد الضريبة" : "Amount after VAT",
     pdfAttached: isAr ? "ملف PDF مرفق." : "PDF attached.",
+    avgDaysToPay: isAr ? "متوسط أيام الدفع" : "Avg days to pay",
   };
 
   const totals = snapshot.totals || {};
@@ -34,6 +35,13 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
   const cashDiscount = Number(totals.cashDiscountTotal || 0);
   const valueDiscount = Number(totals.valueDiscountTotal || 0);
   const schemeDiscount = Number(totals.schemeDiscountTotal || 0);
+  const avgDaysToPay = options.analytics?.paymentBehavior?.avgDaysToPay
+    ?? snapshot.paymentBehavior?.avgDaysToPay
+    ?? snapshot.avgDaysToPay
+    ?? null;
+  const avgDaysLines = avgDaysToPay != null
+    ? ["", `${labels.avgDaysToPay}: ${avgDaysToPay}`]
+    : [];
 
   return [
     labels.title,
@@ -53,6 +61,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en") {
     `${labels.vat}: ${formatMoney(vatAmount)}`,
     `${labels.totalInclVat}: ${formatMoney(totalWithVat)}`,
     labels.pdfAttached,
+    ...avgDaysLines,
     ...formatVisitDistanceWhatsappLines(snapshot.visitDistance),
   ].join("\n");
 }

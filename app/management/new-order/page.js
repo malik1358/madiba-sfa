@@ -1072,7 +1072,9 @@ export default function NewOrderPage() {
             customerCode: snapshot.customerCode,
             savedAtIso: new Date().toISOString(),
           });
-          const summaryText = buildOrderWhatsappSummary(snapshot, language);
+          const summaryText = buildOrderWhatsappSummary(snapshot, language, {
+            analytics: analytics || null,
+          });
           const blob = doc.output("blob");
           return {
             method: "prepared",
@@ -1101,7 +1103,9 @@ export default function NewOrderPage() {
           customerCode: liveSnapshot.customerCode || snapshot.customerCode,
           savedAtIso: new Date().toISOString(),
         });
-        const summaryText = buildOrderWhatsappSummary(liveSnapshot, language);
+        const summaryText = buildOrderWhatsappSummary(liveSnapshot, language, {
+          analytics: monthlyAnalytics || analytics || null,
+        });
 
         if (options.returnFileOnly) {
           const blob = doc.output("blob");

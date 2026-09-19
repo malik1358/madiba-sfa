@@ -300,8 +300,9 @@ export default function InvoiceSettlement({
           <div>
             <h3>Invoices & Settlement</h3>
             <p className="auditSectionNote">
-              Machine Open is FIFO (sales − cash applied). Tally Open is the outstanding upload per invoice.
-              Open Δ shows where they disagree. Gloves are sold without VAT; other lines are grossed up at 15%.
+              Machine Open is FIFO (sales − cash applied) from day-1 history through today.
+              Tally Open is the outstanding upload per invoice. Open Δ shows where they disagree.
+              Gloves are sold without VAT; other lines are grossed up at 15%.
             </p>
           </div>
           <span>

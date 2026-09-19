@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  formatOrderPdfOrderNumberLabel,
   formatSalesOrderNumber,
   isPlaceholderSalesOrderNumber,
+  requireSalesOrderNumber,
   salesOrderNumberNeedsLiveLookup,
 } from "../app/lib/salesOrderNumber.js";
 
@@ -18,4 +20,12 @@ test("formatSalesOrderNumber does not treat pending queue ids as the live number
   assert.equal(isPlaceholderSalesOrderNumber("pending:8981a846-ca3"), true);
   assert.equal(salesOrderNumberNeedsLiveLookup({ id: "pending:8981a846-ca3" }), true);
   assert.equal(salesOrderNumberNeedsLiveLookup({ id: 296 }), false);
+});
+
+test("formatOrderPdfOrderNumberLabel requires a real number in Order No. format", () => {
+  assert.equal(formatOrderPdfOrderNumberLabel({ id: 296 }), "Order No. 296");
+  assert.equal(formatOrderPdfOrderNumberLabel({ order_number: "SO-1001" }), "Order No. SO-1001");
+  assert.equal(requireSalesOrderNumber({ orderId: 337 }), "337");
+  assert.throws(() => formatOrderPdfOrderNumberLabel({ id: "pending:8981a846-ca3" }), /Order number is required/);
+  assert.throws(() => requireSalesOrderNumber({}), /Order number is required/);
 });

@@ -20,6 +20,19 @@ export function formatSalesOrderNumber(source = {}) {
   return "";
 }
 
+export function requireSalesOrderNumber(source = {}) {
+  const orderNumber = formatSalesOrderNumber(source);
+  if (!orderNumber) {
+    throw new Error("Order number is required to generate the order PDF.");
+  }
+  return orderNumber;
+}
+
+/** Mandatory PDF header line, e.g. "Order No. 296". */
+export function formatOrderPdfOrderNumberLabel(source = {}) {
+  return `Order No. ${requireSalesOrderNumber(source)}`;
+}
+
 export function salesOrderNumberNeedsLiveLookup(source = {}) {
   return isPlaceholderSalesOrderNumber(formatSalesOrderNumber(source));
 }

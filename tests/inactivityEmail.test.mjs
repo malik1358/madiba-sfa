@@ -54,37 +54,37 @@ function lunchLogs() {
   ];
 }
 
-test("inactivity email threshold is 40 minutes", () => {
-  assert.equal(INACTIVITY_EMAIL_MINUTES, 40);
-  assert.equal(INACTIVITY_EMAIL_MS, 40 * 60 * 1000);
+test("inactivity email threshold is 70 minutes", () => {
+  assert.equal(INACTIVITY_EMAIL_MINUTES, 70);
+  assert.equal(INACTIVITY_EMAIL_MS, 70 * 60 * 1000);
 });
 
-test("shouldEmailInactivity waits 40 minutes after login or last activity", () => {
+test("shouldEmailInactivity waits 70 minutes after login or last activity", () => {
   const logs = [visitAt("2026-09-06T05:10:00.000Z")];
 
   assert.equal(shouldEmailInactivity({
     loginAt,
     logoutAt: null,
     userLogs: logs,
-    now: new Date("2026-09-06T05:49:00.000Z"),
+    now: new Date("2026-09-06T06:19:00.000Z"),
   }), false);
 
   assert.equal(shouldEmailInactivity({
     loginAt,
     logoutAt: null,
     userLogs: logs,
-    now: new Date("2026-09-06T05:50:00.000Z"),
+    now: new Date("2026-09-06T06:20:00.000Z"),
   }), true);
 
   assert.equal(shouldWarnInactivity({
     loginAt,
     logoutAt: null,
     userLogs: logs,
-    now: new Date("2026-09-06T05:55:00.000Z"),
+    now: new Date("2026-09-06T06:25:00.000Z"),
   }), true);
 });
 
-test("shouldEmailInactivity skips lunch, logout, and the first 40 minutes after lunch in", () => {
+test("shouldEmailInactivity skips lunch, logout, and the first 70 minutes after lunch in", () => {
   const logs = [
     ...lunchLogs(),
     visitAt("2026-09-06T05:10:00.000Z"),
@@ -115,14 +115,14 @@ test("shouldEmailInactivity skips lunch, logout, and the first 40 minutes after 
     loginAt,
     logoutAt: null,
     userLogs: logs,
-    now: new Date("2026-09-06T10:24:00.000Z"),
+    now: new Date("2026-09-06T10:54:00.000Z"),
   }), false);
 
   assert.equal(shouldEmailInactivity({
     loginAt,
     logoutAt: null,
     userLogs: logs,
-    now: new Date("2026-09-06T10:25:00.000Z"),
+    now: new Date("2026-09-06T10:55:00.000Z"),
   }), true);
 });
 
@@ -173,14 +173,14 @@ test("idle clock after lunch ignores silent order updated_at", () => {
     logoutAt: null,
     userLogs: logs,
     orders: silentOrderTouch,
-    now: new Date("2026-09-07T13:51:00.000Z"),
+    now: new Date("2026-09-07T14:21:00.000Z"),
   }), false);
   assert.equal(shouldEmailInactivity({
     loginAt: "2026-09-07T06:27:00.000Z",
     logoutAt: null,
     userLogs: logs,
     orders: silentOrderTouch,
-    now: new Date("2026-09-07T13:52:00.000Z"),
+    now: new Date("2026-09-07T14:22:00.000Z"),
   }), true);
 });
 
@@ -221,7 +221,7 @@ test("buildInactivityAlertEmail names the idle user and duration", () => {
   const message = buildInactivityAlertEmail({
     date: "2026-09-06",
     userName: "Ahmed (SM001)",
-    idleMinutes: 52,
+    idleMinutes: 85,
     lastActivityAt: "2026-09-06T05:10:00.000Z",
     loginAt,
     userId: "u1",
@@ -229,7 +229,7 @@ test("buildInactivityAlertEmail names the idle user and duration", () => {
   });
 
   assert.match(message.subject, /Ahmed \(SM001\)/);
-  assert.match(message.subject, /52 min/);
+  assert.match(message.subject, /1h 25m/);
   assert.match(message.text, /no visit, order, or collection/);
   assert.match(message.text, /Idle since:/);
   assert.match(message.html, /Ahmed \(SM001\)/);
@@ -278,7 +278,7 @@ test("buildDailyVisitReportPageUrl points at that salesman and date", () => {
   );
 });
 
-test("inactivityEmailReferenceKey is unique per idle stretch and 40-minute slot", () => {
+test("inactivityEmailReferenceKey is unique per idle stretch and 70-minute slot", () => {
   assert.equal(
     inactivityEmailReferenceKey({ userId: "u1", reportDate: "2026-09-06", idleSinceTs: 1000, slot: 1 }),
     "inactivity_email:u1:2026-09-06:1000:1",
@@ -289,12 +289,12 @@ test("inactivityEmailReferenceKey is unique per idle stretch and 40-minute slot"
   );
 });
 
-test("inactivityEmailReminderSlot advances every 40 minutes after last activity", () => {
+test("inactivityEmailReminderSlot advances every 70 minutes after last activity", () => {
   const idleSinceTs = Date.parse("2026-09-06T05:10:00.000Z");
-  assert.equal(inactivityEmailReminderSlot(idleSinceTs, new Date("2026-09-06T05:49:00.000Z")), -1);
-  assert.equal(inactivityEmailReminderSlot(idleSinceTs, new Date("2026-09-06T05:50:00.000Z")), 1);
-  assert.equal(inactivityEmailReminderSlot(idleSinceTs, new Date("2026-09-06T06:29:00.000Z")), 1);
-  assert.equal(inactivityEmailReminderSlot(idleSinceTs, new Date("2026-09-06T06:30:00.000Z")), 2);
+  assert.equal(inactivityEmailReminderSlot(idleSinceTs, new Date("2026-09-06T06:19:00.000Z")), -1);
+  assert.equal(inactivityEmailReminderSlot(idleSinceTs, new Date("2026-09-06T06:20:00.000Z")), 1);
+  assert.equal(inactivityEmailReminderSlot(idleSinceTs, new Date("2026-09-06T07:29:00.000Z")), 1);
+  assert.equal(inactivityEmailReminderSlot(idleSinceTs, new Date("2026-09-06T07:30:00.000Z")), 2);
 });
 
 test("lateLoginEmailReferenceKey is unique per 30-minute slot", () => {
@@ -388,7 +388,7 @@ function createLogTable(existingKeys = []) {
   return api;
 }
 
-test("runInactivityEmailCycle emails the user and bosses, then repeats every 40 minutes", async () => {
+test("runInactivityEmailCycle emails the user and bosses, then repeats every 70 minutes", async () => {
   const sent = [];
   const logTable = createLogTable();
   const cycleRows = [];
@@ -418,7 +418,7 @@ test("runInactivityEmailCycle emails the user and bosses, then repeats every 40 
   };
 
   const result = await runInactivityEmailCycle(admin, {
-    now: new Date("2026-09-06T06:00:00.000Z"),
+    now: new Date("2026-09-06T06:20:00.000Z"),
     env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
     send: async (message) => {
       sent.push(message);
@@ -443,7 +443,7 @@ test("runInactivityEmailCycle emails the user and bosses, then repeats every 40 
   assert.match(sent[0].html, /daily-visit-report\?date=2026-09-06&amp;userId=u1/);
 
   const second = await runInactivityEmailCycle(admin, {
-    now: new Date("2026-09-06T06:10:00.000Z"),
+    now: new Date("2026-09-06T06:30:00.000Z"),
     env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
     send: async (message) => {
       sent.push(message);
@@ -465,7 +465,7 @@ test("runInactivityEmailCycle emails the user and bosses, then repeats every 40 
   assert.equal(second.details[0].reason, "already_sent");
 
   const nextSlot = await runInactivityEmailCycle(admin, {
-    now: new Date("2026-09-06T06:30:00.000Z"),
+    now: new Date("2026-09-06T07:30:00.000Z"),
     env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
     send: async (message) => {
       sent.push(message);
@@ -484,7 +484,7 @@ test("runInactivityEmailCycle emails the user and bosses, then repeats every 40 
 
   assert.equal(nextSlot.sent, 1);
   assert.equal(sent.length, 2);
-  assert.match(sent[1].text, /every 40 minutes/);
+  assert.match(sent[1].text, /every 70 minutes/);
   assert.equal(cycleRows.length, 3);
   assert.equal(cycleRows[0].sent, 1);
   assert.equal(cycleRows[1].sent, 0);
@@ -581,7 +581,7 @@ test("attachInactivityEmailSendGaps measures minutes between emails for the same
   assert.equal(rows[2].gapMinutes, null);
 });
 
-test("describeInactivityEmailState names lunch and the 40-minute idle wait", () => {
+test("describeInactivityEmailState names lunch and the 70-minute idle wait", () => {
   const lunchState = describeInactivityEmailState({
     loginAt,
     logoutAt: null,
@@ -598,17 +598,17 @@ test("describeInactivityEmailState names lunch and the 40-minute idle wait", () 
     userLogs: [visitAt("2026-09-06T05:10:00.000Z")],
     now: new Date("2026-09-06T05:40:00.000Z"),
   });
-  assert.equal(waiting.reason, "idle_under_40_minutes");
+  assert.equal(waiting.reason, "idle_under_70_minutes");
   assert.equal(shouldRecordInactivityEmailCheck(waiting), false);
 });
 
-test("loadInactivityEmailLog returns sent emails with 40-minute gaps", async () => {
+test("loadInactivityEmailLog returns sent emails with 70-minute gaps", async () => {
   const sendRows = [
     {
       id: "s1",
       user_id: "u1",
       notification_type: "inactivity_email",
-      title: "No activity for 40m",
+      title: "No activity for 70m",
       body: "",
       success_count: 1,
       failure_count: 0,
@@ -619,11 +619,11 @@ test("loadInactivityEmailLog returns sent emails with 40-minute gaps", async () 
       id: "s2",
       user_id: "u1",
       notification_type: "inactivity_email",
-      title: "No activity for 1h 20m",
+      title: "No activity for 2h 20m",
       body: "",
       success_count: 1,
       failure_count: 0,
-      sent_at: "2026-09-06T07:45:00.000Z",
+      sent_at: "2026-09-06T08:15:00.000Z",
       reference_key: "inactivity_email:u1:2026-09-06:1:2",
     },
   ];
@@ -637,7 +637,7 @@ test("loadInactivityEmailLog returns sent emails with 40-minute gaps", async () 
       login_reminders_sent: 0,
       skipped: false,
       skip_reason: null,
-      details: [{ userId: "u1", kind: "inactivity", status: "skipped", reason: "already_sent", slot: 1, idleMinutes: 50 }],
+      details: [{ userId: "u1", kind: "inactivity", status: "skipped", reason: "already_sent", slot: 1, idleMinutes: 80 }],
     },
   ];
   const logTable = createLogTable();
@@ -666,7 +666,6 @@ test("loadInactivityEmailLog returns sent emails with 40-minute gaps", async () 
 
   const log = await loadInactivityEmailLog(admin, { reportDate: "2026-09-06", userId: "u1" });
   assert.equal(log.sends.length, 2);
-  assert.equal(log.sends[1].gapMinutes, 40);
+  assert.equal(log.sends[1].gapMinutes, 70);
   assert.equal(log.checks[0].reason, "already_sent");
 });
-

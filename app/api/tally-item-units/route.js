@@ -187,7 +187,7 @@ export async function POST(request) {
 
     const form = await request.formData();
     const file = form.get("file");
-    if (!(file instanceof File)) {
+    if (!file || typeof file.arrayBuffer !== "function") {
       return NextResponse.json({ success: false, error: "Excel file is required." }, { status: 400 });
     }
 

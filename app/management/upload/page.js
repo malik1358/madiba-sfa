@@ -451,7 +451,15 @@ export default function UploadSalesPage() {
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) {
-        throw new Error(data.error || "Item master unit upload failed.");
+        const detail = String(data.error || data.message || "").trim();
+        throw new Error(
+          detail
+          || (response.status === 404
+            ? "Item master unit API is not deployed yet. Wait for the latest release, then retry."
+            : response.status === 403
+              ? "Only admin, manager, or invoice maker can import item master units."
+              : `Item master unit upload failed (HTTP ${response.status}).`),
+        );
       }
 
       setItemUnitResult(data);

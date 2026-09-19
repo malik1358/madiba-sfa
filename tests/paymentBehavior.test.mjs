@@ -424,8 +424,8 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   assert.equal(Number(ledger.totals.credit_note_amount.toFixed(2)), 230);
   assert.equal(Number(ledger.totals.net_sales_incl_vat.toFixed(2)), 920);
   assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 500);
-  // FIFO open = 1150 − 500 cash = 650 (CN is not cash). Tally pending stays 420 for compare.
-  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 650);
+  // Machine open also applies unpaired CN in date order: 1150 − 230 CN − 500 cash = 420.
+  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 420);
   assert.equal(Number(ledger.totals.outstanding_unpaid.toFixed(2)), 420);
   const inv1 = ledger.invoices.find((row) => row.voucher_number === "INV1");
   assert.equal(Number(inv1.paid_amount.toFixed(2)), 500);
@@ -504,8 +504,9 @@ test("credit note several days later is not treated as immediate reversal", () =
 
   assert.equal(reversedInvoices.length, 0);
   assert.equal(invoices.length, 1);
-  assert.equal(allocations.length, 1);
-  assert.equal(allocations[0].days, 19);
+  // Full unpaired CN clears the invoice before the later receipt — not a Reversed pair.
+  assert.equal(Number(invoices[0].remaining.toFixed(2)), 0);
+  assert.equal(allocations.length, 0);
 });
 
 test("typed Credit Note with positive amount reverses matching invoice next day (NFD/402 / CN 149)", () => {
@@ -579,7 +580,7 @@ test("Tally vs FIFO discrepancy report flags over-allocated paid on partial invo
   assert.ok(ledger.totals.tally_fifo_over_allocated > 3400);
 });
 
-test("full-amount CN one day before invoice reverses the reissue (2384 → 2397)", () => {
+test("same-day CN voids original; next-day reissue stays open (2384 / 2397)", () => {
   const item = { item_code: "P-100", item_name: "Paper A4", quantity: 10, category: "Paper" };
   const ledger = buildPaymentSettlementLedger({
     transactions: [
@@ -598,16 +599,15 @@ test("full-amount CN one day before invoice reverses the reissue (2384 → 2397)
         sales_amount: 18026.2,
         ...item,
       },
-      // CN typed with the voided voucher no. — full reverse of the next-day reissue.
+      // Orphan / blank-style second CN same day — must NOT reverse the next-day reissue.
       {
         transaction_date: "2025-12-31",
-        voucher_number: "2384",
+        voucher_number: "",
         voucher_type: "Credit Note",
-        reference: "2384",
         sales_amount: 18026.2,
         ...item,
       },
-      // Replacement invoice next day — same amount and items.
+      // Replacement invoice next day — live AR again (Tally keeps this open).
       {
         transaction_date: "2026-01-01",
         voucher_number: "2397",
@@ -620,18 +620,19 @@ test("full-amount CN one day before invoice reverses the reissue (2384 → 2397)
     todayIso: "2026-09-16",
   });
 
-  assert.equal(ledger.reversedInvoices.length, 2);
+  assert.equal(ledger.reversedInvoices.length, 1);
   const original = ledger.reversedInvoices.find((row) => row.voucher_number === "2384");
-  const reissue = ledger.reversedInvoices.find((row) => row.voucher_number === "2397");
   assert.ok(original);
   assert.equal(original.credit_note_voucher, "121");
-  assert.ok(reissue);
-  assert.equal(reissue.credit_note_voucher, "2384");
-  assert.equal(reissue.reversal_days, 1);
-  assert.equal(reissue.credit_note_date, "2025-12-31");
+  assert.equal(ledger.reversedInvoices.some((row) => row.voucher_number === "2397"), false);
 
-  assert.equal(ledger.creditNotes.length, 0);
-  assert.equal(ledger.invoices.some((row) => row.voucher_number === "2397"), false);
+  const reissue = ledger.invoices.find((row) => row.voucher_number === "2397");
+  assert.ok(reissue);
+  assert.equal(Number(reissue.paid_amount.toFixed(2)), 20730.13);
+  assert.equal(Number(reissue.remaining.toFixed(2)), 0);
+
+  // Orphan CN stays unpaired (or applied as credit), not as a reverse of 2397.
+  assert.equal(ledger.creditNotes.some((row) => !String(row.voucher_number || "").trim()), true);
 });
 
 test("CN/ and SR/ voucher codes with positive amounts are sales returns not invoices", () => {

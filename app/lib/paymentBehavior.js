@@ -438,10 +438,12 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
 }
 
 /**
- * Pair invoices with credit notes within ±1 day for the same full amount.
- * Covers same-day / next-day voids and reissue pairs where the CN is dated
- * one day before the replacement invoice (e.g. CN 2384 on 31 Dec → invoice 2397 on 1 Jan).
- * These are voids/reversals, not customer payments — exclude from avg days to pay.
+ * Pair invoices with credit notes dated the same day or up to maxDays after
+ * for the same full amount (classic void / same-day reissue cancel).
+ *
+ * A CN dated BEFORE an invoice must not reverse that later sale — that pattern
+ * is a live reissue (e.g. CN 121 voids 2384 on 31 Dec; sale 2397 on 1 Jan stays open).
+ * Orphan / blank CNs stay unpaired when a vouchered CN already covers the void.
  */
 export function findImmediateCreditNoteReversals(
   invoices = [],
@@ -455,7 +457,14 @@ export function findImmediateCreditNoteReversals(
   const reversals = [];
   const reversedKeys = new Set();
 
-  for (const invoice of (Array.isArray(invoices) ? invoices : [])) {
+  // Oldest invoice first so same-day voids claim CNs before any later reissue.
+  const orderedInvoices = [...(Array.isArray(invoices) ? invoices : [])].sort((left, right) => {
+    const byDate = String(left.invoice_date || "").localeCompare(String(right.invoice_date || ""));
+    if (byDate !== 0) return byDate;
+    return String(left.voucher_number || "").localeCompare(String(right.voucher_number || ""));
+  });
+
+  for (const invoice of orderedInvoices) {
     const invoiceAmount = toNumber(invoice.amount);
     if (invoiceAmount <= AMOUNT_TOLERANCE) continue;
 
@@ -463,15 +472,18 @@ export function findImmediateCreditNoteReversals(
       .map((note, index) => {
         if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) return null;
 
+        // CN must be on/after the invoice (0 … maxDays). Never reverse a later sale
+        // with an earlier CN — that later voucher is the live reissue.
         const offset = isoDayOffset(invoice.invoice_date, note.credit_date);
-        if (offset == null || Math.abs(offset) > maxDays) return null;
-        const days = Math.abs(offset);
+        if (offset == null || offset < 0 || offset > maxDays) return null;
+        const days = offset;
 
         const amountOk = amountsMatch(note.remaining, invoiceAmount)
           || amountsMatch(note.amount, invoiceAmount);
         // Full reverse only — partial credit notes stay in the normal ledger.
         if (!amountOk) return null;
 
+        const noteVoucher = String(note.voucher_number || "").trim();
         const noteRef = normalizeRef(note.reference || note.voucher_number);
         const invoiceRef = normalizeRef(invoice.voucher_number);
         const refHit = Boolean(
@@ -486,7 +498,7 @@ export function findImmediateCreditNoteReversals(
         const invoiceHasItems = (Array.isArray(invoice.item_codes) && invoice.item_codes.length > 0)
           || (Array.isArray(invoice.items) && invoice.items.length > 0);
         // When both sides have items, require overlap so a same-amount CN does not
-        // reverse the wrong bill within the ±1 day window.
+        // reverse the wrong bill within the window.
         if (noteHasItems && invoiceHasItems && itemOverlap <= 0 && !refHit) return null;
 
         return {
@@ -496,10 +508,8 @@ export function findImmediateCreditNoteReversals(
           score: (refHit ? 1000 : 0)
             + (itemOverlap * 50)
             + (amountOk ? 100 : 0)
-            - days
-            // Prefer CN on/after the invoice when scores tie (classic void),
-            // but still allow CN one day before (replacement invoice).
-            + (offset >= 0 ? 5 : 0),
+            + (noteVoucher ? 25 : 0)
+            - days,
         };
       })
       .filter(Boolean)
@@ -548,6 +558,8 @@ export function buildSortedReceipts(receipts = []) {
  * FIFO-match receipts onto sales invoices to estimate days-to-pay.
  * Receipts have no invoice ref, so oldest open invoice is paid first.
  * Invoices reversed immediately by credit notes are excluded from matching.
+ * Unpaired credit notes (orphans) also reduce open remaining in date order,
+ * so Tally blank CNs that wipe older bills are reflected in Machine Open.
  */
 export function matchPaymentsFifo(transactions = [], receipts = []) {
   const allInvoices = buildSalesInvoices(transactions).map((invoice) => ({ ...invoice }));
@@ -556,35 +568,66 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
   const invoices = allInvoices
     .filter((invoice) => !reversedKeys.has(invoiceKey(invoice.invoice_date, invoice.voucher_number)))
     .map((invoice) => ({ ...invoice, remaining: toNumber(invoice.amount) }));
-  const paymentRows = buildSortedReceipts(receipts);
+  const pairedCreditNoteKeys = new Set(
+    reversals.map((row) => invoiceKey(row.credit_note_date, row.credit_note_voucher)),
+  );
+  const unpairedNotes = creditNotes.filter(
+    (note) => !pairedCreditNoteKeys.has(invoiceKey(note.credit_date, note.voucher_number)),
+  );
+
+  const events = [
+    ...unpairedNotes.map((note) => ({
+      kind: "credit_note",
+      date: dateOnly(note.credit_date),
+      amount: toNumber(note.amount),
+    })),
+    ...buildSortedReceipts(receipts).map((row) => ({
+      kind: "receipt",
+      date: row.receipt_date,
+      amount: row.amount,
+      vch_no: row.vch_no,
+    })),
+  ]
+    .filter((row) => row.date && row.amount > 0)
+    .sort((left, right) => {
+      if (left.date !== right.date) return left.date.localeCompare(right.date);
+      // Same day: apply credit notes before cash (Tally voids hit AR before receipts).
+      if (left.kind !== right.kind) return left.kind === "credit_note" ? -1 : 1;
+      return String(left.vch_no || "").localeCompare(String(right.vch_no || ""));
+    });
+
   const allocations = [];
   let unmatchedReceiptAmount = 0;
 
-  for (const receipt of paymentRows) {
-    let remaining = receipt.amount;
+  for (const event of events) {
+    let remaining = event.amount;
 
     for (const invoice of invoices) {
       if (remaining <= 0.009) break;
       if (invoice.remaining <= 0.009) continue;
-      if (receipt.receipt_date < invoice.invoice_date) continue;
+      if (event.date < invoice.invoice_date) continue;
 
       const applied = Math.min(remaining, invoice.remaining);
-      const days = isoDaysBetween(receipt.receipt_date, invoice.invoice_date);
-      if (days != null && applied > 0) {
-        allocations.push({
-          invoice_date: invoice.invoice_date,
-          voucher_number: invoice.voucher_number,
-          receipt_date: receipt.receipt_date,
-          vch_no: receipt.vch_no,
-          amount: applied,
-          days,
-        });
+      if (event.kind === "receipt" && applied > 0) {
+        const days = isoDaysBetween(event.date, invoice.invoice_date);
+        if (days != null) {
+          allocations.push({
+            invoice_date: invoice.invoice_date,
+            voucher_number: invoice.voucher_number,
+            receipt_date: event.date,
+            vch_no: event.vch_no,
+            amount: applied,
+            days,
+          });
+        }
       }
       invoice.remaining = Math.max(0, invoice.remaining - applied);
       remaining = Math.max(0, remaining - applied);
     }
 
-    unmatchedReceiptAmount += Math.max(0, remaining);
+    if (event.kind === "receipt") {
+      unmatchedReceiptAmount += Math.max(0, remaining);
+    }
   }
 
   return {

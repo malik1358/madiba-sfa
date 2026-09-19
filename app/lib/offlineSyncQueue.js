@@ -199,8 +199,16 @@ async function rebuildFormData(item) {
   for (const file of item.files || []) {
     const stored = await readBlobPart(file.blobId);
     if (!stored?.buffer) continue;
-    const blob = new Blob([stored.buffer], { type: stored.mimeType || file.mimeType || "application/octet-stream" });
-    formData.append(file.name, blob, stored.fileName || file.fileName || `${file.name}.bin`);
+    const fileName = stored.fileName || file.fileName || `${file.name}.bin`;
+    const mimeType = resolveUploadContentType(
+      {
+        name: fileName,
+        type: stored.mimeType || file.mimeType,
+      },
+      stored.buffer,
+    );
+    const blob = new Blob([stored.buffer], { type: mimeType });
+    formData.append(file.name, blob, fileName);
   }
 
   return formData;

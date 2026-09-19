@@ -1215,7 +1215,8 @@ export default function PendingOrdersPage() {
         await processOfflineQueue(async () => token).catch(() => undefined);
       }
 
-      // Keep saved item / qty / price; refresh outstanding, receipts, and other live fields.
+      // Refresh outstanding/receipts and reload the price catalog so cash/value/scheme
+      // discount columns can be reconstructed from the saved payment type + region.
       const snapshot = buildOrderPdfSnapshotFromSavedOrder({
         order,
         lines,
@@ -1226,7 +1227,6 @@ export default function PendingOrdersPage() {
 
       const { snapshot: liveSnapshot, analytics } = await resolveLiveOrderPdfSnapshot(snapshot, {
         accessToken: token,
-        skipPricing: true,
       }, {
         processQueue: token
           ? () => processOfflineQueue(async () => token)

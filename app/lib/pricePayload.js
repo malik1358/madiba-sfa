@@ -167,7 +167,13 @@ function toNumber(value) {
 }
 
 function applyDiscountCodeAliases(discountMap) {
-  return applyPriceCodeAliases(discountMap);
+  const aliased = applyPriceCodeAliases(discountMap);
+  const next = {};
+  Object.entries(aliased || {}).forEach(([code, rate]) => {
+    const parsed = parseDiscountRate(rate);
+    if (parsed > 0) next[code] = parsed;
+  });
+  return next;
 }
 
 function findRegionWholesaleIndex(rows, region, fallbackColumn, maxRows = 5) {

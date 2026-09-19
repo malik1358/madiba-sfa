@@ -19,6 +19,7 @@ test("formatDiscountPercent and lookupDiscountRate show item scheme rates", () =
   assert.equal(formatDiscountPercent(0.02), "2%");
   assert.equal(formatDiscountPercent(0), "—");
   assert.equal(lookupDiscountRate({ A003927: 0.02 }, "a003927"), 0.02);
+  assert.equal(lookupDiscountRate({ A003606: "8.00%" }, "A003606"), 0.08);
 });
 
 test("parseDiscountRate reads percent and decimal scheme values", () => {
@@ -42,10 +43,20 @@ test("cash discount applies only to cash orders", () => {
     paymentType: "cash",
     cashDiscountRate: 0.02,
   });
+  const cashFromPercentString = getPricedOrderLine({
+    wholesaleRate: 102,
+    quantity: 5,
+    paymentType: "cash",
+    cashDiscountRate: "8.00%",
+  });
 
   assert.equal(credit.rate, 100);
+  assert.equal(credit.applied.cash, false);
   assert.equal(cash.rate, 98);
   assert.equal(cash.applied.cash, true);
+  assert.equal(cashFromPercentString.rate, 93.84);
+  assert.equal(cashFromPercentString.applied.cash, true);
+  assert.equal(Number(cashFromPercentString.cashDiscountAmount.toFixed(2)), 40.8);
 });
 
 test("formatAppliedDiscount marks the scheme only when it reduced the line", () => {

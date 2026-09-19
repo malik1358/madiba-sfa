@@ -1,6 +1,6 @@
 export const KSA_TIMEZONE = "Asia/Riyadh";
 export const INACTIVITY_MS = 45 * 60 * 1000;
-export const INACTIVITY_EMAIL_MS = 40 * 60 * 1000;
+export const INACTIVITY_EMAIL_MS = 70 * 60 * 1000;
 export const INACTIVITY_ALERT_REPEAT_MS = 15 * 60 * 1000;
 export const LUNCH_BREAK_REMINDER_MS = 3 * 60 * 60 * 1000;
 
@@ -824,7 +824,7 @@ export function describeInactivityEmailState({
     return { ...base, reason: "no_idle_reference" };
   }
   if (now.getTime() - idleSinceTs < INACTIVITY_EMAIL_MS) {
-    return { ...base, reason: "idle_under_40_minutes" };
+    return { ...base, reason: "idle_under_70_minutes" };
   }
 
   return { ...base, eligible: true, reason: "idle" };

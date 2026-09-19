@@ -39,6 +39,10 @@ import {
 } from "../../lib/collectionVisitSummary.js";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp.js";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
+import {
+  resolveUploadContentType,
+  storageExtensionFromUpload,
+} from "../../lib/collectionUploadFile.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -232,31 +236,13 @@ async function countCollectionVisitsForUserDay(admin, userId, dateString = getKs
 }
 
 function storageExtension(file) {
-  const name = String(file?.name || "").toLowerCase();
-  if (name.endsWith(".pdf")) return "pdf";
-  if (name.endsWith(".png")) return "png";
-  if (name.endsWith(".webp")) return "webp";
-  if (name.endsWith(".heic")) return "heic";
-  if (name.endsWith(".heif")) return "heif";
-  const mime = String(file?.type || "").toLowerCase();
-  if (mime === "application/pdf") return "pdf";
-  if (mime === "image/png") return "png";
-  if (mime === "image/webp") return "webp";
-  if (mime === "image/heic") return "heic";
-  if (mime === "image/heif") return "heif";
-  return "jpg";
+  return storageExtensionFromUpload(file);
 }
 
 function uploadContentType(file) {
-  const mime = String(file?.type || "").trim();
-  if (mime) return mime;
-  const ext = storageExtension(file);
-  if (ext === "pdf") return "application/pdf";
-  if (ext === "png") return "image/png";
-  if (ext === "webp") return "image/webp";
-  if (ext === "heic") return "image/heic";
-  if (ext === "heif") return "image/heif";
-  return "image/jpeg";
+  // Android / WebView often labels PDFs as application/octet-stream.
+  // Prefer extension (and ignore generic MIME) so storage accepts the upload.
+  return resolveUploadContentType(file);
 }
 
 async function ensureCollectionFilesBucket(admin) {

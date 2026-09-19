@@ -1,7 +1,10 @@
+import { resolveUploadContentType } from "./collectionUploadFile.js";
+
 const SYNC_DB_NAME = "madiba-sfa-sync";
 const SYNC_DB_VERSION = 1;
 const QUEUE_STORE = "sync_queue";
 const BLOB_STORE = "sync_blobs";
+const FILE_READ_TIMEOUT_MS = 20000;
 
 let syncDbPromise = null;
 
@@ -292,17 +295,33 @@ export async function processOfflineQueue(getAccessToken, options = {}) {
   };
 }
 
+async function readBlobBufferWithTimeout(blob, timeoutMs = FILE_READ_TIMEOUT_MS) {
+  return Promise.race([
+    blob.arrayBuffer(),
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error("Reading the attached file timed out. Try a smaller PDF/photo or retake the receipt."));
+      }, timeoutMs);
+    }),
+  ]);
+}
+
 export async function formDataToOfflinePayload(formData) {
   const fields = {};
   const files = [];
 
   for (const [key, value] of formData.entries()) {
     if (value instanceof Blob && "name" in value && value.name) {
-      const buffer = await value.arrayBuffer();
+      const buffer = await readBlobBufferWithTimeout(value);
+      const fileName = String(value.name || `${key}.bin`);
+      const mimeType = resolveUploadContentType(
+        { name: fileName, type: value.type },
+        buffer,
+      );
       files.push({
         name: key,
-        fileName: value.name,
-        mimeType: value.type || "application/octet-stream",
+        fileName,
+        mimeType,
         buffer,
       });
     } else {

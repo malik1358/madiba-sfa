@@ -26,7 +26,11 @@ import {
 import { evaluateOrderSchemes, lookupSchemeApplication } from "./orderSchemes.js";
 import { loadPricePayload } from "./pricePayload.js";
 import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
-import { formatSalesOrderNumber, salesOrderNumberNeedsLiveLookup } from "./salesOrderNumber.js";
+import {
+  formatOrderPdfOrderNumberLabel,
+  formatSalesOrderNumber,
+  salesOrderNumberNeedsLiveLookup,
+} from "./salesOrderNumber.js";
 import { isQueuedPendingOrderId } from "./queuedSalesOrders.js";
 import {
   isPlaceholderProspectName,
@@ -583,7 +587,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     return startY + 24;
   }
 
-  const orderNumberLabel = formatSalesOrderNumber(snapshot) || "—";
+  const orderNumberLabel = formatOrderPdfOrderNumberLabel(snapshot);
 
   doc.setDrawColor(72, 110, 120);
   doc.setLineWidth(1);
@@ -596,7 +600,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   doc.text("SALES ORDER", marginX + 12, marginTop + 44);
 
   doc.setFontSize(16);
-  doc.text(`Order Number  ${orderNumberLabel}`, marginX + 12, marginTop + 70);
+  doc.text(orderNumberLabel, marginX + 12, marginTop + 70);
 
   doc.setFont(undefined, "normal");
   doc.setFontSize(10);

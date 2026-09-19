@@ -1128,7 +1128,12 @@ export default function NewOrderPage() {
         if (error?.name === "AbortError" || String(error?.message || "").toLowerCase().includes("cancel")) {
           return { method: "cancelled" };
         }
-        setError("Order saved, but PDF could not be prepared. Please try Save / Share PDF again.");
+        const message = String(error?.message || "");
+        if (/order number is required/i.test(message)) {
+          setError("Order number is required before the PDF can be generated. Wait for sync, then try Save / Share PDF again.");
+        } else {
+          setError("Order saved, but PDF could not be prepared. Please try Save / Share PDF again.");
+        }
         return { method: "error" };
       } finally {
         setDownloadingPdf(false);

@@ -16,7 +16,18 @@ test("pending time runs from order created until now when invoice status is unse
   assert.equal(isPendingOrderTimeFrozen(null, "-"), false);
 });
 
-test("pending time does not run when invoice status is set", () => {
+test("pending time keeps running while Pending for invoice creation", () => {
+  const created = "2026-09-10T08:00:00.000Z";
+  const now = Date.parse("2026-09-10T10:15:07.000Z");
+  assert.equal(shouldRunTimeToMakeClock("Pending for invoice creation"), true);
+  assert.equal(
+    pendingOrderTimeToMakeSeconds({ created_at: created }, null, now, "Pending for invoice creation"),
+    2 * 3600 + 15 * 60 + 7,
+  );
+  assert.equal(isPendingOrderTimeFrozen(null, "Pending for invoice creation"), false);
+});
+
+test("pending time does not run when invoice status is set to a non-invoice-wait state", () => {
   const order = { created_at: "2026-09-10T08:00:00.000Z" };
   const now = Date.parse("2026-09-10T12:00:00.000Z");
   assert.equal(shouldRunTimeToMakeClock("Pending for credit approval"), false);

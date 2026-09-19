@@ -1,9 +1,11 @@
+import { isPendingForInvoiceCreationStatus } from "./orderApproval.js";
+
 export function isUnsetInvoiceStatus(invoiceStatus) {
   return String(invoiceStatus ?? "").trim() === "-" || String(invoiceStatus ?? "").trim() === "";
 }
 
 export function shouldRunTimeToMakeClock(invoiceStatus) {
-  return isUnsetInvoiceStatus(invoiceStatus);
+  return isUnsetInvoiceStatus(invoiceStatus) || isPendingForInvoiceCreationStatus(invoiceStatus);
 }
 
 export function isPendingOrderTimeFrozen(meta, invoiceStatus) {

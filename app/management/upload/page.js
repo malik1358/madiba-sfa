@@ -47,9 +47,14 @@ export default function UploadSalesPage() {
   const [receiptUploading, setReceiptUploading] = useState(false);
   const [receiptResult, setReceiptResult] = useState(null);
   const [receiptError, setReceiptError] = useState("");
+  const [itemUnitFile, setItemUnitFile] = useState(null);
+  const [itemUnitUploading, setItemUnitUploading] = useState(false);
+  const [itemUnitResult, setItemUnitResult] = useState(null);
+  const [itemUnitError, setItemUnitError] = useState("");
   const [lastSalesUpload, setLastSalesUpload] = useState(null);
   const [lastOutstandingUpload, setLastOutstandingUpload] = useState(null);
   const [lastReceiptUpload, setLastReceiptUpload] = useState(null);
+  const [lastItemUnitUpload, setLastItemUnitUpload] = useState(null);
   const [loadingLastUploads, setLoadingLastUploads] = useState(true);
   const [downloadingKind, setDownloadingKind] = useState("");
 
@@ -62,10 +67,13 @@ export default function UploadSalesPage() {
   const receiptSuccessMessage = receiptResult
     ? String(receiptResult.message || receiptResult.fileName || "Receipt register updated successfully.").trim()
     : "";
+  const itemUnitSuccessMessage = itemUnitResult
+    ? String(itemUnitResult.message || itemUnitResult.fileName || "Item master units updated successfully.").trim()
+    : "";
 
   usePopupMessages({
-    error: error || outstandingError || receiptError,
-    message: uploadSuccessMessage || outstandingSuccessMessage || receiptSuccessMessage,
+    error: error || outstandingError || receiptError || itemUnitError,
+    message: uploadSuccessMessage || outstandingSuccessMessage || receiptSuccessMessage || itemUnitSuccessMessage,
   });
 
   const supabaseClient = getSupabaseClient();
@@ -88,10 +96,11 @@ export default function UploadSalesPage() {
         setLastSalesUpload(null);
         setLastOutstandingUpload(null);
         setLastReceiptUpload(null);
+        setLastItemUnitUpload(null);
         return;
       }
 
-      const [salesBatchResult, outstandingResponse, salesFileMetaResponse, receiptResponse] = await Promise.all([
+      const [salesBatchResult, outstandingResponse, salesFileMetaResponse, receiptResponse, itemUnitResponse] = await Promise.all([
         supabase
           .from("import_batches")
           .select("file_name,completed_at,started_at,status,customer_count,total_rows")
@@ -110,6 +119,11 @@ export default function UploadSalesPage() {
           },
         }),
         fetch("/api/receipts", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }),
+        fetch("/api/tally-item-units", {
           headers: {
             Authorization: `Bearer ${session.access_token}`,
           },
@@ -155,10 +169,23 @@ export default function UploadSalesPage() {
             }
           : null,
       );
+
+      const itemUnitPayload = await itemUnitResponse.json().catch(() => ({}));
+      setLastItemUnitUpload(
+        itemUnitResponse.ok
+        && itemUnitPayload.success
+        && !itemUnitPayload.setupRequired
+          ? {
+              unitsCount: Number(itemUnitPayload.unitsCount || 0),
+              uploadedAt: itemUnitPayload.updatedAt || "",
+            }
+          : null,
+      );
     } catch {
       setLastSalesUpload(null);
       setLastOutstandingUpload(null);
       setLastReceiptUpload(null);
+      setLastItemUnitUpload(null);
     } finally {
       setLoadingLastUploads(false);
     }
@@ -384,6 +411,55 @@ export default function UploadSalesPage() {
       setReceiptError(err.message || "Receipt register upload failed.");
     } finally {
       setReceiptUploading(false);
+    }
+  }
+
+  async function uploadItemUnitFile() {
+    if (!itemUnitFile) {
+      setItemUnitError("Please select an ITEM MASTER Excel file first.");
+      return;
+    }
+
+    setItemUnitUploading(true);
+    setItemUnitError("");
+    setItemUnitResult(null);
+
+    try {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error("Supabase is not configured.");
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Your login session has expired. Please login again.");
+      }
+
+      const formData = new FormData();
+      formData.append("file", itemUnitFile);
+
+      const response = await fetch("/api/tally-item-units", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: formData,
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Item master unit upload failed.");
+      }
+
+      setItemUnitResult(data);
+      await loadLastUploadInfo();
+    } catch (err) {
+      setItemUnitError(err.message || "Item master unit upload failed.");
+    } finally {
+      setItemUnitUploading(false);
     }
   }
 
@@ -748,6 +824,94 @@ export default function UploadSalesPage() {
                 {receiptResult.mergedIntoExisting
                   ? `✓ Updated ${Number(receiptResult.datesUpdated || 0).toLocaleString()} date(s) in the live receipt register`
                   : "✓ Receipt register is now LIVE"}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="uploadCard" style={{ marginTop: "18px" }}>
+          <div className="uploadMeta">
+            {loadingLastUploads ? (
+              <p>{t("loadingLastUploads")}</p>
+            ) : lastItemUnitUpload ? (
+              <p>
+                <strong>Last item master units:</strong>{" "}
+                {formatUploadTimestamp(lastItemUnitUpload.uploadedAt)}
+                {lastItemUnitUpload.unitsCount
+                  ? ` | ${Number(lastItemUnitUpload.unitsCount).toLocaleString()} items with units`
+                  : ""}
+              </p>
+            ) : (
+              <p>No item master units imported yet.</p>
+            )}
+          </div>
+
+          <label className="fileDrop">
+            <div className="fileIcon">📦</div>
+            <strong>{itemUnitFile ? itemUnitFile.name : "Choose ITEM MASTER Excel"}</strong>
+            <span>
+              {itemUnitFile
+                ? `${(itemUnitFile.size / 1024 / 1024).toFixed(2)} MB`
+                : "Columns: TALLY ITEM NAME, MASTER UNIT (.xlsx/.xls)"}
+            </span>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => {
+                setItemUnitFile(e.target.files?.[0] || null);
+                setItemUnitResult(null);
+                setItemUnitError("");
+              }}
+            />
+          </label>
+
+          <button
+            className="replaceButton"
+            onClick={uploadItemUnitFile}
+            disabled={!itemUnitFile || itemUnitUploading}
+          >
+            {itemUnitUploading ? "Importing Item Units..." : "Import Item Master Units"}
+          </button>
+
+          {itemUnitUploading && (
+            <div className="processingBox">
+              <div className="spinner"></div>
+              <div>
+                <strong>Please keep this page open</strong>
+                <p>
+                  Reading Tally item names and master units, then updating the catalog
+                  used by pending-order Tally Excel export.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {itemUnitResult && (
+            <div className="uploadSuccess">
+              <div className="resultGrid">
+                <div>
+                  <span>Parsed Rows</span>
+                  <strong>{Number(itemUnitResult.parsed || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Updated</span>
+                  <strong>{Number(itemUnitResult.updated || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Created</span>
+                  <strong>{Number(itemUnitResult.created || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Unmatched Codes</span>
+                  <strong>{Number(itemUnitResult.skipped || 0).toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Units In Master</span>
+                  <strong>{Number(itemUnitResult.unitsCount || 0).toLocaleString()}</strong>
+                </div>
+              </div>
+              <div className="snapshotActivated">
+                ✓ Item master units are ready for Tally Excel export
               </div>
             </div>
           )}

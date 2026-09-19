@@ -853,12 +853,14 @@ export function buildTallyFifoDiscrepancies(invoiceRows = [], {
   const rows = (Array.isArray(invoiceRows) ? invoiceRows : [])
     .map((row) => {
       const salesIncl = toNumber(row.amount_incl_vat);
-      const bookOpen = toNumber(row.remaining);
-      const bookPaid = toNumber(row.paid_amount);
       const fifoPaid = toNumber(row.fifo_paid);
       const fifoOpen = row.fifo_remaining == null
         ? Math.max(0, salesIncl - fifoPaid)
         : toNumber(row.fifo_remaining);
+      // Book side comes from outstanding upload when present — not from forced Paid/Open.
+      const hasBookOpen = row.outstanding_pending != null;
+      const bookOpen = hasBookOpen ? toNumber(row.outstanding_pending) : fifoOpen;
+      const bookPaid = hasBookOpen ? Math.max(0, salesIncl - bookOpen) : fifoPaid;
       const paidDelta = fifoPaid - bookPaid;
       const openDelta = fifoOpen - bookOpen;
       if (Math.abs(paidDelta) <= 0.02 && Math.abs(openDelta) <= 0.02) return null;
@@ -961,8 +963,8 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
     const creditNoteSettled = creditChunks.reduce((total, chunk) => total + toNumber(chunk.amount), 0);
     const computedSettled = cashSettled + creditNoteSettled;
     const computedOpen = Math.max(0, salesIncl - computedSettled);
-    const tallyOpen = hasOutstandingRows
-      ? toNumber(row.remaining)
+    const tallyOpen = hasOutstandingRows && row.outstanding_pending != null
+      ? toNumber(row.outstanding_pending)
       : computedOpen;
     const openDelta = computedOpen - tallyOpen;
     const receiptChunks = (Array.isArray(row.settlements) ? row.settlements : []).map((chunk) => ({
@@ -1046,10 +1048,10 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
 
 /**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
- * When outstanding invoice rows exist, Open / status follow that upload (book truth), not FIFO residual.
- * FIFO is kept for payment-days on historically settled chunks; avg days also
- * includes open unpaid older than the paid-only avg (open age can raise, never
- * reduce, the metric).
+ * Paid / Open / Status follow cash FIFO (+ nested credit notes for display). Outstanding upload
+ * is kept on each row for Tally comparison screens — it does not rewrite Paid/Open.
+ * FIFO drives payment-days; avg days also includes open unpaid older than the paid-only avg
+ * (open age can raise, never reduce, the metric).
  * Invoices reversed immediately by credit notes are listed separately and excluded from avg days.
  */
 export function buildPaymentSettlementLedger({
@@ -1108,18 +1110,13 @@ export function buildPaymentSettlementLedger({
       matchedOutstandingRefs.add(normalizeRef(invoice.voucher_number));
     }
 
-    let remaining = fifoRemaining;
-    let paidAmount = fifoPaid;
-    let outstandingPending = null;
-    let openSource = "fifo";
-
-    if (hasOutstandingRows) {
-      openSource = "outstanding";
-      outstandingPending = outstandingMatch ? toNumber(outstandingMatch.pending_amount) : 0;
-      remaining = outstandingPending;
-      // Book-settled amount = sales incl VAT − outstanding pending (credit notes / extra receipts).
-      paidAmount = Math.max(0, amountInclVat - remaining);
-    }
+    // Paid / Open always follow FIFO cash allocation — never force to outstanding.
+    const remaining = fifoRemaining;
+    const paidAmount = fifoPaid;
+    const outstandingPending = hasOutstandingRows
+      ? (outstandingMatch ? toNumber(outstandingMatch.pending_amount) : 0)
+      : null;
+    const openSource = "fifo";
 
     const weightedDays = fifoPaid > 0
       ? settlements.reduce((total, row) => total + (Number(row.days || 0) * toNumber(row.amount)), 0) / fifoPaid

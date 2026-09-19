@@ -28,8 +28,8 @@ const TEXT = {
     ar: "اختر عميلاً لعرض المبيعات والتحصيل والتسوية.",
   },
   note: {
-    en: "Open follows the outstanding upload. Avg days uses paid receipts, then only open invoices older than that paid avg (so fresh bills cannot pull the avg down). Immediate credit-note reversals stay in Sales but are excluded from avg days.",
-    ar: "المفتوح يتبع ملف المستحقات. متوسط الأيام من الإيصالات المدفوعة ثم فقط الفواتير المفتوحة الأقدم من ذلك المتوسط (فلا تخفض الفواتير الجديدة المتوسط). العكس الفوري بإشعار دائن يبقى في المبيعات ويُستبعد من متوسط الأيام.",
+    en: "Paid and Open follow cash FIFO on each invoice (not forced to the outstanding upload). Use Outstanding Compare for Tally vs computed gaps. Avg days uses paid receipts, then only open invoices older than that paid avg. Immediate credit-note reversals stay in Sales but are excluded from avg days.",
+    ar: "المدفوع والمفتوح يتبعان التحصيل حسب الأقدم أولاً لكل فاتورة (دون إجبار ملف المستحقات). استخدم مقارنة المستحقات لفروق تالي. متوسط الأيام من الإيصالات المدفوعة ثم فقط الفواتير المفتوحة الأقدم من ذلك المتوسط. العكس الفوري بإشعار دائن يبقى في المبيعات ويُستبعد من متوسط الأيام.",
   },
 };
 
@@ -440,18 +440,18 @@ export default function PaymentSettlementPage() {
                     <strong>{formatMoney(ledger.totals.collected_amount)}</strong>
                   </div>
                   <div className="auditSummaryCard">
-                    <span>Open / Outstanding</span>
+                    <span>Open (FIFO)</span>
                     <strong>{formatMoney(unpaidSummary?.openAmount || 0)}</strong>
                     {unpaidSummary?.matches === false ? (
                       <em className="auditSummaryCardMeta">
-                        Does not match outstanding upload {formatMoney(unpaidSummary.outstandingUnpaid)}
+                        Tally outstanding {formatMoney(unpaidSummary.outstandingUnpaid)} — see Outstanding Compare
                       </em>
                     ) : unpaidSummary?.balanceMatches === false ? (
                       <em className="auditSummaryCardMeta">
                         Sales − Collected {formatMoney(unpaidSummary.salesMinusCollected)} (gap {formatMoney(unpaidSummary.balanceDelta)})
                       </em>
                     ) : (
-                      <em className="auditSummaryCardMeta">Sales − Collected = Open (matches outstanding)</em>
+                      <em className="auditSummaryCardMeta">Matches Tally outstanding upload</em>
                     )}
                   </div>
                 </div>

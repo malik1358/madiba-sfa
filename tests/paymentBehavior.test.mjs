@@ -188,8 +188,11 @@ test("settlement Sales total keeps gloves without VAT and paper with 15%", () =>
   assert.equal(Number(paper.amount_incl_vat.toFixed(2)), 1150);
   assert.equal(Number(ledger.totals.net_sales_incl_vat.toFixed(2)), 2610);
   assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 2000);
-  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 610);
-  assert.equal(ledger.totals.sales_collected_matches_open, true);
+  // FIFO open on P1 after 2000 cash (gloves 1000 + paper 1000) = 150 — not forced to outstanding 610.
+  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 150);
+  assert.equal(Number(ledger.totals.outstanding_unpaid.toFixed(2)), 610);
+  assert.equal(ledger.totals.open_matches_outstanding, false);
+  assert.equal(Number(paper.paid_amount.toFixed(2)), Number(paper.fifo_paid.toFixed(2)));
   assert.equal(ledger.reversedInvoices.length, 1);
 });
 
@@ -264,7 +267,7 @@ test("buildPaymentBehavior prefers invoice sum over rounded header total", () =>
   assert.equal(behavior.avgDaysPaidOnly, null);
 });
 
-test("buildPaymentSettlementLedger open amounts follow outstanding upload", () => {
+test("buildPaymentSettlementLedger Paid/Open follow FIFO, not outstanding force", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       { transaction_date: "2026-04-12", voucher_number: "NFD/414", sales_amount: 50580, category: "Paper" },
@@ -280,22 +283,24 @@ test("buildPaymentSettlementLedger open amounts follow outstanding upload", () =
     todayIso: "2026-09-16",
   });
 
-  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 76107.6);
+  // Open total is FIFO residual (plus outstanding-only rows), not forced to Tally 76,107.60.
   assert.equal(Number(ledger.totals.outstanding_unpaid.toFixed(2)), 76107.6);
-  assert.equal(ledger.totals.open_matches_outstanding, true);
+  assert.equal(ledger.totals.open_matches_outstanding, false);
 
   const nfd414 = ledger.invoices.find((row) => row.voucher_number === "NFD/414");
-  assert.equal(nfd414.status, "Paid");
-  assert.equal(nfd414.remaining, 0);
+  assert.equal(nfd414.open_source, "fifo");
+  assert.equal(nfd414.outstanding_pending, 0);
 
   const nfd868 = ledger.invoices.find((row) => row.voucher_number === "NFD/868");
-  assert.equal(nfd868.status, "Partial");
-  assert.equal(Number(nfd868.remaining.toFixed(2)), 14795.35);
-  assert.equal(Number(nfd868.paid_amount.toFixed(2)), Number((34350.5 - 14795.35).toFixed(2)));
+  assert.equal(nfd868.open_source, "fifo");
+  assert.equal(Number(nfd868.outstanding_pending.toFixed(2)), 14795.35);
+  // Paid must equal FIFO cash on the row — not sales − outstanding pending (19,555.15).
+  assert.equal(Number(nfd868.paid_amount.toFixed(2)), Number(nfd868.fifo_paid.toFixed(2)));
+  assert.equal(Number(nfd868.remaining.toFixed(2)), Number(nfd868.fifo_remaining.toFixed(2)));
+  assert.notEqual(Number(nfd868.paid_amount.toFixed(2)), Number((34350.5 - 14795.35).toFixed(2)));
 
   const rnfd = ledger.invoices.find((row) => row.voucher_number === "RNFD/158");
-  assert.equal(rnfd.status, "Open");
-  assert.equal(Number(rnfd.remaining.toFixed(2)), 61312.25);
+  assert.equal(Number(rnfd.outstanding_pending.toFixed(2)), 61312.25);
 });
 
 test("buildPaymentSettlementLedger uses open invoice age when customer never paid", () => {
@@ -388,9 +393,10 @@ test("Sales − Collected = Open for balanced reversed + outstanding books", () 
 
   assert.equal(Number(ledger.totals.net_sales_incl_vat.toFixed(2)), 2185);
   assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 1495);
-  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 690);
-  assert.equal(Number(ledger.totals.sales_minus_collected.toFixed(2)), 690);
-  assert.equal(ledger.totals.sales_collected_matches_open, true);
+  // FIFO open after cash — not forced to outstanding pending 690.
+  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 230);
+  assert.equal(Number(ledger.totals.outstanding_unpaid.toFixed(2)), 690);
+  assert.equal(ledger.totals.open_matches_outstanding, false);
   assert.equal(ledger.summary.avgDaysToPay != null, true);
   assert.equal(ledger.reversedInvoices.length, 1);
 });
@@ -418,9 +424,12 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   assert.equal(Number(ledger.totals.credit_note_amount.toFixed(2)), 230);
   assert.equal(Number(ledger.totals.net_sales_incl_vat.toFixed(2)), 920);
   assert.equal(Number(ledger.totals.collected_amount.toFixed(2)), 500);
-  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 420);
-  assert.equal(Number(ledger.totals.sales_minus_collected.toFixed(2)), 420);
-  assert.equal(ledger.totals.sales_collected_matches_open, true);
+  // FIFO open = 1150 − 500 cash = 650 (CN is not cash). Tally pending stays 420 for compare.
+  assert.equal(Number(ledger.totals.open_sales_amount.toFixed(2)), 650);
+  assert.equal(Number(ledger.totals.outstanding_unpaid.toFixed(2)), 420);
+  const inv1 = ledger.invoices.find((row) => row.voucher_number === "INV1");
+  assert.equal(Number(inv1.paid_amount.toFixed(2)), 500);
+  assert.equal(Number(inv1.outstanding_pending.toFixed(2)), 420);
 });
 
 test("partial credit note and sales return appear in creditNotes table, not reversed", () => {
@@ -556,11 +565,13 @@ test("Tally vs FIFO discrepancy report flags over-allocated paid on partial invo
   });
 
   const nfd868 = ledger.invoices.find((row) => row.voucher_number === "NFD/868");
-  assert.equal(Number(nfd868.paid_amount.toFixed(2)), 19555.15);
+  assert.equal(Number(nfd868.paid_amount.toFixed(2)), Number(nfd868.fifo_paid.toFixed(2)));
   assert.equal(Number(nfd868.fifo_paid.toFixed(2)), 22956.11);
 
   const gap = ledger.tallyFifoDiscrepancies.find((row) => row.voucher_number === "NFD/868");
   assert.ok(gap);
+  assert.equal(Number(gap.book_paid.toFixed(2)), 19555.15);
+  assert.equal(Number(gap.fifo_paid.toFixed(2)), 22956.11);
   assert.equal(Number(gap.paid_delta.toFixed(2)), 3400.96);
   assert.equal(Number(gap.open_delta.toFixed(2)), -3400.96);
   assert.match(gap.note, /over-allocated/i);

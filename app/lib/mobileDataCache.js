@@ -51,9 +51,10 @@ function customersCacheKey(scope, enriched = false) {
   return `${prefix}:${buildScopeHash(scope)}`;
 }
 
-function customerHistoryCacheKey(scope, customerCode) {
-  // v3: history payloads include receipt register rows mapped to the customer.
-  return `history:v3:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
+function customerHistoryCacheKey(scope, customerCode, { fullHistory = false } = {}) {
+  // v4: customer audit settlement needs day-1 history (fullHistory), not the 6-month window.
+  const historySuffix = fullHistory ? ":full" : "";
+  return `history:v4${historySuffix}:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
 }
 
 function itemsMasterCacheKey() {
@@ -230,12 +231,21 @@ async function fetchVisibleCustomersNetwork(accessToken, { enriched = false } = 
   return payload.customers || [];
 }
 
-async function fetchCustomerHistoryNetwork(accessToken, customerCode, customerName = "") {
+async function fetchCustomerHistoryNetwork(
+  accessToken,
+  customerCode,
+  customerName = "",
+  { fullHistory = false } = {},
+) {
   const params = new URLSearchParams({
     customerCode: String(customerCode || ""),
   });
   if (String(customerName || "").trim()) {
     params.set("customerName", String(customerName).trim());
+  }
+  if (fullHistory) {
+    params.set("fullHistory", "1");
+    params.set("scope", "settlement");
   }
 
   const response = await fetch(
@@ -255,6 +265,8 @@ async function fetchCustomerHistoryNetwork(accessToken, customerCode, customerNa
     transactions: Array.isArray(payload.transactions) ? payload.transactions : [],
     peerTransactions: Array.isArray(payload.peerTransactions) ? payload.peerTransactions : [],
     receipts: Array.isArray(payload.receipts) ? payload.receipts : [],
+    fromDate: payload.fromDate || "",
+    fullHistory: Boolean(payload.fullHistory),
   };
 }
 
@@ -399,10 +411,12 @@ export async function fetchVisibleCustomersCached(accessToken, scope, options = 
 
 export async function fetchCustomerHistoryCached(accessToken, scope, customerCode, options = {}) {
   const customerName = options.customerName || "";
+  // Settlement / unpaid math needs every sales month (day 1 → now), not the 6-month BI window.
+  const fullHistory = options.fullHistory !== false;
   return fetchWithLocalCache(
-    customerHistoryCacheKey(scope, customerCode),
+    customerHistoryCacheKey(scope, customerCode, { fullHistory }),
     CACHE_TTL.customerHistoryMs,
-    () => fetchCustomerHistoryNetwork(accessToken, customerCode, customerName),
+    () => fetchCustomerHistoryNetwork(accessToken, customerCode, customerName, { fullHistory }),
     {
       onUpdate: options.onUpdate,
       // Empty history was often a failed code-only lookup; always revalidate those.

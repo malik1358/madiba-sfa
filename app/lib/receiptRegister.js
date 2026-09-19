@@ -387,6 +387,7 @@ export function emptyReceiptDataset() {
   return {
     uploadedAt: "",
     fileName: "",
+    filePath: "",
     rows: [],
     datesUpdated: [],
     matchedCount: 0,
@@ -401,6 +402,7 @@ export function normalizeReceiptDataset(raw) {
   return {
     uploadedAt: String(raw.uploadedAt || ""),
     fileName: String(raw.fileName || ""),
+    filePath: String(raw.filePath || ""),
     rows,
     datesUpdated: Array.isArray(raw.datesUpdated) ? raw.datesUpdated : [],
     matchedCount: Number(raw.matchedCount || 0),

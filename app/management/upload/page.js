@@ -166,6 +166,7 @@ export default function UploadSalesPage() {
               uploadedAt: receiptPayload.uploadedAt,
               rowsCount: receiptPayload.rowsCount || 0,
               matchedCount: receiptPayload.matchedCount || 0,
+              canDownload: Boolean(receiptPayload.canDownload),
             }
           : null,
       );
@@ -197,11 +198,12 @@ export default function UploadSalesPage() {
 
   async function downloadUploadedFile(kind, fallbackName) {
     const normalizedKind = String(kind || "").trim().toLowerCase();
-    if (!["sales", "outstanding"].includes(normalizedKind) || downloadingKind) return;
+    if (!["sales", "outstanding", "receipt"].includes(normalizedKind) || downloadingKind) return;
 
     setDownloadingKind(normalizedKind);
     setError("");
     setOutstandingError("");
+    setReceiptError("");
 
     try {
       const supabase = getSupabaseClient();
@@ -241,6 +243,8 @@ export default function UploadSalesPage() {
     } catch (err) {
       if (normalizedKind === "outstanding") {
         setOutstandingError(err.message || "Unable to download uploaded file.");
+      } else if (normalizedKind === "receipt") {
+        setReceiptError(err.message || "Unable to download uploaded file.");
       } else {
         setError(err.message || "Unable to download uploaded file.");
       }
@@ -755,13 +759,25 @@ export default function UploadSalesPage() {
             {loadingLastUploads ? (
               <p>{t("loadingLastUploads")}</p>
             ) : lastReceiptUpload ? (
-              <p>
-                <strong>{t("lastReceiptUpload")}:</strong>{" "}
-                {formatUploadTimestamp(lastReceiptUpload.uploadedAt)}
-                {lastReceiptUpload.fileName ? ` | ${lastReceiptUpload.fileName}` : ""}
-                {lastReceiptUpload.rowsCount ? ` | ${Number(lastReceiptUpload.rowsCount).toLocaleString()} receipts` : ""}
-                {lastReceiptUpload.matchedCount ? ` | ${Number(lastReceiptUpload.matchedCount).toLocaleString()} mapped` : ""}
-              </p>
+              <div className="uploadMetaRow">
+                <p>
+                  <strong>{t("lastReceiptUpload")}:</strong>{" "}
+                  {formatUploadTimestamp(lastReceiptUpload.uploadedAt)}
+                  {lastReceiptUpload.fileName ? ` | ${lastReceiptUpload.fileName}` : ""}
+                  {lastReceiptUpload.rowsCount ? ` | ${Number(lastReceiptUpload.rowsCount).toLocaleString()} receipts` : ""}
+                  {lastReceiptUpload.matchedCount ? ` | ${Number(lastReceiptUpload.matchedCount).toLocaleString()} mapped` : ""}
+                </p>
+                {lastReceiptUpload.canDownload ? (
+                  <button
+                    type="button"
+                    className="uploadDownloadButton"
+                    onClick={() => downloadUploadedFile("receipt", lastReceiptUpload.fileName)}
+                    disabled={Boolean(downloadingKind)}
+                  >
+                    {downloadingKind === "receipt" ? t("downloadingFile") : t("downloadFile")}
+                  </button>
+                ) : null}
+              </div>
             ) : (
               <p>{t("noReceiptUploadYet")}</p>
             )}

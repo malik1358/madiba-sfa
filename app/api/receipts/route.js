@@ -12,6 +12,7 @@ import {
   parseReceiptRegisterRows,
   prioritizeReceiptSheets,
 } from "../../lib/receiptRegister.js";
+import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -108,6 +109,7 @@ export async function GET(request) {
       success: true,
       uploadedAt: dataset.uploadedAt,
       fileName: dataset.fileName,
+      canDownload: Boolean(String(dataset.filePath || "").trim()),
       rowsCount: dataset.rowsCount || dataset.rows.length,
       matchedCount: dataset.matchedCount,
       unmatchedCount: dataset.unmatchedCount,
@@ -204,9 +206,23 @@ export async function POST(request) {
     const liveUnmatched = mergedRows.length - liveMatched;
     const nowIso = new Date().toISOString();
 
+    let storedFilePath = "";
+    try {
+      const storedFile = await storeUploadedExcel(admin, {
+        kind: "receipt",
+        fileName,
+        bytes: Buffer.from(arrayBuffer),
+        uploadedAt: nowIso,
+      });
+      storedFilePath = storedFile.filePath;
+    } catch (storeError) {
+      console.error("Could not store receipt upload file for download:", storeError);
+    }
+
     const payload = {
       uploadedAt: nowIso,
       fileName,
+      filePath: storedFilePath,
       rows: mergedRows,
       datesUpdated: parsed.dates,
       matchedCount: liveMatched,

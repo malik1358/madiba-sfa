@@ -1,4 +1,4 @@
--- Original sales / outstanding Excel uploads (Supabase Storage)
+-- Original sales / outstanding / receipt Excel uploads (Supabase Storage)
 -- Run in Supabase SQL Editor if auto-create from the API fails.
 
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)

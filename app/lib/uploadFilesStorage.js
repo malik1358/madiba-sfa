@@ -61,7 +61,7 @@ export async function storeUploadedExcel(admin, {
   batchId = null,
 }) {
   const normalizedKind = String(kind || "").trim().toLowerCase();
-  if (!["sales", "outstanding"].includes(normalizedKind)) {
+  if (!["sales", "outstanding", "receipt"].includes(normalizedKind)) {
     throw new Error("Unsupported upload file kind.");
   }
 

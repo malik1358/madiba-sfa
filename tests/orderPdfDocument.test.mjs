@@ -717,3 +717,67 @@ test("enrichOrderPdfLiveData fills the shop name for a live PROSPECT id", async 
     global.fetch = originalFetch;
   }
 });
+
+test("enrichOrderPdfLiveData with skipPricing refreshes outstanding and keeps saved item qty price", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/api/outstanding")) {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          uploadedAt: "2026-09-17T00:00:00.000Z",
+          bucketLabels: ["0-30"],
+          customer: { customer_code: "1059", total: 1200 },
+          customerInvoices: [{ invoice_no: "INV-1", outstanding: 1200 }],
+        }),
+      };
+    }
+    if (href.includes("/api/customer-history")) {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          receipts: [{ receipt_date: "2026-09-10", amount: 500 }],
+          transactions: [],
+          lifetimeSales: 0,
+          lifetimeSkuCount: 0,
+        }),
+      };
+    }
+    if (href.includes("/api/pricing/cache")) {
+      assert.fail("pricing cache must not load when skipPricing is true");
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  try {
+    const savedLines = [{
+      item_code: "A005425",
+      item_name: "GOLDEN STAR PAPER",
+      quantity: 40,
+      rate: 52,
+      lineValue: 2080,
+    }];
+    const { snapshot, analytics } = await enrichOrderPdfLiveData({
+      orderId: 4401,
+      customerCode: "1059",
+      customerName: "Test Customer",
+      lines: savedLines,
+      totals: { amountExclVat: 2080 },
+      grandTotal: 2080,
+      outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+    }, { accessToken: "token", skipPricing: true });
+
+    assert.equal(snapshot.lines[0].item_code, "A005425");
+    assert.equal(snapshot.lines[0].quantity, 40);
+    assert.equal(snapshot.lines[0].rate, 52);
+    assert.equal(snapshot.grandTotal, 2080);
+    assert.equal(snapshot.outstanding.customer?.total, 1200);
+    assert.equal(snapshot.outstanding.customerInvoices.length, 1);
+    assert.ok(analytics == null || typeof analytics === "object");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

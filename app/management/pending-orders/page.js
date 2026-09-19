@@ -298,7 +298,7 @@ export default function PendingOrdersPage() {
   const [orderLines, setOrderLines] = useState([]);
   const [orderHistory, setOrderHistory] = useState([]);
   const [loadingLines, setLoadingLines] = useState(false);
-  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [downloadingPdfOrderId, setDownloadingPdfOrderId] = useState("");
   const [invoiceMetaByOrder, setInvoiceMetaByOrder] = useState({});
   const [statusDraftByOrder, setStatusDraftByOrder] = useState({});
   const [rejectReasonByOrder, setRejectReasonByOrder] = useState({});
@@ -1103,45 +1103,102 @@ export default function PendingOrdersPage() {
     }, { orderValue: 0, invoiceValue: 0 });
   }, [filteredOrders, invoiceMetaByOrder]);
 
-  async function regenerateOrderPdf() {
-    if (!activeOrder) {
-      setError("Open an order first to regenerate PDF.");
-      return;
+  async function loadOrderPdfSource(orderId) {
+    const order = orders.find((entry) => entry.id === orderId) || null;
+    if (!order) {
+      throw new Error("Order not found.");
     }
 
-    if (orderLines.length === 0) {
-      setError("This order has no line items to generate PDF.");
-      return;
+    if (isQueuedPendingOrderId(orderId)) {
+      const lines = Array.isArray(order.queuedLines) ? order.queuedLines : [];
+      return { order, lines, history: [] };
     }
 
-    setDownloadingPdf(true);
+    if (activeOrderId === orderId && Array.isArray(orderLines) && orderLines.length > 0) {
+      return { order, lines: orderLines, history: orderHistory };
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      throw new Error("Supabase is not configured.");
+    }
+
+    const { data, error: linesError } = await supabase
+      .from("sales_order_items")
+      .select("id,item_code,item_name,category,quantity,rate,line_value")
+      .eq("order_id", orderId)
+      .order("item_name");
+
+    if (linesError) throw linesError;
+
+    const token = await getAuthToken();
+    const historyResponse = await fetch(`/api/order-history?orderId=${encodeURIComponent(orderId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const historyPayload = await historyResponse.json().catch(() => ({}));
+    const history = historyResponse.ok && historyPayload.success && Array.isArray(historyPayload.history)
+      ? historyPayload.history
+      : [];
+
+    return { order, lines: data || [], history };
+  }
+
+  async function generateOrderPdf(orderId) {
+    if (!orderId || downloadingPdfOrderId) return;
+
+    setDownloadingPdfOrderId(String(orderId));
     setError("");
 
     try {
+      const { order, lines, history } = await loadOrderPdfSource(orderId);
+      if (!lines.length) {
+        setError("This order has no line items to generate PDF.");
+        return;
+      }
+
       const token = await getAuthToken();
-      if (token && isQueuedPendingOrderId(activeOrder.id)) {
+      if (token && isQueuedPendingOrderId(order.id)) {
         await processOfflineQueue(async () => token).catch(() => undefined);
       }
+
+      // Keep saved item / qty / price; refresh outstanding, receipts, and other live fields.
       const snapshot = buildOrderPdfSnapshotFromSavedOrder({
-        order: activeOrder,
-        lines: orderLines,
-        history: orderHistory,
-        outstanding: outstandingInfoByOrder?.[activeOrder.id] || null,
-        creditApprovalRemark: creditApprovalByOrder?.[activeOrder.id]?.remark || "",
+        order,
+        lines,
+        history,
+        outstanding: outstandingInfoByOrder?.[order.id] || null,
+        creditApprovalRemark: creditApprovalByOrder?.[order.id]?.remark || "",
       });
 
       const { snapshot: liveSnapshot, analytics } = await resolveLiveOrderPdfSnapshot(snapshot, {
         accessToken: token,
+        skipPricing: true,
       }, {
         processQueue: token
           ? () => processOfflineQueue(async () => token)
           : undefined,
       });
 
-      let creditEvaluation = creditApprovalByOrder?.[activeOrder.id] || null;
+      if (liveSnapshot?.outstanding) {
+        setOutstandingInfoByOrder((current) => ({
+          ...current,
+          [order.id]: {
+            uploadedAt: String(current?.[order.id]?.uploadedAt || ""),
+            bucketLabels: Array.isArray(liveSnapshot.outstanding.bucketLabels)
+              ? liveSnapshot.outstanding.bucketLabels
+              : (current?.[order.id]?.bucketLabels || []),
+            customer: liveSnapshot.outstanding.customer || current?.[order.id]?.customer || null,
+            customerInvoices: Array.isArray(liveSnapshot.outstanding.customerInvoices)
+              ? liveSnapshot.outstanding.customerInvoices
+              : (current?.[order.id]?.customerInvoices || []),
+          },
+        }));
+      }
+
+      let creditEvaluation = creditApprovalByOrder?.[order.id] || null;
       try {
         const documentsResponse = await fetch(
-          `/api/customer-documents?customerCode=${encodeURIComponent(activeOrder.customer_code || "")}`,
+          `/api/customer-documents?customerCode=${encodeURIComponent(order.customer_code || "")}`,
           { headers: { Authorization: `Bearer ${token}` } },
         );
         const documentsPayload = await documentsResponse.json().catch(() => ({}));
@@ -1152,6 +1209,10 @@ export default function PendingOrdersPage() {
             ? documentsPayload.compliance?.creditApplication
             : { present: false },
         });
+        setCreditApprovalByOrder((current) => ({
+          ...current,
+          [order.id]: creditEvaluation,
+        }));
       } catch {
         creditEvaluation = creditEvaluation || evaluateCreditApproval({
           outstanding: liveSnapshot.outstanding?.customer || {},
@@ -1168,22 +1229,22 @@ export default function PendingOrdersPage() {
       const orderNumber = formatSalesOrderNumber(liveSnapshot) || "order";
       const fileName = buildOrderPdfFileName({
         orderId: orderNumber,
-        customerCode: liveSnapshot.customerCode || activeOrder.customer_code,
+        customerCode: liveSnapshot.customerCode || order.customer_code,
         savedAtIso: new Date().toISOString(),
       });
       await saveOrShareOrderPdf(doc, fileName, {
         title: `Order #${orderNumber}`,
-        text: `Sales order for ${activeOrder.customer_name || activeOrder.customer_code || "customer"}`,
-        dialogTitle: "Save or share order PDF",
+        text: `Sales order for ${order.customer_name || order.customer_code || "customer"}`,
+        dialogTitle: "Save order PDF",
         forceDownload: true,
       });
     } catch (error) {
       if (error?.name === "AbortError" || String(error?.message || "").toLowerCase().includes("cancel")) {
         return;
       }
-      setError("Unable to prepare PDF for this order.");
+      setError(error?.message || "Unable to prepare PDF for this order.");
     } finally {
-      setDownloadingPdf(false);
+      setDownloadingPdfOrderId("");
     }
   }
 
@@ -1472,6 +1533,17 @@ export default function PendingOrdersPage() {
                               >
                                 {activeOrderId === order.id ? "Close" : "Open"}
                               </button>
+                              <button
+                                type="button"
+                                className="moduleInlineButton"
+                                onClick={() => generateOrderPdf(order.id)}
+                                disabled={Boolean(downloadingPdfOrderId)}
+                                title="Download PDF with live receipt and outstanding; keeps saved item, qty, and price"
+                              >
+                                {String(downloadingPdfOrderId) === String(order.id)
+                                  ? "Preparing PDF..."
+                                  : "Generate PDF"}
+                              </button>
                               {canManageInvoice ? (
                                 <select
                                   className="moduleInput"
@@ -1726,10 +1798,12 @@ export default function PendingOrdersPage() {
                                   <button
                                     type="button"
                                     className="modulePrimaryButton"
-                                    onClick={regenerateOrderPdf}
-                                    disabled={downloadingPdf || loadingLines || orderLines.length === 0}
+                                    onClick={() => generateOrderPdf(order.id)}
+                                    disabled={Boolean(downloadingPdfOrderId) || loadingLines || orderLines.length === 0}
                                   >
-                                    {downloadingPdf ? "Preparing PDF..." : "Regenerate / Download PDF"}
+                                    {String(downloadingPdfOrderId) === String(order.id)
+                                      ? "Preparing PDF..."
+                                      : "Generate / Download PDF"}
                                   </button>
                                   <button type="button" className="moduleInlineButton" onClick={exportQueueToExcel} disabled={orders.length === 0}>
                                     Export Excel

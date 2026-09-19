@@ -41,8 +41,8 @@ const TEXT = {
     ar: "لم يتم رفع سجل إيصالات تالي بعد. استورد ملف الإيصالات أولاً.",
   },
   hint: {
-    en: "Match rule: same customer, amount within 0.02, and receipt date within the selected day window of the app visit date (KSA). One Tally voucher is used at most once.",
-    ar: "قاعدة المطابقة: نفس العميل، فرق المبلغ حتى 0.02، وتاريخ إيصال تالي ضمن نافذة الأيام المحددة حول تاريخ زيارة التطبيق (توقيت السعودية). يُستخدم كل قسيمة تالي مرة واحدة فقط.",
+    en: "Match rule: same customer, amount within 0.02, and receipt date within the selected day window of the app visit date (KSA). Choose 0–30 days. One Tally voucher is used at most once.",
+    ar: "قاعدة المطابقة: نفس العميل، فرق المبلغ حتى 0.02، وتاريخ إيصال تالي ضمن نافذة الأيام المحددة حول تاريخ زيارة التطبيق (توقيت السعودية). اختر من 0 إلى 30 يوماً. يُستخدم كل قسيمة تالي مرة واحدة فقط.",
   },
   appReceipts: { en: "App receipts", ar: "إيصالات التطبيق" },
   matched: { en: "Matched to Tally", ar: "مطابق لتالي" },
@@ -279,16 +279,24 @@ export default function ReceiptsNotInTallyPage() {
               </label>
               <label className="moduleField">
                 {t("windowDays")}
-                <select
+                <input
                   className="moduleInput"
+                  type="number"
+                  min="0"
+                  max="30"
+                  step="1"
                   value={windowDays}
-                  onChange={(event) => setWindowDays(event.target.value)}
-                >
-                  <option value="0">0</option>
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                </select>
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    if (next === "") {
+                      setWindowDays("");
+                      return;
+                    }
+                    const parsed = Number(next);
+                    if (!Number.isFinite(parsed)) return;
+                    setWindowDays(String(Math.max(0, Math.min(30, Math.round(parsed)))));
+                  }}
+                />
               </label>
             </div>
           </section>

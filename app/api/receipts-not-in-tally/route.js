@@ -193,7 +193,7 @@ export async function GET(request) {
 
     const windowDaysRaw = Number(url.searchParams.get("windowDays"));
     const windowDays = Number.isFinite(windowDaysRaw)
-      ? Math.max(0, Math.min(7, Math.round(windowDaysRaw)))
+      ? Math.max(0, Math.min(30, Math.round(windowDaysRaw)))
       : DEFAULT_DATE_WINDOW_DAYS;
 
     const { startIso } = ksaDayBounds(fromDate);

@@ -1,3 +1,4 @@
+import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
 import { formatKsaDateOnly } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 
@@ -170,6 +171,10 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   lines.push(`${labels.bucket61to90}: ${formatMoney(row.outstanding_61_90)}`);
   lines.push(`${labels.bucket91to120}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${labels.bucket120plus}: ${formatMoney(row.outstanding_above_120)}`);
+  lines.push(...formatAvgDaysToPayWhatsappLines(
+    options.avgDaysToPay ?? row.avgDaysToPay ?? row.avg_days_to_pay,
+    { avgDaysToPay: labels.avgDaysToPay },
+  ));
   lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
     gps: labels.gps,
     distanceFromCustomer: labels.distanceFromCustomer,

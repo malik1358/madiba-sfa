@@ -1,3 +1,4 @@
+import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
 import { formatKsaDateOnly } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 
@@ -36,6 +37,7 @@ export function buildFieldVisitWhatsappSummary({
   language: _language = "en",
   visitDistance = {},
   includeOutstanding = true,
+  avgDaysToPay = null,
 } = {}) {
   const labels = {
     title: "Field visit report",
@@ -52,6 +54,7 @@ export function buildFieldVisitWhatsappSummary({
     bucket61To90: "61-90",
     bucketAbove90: ">90",
     totalOutstanding: "Total",
+    avgDaysToPay: "Avg days to pay",
   };
 
   const outcome = formatFieldVisitOutcome(visitForm.outcome, "en");
@@ -87,6 +90,10 @@ export function buildFieldVisitWhatsappSummary({
     lines.push(`${labels.totalOutstanding}: ${formatMoney(totalOutstanding)}`);
   }
 
+  lines.push(...formatAvgDaysToPayWhatsappLines(
+    avgDaysToPay ?? customer.avgDaysToPay ?? customer.avg_days_to_pay,
+    labels,
+  ));
   lines.push(...formatVisitDistanceWhatsappLines(visitDistance));
 
   return lines.join("\n");

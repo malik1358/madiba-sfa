@@ -1,3 +1,5 @@
+import { ensureNamedUploadFile, resolveUploadContentType } from "./collectionUploadFile.js";
+
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
 const MAX_IMAGE_DIMENSION = 2000;
 
@@ -65,16 +67,19 @@ export async function prepareUploadFile(file) {
 
   const mime = String(file.type || "").toLowerCase();
   const name = String(file.name || "").toLowerCase();
-  if (mime === "application/pdf" || name.endsWith(".pdf")) {
+  const resolvedType = resolveUploadContentType({ name: file.name, type: file.type });
+  if (resolvedType === "application/pdf" || mime === "application/pdf" || name.endsWith(".pdf")) {
     if (file.size > 10 * 1024 * 1024) {
       throw new Error("PDF file is too large. Choose a file under 10 MB, or upload a JPG/PNG photo of the certificate.");
     }
-    return file;
+    return ensureNamedUploadFile(file, "receipt-copy.pdf");
   }
 
-  if (!mime.startsWith("image/")) return file;
+  if (!mime.startsWith("image/") && resolvedType !== "image/jpeg" && resolvedType !== "image/png" && resolvedType !== "image/webp") {
+    return ensureNamedUploadFile(file);
+  }
   if (file.size <= MAX_UPLOAD_BYTES && !mime.includes("heic") && !mime.includes("heif")) {
-    return file;
+    return ensureNamedUploadFile(file);
   }
 
   return compressImageFile(file);

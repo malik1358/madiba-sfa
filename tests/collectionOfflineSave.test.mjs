@@ -18,6 +18,9 @@ test("collection save path uses local customer data and resilient offline helper
   assert.match(source, /skipReverseGeocode: offline/);
   assert.match(source, /scope: salesScope/);
   assert.match(source, /queueFirst: typeof navigator !== "undefined" && navigator\.onLine === false/);
+  assert.match(source, /queueFirst: offline/);
+  assert.match(source, /timeoutMs: shareFiles\.length > 0 \? 90000 : 25000/);
+  assert.match(source, /receipt-copy\.pdf/);
 });
 
 test("legal remove uses a long PATCH timeout and skips office GPS", () => {

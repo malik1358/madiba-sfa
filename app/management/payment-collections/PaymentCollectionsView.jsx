@@ -1031,6 +1031,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (text.includes("GPS is required") || text === GPS_REQUIRED_ERROR) return t("msgGpsRequired");
     if (text.includes("Unable to save collection visit")) return t("msgSaveFailed");
     if (text.includes("timed out") || text.toLowerCase().includes("abort")) return t("msgRequestTimeout");
+    if (text.includes("Reading the attached file")) return t("msgRequestTimeout");
     if (text.toLowerCase().includes("bucket not found") || text.includes("File storage is not configured")) {
       return t("msgStorageUnavailable");
     }
@@ -1706,6 +1707,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
     setSavingCustomerCode(row.customer_code);
     setError("");
+    let saveWatchdog = 0;
+    if (typeof window !== "undefined") {
+      saveWatchdog = window.setTimeout(() => {
+        setSavingCustomerCode((current) => (current === row.customer_code ? "" : current));
+      }, 90000);
+    }
 
     try {
       const session = await resolveAuthSession(supabase, 8000);
@@ -1864,23 +1871,26 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
       const shareFiles = [];
       if (form.paymentCopy) {
-        const paymentFile = toWhatsappShareFile(
-          await prepareUploadFile(form.paymentCopy),
-          "payment-copy.jpg",
-        );
+        const preparedPayment = await prepareUploadFile(form.paymentCopy);
+        const paymentFallback = String(preparedPayment?.type || "").includes("pdf")
+          ? "payment-copy.pdf"
+          : "payment-copy.jpg";
+        const paymentFile = toWhatsappShareFile(preparedPayment, paymentFallback);
         formData.append("paymentCopy", paymentFile);
         if (paymentFile) shareFiles.push(paymentFile);
       }
 
       if (form.receiptCopy) {
-        const receiptFile = toWhatsappShareFile(
-          await prepareUploadFile(form.receiptCopy),
-          "receipt-copy.jpg",
-        );
+        const preparedReceipt = await prepareUploadFile(form.receiptCopy);
+        const receiptFallback = String(preparedReceipt?.type || "").includes("pdf")
+          ? "receipt-copy.pdf"
+          : "receipt-copy.jpg";
+        const receiptFile = toWhatsappShareFile(preparedReceipt, receiptFallback);
         formData.append("receiptCopy", receiptFile);
         if (receiptFile) shareFiles.push(receiptFile);
       }
 
+      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
       const saveResult = await postFormDataResilient({
         url: "/api/payment-collections",
         formData,
@@ -1891,9 +1901,13 @@ export default function PaymentCollectionsView({ view = "due" }) {
           type: "collection_visit",
           customerCode: row.customer_code,
         },
-        timeoutMs: 25000,
+        // Large PDF receipts need more than a short probe timeout on mobile data.
+        timeoutMs: shareFiles.length > 0 ? 90000 : 25000,
         queueOnTimeout: true,
-        queueFirst: true,
+        // Only queue-first when offline. Online uploads (especially PDF receipts)
+        // should hit the server directly so Android octet-stream PDFs are normalized
+        // and saved immediately instead of sitting in a stuck IndexedDB sync item.
+        queueFirst: offline,
       });
 
       const payload = saveResult.payload || {};
@@ -1939,6 +1953,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
     } catch (err) {
       showPopup({ message: localizeApiMessage(err.message || t("msgSaveFailed")), variant: "error" });
     } finally {
+      if (saveWatchdog && typeof window !== "undefined") {
+        window.clearTimeout(saveWatchdog);
+      }
       setSavingCustomerCode("");
     }
   }

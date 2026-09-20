@@ -655,8 +655,11 @@ export default function PendingOrdersPage() {
       setStatusDraftByOrder((current) => {
         const next = { ...current };
         Object.entries(items).forEach(([orderId, meta]) => {
-          if (!next[orderId]) {
-            next[orderId] = String(meta?.status || "");
+          const serverStatus = String(meta?.status || "");
+          // Always adopt server Invoice made (upload/heal) so the dropdown
+          // does not keep a stale Pending for approval value.
+          if (!next[orderId] || serverStatus === INVOICE_STATUS_MADE) {
+            next[orderId] = serverStatus;
           }
         });
         return next;

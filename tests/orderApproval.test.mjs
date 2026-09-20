@@ -6,6 +6,7 @@ import {
   ORDER_REJECTION_REASON_DISCOUNT_PRICE,
   ORDER_REJECTION_REASON_STOCK,
   ORDER_REJECTION_REASON_MADE_BY_MISTAKE,
+  ORDER_STATUS_INVOICE_MADE,
   ORDER_STATUS_PENDING_APPROVAL,
   ORDER_STATUS_PENDING_CREDIT,
   ORDER_STATUS_PENDING_INVOICE_CREATION,
@@ -17,6 +18,8 @@ import {
   isPendingForApprovalStatus,
   isSubmittedWithoutUploadedInvoice,
   isValidRejectionReason,
+  metaWithInvoiceMadeStatus,
+  shouldAutoMarkInvoiceMade,
   shouldAutoMarkPendingApproval,
   shouldAutoMarkPendingInvoiceCreation,
   shouldAutoRejectLegacyUninvoicedOrder,
@@ -95,6 +98,44 @@ test("submitted orders with invoice uploaded are not queued", () => {
   assert.equal(shouldAutoMarkPendingApproval({ order, meta, approvalRequired: true }), false);
   assert.equal(shouldAutoMarkPendingInvoiceCreation({ order, meta, approvalRequired: false }), false);
   assert.equal(shouldShowPendingApprovalActions(order, meta), false);
+  assert.equal(displayInvoiceStatus(meta, { order, approvalRequired: true }), ORDER_STATUS_INVOICE_MADE);
+});
+
+test("uploaded invoice forces Invoice made over leftover pending approval status", () => {
+  const order = { id: 99, status: "SUBMITTED" };
+  const meta = {
+    orderId: "99",
+    status: ORDER_STATUS_PENDING_APPROVAL,
+    invoiceFilePath: "C1/99/invoice.pdf",
+    invoiceUploadedAt: "2026-09-19T11:17:00.000Z",
+  };
+  assert.equal(displayInvoiceStatus(meta, { order, approvalRequired: true }), ORDER_STATUS_INVOICE_MADE);
+  assert.equal(displayInvoiceStatus(meta, { order }), ORDER_STATUS_INVOICE_MADE);
+  assert.equal(shouldAutoMarkInvoiceMade(meta), true);
+  assert.equal(shouldAutoMarkInvoiceMade({
+    ...meta,
+    status: ORDER_STATUS_INVOICE_MADE,
+  }), false);
+  assert.equal(shouldAutoMarkInvoiceMade({ status: ORDER_STATUS_PENDING_APPROVAL }), false);
+
+  const healed = metaWithInvoiceMadeStatus(meta, {
+    userId: "user-1",
+    nowIso: "2026-09-20T08:00:00.000Z",
+  });
+  assert.equal(healed.status, ORDER_STATUS_INVOICE_MADE);
+  assert.equal(healed.invoiceFilePath, meta.invoiceFilePath);
+  assert.equal(healed.invoiceUploadedAt, meta.invoiceUploadedAt);
+  assert.equal(healed.statusUpdatedBy, "user-1");
+  assert.equal(healed.updatedAt, "2026-09-20T08:00:00.000Z");
+});
+
+test("uploaded invoice also clears leftover pending invoice creation status", () => {
+  const meta = {
+    status: ORDER_STATUS_PENDING_INVOICE_CREATION,
+    invoiceUploadedAt: "2026-09-19T11:17:00.000Z",
+  };
+  assert.equal(displayInvoiceStatus(meta), ORDER_STATUS_INVOICE_MADE);
+  assert.equal(shouldAutoMarkInvoiceMade(meta), true);
 });
 
 test("pending for approval includes legacy credit status", () => {

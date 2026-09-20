@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { buildCacheBustingReloadUrl, getClientBuildId } from "../lib/buildInfo";
+import {
+  buildCacheBustingReloadUrl,
+  getClientBuildId,
+  hasAttemptedReloadForBuild,
+} from "../lib/buildInfo";
 import { hasOpenUnsavedEntry, UNSAVED_ENTRY_EVENT } from "../lib/unsavedEntryGuard";
 
 const POLL_MS = 60 * 1000;
@@ -61,6 +65,14 @@ export default function BuildUpdateWatcher() {
         const serverBuild = String(payload.buildId || "").trim();
         if (!serverBuild || serverBuild === "local") return;
         if (serverBuild !== clientBuildRef.current) {
+          // Prerendered HTML can stay stale after deploy even with ?_build=.
+          // Only attempt one reload per build id so collectors are not stuck
+          // in a full-page reload loop on Payment Collections.
+          if (hasAttemptedReloadForBuild(serverBuild, window.location.href)) {
+            clientBuildRef.current = serverBuild;
+            pendingReloadRef.current = false;
+            return;
+          }
           if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
             navigator.serviceWorker.getRegistrations()
               .then((registrations) => Promise.all(registrations.map((registration) => registration.update())))

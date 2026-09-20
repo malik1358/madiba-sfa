@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildCacheBustingReloadUrl,
+  hasAttemptedReloadForBuild,
   resolveBuildId,
   resolveBuildTime,
   formatBuildDateTime,
@@ -46,5 +47,20 @@ test("buildCacheBustingReloadUrl adds build query param", () => {
   assert.equal(
     buildCacheBustingReloadUrl("1e56c2b", "https://madiba-sfa.vercel.app/management/my-day"),
     "/management/my-day?_build=1e56c2b",
+  );
+});
+
+test("hasAttemptedReloadForBuild detects a matching _build query", () => {
+  assert.equal(
+    hasAttemptedReloadForBuild("1e56c2b", "https://madiba-sfa.vercel.app/management/payment-collections?_build=1e56c2b"),
+    true,
+  );
+  assert.equal(
+    hasAttemptedReloadForBuild("1e56c2b", "https://madiba-sfa.vercel.app/management/payment-collections?_build=old"),
+    false,
+  );
+  assert.equal(
+    hasAttemptedReloadForBuild("1e56c2b", "https://madiba-sfa.vercel.app/management/payment-collections"),
+    false,
   );
 });

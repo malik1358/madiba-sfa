@@ -24,6 +24,8 @@ import {
   isSubmittedWithoutUploadedInvoice,
   isSupportedInvoiceStatus,
   isValidRejectionReason,
+  metaWithInvoiceMadeStatus,
+  shouldAutoMarkInvoiceMade,
   shouldAutoMarkPendingApproval,
   shouldAutoMarkPendingInvoiceCreation,
   shouldAutoRejectLegacyUninvoicedOrder,
@@ -263,6 +265,14 @@ async function upsertMeta(admin, meta) {
   if (error) throw error;
 }
 
+/** Persist Invoice made when an upload exists but status was left on a queue label. */
+async function ensureInvoiceMadeWhenUploaded(admin, meta, userId = "") {
+  if (!shouldAutoMarkInvoiceMade(meta)) return meta;
+  const updated = metaWithInvoiceMadeStatus(meta, { userId });
+  await upsertMeta(admin, updated);
+  return updated;
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -289,6 +299,7 @@ export async function GET(request) {
       const order = await ensureOrderVisible(admin, singleOrderId, scope);
       const metaMap = await readMetaMap(admin, [singleOrderId]);
       let meta = metaMap.get(singleOrderId) || { orderId: singleOrderId };
+      meta = await ensureInvoiceMadeWhenUploaded(admin, meta, scope.userId);
       meta = await hydrateMetaWithComparison(admin, meta, { forceCompare: compare });
 
       if (compare && isProspectCustomerCode(order.customer_code)) {
@@ -325,7 +336,8 @@ export async function GET(request) {
     // List views only need status metadata. Signed URLs and PDF prospect
     // backfill run on single-order GET / upload so this request stays fast.
     for (const orderId of visibleIds) {
-      items[orderId] = metaMap.get(orderId) || { orderId };
+      const existing = metaMap.get(orderId) || { orderId };
+      items[orderId] = await ensureInvoiceMadeWhenUploaded(admin, existing, scope.userId);
     }
 
     return NextResponse.json({ success: true, items });

@@ -111,6 +111,35 @@ export function hasUploadedInvoice(meta) {
   );
 }
 
+export function isInvoiceMadeStatus(status) {
+  return normalizeInvoiceStatus(status).toLowerCase()
+    === ORDER_STATUS_INVOICE_MADE.toLowerCase();
+}
+
+/**
+ * Uploaded invoices must show as Invoice made, even when an earlier queue
+ * status (pending approval / invoice creation) was never cleared.
+ */
+export function shouldAutoMarkInvoiceMade(meta = null) {
+  if (!hasUploadedInvoice(meta)) return false;
+  return !isInvoiceMadeStatus(meta?.status);
+}
+
+export function metaWithInvoiceMadeStatus(meta, {
+  userId = "",
+  nowIso = new Date().toISOString(),
+} = {}) {
+  const orderId = String(meta?.orderId || "").trim();
+  return {
+    ...(meta || {}),
+    ...(orderId ? { orderId } : {}),
+    status: ORDER_STATUS_INVOICE_MADE,
+    updatedAt: nowIso,
+    statusUpdatedAt: nowIso,
+    statusUpdatedBy: userId || meta?.statusUpdatedBy || "",
+  };
+}
+
 /** Statuses that already leave the open invoice-work queues. */
 export function hasSettledInvoiceStatus(meta) {
   const status = normalizeInvoiceStatus(meta?.status).toLowerCase();
@@ -142,7 +171,8 @@ export function displayInvoiceStatus(meta, {
       ? `${ORDER_STATUS_REJECTED} (${meta.rejectionReason})`
       : ORDER_STATUS_REJECTED;
   }
-  if (hasUploadedInvoice(meta) && (!status || status.toLowerCase() === "invoice not uploaded")) {
+  // Upload always wins over leftover queue statuses (pending approval, etc.).
+  if (hasUploadedInvoice(meta)) {
     return ORDER_STATUS_INVOICE_MADE;
   }
   if (isPendingForApprovalStatus(status)) {
@@ -150,7 +180,7 @@ export function displayInvoiceStatus(meta, {
   }
   // Credit-needed orders must not stay labeled as invoice-creation, even if
   // an earlier auto-mark wrote that status before approval was evaluated.
-  if (approvalRequired === true && !meta?.approvedAt && !hasUploadedInvoice(meta)) {
+  if (approvalRequired === true && !meta?.approvedAt) {
     if (isPendingForInvoiceCreationStatus(status) || !status || status.toLowerCase() === "invoice not uploaded") {
       return ORDER_STATUS_PENDING_APPROVAL;
     }
@@ -167,7 +197,7 @@ export function displayInvoiceStatus(meta, {
     }
     return status;
   }
-  if (meta?.approvedAt && !hasUploadedInvoice(meta)) {
+  if (meta?.approvedAt) {
     return ORDER_STATUS_PENDING_INVOICE_CREATION;
   }
   if (approvalRequired === true && !meta?.approvedAt) {
@@ -178,9 +208,6 @@ export function displayInvoiceStatus(meta, {
     if (approvalRequired === true) return ORDER_STATUS_PENDING_APPROVAL;
     // Credit check not evaluated yet — do not assume invoice creation.
     return "-";
-  }
-  if (hasUploadedInvoice(meta)) {
-    return ORDER_STATUS_INVOICE_MADE;
   }
   return "-";
 }

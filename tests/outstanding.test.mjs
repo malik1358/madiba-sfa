@@ -17,6 +17,9 @@ import {
   resolveUploadedOutstandingSalesman,
   pickLongestCustomerName,
   findOutstandingForCustomer,
+  buildOutstandingLookup,
+  getOutstandingLookup,
+  outstandingAccountIndexKeys,
   findOutstandingHeaderRow,
   isSameOutstandingCustomer,
   findOutstandingCustomerCodesForSalesmen,
@@ -404,6 +407,72 @@ test("findOutstandingForCustomer matches order 1564 to outstanding 1564C", () =>
       "Windows of Thought and Creativity Foundation",
     ),
     true,
+  );
+});
+
+test("outstanding lookup indexes account stems and memoizes results", () => {
+  const dataset = {
+    rows: Array.from({ length: 2000 }, (_, index) => ({
+      customer_code: `${1000 + index}C`,
+      customer_name: `Customer ${1000 + index}`,
+      total_outstanding: index + 1,
+      buckets: { "0-30": index + 1 },
+    })),
+  };
+  dataset.rows[1564 - 1000] = {
+    customer_code: "1564C",
+    customer_name: "1564C Windows of Thought and Creativity Foundation",
+    total_outstanding: 2000,
+    buckets: { "0-30": 800, "31-60": 1200 },
+  };
+
+  const lookup = getOutstandingLookup(dataset);
+  assert.equal(lookup, getOutstandingLookup(dataset));
+  assert.ok(outstandingAccountIndexKeys("1564C", "Windows").has("1564"));
+  assert.ok(lookup.byAccountKey.get("1564")?.some((row) => row.customer_code === "1564C"));
+
+  const first = findOutstandingForCustomer(
+    dataset,
+    "1564",
+    "Windows of Thought and Creativity Foundation",
+  );
+  const second = findOutstandingForCustomer(
+    dataset,
+    "1564",
+    "Windows of Thought and Creativity Foundation",
+  );
+  assert.equal(first?.total_outstanding, 2000);
+  assert.equal(second, first);
+  assert.equal(
+    findOutstandingForCustomer(dataset, "999999", "Missing Customer"),
+    null,
+  );
+
+  const started = Date.now();
+  for (let i = 0; i < 500; i += 1) {
+    findOutstandingForCustomer(dataset, `${1000 + (i % 2000)}`, `Customer ${1000 + (i % 2000)}`);
+  }
+  assert.ok(Date.now() - started < 1500, "indexed outstanding lookups should stay fast under load");
+});
+
+test("buildOutstandingLookup finds customers by normalized name when codes differ", () => {
+  const dataset = {
+    rows: [{
+      customer_code: "C-100",
+      customer_name: "Trusted Car Company",
+      total_outstanding: 440,
+      buckets: { "0-30": 440 },
+    }],
+  };
+  const lookup = buildOutstandingLookup(dataset);
+  assert.ok(lookup.byName.get("TRUSTED CAR COMPANY")?.length > 0);
+  assert.equal(
+    findOutstandingForCustomer(dataset, "C-100", "Trusted Car Company")?.total_outstanding,
+    440,
+  );
+  assert.equal(
+    findOutstandingForCustomer(dataset, "C-100", "trusted   car company")?.total_outstanding,
+    440,
   );
 });
 

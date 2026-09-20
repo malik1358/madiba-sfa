@@ -148,23 +148,24 @@ function orderCurrentOutstanding(order, outstandingDataset) {
   return row ? Number(row.total_outstanding || 0) : 0;
 }
 
-function pendingOrderFilterValues(order, meta, approvalRequired = null, outstandingDataset = null) {
+function pendingOrderFilterValues(order, meta, approvalRequired = null, outstandingAmount = null) {
+  const invoiceStatus = invoiceStatusText(meta, order, approvalRequired);
   return {
     orderId: displayOrDash(formatSalesOrderNumber(order) || order.id),
     customer: displayOrDash(order.customer_name || order.customer_code),
     salesman: displayOrDash(order.salesman_code),
     status: displayOrDash(order.status),
-    invoiceStatus: displayOrDash(invoiceStatusText(meta, order, approvalRequired)),
+    invoiceStatus: displayOrDash(invoiceStatus),
     uploadedAt: displayOrDash(formatDateTime(meta?.invoiceUploadedAt)),
     timeToMake: pendingOrderTimeToMakeBucket(
-      pendingOrderTimeToMakeSeconds(order, meta, Date.now(), invoiceStatusText(meta, order, approvalRequired)),
+      pendingOrderTimeToMakeSeconds(order, meta, Date.now(), invoiceStatus),
     ),
     created: displayOrDash(formatDateTime(order.created_at)),
     lastUpdated: displayOrDash(formatDateTime(order.updated_at)),
     age: String(daysOld(order.updated_at || order.created_at)),
     orderValue: formatMoneyInclVat(orderValueInclVat(order)),
     invoiceValue: formatMoneyInclVat(invoiceMadeInclVat(meta)),
-    currentOutstanding: formatCurrentOutstanding(orderCurrentOutstanding(order, outstandingDataset)),
+    currentOutstanding: formatCurrentOutstanding(outstandingAmount),
   };
 }
 
@@ -225,7 +226,7 @@ function subscribeDurationTick(listener) {
     durationTick.timer = setInterval(() => {
       durationTick.now = Date.now();
       durationTick.listeners.forEach((fn) => fn());
-    }, 1000);
+    }, 5000);
   }
   return () => {
     durationTick.listeners.delete(listener);
@@ -1095,29 +1096,39 @@ export default function PendingOrdersPage() {
     [orders, activeOrderId]
   );
 
+  // Precompute outstanding + filter cell values once per data change so heading
+  // filters stay O(columns × orders) with cheap string compares — not repeated
+  // outstanding customer scans (which froze the page with large datasets).
+  const outstandingAmountByOrderId = useMemo(() => {
+    const amounts = new Map();
+    (orders || []).forEach((order) => {
+      amounts.set(order.id, orderCurrentOutstanding(order, outstandingDataset));
+    });
+    return amounts;
+  }, [orders, outstandingDataset]);
+
+  const orderFilterRows = useMemo(() => (
+    (orders || []).map((order) => ({
+      order,
+      values: pendingOrderFilterValues(
+        order,
+        invoiceMetaByOrder?.[order.id] || null,
+        creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
+        outstandingAmountByOrderId.get(order.id),
+      ),
+    }))
+  ), [creditApprovalByOrder, invoiceMetaByOrder, orders, outstandingAmountByOrderId]);
+
   const columnFilterOptions = useMemo(() => {
     const options = {};
     HEADING_FILTER_KEYS.forEach((key) => {
-      const matching = orders.filter((order) => {
-        const values = pendingOrderFilterValues(
-          order,
-          invoiceMetaByOrder?.[order.id] || null,
-          creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
-          outstandingDataset,
-        );
-        return rowMatchesOtherExcelFilters(values, columnFilters, key, HEADING_FILTER_KEYS, matchesColumnFilter);
-      });
-      options[key] = uniqueColumnValues(
-        matching.map((order) => pendingOrderFilterValues(
-          order,
-          invoiceMetaByOrder?.[order.id] || null,
-          creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
-          outstandingDataset,
-        )[key]),
-      );
+      const matching = orderFilterRows.filter(({ values }) => (
+        rowMatchesOtherExcelFilters(values, columnFilters, key, HEADING_FILTER_KEYS, matchesColumnFilter)
+      ));
+      options[key] = uniqueColumnValues(matching.map(({ values }) => values[key]));
     });
     return options;
-  }, [columnFilters, creditApprovalByOrder, invoiceMetaByOrder, orders, outstandingDataset]);
+  }, [columnFilters, orderFilterRows]);
 
   const effectiveColumnFilters = useMemo(() => {
     const next = { ...columnFilters };
@@ -1127,24 +1138,23 @@ export default function PendingOrdersPage() {
     return next;
   }, [columnFilterOptions, columnFilters]);
 
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      const values = pendingOrderFilterValues(
-        order,
-        invoiceMetaByOrder?.[order.id] || null,
-        creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
-        outstandingDataset,
-      );
-      return HEADING_FILTER_KEYS.every((key) => matchesColumnFilter(values[key], effectiveColumnFilters[key]));
-    });
-  }, [creditApprovalByOrder, effectiveColumnFilters, invoiceMetaByOrder, orders, outstandingDataset]);
+  const filteredOrderRows = useMemo(() => (
+    orderFilterRows.filter(({ values }) => (
+      HEADING_FILTER_KEYS.every((key) => matchesColumnFilter(values[key], effectiveColumnFilters[key]))
+    ))
+  ), [effectiveColumnFilters, orderFilterRows]);
+
+  const filteredOrders = useMemo(
+    () => filteredOrderRows.map(({ order }) => order),
+    [filteredOrderRows],
+  );
 
   const filteredValueTotals = useMemo(() => {
     const seenCustomers = new Set();
-    return filteredOrders.reduce((totals, order) => {
+    return filteredOrderRows.reduce((totals, { order }) => {
       totals.orderValue += orderValueInclVat(order) || 0;
       totals.invoiceValue += invoiceMadeInclVat(invoiceMetaByOrder?.[order.id]) || 0;
-      const outstanding = orderCurrentOutstanding(order, outstandingDataset);
+      const outstanding = outstandingAmountByOrderId.get(order.id);
       const customerKey = [
         String(order?.customer_code || "").trim().toUpperCase(),
         String(order?.customer_name || "").trim().toUpperCase(),
@@ -1155,7 +1165,7 @@ export default function PendingOrdersPage() {
       }
       return totals;
     }, { orderValue: 0, invoiceValue: 0, currentOutstanding: 0 });
-  }, [filteredOrders, invoiceMetaByOrder, outstandingDataset]);
+  }, [filteredOrderRows, invoiceMetaByOrder, outstandingAmountByOrderId]);
 
   async function loadOrderPdfSource(orderId) {
     const order = orders.find((entry) => entry.id === orderId) || null;
@@ -1424,7 +1434,7 @@ export default function PendingOrdersPage() {
         "Age (days)": daysOld(order.updated_at || order.created_at),
         "Order value (incl. VAT)": formatMoneyInclVat(orderValueInclVat(order)),
         "Invoice made (incl. VAT)": formatMoneyInclVat(invoiceMadeInclVat(invoiceMetaByOrder?.[order.id])),
-        "Current outstanding": formatCurrentOutstanding(orderCurrentOutstanding(order, outstandingDataset)),
+        "Current outstanding": formatCurrentOutstanding(outstandingAmountByOrderId.get(order.id)),
       }));
 
       workbook.Sheets.PendingOrders = XLSX.utils.json_to_sheet(queueRows);
@@ -1669,7 +1679,7 @@ export default function PendingOrdersPage() {
                           <td>{age}</td>
                           <td style={{ textAlign: "right" }}>{formatMoneyInclVat(orderValueInclVat(order))}</td>
                           <td style={{ textAlign: "right" }}>{formatMoneyInclVat(invoiceMadeInclVat(meta))}</td>
-                          <td style={{ textAlign: "right" }}>{formatCurrentOutstanding(orderCurrentOutstanding(order, outstandingDataset))}</td>
+                          <td style={{ textAlign: "right" }}>{formatCurrentOutstanding(outstandingAmountByOrderId.get(order.id))}</td>
                           <td>
                             <div className="moduleActionRow" style={{ flexWrap: "wrap", gap: "6px" }}>
                               <button

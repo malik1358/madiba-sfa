@@ -54,6 +54,19 @@ export function buildCacheBustingReloadUrl(serverBuildId, currentHref = "") {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+/** True when this page load already attempted a cache-bust for `serverBuildId`. */
+export function hasAttemptedReloadForBuild(serverBuildId, currentHref = "") {
+  const buildToken = String(serverBuildId || "").trim();
+  if (!buildToken) return false;
+  try {
+    const href = String(currentHref || "").trim() || "/";
+    const url = new URL(href, "http://local");
+    return url.searchParams.get("_build") === buildToken;
+  } catch {
+    return false;
+  }
+}
+
 export function addPdfBuildFooter(doc, buildId = getClientBuildId()) {
   const label = `Build: ${String(buildId || "local").trim() || "local"}`;
   const pageCount = doc.getNumberOfPages();

@@ -13,10 +13,15 @@ export function isMorningAttendanceRoute(pathname) {
 }
 
 export function canAccessWithoutMorningAttendance(pathname) {
-  const path = String(pathname || "").trim();
+  const path = String(pathname || "").trim().split("?")[0];
   return path === "/"
     || path === "/management/my-day"
-    || path === "/management/visit-without-order";
+    || path === "/management/visit-without-order"
+    // Collections intentionally skips the morning-attendance gate (collectors
+    // land here as their home screen). Do not bounce them to My Day in a loop.
+    || path === "/management/payment-collections"
+    || path === "/management/payment-collections/legal"
+    || path === "/management/my-collections";
 }
 
 export function todayAttendanceBounds(referenceDate = new Date()) {

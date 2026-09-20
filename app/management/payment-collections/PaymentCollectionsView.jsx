@@ -1091,11 +1091,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const collectionEntryOpen = Boolean(savingCustomerCode) || (Boolean(activeRowKey) && collectionFormIsDirty(form, activeRow));
   useUnsavedEntryGuard(collectionEntryOpen);
 
+  // Reset the visit form only when the selected customer changes.
+  // Do not depend on `activeRow` — background queue refreshes replace that
+  // object and were wiping in-progress Funds Received entry (looked like a reload loop).
   useEffect(() => {
-    if (activeRow) {
-      setForm(buildInitialForm());
-    }
-  }, [activeRow]);
+    setForm(buildInitialForm());
+  }, [activeRowKey]);
 
   useEffect(() => {
     setSummaryForWhatsApp("");
@@ -1555,7 +1556,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   useEffect(() => {
     const text = String(form.remarkArabic || "").trim();
-    if (!activeRow || !text) return;
+    if (!activeRowKey || !text) return;
 
     const controller = new AbortController();
     const timer = setTimeout(async () => {
@@ -1590,7 +1591,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [form.remarkArabic, activeRow]);
+  }, [form.remarkArabic, activeRowKey]);
 
   if (!supabaseClient) {
     return (

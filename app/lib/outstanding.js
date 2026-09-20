@@ -1321,16 +1321,119 @@ function outstandingPartyComparableName(customerCode, customerName) {
   return normalizeComparableName(stripped.customer_name || name);
 }
 
+const outstandingLookupByDataset = new WeakMap();
+
+function addOutstandingIndexEntry(map, key, row) {
+  if (!key) return;
+  const existing = map.get(key);
+  if (existing) {
+    existing.push(row);
+    return;
+  }
+  map.set(key, [row]);
+}
+
+function addOutstandingAccountStemKeys(keys, accountCode) {
+  const resolved = resolveCustomerAccountCode(accountCode);
+  if (!resolved) return;
+  keys.add(resolved);
+  const withLetter = resolved.match(/^(\d{3,6})[A-Z]$/);
+  if (withLetter) keys.add(withLetter[1]);
+}
+
+/** Account-code keys used to index and probe outstanding customer rows. */
+export function outstandingAccountIndexKeys(customerCode, customerName) {
+  const keys = new Set();
+  customerCodeCandidates(customerCode).forEach((candidate) => addOutstandingAccountStemKeys(keys, candidate));
+  customerCodeCandidates(customerName).forEach((candidate) => addOutstandingAccountStemKeys(keys, candidate));
+  addOutstandingAccountStemKeys(keys, outstandingPartyAccountCode(customerCode, customerName));
+  return keys;
+}
+
+function pushOutstandingCandidates(target, seen, list) {
+  (list || []).forEach((row) => {
+    if (seen.has(row)) return;
+    seen.add(row);
+    target.push(row);
+  });
+}
+
+/**
+ * Build a reusable outstanding lookup (code/name indexes + result memo).
+ * Cached per dataset object via WeakMap inside getOutstandingLookup.
+ */
+export function buildOutstandingLookup(dataset) {
+  const rows = (Array.isArray(dataset?.rows) ? dataset.rows : []).map((row) => buildOutstandingRow(row));
+  const byAccountKey = new Map();
+  const byName = new Map();
+  const byComparableName = new Map();
+
+  rows.forEach((row) => {
+    outstandingAccountIndexKeys(row.customer_code, row.customer_name).forEach((key) => {
+      addOutstandingIndexEntry(byAccountKey, key, row);
+    });
+    addOutstandingIndexEntry(byName, normalizeName(row.customer_name), row);
+    addOutstandingIndexEntry(
+      byComparableName,
+      outstandingPartyComparableName(row.customer_code, row.customer_name),
+      row,
+    );
+  });
+
+  return {
+    rows,
+    byAccountKey,
+    byName,
+    byComparableName,
+    resultCache: new Map(),
+  };
+}
+
+export function getOutstandingLookup(dataset) {
+  if (!dataset || typeof dataset !== "object") return null;
+  let lookup = outstandingLookupByDataset.get(dataset);
+  if (!lookup) {
+    lookup = buildOutstandingLookup(dataset);
+    outstandingLookupByDataset.set(dataset, lookup);
+  }
+  return lookup;
+}
+
+function collectOutstandingCandidates(lookup, customerCode, customerName) {
+  const seen = new Set();
+  const candidates = [];
+  outstandingAccountIndexKeys(customerCode, customerName).forEach((key) => {
+    pushOutstandingCandidates(candidates, seen, lookup.byAccountKey.get(key));
+  });
+  pushOutstandingCandidates(candidates, seen, lookup.byName.get(normalizeName(customerName)));
+  pushOutstandingCandidates(
+    candidates,
+    seen,
+    lookup.byComparableName.get(outstandingPartyComparableName(customerCode, customerName)),
+  );
+  return candidates;
+}
+
 export function findOutstandingForCustomer(dataset, customerCode, customerName) {
   if (isProspectCustomerCode(customerCode)) {
     return null;
   }
 
-  const rows = Array.isArray(dataset?.rows) ? dataset.rows : [];
-  const matched = rows.find((row) => (
+  const lookup = getOutstandingLookup(dataset);
+  if (!lookup) return null;
+
+  const cacheKey = `${normalizeCode(customerCode)}\0${normalizeName(customerName)}`;
+  if (lookup.resultCache.has(cacheKey)) {
+    return lookup.resultCache.get(cacheKey);
+  }
+
+  const candidates = collectOutstandingCandidates(lookup, customerCode, customerName);
+  const matched = candidates.find((row) => (
     isSameOutstandingCustomer(row.customer_code, row.customer_name, customerCode, customerName)
-  ));
-  return matched ? buildOutstandingRow(matched) : null;
+  )) || null;
+
+  lookup.resultCache.set(cacheKey, matched);
+  return matched;
 }
 
 export function isSameOutstandingCustomer(rowCustomerCode, rowCustomerName, customerCode, customerName) {

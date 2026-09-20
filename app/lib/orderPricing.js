@@ -8,6 +8,7 @@ import {
 } from "./orderSchemes.js";
 import {
   getPricedOrderLine,
+  lookupDiscountRate,
   normalizePaymentType,
   regionPriceMapFor,
   resolveOrderPricingRegion,
@@ -38,8 +39,8 @@ export function priceOrderLines(lines, {
       wholesaleRate: lookupPositiveRate(regionPriceMap, code, line?.rate ?? line?.wholesaleRate),
       quantity,
       paymentType,
-      cashDiscountRate: cashDiscountMap[code] || 0,
-      valueDiscountRate: valueDiscountMap[code] || 0,
+      cashDiscountRate: lookupDiscountRate(cashDiscountMap, code),
+      valueDiscountRate: lookupDiscountRate(valueDiscountMap, code),
       schemeUnitDiscount: scheme.unitDiscount,
       schemeDiscountedQty: scheme.discountedQty,
       excludeCashDiscount: scheme.excludeCashDiscount === true,

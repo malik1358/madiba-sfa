@@ -127,6 +127,47 @@ test("mapSavedOrderLinesToPdfLines fills discount columns when catalog reprices 
   assert.equal(line.lineValue, 900);
 });
 
+test("mapSavedOrderLinesToPdfLines reconstructs order 490 glycerine cash discount from percent strings", () => {
+  const snapshot = buildOrderPdfSnapshotFromSavedOrder({
+    order: {
+      id: 490,
+      status: "SUBMITTED",
+      customer_code: "1565",
+      customer_name: "Badr Majid Mohammed Al-Jailan Trading Establishment",
+      salesman_code: "MOINUDIN KHAJA",
+      updated_at: "2026-09-19T17:12:00.000Z",
+    },
+    lines: [{
+      item_code: "A003606",
+      item_name: "MADIBA GLYCERINE OIL- 200 ML 6PCS X 6PACK",
+      quantity: 5,
+      rate: 93.84,
+      line_value: 469.2,
+    }],
+    history: [{ action: "SUBMITTED_ORDER", paymentType: "cash", pricingRegion: "dammam" }],
+    paymentType: "cash",
+    pricingRegion: "dammam",
+    pricingCatalog: {
+      priceMap: { A003606: 97 },
+      regionPriceMaps: { dammam: { A003606: 102 } },
+      cashDiscountMap: { A003606: "8.00%" },
+      valueDiscountMap: {},
+    },
+  });
+
+  assert.equal(snapshot.lines[0].wholesaleRate, 102);
+  assert.equal(snapshot.lines[0].rate, 93.84);
+  assert.equal(snapshot.lines[0].cashApplied, true);
+  assert.equal(Number(snapshot.lines[0].cashDiscountAmount.toFixed(2)), 40.8);
+  assert.equal(Number(snapshot.totals.cashDiscountTotal.toFixed(2)), 40.8);
+  assert.equal(Number(snapshot.totals.amountExclVat.toFixed(2)), 469.2);
+
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, snapshot);
+  assert.equal(doc.texts.includes("Cash Disc"), true);
+  assert.equal(doc.texts.includes("Cash discount"), true);
+});
+
 test("buildOrderPdfSnapshotFromSavedOrder matches the new-order snapshot shape", () => {
   const snapshot = buildOrderPdfSnapshotFromSavedOrder({
     order: {

@@ -153,7 +153,7 @@ export function formatPdfDiscountDetail(rate, applied, amount) {
 export function lookupDiscountRate(discountMap, itemCode) {
   const code = String(itemCode || "").trim().toUpperCase();
   if (!code) return 0;
-  return Number(discountMap?.[code] ?? discountMap?.[itemCode] ?? 0);
+  return parseDiscountRate(discountMap?.[code] ?? discountMap?.[itemCode] ?? 0);
 }
 
 export function lookupQuantity(quantities, itemCode) {
@@ -191,8 +191,8 @@ export function getPricedOrderLine({
 } = {}) {
   const qty = Number(quantity || 0);
   const wholesale = Number(wholesaleRate || 0);
-  const cashRate = Number(cashDiscountRate || 0);
-  const valueRate = Number(valueDiscountRate || 0);
+  const cashRate = parseDiscountRate(cashDiscountRate);
+  const valueRate = parseDiscountRate(valueDiscountRate);
   const lineBeforeDiscount = qty * wholesale;
 
   let rate = wholesale;

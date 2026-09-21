@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_DEV_PORT, killProcessOnPort } from "./dev-port.mjs";
+import { assertConfiguredSupabaseUrlAllowed } from "../app/lib/supabaseGuard.js";
 
 const require = createRequire(import.meta.url);
 const nextBin = require.resolve("next/dist/bin/next");
@@ -12,6 +13,28 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function loadEnvLocal() {
+  const envPath = path.join(repoRoot, ".env.local");
+  if (!existsSync(envPath)) return false;
+
+  readFileSync(envPath, "utf8")
+    .split(/\r?\n/)
+    .forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return;
+      const separator = trimmed.indexOf("=");
+      if (separator <= 0) return;
+      const key = trimmed.slice(0, separator).trim();
+      let value = trimmed.slice(separator + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      if (!process.env[key]) process.env[key] = value;
+    });
+
+  return true;
 }
 
 function warnIfEnvMissing() {
@@ -31,6 +54,9 @@ async function main() {
 
   process.chdir(repoRoot);
   warnIfEnvMissing();
+  if (loadEnvLocal()) {
+    assertConfiguredSupabaseUrlAllowed();
+  }
 
   if (shouldClean) {
     rmSync(path.join(repoRoot, ".next"), { recursive: true, force: true });

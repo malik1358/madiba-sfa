@@ -100,6 +100,8 @@ npm run dev
 
 `npm run dev` uses `scripts/dev-server.mjs`. `npm run dev:clean` and `npm run dev:stop` are the other local helpers. Copy `.env.example` to `.env.local` and fill **local/dev Supabase** keys only. Never paste production Supabase URL or service-role keys into `.env.local`.
 
+Local/dev (and any non-`VERCEL_ENV=production` runtime) **fail fast** if `NEXT_PUBLIC_SUPABASE_URL` points at the production Supabase project (`ynmtlzyqvmurpmfretji`). The guard lives in `app/lib/supabaseGuard.js`, runs from `instrumentation.js`, `getSupabaseClient()`, `scripts/dev-server.mjs`, and `scripts/import-customer-locations.mjs`. Emergency override only: `MADIBA_ALLOW_PRODUCTION_SUPABASE=1` (do not use casually).
+
 Customer location import: `npm run import:customer-locations` (`scripts/import-customer-locations.mjs`). It requires `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`.
 
 Tests:

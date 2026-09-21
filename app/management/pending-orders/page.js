@@ -23,7 +23,7 @@ import {
 import { processOfflineQueue } from "../../lib/offlineApi";
 import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
 import { findOutstandingForCustomer, sortBucketLabels } from "../../lib/outstanding";
-import { evaluateCreditApproval } from "../../lib/creditApproval";
+import { evaluateCreditApproval, outstandingAmountOverSixtyDays } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
@@ -107,6 +107,7 @@ const EMPTY_FILTERS = {
   orderValue: [],
   invoiceValue: [],
   currentOutstanding: [],
+  outstandingOver60Days: [],
 };
 
 function displayOrDash(value) {
@@ -138,17 +139,26 @@ function formatCurrentOutstanding(value) {
   return number.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
-function orderCurrentOutstanding(order, outstandingDataset) {
+function outstandingRowForOrder(order, outstandingDataset) {
   if (!outstandingDataset) return null;
-  const row = findOutstandingForCustomer(
+  return findOutstandingForCustomer(
     outstandingDataset,
     order?.customer_code,
     order?.customer_name,
   );
-  return row ? Number(row.total_outstanding || 0) : 0;
 }
 
-function pendingOrderFilterValues(order, meta, approvalRequired = null, outstandingAmount = null) {
+function orderCurrentOutstanding(order, outstandingDataset) {
+  const row = outstandingRowForOrder(order, outstandingDataset);
+  return row ? Number(row.total_outstanding || 0) : row === null && !outstandingDataset ? null : 0;
+}
+
+function orderOutstandingOver60Days(order, outstandingDataset) {
+  const row = outstandingRowForOrder(order, outstandingDataset);
+  return row ? outstandingAmountOverSixtyDays(row) : row === null && !outstandingDataset ? null : 0;
+}
+
+function pendingOrderFilterValues(order, meta, approvalRequired = null, outstandingAmount = null, outstandingOver60DaysAmount = null) {
   const invoiceStatus = invoiceStatusText(meta, order, approvalRequired);
   return {
     orderId: displayOrDash(formatSalesOrderNumber(order) || order.id),
@@ -166,7 +176,27 @@ function pendingOrderFilterValues(order, meta, approvalRequired = null, outstand
     orderValue: formatMoneyInclVat(orderValueInclVat(order)),
     invoiceValue: formatMoneyInclVat(invoiceMadeInclVat(meta)),
     currentOutstanding: formatCurrentOutstanding(outstandingAmount),
+    outstandingOver60Days: formatCurrentOutstanding(outstandingOver60DaysAmount),
   };
+}
+
+function pendingOrderCustomerKey(order) {
+  return [
+    String(order?.customer_code || "").trim().toUpperCase(),
+    String(order?.customer_name || "").trim().toUpperCase(),
+  ].join("|");
+}
+
+function firstCustomerRowFlags(orders) {
+  const seenCustomers = new Set();
+  const flags = new Map();
+  (orders || []).forEach((order) => {
+    const customerKey = pendingOrderCustomerKey(order);
+    const firstRow = !seenCustomers.has(customerKey);
+    if (firstRow) seenCustomers.add(customerKey);
+    flags.set(order.id, firstRow);
+  });
+  return flags;
 }
 
 const HEADING_FILTERS = [
@@ -183,6 +213,7 @@ const HEADING_FILTERS = [
   { key: "orderValue", label: "Order value (incl. VAT)" },
   { key: "invoiceValue", label: "Invoice made (incl. VAT)" },
   { key: "currentOutstanding", label: "Current outstanding" },
+  { key: "outstandingOver60Days", label: "Outstanding >60 days" },
 ];
 const HEADING_FILTER_KEYS = HEADING_FILTERS.map(({ key }) => key);
 
@@ -1110,6 +1141,14 @@ export default function PendingOrdersPage() {
     return amounts;
   }, [orders, outstandingDataset]);
 
+  const outstandingOver60DaysByOrderId = useMemo(() => {
+    const amounts = new Map();
+    (orders || []).forEach((order) => {
+      amounts.set(order.id, orderOutstandingOver60Days(order, outstandingDataset));
+    });
+    return amounts;
+  }, [orders, outstandingDataset]);
+
   const orderFilterRows = useMemo(() => (
     (orders || []).map((order) => ({
       order,
@@ -1118,9 +1157,10 @@ export default function PendingOrdersPage() {
         invoiceMetaByOrder?.[order.id] || null,
         creditApprovalRequiredFlag(creditApprovalByOrder, order.id),
         outstandingAmountByOrderId.get(order.id),
+        outstandingOver60DaysByOrderId.get(order.id),
       ),
     }))
-  ), [creditApprovalByOrder, invoiceMetaByOrder, orders, outstandingAmountByOrderId]);
+  ), [creditApprovalByOrder, invoiceMetaByOrder, orders, outstandingAmountByOrderId, outstandingOver60DaysByOrderId]);
 
   const columnFilterOptions = useMemo(() => {
     const options = {};
@@ -1152,23 +1192,26 @@ export default function PendingOrdersPage() {
     [filteredOrderRows],
   );
 
+  const visibleOutstandingByOrderId = useMemo(
+    () => firstCustomerRowFlags(filteredOrders),
+    [filteredOrders],
+  );
+
   const filteredValueTotals = useMemo(() => {
     const seenCustomers = new Set();
     return filteredOrderRows.reduce((totals, { order }) => {
       totals.orderValue += orderValueInclVat(order) || 0;
       totals.invoiceValue += invoiceMadeInclVat(invoiceMetaByOrder?.[order.id]) || 0;
       const outstanding = outstandingAmountByOrderId.get(order.id);
-      const customerKey = [
-        String(order?.customer_code || "").trim().toUpperCase(),
-        String(order?.customer_name || "").trim().toUpperCase(),
-      ].join("|");
+      const customerKey = pendingOrderCustomerKey(order);
       if (!seenCustomers.has(customerKey)) {
         seenCustomers.add(customerKey);
         totals.currentOutstanding += Number(outstanding || 0);
+        totals.outstandingOver60Days += Number(outstandingOver60DaysByOrderId.get(order.id) || 0);
       }
       return totals;
-    }, { orderValue: 0, invoiceValue: 0, currentOutstanding: 0 });
-  }, [filteredOrderRows, invoiceMetaByOrder, outstandingAmountByOrderId]);
+    }, { orderValue: 0, invoiceValue: 0, currentOutstanding: 0, outstandingOver60Days: 0 });
+  }, [filteredOrderRows, invoiceMetaByOrder, outstandingAmountByOrderId, outstandingOver60DaysByOrderId]);
 
   async function loadOrderPdfSource(orderId) {
     const order = orders.find((entry) => entry.id === orderId) || null;
@@ -1413,8 +1456,11 @@ export default function PendingOrdersPage() {
         Sheets: {},
         SheetNames: [],
       };
+      const exportOutstandingByOrderId = firstCustomerRowFlags(filteredOrders);
 
-      const queueRows = orders.map((order) => ({
+      const queueRows = filteredOrders.map((order) => {
+        const firstCustomerRow = exportOutstandingByOrderId.get(order.id);
+        return {
         "Order Number": formatSalesOrderNumber(order) || order.id,
         Customer: order.customer_name || order.customer_code || "-",
         "Customer Code": order.customer_code || "-",
@@ -1437,8 +1483,14 @@ export default function PendingOrdersPage() {
         "Age (days)": daysOld(order.updated_at || order.created_at),
         "Order value (incl. VAT)": formatMoneyInclVat(orderValueInclVat(order)),
         "Invoice made (incl. VAT)": formatMoneyInclVat(invoiceMadeInclVat(invoiceMetaByOrder?.[order.id])),
-        "Current outstanding": formatCurrentOutstanding(outstandingAmountByOrderId.get(order.id)),
-      }));
+        "Current outstanding": firstCustomerRow
+          ? formatCurrentOutstanding(outstandingAmountByOrderId.get(order.id))
+          : "-",
+        "Outstanding >60 days": firstCustomerRow
+          ? formatCurrentOutstanding(outstandingOver60DaysByOrderId.get(order.id))
+          : "-",
+        };
+      });
 
       workbook.Sheets.PendingOrders = XLSX.utils.json_to_sheet(queueRows);
       workbook.SheetNames.push("PendingOrders");
@@ -1682,7 +1734,16 @@ export default function PendingOrdersPage() {
                           <td>{age}</td>
                           <td style={{ textAlign: "right" }}>{formatMoneyInclVat(orderValueInclVat(order))}</td>
                           <td style={{ textAlign: "right" }}>{formatMoneyInclVat(invoiceMadeInclVat(meta))}</td>
-                          <td style={{ textAlign: "right" }}>{formatCurrentOutstanding(outstandingAmountByOrderId.get(order.id))}</td>
+                          <td style={{ textAlign: "right" }}>
+                            {visibleOutstandingByOrderId.get(order.id)
+                              ? formatCurrentOutstanding(outstandingAmountByOrderId.get(order.id))
+                              : "-"}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {visibleOutstandingByOrderId.get(order.id)
+                              ? formatCurrentOutstanding(outstandingOver60DaysByOrderId.get(order.id))
+                              : "-"}
+                          </td>
                           <td>
                             <div className="moduleActionRow" style={{ flexWrap: "wrap", gap: "6px" }}>
                               <button
@@ -1790,7 +1851,7 @@ export default function PendingOrdersPage() {
 
                         {activeOrderId === order.id && (
                           <tr>
-                            <td colSpan={14}>
+                            <td colSpan={15}>
                               <div style={{ marginTop: "8px", marginBottom: "8px" }}>
                                 <div className="moduleSectionHeader">
                                   <h2>Order #{formatSalesOrderNumber(order) || order.id} Details</h2>
@@ -2046,7 +2107,7 @@ export default function PendingOrdersPage() {
 
                   {filteredOrders.length === 0 && (
                     <tr>
-                      <td colSpan={14}>{orders.length === 0 ? "No pending orders found." : "No orders match the current filters."}</td>
+                      <td colSpan={15}>{orders.length === 0 ? "No pending orders found." : "No orders match the current filters."}</td>
                     </tr>
                   )}
                 </tbody>
@@ -2057,6 +2118,7 @@ export default function PendingOrdersPage() {
                       <td style={{ textAlign: "right" }}>{filteredValueTotals.orderValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td style={{ textAlign: "right" }}>{filteredValueTotals.invoiceValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td style={{ textAlign: "right" }}>{formatCurrentOutstanding(filteredValueTotals.currentOutstanding)}</td>
+                      <td style={{ textAlign: "right" }}>{formatCurrentOutstanding(filteredValueTotals.outstandingOver60Days)}</td>
                       <td />
                     </tr>
                   </tfoot>

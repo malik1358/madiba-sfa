@@ -14,7 +14,11 @@ export function isVatExemptProduct({
   if (vatExempt === true) return true;
   if (vatExempt === false) return false;
   const haystack = `${category} ${item_name} ${item_code}`.toUpperCase();
-  return haystack.includes("GLOVE") || haystack.includes("قفاز");
+  // Catalog names say "Gloves"; dirty sales uploads sometimes truncate to "VINYL" only
+  // (e.g. A003949_MADIBA VINYL Do Not Use) while Tally still posts them excl VAT.
+  return haystack.includes("GLOVE")
+    || haystack.includes("VINYL")
+    || haystack.includes("قفاز");
 }
 
 export function vatRateForProduct(product = {}) {

@@ -181,6 +181,13 @@ function pendingOrderFilterValues(order, meta, approvalRequired = null, outstand
   };
 }
 
+function pendingOrderCustomerKey(order) {
+  return [
+    String(order?.customer_code || "").trim().toUpperCase(),
+    String(order?.customer_name || "").trim().toUpperCase(),
+  ].join("|");
+}
+
 const HEADING_FILTERS = [
   { key: "orderId", label: "Order Number" },
   { key: "customer", label: "Customer" },
@@ -1180,10 +1187,7 @@ export default function PendingOrdersPage() {
       totals.orderValue += orderValueInclVat(order) || 0;
       totals.invoiceValue += invoiceMadeInclVat(invoiceMetaByOrder?.[order.id]) || 0;
       const outstanding = outstandingAmountByOrderId.get(order.id);
-      const customerKey = [
-        String(order?.customer_code || "").trim().toUpperCase(),
-        String(order?.customer_name || "").trim().toUpperCase(),
-      ].join("|");
+      const customerKey = pendingOrderCustomerKey(order);
       if (!seenCustomers.has(customerKey)) {
         seenCustomers.add(customerKey);
         totals.currentOutstanding += Number(outstanding || 0);
@@ -1436,8 +1440,13 @@ export default function PendingOrdersPage() {
         Sheets: {},
         SheetNames: [],
       };
+      const seenCustomers = new Set();
 
-      const queueRows = orders.map((order) => ({
+      const queueRows = orders.map((order) => {
+        const customerKey = pendingOrderCustomerKey(order);
+        const firstCustomerRow = !seenCustomers.has(customerKey);
+        seenCustomers.add(customerKey);
+        return {
         "Order Number": formatSalesOrderNumber(order) || order.id,
         Customer: order.customer_name || order.customer_code || "-",
         "Customer Code": order.customer_code || "-",
@@ -1460,9 +1469,14 @@ export default function PendingOrdersPage() {
         "Age (days)": daysOld(order.updated_at || order.created_at),
         "Order value (incl. VAT)": formatMoneyInclVat(orderValueInclVat(order)),
         "Invoice made (incl. VAT)": formatMoneyInclVat(invoiceMadeInclVat(invoiceMetaByOrder?.[order.id])),
-        "Current outstanding": formatCurrentOutstanding(outstandingAmountByOrderId.get(order.id)),
-        "Outstanding >60 days": formatCurrentOutstanding(outstandingOver60DaysByOrderId.get(order.id)),
-      }));
+        "Current outstanding": firstCustomerRow
+          ? formatCurrentOutstanding(outstandingAmountByOrderId.get(order.id))
+          : "-",
+        "Outstanding >60 days": firstCustomerRow
+          ? formatCurrentOutstanding(outstandingOver60DaysByOrderId.get(order.id))
+          : "-",
+        };
+      });
 
       workbook.Sheets.PendingOrders = XLSX.utils.json_to_sheet(queueRows);
       workbook.SheetNames.push("PendingOrders");

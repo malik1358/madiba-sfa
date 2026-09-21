@@ -142,7 +142,18 @@ export function resolveCollectionAvgDaysToPay({
   return behavior?.avgDaysToPay ?? null;
 }
 
-/** Attach avg_days_to_pay using preloaded sales + receipt maps. */
+/** Latest receipt_date (YYYY-MM-DD) from receipt register rows, or "". */
+export function resolveLastReceiptDate(receipts = []) {
+  let latest = "";
+  (Array.isArray(receipts) ? receipts : []).forEach((row) => {
+    const date = String(row?.receipt_date || "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    if (!latest || date > latest) latest = date;
+  });
+  return latest;
+}
+
+/** Attach avg_days_to_pay and last_receipt_date using preloaded sales + receipt maps. */
 export function attachAvgDaysToPayToRecords(records, {
   salesByCustomer = new Map(),
   receiptsByCustomer = new Map(),
@@ -155,9 +166,10 @@ export function attachAvgDaysToPayToRecords(records, {
       (sum, invoice) => sum + toNumber(invoice?.pending_amount),
       0,
     );
+    const receipts = lookupByCustomerCode(receiptsByCustomer, code);
     const avgDaysToPay = resolveCollectionAvgDaysToPay({
       transactions: lookupByCustomerCode(salesByCustomer, code),
-      receipts: lookupByCustomerCode(receiptsByCustomer, code),
+      receipts,
       invoices,
       totalOutstanding,
       todayIso,
@@ -165,6 +177,7 @@ export function attachAvgDaysToPayToRecords(records, {
     return {
       ...record,
       avg_days_to_pay: avgDaysToPay,
+      last_receipt_date: resolveLastReceiptDate(receipts),
     };
   });
 }

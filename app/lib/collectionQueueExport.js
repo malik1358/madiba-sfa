@@ -31,6 +31,9 @@ function buildCustomerSummaryRow(row, section, priorityByCode) {
     "Due Amount": roundAmount(isNotDue ? row.total_not_due_amount : row.total_due_amount),
     Cash: roundAmount(row.outstanding_cash),
     "Received (Last 10 Days)": roundAmount(row.received_last_10_days),
+    "Avg Paying Days": row.avg_days_to_pay == null || row.avg_days_to_pay === ""
+      ? ""
+      : Number(row.avg_days_to_pay),
     "0-30": roundAmount(row.outstanding_0_30),
     "31-60": roundAmount(row.outstanding_30_60),
     "61-90": roundAmount(row.outstanding_61_90),

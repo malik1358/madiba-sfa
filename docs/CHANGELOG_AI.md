@@ -6,7 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
-- **2026-09-21** — Hard local guard blocks the production Supabase project ref (`ynmtlzyqvmurpmfretji`) outside `VERCEL_ENV=production` (`app/lib/supabaseGuard.js`, `instrumentation.js`, browser client, local scripts). No secrets logged.
+- **2026-09-21** — Hard local guard blocks the production Supabase project ref (`ynmtlzyqvmurpmfretji`) outside Vercel (`app/lib/supabaseGuard.js`, `instrumentation.js`, browser client, local scripts). Preview and production Vercel deploys are allowed. No secrets logged.
 - **2026-09-21** — Env semantics: `NEXT_PUBLIC_APP_ENV` local/development (and legacy staging) → LOCAL banner; removed hardcoded `madiba-sfa-staging.vercel.app` origin fallback in favor of explicit `APP_ORIGIN` / localhost. Production origin resolution unchanged when env is production or unset.
 - **2026-09-21** — Canonical deploy model is now local/dev → feature/AI branch → PR/CI → `main` → Vercel production. No permanent cloud staging. Docs updated (`README`, `AGENTS.md`, Copilot instructions, `docs/DEPLOYMENT.md`, related handover files, `ANDROID_APK.md`). Runtime/CI cutover follows in separate commits; legacy `staging` branch/env labels may still exist in code until those land.
 - **2026-09-21** — Expanded handover: mandatory agent rules list, `moduleAccess` matrix, major API inventory, and Android/Capacitor sections. Docs refreshed for dual Cursor + Copilot use; no application code changes.

@@ -27,14 +27,16 @@ export function isProductionSupabaseUrl(url) {
 }
 
 /**
- * Enforce the guard everywhere except real Vercel production deploys
- * (or an explicit emergency override).
+ * Enforce only on local/dev machines and scripts.
+ * Any Vercel deployment (production or preview) must not be blocked.
+ * Emergency override: MADIBA_ALLOW_PRODUCTION_SUPABASE=1
  */
 export function shouldEnforceLocalSupabaseGuard(env = process.env) {
   if (String(env.MADIBA_ALLOW_PRODUCTION_SUPABASE || "").trim() === "1") {
     return false;
   }
-  if (String(env.VERCEL_ENV || "").trim().toLowerCase() === "production") {
+  // Vercel sets VERCEL=1 and VERCEL_ENV (production | preview | development).
+  if (String(env.VERCEL || "").trim() || String(env.VERCEL_ENV || "").trim()) {
     return false;
   }
   return true;

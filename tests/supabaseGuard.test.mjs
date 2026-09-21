@@ -35,6 +35,13 @@ test("Vercel production does not enforce the local guard", () => {
   );
 });
 
+test("Vercel preview does not enforce the local guard", () => {
+  assert.equal(
+    shouldEnforceLocalSupabaseGuard({ VERCEL: "1", VERCEL_ENV: "preview", NODE_ENV: "production" }),
+    false,
+  );
+});
+
 test("local and development enforce the guard", () => {
   assert.equal(shouldEnforceLocalSupabaseGuard({ NEXT_PUBLIC_APP_ENV: "local" }), true);
   assert.equal(shouldEnforceLocalSupabaseGuard({ NODE_ENV: "development" }), true);
@@ -58,11 +65,18 @@ test("production URL is blocked in local/development", () => {
   );
 });
 
-test("production URL is allowed on Vercel production", () => {
+test("production URL is allowed on Vercel production and preview", () => {
   assert.doesNotThrow(() =>
     assertSupabaseUrlAllowed(PROD_URL, {
       VERCEL_ENV: "production",
       NEXT_PUBLIC_APP_ENV: "production",
+      NODE_ENV: "production",
+    }),
+  );
+  assert.doesNotThrow(() =>
+    assertSupabaseUrlAllowed(PROD_URL, {
+      VERCEL: "1",
+      VERCEL_ENV: "preview",
       NODE_ENV: "production",
     }),
   );

@@ -33,3 +33,17 @@ test("buildAnalytics reports receipt amount for the last 10 days", () => {
   assert.equal(analytics.receiptAmountLast10Days, 350);
   assert.equal(analytics.receiptTotal, 1050);
 });
+
+test("buildAnalytics uses KSA date for last-10-day receipt window boundaries", () => {
+  const analytics = buildAnalytics(sampleTransactions(), {
+    // 22:30 UTC is the next calendar day in KSA.
+    todayIso: "2026-09-20T22:30:00.000Z",
+    receipts: [
+      { receipt_date: "2026-09-21", amount: 100 },
+      { receipt_date: "2026-09-12", amount: 200 },
+      { receipt_date: "2026-09-11", amount: 300 },
+    ],
+  });
+
+  assert.equal(analytics.receiptAmountLast10Days, 300);
+});

@@ -5,29 +5,36 @@ import {
   buildPaymentSettlementLedger,
   emptyPaymentBehavior,
 } from '../../../lib/paymentBehavior.js';
-import { monthKey, parseDateValue, salesUnitQty } from './format';
+import { getKsaDateTimeParts } from "../../../lib/workdayActivity.js";
+import { monthKey, parseDateValue, salesUnitQty } from './format.js';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+function ksaDateKeyFromDate(date) {
+  const parts = getKsaDateTimeParts(date);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
 
 function sumReceiptAmountInLastDays(receipts = [], { todayIso, days = 10 } = {}) {
   const windowDays = Math.max(1, Number(days) || 10);
-  const todayDate = parseDateValue(todayIso) || new Date();
-  const todayStartMs = Date.UTC(
-    todayDate.getUTCFullYear(),
-    todayDate.getUTCMonth(),
-    todayDate.getUTCDate(),
-  );
-  const cutoffMs = todayStartMs - ((windowDays - 1) * DAY_MS);
+  let todayDate = new Date();
+  if (todayIso) {
+    const fromIso = new Date(todayIso);
+    if (Number.isFinite(fromIso.getTime())) {
+      todayDate = fromIso;
+    } else {
+      const parsedFallback = parseDateValue(todayIso);
+      if (parsedFallback) todayDate = parsedFallback;
+    }
+  }
+  const todayKey = ksaDateKeyFromDate(todayDate);
+  const [year, month, day] = todayKey.split("-").map((value) => Number(value));
+  const cutoffMs = Date.UTC(year, month - 1, day - (windowDays - 1));
+  const cutoffKey = new Date(cutoffMs).toISOString().slice(0, 10);
 
   return (Array.isArray(receipts) ? receipts : []).reduce((total, row) => {
     const parsedDate = parseDateValue(row?.receipt_date);
     if (!parsedDate) return total;
-    const receiptDayMs = Date.UTC(
-      parsedDate.getUTCFullYear(),
-      parsedDate.getUTCMonth(),
-      parsedDate.getUTCDate(),
-    );
-    if (receiptDayMs < cutoffMs || receiptDayMs > todayStartMs) return total;
+    const receiptKey = parsedDate.toISOString().slice(0, 10);
+    if (receiptKey < cutoffKey || receiptKey > todayKey) return total;
     return total + Number(row?.amount || 0);
   }, 0);
 }

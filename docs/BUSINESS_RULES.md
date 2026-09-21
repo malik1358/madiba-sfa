@@ -90,7 +90,7 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 - A next-day **reissue** is not a reversal. Orphan credit notes that do not match an invoice reduce open balance rather than being dropped.
 - Average days uses paid receipts first. Open invoices are included only when they are older than that paid average. Younger FIFO residuals are excluded.
 - Partial credit notes and sales returns appear in the credit-note table, not as reversed invoices.
-- Customer Audit loads history from day 1 through today for this ledger. Do not shorten that window or the FIFO result changes.
+- Avg days / FIFO settlement must load sales history from day 1 through today (customer-history `fullHistory=1` / `scope=settlement`). That includes Customer Audit, Payment Settlement, Order PDF, New Order payment behavior, and WhatsApp avg-days helpers. Do not use the default ~6-month BI performance window for avg days — receipts are still full-ledger, and truncated sales skew the weighted average dramatically.
 - Tolerance for amount matches is 0.02.
 
 ## Sales import and BI

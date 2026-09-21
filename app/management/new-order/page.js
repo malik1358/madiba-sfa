@@ -1517,8 +1517,9 @@ export default function NewOrderPage() {
         }
 
         async function loadHistory(refresh = false) {
+          // fullHistory: avg days / FIFO must use day-1 sales, not the 6-month BI window.
           const response = await fetch(
-            `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}&customerName=${encodeURIComponent(selectedCustomer.customer_name || "")}${refresh ? "&refresh=1" : ""}`,
+            `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}&customerName=${encodeURIComponent(selectedCustomer.customer_name || "")}&fullHistory=1&scope=settlement${refresh ? "&refresh=1" : ""}`,
             {
               headers: {
                 Authorization: `Bearer ${accessToken}`,

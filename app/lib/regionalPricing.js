@@ -40,6 +40,28 @@ export function vatAmountFromExcl(amountExclVat, vatRate = VAT_RATE) {
   return excl * rate;
 }
 
+/** Label for order UI / PDF / WhatsApp. Uses 0% for gloves-only, 15% for taxable-only, else plain "VAT". */
+export function formatOrderVatLabel(totalsOrRate = {}, { language = "en" } = {}) {
+  const isAr = language === "ar";
+  let rate = null;
+  if (typeof totalsOrRate === "number") {
+    rate = Number(totalsOrRate);
+  } else if (totalsOrRate && typeof totalsOrRate === "object") {
+    if (Number.isFinite(Number(totalsOrRate.vatRate))) {
+      rate = Number(totalsOrRate.vatRate);
+    } else {
+      const excl = Number(totalsOrRate.amountExclVat || 0);
+      const vat = Number(totalsOrRate.vatAmount || 0);
+      if (excl > 0 && Number.isFinite(vat)) rate = vat / excl;
+      else if (excl <= 0 && Number.isFinite(vat) && vat === 0) rate = 0;
+    }
+  }
+  if (!Number.isFinite(rate)) rate = VAT_RATE;
+  if (Math.abs(rate) < 0.0005) return isAr ? "ضريبة 0%" : "VAT 0%";
+  if (Math.abs(rate - VAT_RATE) < 0.0005) return isAr ? "ضريبة 15%" : "VAT 15%";
+  return isAr ? "ضريبة" : "VAT";
+}
+
 export const REGION_PRICE_COLUMNS = {
   riyadh: "CB",
   dammam: "CF",
@@ -192,6 +214,11 @@ export function getPricedOrderLine({
   schemeUnitDiscount = 0,
   schemeDiscountedQty = 0,
   excludeCashDiscount = false,
+  item_code = "",
+  item_name = "",
+  category = "",
+  vatExempt,
+  vatRate,
 } = {}) {
   const qty = Number(quantity || 0);
   const wholesale = Number(wholesaleRate || 0);
@@ -226,7 +253,10 @@ export function getPricedOrderLine({
   }
   const valueDiscountAmount = applied.value ? wholesaleLineValue * valueRate : 0;
   const cashDiscountAmount = applied.cash ? (wholesaleLineValue - valueDiscountAmount) * cashRate : 0;
-  const vatAmount = lineValue * VAT_RATE;
+  const resolvedVatRate = Number.isFinite(Number(vatRate)) && Number(vatRate) >= 0
+    ? Number(vatRate)
+    : vatRateForProduct({ category, item_name, item_code, vatExempt });
+  const vatAmount = vatAmountFromExcl(lineValue, resolvedVatRate);
 
   return {
     wholesaleRate: wholesale,
@@ -237,6 +267,7 @@ export function getPricedOrderLine({
     cashDiscountAmount,
     schemeDiscountAmount,
     lineValue,
+    vatRate: resolvedVatRate,
     vatAmount,
     lineTotalInclVat: lineValue + vatAmount,
     applied,
@@ -259,8 +290,12 @@ export function summarizePricedLines(lines = []) {
     const cashDiscountTotal = totals.cashDiscountTotal + Number(line.cashDiscountAmount || 0);
     const valueDiscountTotal = totals.valueDiscountTotal + Number(line.valueDiscountAmount || 0);
     const schemeDiscountTotal = totals.schemeDiscountTotal + Number(line.schemeDiscountAmount || 0);
-    const amountExclVat = totals.amountExclVat + Number(line.lineValue || line.lineTotal || 0);
-    const vatAmount = amountExclVat * VAT_RATE;
+    const lineExcl = Number(line.lineValue || line.lineTotal || 0);
+    const amountExclVat = totals.amountExclVat + lineExcl;
+    const lineVat = Number.isFinite(Number(line.vatAmount))
+      ? Number(line.vatAmount)
+      : vatAmountFromExcl(lineExcl, vatRateForProduct(line));
+    const vatAmount = totals.vatAmount + lineVat;
     return {
       wholesaleTotal,
       cashDiscountTotal,

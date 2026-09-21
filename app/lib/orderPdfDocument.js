@@ -358,8 +358,11 @@ export async function enrichOrderPdfLiveData(snapshot, {
   if (authHeaders && liveCustomerCode && !skipHistory) {
     dataLookups.push((async () => {
       try {
+        // Avg days / FIFO settlement need day-1 sales history. The default
+        // customer-history window is only ~6 months and skews avg days badly
+        // when all receipts are applied against a truncated invoice set.
         const historyResponse = await fetch(
-          `${customerHistoryApi}?customerCode=${encodeURIComponent(liveCustomerCode)}&customerName=${encodeURIComponent(liveCustomerName || "")}`,
+          `${customerHistoryApi}?customerCode=${encodeURIComponent(liveCustomerCode)}&customerName=${encodeURIComponent(liveCustomerName || "")}&fullHistory=1&scope=settlement`,
           { headers: authHeaders }
         );
         const historyPayload = await historyResponse.json().catch(() => ({}));

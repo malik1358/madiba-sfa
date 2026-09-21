@@ -825,3 +825,58 @@ test("enrichOrderPdfLiveData with skipPricing refreshes outstanding and keeps sa
     global.fetch = originalFetch;
   }
 });
+
+test("enrichOrderPdfLiveData requests fullHistory for avg-days settlement ledger", async () => {
+  const originalFetch = global.fetch;
+  const historyUrls = [];
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/api/outstanding")) {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          bucketLabels: ["0-30"],
+          customer: { customer_code: "1009", total_outstanding: 100 },
+          customerInvoices: [],
+        }),
+      };
+    }
+    if (href.includes("/api/customer-history")) {
+      historyUrls.push(href);
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          fullHistory: true,
+          receipts: [{ receipt_date: "2026-03-01", amount: 1150 }],
+          transactions: [
+            { transaction_date: "2026-01-01", voucher_number: "OLD", sales_amount: 1000, category: "Paper" },
+          ],
+        }),
+      };
+    }
+    if (href.includes("/api/pricing/cache")) {
+      return { ok: true, json: async () => ({ success: true, items: [] }) };
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  try {
+    await enrichOrderPdfLiveData({
+      orderId: 454,
+      customerCode: "1009",
+      customerName: "ABRAJ",
+      lines: [],
+      totals: { amountExclVat: 0 },
+      grandTotal: 0,
+      outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+    }, { accessToken: "token", skipPricing: true });
+
+    assert.equal(historyUrls.length, 1);
+    assert.match(historyUrls[0], /fullHistory=1/);
+    assert.match(historyUrls[0], /scope=settlement/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

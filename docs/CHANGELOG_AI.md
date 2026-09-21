@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-21** — Env semantics: `NEXT_PUBLIC_APP_ENV` local/development (and legacy staging) → LOCAL banner; removed hardcoded `madiba-sfa-staging.vercel.app` origin fallback in favor of explicit `APP_ORIGIN` / localhost. Production origin resolution unchanged when env is production or unset.
 - **2026-09-21** — Canonical deploy model is now local/dev → feature/AI branch → PR/CI → `main` → Vercel production. No permanent cloud staging. Docs updated (`README`, `AGENTS.md`, Copilot instructions, `docs/DEPLOYMENT.md`, related handover files, `ANDROID_APK.md`). Runtime/CI cutover follows in separate commits; legacy `staging` branch/env labels may still exist in code until those land.
 - **2026-09-21** — Expanded handover: mandatory agent rules list, `moduleAccess` matrix, major API inventory, and Android/Capacitor sections. Docs refreshed for dual Cursor + Copilot use; no application code changes.
 - **2026-09-21** — Mandatory rule in `AGENTS.md`: after any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the relevant documentation before finishing the task.
@@ -56,7 +57,7 @@ These are real mismatches. Do not “fix” them as drive-by cleanups.
 6. **Price catalog setup is duplicated.** Baseline migration already creates `price_catalog_cache` and `price_catalog_snapshots`. `README.md` still tells operators to run `sql/setup_price_catalog_cache.sql` once. Running it should be idempotent; do not assume the cache tables are absent.
 7. **`is_management()` is narrower than the UI.** Invoice makers can open Imports and hierarchy in the app but SQL policies that call `is_management()` will deny them on direct browser queries. APIs bypass that with the service role.
 8. **Customer GPS audit columns are optional at runtime.** `customerGpsHistory.js` retries without them if Postgres says the column does not exist. A database that skipped `20260831153000_customer_gps_history.sql` still loads Customer Master, but without audit history.
-9. **Non-production banner versus shell label.** The yellow banner currently requires `NEXT_PUBLIC_APP_ENV=staging`. `GlobalAppStatus` still receives `PRODUCTION` when that variable is anything else. Local/dev should be treated as non-production; an unset env still looks like production in the shell.
+9. **Non-production banner versus shell label.** Yellow banner and `LOCAL` shell label require a non-production `NEXT_PUBLIC_APP_ENV` (`local`, `development`, `dev`, or legacy `staging`). Unset or `production` still looks like production in the shell.
 10. **No automated test script in `package.json`.** Agents and CI can miss tests. CI only runs `npm run build`. Rule changes need an explicit `node --test` run.
 11. **Personal share script.** `sql/share_ahmed_nabil_customers_with_abdalla.sql` is a one-off data change. The durable rule is `SHARED_CUSTOMER_BOOKS` plus `customer_book_shares`. Do not run that script on local/dev unless the same people exist there.
 

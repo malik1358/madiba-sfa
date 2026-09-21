@@ -61,6 +61,7 @@ body {
   letter-spacing: 0;
 }
 
+.globalAppStatusLOCAL,
 .globalAppStatusSTAGING {
   top: 34px;
   background: #39464a;

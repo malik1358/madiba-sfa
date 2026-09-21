@@ -11,6 +11,7 @@ import { AppLanguageProvider } from "./lib/appLanguage";
 import { AppPopupProvider } from "./components/AppPopupProvider";
 import MorningAttendanceRedirect from "./components/MorningAttendanceRedirect";
 import { resolveBuildId, resolveBuildTime, formatBuildDateTime } from "./lib/buildInfo";
+import { isNonProductionAppEnv, resolveAppEnvironmentLabel } from "./lib/appEnvironment";
 
 export const metadata = {
   title: "MADIBA SFA",
@@ -41,8 +42,8 @@ export const viewport = {
 };
 
 export default function RootLayout({ children }) {
-  const isStaging = process.env.NEXT_PUBLIC_APP_ENV === "staging";
-  const environment = isStaging ? "STAGING" : "PRODUCTION";
+  const isLocal = isNonProductionAppEnv();
+  const environment = resolveAppEnvironmentLabel();
   const buildId = resolveBuildId();
   const buildTime = formatBuildDateTime(resolveBuildTime());
 
@@ -51,9 +52,9 @@ export default function RootLayout({ children }) {
       <body data-build-id={buildId} data-build-time={buildTime}>
         <AppLanguageProvider>
           <AppPopupProvider>
-            {isStaging && (
+            {isLocal && (
               <div className="environmentBanner" role="status">
-                STAGING / UAT - TEST DATA ONLY
+                LOCAL / DEV - TEST DATA ONLY
               </div>
             )}
             <BuildUpdateWatcher />

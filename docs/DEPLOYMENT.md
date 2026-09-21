@@ -24,7 +24,7 @@ local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  V
 
 `Build` (`.github/workflows/build.yml`) runs on pull requests and pushes to `main`: `npm ci` then `npm run build`. Node comes from `.nvmrc` (22). Play Store internal uploads (`.github/workflows/play-store-internal.yml`) are `main`-only. Scheduled cron workflows call the **production** Vercel host (`https://madiba-sfa.vercel.app`); they do not depend on a staging branch.
 
-`NEXT_PUBLIC_APP_ENV=staging` currently turns on the yellow non-production banner in `app/layout.js` (legacy cloud-staging label). Prefer treating local as non-production; production Vercel must keep `NEXT_PUBLIC_APP_ENV=production` (or unset, which the shell still labels as production). Runtime env semantics are being aligned to local/dev in a follow-up change.
+`NEXT_PUBLIC_APP_ENV` of `local`, `development`, `dev`, or legacy `staging` turns on the yellow `LOCAL / DEV - TEST DATA ONLY` banner and labels the shell `LOCAL` (`app/lib/appEnvironment.js`). Production Vercel must keep `NEXT_PUBLIC_APP_ENV=production` (or unset). Prefer an explicit `APP_ORIGIN` for email links; non-production without `APP_ORIGIN` falls back to `http://localhost:3000`, not a cloud staging host.
 
 ## Vercel
 
@@ -41,7 +41,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 
 | Name | Role |
 | --- | --- |
-| `NEXT_PUBLIC_APP_ENV` | Non-production (`staging` / future `local` / `development`) or `production` |
+| `NEXT_PUBLIC_APP_ENV` | `local` / `development` / `production` (legacy `staging` = non-production) |
 | `APP_ORIGIN` | Stable public URL for email links |
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser and server |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser only |

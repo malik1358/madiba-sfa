@@ -154,6 +154,32 @@ function dateOnly(value) {
   return parseOutstandingSheetDate(value);
 }
 
+function shiftDateKey(dateKey, dayDelta) {
+  const base = String(dateKey || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return "";
+  const date = new Date(`${base}T12:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setUTCDate(date.getUTCDate() + Number(dayDelta || 0));
+  return date.toISOString().slice(0, 10);
+}
+
+/** Sum of amount_received on collection visits within the last `days` calendar days (inclusive of today). */
+export function sumCollectionReceivedInLastDays(visits, {
+  todayIso = new Date().toISOString(),
+  days = 10,
+} = {}) {
+  const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
+  const windowDays = Math.max(1, Math.floor(Number(days) || 10));
+  const startKey = shiftDateKey(today, -(windowDays - 1));
+  if (!startKey) return 0;
+
+  return (visits || []).reduce((sum, visit) => {
+    const saved = dateOnly(visit?.saved_at);
+    if (!saved || saved < startKey || saved > today) return sum;
+    return sum + toNumber(visit?.amount_received);
+  }, 0);
+}
+
 export function collectionRowMatchesCustomerQuery(row, customerFilter) {
   const customerQuery = String(customerFilter || "").trim().toLowerCase();
   if (!customerQuery) return true;
@@ -540,6 +566,14 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       today,
     });
 
+    const collectionHistory = Array.isArray(queueRecord?.collection_history)
+      ? queueRecord.collection_history
+      : (queueRecord?.latest_collection ? [queueRecord.latest_collection] : []);
+    const receivedLast10Days = sumCollectionReceivedInLastDays(collectionHistory, {
+      todayIso,
+      days: 10,
+    });
+
     const next = {
       ...queueRecord,
       queue_key: queueKeyFor(queueRecord),
@@ -551,6 +585,7 @@ export function buildCollectionQueues(records, todayIso = new Date().toISOString
       exposure_score: exposureScore,
       outstanding_cash: cashDueAmount,
       has_cash_due: cashDueAmount > 0,
+      received_last_10_days: receivedLast10Days,
       invoices: Array.isArray(queueRecord?.invoices) ? queueRecord.invoices : [],
       probability_score: priority.score,
       probability_label: priority.label,

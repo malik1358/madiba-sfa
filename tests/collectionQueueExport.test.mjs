@@ -45,6 +45,7 @@ test("buildDueCollectionQueueExport includes customer summary and invoice rows f
   assert.equal(summaryRows[0].Party, "1468_Bahr Al-Takhfid Trading Company");
   assert.equal(summaryRows[0]["Priority #"], 12);
   assert.equal(summaryRows[0]["Due Amount"], 19315);
+  assert.equal(summaryRows[0]["Received (Last 10 Days)"], 0);
   assert.equal(summaryRows[0]["Last Visit Remark"], "سيسدد الأسبوع القادم / Will pay next week");
 
   assert.equal(invoiceRows.length, 1);

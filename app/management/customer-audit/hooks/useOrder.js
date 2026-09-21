@@ -16,6 +16,7 @@ import { priceOrderLines } from '../../../lib/orderPricing';
 import { claimUnsavedEntry } from '../../../lib/unsavedEntryGuard';
 import { requestLoginFirstCustomerHintCheck } from '../../../lib/loginFirstCustomerHint';
 import { friendlyErrorMessage } from '../../../lib/abortError';
+import { blockedByAvgDaysMessage } from '../../../lib/customerOrderBlock';
 
 function isPendingOrderId(orderId) {
   return String(orderId || '').startsWith('pending:');
@@ -41,6 +42,7 @@ function buildOrderPayload({
   capturedAt,
   platform,
   creditApprovalRequired = false,
+  orderBlock = null,
 }) {
   const pricedLines = priceOrderLines(
     orderItems.map((item) => ({
@@ -72,6 +74,12 @@ function buildOrderPayload({
     location,
     platform,
     creditApprovalRequired: Boolean(creditApprovalRequired),
+    orderBlockSnapshot: orderBlock
+      ? {
+        avgDaysToPay: orderBlock.avgDaysToPay,
+        threshold: orderBlock.threshold,
+      }
+      : null,
     lines: pricedLines,
   };
 }
@@ -96,6 +104,7 @@ export function useOrder({
   pricingRegion = 'riyadh',
   setPricingRegion = null,
   creditApprovalRequired = false,
+  orderBlock = null,
 }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
   const [orderQuantities, setOrderQuantities] = useState({});
@@ -407,6 +416,13 @@ export function useOrder({
     setMessage('');
 
     try {
+      if (orderBlock?.blocked) {
+        throw new Error(blockedByAvgDaysMessage({
+          threshold: orderBlock.threshold,
+          avgDaysToPay: orderBlock.avgDaysToPay,
+        }));
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Please login again.');
 
@@ -455,6 +471,7 @@ export function useOrder({
           capturedAt,
           platform,
           creditApprovalRequired: Boolean(options.creditApprovalRequired ?? creditApprovalRequired),
+          orderBlock,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -519,7 +536,7 @@ export function useOrder({
     } finally {
       setSubmittingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, creditApprovalRequired, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, creditApprovalRequired, draftOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

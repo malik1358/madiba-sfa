@@ -507,6 +507,9 @@ function CustomerAuditPageContent() {
                     ? " (paid avg + open invoices older than that avg)"
                     : " from collected receipts")
                 : "Avg days to pay unavailable (need sales + receipts or open invoices)"}
+              {analytics.paymentBehavior.avgDaysToPay6m != null
+                ? ` · 6m ${analytics.paymentBehavior.avgDaysToPay6m}`
+                : ""}
               {analytics.paymentBehavior.avgDaysPaidOnly != null
                 && Number(analytics.paymentBehavior.openAmountInAvg || 0) > 0.009
                 && analytics.paymentBehavior.avgDaysPaidOnly !== analytics.paymentBehavior.avgDaysToPay

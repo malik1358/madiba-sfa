@@ -27,6 +27,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     totalInclVat: isAr ? "المبلغ بعد الضريبة" : "Amount after VAT",
     pdfAttached: isAr ? "ملف PDF مرفق." : "PDF attached.",
     avgDaysToPay: isAr ? "متوسط أيام الدفع" : "Avg days to pay",
+    avgDaysToPay6mLabel: isAr ? "متوسط 6 أشهر" : "6-month avg",
   };
 
   const totals = snapshot.totals || {};
@@ -36,10 +37,15 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
   const cashDiscount = Number(totals.cashDiscountTotal || 0);
   const valueDiscount = Number(totals.valueDiscountTotal || 0);
   const schemeDiscount = Number(totals.schemeDiscountTotal || 0);
-  const avgDaysToPay = options.analytics?.paymentBehavior?.avgDaysToPay
-    ?? snapshot.paymentBehavior?.avgDaysToPay
-    ?? snapshot.avgDaysToPay
-    ?? null;
+  const paymentBehavior = options.analytics?.paymentBehavior
+    || snapshot.paymentBehavior
+    || null;
+  const avgDaysToPay = paymentBehavior
+    ? {
+      avgDaysToPay: paymentBehavior.avgDaysToPay ?? null,
+      avgDaysToPay6m: paymentBehavior.avgDaysToPay6m ?? null,
+    }
+    : (snapshot.avgDaysToPay ?? null);
 
   return [
     labels.title,

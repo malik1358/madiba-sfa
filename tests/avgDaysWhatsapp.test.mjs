@@ -9,6 +9,10 @@ import { buildCollectionVisitSummary } from "../app/lib/collectionVisitSummary.j
 test("formatAvgDaysToPayWhatsappLines leaves blank line above", () => {
   assert.deepEqual(formatAvgDaysToPayWhatsappLines(80), ["", "Avg days to pay: 80"]);
   assert.deepEqual(formatAvgDaysToPayWhatsappLines(null), []);
+  assert.deepEqual(
+    formatAvgDaysToPayWhatsappLines({ avgDaysToPay: 52, avgDaysToPay6m: 45 }),
+    ["", "Avg days to pay: 52", "6-month avg: 45"],
+  );
 });
 
 test("buildOrderWhatsappSummary includes avg days to pay with blank lines around it", () => {
@@ -24,10 +28,10 @@ test("buildOrderWhatsappSummary includes avg days to pay with blank lines around
     paymentType: "credit",
     pricingRegion: "riyadh",
   }, "en", {
-    analytics: { paymentBehavior: { avgDaysToPay: 80 } },
+    analytics: { paymentBehavior: { avgDaysToPay: 80, avgDaysToPay6m: 60 } },
   });
 
-  assert.match(summary, /PDF attached\.\n\nAvg days to pay: 80\n\nGPS:/);
+  assert.match(summary, /PDF attached\.\n\nAvg days to pay: 80\n6-month avg: 60\n\nGPS:/);
 });
 
 test("buildFieldVisitWhatsappSummary includes avg days to pay with blank lines around it", () => {

@@ -1644,6 +1644,9 @@ export default function NewOrderPage() {
                     ? " (paid avg + open older than that avg)"
                     : " from collected receipts")
                 : "Avg days to pay unavailable (need sales + receipts or open invoices)"}
+              {analytics.paymentBehavior.avgDaysToPay6m != null
+                ? ` · 6m ${analytics.paymentBehavior.avgDaysToPay6m}`
+                : ""}
               {analytics.paymentBehavior.medianDaysToPay != null
                 && analytics.paymentBehavior.medianDaysToPay !== analytics.paymentBehavior.avgDaysToPay
                 ? ` · median ${analytics.paymentBehavior.medianDaysToPay}`

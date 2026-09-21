@@ -526,7 +526,7 @@ export default function PaymentSettlementPage() {
                 </ExportableTable>
               </section>
 
-              <section className="moduleSection">
+              <section className="moduleSection" id="invoices-settlement">
                 <div className="moduleSectionHeader">
                   <h2>Invoices & Settlement</h2>
                   <span>

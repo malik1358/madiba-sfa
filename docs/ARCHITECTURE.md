@@ -83,6 +83,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/user/sales-scope` — visible salesman codes
 - `/api/customers/visible`, `/api/customers/lookup`, `/api/customers/contact`, `/api/customers/location`
 - `/api/customer-history`, `/api/customer-meta`, `/api/customer-documents`, `/api/customer-visits`
+- `/api/customer-order-block` (Avg-days order block status + admin override)
 - `/api/prospects`, `/api/visit-reports`, `/api/gps-ping`
 - `/api/sales-orders`, `/api/order-history`, `/api/order-invoice`
 - `/api/sales-invoices`, `/api/outstanding`, `/api/performance`

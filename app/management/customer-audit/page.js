@@ -12,7 +12,7 @@ const TEXT = {
   cacheRefreshing: { en: "Showing saved data. Refreshing in background...", ar: "عرض البيانات المحفوظة. جاري التحديث في الخلفية..." },
 };
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
@@ -58,6 +58,7 @@ import { useOrder } from "./hooks/useOrder";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { buildOrderCatalog } from "./lib/orderHelpers";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
+import { normalizeAccessRole } from "../../lib/moduleAccess.js";
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString("en-US", {
@@ -106,6 +107,8 @@ function CustomerAuditPageContent() {
     customerInvoices: [],
     needsInvoiceRowsReupload: false,
   });
+  const [orderBlock, setOrderBlock] = useState(null);
+  const [updatingOrderBlock, setUpdatingOrderBlock] = useState(false);
 
   const {
     customers,
@@ -133,6 +136,7 @@ function CustomerAuditPageContent() {
   } = useCustomerData({ setError, setMessage });
 
   const { access } = useModuleAccess();
+  const isAdmin = normalizeAccessRole(access?.role) === "admin";
   const analytics = useAnalytics(transactions, receipts, {}, {
     customer: outstandingInfo.customer,
     customerInvoices: outstandingInfo.customerInvoices,
@@ -220,6 +224,7 @@ function CustomerAuditPageContent() {
     accessScope,
     language,
     userRole: access.role,
+    orderBlock,
   });
 
   const schemeApplications = useMemo(
@@ -301,6 +306,81 @@ function CustomerAuditPageContent() {
 
     loadOutstanding();
   }, [outstandingRefreshToken, selectedCustomer, setError]);
+
+  useEffect(() => {
+    async function loadOrderBlock() {
+      if (!selectedCustomer?.customer_code) {
+        setOrderBlock(null);
+        return;
+      }
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error("Please login again.");
+
+        const avgDaysToPay = analytics?.paymentBehavior?.avgDaysToPay;
+        const query = new URLSearchParams({
+          customerCode: String(selectedCustomer.customer_code || ""),
+        });
+        if (avgDaysToPay != null) query.set("avgDaysToPay", String(avgDaysToPay));
+
+        const response = await fetch(`/api/customer-order-block?${query.toString()}`, {
+          headers: { Authorization: `****** },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load order block status.");
+        }
+        setOrderBlock(payload);
+      } catch {
+        setOrderBlock(null);
+      }
+    }
+
+    loadOrderBlock();
+  }, [analytics?.paymentBehavior?.avgDaysToPay, selectedCustomer?.customer_code]);
+
+  const toggleOrderBlockOverride = useCallback(async () => {
+    if (!selectedCustomer?.customer_code || !orderBlock || !isAdmin) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    setUpdatingOrderBlock(true);
+    setError("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Please login again.");
+
+      const response = await fetch("/api/customer-order-block", {
+        method: "POST",
+        headers: {
+          Authorization: `******
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customerCode: selectedCustomer.customer_code,
+          isUnblocked: !orderBlock.isAdminUnblocked,
+          avgDaysToPay: orderBlock.avgDaysToPay,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to update customer unblock override.");
+      }
+      setOrderBlock((current) => ({ ...(current || {}), ...payload }));
+      setMessage(payload.isAdminUnblocked ? "Customer unblocked for sales order by admin." : "Customer follows automatic block rule now.");
+    } catch (err) {
+      setError(err.message || "Unable to update customer unblock override.");
+    } finally {
+      setUpdatingOrderBlock(false);
+    }
+  }, [isAdmin, orderBlock, selectedCustomer, setError, setMessage]);
 
   const visibleOutstandingBuckets = useMemo(() => {
     const resolved = resolveOutstandingBucketLabels(
@@ -475,6 +555,10 @@ function CustomerAuditPageContent() {
           customer={selectedCustomer}
           analytics={analytics}
           outstandingSalesman={outstandingSalesman}
+          orderBlock={orderBlock}
+          canManageOrderBlock={isAdmin}
+          updatingOrderBlock={updatingOrderBlock}
+          onToggleOrderBlock={toggleOrderBlockOverride}
         />
 
         {!analytics ? (

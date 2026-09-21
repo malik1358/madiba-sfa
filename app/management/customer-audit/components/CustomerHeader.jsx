@@ -1,7 +1,16 @@
 import Link from "next/link";
 import { formatPaymentDaysLabel } from "../../../lib/paymentBehavior.js";
+import { blockedByAvgDaysMessage } from "../../../lib/customerOrderBlock.js";
 
-export default function CustomerHeader({ customer, analytics, outstandingSalesman = "" }) {
+export default function CustomerHeader({
+  customer,
+  analytics,
+  outstandingSalesman = "",
+  orderBlock = null,
+  canManageOrderBlock = false,
+  updatingOrderBlock = false,
+  onToggleOrderBlock = null,
+}) {
   const salesmanLabel = String(outstandingSalesman || "").trim()
     || String(customer.current_salesman_code || "").trim()
     || "NO SALESMAN";
@@ -11,6 +20,12 @@ export default function CustomerHeader({ customer, analytics, outstandingSalesma
   const unpaidOldest = Number(payment?.outstandingOldestDays || 0);
   const receiptAmountLast10Days = Number(analytics?.receiptAmountLast10Days || 0);
   const settlementHref = `/management/payment-settlement?customer_code=${encodeURIComponent(customer.customer_code || "")}`;
+  const blockMessage = orderBlock?.blocked
+    ? blockedByAvgDaysMessage({
+      threshold: orderBlock.threshold,
+      avgDaysToPay: orderBlock.avgDaysToPay,
+    })
+    : "";
 
   return (
     <section className="auditCustomerHero">
@@ -78,6 +93,32 @@ export default function CustomerHeader({ customer, analytics, outstandingSalesma
               ? receiptAmountLast10Days.toLocaleString("en-US", { maximumFractionDigits: 0 })
               : "0"}
           </strong>
+        </div>
+        <div className="auditSummaryCard">
+          <span>Order block (Avg ≥ 120)</span>
+          <strong style={{ color: orderBlock?.blocked ? "#b42318" : "#0f766e" }}>
+            {orderBlock?.blocked ? "Blocked" : "Allowed"}
+          </strong>
+          {orderBlock?.isAdminUnblocked ? (
+            <em className="auditSummaryCardMeta">Unblocked by admin override</em>
+          ) : null}
+          {blockMessage ? (
+            <em className="auditSummaryCardMeta">{blockMessage}</em>
+          ) : null}
+          {canManageOrderBlock && typeof onToggleOrderBlock === "function" ? (
+            <button
+              type="button"
+              className="moduleInlineButton moduleActionButton"
+              style={{ marginTop: "8px", alignSelf: "flex-start" }}
+              onClick={onToggleOrderBlock}
+              disabled={updatingOrderBlock || !orderBlock?.isOverThreshold}
+              title={!orderBlock?.isOverThreshold ? "Average below threshold; unblock override is not needed." : ""}
+            >
+              {updatingOrderBlock
+                ? "Saving..."
+                : (orderBlock?.isAdminUnblocked ? "Re-enable block rule" : "Unblock for orders")}
+            </button>
+          ) : null}
         </div>
       </section>
     </section>

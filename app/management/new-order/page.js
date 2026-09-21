@@ -62,6 +62,7 @@ import { processOfflineQueue } from "../../lib/offlineApi";
 import { isQueuedPendingOrderId } from "../../lib/queuedSalesOrders";
 import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
+import { blockedByAvgDaysMessage, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -644,6 +645,7 @@ export default function NewOrderPage() {
   });
   const [customerDocumentCompliance, setCustomerDocumentCompliance] = useState(null);
   const [accessScope, setAccessScope] = useState(null);
+  const [orderBlock, setOrderBlock] = useState(null);
   const [prefilledCustomer, setPrefilledCustomer] = useState(null);
   const [editOrderId, setEditOrderId] = useState("");
 
@@ -941,6 +943,7 @@ export default function NewOrderPage() {
     editOrderId,
     language,
     userRole: accessScope?.role || "",
+    orderBlock,
   });
 
   const schemeApplications = useMemo(
@@ -1013,6 +1016,19 @@ export default function NewOrderPage() {
     }),
     [customerDocumentCompliance, orderGrandTotal, outstandingInfo.customer, paymentType]
   );
+  const orderBlockFromAnalytics = useMemo(
+    () => resolveOrderBlockStatus({
+      avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
+      override: orderBlock,
+    }),
+    [analytics?.paymentBehavior?.avgDaysToPay, orderBlock],
+  );
+  const orderBlockedMessage = orderBlockFromAnalytics.blocked
+    ? blockedByAvgDaysMessage({
+      threshold: orderBlockFromAnalytics.threshold,
+      avgDaysToPay: orderBlockFromAnalytics.avgDaysToPay,
+    })
+    : "";
 
   const buildOrderSnapshot = useCallback(
     (orderId, statusLabel, orderNumber = "", visitDistance = null) => {
@@ -1291,6 +1307,44 @@ export default function NewOrderPage() {
       setOutstandingLoading(false);
     }
   }, [setError]);
+
+  useEffect(() => {
+    async function loadOrderBlockStatus() {
+      if (!selectedCustomer?.customer_code) {
+        setOrderBlock(null);
+        return;
+      }
+
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error("Please login again.");
+
+        const avgDaysToPay = analytics?.paymentBehavior?.avgDaysToPay;
+        const query = new URLSearchParams({
+          customerCode: String(selectedCustomer.customer_code || ""),
+        });
+        if (avgDaysToPay != null) query.set("avgDaysToPay", String(avgDaysToPay));
+
+        const response = await fetch(`/api/customer-order-block?${query.toString()}`, {
+          headers: { Authorization: `****** },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load order block status.");
+        }
+        setOrderBlock(payload.override || null);
+      } catch {
+        setOrderBlock(null);
+      }
+    }
+
+    loadOrderBlockStatus();
+  }, [analytics?.paymentBehavior?.avgDaysToPay, selectedCustomer?.customer_code]);
 
   const fetchCustomerDocuments = useCallback(async (customer) => {
     if (!customer?.customer_code) {
@@ -1826,7 +1880,11 @@ export default function NewOrderPage() {
 
             {!loadingCustomerHistory && analytics && (
               <>
-                <CustomerHeader customer={selectedCustomer} analytics={analytics} />
+                <CustomerHeader
+                  customer={selectedCustomer}
+                  analytics={analytics}
+                  orderBlock={orderBlockFromAnalytics}
+                />
                 <MonthlyPerformance analytics={analytics} />
                 <CategoryPerformance
                   analytics={analytics}
@@ -2062,7 +2120,11 @@ export default function NewOrderPage() {
                       <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>
                         {savingOrder ? "Saving..." : draftOrderId ? "Update Draft" : "Save Draft"}
                       </button>
-                      <button type="button" onClick={handleSubmitOrder} disabled={savingOrder || submittingOrder || downloadingPdf}>
+                      <button
+                        type="button"
+                        onClick={handleSubmitOrder}
+                        disabled={savingOrder || submittingOrder || downloadingPdf || orderBlockFromAnalytics.blocked}
+                      >
                         {submittingOrder ? "Submitting..." : "Submit Order"}
                       </button>
                     </div>
@@ -2074,10 +2136,11 @@ export default function NewOrderPage() {
                     style={{
                       marginTop: "10px",
                       fontWeight: 700,
-                      color: creditApproval.required ? "#9b1c1c" : undefined,
+                      color: (creditApproval.required || orderBlockFromAnalytics.blocked) ? "#9b1c1c" : undefined,
                     }}
                   >
                     {creditApproval.remark}
+                    {orderBlockedMessage ? ` · ${orderBlockedMessage}` : ""}
                   </div>
                 )}
               />

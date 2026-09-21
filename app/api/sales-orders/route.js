@@ -16,6 +16,12 @@ import {
   ORDER_STATUS_PENDING_INVOICE_CREATION,
 } from "../../lib/orderApproval.js";
 import { assertOrderQuantityControls } from "../../lib/orderQuantityControlsServer.js";
+import {
+  blockedByAvgDaysMessage,
+  orderBlockOverrideKey,
+  parseOrderBlockOverride,
+  resolveOrderBlockStatus,
+} from "../../lib/customerOrderBlock.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -540,6 +546,8 @@ export async function POST(request) {
     const loadedOrderStatus = String(body?.loadedOrderStatus || "DRAFT").trim().toUpperCase();
     const requestedOrderId = body?.orderId ? Number(body.orderId) : null;
     const creditApprovalRequired = Boolean(body?.creditApprovalRequired);
+    const avgDaysToPay = body?.orderBlockSnapshot?.avgDaysToPay ?? body?.avgDaysToPay ?? null;
+    const orderBlockThreshold = body?.orderBlockSnapshot?.threshold ?? null;
 
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer is required." }, { status: 400 });
@@ -557,6 +565,29 @@ export async function POST(request) {
 
     const user = await getAuthUser(admin, authHeader.replace("Bearer ", ""));
     const userMetadata = user.user_metadata || user.app_metadata || {};
+    const scope = await resolveSalesScopeForUserId(admin, user.id);
+
+    const { data: blockOverrideRow, error: blockOverrideError } = await admin
+      .from("system_settings")
+      .select("setting_value")
+      .eq("setting_key", orderBlockOverrideKey(customerCode))
+      .maybeSingle();
+    if (blockOverrideError) throw blockOverrideError;
+
+    const blockStatus = resolveOrderBlockStatus({
+      avgDaysToPay,
+      threshold: orderBlockThreshold,
+      override: parseOrderBlockOverride(blockOverrideRow?.setting_value),
+    });
+    if (action === "submit" && !scope.hasAllAccess && blockStatus.blocked) {
+      return NextResponse.json({
+        success: false,
+        error: blockedByAvgDaysMessage({
+          threshold: blockStatus.threshold,
+          avgDaysToPay: blockStatus.avgDaysToPay,
+        }),
+      }, { status: 400 });
+    }
 
     const { data: profile, error: profileError } = await admin
       .from("profiles")

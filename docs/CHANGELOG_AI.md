@@ -4,8 +4,24 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
+## Canonical handover package
+
+These eight files are the AI agent handover for this repository (Cursor and GitHub Copilot):
+
+1. `AGENTS.md`
+2. `.github/copilot-instructions.md`
+3. `docs/PROJECT_OVERVIEW.md`
+4. `docs/ARCHITECTURE.md`
+5. `docs/DATABASE.md`
+6. `docs/BUSINESS_RULES.md`
+7. `docs/DEPLOYMENT.md`
+8. `docs/CHANGELOG_AI.md`
+
+They are written from the application source, Supabase migrations, `/sql`, workflows, and Capacitor config. They do not change runtime behavior.
+
 ## Recent agent notes
 
+- **2026-09-21** — Canonical handover package committed as `docs: add AI agent project handover` on the current feature branch.
 - **2026-09-21** — Documented workday thresholds, KPI day-share pace, new vs repeat customers, team consolidation, business-dashboard severity, and native field-tracking cadence from source. Corrected `ANDROID_APK.md` to Node.js 22+. Flagged missing `MostVisitedPages.jsx` in `COLLECTOR_SCREEN_SETUP.md` instead of inventing a replacement. No application code changes.
 - **2026-09-21** — Expanded handover: mandatory agent rules list, `moduleAccess` matrix, major API inventory, and Android/Capacitor sections. Docs refreshed for dual Cursor + Copilot use; no application code changes.
 - **2026-09-21** — Mandatory rule in `AGENTS.md`: after any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the relevant documentation before finishing the task.

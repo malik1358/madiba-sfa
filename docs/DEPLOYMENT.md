@@ -1,5 +1,7 @@
 # Deployment
 
+> AI agent handover — staging vs production, Vercel, GitHub Actions crons, Android, Node 22+.
+
 ## Environments
 
 From `README.md`:

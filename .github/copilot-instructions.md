@@ -1,5 +1,7 @@
 # MADIBA SFA — instructions for coding agents
 
+> Part of the AI agent handover package with `AGENTS.md` and `docs/*.md`.
+
 MADIBA SFA is a Next.js 15 (App Router) sales-force app for KSA. Data lives in Supabase. Production deploys from `main` to Vercel. Staging uses a separate branch, Vercel project, and Supabase project.
 
 This repository is developed by **Cursor agents and GitHub Copilot together**. Treat the handover files as living shared memory.

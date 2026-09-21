@@ -1,5 +1,7 @@
 # AGENTS.md
 
+> Part of the AI agent handover package with `.github/copilot-instructions.md` and `docs/*.md`.
+
 Core conventions for any AI coding agent working in this repository — **Cursor and GitHub Copilot**. Read this file, `.github/copilot-instructions.md`, and `docs/` before editing. Keep those files updated when you finish. They are the shared memory between both tools.
 
 ## What this repo is

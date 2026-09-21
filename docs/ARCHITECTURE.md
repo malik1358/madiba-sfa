@@ -1,5 +1,7 @@
 # Architecture
 
+> AI agent handover — source-backed overview of runtime layers, APIs, roles, and Capacitor.
+
 ## Stack
 
 - Next.js 15 App Router (`app/`), React 19, JavaScript only.

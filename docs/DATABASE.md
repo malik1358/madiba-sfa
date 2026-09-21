@@ -1,5 +1,7 @@
 # Database
 
+> AI agent handover — schema from `supabase/migrations/` and `/sql` only; do not invent objects.
+
 Schema source of truth in git is `supabase/migrations/`, applied in filename order. `sql/` contains setup and repair scripts. Some of those scripts are **not** copied into `supabase/migrations/`. A fresh database built only from the migrations folder will not match production if those scripts were run by hand.
 
 This file lists objects found in the repo. It is not a live dump of production. Do not add columns that are not listed here unless you add a migration.

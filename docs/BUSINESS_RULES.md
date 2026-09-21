@@ -1,5 +1,7 @@
 # Business rules
 
+> AI agent handover — roles, workday, KPIs, dashboard alerts, settlement, GPS, and collections.
+
 Rules below are implemented in code. If a screen disagrees with this file, trust the code and update this file. Amounts and dates are KSA (`Asia/Riyadh`) unless a job comment says the window is India time.
 
 ## Roles and gates

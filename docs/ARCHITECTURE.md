@@ -39,6 +39,82 @@ The service role is server-only. Losing the scope checks in an API route would e
 
 Navigation groups are Home, Field Sales, Collections, Reports, Warehouse, and Setup & Admin (`NAV_GROUPS` in `app/lib/moduleAccess.js`).
 
+## Role system and `moduleAccess.js`
+
+Source of truth: `app/lib/moduleAccess.js` (covered by `tests/moduleAccess.test.mjs`).
+
+- `normalizeAccessRole` lowercases and turns `_` into `-` (`invoice_maker` → `invoice-maker`).
+- `isCollectionOnlyAccess`: role `collector`, or `collection_only` metadata, or salesman code matching `/^CL\d+$/i`.
+- `isFieldSales` for module flags: salesman, manager, admin, invoice-maker, or product-promoter (collectors are then excluded from field modules).
+- GPS helpers: `shouldRequireTransactionGps` (false for invoice makers), `shouldRequireGpsAccessGate` (false for admin/manager), `shouldEnableBackgroundGps` (false for admin and invoice makers).
+- Invoice management: `canManageOrderInvoice` for invoice-maker, admin, manager.
+- Stock take: admin or `profiles.stock_take_access`.
+- Salesman visit plan for field roles depends on `NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS` (default enabled).
+- `myCollections` module flag is always `false`; `/management/my-collections` remains reachable via `canAccessPath` when payment collections are allowed.
+- SQL `is_management()` is only admin/manager. App UI can still show invoice makers more screens via service-role APIs.
+
+Module access summary from `buildModuleAccess` (Y = true for that role group; collectors use the collection-only path):
+
+| Module | admin | manager | salesman | collector | invoice-maker | product-promoter |
+| --- | --- | --- | --- | --- | --- | --- |
+| dashboard | Y | Y | Y | Y | Y | Y |
+| management | Y | Y | | Y | Y | |
+| myDay, customerAudit, newOrder, visitWithoutOrder, pendingOrders, newCustomer, myPerformance, mySalesInvoices, paymentSettlement, outstandingCompare | Y | Y | Y | | Y | Y |
+| paymentCollections | Y | Y | Y | Y | Y | |
+| collectionReport, receiptsNotInTally, userActivity | Y | Y | | Y | | |
+| dailyVisitReport | Y | Y | Y | Y | | |
+| businessDashboard, customerMaster, outstandingNoGps, customerBookShares, kpiTargets, schemes, orderQuantityControls | Y | Y | | | | |
+| salesmanHierarchy, upload | Y | Y | | | Y | |
+| salesmanVisitPlan | Y | Y* | Y* | | Y* | Y* |
+| itemPriceHistory | Y | Y | Y | | Y | Y |
+| gpsMap | Y | | | | Y | Y |
+| stockTake | Y / flag | flag | flag | flag | flag | flag |
+
+\*Visit plan for non-admin field roles requires the env flag above. “flag” means `stock_take_access` on the profile.
+
+Pinned home shortcuts: `PINNED_MODULE_KEYS` in the same file.
+
+## Major API routes
+
+Handlers live under `app/api/**/route.js`. Most create a service-role client, verify the user JWT (or `CRON_SECRET`), then enforce sales scope in application code.
+
+**Field / customers**
+
+- `/api/user/sales-scope` — visible salesman codes
+- `/api/customers/visible`, `/api/customers/lookup`, `/api/customers/contact`, `/api/customers/location`
+- `/api/customer-history`, `/api/customer-meta`, `/api/customer-documents`, `/api/customer-visits`
+- `/api/prospects`, `/api/visit-reports`, `/api/gps-ping`
+- `/api/sales-orders`, `/api/order-history`, `/api/order-invoice`
+- `/api/sales-invoices`, `/api/outstanding`, `/api/performance`
+- `/api/transaction-alert`, `/api/translate`
+
+**Collections**
+
+- `/api/payment-collections`, `/api/payment-collections/report`, `/api/payment-collections/day-summary`
+- `/api/receipts`, `/api/receipts-not-in-tally`
+
+**Admin / imports / BI**
+
+- `/api/import-sales`, `/api/upload-files`, `/api/pricing/cache`, `/api/admin/price-sync`
+- `/api/business-dashboard`, `/api/business-dashboard/category-growth`
+- `/api/admin/customers`, `.../export`, `.../locations`, `.../gps-history`
+- `/api/admin/salesmen-hierarchy`, `/api/admin/customer-book-shares`, `/api/admin/kpi-targets`
+- `/api/admin/schemes`, `/api/admin/order-quantity-controls`, `/api/admin/item-price-history`
+- `/api/admin/salesman-visit-plan`, `/api/admin/outstanding-no-gps`, `/api/admin/clean-dirty-customers`
+- `/api/admin/push-notifications`, `/api/tally-item-units`, `/api/stock-take`
+
+**Mobile / config / activity**
+
+- `/api/mobile-snapshot`, `/api/offline-data-version`, `/api/push-tokens`
+- `/api/app-config`, `/api/build-info`, `/api/user-activity`
+- `/api/daily-visit-report`, `/api/daily-visit-report/email`, `/api/inactivity-email-log`
+
+**Cron** (`app/api/cron/*`, auth via `CRON_SECRET`)
+
+- `inactivity-push`, `auto-close-workdays`, `daily-visit-report-email`, `daily-salesman-resume-email`
+- `daily-supplier-order-email`, `outstanding-no-gps-email`, `missing-invoice-email`
+- `salesman-visit-plan-email`, `mobile-snapshot`
+
 ## Authentication
 
 1. Home page signs in with `supabase.auth.signInWithPassword`.
@@ -47,6 +123,7 @@ Navigation groups are Home, Field Sales, Collections, Reports, Warehouse, and Se
 4. API routes expect `Authorization: Bearer <access token>`, then `auth.getUser`.
 5. Cron routes use `app/lib/cronAuth.js`: `Authorization: Bearer <CRON_SECRET>` or header `x-cron-secret`. If `CRON_SECRET` is empty, cron calls are rejected.
 6. Android login can be blocked by a minimum APK version (`app/lib/androidAppVersionPolicy.js`, setting `android_apk_min_version_v1`, env `MIN_ANDROID_APK_VERSION_CODE`).
+7. Android also gates login/morning attendance on unrestricted battery (`app/lib/androidBatteryOptimization.js`, details in `ANDROID_APK.md`).
 
 Hierarchy is not a table. Each auth user’s `user_metadata` / `app_metadata` may contain `head_salesman_code` and `head_salesman_name`. `app/lib/salesHierarchy.js` walks that chain. Customer book shares are a real table (`customer_book_shares`) plus hardcoded pairs in `app/lib/mutualSalesmanGroups.js`.
 
@@ -140,7 +217,19 @@ These are large or shared. Read them fully enough to see callers before editing:
 - `app/lib/paymentBehavior.js`
 - `app/lib/outstanding.js`
 - `app/lib/workdayActivity.js`
+- `app/lib/moduleAccess.js`
 - `app/management/customer-audit/page.js`
 - `app/management/pending-orders/page.js`
 - `app/management/new-order/page.js`
 - `app/management/payment-collections/PaymentCollectionsView.jsx`
+
+## Android / Capacitor
+
+- Config: `capacitor.config.js` — `appId` `com.madiba.sfa`, `appName` `MADIBA SFA`, `webDir` `public`, server URL defaults to `https://madiba-sfa.vercel.app` (override with `CAPACITOR_SERVER_URL`).
+- Native project: `android/`. Field UI still comes from the hosted Next.js site; rebuild APK only when native code, permissions, or Capacitor plugins change.
+- Tracking: `app/lib/nativeFieldTracking.js` + `app/components/NativeFieldTracking.jsx`. Foreground service notification, idle GPS after 15 minutes without transaction activity, check cycle every 5 minutes while the process runs. Pings pause during lunch and after end of day.
+- Push: device tokens in `device_push_tokens`; server FCM via `FIREBASE_SERVICE_ACCOUNT_JSON` and `app/lib/fcm.js`. Without Firebase server config, local inactivity alerts can still work; remote push does not.
+- Minimum APK: env + `system_settings.android_apk_min_version_v1`.
+- Operator guide: `ANDROID_APK.md` (battery unrestricted required before login, location all-the-time, Play internal testing, GitHub APK workflow).
+
+Do not change Capacitor app id, tracking intervals, or battery/login gates unless the task explicitly asks for it.

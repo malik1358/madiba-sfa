@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-21** — Expanded handover: mandatory agent rules list, `moduleAccess` matrix, major API inventory, and Android/Capacitor sections. Docs refreshed for dual Cursor + Copilot use; no application code changes.
 - **2026-09-21** — Mandatory rule in `AGENTS.md`: after any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the relevant documentation before finishing the task.
 - **2026-09-21** — Dual-agent rule: Cursor and Copilot must both read the handover files at task start and update them when behavior, schema, roles, reporting, or deployment changes. Stale docs are treated as a defect for the next agent.
 
@@ -91,3 +92,16 @@ When a task needs a new fact:
 ## Documentation-only handover
 
 The files `.github/copilot-instructions.md`, `AGENTS.md`, and `docs/*.md` were added so Cursor and Copilot can continue without a verbal briefing. They do not change runtime behavior. They must stay aligned with the code as both tools keep shipping features.
+
+## Incomplete repository evidence
+
+Areas where the git checkout alone is incomplete. Do not invent missing details:
+
+1. **No live Supabase dump.** Tables and columns come from migrations and `sql/`. Production may have one-off scripts applied that are not in `supabase/migrations/` (for example `collector` on `profiles_role_check`, `profit_amount`, storage buckets, `sales_bi_monthly`).
+2. **`@supabase/ssr` is unused in app source** even though it is in `package.json`. Do not document SSR cookie helpers as existing until code imports them.
+3. **Exact production env values and cron URL secrets** are not in the repo (correctly). Only names are in `.env.example`.
+4. **Price upstream URL fallback** inside price-sync code was not re-audited for this doc pass; `PRICE_SOURCE_URL` is optional and the README says a fallback exists.
+5. **Full RLS policy matrix** for every table after every migration is large; treat policies as a backstop and rely on API scope checks for service-role routes.
+6. **Which staging SQL scripts have been applied** on the staging Supabase project is not knowable from git alone.
+7. **`COLLECTOR_SCREEN_SETUP.md` and parts of older READMEs** can disagree with `moduleAccess.js` and migrations; prefer code + `docs/`.
+8. **Capacitor plugin behavior on specific Android OEM skins** (battery killing timers) is described in `ANDROID_APK.md` as operational guidance, not guaranteed OS behavior.

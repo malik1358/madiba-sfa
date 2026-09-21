@@ -6,9 +6,23 @@ Core conventions for any AI coding agent working in this repository — **Cursor
 
 MADIBA SFA (`package.json` name `madiba-sfa`) is the KSA sales-force system: field visits, orders, collections, GPS, attendance, and management reports. Stack: Next.js 15 App Router, React 19, Supabase Auth + Postgres, Vercel, optional Capacitor Android shell.
 
-## Dual-agent workflow (Cursor + Copilot)
+## Rules every AI coding agent must follow
 
-Development will continue with Cursor agents and GitHub Copilot in the same repository. Treat the handover files as mandatory, not optional:
+These rules are mandatory for Cursor and Copilot:
+
+1. **Understand existing code before changing it.** Read the module, its callers, related `app/lib/` helpers, and matching tests under `tests/`.
+2. **Inspect dependencies before structural changes.** Search for every consumer of a function, table, setting key, status string, route, or role before renaming or removing it.
+3. **Do not invent Supabase tables, columns, or functions.** Use only names present in `supabase/migrations/`, `sql/`, or live queries. Many “datasets” are JSON in `public.system_settings`, not tables.
+4. **Preserve staging/production separation.** `staging` branch + staging Vercel + staging Supabase. `main` + production Vercel + production Supabase. Never put production credentials on staging.
+5. **Preserve role-based access controls.** Screen access is `buildModuleAccess` in `app/lib/moduleAccess.js`. Do not bypass it with client-only hiding. Do not weaken API scope checks.
+6. **Preserve existing Android/Capacitor behavior unless explicitly asked.** The shell loads the hosted site (`capacitor.config.js`). Do not change app id, tracking, push, battery gates, or native permissions casually.
+7. **Test changes before finishing.** Run related `node --test tests/<file>.test.mjs` files and `npm run build` when the change can affect the Next.js build. There is no `npm test` script.
+8. **Document database migrations.** Say which migration to add, what it changes, and that it must be applied in Supabase before the app depends on it. Some production SQL exists only under `sql/`.
+9. **Update relevant docs when business logic changes.** After any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the matching `docs/*.md` file and add a dated note to `docs/CHANGELOG_AI.md` **before finishing the task**.
+10. **Do not expose secrets or environment variables.** Never print, commit, or paste `.env*` values, service-role keys, `CRON_SECRET`, SMTP passwords, Firebase JSON, or tokens. `.env.example` lists names only.
+11. **Prefer incremental changes over unnecessary rewrites.** Large pages and shared libs (`paymentBehavior.js`, collections, pending orders, customer audit, sales import) are easy to break.
+
+## Dual-agent workflow (Cursor + Copilot)
 
 | When | What every agent must do |
 | --- | --- |
@@ -18,11 +32,9 @@ Development will continue with Cursor agents and GitHub Copilot in the same repo
 
 Do not assume the other tool will update the handover. Leaving docs stale breaks the next agent on either side.
 
-## Mandatory rule
+## Mandatory documentation rule
 
 **After any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the relevant documentation before finishing the task.**
-
-This is required, not optional. Apply it for Cursor and Copilot:
 
 - Update the matching file under `docs/` (`BUSINESS_RULES.md`, `DATABASE.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`, and/or `PROJECT_OVERVIEW.md`).
 - Add a short dated note under “Recent agent notes” in `docs/CHANGELOG_AI.md`.
@@ -35,10 +47,10 @@ This is required, not optional. Apply it for Cursor and Copilot:
 3. Change only what the task needs. Do not rewrite a page or library because it is large.
 4. Do not invent columns, tables, roles, or status values.
 5. Keep user-visible behavior unless the task explicitly changes it.
-6. After code changes, run the related `node --test tests/<file>.test.mjs` files and `npm run build` when the change can affect the Next.js build.
+6. After code changes, run the related tests and `npm run build` when needed.
 7. If the database must change, add a migration and say so in the summary. Applying SQL in Supabase is a separate production step.
-8. Never print or commit secrets. `.env*` is gitignored except `.env.example`.
-9. Follow the **Mandatory rule** above: when a business rule, database structure, report, auth, GPS/attendance, or architecture decision changes, update the relevant docs and `docs/CHANGELOG_AI.md` before finishing.
+8. Never print or commit secrets.
+9. Follow the mandatory documentation rule above.
 
 ## Repository map
 
@@ -48,12 +60,14 @@ This is required, not optional. Apply it for Cursor and Copilot:
 | `app/management/` | Authenticated screens |
 | `app/api/` | Route handlers. Most use the service role after checking the user JWT |
 | `app/lib/` | Shared business rules. Prefer changing these over duplicating logic in pages |
+| `app/lib/moduleAccess.js` | Roles, module keys, nav groups, GPS/attendance gates |
 | `app/components/` | Shell: nav, attendance gate, GPS, language |
 | `supabase/migrations/` | Schema intended to be applied in order |
 | `sql/` | One-off and setup scripts. Not all of them are migrations |
 | `tests/` | Node.js built-in test runner (`node:test`) |
 | `.github/workflows/` | CI build and scheduled calls into `/api/cron/*` and price sync |
 | `android/` | Capacitor shell. The UI is still the Vercel site |
+| `ANDROID_APK.md` | Field Android install, push, battery, tracking details |
 
 There is no Next.js `middleware.js`. Auth is enforced in the client shell and in each API route.
 
@@ -82,6 +96,7 @@ Sales figures used by the app come from the `active_sales` view (the batch id in
 
 ```bash
 node --test tests/paymentBehavior.test.mjs
+node --test tests/moduleAccess.test.mjs
 node --test tests/*.test.mjs
 npm run build
 ```

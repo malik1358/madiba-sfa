@@ -108,15 +108,20 @@ There is no `npm test` script.
 
 ## Android
 
-See `ANDROID_APK.md`. Short version:
+See `ANDROID_APK.md` for the full operator guide. Architecture summary is in `docs/ARCHITECTURE.md` under “Android / Capacitor”.
 
-- App id `com.madiba.sfa`. The WebView loads the hosted site.
+Short version:
+
+- App id `com.madiba.sfa`. The WebView loads the hosted site (`CAPACITOR_SERVER_URL` or production Vercel).
 - Play internal testing is the field rollout path (`.github/workflows/play-store-internal.yml`).
-- Debug APK: `.github/workflows/android-apk.yml` or `npm run cap:build:apk` (PowerShell script).
+- Debug/release APK: `.github/workflows/android-apk.yml` or `npm run cap:build:apk` (PowerShell script).
 - `npm run cap:sync` / `cap:open:android` need Android Studio.
 - Minimum version is enforced at login via env and `system_settings.android_apk_min_version_v1`.
+- Phones need Location → All the time, notifications, and Battery → Unrestricted before login/morning attendance.
+- Native idle GPS: every 5 minutes while running; save idle ping after 15 minutes without visit/order/collection. Inactivity lock-screen alert at 45 minutes, repeats every 15 minutes. Pauses during lunch.
+- Preserve this behavior unless the task explicitly changes Android/Capacitor.
 
-Do not commit keystores, `android/keystore.properties`, or `google-services.json` if it contains a private client secret beyond what is already in the repo. `android/app/google-services.json` is currently tracked; treat it as Firebase client config, not a place to paste server keys.
+Do not commit keystores, `android/keystore.properties`, or paste server private keys into `google-services.json`. `android/app/google-services.json` is currently tracked as Firebase client config.
 
 ## Supabase pg_cron
 

@@ -198,5 +198,5 @@ Treat RLS as a backstop for browser queries with the publishable key. API author
 1. Add `supabase/migrations/<timestamp>_<name>.sql`.
 2. Prefer `ADD COLUMN IF NOT EXISTS` and `CREATE TABLE IF NOT EXISTS`.
 3. If the app can deploy before the SQL runs, read the column with a fallback, matching existing `isMissingColumnError` handling.
-4. Say in the change summary that someone must run the migration on staging and production Supabase. Git push does not migrate the database.
+4. Say in the change summary that someone must run the migration on **local/dev** (while developing) and **production** Supabase before the app depends on it. Git push does not migrate the database.
 5. Do not put production data fixes that target named people into a migration that runs on every environment. One-off data scripts such as `sql/share_ahmed_nabil_customers_with_abdalla.sql` are manual.

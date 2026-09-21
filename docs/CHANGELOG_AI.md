@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-21** — Canonical deploy model is now local/dev → feature/AI branch → PR/CI → `main` → Vercel production. No permanent cloud staging. Docs updated (`README`, `AGENTS.md`, Copilot instructions, `docs/DEPLOYMENT.md`, related handover files, `ANDROID_APK.md`). Runtime/CI cutover follows in separate commits; legacy `staging` branch/env labels may still exist in code until those land.
 - **2026-09-21** — Expanded handover: mandatory agent rules list, `moduleAccess` matrix, major API inventory, and Android/Capacitor sections. Docs refreshed for dual Cursor + Copilot use; no application code changes.
 - **2026-09-21** — Mandatory rule in `AGENTS.md`: after any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the relevant documentation before finishing the task.
 - **2026-09-21** — Dual-agent rule: Cursor and Copilot must both read the handover files at task start and update them when behavior, schema, roles, reporting, or deployment changes. Stale docs are treated as a defect for the next agent.
@@ -55,9 +56,9 @@ These are real mismatches. Do not “fix” them as drive-by cleanups.
 6. **Price catalog setup is duplicated.** Baseline migration already creates `price_catalog_cache` and `price_catalog_snapshots`. `README.md` still tells operators to run `sql/setup_price_catalog_cache.sql` once. Running it should be idempotent; do not assume the cache tables are absent.
 7. **`is_management()` is narrower than the UI.** Invoice makers can open Imports and hierarchy in the app but SQL policies that call `is_management()` will deny them on direct browser queries. APIs bypass that with the service role.
 8. **Customer GPS audit columns are optional at runtime.** `customerGpsHistory.js` retries without them if Postgres says the column does not exist. A database that skipped `20260831153000_customer_gps_history.sql` still loads Customer Master, but without audit history.
-9. **Staging banner versus shell label.** The yellow banner requires `NEXT_PUBLIC_APP_ENV=staging`. `GlobalAppStatus` still receives `PRODUCTION` when that variable is anything else. An unset env on a staging project would look like production.
+9. **Non-production banner versus shell label.** The yellow banner currently requires `NEXT_PUBLIC_APP_ENV=staging`. `GlobalAppStatus` still receives `PRODUCTION` when that variable is anything else. Local/dev should be treated as non-production; an unset env still looks like production in the shell.
 10. **No automated test script in `package.json`.** Agents and CI can miss tests. CI only runs `npm run build`. Rule changes need an explicit `node --test` run.
-11. **Personal share script.** `sql/share_ahmed_nabil_customers_with_abdalla.sql` is a one-off data change. The durable rule is `SHARED_CUSTOMER_BOOKS` plus `customer_book_shares`. Do not run that script on staging unless the same people exist there.
+11. **Personal share script.** `sql/share_ahmed_nabil_customers_with_abdalla.sql` is a one-off data change. The durable rule is `SHARED_CUSTOMER_BOOKS` plus `customer_book_shares`. Do not run that script on local/dev unless the same people exist there.
 
 ## Do not modify without checking dependents
 
@@ -102,6 +103,6 @@ Areas where the git checkout alone is incomplete. Do not invent missing details:
 3. **Exact production env values and cron URL secrets** are not in the repo (correctly). Only names are in `.env.example`.
 4. **Price upstream URL fallback** inside price-sync code was not re-audited for this doc pass; `PRICE_SOURCE_URL` is optional and the README says a fallback exists.
 5. **Full RLS policy matrix** for every table after every migration is large; treat policies as a backstop and rely on API scope checks for service-role routes.
-6. **Which staging SQL scripts have been applied** on the staging Supabase project is not knowable from git alone.
+6. **Which local/dev SQL scripts have been applied** on a developer’s Supabase project is not knowable from git alone.
 7. **`COLLECTOR_SCREEN_SETUP.md` and parts of older READMEs** can disagree with `moduleAccess.js` and migrations; prefer code + `docs/`.
 8. **Capacitor plugin behavior on specific Android OEM skins** (battery killing timers) is described in `ANDROID_APK.md` as operational guidance, not guaranteed OS behavior.

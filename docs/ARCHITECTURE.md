@@ -33,7 +33,7 @@ The service role is server-only. Losing the scope checks in an API route would e
 
 `app/layout.js` wraps every page with:
 
-- Staging banner when `NEXT_PUBLIC_APP_ENV === "staging"`.
+- Non-production banner when `NEXT_PUBLIC_APP_ENV === "staging"` (legacy label; local/dev is the intended non-production environment).
 - `BuildUpdateWatcher`, PWA shell, native field tracking, morning-attendance redirect, workday time bar, main nav, back button, logout.
 - `AppLanguageProvider` and `AppPopupProvider`.
 

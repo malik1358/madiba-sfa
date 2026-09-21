@@ -200,17 +200,19 @@ Android only shows a generic error for all of these. When in doubt: **uninstall 
 
 ---
 
-## Staging / UAT APK
+## Staging / local APK
 
-To point the shell at staging instead of production:
+To point the Capacitor shell at your **local** Next.js server (or another non-production host) instead of production:
 
 ```powershell
-$env:CAPACITOR_SERVER_URL = "https://YOUR-STAGING-URL.vercel.app"
+$env:CAPACITOR_SERVER_URL = "http://YOUR-LAN-IP:3000"
 npm run cap:sync
 npm run cap:open:android
 ```
 
-Rebuild the APK after changing the URL.
+Use HTTPS for any non-local host. Cleartext to a LAN IP may require Android cleartext / network-security config; prefer a local tunnel with HTTPS when possible.
+
+Rebuild the APK after changing the URL. Do not point local debug builds at production Supabase credentials.
 
 ---
 

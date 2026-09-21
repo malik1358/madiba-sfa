@@ -2,24 +2,29 @@
 
 ## Environments
 
-From `README.md`:
+There is **no permanent cloud staging environment**. Local PC covers development and staging. Cloud is production only.
 
-| Environment | Git branch | Vercel | Database |
-| --- | --- | --- | --- |
-| Staging / UAT | `staging` | Separate project, production branch `staging` | Separate Supabase project |
-| Production | `main` | Existing production project | Production Supabase |
+| Environment | Where | Git | Hosting | Database |
+| --- | --- | --- | --- | --- |
+| Local / staging | Developer PC | Working / feature / AI branch | `npm run dev` | Local / dev Supabase only |
+| Production | Cloud | `main` | Vercel production | Production Supabase |
 
-Never put production Supabase keys on the staging Vercel project. Staging must set `NEXT_PUBLIC_APP_ENV=staging`. That value turns on the yellow `STAGING / UAT - TEST DATA ONLY` banner in `app/layout.js`. Any other value (including unset) is treated as production in the banner logic and the shell label.
+Never put production Supabase keys in `.env.local` or any local/dev config.
 
-Release path used by the team:
+Canonical release path:
 
-1. Feature branch to pull request into `staging`.
-2. GitHub Actions job `Build` must pass.
-3. UAT on the staging URL.
-4. Pull request from `staging` into `main`.
-5. Merge only after `Build` passes. Vercel deploys production from `main`.
+```text
+local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  Vercel production
+```
 
-`Build` (`.github/workflows/build.yml`) runs on pull requests and pushes to `main` and `staging`: `npm ci` then `npm run build`. Node comes from `.nvmrc` (22).
+1. Develop, test, and stage on the local PC against local/dev Supabase.
+2. Push a temporary feature or AI branch and open a pull request into `main`.
+3. GitHub Actions job `Build` must pass.
+4. Merge into `main`. Vercel deploys production from `main` only.
+
+`Build` (`.github/workflows/build.yml`) runs on pull requests and pushes to `main`: `npm ci` then `npm run build`. Node comes from `.nvmrc` (22). Play Store internal uploads (`.github/workflows/play-store-internal.yml`) are `main`-only. Scheduled cron workflows call the **production** Vercel host (`https://madiba-sfa.vercel.app`); they do not depend on a staging branch.
+
+`NEXT_PUBLIC_APP_ENV=staging` currently turns on the yellow non-production banner in `app/layout.js` (legacy cloud-staging label). Prefer treating local as non-production; production Vercel must keep `NEXT_PUBLIC_APP_ENV=production` (or unset, which the shell still labels as production). Runtime env semantics are being aligned to local/dev in a follow-up change.
 
 ## Vercel
 
@@ -36,7 +41,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 
 | Name | Role |
 | --- | --- |
-| `NEXT_PUBLIC_APP_ENV` | `staging` or `production` |
+| `NEXT_PUBLIC_APP_ENV` | Non-production (`staging` / future `local` / `development`) or `production` |
 | `APP_ORIGIN` | Stable public URL for email links |
 | `NEXT_PUBLIC_SUPABASE_URL` | Browser and server |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser only |
@@ -93,7 +98,7 @@ npm ci
 npm run dev
 ```
 
-`npm run dev` uses `scripts/dev-server.mjs`. `npm run dev:clean` and `npm run dev:stop` are the other local helpers. Copy `.env.example` to `.env.local` and fill staging keys only.
+`npm run dev` uses `scripts/dev-server.mjs`. `npm run dev:clean` and `npm run dev:stop` are the other local helpers. Copy `.env.example` to `.env.local` and fill **local/dev Supabase** keys only. Never paste production Supabase URL or service-role keys into `.env.local`.
 
 Customer location import: `npm run import:customer-locations` (`scripts/import-customer-locations.mjs`). It requires `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`.
 
@@ -129,8 +134,8 @@ Do not commit keystores, `android/keystore.properties`, or paste server private 
 
 ## What a production change needs
 
-1. Code on `main` after the staging PR path above, unless the task is an emergency fix the user explicitly wants on `main`.
-2. Vercel env changes, if new names were added, on **both** projects when both environments should run the feature.
-3. SQL applied to the matching Supabase project.
+1. Code on `main` after the local → feature/AI branch → PR/CI path above, unless the task is an emergency fix the user explicitly wants on `main`.
+2. Vercel env changes, if new names were added, on the **production** project.
+3. SQL applied to the **production** Supabase project (and to local/dev when developing the feature).
 4. GitHub secret changes only when a new cron URL is introduced. Existing workflows already default to the production host.
 5. No service-role key in the client bundle. Only `NEXT_PUBLIC_*` values are public, and those must still not be the service role.

@@ -5,7 +5,39 @@ import {
   buildPaymentSettlementLedger,
   emptyPaymentBehavior,
 } from '../../../lib/paymentBehavior.js';
-import { monthKey, parseDateValue, salesUnitQty } from './format';
+import { getKsaDateTimeParts } from "../../../lib/workdayActivity.js";
+import { monthKey, parseDateValue, salesUnitQty } from './format.js';
+
+function ksaDateKeyFromDate(date) {
+  const parts = getKsaDateTimeParts(date);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+function sumReceiptAmountInLastDays(receipts = [], { todayIso, days = 10 } = {}) {
+  const windowDays = Math.max(1, Number(days) || 10);
+  let todayDate = new Date();
+  if (todayIso) {
+    const fromIso = new Date(todayIso);
+    if (Number.isFinite(fromIso.getTime())) {
+      todayDate = fromIso;
+    } else {
+      const parsedFallback = parseDateValue(todayIso);
+      if (parsedFallback) todayDate = parsedFallback;
+    }
+  }
+  const todayKey = ksaDateKeyFromDate(todayDate);
+  const [year, month, day] = todayKey.split("-").map((value) => Number(value));
+  const cutoffMs = Date.UTC(year, month - 1, day - (windowDays - 1));
+  const cutoffKey = new Date(cutoffMs).toISOString().slice(0, 10);
+
+  return (Array.isArray(receipts) ? receipts : []).reduce((total, row) => {
+    const parsedDate = parseDateValue(row?.receipt_date);
+    if (!parsedDate) return total;
+    const receiptKey = parsedDate.toISOString().slice(0, 10);
+    if (receiptKey < cutoffKey || receiptKey > todayKey) return total;
+    return total + Number(row?.amount || 0);
+  }, 0);
+}
 
 export function buildAnalytics(transactions, {
   currentMonthKey,
@@ -52,6 +84,7 @@ export function buildAnalytics(transactions, {
     .map(([month]) => month);
 
   const receiptList = Array.isArray(receipts) ? receipts : [];
+  const receiptAmountLast10Days = sumReceiptAmountInLastDays(receiptList, { todayIso, days: 10 });
   const receiptMonths = [];
   const receiptMonthSeen = new Set();
   receiptList.forEach((row) => {
@@ -268,6 +301,7 @@ export function buildAnalytics(transactions, {
     salesTotal: lifetimeSalesTotal,
     receiptTotal: lifetimeReceiptTotal,
     transactionCount: transactions.length,
+    receiptAmountLast10Days,
     paymentBehavior: paymentBehavior || emptyPaymentBehavior(),
     paymentSettlement: paymentSettlement || null,
   };

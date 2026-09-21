@@ -9,6 +9,7 @@ export default function CustomerHeader({ customer, analytics, outstandingSalesma
   const avgDaysLabel = formatPaymentDaysLabel(payment);
   const unpaidTotal = Number(payment?.outstandingTotal || 0);
   const unpaidOldest = Number(payment?.outstandingOldestDays || 0);
+  const receiptAmountLast10Days = Number(analytics?.receiptAmountLast10Days || 0);
   const settlementHref = `/management/payment-settlement?customer_code=${encodeURIComponent(customer.customer_code || "")}`;
 
   return (
@@ -69,6 +70,14 @@ export default function CustomerHeader({ customer, analytics, outstandingSalesma
                 : ""}
             </em>
           ) : null}
+        </div>
+        <div className="auditSummaryCard">
+          <span>Receipt amount (last 10 days)</span>
+          <strong>
+            {receiptAmountLast10Days > 0
+              ? receiptAmountLast10Days.toLocaleString("en-US", { maximumFractionDigits: 0 })
+              : "0"}
+          </strong>
         </div>
       </section>
     </section>

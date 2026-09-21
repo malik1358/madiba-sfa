@@ -6,6 +6,7 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
+import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
@@ -27,7 +28,19 @@ const TEXT = {
     en: "Select a customer to compare Tally outstanding with computed open (cash + credit notes).",
     ar: "اختر عميلاً لمقارنة مستحقات تالي بالمفتوح المحسوب (نقد + إشعارات دائن).",
   },
+  code: { en: "Code", ar: "الكود" },
+  customer: { en: "Customer", ar: "العميل" },
+  days0To30: { en: "0–30", ar: "0–30" },
+  days30To60: { en: "30–60", ar: "30–60" },
+  days61To90: { en: "61–90", ar: "61–90" },
+  daysAbove90: { en: ">90", ar: ">90" },
+  totalOutstanding: { en: "Total outstanding", ar: "إجمالي المستحق" },
+  compare: { en: "Compare", ar: "قارن" },
+  total: { en: "Total", ar: "الإجمالي" },
+  noCustomers: { en: "No matching customers.", ar: "لا يوجد عملاء مطابقون." },
 };
+
+const CUSTOMER_FILTER_KEYS = ["code", "name", "d0", "d30", "d61", "d90", "total"];
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -51,6 +64,10 @@ function deltaClass(value) {
   return "";
 }
 
+function outstandingCellClass(value) {
+  return Number(value || 0) > 0.009 ? "moduleBiMonthCell--down" : "";
+}
+
 function statusClass(status) {
   if (status === "Paid" || status === "Match" || status === "Computed only") {
     return "paymentSettleStatus paymentSettleStatus--paid";
@@ -59,6 +76,17 @@ function statusClass(status) {
     return "paymentSettleStatus paymentSettleStatus--partial";
   }
   return "paymentSettleStatus paymentSettleStatus--open";
+}
+
+function customerOutstandingTotal(row) {
+  return Number(row?.outstanding_0_30 || 0)
+    + Number(row?.outstanding_30_60 || 0)
+    + Number(row?.outstanding_61_90 || 0)
+    + Number(row?.outstanding_above_90 || 0);
+}
+
+function settlementHref(customerCode) {
+  return `/management/payment-settlement?customer_code=${encodeURIComponent(customerCode || "")}#invoices-settlement`;
 }
 
 export default function OutstandingComparePage() {
@@ -82,17 +110,51 @@ export default function OutstandingComparePage() {
     || access.canAccess("paymentSettlement")
     || access.canAccess("customerAudit");
 
-  const filteredCustomers = useMemo(() => {
+  const customerRows = useMemo(() => {
     const needle = String(customerSearch || "").trim().toLowerCase();
-    if (!needle) return customers.slice(0, 40);
-    return customers
+    const rows = customers
+      .map((row) => ({
+        ...row,
+        outstanding_total: customerOutstandingTotal(row),
+      }))
       .filter((row) => {
+        if (!needle) return true;
         const code = String(row.customer_code || "").toLowerCase();
         const name = String(row.customer_name || "").toLowerCase();
         return code.includes(needle) || name.includes(needle);
       })
-      .slice(0, 40);
+      .sort((a, b) => {
+        const byOutstanding = Number(b.outstanding_total || 0) - Number(a.outstanding_total || 0);
+        if (Math.abs(byOutstanding) > 0.009) return byOutstanding;
+        return String(a.customer_code || "").localeCompare(String(b.customer_code || ""));
+      });
+    return rows;
   }, [customerSearch, customers]);
+
+  const customerFilterValue = useCallback((row, key) => {
+    if (key === "code") return String(row.customer_code || "—");
+    if (key === "name") return String(row.customer_name || "—");
+    if (key === "d0") return formatMoney(row.outstanding_0_30);
+    if (key === "d30") return formatMoney(row.outstanding_30_60);
+    if (key === "d61") return formatMoney(row.outstanding_61_90);
+    if (key === "d90") return formatMoney(row.outstanding_above_90);
+    return formatMoney(row.outstanding_total);
+  }, []);
+
+  const {
+    filters: customerFilters,
+    options: customerFilterOptions,
+    visibleRows: visibleCustomers,
+    setFilter: setCustomerFilter,
+  } = useBiExcelFilters(customerRows, CUSTOMER_FILTER_KEYS, customerFilterValue);
+
+  const customerFooter = useMemo(() => ({
+    d0: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_0_30 || 0), 0),
+    d30: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_30_60 || 0), 0),
+    d61: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_61_90 || 0), 0),
+    d90: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_above_90 || 0), 0),
+    total: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_total || 0), 0),
+  }), [visibleCustomers]);
 
   const loadCustomers = useCallback(async () => {
     const supabase = getSupabaseClient();
@@ -101,7 +163,7 @@ export default function OutstandingComparePage() {
     setError("");
     try {
       const session = await resolveAuthSession(supabase);
-      const response = await fetch("/api/customers/visible", {
+      const response = await fetch("/api/customers/visible?includeOutstanding=1", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const payload = await response.json().catch(() => ({}));
@@ -240,7 +302,7 @@ export default function OutstandingComparePage() {
               <AppLanguageSwitch language={language} setLanguage={setLanguage} />
               {selectedCustomer?.customer_code ? (
                 <Link
-                  href={`/management/payment-settlement?customer_code=${encodeURIComponent(selectedCustomer.customer_code)}`}
+                  href={settlementHref(selectedCustomer.customer_code)}
                   className="moduleBackLink"
                 >
                   {t("settlement")}
@@ -252,8 +314,12 @@ export default function OutstandingComparePage() {
 
           <section className="moduleSection">
             <div className="moduleSectionHeader">
-              <h2>Customer</h2>
-              <span>{loadingCustomers ? "Loading customers..." : `${customers.length.toLocaleString()} visible`}</span>
+              <h2>{t("customer")}</h2>
+              <span>
+                {loadingCustomers
+                  ? "Loading customers..."
+                  : `${visibleCustomers.length.toLocaleString()} of ${customers.length.toLocaleString()} visible`}
+              </span>
             </div>
             <div className="moduleFilterRow">
               <input
@@ -263,25 +329,128 @@ export default function OutstandingComparePage() {
                 placeholder={t("search")}
               />
             </div>
-            <div className="moduleChipList">
-              {filteredCustomers.map((customer) => {
-                const active = selectedCustomer?.customer_code === customer.customer_code;
-                return (
-                  <button
-                    key={customer.customer_code}
-                    type="button"
-                    className={active ? "moduleChip moduleChip--active" : "moduleChip"}
-                    onClick={() => void loadCompare(customer)}
-                  >
-                    <strong>{customer.customer_code}</strong>
-                    <span>{customer.customer_name || "—"}</span>
-                  </button>
-                );
-              })}
-              {!filteredCustomers.length && !loadingCustomers ? (
-                <div className="moduleHint">No matching customers.</div>
-              ) : null}
-            </div>
+            <ExportableTable filename="outstanding-compare-customers" sheetName="Customers" className="moduleTableWrap moduleBiTableWrap">
+              <table className="moduleTable moduleBiTable">
+                <thead>
+                  <tr>
+                    <BiExcelHead
+                      label={t("code")}
+                      filterKey="code"
+                      options={customerFilterOptions}
+                      filters={customerFilters}
+                      onChange={setCustomerFilter}
+                    />
+                    <BiExcelHead
+                      label={t("customer")}
+                      filterKey="name"
+                      options={customerFilterOptions}
+                      filters={customerFilters}
+                      onChange={setCustomerFilter}
+                    />
+                    <BiExcelHead
+                      label={t("days0To30")}
+                      filterKey="d0"
+                      options={customerFilterOptions}
+                      filters={customerFilters}
+                      onChange={setCustomerFilter}
+                    />
+                    <BiExcelHead
+                      label={t("days30To60")}
+                      filterKey="d30"
+                      options={customerFilterOptions}
+                      filters={customerFilters}
+                      onChange={setCustomerFilter}
+                    />
+                    <BiExcelHead
+                      label={t("days61To90")}
+                      filterKey="d61"
+                      options={customerFilterOptions}
+                      filters={customerFilters}
+                      onChange={setCustomerFilter}
+                    />
+                    <BiExcelHead
+                      label={t("daysAbove90")}
+                      filterKey="d90"
+                      options={customerFilterOptions}
+                      filters={customerFilters}
+                      onChange={setCustomerFilter}
+                    />
+                    <BiExcelHead
+                      label={t("totalOutstanding")}
+                      filterKey="total"
+                      options={customerFilterOptions}
+                      filters={customerFilters}
+                      onChange={setCustomerFilter}
+                      className="moduleBiTotalCol"
+                    />
+                    <th>{t("compare")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleCustomers.map((customer) => {
+                    const active = selectedCustomer?.customer_code === customer.customer_code;
+                    return (
+                      <tr key={customer.customer_code}>
+                        <td>
+                          {active ? <strong>{customer.customer_code || "—"}</strong> : (customer.customer_code || "—")}
+                        </td>
+                        <td>
+                          <Link
+                            href={settlementHref(customer.customer_code)}
+                            className="moduleInlineButton"
+                          >
+                            {customer.customer_name || "—"}
+                          </Link>
+                        </td>
+                        <td className={outstandingCellClass(customer.outstanding_0_30)}>
+                          {formatMoney(customer.outstanding_0_30)}
+                        </td>
+                        <td className={outstandingCellClass(customer.outstanding_30_60)}>
+                          {formatMoney(customer.outstanding_30_60)}
+                        </td>
+                        <td className={outstandingCellClass(customer.outstanding_61_90)}>
+                          {formatMoney(customer.outstanding_61_90)}
+                        </td>
+                        <td className={outstandingCellClass(customer.outstanding_above_90)}>
+                          {formatMoney(customer.outstanding_above_90)}
+                        </td>
+                        <td className={`moduleBiTotalCol ${outstandingCellClass(customer.outstanding_total)}`.trim()}>
+                          <strong>{formatMoney(customer.outstanding_total)}</strong>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="moduleInlineButton moduleActionButton"
+                            onClick={() => void loadCompare(customer)}
+                            disabled={loadingCompare && active}
+                          >
+                            {t("compare")}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!visibleCustomers.length && !loadingCustomers ? (
+                    <tr>
+                      <td colSpan={8}>{t("noCustomers")}</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+                <tfoot>
+                  <tr className="moduleBiTotalRow">
+                    <td colSpan={2}><strong>{t("total")}</strong></td>
+                    <td><strong>{formatMoney(customerFooter.d0)}</strong></td>
+                    <td><strong>{formatMoney(customerFooter.d30)}</strong></td>
+                    <td><strong>{formatMoney(customerFooter.d61)}</strong></td>
+                    <td><strong>{formatMoney(customerFooter.d90)}</strong></td>
+                    <td className="moduleBiTotalCol">
+                      <strong>{formatMoney(customerFooter.total)}</strong>
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </ExportableTable>
           </section>
 
           {loadingCompare ? <div className="moduleHint">{t("loading")}</div> : null}

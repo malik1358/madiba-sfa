@@ -329,7 +329,7 @@ function CustomerAuditPageContent() {
         if (avgDaysToPay != null) query.set("avgDaysToPay", String(avgDaysToPay));
 
         const response = await fetch(`/api/customer-order-block?${query.toString()}`, {
-          headers: { Authorization: `****** },
+          headers: { Authorization: "Bearer " + session.access_token },
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success) {
@@ -360,7 +360,7 @@ function CustomerAuditPageContent() {
       const response = await fetch("/api/customer-order-block", {
         method: "POST",
         headers: {
-          Authorization: `******
+          Authorization: "Bearer " + session.access_token,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

@@ -1331,7 +1331,7 @@ export default function NewOrderPage() {
         if (avgDaysToPay != null) query.set("avgDaysToPay", String(avgDaysToPay));
 
         const response = await fetch(`/api/customer-order-block?${query.toString()}`, {
-          headers: { Authorization: `****** },
+          headers: { Authorization: "Bearer " + session.access_token },
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.success) {

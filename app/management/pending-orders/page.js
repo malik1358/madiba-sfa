@@ -188,6 +188,18 @@ function pendingOrderCustomerKey(order) {
   ].join("|");
 }
 
+function firstCustomerRowFlags(orders) {
+  const seenCustomers = new Set();
+  const flags = new Map();
+  (orders || []).forEach((order) => {
+    const customerKey = pendingOrderCustomerKey(order);
+    const firstRow = !seenCustomers.has(customerKey);
+    if (firstRow) seenCustomers.add(customerKey);
+    flags.set(order.id, firstRow);
+  });
+  return flags;
+}
+
 const HEADING_FILTERS = [
   { key: "orderId", label: "Order Number" },
   { key: "customer", label: "Customer" },
@@ -1181,6 +1193,11 @@ export default function PendingOrdersPage() {
     [filteredOrderRows],
   );
 
+  const visibleOutstandingByOrderId = useMemo(
+    () => firstCustomerRowFlags(filteredOrders),
+    [filteredOrders],
+  );
+
   const filteredValueTotals = useMemo(() => {
     const seenCustomers = new Set();
     return filteredOrderRows.reduce((totals, { order }) => {
@@ -1440,12 +1457,10 @@ export default function PendingOrdersPage() {
         Sheets: {},
         SheetNames: [],
       };
-      const seenCustomers = new Set();
+      const exportOutstandingByOrderId = firstCustomerRowFlags(orders);
 
       const queueRows = orders.map((order) => {
-        const customerKey = pendingOrderCustomerKey(order);
-        const firstCustomerRow = !seenCustomers.has(customerKey);
-        seenCustomers.add(customerKey);
+        const firstCustomerRow = exportOutstandingByOrderId.get(order.id);
         return {
         "Order Number": formatSalesOrderNumber(order) || order.id,
         Customer: order.customer_name || order.customer_code || "-",
@@ -1720,8 +1735,16 @@ export default function PendingOrdersPage() {
                           <td>{age}</td>
                           <td style={{ textAlign: "right" }}>{formatMoneyInclVat(orderValueInclVat(order))}</td>
                           <td style={{ textAlign: "right" }}>{formatMoneyInclVat(invoiceMadeInclVat(meta))}</td>
-                          <td style={{ textAlign: "right" }}>{formatCurrentOutstanding(outstandingAmountByOrderId.get(order.id))}</td>
-                          <td style={{ textAlign: "right" }}>{formatCurrentOutstanding(outstandingOver60DaysByOrderId.get(order.id))}</td>
+                          <td style={{ textAlign: "right" }}>
+                            {visibleOutstandingByOrderId.get(order.id)
+                              ? formatCurrentOutstanding(outstandingAmountByOrderId.get(order.id))
+                              : "-"}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {visibleOutstandingByOrderId.get(order.id)
+                              ? formatCurrentOutstanding(outstandingOver60DaysByOrderId.get(order.id))
+                              : "-"}
+                          </td>
                           <td>
                             <div className="moduleActionRow" style={{ flexWrap: "wrap", gap: "6px" }}>
                               <button

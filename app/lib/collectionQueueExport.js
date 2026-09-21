@@ -34,6 +34,7 @@ function buildCustomerSummaryRow(row, section, priorityByCode) {
     "Avg Paying Days": row.avg_days_to_pay == null || row.avg_days_to_pay === ""
       ? ""
       : Number(row.avg_days_to_pay),
+    "Last Receipt Date": String(row.last_receipt_date || "").trim(),
     "0-30": roundAmount(row.outstanding_0_30),
     "31-60": roundAmount(row.outstanding_30_60),
     "61-90": roundAmount(row.outstanding_61_90),

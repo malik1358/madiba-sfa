@@ -96,6 +96,7 @@ const TEXT = {
   cashBucket: { en: "Cash", ar: "نقدي" },
   receivedLast10Days: { en: "Received (Last 10 Days)", ar: "المحصل (آخر 10 أيام)" },
   avgPayingDays: { en: "Avg Paying Days", ar: "متوسط أيام الدفع" },
+  lastReceiptDate: { en: "Last Receipt Date", ar: "تاريخ آخر إيصال" },
   bucket30: { en: "0-30", ar: "0-30" },
   bucket31to60: { en: "31-60", ar: "31-60" },
   bucket61to90: { en: "61-90", ar: "61-90" },
@@ -349,6 +350,7 @@ const TEXT = {
   filterOutcome: { en: "Filter outcome", ar: "تصفية النتيجة" },
   filterLastVisitRemark: { en: "Filter remark", ar: "تصفية الملاحظة" },
   filterLastUpdate: { en: "Filter last update", ar: "تصفية آخر تحديث" },
+  filterLastReceiptDate: { en: "Filter receipt date", ar: "تصفية تاريخ الإيصال" },
   invDate: { en: "Date", ar: "التاريخ" },
   invRef: { en: "Ref", ar: "المرجع" },
   invPending: { en: "Pending", ar: "المعلق" },
@@ -393,6 +395,7 @@ const EMPTY_CREDIT_COLUMN_FILTERS = {
   cash: "",
   receivedLast10Days: "",
   avgPayingDays: "",
+  lastReceiptDate: "",
   bucket30: "",
   bucket31to60: "",
   bucket61to90: "",
@@ -771,6 +774,7 @@ function rowMatchesCreditColumnFilters(row, filters, t) {
   if (!matchesNumericFilter(row?.outstanding_cash, filters.cash)) return false;
   if (!matchesNumericFilter(row?.received_last_10_days, filters.receivedLast10Days)) return false;
   if (!matchesNumericFilter(row?.avg_days_to_pay, filters.avgPayingDays)) return false;
+  if (!includesTextFilter(row?.last_receipt_date, filters.lastReceiptDate)) return false;
   if (!matchesNumericFilter(row?.outstanding_0_30, filters.bucket30)) return false;
   if (!matchesNumericFilter(row?.outstanding_30_60, filters.bucket31to60)) return false;
   if (!matchesNumericFilter(row?.outstanding_61_90, filters.bucket61to90)) return false;
@@ -2610,6 +2614,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                     <th>{t("cashBucket")}</th>
                     <th>{t("receivedLast10Days")}</th>
                     <th>{t("avgPayingDays")}</th>
+                    <th>{t("lastReceiptDate")}</th>
                     <th>{t("bucket30")}</th>
                     <th>{t("bucket31to60")}</th>
                     <th>{t("bucket61to90")}</th>
@@ -2725,6 +2730,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
                         onChange={(event) => setCreditColumnFilters((current) => ({
                           ...current,
                           avgPayingDays: event.target.value,
+                        }))}
+                      />
+                    </th>
+                    <th>
+                      <input
+                        className="moduleInput moduleCollectorColumnFilter"
+                        type="text"
+                        value={creditColumnFilters.lastReceiptDate}
+                        placeholder={t("filterLastReceiptDate")}
+                        onChange={(event) => setCreditColumnFilters((current) => ({
+                          ...current,
+                          lastReceiptDate: event.target.value,
                         }))}
                       />
                     </th>
@@ -2847,7 +2864,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                     if (item.type === "separator") {
                       return (
                         <tr key="not-due-separator" className="moduleCollectorSectionRow">
-                          <td colSpan={20}>
+                          <td colSpan={21}>
                             <strong>{t("notDueQueue")}</strong>
                             <div className="moduleHint">{t("notDueHint")}</div>
                           </td>
@@ -2883,6 +2900,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
                             {row.avg_days_to_pay == null || row.avg_days_to_pay === ""
                               ? "—"
                               : Number(row.avg_days_to_pay).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                          </td>
+                          <td data-label={t("lastReceiptDate")}>
+                            {row.last_receipt_date ? formatDateOnly(row.last_receipt_date) || row.last_receipt_date : "—"}
                           </td>
                           <td data-label={t("bucket30")}>{formatMoney(row.outstanding_0_30)}</td>
                           <td data-label={t("bucket31to60")}>{formatMoney(row.outstanding_30_60)}</td>
@@ -2941,7 +2961,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                         </tr>
                         {isOpen ? (
                           <tr id={`collector-detail-${key}`} className="moduleCollectorDetailRow">
-                            <td colSpan={20}>
+                            <td colSpan={21}>
                               {view === "legal" ? (
                                 <div className="moduleInlineStack moduleActionStack" style={{ marginBottom: "12px" }}>
                                   <button

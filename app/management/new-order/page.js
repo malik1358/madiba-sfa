@@ -1662,6 +1662,9 @@ export default function NewOrderPage() {
               {Number(analytics.paymentBehavior.outstandingOverdueCount || 0) > 0
                 ? ` · ${analytics.paymentBehavior.outstandingOverdueCount} overdue`
                 : ""}
+              {Number(analytics.receiptAmountLast10Days || 0) > 0
+                ? ` · receipts last 10d ${Number(analytics.receiptAmountLast10Days).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+                : ""}
             </div>
           ) : null}
 

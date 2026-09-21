@@ -7,6 +7,31 @@ import {
 } from '../../../lib/paymentBehavior.js';
 import { monthKey, parseDateValue, salesUnitQty } from './format';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function sumReceiptAmountInLastDays(receipts = [], { todayIso, days = 10 } = {}) {
+  const windowDays = Math.max(1, Number(days) || 10);
+  const todayDate = parseDateValue(todayIso) || new Date();
+  const todayStartMs = Date.UTC(
+    todayDate.getUTCFullYear(),
+    todayDate.getUTCMonth(),
+    todayDate.getUTCDate(),
+  );
+  const cutoffMs = todayStartMs - ((windowDays - 1) * DAY_MS);
+
+  return (Array.isArray(receipts) ? receipts : []).reduce((total, row) => {
+    const parsedDate = parseDateValue(row?.receipt_date);
+    if (!parsedDate) return total;
+    const receiptDayMs = Date.UTC(
+      parsedDate.getUTCFullYear(),
+      parsedDate.getUTCMonth(),
+      parsedDate.getUTCDate(),
+    );
+    if (receiptDayMs < cutoffMs || receiptDayMs > todayStartMs) return total;
+    return total + Number(row?.amount || 0);
+  }, 0);
+}
+
 export function buildAnalytics(transactions, {
   currentMonthKey,
   receipts = [],
@@ -52,6 +77,7 @@ export function buildAnalytics(transactions, {
     .map(([month]) => month);
 
   const receiptList = Array.isArray(receipts) ? receipts : [];
+  const receiptAmountLast10Days = sumReceiptAmountInLastDays(receiptList, { todayIso, days: 10 });
   const receiptMonths = [];
   const receiptMonthSeen = new Set();
   receiptList.forEach((row) => {
@@ -268,6 +294,7 @@ export function buildAnalytics(transactions, {
     salesTotal: lifetimeSalesTotal,
     receiptTotal: lifetimeReceiptTotal,
     transactionCount: transactions.length,
+    receiptAmountLast10Days,
     paymentBehavior: paymentBehavior || emptyPaymentBehavior(),
     paymentSettlement: paymentSettlement || null,
   };

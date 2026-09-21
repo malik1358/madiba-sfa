@@ -18,6 +18,16 @@ Development will continue with Cursor agents and GitHub Copilot in the same repo
 
 Do not assume the other tool will update the handover. Leaving docs stale breaks the next agent on either side.
 
+## Mandatory rule
+
+**After any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the relevant documentation before finishing the task.**
+
+This is required, not optional. Apply it for Cursor and Copilot:
+
+- Update the matching file under `docs/` (`BUSINESS_RULES.md`, `DATABASE.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`, and/or `PROJECT_OVERVIEW.md`).
+- Add a short dated note under “Recent agent notes” in `docs/CHANGELOG_AI.md`.
+- Do not mark the task complete while those docs are still stale relative to the code you just changed.
+
 ## How to work
 
 1. Read the handover docs first, then the existing implementation and its tests before editing.
@@ -28,7 +38,7 @@ Do not assume the other tool will update the handover. Leaving docs stale breaks
 6. After code changes, run the related `node --test tests/<file>.test.mjs` files and `npm run build` when the change can affect the Next.js build.
 7. If the database must change, add a migration and say so in the summary. Applying SQL in Supabase is a separate production step.
 8. Never print or commit secrets. `.env*` is gitignored except `.env.example`.
-9. When a business rule or architecture decision changes, update `docs/` and `docs/CHANGELOG_AI.md` so Cursor and Copilot both stay aligned.
+9. Follow the **Mandatory rule** above: when a business rule, database structure, report, auth, GPS/attendance, or architecture decision changes, update the relevant docs and `docs/CHANGELOG_AI.md` before finishing.
 
 ## Repository map
 

@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-21** — Mandatory rule in `AGENTS.md`: after any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the relevant documentation before finishing the task.
 - **2026-09-21** — Dual-agent rule: Cursor and Copilot must both read the handover files at task start and update them when behavior, schema, roles, reporting, or deployment changes. Stale docs are treated as a defect for the next agent.
 
 ## How the system was shaped

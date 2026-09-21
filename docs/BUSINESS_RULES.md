@@ -51,6 +51,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Time-to-make clock runs for `Pending for invoice creation` and stops when status leaves that queue. Show the live duration; do not freeze it at submit time.
 - Order PDFs must show a mandatory `Order No.` label (`app/lib/salesOrderNumber.js`). Placeholder numbers are not acceptable on the PDF.
 - Cash-discount breakdown is printed on pending-order PDFs. Do not drop it when editing the PDF builder.
+- Pending Orders shows both `Current outstanding` and `Outstanding >60 days` from the uploaded outstanding dataset for the customer. The >60 value is the sum of buckets `61-90`, `91-120`, and `>120`.
 - Orders created before the KSA day `2026-09-01` with no uploaded invoice are legacy and should be closed as `Rejected by management` / `Pre-September 2026 — invoice not uploaded`. Missing-invoice chase starts at `MISSING_INVOICE_CREATED_FROM = 2026-09-01`, after a 60-minute grace, and not more often than every 12 minutes.
 - Credit approval (`app/lib/creditApproval.js`): cash orders skip it. Otherwise approval is required when outstanding over 60 days is greater than zero (buckets `61-90`, `91-120`, `>120`), or when order value plus total outstanding is over 10,000 and the credit application is missing or expired. Expired means expiry date is before today, or issue date plus one year is before today.
 - Quantity caps live in `order_quantity_controls` (week window in Riyadh, customer scope). Defaults are in `DEFAULT_ORDER_QUANTITY_CONTROLS`. Enforcement is `assertOrderQuantityControls`.

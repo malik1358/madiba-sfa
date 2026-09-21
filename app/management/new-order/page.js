@@ -57,6 +57,7 @@ import { createOrderPdfDocument, formatHistoryChange, preloadOrderPdfLibrary, re
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 import { isExcludedNewOrderCustomer } from "../../lib/buildingMaterialCustomerFilter";
+import { buildSettlementCustomerHistoryUrl } from "../../lib/customerHistoryApi";
 import { processOfflineQueue } from "../../lib/offlineApi";
 import { isQueuedPendingOrderId } from "../../lib/queuedSalesOrders";
 import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
@@ -1524,7 +1525,12 @@ export default function NewOrderPage() {
         async function loadHistory(refresh = false) {
           // fullHistory: avg days / FIFO must use day-1 sales, not the 6-month BI window.
           const response = await fetch(
-            `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}&customerName=${encodeURIComponent(selectedCustomer.customer_name || "")}&fullHistory=1&scope=settlement${refresh ? "&refresh=1" : ""}`,
+            buildSettlementCustomerHistoryUrl(
+              CUSTOMER_HISTORY_API,
+              selectedCustomer.customer_code,
+              selectedCustomer.customer_name || "",
+              { refresh },
+            ),
             {
               headers: {
                 Authorization: `Bearer ${accessToken}`,

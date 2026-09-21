@@ -8,8 +8,8 @@ export function buildCustomerHistoryApiUrl(
     customerCode: String(customerCode || "").trim(),
   });
 
-  const nameValue = String(customerName || "");
-  if (nameValue.trim()) {
+  const nameValue = String(customerName || "").trim();
+  if (nameValue) {
     params.set("customerName", nameValue);
   }
 

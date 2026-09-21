@@ -388,16 +388,28 @@ export function parseOutstandingSheetDate(value) {
 
   const dmyMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
   if (dmyMatch) {
-    const day = Number(dmyMatch[1]);
-    const month = Number(dmyMatch[2]);
+    const left = Number(dmyMatch[1]);
+    const right = Number(dmyMatch[2]);
     let year = Number(dmyMatch[3]);
     if (year < 100) year += 2000;
-    const parsed = utcDateString(year, month, day);
+    // Disambiguate US MDY (9/20/2026) vs DMY (20/9/2026) when one side is > 12.
+    if (right > 12 && left >= 1 && left <= 12) {
+      const parsed = utcDateString(year, left, right);
+      if (parsed) return parsed;
+    }
+    if (left > 12 && right >= 1 && right <= 12) {
+      const parsed = utcDateString(year, right, left);
+      if (parsed) return parsed;
+    }
+    const parsed = utcDateString(year, right, left);
     if (parsed) return parsed;
   }
 
   const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  if (!Number.isNaN(parsed.getTime())) {
+    return utcDateString(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate())
+      || parsed.toISOString().slice(0, 10);
+  }
   return "";
 }
 

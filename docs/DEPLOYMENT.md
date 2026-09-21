@@ -61,7 +61,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `SALESMAN_VISIT_PLAN_EMAIL_ENABLED` | Default false |
 | `SALESMAN_VISIT_PLAN_EMAIL_SEND_TO_USERS` | Default false |
 | `SALESMAN_VISIT_PLAN_EMAIL_TO` | Admin digest |
-| `MIN_ANDROID_APK_VERSION_CODE` | `0` disables the block |
+| `MIN_ANDROID_APK_VERSION_CODE` | Env-side minimum APK code; effective minimum uses the higher value between env and Supabase setting |
 | `MIN_ANDROID_APK_VERSION_NAME` | Display name for the block |
 | `ANDROID_APK_DOWNLOAD_URL` | Where the update prompt sends the user |
 | `CAPACITOR_SERVER_URL` | Optional. Android shell target. Default is production Vercel |
@@ -118,7 +118,7 @@ Short version:
 - Play internal testing is the field rollout path (`.github/workflows/play-store-internal.yml`).
 - Debug/release APK: `.github/workflows/android-apk.yml` or `npm run cap:build:apk` (PowerShell script).
 - `npm run cap:sync` / `cap:open:android` need Android Studio.
-- Minimum version is enforced at login via env and `system_settings.android_apk_min_version_v1`.
+- Minimum version is enforced at login via env and `system_settings.android_apk_min_version_v1`; app logic uses the higher/more restrictive version code between the two sources (`app/lib/androidAppVersionPolicy.js`).
 - Phones need Location → All the time, notifications, and Battery → Unrestricted before login/morning attendance.
 - Native idle GPS: every 5 minutes while running; save idle ping after 15 minutes without visit/order/collection. Inactivity lock-screen alert at 45 minutes, repeats every 15 minutes. Pauses during lunch.
 - Preserve this behavior unless the task explicitly changes Android/Capacitor.

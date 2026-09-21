@@ -21,6 +21,7 @@ They are written from the application source, Supabase migrations, `/sql`, workf
 
 ## Recent agent notes
 
+- **2026-09-21** — Documentation-only corrections: documented APK minimum resolution as the higher/more restrictive value between env and Supabase settings (`androidAppVersionPolicy.js`), documented persisted per-user native tracking timestamps in `nativeFieldTracking.js`, updated `ANDROID_APK.md` Node requirement to 22+, refreshed stale notes in `COLLECTOR_SCREEN_SETUP.md`, and added explicit warnings in `AGENTS.md` + `.github/copilot-instructions.md` about `/sql` drift, stale legacy markdown, service-role route auth checks, and outstanding-dataset-vs-table collection source behavior.
 - **2026-09-21** — Canonical handover package committed as `docs: add AI agent project handover` on the current feature branch.
 - **2026-09-21** — Documented workday thresholds, KPI day-share pace, new vs repeat customers, team consolidation, business-dashboard severity, and native field-tracking cadence from source. Corrected `ANDROID_APK.md` to Node.js 22+. Flagged missing `MostVisitedPages.jsx` in `COLLECTOR_SCREEN_SETUP.md` instead of inventing a replacement. No application code changes.
 - **2026-09-21** — Expanded handover: mandatory agent rules list, `moduleAccess` matrix, major API inventory, and Android/Capacitor sections. Docs refreshed for dual Cursor + Copilot use; no application code changes.

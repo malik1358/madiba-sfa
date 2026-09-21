@@ -24,8 +24,12 @@ After any important change to business logic, database structure, reports, authe
 
 - `collector` is supported in `app/lib/moduleAccess.js`, but the baseline `profiles_role_check` migration does not allow that role. Confirm `sql/fix_profiles_role_check_collector.sql` was applied before writing collector rows.
 - Do not invent Supabase tables, columns, or functions. Docs and the live database can drift.
+- Do not assume `supabase/migrations/` alone is the full production schema. Always inspect relevant `/sql` scripts for manual setup/fix steps.
+- Do not assume legacy markdown outside `docs/` is current. Files like old setup notes can be stale; verify against code and `docs/`.
 - `package.json` requires Node `>=22`. There is no `npm test` or `npm run lint`. Use `node --test`.
 - Cron behavior is split across Vercel (`vercel.json`), GitHub Actions, and Supabase `pg_cron`.
+- Do not rely on RLS alone when reviewing API security. Service-role routes bypass RLS and require explicit route-level authorization/scope checks.
+- Do not assume collections always read from tables. Collection queues can come from uploaded outstanding dataset JSON (`system_settings`) with table fallback.
 - Before changing access, activity, KPIs, or Android tracking, read `moduleAccess.js`, `workdayActivity.js`, both `performanceKpis*.js` files, and `nativeFieldTracking.js`.
 - Preserve staging/production separation. Prefer incremental changes over rewrites.
 

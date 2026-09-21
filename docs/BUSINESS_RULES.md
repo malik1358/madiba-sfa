@@ -164,6 +164,7 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 
 - Customer GPS updates record `gps_updated_at`, actor, and source: `customer_master`, `visit`, or `excel_import`.
 - History rows go to `customer_gps_history` with the previous coordinates.
+- Native Android tracking stores per-user state in Capacitor Preferences (`madiba.nativeTracking.<userId>.*`), including last activity/ping/inactivity-alert timestamps. This persisted state affects idle-ping and alert behavior after app resume/restart.
 - Outstanding Without GPS lists customers who have an outstanding balance and no saved coordinates. The daily email goes to each salesman, with hierarchy bosses on CC, at 00:25 KSA, skipping the Friday holiday the same way as other salesman emails.
 - GPS pings are rejected when the KSA workday is already ended.
 

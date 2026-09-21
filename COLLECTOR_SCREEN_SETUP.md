@@ -1,5 +1,7 @@
 # Salesman Collector Screen Implementation
 
+> ⚠️ Legacy note: this file is historical context and may drift. Canonical agent guidance lives in `AGENTS.md`, `.github/copilot-instructions.md`, and `docs/*.md`.
+
 ## Overview
 Added a dedicated collector screen for salesmen that displays only their assigned customers, allowing them to track collections and manage payment status.
 
@@ -26,9 +28,9 @@ Added a dedicated collector screen for salesmen that displays only their assigne
      - Salesmen see "My Customer Collections" link
      - Admins/Managers see "Payment Collections" link (view all customers)
 
-### 4. **Updated Navigation** - `/app/components/MostVisitedPages.jsx`
-   - Added "/management/my-collections" to page labels
-   - Tracks visits to the salesman collector screen for quick access
+### 4. **Legacy note on navigation**
+   - A previous note referenced `/app/components/MostVisitedPages.jsx`.
+   - That file is not present in the current codebase; treat this as stale historical context.
 
 ## Database Tables Required
 
@@ -46,7 +48,7 @@ The implementation expects the following Supabase tables:
 
 ### `invoices`
 ```sql
-- id (UUID)
+- id (BIGINT identity in current migrations)
 - customer_code (TEXT)
 - invoice_number (TEXT)
 - due_date (DATE)
@@ -56,7 +58,7 @@ The implementation expects the following Supabase tables:
 
 ### `collection_visits`
 ```sql
-- id (UUID)
+- id (BIGINT identity in current migrations)
 - customer_code (TEXT)
 - visit_outcome (TEXT) -- e.g., FUNDS_RECEIVED, ASKED_COME_LATER, etc.
 - payment_status (TEXT) -- PAID, PARTIAL, NOT_PAID, PROMISED
@@ -68,8 +70,9 @@ The implementation expects the following Supabase tables:
 - non_payment_reason (TEXT)
 - payment_copy_url (TEXT)
 - receipt_copy_url (TEXT)
-- created_by (UUID)
+- created_by (UUID - auth user id)
 - saved_at (TIMESTAMP)
+-- Later schema adds additional fields (for example GPS and summary/priority metadata)
 ```
 
 ### `legal_transfers`
@@ -123,3 +126,5 @@ The implementation expects the following Supabase tables:
 - All payment copy and receipt files are stored in Supabase storage
 - Collection visits are timestamped and tracked by user
 - Admin users can override and see all collections from management dashboard
+- Current module access in `app/lib/moduleAccess.js` enables `paymentCollections` for salesmen; `myCollections` module key is intentionally `false`, while `/management/my-collections` remains a legacy-compatible path.
+- Current collection queue behavior can read from uploaded outstanding dataset JSON (`system_settings.outstanding_customerwise_dataset_v1`) with table fallback, not only from `public.invoices`.

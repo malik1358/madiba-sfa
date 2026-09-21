@@ -78,7 +78,7 @@ Without `google-services.json` and `FIREBASE_SERVICE_ACCOUNT_JSON`, background G
 
 ## What you need on your PC (only if building locally)
 
-1. **Node.js 20+** (already used for this repo)
+1. **Node.js 22+** (matches this repo’s `package.json` engines and CI)
 2. **Android Studio** â€” https://developer.android.com/studio
    - During setup, install **Android SDK**, **SDK Platform Tools**, and **Android SDK Build-Tools**
 3. **Java 17** â€” usually bundled with Android Studio

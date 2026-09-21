@@ -236,7 +236,8 @@ Source: `capacitor.config.js`, `app/lib/nativeFieldTracking.js`, `android/`, `AN
 - Tracking timer is every 5 minutes (`CHECK_INTERVAL_MS`). An idle GPS ping is saved only after 15 minutes without visit/order/collection activity (`BACKGROUND_GPS_IDLE_MS` in `workdayActivity.js`), not on a fixed 15-minute clock. Pings go to `POST /api/gps-ping` as `daily_activity_logs.entry_type = GPS_PING`.
 - Tracking stops on lunch and after end of day (`stopNativeFieldTracking` stops the foreground service).
 - Local notification channel `madiba-push-alerts` is separate from the foreground channel.
-- Minimum APK: env `MIN_ANDROID_APK_VERSION_CODE` and `system_settings.android_apk_min_version_v1`.
+- Minimum APK is resolved with `resolveAndroidApkMinVersionConfig` in `app/lib/androidAppVersionPolicy.js`: the effective minimum version code is the **higher (more restrictive)** value between env (`MIN_ANDROID_APK_VERSION_CODE`) and `system_settings.android_apk_min_version_v1`.
+- Native tracking persists per-user state in Capacitor Preferences (`madiba.nativeTracking.<userId>.*`), including last activity, last GPS ping, and last inactivity-alert timestamps. This affects catch-up behavior after app resume and process restarts.
 - Battery unrestricted is required before login (`app/lib/androidBatteryOptimization.js`).
 
 Do not change Capacitor app id, tracking intervals, or battery/login gates unless the task explicitly asks for it.

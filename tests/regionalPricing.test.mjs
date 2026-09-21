@@ -8,10 +8,12 @@ import {
   formatPdfDiscountDetail,
   formatDiscountPercent,
   getPricedOrderLine,
+  isVatExemptProduct,
   lookupDiscountRate,
   parseDiscountRate,
   pricingRegionsFromMetadata,
   resolveOrderPricingRegion,
+  vatRateForProduct,
   summarizePricedLines,
 } from "../app/lib/regionalPricing.js";
 
@@ -188,4 +190,12 @@ test("multi-region salesmen can pick an assigned order region", () => {
     }),
     "riyadh"
   );
+});
+
+test("vinyl glove SKUs are VAT-exempt even when sales name omits Gloves", () => {
+  assert.equal(isVatExemptProduct({ item_name: "Gloves, clear vinyl, XL - A003949" }), true);
+  assert.equal(isVatExemptProduct({ item_name: "A003949_MADIBA VINYL Do Not Use", item_code: "A003949" }), true);
+  assert.equal(isVatExemptProduct({ item_name: "A003948_MADIBA VINYL GLOVES SIZE Do Not Use" }), true);
+  assert.equal(vatRateForProduct({ item_name: "A003949_MADIBA VINYL Do Not Use" }), 0);
+  assert.equal(vatRateForProduct({ item_name: "Paper A4", category: "Stationery" }), 0.15);
 });

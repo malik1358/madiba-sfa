@@ -26,7 +26,8 @@ export function buildCustomerHistoryApiUrl(
     params.set("refresh", "1");
   }
 
-  return `${baseUrl}?${params.toString()}`;
+  const query = params.toString();
+  return query ? `${baseUrl}?${query}` : baseUrl;
 }
 
 export function buildSettlementCustomerHistoryUrl(

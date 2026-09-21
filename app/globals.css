@@ -5456,9 +5456,9 @@ th:has(.moduleTableColumnFilterInput) {
   }
 }
 
-/* The queue has 18 columns, so let it scroll instead of crushing cells to nothing. */
+/* Wide credit queue — allow horizontal scroll instead of crushing cells. */
 .moduleCollectorTable {
-  min-width: 1320px;
+  min-width: 1480px;
 }
 
 .moduleCollectorTableWrap .moduleTable th {
@@ -5470,7 +5470,9 @@ th:has(.moduleTableColumnFilterInput) {
   position: sticky;
   top: 0;
   z-index: 6;
-  background: #edf4f5;
+  background: #0f4c5c;
+  color: #ffffff;
+  box-shadow: inset 0 -1px 0 #0b3c49;
 }
 
 .moduleCollectorTableWrap > .moduleCollectorTable > thead > tr.moduleCollectorFilterRow > th {
@@ -5480,6 +5482,11 @@ th:has(.moduleTableColumnFilterInput) {
   padding-top: 4px;
   padding-bottom: 8px;
   vertical-align: top;
+  background: #edf4f5;
+  color: #18333a;
+  box-shadow: none;
+  font-weight: 600;
+  text-transform: none;
 }
 
 .moduleCollectorColumnFilter {

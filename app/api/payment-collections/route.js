@@ -8,6 +8,7 @@ import {
   findLegalTransferForCustomer,
   redactCollectionVisitScheduleForViewer,
 } from "../../lib/paymentCollections.js";
+import { enrichCollectionRecordsWithAvgDays } from "../../lib/collectionAvgDays.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireGpsAccessGate, shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
@@ -869,7 +870,13 @@ export async function GET(request) {
 
     const scope = await getSalesScope(admin, user.id);
     const records = await fetchOutstandingAndCollectionRecords(admin, scope);
-    const queues = buildCollectionQueues(records);
+    let enrichedRecords = records;
+    try {
+      enrichedRecords = await enrichCollectionRecordsWithAvgDays(admin, records);
+    } catch (enrichError) {
+      console.error("Unable to enrich collection avg paying days:", enrichError);
+    }
+    const queues = buildCollectionQueues(enrichedRecords);
 
     return Response.json({
       success: true,

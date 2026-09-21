@@ -5,7 +5,7 @@ export function buildCustomerHistoryApiUrl(
   { fullHistory = false, scope = "", refresh = false } = {},
 ) {
   const params = new URLSearchParams({
-    customerCode: String(customerCode || ""),
+    customerCode: String(customerCode || "").trim(),
   });
 
   const nameValue = String(customerName || "");

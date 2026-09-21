@@ -13,6 +13,6 @@ test("buildSettlementCustomerHistoryUrl keeps New Order on full settlement histo
 
   assert.equal(
     url,
-    "/api/customer-history?customerCode=+C001+&customerName=Madiba+Medical&fullHistory=1&scope=settlement&refresh=1",
+    "/api/customer-history?customerCode=C001&customerName=Madiba+Medical&fullHistory=1&scope=settlement&refresh=1",
   );
 });

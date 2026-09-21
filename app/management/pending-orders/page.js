@@ -139,24 +139,23 @@ function formatCurrentOutstanding(value) {
   return number.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
-function orderCurrentOutstanding(order, outstandingDataset) {
+function outstandingRowForOrder(order, outstandingDataset) {
   if (!outstandingDataset) return null;
-  const row = findOutstandingForCustomer(
+  return findOutstandingForCustomer(
     outstandingDataset,
     order?.customer_code,
     order?.customer_name,
   );
-  return row ? Number(row.total_outstanding || 0) : 0;
+}
+
+function orderCurrentOutstanding(order, outstandingDataset) {
+  const row = outstandingRowForOrder(order, outstandingDataset);
+  return row ? Number(row.total_outstanding || 0) : row === null && !outstandingDataset ? null : 0;
 }
 
 function orderOutstandingOver60Days(order, outstandingDataset) {
-  if (!outstandingDataset) return null;
-  const row = findOutstandingForCustomer(
-    outstandingDataset,
-    order?.customer_code,
-    order?.customer_name,
-  );
-  return row ? outstandingAmountOverSixtyDays(row) : 0;
+  const row = outstandingRowForOrder(order, outstandingDataset);
+  return row ? outstandingAmountOverSixtyDays(row) : row === null && !outstandingDataset ? null : 0;
 }
 
 function pendingOrderFilterValues(order, meta, approvalRequired = null, outstandingAmount = null, outstandingOver60DaysAmount = null) {
@@ -1457,9 +1456,9 @@ export default function PendingOrdersPage() {
         Sheets: {},
         SheetNames: [],
       };
-      const exportOutstandingByOrderId = firstCustomerRowFlags(orders);
+      const exportOutstandingByOrderId = firstCustomerRowFlags(filteredOrders);
 
-      const queueRows = orders.map((order) => {
+      const queueRows = filteredOrders.map((order) => {
         const firstCustomerRow = exportOutstandingByOrderId.get(order.id);
         return {
         "Order Number": formatSalesOrderNumber(order) || order.id,

@@ -22,6 +22,7 @@ import {
   buildEffectivePriceList,
   formatDiscountDetail,
   formatDiscountPercent,
+  formatOrderVatLabel,
   allowedOrderPricingRegions,
   formatMoneyAmount,
   getPricedOrderLine,
@@ -76,7 +77,7 @@ function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-function OrderTotalsPanel({ totals, actions, remark }) {
+function OrderTotalsPanel({ totals, actions, remark, language = "en" }) {
   const cashLabel = totals.cashDiscountTotal > 0
     ? formatMoneyAmount(totals.cashDiscountTotal)
     : "None";
@@ -86,6 +87,7 @@ function OrderTotalsPanel({ totals, actions, remark }) {
   const schemeLabel = totals.schemeDiscountTotal > 0
     ? formatMoneyAmount(totals.schemeDiscountTotal)
     : "None";
+  const vatLabel = formatOrderVatLabel(totals, { language });
 
   return (
     <>
@@ -111,7 +113,7 @@ function OrderTotalsPanel({ totals, actions, remark }) {
           <strong>{formatMoneyAmount(totals.amountExclVat)}</strong>
         </div>
         <div>
-          <span>VAT 15%</span>
+          <span>{vatLabel}</span>
           <strong>{formatMoneyAmount(totals.vatAmount)}</strong>
         </div>
         <div className="moduleOrderTotalsIncl">
@@ -973,6 +975,9 @@ export default function NewOrderPage() {
         schemeUnitDiscount: scheme.unitDiscount,
         schemeDiscountedQty: scheme.discountedQty,
         excludeCashDiscount: scheme.excludeCashDiscount === true,
+        item_code: item.item_code,
+        item_name: item.item_name,
+        category: item.category,
       });
       return {
         ...priced,
@@ -1967,6 +1972,9 @@ export default function NewOrderPage() {
                                 schemeUnitDiscount: scheme.unitDiscount,
                                 schemeDiscountedQty: scheme.discountedQty,
                                 excludeCashDiscount: scheme.excludeCashDiscount === true,
+                                item_code: item.item_code,
+                                item_name: item.item_name,
+                                category: item.category,
                               });
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
@@ -2037,6 +2045,7 @@ export default function NewOrderPage() {
               />
               <OrderTotalsPanel
                 totals={orderTotals}
+                language={language}
                 actions={(
                   <div className="moduleOrderBar">
                     <div>
@@ -2115,7 +2124,7 @@ export default function NewOrderPage() {
                   </div>
                 </div>
 
-                {lastSavedOrder.totals ? <OrderTotalsPanel totals={lastSavedOrder.totals} /> : null}
+                {lastSavedOrder.totals ? <OrderTotalsPanel totals={lastSavedOrder.totals} language={language} /> : null}
 
                 {lastSavedOrder.creditApprovalRemark ? (
                   <div
@@ -2142,7 +2151,7 @@ export default function NewOrderPage() {
                         <th>Value Discount</th>
                         <th>Scheme</th>
                         <th>Without VAT</th>
-                        <th>VAT 15%</th>
+                        <th>{formatOrderVatLabel(lastSavedOrder.totals || {}, { language })}</th>
                         <th>After VAT</th>
                       </tr>
                     </thead>

@@ -73,6 +73,49 @@ test("mapSavedOrderLinesToPdfLines keeps stored totals when catalog does not mat
   assert.equal(line.lineTotalInclVat, 1656);
 });
 
+test("mapSavedOrderLinesToPdfLines applies zero VAT to vinyl gloves", () => {
+  const lines = mapSavedOrderLinesToPdfLines([
+    {
+      item_code: "A006298",
+      item_name: "MADIBA VINYL GLOVES SIZE MEDIUM TRANSPARENT CLEAR",
+      quantity: 100,
+      rate: 48,
+      line_value: 4800,
+    },
+    {
+      item_code: "A006300",
+      item_name: "MADIBA VINYL GLOVES SIZE XL TRANSPARENT CLEAR",
+      quantity: 50,
+      rate: 54,
+      line_value: 2700,
+    },
+  ]);
+  assert.equal(lines[0].vatAmount, 0);
+  assert.equal(lines[0].lineTotalInclVat, 4800);
+  assert.equal(lines[1].vatAmount, 0);
+  assert.equal(lines[1].lineTotalInclVat, 2700);
+
+  const snapshot = buildOrderPdfSnapshotFromSavedOrder({
+    order: { id: 454, status: "SUBMITTED", customer_code: "1001", customer_name: "Gloves Co" },
+    lines: [
+      {
+        item_code: "A006298",
+        item_name: "MADIBA VINYL GLOVES SIZE MEDIUM TRANSPARENT CLEAR",
+        quantity: 100,
+        rate: 48,
+        line_value: 4800,
+      },
+    ],
+  });
+  assert.equal(snapshot.totals.vatAmount, 0);
+  assert.equal(snapshot.totals.amountInclVat, 4800);
+
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, snapshot);
+  assert.ok(doc.texts.includes("VAT 0%"));
+  assert.equal(doc.texts.includes("VAT 15%"), false);
+});
+
 test("mapSavedOrderLinesToPdfLines applies the A005425 mix scheme to alias paper codes", () => {
   const [line] = mapSavedOrderLinesToPdfLines(
     [

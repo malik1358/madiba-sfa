@@ -1,6 +1,7 @@
 import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
 import { formatSalesOrderNumber } from "./salesOrderNumber.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
+import { formatOrderVatLabel, VAT_RATE } from "./regionalPricing.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -8,6 +9,18 @@ function formatMoney(value) {
 
 export function buildOrderWhatsappSummary(snapshot, language = "en", options = {}) {
   const isAr = language === "ar";
+  const totals = snapshot.totals || {};
+  const subtotal = Number(totals.amountExclVat || snapshot.grandTotal || 0);
+  const vatAmount = Number.isFinite(Number(totals.vatAmount))
+    ? Number(totals.vatAmount)
+    : subtotal * VAT_RATE;
+  const totalWithVat = Number.isFinite(Number(totals.amountInclVat))
+    ? Number(totals.amountInclVat)
+    : subtotal + vatAmount;
+  const vatLabel = formatOrderVatLabel(
+    Number.isFinite(Number(totals.vatAmount)) ? totals : { amountExclVat: subtotal, vatAmount },
+    { language }
+  );
   const labels = {
     title: isAr ? "طلب مبيعات" : "Sales order",
     orderId: isAr ? "رقم الطلب" : "Order #",
@@ -23,16 +36,12 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     valueDiscount: isAr ? "خصم القيمة" : "Value discount",
     schemeDiscount: isAr ? "خصم العرض" : "Scheme discount",
     subtotal: isAr ? "المبلغ بدون ضريبة" : "Amount without VAT",
-    vat: isAr ? "ضريبة 15%" : "VAT 15%",
+    vat: vatLabel,
     totalInclVat: isAr ? "المبلغ بعد الضريبة" : "Amount after VAT",
     pdfAttached: isAr ? "ملف PDF مرفق." : "PDF attached.",
     avgDaysToPay: isAr ? "متوسط أيام الدفع" : "Avg days to pay",
   };
 
-  const totals = snapshot.totals || {};
-  const subtotal = Number(totals.amountExclVat || snapshot.grandTotal || 0);
-  const vatAmount = Number(totals.vatAmount || subtotal * 0.15);
-  const totalWithVat = Number(totals.amountInclVat || subtotal + vatAmount);
   const cashDiscount = Number(totals.cashDiscountTotal || 0);
   const valueDiscount = Number(totals.valueDiscountTotal || 0);
   const schemeDiscount = Number(totals.schemeDiscountTotal || 0);

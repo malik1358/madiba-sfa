@@ -44,6 +44,11 @@ export function priceOrderLines(lines, {
       schemeUnitDiscount: scheme.unitDiscount,
       schemeDiscountedQty: scheme.discountedQty,
       excludeCashDiscount: scheme.excludeCashDiscount === true,
+      item_code: code,
+      item_name: line?.item_name,
+      category: line?.category,
+      vatExempt: line?.vatExempt,
+      vatRate: line?.vatRate,
     });
 
     return {
@@ -52,6 +57,9 @@ export function priceOrderLines(lines, {
       quantity,
       rate: priced.rate,
       line_value: priced.lineValue,
+      vatRate: priced.vatRate,
+      vatAmount: priced.vatAmount,
+      lineTotalInclVat: priced.lineTotalInclVat,
     };
   });
 }

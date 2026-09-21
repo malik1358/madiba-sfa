@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-21** — Gloves VAT is 0% on sales orders (New Order, PDF, WhatsApp), not only on settlement. `getPricedOrderLine` / `summarizePricedLines` honor `vatRateForProduct` (GLOVE/VINYL/قفاز). Labels switch to `VAT 0%` for gloves-only carts; do not treat `vatAmount === 0` as missing and fall back to 15%.
 - **2026-09-21** — Customer Audit and New Order now include “receipt amount in last 10 days” sourced from customer-history receipts, using receipt-date windowing.
 - **2026-09-21** — Avg days to pay on Order PDF and New Order was using the default ~6-month customer-history window while receipts stayed full-ledger, so a small collection looked like a huge avg-days swing vs Customer Audit. Both now request `fullHistory=1&scope=settlement` like settlement screens.
 - **2026-09-21** — Pending Orders now shows both current outstanding and `Outstanding >60 days` from the uploaded outstanding dataset, with the >60 figure summed from `61-90`, `91-120`, and `>120`.

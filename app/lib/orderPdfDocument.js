@@ -28,6 +28,7 @@ import {
 } from "./regionalPricing.js";
 import { evaluateOrderSchemes, lookupSchemeApplication } from "./orderSchemes.js";
 import { loadPricePayload } from "./pricePayload.js";
+import { buildSettlementCustomerHistoryUrl } from "./customerHistoryApi.js";
 import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import {
   formatOrderPdfOrderNumberLabel,
@@ -378,7 +379,11 @@ export async function enrichOrderPdfLiveData(snapshot, {
         // customer-history window is only ~6 months and skews avg days badly
         // when all receipts are applied against a truncated invoice set.
         const historyResponse = await fetch(
-          `${customerHistoryApi}?customerCode=${encodeURIComponent(liveCustomerCode)}&customerName=${encodeURIComponent(liveCustomerName || "")}&fullHistory=1&scope=settlement`,
+          buildSettlementCustomerHistoryUrl(
+            customerHistoryApi,
+            liveCustomerCode,
+            liveCustomerName || "",
+          ),
           { headers: authHeaders }
         );
         const historyPayload = await historyResponse.json().catch(() => ({}));

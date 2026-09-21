@@ -2,7 +2,7 @@
 
 MADIBA SFA is an internal sales-force application for a KSA distribution business. Field users record attendance, visits, orders, collections, and GPS. Office users approve orders, upload Tally/Excel datasets, and read management reports. The live UI is a Next.js app on Vercel. The Android app is a Capacitor shell around that site (`capacitor.config.js` loads `https://madiba-sfa.vercel.app` unless `CAPACITOR_SERVER_URL` is set).
 
-This document was written from the repository at `main` (merge of PR #313, commit `e3e9150`). It does not describe a database that was queried live. Schema details come from `supabase/migrations/` and `sql/`.
+This document was written from the repository (handover branch including docs through 2026-09-21). It does not describe a database that was queried live. Schema details come from `supabase/migrations/` and `sql/`. See `docs/CHANGELOG_AI.md` → “Incomplete repository evidence” for known gaps.
 
 ## Users and roles
 

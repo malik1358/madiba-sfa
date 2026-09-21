@@ -29,3 +29,16 @@ test("buildSettlementCustomerHistoryUrl trims customer name whitespace", () => {
     "/api/customer-history?customerCode=C001&customerName=Madiba+Medical&fullHistory=1&scope=settlement",
   );
 });
+
+test("buildSettlementCustomerHistoryUrl appends params to existing query", () => {
+  const url = buildSettlementCustomerHistoryUrl(
+    "/api/customer-history?foo=1",
+    "C001",
+    "Madiba Medical",
+  );
+
+  assert.equal(
+    url,
+    "/api/customer-history?foo=1&customerCode=C001&customerName=Madiba+Medical&fullHistory=1&scope=settlement",
+  );
+});

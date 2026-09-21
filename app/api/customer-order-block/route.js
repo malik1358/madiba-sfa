@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ensureCustomerVisibleToScope } from "../../lib/customerAccess.js";
+import { normalizeAccessRole } from "../../lib/moduleAccess.js";
+import { resolveTrustedAvgDaysToPayForCustomer } from "../../lib/customerOrderBlockServer.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 import {
   ORDER_BLOCK_AVG_DAYS_THRESHOLD,
@@ -53,7 +55,7 @@ export async function GET(request) {
 
     const url = new URL(request.url);
     const customerCode = normalizeOrderBlockCustomerCode(url.searchParams.get("customerCode"));
-    const avgDaysToPay = url.searchParams.get("avgDaysToPay");
+    const customerName = String(url.searchParams.get("customerName") || "").trim();
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
     }
@@ -68,6 +70,13 @@ export async function GET(request) {
       visibleMembers: scope.visibleMembers || [],
     });
 
+    const authHeader = request.headers.get("authorization");
+    const avgDaysToPay = await resolveTrustedAvgDaysToPayForCustomer({
+      request,
+      authHeader,
+      customerCode,
+      customerName,
+    });
     const override = await readOverride(admin, customerCode);
     const status = resolveOrderBlockStatus({ avgDaysToPay, override });
     return NextResponse.json({
@@ -78,7 +87,7 @@ export async function GET(request) {
       message: status.blocked
         ? blockedByAvgDaysMessage({ threshold: status.threshold, avgDaysToPay: status.avgDaysToPay })
         : "",
-      canAdminOverride: scope.role === "admin",
+      canAdminOverride: normalizeAccessRole(scope.role) === "admin",
     });
   } catch (error) {
     const message = error.message || "Unable to load customer order block status.";
@@ -97,7 +106,7 @@ export async function POST(request) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
     const { user, scope } = await resolveAuth(admin, request);
-    if (scope.role !== "admin") {
+    if (normalizeAccessRole(scope.role) !== "admin") {
       return NextResponse.json({ success: false, error: "Only admin can change customer order unblock status." }, { status: 403 });
     }
 
@@ -105,6 +114,7 @@ export async function POST(request) {
     const customerCode = normalizeOrderBlockCustomerCode(body?.customerCode);
     const isUnblocked = body?.isUnblocked === true;
     const note = String(body?.note || "").trim();
+    const customerName = String(body?.customerName || "").trim();
 
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
@@ -141,8 +151,15 @@ export async function POST(request) {
     }
 
     const override = await readOverride(admin, customerCode);
+    const authHeader = request.headers.get("authorization");
+    const avgDaysToPay = await resolveTrustedAvgDaysToPayForCustomer({
+      request,
+      authHeader,
+      customerCode,
+      customerName,
+    });
     const status = resolveOrderBlockStatus({
-      avgDaysToPay: body?.avgDaysToPay ?? null,
+      avgDaysToPay,
       override,
       threshold: ORDER_BLOCK_AVG_DAYS_THRESHOLD,
     });

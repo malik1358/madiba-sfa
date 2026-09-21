@@ -22,6 +22,7 @@ import {
   parseOrderBlockOverride,
   resolveOrderBlockStatus,
 } from "../../lib/customerOrderBlock.js";
+import { resolveTrustedAvgDaysToPayForCustomer } from "../../lib/customerOrderBlockServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -546,7 +547,6 @@ export async function POST(request) {
     const loadedOrderStatus = String(body?.loadedOrderStatus || "DRAFT").trim().toUpperCase();
     const requestedOrderId = body?.orderId ? Number(body.orderId) : null;
     const creditApprovalRequired = Boolean(body?.creditApprovalRequired);
-    const avgDaysToPay = body?.orderBlockSnapshot?.avgDaysToPay ?? body?.avgDaysToPay ?? null;
     const orderBlockThreshold = body?.orderBlockSnapshot?.threshold ?? null;
 
     if (!customerCode) {
@@ -574,19 +574,27 @@ export async function POST(request) {
       .maybeSingle();
     if (blockOverrideError) throw blockOverrideError;
 
-    const blockStatus = resolveOrderBlockStatus({
-      avgDaysToPay,
-      threshold: orderBlockThreshold,
-      override: parseOrderBlockOverride(blockOverrideRow?.setting_value),
-    });
-    if (action === "submit" && !scope.hasAllAccess && blockStatus.blocked) {
-      return NextResponse.json({
-        success: false,
-        error: blockedByAvgDaysMessage({
-          threshold: blockStatus.threshold,
-          avgDaysToPay: blockStatus.avgDaysToPay,
-        }),
-      }, { status: 400 });
+    if (action === "submit" && !scope.hasAllAccess) {
+      const avgDaysToPay = await resolveTrustedAvgDaysToPayForCustomer({
+        request,
+        authHeader,
+        customerCode,
+        customerName,
+      });
+      const blockStatus = resolveOrderBlockStatus({
+        avgDaysToPay,
+        threshold: orderBlockThreshold,
+        override: parseOrderBlockOverride(blockOverrideRow?.setting_value),
+      });
+      if (blockStatus.blocked) {
+        return NextResponse.json({
+          success: false,
+          error: blockedByAvgDaysMessage({
+            threshold: blockStatus.threshold,
+            avgDaysToPay: blockStatus.avgDaysToPay,
+          }),
+        }, { status: 400 });
+      }
     }
 
     const { data: profile, error: profileError } = await admin

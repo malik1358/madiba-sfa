@@ -59,6 +59,7 @@ import { useModuleAccess } from "../../hooks/useModuleAccess";
 import { buildOrderCatalog } from "./lib/orderHelpers";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
 import { normalizeAccessRole } from "../../lib/moduleAccess.js";
+import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient.js";
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString("en-US", {
@@ -322,19 +323,11 @@ function CustomerAuditPageContent() {
         } = await supabase.auth.getSession();
         if (!session?.access_token) throw new Error("Please login again.");
 
-        const avgDaysToPay = analytics?.paymentBehavior?.avgDaysToPay;
-        const query = new URLSearchParams({
-          customerCode: String(selectedCustomer.customer_code || ""),
-        });
-        if (avgDaysToPay != null) query.set("avgDaysToPay", String(avgDaysToPay));
-
-        const response = await fetch(`/api/customer-order-block?${query.toString()}`, {
-          headers: { Authorization: "Bearer " + session.access_token },
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.error || "Unable to load order block status.");
-        }
+        const payload = await fetchCustomerOrderBlockStatus(
+          session.access_token,
+          selectedCustomer.customer_code,
+          selectedCustomer.customer_name,
+        );
         setOrderBlock(payload);
       } catch {
         setOrderBlock(null);
@@ -342,7 +335,7 @@ function CustomerAuditPageContent() {
     }
 
     loadOrderBlock();
-  }, [analytics?.paymentBehavior?.avgDaysToPay, selectedCustomer?.customer_code]);
+  }, [selectedCustomer?.customer_code, selectedCustomer?.customer_name]);
 
   const toggleOrderBlockOverride = useCallback(async () => {
     if (!selectedCustomer?.customer_code || !orderBlock || !isAdmin) return;
@@ -365,8 +358,8 @@ function CustomerAuditPageContent() {
         },
         body: JSON.stringify({
           customerCode: selectedCustomer.customer_code,
+          customerName: selectedCustomer.customer_name,
           isUnblocked: !orderBlock.isAdminUnblocked,
-          avgDaysToPay: orderBlock.avgDaysToPay,
         }),
       });
       const payload = await response.json().catch(() => ({}));

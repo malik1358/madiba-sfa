@@ -63,6 +63,7 @@ import { isQueuedPendingOrderId } from "../../lib/queuedSalesOrders";
 import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { blockedByAvgDaysMessage, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
+import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -1017,10 +1018,21 @@ export default function NewOrderPage() {
     [customerDocumentCompliance, orderGrandTotal, outstandingInfo.customer, paymentType]
   );
   const orderBlockFromAnalytics = useMemo(
-    () => resolveOrderBlockStatus({
-      avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
-      override: orderBlock,
-    }),
+    () => {
+      if (orderBlock) {
+        return {
+          ...orderBlock,
+          ...resolveOrderBlockStatus({
+            avgDaysToPay: orderBlock.avgDaysToPay,
+            threshold: orderBlock.threshold,
+            override: orderBlock.override || orderBlock,
+          }),
+        };
+      }
+      return resolveOrderBlockStatus({
+        avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
+      });
+    },
     [analytics?.paymentBehavior?.avgDaysToPay, orderBlock],
   );
   const orderBlockedMessage = orderBlockFromAnalytics.blocked
@@ -1324,27 +1336,19 @@ export default function NewOrderPage() {
         } = await supabase.auth.getSession();
         if (!session?.access_token) throw new Error("Please login again.");
 
-        const avgDaysToPay = analytics?.paymentBehavior?.avgDaysToPay;
-        const query = new URLSearchParams({
-          customerCode: String(selectedCustomer.customer_code || ""),
-        });
-        if (avgDaysToPay != null) query.set("avgDaysToPay", String(avgDaysToPay));
-
-        const response = await fetch(`/api/customer-order-block?${query.toString()}`, {
-          headers: { Authorization: "Bearer " + session.access_token },
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.error || "Unable to load order block status.");
-        }
-        setOrderBlock(payload.override || null);
+        const payload = await fetchCustomerOrderBlockStatus(
+          session.access_token,
+          selectedCustomer.customer_code,
+          selectedCustomer.customer_name,
+        );
+        setOrderBlock(payload);
       } catch {
         setOrderBlock(null);
       }
     }
 
     loadOrderBlockStatus();
-  }, [analytics?.paymentBehavior?.avgDaysToPay, selectedCustomer?.customer_code]);
+  }, [selectedCustomer?.customer_code, selectedCustomer?.customer_name]);
 
   const fetchCustomerDocuments = useCallback(async (customer) => {
     if (!customer?.customer_code) {

@@ -150,9 +150,20 @@ test("buildUserVisitReportEmail appends working hours after the day route", () =
       visitCount: 1,
       entries: [
         {
-          savedAt: "2026-09-07T07:34:00.000Z",
+          savedAt: "2026-09-07T06:00:00.000Z",
           transactionType: "MORNING_ATTENDANCE",
           transactionLabel: "Login",
+          hasEntryGps: true,
+          entryLatitude: 24.7,
+          entryLongitude: 46.7,
+        },
+        {
+          savedAt: "2026-09-07T07:34:00.000Z",
+          transactionType: "VISIT_REPORT",
+          transactionLabel: "Visit report",
+          customerCode: "C1",
+          customerName: "Shop A",
+          isFarFromCustomer: false,
           hasEntryGps: true,
           entryLatitude: 24.7,
           entryLongitude: 46.7,
@@ -174,19 +185,30 @@ test("buildUserVisitReportEmail appends working hours after the day route", () =
           entryLongitude: 46.71,
         },
         {
+          savedAt: "2026-09-07T15:00:00.000Z",
+          transactionType: "COLLECTION_VISIT",
+          transactionLabel: "Collection visit",
+          customerCode: "C2",
+          customerName: "Shop B",
+          isFarFromCustomer: false,
+          hasEntryGps: true,
+          entryLatitude: 24.72,
+          entryLongitude: 46.72,
+        },
+        {
           savedAt: "2026-09-07T16:10:00.000Z",
           transactionType: "END_OF_DAY",
           transactionLabel: "Logout",
           hasEntryGps: true,
-          entryLatitude: 24.72,
-          entryLongitude: 46.72,
+          entryLatitude: 24.73,
+          entryLongitude: 46.73,
         },
       ],
     },
   });
 
   assert.match(message.html, /Day route/);
-  assert.match(message.html, /Working hours:<\/strong> 7h 9m/);
+  assert.match(message.html, /Working hours:<\/strong> 5h 59m/);
 });
 
 test("buildUserVisitReportEmail shows collection outcome when nothing was collected", () => {

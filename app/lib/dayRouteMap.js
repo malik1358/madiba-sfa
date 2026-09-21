@@ -1,6 +1,12 @@
 import { hasGpsCoordinates } from "./geo.js";
 import { formatIdleDuration, formatNarrativeTime } from "./collectionDaySummary.js";
-import { calculateWorkingHoursMinutes, formatWorkingHours } from "./workdayActivity.js";
+import { formatWorkingHours } from "./workdayActivity.js";
+
+const NEAR_CUSTOMER_TRANSACTION_TYPES = new Set([
+  "VISIT_REPORT",
+  "COLLECTION_VISIT",
+  "ORDER_SUBMITTED",
+]);
 
 const KIND_COLORS = {
   stop: "#2563eb",
@@ -61,6 +67,8 @@ export function buildDayRoutePoints(entries = [], idleGaps = []) {
         customerCode: String(entry.customerCode || entry.customer_code || "").trim(),
         area: String(entry.area || "").trim(),
         street: String(entry.street || "").trim(),
+        isFarFromCustomer: Boolean(entry.isFarFromCustomer),
+        transactionType: type,
       };
     });
 }
@@ -191,6 +199,11 @@ function workdayEventType(item) {
   return String(item?.transactionType || item?.transaction_type || item?.type || "").trim().toUpperCase();
 }
 
+function isNearCustomerTransaction(item) {
+  if (!NEAR_CUSTOMER_TRANSACTION_TYPES.has(workdayEventType(item))) return false;
+  return !item?.isFarFromCustomer;
+}
+
 export function extractWorkdayTimesFromRoute(source = []) {
   const ordered = [...(source || [])]
     .map((item) => {
@@ -211,8 +224,59 @@ export function extractWorkdayTimesFromRoute(source = []) {
   return times;
 }
 
+function nearCustomerTransactions(source = []) {
+  return (source || [])
+    .map((item) => {
+      const at = workdayEventIso(item);
+      const ts = Date.parse(String(at || ""));
+      return {
+        ...item,
+        transactionType: workdayEventType(item),
+        at,
+        ts,
+      };
+    })
+    .filter((item) => item.at && Number.isFinite(item.ts) && isNearCustomerTransaction(item))
+    .sort((left, right) => left.ts - right.ts);
+}
+
+function lunchOverlapMs(start, end, lunchOutAt, lunchInAt) {
+  const lunchOut = Date.parse(String(lunchOutAt || ""));
+  const lunchIn = Date.parse(String(lunchInAt || ""));
+  if (Number.isFinite(lunchOut) && Number.isFinite(lunchIn) && lunchIn > lunchOut) {
+    const overlapStart = Math.max(start, lunchOut);
+    const overlapEnd = Math.min(end, lunchIn);
+    return overlapEnd > overlapStart ? overlapEnd - overlapStart : 0;
+  }
+  if (Number.isFinite(lunchOut) && !Number.isFinite(lunchIn) && lunchOut > start && lunchOut < end) {
+    return end - lunchOut;
+  }
+  return 0;
+}
+
+function workingMinutesFromNearTransactions({ startAt, endAt, lunchOutAt, lunchInAt }) {
+  const start = Date.parse(String(startAt || ""));
+  const end = Date.parse(String(endAt || ""));
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+
+  const totalMs = end - start - lunchOverlapMs(start, end, lunchOutAt, lunchInAt);
+  const minutes = Math.round(totalMs / 60000);
+  return minutes > 0 ? minutes : null;
+}
+
 export function resolveDayRouteWorkingHours(source = []) {
-  const minutes = calculateWorkingHoursMinutes(extractWorkdayTimesFromRoute(source));
+  const near = nearCustomerTransactions(source);
+  if (!near.length) {
+    return { minutes: null, value: formatWorkingHours(null) };
+  }
+
+  const { lunchOutAt, lunchInAt } = extractWorkdayTimesFromRoute(source);
+  const minutes = workingMinutesFromNearTransactions({
+    startAt: near[0].at,
+    endAt: near[near.length - 1].at,
+    lunchOutAt,
+    lunchInAt,
+  });
   return {
     minutes,
     value: formatWorkingHours(minutes),

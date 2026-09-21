@@ -1,6 +1,24 @@
 # MADIBA SFA — instructions for coding agents
 
-MADIBA SFA is a Next.js 15 (App Router) sales-force app for KSA. Data lives in Supabase. Production deploys from `main` to Vercel. Read `AGENTS.md` and every file under `docs/` before changing code. Inspect the real source, SQL, and tests. Do not guess schema or business rules.
+MADIBA SFA is a Next.js 15 (App Router) sales-force app for KSA. Data lives in Supabase. Production deploys from `main` to Vercel.
+
+This repository is developed by **Cursor agents and GitHub Copilot together**. The files below are the shared handover. Every agent, Cursor or Copilot, must treat them as living documentation.
+
+## Shared handover (read and update)
+
+**At the start of every task (before editing):**
+
+1. Read this file, `AGENTS.md`, and all files under `docs/`.
+2. Inspect the real source, SQL, and tests for the area you will touch. Do not guess schema or business rules.
+3. Prefer the code when docs and code disagree, then fix the docs in the same change.
+
+**At the end of every task that changes behavior, schema, roles, reporting, or deployment:**
+
+1. Update the matching `docs/*.md` file so the next agent (Cursor or Copilot) inherits the truth.
+2. Add a short dated note at the top of `docs/CHANGELOG_AI.md`.
+3. If you only fixed a docs/code inconsistency, still update the docs. Do not leave drift for the other tool.
+
+Do not skip the read or the update because “the other agent will handle docs.” Both tools must keep these files current.
 
 ## Persistent rules
 

@@ -66,11 +66,13 @@ Management BI reads the active sales batch (`active_sales`), optionally a monthl
 
 ## Docs in this handover
 
+These files are the shared memory for **Cursor and GitHub Copilot**. Read them at the start of every task. Update them when you change behavior, schema, roles, reporting, or deployment. Do not leave the next agent on either tool with stale rules.
+
 - `docs/ARCHITECTURE.md` — runtime structure
 - `docs/DATABASE.md` — tables, views, settings, storage
 - `docs/BUSINESS_RULES.md` — rules that change user-visible results
 - `docs/DEPLOYMENT.md` — Vercel, GitHub Actions, Android, env names
-- `docs/CHANGELOG_AI.md` — decisions, known drift, do-not-touch areas
+- `docs/CHANGELOG_AI.md` — decisions, known drift, do-not-touch areas, dated agent notes
 
 Older notes `README.md`, `ANDROID_APK.md`, and `COLLECTOR_SCREEN_SETUP.md` are still in the repo. `COLLECTOR_SCREEN_SETUP.md` is partly stale. See `docs/CHANGELOG_AI.md`.
 
@@ -89,3 +91,5 @@ Tell me your understanding of:
 5. reporting logic
 6. deployment setup
 7. any inconsistencies between the documentation and actual code.
+
+After that session, keep reading and updating these files as Cursor and Copilot continue development.

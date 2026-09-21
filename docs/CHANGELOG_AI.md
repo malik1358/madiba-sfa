@@ -1,6 +1,12 @@
 # Changelog for AI agents
 
-Decisions and hazards recorded from the repository (code, SQL, and git history through merge `e3e9150` on `main`, PR #313). This is not a full commit log. Add a dated note when a later change alters a rule in `docs/BUSINESS_RULES.md` or a structure in `docs/ARCHITECTURE.md`.
+Decisions and hazards recorded from the repository (code, SQL, and git history through merge `e3e9150` on `main`, PR #313). This is not a full commit log.
+
+**Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
+
+## Recent agent notes
+
+- **2026-09-21** — Dual-agent rule: Cursor and Copilot must both read the handover files at task start and update them when behavior, schema, roles, reporting, or deployment changes. Stale docs are treated as a defect for the next agent.
 
 ## How the system was shaped
 
@@ -79,8 +85,8 @@ When a task needs a new fact:
 2. If a column is required, add a migration and a missing-column fallback if the app might deploy first.
 3. Put the rule in `app/lib/` and a `node:test` file.
 4. Wire the API, then the page.
-5. Update `docs/BUSINESS_RULES.md` or `docs/ARCHITECTURE.md`, and add a short entry at the top of this file.
+5. Update `docs/BUSINESS_RULES.md` or `docs/ARCHITECTURE.md` (and any other matching doc), and add a short dated entry under “Recent agent notes” at the top of this file. Cursor and Copilot both rely on that step.
 
 ## Documentation-only handover
 
-The files `.github/copilot-instructions.md`, `AGENTS.md`, and `docs/*.md` were added so another agent can continue without a verbal briefing. They do not change runtime behavior.
+The files `.github/copilot-instructions.md`, `AGENTS.md`, and `docs/*.md` were added so Cursor and Copilot can continue without a verbal briefing. They do not change runtime behavior. They must stay aligned with the code as both tools keep shipping features.

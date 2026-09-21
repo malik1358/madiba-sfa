@@ -1,14 +1,26 @@
 # AGENTS.md
 
-Core conventions for any AI coding agent working in this repository. Read this file, `.github/copilot-instructions.md`, and `docs/` before editing.
+Core conventions for any AI coding agent working in this repository — **Cursor and GitHub Copilot**. Read this file, `.github/copilot-instructions.md`, and `docs/` before editing. Keep those files updated when you finish. They are the shared memory between both tools.
 
 ## What this repo is
 
 MADIBA SFA (`package.json` name `madiba-sfa`) is the KSA sales-force system: field visits, orders, collections, GPS, attendance, and management reports. Stack: Next.js 15 App Router, React 19, Supabase Auth + Postgres, Vercel, optional Capacitor Android shell.
 
+## Dual-agent workflow (Cursor + Copilot)
+
+Development will continue with Cursor agents and GitHub Copilot in the same repository. Treat the handover files as mandatory, not optional:
+
+| When | What every agent must do |
+| --- | --- |
+| Starting a task | Read `.github/copilot-instructions.md`, this file, and all of `docs/`. Then inspect the code for the area you will change. |
+| Finishing a task that changes behavior, schema, roles, reports, or deploy | Update the matching `docs/*.md` file and add a short dated note to `docs/CHANGELOG_AI.md` in the same PR or commit when practical. |
+| Docs disagree with code | Trust the code, then correct the docs so the next Cursor or Copilot session does not relearn a false rule. |
+
+Do not assume the other tool will update the handover. Leaving docs stale breaks the next agent on either side.
+
 ## How to work
 
-1. Read the existing implementation and its tests before editing.
+1. Read the handover docs first, then the existing implementation and its tests before editing.
 2. Search callers before changing a shared function, table, setting key, status string, or route.
 3. Change only what the task needs. Do not rewrite a page or library because it is large.
 4. Do not invent columns, tables, roles, or status values.
@@ -16,7 +28,7 @@ MADIBA SFA (`package.json` name `madiba-sfa`) is the KSA sales-force system: fie
 6. After code changes, run the related `node --test tests/<file>.test.mjs` files and `npm run build` when the change can affect the Next.js build.
 7. If the database must change, add a migration and say so in the summary. Applying SQL in Supabase is a separate production step.
 8. Never print or commit secrets. `.env*` is gitignored except `.env.example`.
-9. When a business rule or architecture decision changes, update `docs/` and `docs/CHANGELOG_AI.md`.
+9. When a business rule or architecture decision changes, update `docs/` and `docs/CHANGELOG_AI.md` so Cursor and Copilot both stay aligned.
 
 ## Repository map
 
@@ -74,4 +86,4 @@ Run the narrow test file that matches the module you changed. The full suite is 
 
 ## Handover docs
 
-`docs/PROJECT_OVERVIEW.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `docs/BUSINESS_RULES.md`, `docs/DEPLOYMENT.md`, and `docs/CHANGELOG_AI.md` are the source of truth for agents. If they disagree with the code, trust the code and record the mismatch.
+`.github/copilot-instructions.md`, this file, and `docs/PROJECT_OVERVIEW.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `docs/BUSINESS_RULES.md`, `docs/DEPLOYMENT.md`, and `docs/CHANGELOG_AI.md` are the shared source of truth for Cursor and Copilot. Read them before every task. Update them when you change something important. If they disagree with the code, trust the code and record the mismatch.

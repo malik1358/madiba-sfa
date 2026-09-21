@@ -3,7 +3,7 @@
 ## Stack
 
 - Next.js 15 App Router (`app/`), React 19, JavaScript only.
-- Node `>=22` (`.nvmrc` is `22`).
+- Node `>=22.0.0` (`package.json` engines, `.nvmrc` value `22`). GitHub Actions Build uses `node-version-file: .nvmrc`. There is no `npm test` or lint script.
 - Supabase JS (`@supabase/supabase-js`). `@supabase/ssr` is listed in `package.json` but app code does not import it. The browser client in `app/lib/supabase.js` uses `createClient` from `@supabase/supabase-js`.
 - No global `middleware.js`. No ORM. SQL is written by hand.
 - PDF: `jspdf`, `pdf-parse`, `pdfjs-dist`. Excel: `xlsx`. Images: `sharp`. Optional OCR: `tesseract.js`.
@@ -225,11 +225,16 @@ These are large or shared. Read them fully enough to see callers before editing:
 
 ## Android / Capacitor
 
-- Config: `capacitor.config.js` — `appId` `com.madiba.sfa`, `appName` `MADIBA SFA`, `webDir` `public`, server URL defaults to `https://madiba-sfa.vercel.app` (override with `CAPACITOR_SERVER_URL`).
-- Native project: `android/`. Field UI still comes from the hosted Next.js site; rebuild APK only when native code, permissions, or Capacitor plugins change.
-- Tracking: `app/lib/nativeFieldTracking.js` + `app/components/NativeFieldTracking.jsx`. Foreground service notification, idle GPS after 15 minutes without transaction activity, check cycle every 5 minutes while the process runs. Pings pause during lunch and after end of day.
-- Push: device tokens in `device_push_tokens`; server FCM via `FIREBASE_SERVICE_ACCOUNT_JSON` and `app/lib/fcm.js`. Without Firebase server config, local inactivity alerts can still work; remote push does not.
-- Minimum APK: env + `system_settings.android_apk_min_version_v1`.
-- Operator guide: `ANDROID_APK.md` (battery unrestricted required before login, location all-the-time, Play internal testing, GitHub APK workflow).
+Source: `capacitor.config.js`, `app/lib/nativeFieldTracking.js`, `android/`, `ANDROID_APK.md`.
+
+- App id `com.madiba.sfa`. WebView loads `CAPACITOR_SERVER_URL` or `https://madiba-sfa.vercel.app`. `webDir` is `public`. UI updates ship with the website; rebuild the APK only when native permissions or plugins change.
+- Node for this repo is `>=22` (`package.json` `engines`, `.nvmrc`, GitHub Actions `node-version-file`). `ANDROID_APK.md` must say 22+, not 20+.
+- `startNativeFieldTracking` requests geolocation, starts a foreground location service (notification id 1001, channel `madiba-field-tracking`, title “MADIBA field tracking active”, `ServiceType.Location`), then registers FCM.
+- Push registration listens for Capacitor `registration` and POSTs `{ token, platform: "android" }` to `/api/push-tokens` with the user bearer token. Failure is swallowed until Firebase is configured. Push data type `offline_data_refresh` emits a local refresh.
+- Tracking timer is every 5 minutes (`CHECK_INTERVAL_MS`). An idle GPS ping is saved only after 15 minutes without visit/order/collection activity (`BACKGROUND_GPS_IDLE_MS` in `workdayActivity.js`), not on a fixed 15-minute clock. Pings go to `POST /api/gps-ping` as `daily_activity_logs.entry_type = GPS_PING`.
+- Tracking stops on lunch and after end of day (`stopNativeFieldTracking` stops the foreground service).
+- Local notification channel `madiba-push-alerts` is separate from the foreground channel.
+- Minimum APK: env `MIN_ANDROID_APK_VERSION_CODE` and `system_settings.android_apk_min_version_v1`.
+- Battery unrestricted is required before login (`app/lib/androidBatteryOptimization.js`).
 
 Do not change Capacitor app id, tracking intervals, or battery/login gates unless the task explicitly asks for it.

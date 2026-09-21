@@ -26,9 +26,9 @@ Added a dedicated collector screen for salesmen that displays only their assigne
      - Salesmen see "My Customer Collections" link
      - Admins/Managers see "Payment Collections" link (view all customers)
 
-### 4. **Updated Navigation** - `/app/components/MostVisitedPages.jsx`
-   - Added "/management/my-collections" to page labels
-   - Tracks visits to the salesman collector screen for quick access
+### 4. **Navigation note (file missing)**
+
+`COLLECTOR_SCREEN_SETUP.md` originally claimed `/app/components/MostVisitedPages.jsx` was updated to label `/management/my-collections`. That file is **not in the repository** (no `MostVisitedPages.jsx` anywhere). Do not recreate it from this note. Current navigation is `app/lib/moduleAccess.js` and `app/components/AppMainNav.jsx`. `myCollections` is disabled; salesmen use Payment Collections. Treat the rest of this setup note as historical and partly stale (bigint ids, not UUIDs).
 
 ## Database Tables Required
 

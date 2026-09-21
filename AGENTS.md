@@ -32,6 +32,22 @@ These rules are mandatory for Cursor and Copilot:
 
 Do not assume the other tool will update the handover. Leaving docs stale breaks the next agent on either side.
 
+## Do not assume
+
+These warnings come from real drift in this repository:
+
+- Do not assume the `collector` role exists in every database merely because app code supports it. `profiles_role_check` in `supabase/migrations/20260808000000_production_schema.sql` does not include `collector`. Only `sql/fix_profiles_role_check_collector.sql` adds it, and that script is not a migration.
+- Do not invent database columns, tables, or functions.
+- Do not assume `docs/` and the live database schema are synchronized. Migrations, `sql/` scripts, and production may differ.
+- Do not assume `npm test` or `npm run lint` exist. `package.json` has no test or lint script. Use `node --test tests/<file>.test.mjs`.
+- Do not assume cron logic lives in only one scheduler. Vercel cron, GitHub Actions, and Supabase `pg_cron` can call the same routes.
+- Do not change role or screen access without reading `app/lib/moduleAccess.js` and `tests/moduleAccess.test.mjs`.
+- Do not change attendance, lunch, inactivity, reminders, or auto-close without reading `app/lib/workdayActivity.js`.
+- Do not change KPI pace, new vs repeat customers, or team totals without reading both `app/lib/performanceKpis.js` and `app/lib/performanceKpisServer.js`.
+- Do not change Android tracking, GPS cadence, or push registration without reading `app/lib/nativeFieldTracking.js`.
+- Preserve staging/production separation (`staging` vs `main`, separate Vercel projects, separate Supabase projects).
+- Prefer incremental changes over rewrites.
+
 ## Mandatory documentation rule
 
 **After any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the relevant documentation before finishing the task.**

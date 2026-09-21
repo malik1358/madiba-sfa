@@ -18,6 +18,15 @@ After any important change to business logic, database structure, reports, authe
 2. Add a short dated note under “Recent agent notes” in `docs/CHANGELOG_AI.md`.
 3. Do not mark the task complete while those docs are stale.
 
+## Do not assume
+
+- `collector` is supported in `app/lib/moduleAccess.js`, but the baseline `profiles_role_check` migration does not allow that role. Confirm `sql/fix_profiles_role_check_collector.sql` was applied before writing collector rows.
+- Do not invent Supabase tables, columns, or functions. Docs and the live database can drift.
+- `package.json` requires Node `>=22`. There is no `npm test` or `npm run lint`. Use `node --test`.
+- Cron behavior is split across Vercel (`vercel.json`), GitHub Actions, and Supabase `pg_cron`.
+- Before changing access, activity, KPIs, or Android tracking, read `moduleAccess.js`, `workdayActivity.js`, both `performanceKpis*.js` files, and `nativeFieldTracking.js`.
+- Preserve staging/production separation. Prefer incremental changes over rewrites.
+
 ## Persistent rules
 
 - Understand existing code before changing it.

@@ -20,7 +20,7 @@ This file lists objects found in the repo. It is not a live dump of production. 
 | `activity_reminders_enabled` | Boolean, default true. `20260907120000_profile_activity_reminders.sql`. |
 | `stock_take_access` | Boolean, default false. `20260908140000_stock_take.sql`. |
 
-**Not in migrations:** `sql/fix_profiles_role_check_collector.sql` adds `collector` to `profiles_role_check`. The baseline migration does not include `collector`. Assigning that role fails until the script is applied.
+**Not in migrations:** `sql/fix_profiles_role_check_collector.sql` adds `collector` to `profiles_role_check`. The baseline migration does not include `collector`. App code in `moduleAccess.js` supports the role, but a database that never ran that script will reject collector profile rows. Do not assume every environment has the constraint update.
 
 Helper functions in the baseline migration:
 

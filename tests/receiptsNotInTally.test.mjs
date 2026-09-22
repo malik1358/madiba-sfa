@@ -114,7 +114,7 @@ test("reconcileAppReceiptsToTally rejects amount mismatches beyond tolerance", (
         receipt_date: "2026-03-01",
         customer_code: "1006",
         customer_name: "ABDULLAH",
-        amount: 499,
+        amount: 498,
         vch_no: "1",
       },
     ],
@@ -122,4 +122,33 @@ test("reconcileAppReceiptsToTally rejects amount mismatches beyond tolerance", (
 
   assert.equal(result.matchedCount, 0);
   assert.equal(result.missingCount, 1);
+});
+
+test("reconcileAppReceiptsToTally matches same trading name with small amount difference", () => {
+  const result = reconcileAppReceiptsToTally({
+    appVisits: [
+      {
+        id: "app-1108",
+        customer_code: "1108",
+        customer_name: "Dar Rayhana Trading Establishment",
+        amount_received: 4896,
+        visit_outcome: "FUNDS_RECEIVED",
+        visit_date: "2026-09-01",
+      },
+    ],
+    tallyReceipts: [
+      {
+        receipt_date: "2026-09-01",
+        customer_code: "1106",
+        customer_name: "Dar Rayhana Trading Establishment",
+        particulars: "1106 Dar Rayhana Trading Establishment",
+        amount: 4895.9,
+        vch_no: "1599",
+      },
+    ],
+  });
+
+  assert.equal(result.matchedCount, 1);
+  assert.equal(result.missingCount, 0);
+  assert.equal(result.matched[0].tally.vch_no, "1599");
 });

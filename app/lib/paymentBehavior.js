@@ -5,6 +5,11 @@ import {
   toNumber,
 } from "./outstanding.js";
 import { amountInclVatFromExcl, vatRateForProduct } from "./regionalPricing.js";
+import {
+  HISTORIC_PERFORMANCE_MONTHS,
+  ksaMonthKey,
+  shiftMonthKey,
+} from "./monthlyPerformanceMonths.js";
 
 function dateOnly(value) {
   return parseOutstandingSheetDate(value) || String(value || "").slice(0, 10);
@@ -733,11 +738,55 @@ export function weightedAverageDays(observations = []) {
   return weighted / totalAmount;
 }
 
+/**
+ * First day of the month that starts the rolling “6 historic months + current”
+ * avg-days window (same span as the BI performance months helper).
+ */
+export function avgDaysSixMonthFromIso(todayIso = new Date().toISOString().slice(0, 10)) {
+  const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
+  const currentMonth = ksaMonthKey(new Date(`${today}T12:00:00Z`));
+  const fromMonth = shiftMonthKey(currentMonth, -HISTORIC_PERFORMANCE_MONTHS);
+  return fromMonth ? `${fromMonth}-01` : "";
+}
+
+export function filterPaymentLedgerFromDate({
+  transactions = [],
+  receipts = [],
+  outstandingInvoices = [],
+  fromIso = "",
+} = {}) {
+  const from = dateOnly(fromIso);
+  if (!from) {
+    return {
+      transactions: Array.isArray(transactions) ? transactions : [],
+      receipts: Array.isArray(receipts) ? receipts : [],
+      outstandingInvoices: Array.isArray(outstandingInvoices) ? outstandingInvoices : [],
+    };
+  }
+  const onOrAfter = (value) => {
+    const iso = dateOnly(value);
+    return iso && iso >= from;
+  };
+  return {
+    transactions: (Array.isArray(transactions) ? transactions : [])
+      .filter((row) => onOrAfter(row?.transaction_date)),
+    receipts: (Array.isArray(receipts) ? receipts : [])
+      .filter((row) => onOrAfter(row?.receipt_date)),
+    outstandingInvoices: (Array.isArray(outstandingInvoices) ? outstandingInvoices : [])
+      .filter((row) => onOrAfter(row?.invoice_date)),
+  };
+}
+
 export function emptyPaymentBehavior() {
   return {
     avgDaysToPay: null,
     avgDaysPaidOnly: null,
     medianDaysToPay: null,
+    avgDaysToPay6m: null,
+    avgDaysPaidOnly6m: null,
+    medianDaysToPay6m: null,
+    openAmountInAvg6m: 0,
+    avgDays6mFromDate: "",
     paidAllocationCount: 0,
     paidAmount: 0,
     openAmountInAvg: 0,
@@ -753,13 +802,7 @@ export function emptyPaymentBehavior() {
   };
 }
 
-/**
- * Combine sales+receipt FIFO days-to-pay with outstanding unpaid bill stats.
- * Avg days starts from paid receipts, then blends only open unpaid invoices
- * older than that paid-only avg (so open age can raise, never reduce, the avg).
- * Paid-only avg is kept as avgDaysPaidOnly for comparison.
- */
-export function buildPaymentBehavior({
+function buildPaymentBehaviorCore({
   transactions = [],
   receipts = [],
   outstandingCustomer = null,
@@ -846,6 +889,11 @@ export function buildPaymentBehavior({
     avgDaysToPay,
     avgDaysPaidOnly,
     medianDaysToPay,
+    avgDaysToPay6m: null,
+    avgDaysPaidOnly6m: null,
+    medianDaysToPay6m: null,
+    openAmountInAvg6m: 0,
+    avgDays6mFromDate: "",
     paidAllocationCount: allocations.length,
     paidAmount,
     openAmountInAvg,
@@ -861,9 +909,92 @@ export function buildPaymentBehavior({
   };
 }
 
+/**
+ * Combine sales+receipt FIFO days-to-pay with outstanding unpaid bill stats.
+ * Avg days starts from paid receipts, then blends only open unpaid invoices
+ * older than that paid-only avg (so open age can raise, never reduce, the avg).
+ * Paid-only avg is kept as avgDaysPaidOnly for comparison.
+ * Also computes a parallel 6-month window (sales + receipts + open from that
+ * from-date) exposed as avgDaysToPay6m / avgDaysPaidOnly6m.
+ */
+export function buildPaymentBehavior({
+  transactions = [],
+  receipts = [],
+  outstandingCustomer = null,
+  outstandingInvoices = [],
+  todayIso = new Date().toISOString().slice(0, 10),
+  includeSixMonthWindow = true,
+} = {}) {
+  const lifetime = buildPaymentBehaviorCore({
+    transactions,
+    receipts,
+    outstandingCustomer,
+    outstandingInvoices,
+    todayIso,
+  });
+
+  if (!includeSixMonthWindow) {
+    return lifetime;
+  }
+
+  const fromIso = avgDaysSixMonthFromIso(todayIso);
+  const windowed = filterPaymentLedgerFromDate({
+    transactions,
+    receipts,
+    outstandingInvoices,
+    fromIso,
+  });
+  const six = buildPaymentBehaviorCore({
+    transactions: windowed.transactions,
+    receipts: windowed.receipts,
+    outstandingCustomer,
+    outstandingInvoices: windowed.outstandingInvoices,
+    todayIso,
+  });
+
+  let summaryLabel = lifetime.summaryLabel;
+  if (six.avgDaysToPay != null) {
+    const hasLifetime = lifetime.avgDaysToPay != null
+      || (summaryLabel && summaryLabel !== "Payment days unavailable");
+    summaryLabel += hasLifetime ? ` · 6m ${six.avgDaysToPay}` : `Avg ${six.avgDaysToPay} days to pay (6m)`;
+  }
+
+  return {
+    ...lifetime,
+    avgDaysToPay6m: six.avgDaysToPay,
+    avgDaysPaidOnly6m: six.avgDaysPaidOnly,
+    medianDaysToPay6m: six.medianDaysToPay,
+    openAmountInAvg6m: six.openAmountInAvg,
+    avgDays6mFromDate: fromIso,
+    summaryLabel,
+  };
+}
+
 export function formatPaymentDaysLabel(behavior) {
-  if (!behavior || behavior.avgDaysToPay == null) return "—";
+  if (!behavior || behavior.avgDaysToPay == null) {
+    if (behavior?.avgDaysToPay6m != null) return `6m ${behavior.avgDaysToPay6m} days`;
+    return "—";
+  }
+  if (behavior.avgDaysToPay6m != null) {
+    return `${behavior.avgDaysToPay} days · 6m ${behavior.avgDaysToPay6m}`;
+  }
   return `${behavior.avgDaysToPay} days`;
+}
+
+/** Compact dual label for PDF / one-line summaries. */
+export function formatAvgDaysDualLine(behavior, {
+  lifetimePrefix = "Avg days to pay",
+  sixMonthLabel = "6m",
+} = {}) {
+  if (!behavior) return "";
+  const lifetime = behavior.avgDaysToPay;
+  const six = behavior.avgDaysToPay6m;
+  if (lifetime == null && six == null) return "";
+  if (lifetime != null && six != null) {
+    return `${lifetimePrefix}: ${lifetime} lifetime · ${six} (${sixMonthLabel})`;
+  }
+  if (lifetime != null) return `${lifetimePrefix}: ${lifetime}`;
+  return `${lifetimePrefix}: ${six} (${sixMonthLabel})`;
 }
 
 /**

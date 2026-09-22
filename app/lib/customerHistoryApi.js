@@ -4,12 +4,12 @@ export function buildCustomerHistoryApiUrl(
   customerName = "",
   { fullHistory = false, scope = "", refresh = false } = {},
 ) {
-  const params = new URLSearchParams({
-    customerCode: String(customerCode || "").trim(),
-  });
+  const [baseUrl, existingQuery = ""] = String(customerHistoryApi || "").split("?", 2);
+  const params = new URLSearchParams(existingQuery);
+  params.set("customerCode", String(customerCode || "").trim());
 
-  const nameValue = String(customerName || "");
-  if (nameValue.trim()) {
+  const nameValue = String(customerName || "").trim();
+  if (nameValue) {
     params.set("customerName", nameValue);
   }
 
@@ -26,7 +26,8 @@ export function buildCustomerHistoryApiUrl(
     params.set("refresh", "1");
   }
 
-  return `${customerHistoryApi}?${params.toString()}`;
+  const query = params.toString();
+  return query ? `${baseUrl}?${query}` : baseUrl;
 }
 
 export function buildSettlementCustomerHistoryUrl(

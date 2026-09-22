@@ -1,4 +1,4 @@
--- Run once in Supabase SQL Editor (staging and production).
+-- Run once in Supabase SQL Editor (local/dev and production).
 -- Adds GPS capture columns for collection visit route reporting.
 
 ALTER TABLE "public"."collection_visits"

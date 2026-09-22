@@ -7,7 +7,12 @@ import {
 } from "./customerGpsHistory.js";
 
 export function normalizeCustomerMasterSearch(value) {
-  return String(value || "").trim().replace(/^\*+|\*+$/g, "").trim();
+  const trimmed = String(value || "").trim();
+  let start = 0;
+  let end = trimmed.length;
+  while (start < end && trimmed[start] === "*") start += 1;
+  while (end > start && trimmed[end - 1] === "*") end -= 1;
+  return trimmed.slice(start, end).trim();
 }
 
 export function looksLikeCustomerCodeSearch(value) {

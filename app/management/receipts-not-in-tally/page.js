@@ -372,7 +372,7 @@ export default function ReceiptsNotInTallyPage() {
                 </section>
                 <section className="moduleMetricCard">
                   <span>{t("missingAmount")}</span>
-                  <strong>{formatAmount(report.summary?.missingTotal)}</strong>
+                  <strong>{formatAmount(missingTotal)}</strong>
                 </section>
               </div>
 

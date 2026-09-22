@@ -575,14 +575,14 @@ export async function POST(request) {
     if (blockOverrideError) throw blockOverrideError;
 
     if (action === "submit" && !scope.hasAllAccess) {
-      const avgDaysToPay = await resolveTrustedAvgDaysToPayForCustomer({
+      const avgDays = await resolveTrustedAvgDaysToPayForCustomer({
         request,
         authHeader,
         customerCode,
         customerName,
       });
       const blockStatus = resolveOrderBlockStatus({
-        avgDaysToPay,
+        ...avgDays,
         threshold: orderBlockThreshold,
         override: parseOrderBlockOverride(blockOverrideRow?.setting_value),
       });

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ExportableTable from "../../../components/ExportableTable";
+import { HISTORIC_PERFORMANCE_PERIOD_LABEL, HISTORIC_PERFORMANCE_SHORT_LABEL } from "../../../lib/paymentBehavior.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -237,9 +238,9 @@ export default function InvoiceSettlement({
             </em>
             {summary.avgDaysToPay6m != null ? (
               <em className="auditSummaryCardMeta">
-                Last 6 months: {formatCount(summary.avgDaysToPay6m)} days
+                {HISTORIC_PERFORMANCE_PERIOD_LABEL}: {formatCount(summary.avgDaysToPay6m)} days
                 {Number(summary.openAmountInAvg6m || 0) > 0.009
-                  ? " · includes open older than 6m paid avg"
+                  ? ` · includes open older than ${HISTORIC_PERFORMANCE_SHORT_LABEL} paid avg`
                   : ""}
               </em>
             ) : null}

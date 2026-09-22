@@ -201,7 +201,7 @@ async function readOutstandingDataset(admin) {
     }
   }
 
-  // Staging/dev fallback when no outstanding workbook has been uploaded yet.
+  // Local/dev fallback when no outstanding workbook has been uploaded yet.
   return {
     invoices: await readOutstandingInvoicesFromTable(admin),
     rows: [],

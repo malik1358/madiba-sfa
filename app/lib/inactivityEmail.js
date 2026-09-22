@@ -2,12 +2,13 @@ import { escapeHtml, formatReportTime, resolveUserReportEmail } from "./dailyVis
 import { parseEmailList } from "./mailer.js";
 import { formatIdleDuration } from "./collectionDaySummary.js";
 import { INACTIVITY_EMAIL_MS } from "./workdayActivity.js";
+import { isNonProductionAppEnv } from "./appEnvironment.js";
 
 export const INACTIVITY_EMAIL_TYPE = "inactivity_email";
 export const LATE_LOGIN_EMAIL_TYPE = "late_login_email";
 export const INACTIVITY_EMAIL_MINUTES = Math.round(INACTIVITY_EMAIL_MS / 60000);
 export const DEFAULT_APP_ORIGIN = "https://madiba-sfa.vercel.app";
-export const STAGING_APP_ORIGIN = "https://madiba-sfa-staging.vercel.app";
+export const LOCAL_APP_ORIGIN = "http://localhost:3000";
 
 function normalizeOrigin(value) {
   const raw = String(value || "").trim().replace(/\/+$/, "");
@@ -42,8 +43,8 @@ export function resolveAppOrigin(env = process.env) {
     return vercel;
   }
 
-  if (String(env.NEXT_PUBLIC_APP_ENV || "").trim().toLowerCase() === "staging") {
-    return STAGING_APP_ORIGIN;
+  if (isNonProductionAppEnv(env)) {
+    return LOCAL_APP_ORIGIN;
   }
 
   return DEFAULT_APP_ORIGIN;

@@ -47,6 +47,12 @@ async function readOverride(admin, customerCode) {
   return parseOrderBlockOverride(data?.setting_value);
 }
 
+function statusForCustomerOrderBlockError(message) {
+  if (/customer code is required/i.test(message)) return 400;
+  if (/not authenticated|invalid login session|access|customer not found/i.test(message)) return 403;
+  return 500;
+}
+
 export async function GET(request) {
   try {
     if (!supabaseUrl || !serviceKey) {
@@ -71,14 +77,14 @@ export async function GET(request) {
     });
 
     const authHeader = request.headers.get("authorization");
-    const avgDaysToPay = await resolveTrustedAvgDaysToPayForCustomer({
+    const avgDays = await resolveTrustedAvgDaysToPayForCustomer({
       request,
       authHeader,
       customerCode,
       customerName,
     });
     const override = await readOverride(admin, customerCode);
-    const status = resolveOrderBlockStatus({ avgDaysToPay, override });
+    const status = resolveOrderBlockStatus({ ...avgDays, override });
     return NextResponse.json({
       success: true,
       customerCode,
@@ -91,7 +97,7 @@ export async function GET(request) {
     });
   } catch (error) {
     const message = error.message || "Unable to load customer order block status.";
-    const status = /not authenticated|invalid login session|access|customer not found/i.test(message) ? 403 : 500;
+    const status = statusForCustomerOrderBlockError(message);
     return NextResponse.json({ success: false, error: message }, { status });
   }
 }
@@ -152,21 +158,21 @@ export async function POST(request) {
 
     const override = await readOverride(admin, customerCode);
     const authHeader = request.headers.get("authorization");
-    const avgDaysToPay = await resolveTrustedAvgDaysToPayForCustomer({
+    const avgDays = await resolveTrustedAvgDaysToPayForCustomer({
       request,
       authHeader,
       customerCode,
       customerName,
     });
     const status = resolveOrderBlockStatus({
-      avgDaysToPay,
+      ...avgDays,
       override,
       threshold: ORDER_BLOCK_AVG_DAYS_THRESHOLD,
     });
     return NextResponse.json({ success: true, customerCode, ...status, override });
   } catch (error) {
     const message = error.message || "Unable to update customer order unblock status.";
-    const status = /not authenticated|invalid login session|access|customer not found/i.test(message) ? 403 : 500;
+    const status = statusForCustomerOrderBlockError(message);
     return NextResponse.json({ success: false, error: message }, { status });
   }
 }

@@ -1,6 +1,9 @@
 import { hasGpsCoordinates } from "./geo.js";
 import { formatIdleDuration, formatNarrativeTime } from "./collectionDaySummary.js";
-import { formatWorkingHours } from "./workdayActivity.js";
+import { formatWorkingHours, getKsaDateTimeParts } from "./workdayActivity.js";
+
+/** Day-route working hours count only non-far customer stops from this KSA hour onward. */
+export const DAY_ROUTE_WORKING_HOURS_START_HOUR = 8;
 
 const NEAR_CUSTOMER_TRANSACTION_TYPES = new Set([
   "VISIT_REPORT",
@@ -204,6 +207,12 @@ function isNearCustomerTransaction(item) {
   return !item?.isFarFromCustomer;
 }
 
+function isAtOrAfterDayRouteWorkingHoursStart(ts) {
+  if (!Number.isFinite(ts)) return false;
+  const { hour } = getKsaDateTimeParts(new Date(ts));
+  return hour >= DAY_ROUTE_WORKING_HOURS_START_HOUR;
+}
+
 export function extractWorkdayTimesFromRoute(source = []) {
   const ordered = [...(source || [])]
     .map((item) => {
@@ -236,7 +245,12 @@ function nearCustomerTransactions(source = []) {
         ts,
       };
     })
-    .filter((item) => item.at && Number.isFinite(item.ts) && isNearCustomerTransaction(item))
+    .filter((item) => (
+      item.at
+      && Number.isFinite(item.ts)
+      && isNearCustomerTransaction(item)
+      && isAtOrAfterDayRouteWorkingHoursStart(item.ts)
+    ))
     .sort((left, right) => left.ts - right.ts);
 }
 

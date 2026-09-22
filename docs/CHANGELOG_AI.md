@@ -7,12 +7,16 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 ## Recent agent notes
 
 - **2026-09-22** — Visit GPS is auto-promoted onto the customer master when the customer has no saved coordinates (`maybePromptCustomerLocationUpdate` / `evaluateCustomerLocationUpdatePrompt`). Far-from-saved still prompts before overwrite. Outstanding Without GPS can still list customers with a last visit from older skipped/blocked GPS captures.
+- **2026-09-22** — Day-route / daily visit Working hours now use only non-far customer transactions at or after 08:00 KSA (`resolveDayRouteWorkingHours`). Midnight and early-morning near stops no longer inflate the total; far visit reports stay excluded.
 - **2026-09-22** — Payment Collections attachment saves: online path no longer serializes files into IndexedDB before upload; camera photo compression has load/canvas timeouts with original-file fallback; storage bucket `updateBucket` is best-effort; Saving clears before queue reload; selected attachment names show in the form. Server sniffs PDF magic bytes and accepts Android `image/jpg`.
 - **2026-09-21** — Sales-order submit now auto-blocks customers when Avg Days to Pay is 120+ (salesmen see the customer but submit is rejected). Customer Audit shows the block status, and admin can apply/remove a per-customer unblock override via `customer_order_block_override:<code>`.
 - **2026-09-21** — Gloves VAT is 0% on sales orders (New Order, PDF, WhatsApp), not only on settlement. `getPricedOrderLine` / `summarizePricedLines` honor `vatRateForProduct` (GLOVE/VINYL/قفاز). Labels switch to `VAT 0%` for gloves-only carts; do not treat `vatAmount === 0` as missing and fall back to 15%.
 - **2026-09-21** — Avg days to pay now shows both lifetime and last-6-month figures wherever lifetime was shown (Customer Audit, Payment Settlement, New Order, Order PDF, WhatsApp). 6m uses sales+receipts from the BI performance from-month; open invoices still only blend when older than that window’s paid avg.
 - **2026-09-21** — Customer Audit and New Order now include “receipt amount in last 10 days” sourced from customer-history receipts, using receipt-date windowing.
 - **2026-09-21** — Avg days to pay on Order PDF and New Order was using the default ~6-month customer-history window while receipts stayed full-ledger, so a small collection looked like a huge avg-days swing vs Customer Audit. Both now request `fullHistory=1&scope=settlement` like settlement screens.
+- **2026-09-21** — Hard local guard blocks the production Supabase project ref (`ynmtlzyqvmurpmfretji`) outside Vercel (`app/lib/supabaseGuard.js`, `instrumentation.js`, browser client, local scripts). Preview and production Vercel deploys are allowed. No secrets logged.
+- **2026-09-21** — Env semantics: `NEXT_PUBLIC_APP_ENV` local/development (and legacy staging) → LOCAL banner; removed hardcoded `madiba-sfa-staging.vercel.app` origin fallback in favor of explicit `APP_ORIGIN` / localhost. Production origin resolution unchanged when env is production or unset.
+- **2026-09-21** — Canonical deploy model is now local/dev → feature/AI branch → PR/CI → `main` → Vercel production. No permanent cloud staging. Docs updated (`README`, `AGENTS.md`, Copilot instructions, `docs/DEPLOYMENT.md`, related handover files, `ANDROID_APK.md`).
 - **2026-09-21** — Pending Orders now shows both current outstanding and `Outstanding >60 days` from the uploaded outstanding dataset, with the >60 figure summed from `61-90`, `91-120`, and `>120`.
 - **2026-09-21** — Expanded handover: mandatory agent rules list, `moduleAccess` matrix, major API inventory, and Android/Capacitor sections. Docs refreshed for dual Cursor + Copilot use; no application code changes.
 - **2026-09-21** — Mandatory rule in `AGENTS.md`: after any important change to business logic, database structure, reports, authentication, GPS/attendance logic, or architecture, update the relevant documentation before finishing the task.
@@ -63,9 +67,9 @@ These are real mismatches. Do not “fix” them as drive-by cleanups.
 6. **Price catalog setup is duplicated.** Baseline migration already creates `price_catalog_cache` and `price_catalog_snapshots`. `README.md` still tells operators to run `sql/setup_price_catalog_cache.sql` once. Running it should be idempotent; do not assume the cache tables are absent.
 7. **`is_management()` is narrower than the UI.** Invoice makers can open Imports and hierarchy in the app but SQL policies that call `is_management()` will deny them on direct browser queries. APIs bypass that with the service role.
 8. **Customer GPS audit columns are optional at runtime.** `customerGpsHistory.js` retries without them if Postgres says the column does not exist. A database that skipped `20260831153000_customer_gps_history.sql` still loads Customer Master, but without audit history.
-9. **Staging banner versus shell label.** The yellow banner requires `NEXT_PUBLIC_APP_ENV=staging`. `GlobalAppStatus` still receives `PRODUCTION` when that variable is anything else. An unset env on a staging project would look like production.
+9. **Non-production banner versus shell label.** Yellow banner and `LOCAL` shell label require a non-production `NEXT_PUBLIC_APP_ENV` (`local`, `development`, `dev`, or legacy `staging`). Unset or `production` still looks like production in the shell.
 10. **No automated test script in `package.json`.** Agents and CI can miss tests. CI only runs `npm run build`. Rule changes need an explicit `node --test` run.
-11. **Personal share script.** `sql/share_ahmed_nabil_customers_with_abdalla.sql` is a one-off data change. The durable rule is `SHARED_CUSTOMER_BOOKS` plus `customer_book_shares`. Do not run that script on staging unless the same people exist there.
+11. **Personal share script.** `sql/share_ahmed_nabil_customers_with_abdalla.sql` is a one-off data change. The durable rule is `SHARED_CUSTOMER_BOOKS` plus `customer_book_shares`. Do not run that script on local/dev unless the same people exist there.
 
 ## Do not modify without checking dependents
 
@@ -110,6 +114,6 @@ Areas where the git checkout alone is incomplete. Do not invent missing details:
 3. **Exact production env values and cron URL secrets** are not in the repo (correctly). Only names are in `.env.example`.
 4. **Price upstream URL fallback** inside price-sync code was not re-audited for this doc pass; `PRICE_SOURCE_URL` is optional and the README says a fallback exists.
 5. **Full RLS policy matrix** for every table after every migration is large; treat policies as a backstop and rely on API scope checks for service-role routes.
-6. **Which staging SQL scripts have been applied** on the staging Supabase project is not knowable from git alone.
+6. **Which local/dev SQL scripts have been applied** on a developer’s Supabase project is not knowable from git alone.
 7. **`COLLECTOR_SCREEN_SETUP.md` and parts of older READMEs** can disagree with `moduleAccess.js` and migrations; prefer code + `docs/`.
 8. **Capacitor plugin behavior on specific Android OEM skins** (battery killing timers) is described in `ANDROID_APK.md` as operational guidance, not guaranteed OS behavior.

@@ -18,6 +18,7 @@ import {
   parseLocationSpreadsheetRow,
   planCustomerLocationUpdates,
 } from "../app/lib/customerLocationImport.js";
+import { assertSupabaseUrlAllowed } from "../app/lib/supabaseGuard.js";
 
 function parseCsvRows(text) {
   const lines = String(text || "")
@@ -98,6 +99,7 @@ async function main() {
   if (!supabaseUrl || !serviceKey) {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
   }
+  assertSupabaseUrlAllowed(supabaseUrl);
 
   const inputPath = resolve(
     process.argv.find((arg) => !arg.startsWith("--") && arg.endsWith(".xlsx"))

@@ -13,7 +13,7 @@ These rules are mandatory for Cursor and Copilot:
 1. **Understand existing code before changing it.** Read the module, its callers, related `app/lib/` helpers, and matching tests under `tests/`.
 2. **Inspect dependencies before structural changes.** Search for every consumer of a function, table, setting key, status string, route, or role before renaming or removing it.
 3. **Do not invent Supabase tables, columns, or functions.** Use only names present in `supabase/migrations/`, `sql/`, or live queries. Many “datasets” are JSON in `public.system_settings`, not tables.
-4. **Preserve staging/production separation.** `staging` branch + staging Vercel + staging Supabase. `main` + production Vercel + production Supabase. Never put production credentials on staging.
+4. **Preserve local/production separation.** Local PC = development + staging (local/dev Supabase only). `main` = production (Vercel + production Supabase). There is no permanent cloud staging. Never put production Supabase credentials in `.env.local` or local/dev config. The runtime guard in `app/lib/supabaseGuard.js` must keep blocking the production project outside Vercel.
 5. **Preserve role-based access controls.** Screen access is `buildModuleAccess` in `app/lib/moduleAccess.js`. Do not bypass it with client-only hiding. Do not weaken API scope checks.
 6. **Preserve existing Android/Capacitor behavior unless explicitly asked.** The shell loads the hosted site (`capacitor.config.js`). Do not change app id, tracking, push, battery gates, or native permissions casually.
 7. **Test changes before finishing.** Run related `node --test tests/<file>.test.mjs` files and `npm run build` when the change can affect the Next.js build. There is no `npm test` script.
@@ -101,12 +101,20 @@ node --test tests/*.test.mjs
 npm run build
 ```
 
-Run the narrow test file that matches the module you changed. The full suite is large. `npm run build` is what GitHub Actions runs on pull requests to `main` and `staging`.
+Run the narrow test file that matches the module you changed. The full suite is large. `npm run build` is what GitHub Actions runs on pull requests and pushes to `main`.
 
 ## Git and environments
 
-- Feature work branches off `main` unless the task says otherwise. Production is `main`. UAT is `staging`.
-- Never point a staging deploy at production Supabase keys.
+Canonical model:
+
+```text
+local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  Vercel production
+```
+
+- Local PC is development and staging. Validate and test locally before opening a PR.
+- Temporary feature / AI branches isolate changes. Open pull requests into `main`.
+- Production is `main` only (Vercel production + production Supabase).
+- Never point local/dev at production Supabase keys.
 - Do not commit generated Android build output, `.next`, or env files.
 
 ## Handover docs

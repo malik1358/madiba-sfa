@@ -1,6 +1,6 @@
 # MADIBA SFA — instructions for coding agents
 
-MADIBA SFA is a Next.js 15 (App Router) sales-force app for KSA. Data lives in Supabase. Production deploys from `main` to Vercel. Staging uses a separate branch, Vercel project, and Supabase project.
+MADIBA SFA is a Next.js 15 (App Router) sales-force app for KSA. Data lives in Supabase. Local PC is development and staging (local/dev Supabase only). Production deploys from `main` to Vercel only. There is no permanent cloud staging environment.
 
 This repository is developed by **Cursor agents and GitHub Copilot together**. Treat the handover files as living shared memory.
 
@@ -23,7 +23,7 @@ After any important change to business logic, database structure, reports, authe
 - Understand existing code before changing it.
 - Inspect dependencies before structural changes. Search callers of shared `app/lib/` helpers, routes, setting keys, and status strings.
 - Do not invent Supabase tables, columns, or functions. Use `supabase/migrations/`, `sql/`, and current queries only. Many datasets are JSON in `public.system_settings`.
-- Preserve staging/production separation. Never use production Supabase credentials on staging.
+- Preserve local/production separation. Never use production Supabase credentials in local/dev (`.env.local`). Canonical flow: local/dev → feature/AI branch → PR/CI → `main` → Vercel production.
 - Preserve role-based access controls (`app/lib/moduleAccess.js` and API sales-scope checks).
 - Preserve existing Android/Capacitor behavior unless explicitly asked (`capacitor.config.js`, `android/`, `ANDROID_APK.md`).
 - Preserve existing field functionality (sales, collections, attendance, GPS, orders, settlement, reports).

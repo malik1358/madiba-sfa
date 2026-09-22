@@ -1024,6 +1024,7 @@ export default function NewOrderPage() {
           ...orderBlock,
           ...resolveOrderBlockStatus({
             avgDaysToPay: orderBlock.avgDaysToPay,
+            avgDaysToPay6m: orderBlock.avgDaysToPay6m,
             threshold: orderBlock.threshold,
             override: orderBlock.override || orderBlock,
           }),
@@ -1031,9 +1032,10 @@ export default function NewOrderPage() {
       }
       return resolveOrderBlockStatus({
         avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
+        avgDaysToPay6m: analytics?.paymentBehavior?.avgDaysToPay6m ?? null,
       });
     },
-    [analytics?.paymentBehavior?.avgDaysToPay, orderBlock],
+    [analytics?.paymentBehavior?.avgDaysToPay, analytics?.paymentBehavior?.avgDaysToPay6m, orderBlock],
   );
   const orderBlockedMessage = orderBlockFromAnalytics.blocked
     ? blockedByAvgDaysMessage({

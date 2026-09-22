@@ -272,14 +272,44 @@ export function extractLeadingCustomerCodeAndName(value) {
     return { customer_code: "", customer_name: "" };
   }
 
-  const match = text.match(/^([A-Z0-9-]{3,20})[\s_\-]+(.+)$/i);
-  if (!match || !leadingTokenLooksLikeCustomerCode(match[1])) {
+  let separatorIndex = -1;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === " " || char === "_" || char === "-") {
+      separatorIndex = index;
+      break;
+    }
+  }
+
+  if (separatorIndex < 0) {
+    return { customer_code: "", customer_name: text };
+  }
+
+  const leading = text.slice(0, separatorIndex).trim();
+  if (
+    leading.length < 3
+    || leading.length > 20
+    || !/^[A-Z0-9-]+$/i.test(leading)
+    || !leadingTokenLooksLikeCustomerCode(leading)
+  ) {
+    return { customer_code: "", customer_name: text };
+  }
+
+  let nameStart = separatorIndex;
+  while (nameStart < text.length) {
+    const char = text[nameStart];
+    if (char !== " " && char !== "_" && char !== "-") break;
+    nameStart += 1;
+  }
+
+  const customerName = text.slice(nameStart).trim();
+  if (!customerName) {
     return { customer_code: "", customer_name: text };
   }
 
   return {
-    customer_code: String(match[1] || "").trim(),
-    customer_name: String(match[2] || "").trim(),
+    customer_code: leading,
+    customer_name: customerName,
   };
 }
 
@@ -1576,5 +1606,4 @@ export function resolveVisitLastInvoiceDate(row, todayIso = new Date().toISOStri
     todayIso,
   ) || laterDateOnly(row?.latest_transaction_date, row?.last_invoice_date) || "";
 }
-
 

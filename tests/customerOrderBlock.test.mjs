@@ -23,6 +23,16 @@ test("does not block when admin override is active", () => {
   assert.equal(status.isAdminUnblocked, true);
 });
 
+test("falls back to 6-month average when lifetime average is unavailable", () => {
+  const status = resolveOrderBlockStatus({
+    avgDaysToPay: null,
+    avgDaysToPay6m: 130,
+  });
+  assert.equal(status.avgDaysToPay, 130);
+  assert.equal(status.avgDaysToPay6m, 130);
+  assert.equal(status.blocked, true);
+});
+
 test("parseOrderBlockOverride handles invalid JSON safely", () => {
   const override = parseOrderBlockOverride("{invalid");
   assert.equal(override.isUnblocked, false);

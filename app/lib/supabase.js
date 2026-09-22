@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { assertSupabaseUrlAllowed } from './supabaseGuard.js';
 
 let clientInstance = null;
 
@@ -13,6 +14,8 @@ export function getSupabaseClient() {
   if (!supabaseUrl || !supabaseKey) {
     return null;
   }
+
+  assertSupabaseUrlAllowed(supabaseUrl);
 
   clientInstance = createClient(supabaseUrl, supabaseKey, {
     auth: {

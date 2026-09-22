@@ -2,6 +2,7 @@ export const ORDER_BLOCK_AVG_DAYS_THRESHOLD = 120;
 export const ORDER_BLOCK_OVERRIDE_KEY_PREFIX = "customer_order_block_override:";
 
 function toNumber(value) {
+  if (value == null || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -30,17 +31,21 @@ export function parseOrderBlockOverride(rawSettingValue) {
 
 export function resolveOrderBlockStatus({
   avgDaysToPay,
+  avgDaysToPay6m = null,
   override = null,
   threshold = ORDER_BLOCK_AVG_DAYS_THRESHOLD,
 } = {}) {
   const avgDays = toNumber(avgDaysToPay);
+  const avgDays6m = toNumber(avgDaysToPay6m);
+  const effectiveAvgDays = avgDays ?? avgDays6m;
   const thresholdValue = toNumber(threshold) ?? ORDER_BLOCK_AVG_DAYS_THRESHOLD;
-  const isOverThreshold = avgDays != null && avgDays >= thresholdValue;
+  const isOverThreshold = effectiveAvgDays != null && effectiveAvgDays >= thresholdValue;
   const isAdminUnblocked = Boolean(override?.isUnblocked);
   const blocked = isOverThreshold && !isAdminUnblocked;
 
   return {
-    avgDaysToPay: avgDays,
+    avgDaysToPay: effectiveAvgDays,
+    avgDaysToPay6m: avgDays6m,
     threshold: thresholdValue,
     isOverThreshold,
     isAdminUnblocked,

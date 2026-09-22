@@ -30,6 +30,12 @@ export function isProductionSupabaseUrl(url) {
  * Enforce only on local/dev machines and scripts.
  * Any Vercel deployment (production or preview) must not be blocked.
  * Emergency override: MADIBA_ALLOW_PRODUCTION_SUPABASE=1
+ *
+ * Browser note: Next only inlines NEXT_PUBLIC_* into client bundles.
+ * VERCEL / VERCEL_ENV are server-only, so they are never present in the
+ * browser. Skipping the guard in the browser avoids crashing production
+ * hydration; local next dev is still blocked by instrumentation.js and
+ * scripts/dev-server.mjs on the server before pages are served.
  */
 export function shouldEnforceLocalSupabaseGuard(env = process.env) {
   if (String(env.MADIBA_ALLOW_PRODUCTION_SUPABASE || "").trim() === "1") {
@@ -37,6 +43,10 @@ export function shouldEnforceLocalSupabaseGuard(env = process.env) {
   }
   // Vercel sets VERCEL=1 and VERCEL_ENV (production | preview | development).
   if (String(env.VERCEL || "").trim() || String(env.VERCEL_ENV || "").trim()) {
+    return false;
+  }
+  // Client bundles never receive VERCEL*; do not throw during hydration.
+  if (typeof window !== "undefined") {
     return false;
   }
   return true;

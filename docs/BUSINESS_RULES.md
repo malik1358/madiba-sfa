@@ -23,6 +23,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Workday window used by helpers: 06:00–22:00 KSA.
 - Background GPS idle threshold: 15 minutes.
 - Auto-close looks back 14 days and inserts `END_OF_DAY` for sessions that have morning attendance and no end (`app/lib/autoCloseWorkdaysServer.js`). Cron closes the previous KSA day at 00:05 KSA and same-day at 23:59 KSA.
+- Day-route / daily visit **Working hours** (`resolveDayRouteWorkingHours` in `app/lib/dayRouteMap.js`): span from the first to the last **non-far** customer transaction (`VISIT_REPORT`, `COLLECTION_VISIT`, `ORDER_SUBMITTED`) at or after **08:00 KSA**, minus lunch overlap. Pre-8:00 KSA stops (including midnight activity), far-from-customer rows, login, logout, and GPS pings do not set the endpoints. This is separate from the 06:00–22:00 helper window and from user-activity working hours (login→lunch→logout).
 - Transaction types that count as activity: `VISIT_REPORT`, `ORDER_DRAFT`, `ORDER_EDITED`, `ORDER_SUBMITTED`, `PROSPECT_FOLLOW_UP`, `NOTE`. GPS-only punches do not clear the inactivity warning.
 - `activity_reminders_enabled` on the profile can suppress reminders. Default is true.
 

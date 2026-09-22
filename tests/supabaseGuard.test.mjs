@@ -48,6 +48,19 @@ test("local and development enforce the guard", () => {
   assert.equal(shouldEnforceLocalSupabaseGuard({}), true);
 });
 
+test("browser runtime does not enforce even without Vercel env", () => {
+  const previous = globalThis.window;
+  globalThis.window = {};
+  try {
+    assert.equal(shouldEnforceLocalSupabaseGuard({ NODE_ENV: "production" }), false);
+    assert.equal(shouldEnforceLocalSupabaseGuard({}), false);
+    assert.doesNotThrow(() => assertSupabaseUrlAllowed(PROD_URL, {}));
+  } finally {
+    if (previous === undefined) delete globalThis.window;
+    else globalThis.window = previous;
+  }
+});
+
 test("allowed local/dev URL does not throw", () => {
   assert.doesNotThrow(() =>
     assertSupabaseUrlAllowed(LOCAL_URL, { NEXT_PUBLIC_APP_ENV: "local", NODE_ENV: "development" }),

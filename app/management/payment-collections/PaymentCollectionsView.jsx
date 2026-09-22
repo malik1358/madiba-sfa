@@ -199,6 +199,8 @@ const TEXT = {
   receiptCopy: { en: "Receipt Copy", ar: "صورة الإيصال" },
   capturePhoto: { en: "Take Photo", ar: "التقاط صورة" },
   chooseFile: { en: "Choose File / PDF", ar: "اختيار ملف / PDF" },
+  clearAttachment: { en: "Clear", ar: "مسح" },
+  attachmentSelected: { en: "Selected", ar: "تم الاختيار" },
   saveVisit: { en: "Save Collection Visit", ar: "حفظ زيارة التحصيل" },
   locationUpdateTitle: { en: "Update customer location?", ar: "تحديث موقع العميل؟" },
   locationUpdateAndSave: { en: "Update location and save", ar: "تحديث الموقع والحفظ" },
@@ -1047,7 +1049,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (text.includes("GPS is required") || text === GPS_REQUIRED_ERROR) return t("msgGpsRequired");
     if (text.includes("Unable to save collection visit")) return t("msgSaveFailed");
     if (text.includes("timed out") || text.toLowerCase().includes("abort")) return t("msgRequestTimeout");
-    if (text.includes("Reading the attached file")) return t("msgRequestTimeout");
+    if (text.includes("Reading the attached file") || text.includes("Reading this photo") || text.includes("Compressing this photo")) {
+      return t("msgRequestTimeout");
+    }
     if (text.toLowerCase().includes("bucket not found") || text.includes("File storage is not configured")) {
       return t("msgStorageUnavailable");
     }
@@ -1935,6 +1939,14 @@ export default function PaymentCollectionsView({ view = "due" }) {
         queueFirst: offline,
       });
 
+      // Clear Saving before success UI / queue refresh so attachment saves do not
+      // look stuck while the outstanding queue reloads on mobile.
+      if (saveWatchdog && typeof window !== "undefined") {
+        window.clearTimeout(saveWatchdog);
+        saveWatchdog = 0;
+      }
+      setSavingCustomerCode("");
+
       const payload = saveResult.payload || {};
       const correctedSummary = String(payload?.summaryText || "").trim();
       const whatsappSummary = correctedSummary || summaryText;
@@ -1961,7 +1973,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       await refreshPendingSyncCount();
 
       if (!saveResult.queued) {
-        await loadQueue(rowKey(row));
+        void loadQueue(rowKey(row));
       } else {
         const scope = salesScope || (await fetchSalesScopeCached().catch(() => null))?.scope;
         await persistOptimisticVisitSave(row, {
@@ -3183,6 +3195,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                         />
                                       </label>
                                     </div>
+                                    {form.paymentCopy ? (
+                                      <div className="moduleHint" style={{ marginTop: "6px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <span>{t("attachmentSelected")}: {form.paymentCopy.name || "payment-copy"}</span>
+                                        <button
+                                          type="button"
+                                          className="moduleInlineButton moduleActionButton"
+                                          onClick={() => setForm((current) => ({ ...current, paymentCopy: null }))}
+                                        >
+                                          {t("clearAttachment")}
+                                        </button>
+                                      </div>
+                                    ) : null}
                                   </label>
                                   <label>
                                     {t("receiptCopy")}
@@ -3208,6 +3232,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                         />
                                       </label>
                                     </div>
+                                    {form.receiptCopy ? (
+                                      <div className="moduleHint" style={{ marginTop: "6px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <span>{t("attachmentSelected")}: {form.receiptCopy.name || "receipt-copy"}</span>
+                                        <button
+                                          type="button"
+                                          className="moduleInlineButton moduleActionButton"
+                                          onClick={() => setForm((current) => ({ ...current, receiptCopy: null }))}
+                                        >
+                                          {t("clearAttachment")}
+                                        </button>
+                                      </div>
+                                    ) : null}
                                   </label>
                                 </div>
 

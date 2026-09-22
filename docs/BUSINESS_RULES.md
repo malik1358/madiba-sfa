@@ -76,7 +76,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Salesmen named in `COLLECTION_QUEUE_EXCLUDED_SALESMEN` (`Zia`, `Asrar Ahmed`) are removed from the collection queue. This is a business filter, not dead code.
 - Scheduled revisit dates are redacted for viewers who should not see another collector’s private schedule (`redactCollectionVisitScheduleForViewer`).
 - Legal transfer removes the customer from the normal queue and lists them on `/management/payment-collections/legal`.
-- Receipt copies and payment copies go to the `payment-collections` bucket. The save path must not hang when a Funds Received PDF is attached (that bug was fixed; keep the save path bounded).
+- Receipt copies and payment copies go to the `payment-collections` bucket. The save path must not hang when a Funds Received PDF or camera photo is attached: online saves upload directly (no IndexedDB serialize-first), photo compression is time-bounded with a fallback to the original file, bucket MIME refresh is best-effort, and Saving clears before the queue reload.
 - Receipts Not in Tally (`app/lib/receiptsNotInTally.js`) matches app collection receipts to the Tally receipt upload. Amount tolerance is 0.02. Default date window is 1 day. The UI allows a window up to 30 days. Do not raise that cap without checking the page and the API together.
 - Collection report WhatsApp distance uses the same prior visits as the report. The service role recomputes distance because client RLS cannot see every previous row.
 

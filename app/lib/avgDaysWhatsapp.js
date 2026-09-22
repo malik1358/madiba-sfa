@@ -6,17 +6,36 @@ import {
 } from "./mobileDataCache.js";
 
 export const AVG_DAYS_TO_PAY_WHATSAPP_LABEL = "Avg days to pay";
+export const AVG_DAYS_TO_PAY_6M_WHATSAPP_LABEL = "6-month avg";
 
 /**
  * Blank line above the avg-days line. The GPS block that follows starts with its own
  * blank line, which provides the gap below.
+ * Accepts a number (lifetime only) or `{ avgDaysToPay, avgDaysToPay6m }`.
  */
 export function formatAvgDaysToPayWhatsappLines(avgDaysToPay, labels = {}) {
-  if (avgDaysToPay == null || avgDaysToPay === "") return [];
-  const value = Number(avgDaysToPay);
-  if (!Number.isFinite(value)) return [];
+  let lifetime = avgDaysToPay;
+  let sixMonth = labels.avgDaysToPay6m;
+  if (avgDaysToPay != null && typeof avgDaysToPay === "object") {
+    lifetime = avgDaysToPay.avgDaysToPay;
+    sixMonth = avgDaysToPay.avgDaysToPay6m ?? sixMonth;
+  }
+
+  const lines = [];
+  const lifetimeValue = lifetime == null || lifetime === "" ? null : Number(lifetime);
+  const sixValue = sixMonth == null || sixMonth === "" ? null : Number(sixMonth);
   const label = labels.avgDaysToPay || AVG_DAYS_TO_PAY_WHATSAPP_LABEL;
-  return ["", `${label}: ${Math.round(value)}`];
+  const sixLabel = labels.avgDaysToPay6mLabel || AVG_DAYS_TO_PAY_6M_WHATSAPP_LABEL;
+
+  if (Number.isFinite(lifetimeValue)) {
+    if (!lines.length) lines.push("");
+    lines.push(`${label}: ${Math.round(lifetimeValue)}`);
+  }
+  if (Number.isFinite(sixValue)) {
+    if (!lines.length) lines.push("");
+    lines.push(`${sixLabel}: ${Math.round(sixValue)}`);
+  }
+  return lines;
 }
 
 export async function loadCustomerAvgDaysToPay({
@@ -65,7 +84,14 @@ export async function loadCustomerAvgDaysToPay({
       outstandingInvoices,
     });
 
-    return behavior?.avgDaysToPay ?? null;
+    if (behavior?.avgDaysToPay == null && behavior?.avgDaysToPay6m == null) {
+      return null;
+    }
+
+    return {
+      avgDaysToPay: behavior?.avgDaysToPay ?? null,
+      avgDaysToPay6m: behavior?.avgDaysToPay6m ?? null,
+    };
   } catch {
     return null;
   }

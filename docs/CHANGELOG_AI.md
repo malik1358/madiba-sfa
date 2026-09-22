@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-22** — Payment Collections attachment saves: online path no longer serializes files into IndexedDB before upload; camera photo compression has load/canvas timeouts with original-file fallback; storage bucket `updateBucket` is best-effort; Saving clears before queue reload; selected attachment names show in the form. Server sniffs PDF magic bytes and accepts Android `image/jpg`.
 - **2026-09-21** — Sales-order submit now auto-blocks customers when Avg Days to Pay is 120+ (salesmen see the customer but submit is rejected). Customer Audit shows the block status, and admin can apply/remove a per-customer unblock override via `customer_order_block_override:<code>`.
 - **2026-09-21** — Gloves VAT is 0% on sales orders (New Order, PDF, WhatsApp), not only on settlement. `getPricedOrderLine` / `summarizePricedLines` honor `vatRateForProduct` (GLOVE/VINYL/قفاز). Labels switch to `VAT 0%` for gloves-only carts; do not treat `vatAmount === 0` as missing and fall back to 15%.
 - **2026-09-21** — Customer Audit and New Order now include “receipt amount in last 10 days” sourced from customer-history receipts, using receipt-date windowing.
@@ -45,7 +46,7 @@ From merged pull requests on `main` (newest first):
 - Pending Order Queue has a current outstanding column (PR #303).
 - Tally order Excel export and item-master unit import exist. Large unit imports must not time out without a clear error (PRs #300 and #304).
 - Live time-to-make is shown for `Pending for invoice creation` (PR #308).
-- Saving a Funds Received collection must not hang on the PDF attachment (PR #309).
+- Saving a Funds Received collection must not hang on PDF or camera attachments (PR #309; follow-up 2026-09-22 bounded compression / online upload path).
 - Sheet names for exports should come from the snapshot the user is looking at (PR #289).
 
 ## Known drift (docs or SQL versus code)

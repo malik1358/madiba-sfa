@@ -47,6 +47,9 @@ export function resolveUploadContentType(file = {}, buffer = null) {
   if (mime === "application/pdf" || name.endsWith(".pdf") || headerLooksLikePdf(buffer)) {
     return "application/pdf";
   }
+  if (mime === "image/jpg" || mime === "image/pjpeg") {
+    return "image/jpeg";
+  }
   if (!isGenericUploadMimeType(mime)) {
     return mime;
   }
@@ -60,20 +63,24 @@ export function resolveUploadContentType(file = {}, buffer = null) {
   return "image/jpeg";
 }
 
-export function ensureNamedUploadFile(file, fallbackName = "attachment.jpg") {
+export function ensureNamedUploadFile(file, fallbackName = "attachment.jpg", buffer = null) {
   if (!file || typeof File === "undefined" || !(file instanceof Blob)) return file;
 
   const contentType = resolveUploadContentType({
     name: file.name || fallbackName,
     type: file.type,
-  });
+  }, buffer);
   const ext = contentType === "application/pdf"
     ? "pdf"
     : contentType === "image/png"
       ? "png"
       : contentType === "image/webp"
         ? "webp"
-        : "jpg";
+        : contentType === "image/heic"
+          ? "heic"
+          : contentType === "image/heif"
+            ? "heif"
+            : "jpg";
   const rawName = String(file.name || fallbackName || `attachment.${ext}`).trim() || `attachment.${ext}`;
   const baseName = rawName.replace(/\.[^.]+$/, "") || "attachment";
   const nextName = `${baseName}.${ext}`;

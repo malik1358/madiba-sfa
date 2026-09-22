@@ -21,6 +21,30 @@ test("collection save path uses local customer data and resilient offline helper
   assert.match(source, /queueFirst: offline/);
   assert.match(source, /timeoutMs: shareFiles\.length > 0 \? 90000 : 25000/);
   assert.match(source, /receipt-copy\.pdf/);
+  assert.match(source, /setSavingCustomerCode\(""\);/);
+  assert.match(source, /void loadQueue\(rowKey\(row\)\);/);
+  assert.match(source, /attachmentSelected/);
+});
+
+test("online collection uploads skip IndexedDB serialization until queueing", () => {
+  const source = fs.readFileSync(new URL("../app/lib/offlineApi.js", import.meta.url), "utf8");
+  assert.match(source, /Only serialize files into IndexedDB when we actually need to queue/);
+  assert.match(source, /async function queueForSync\(\) \{\s*const payload = await formDataToOfflinePayload\(formData\);/s);
+});
+
+test("photo prepare path bounds image load and canvas compression", () => {
+  const source = fs.readFileSync(new URL("../app/lib/compressUploadFile.js", import.meta.url), "utf8");
+  assert.match(source, /IMAGE_LOAD_TIMEOUT_MS/);
+  assert.match(source, /CANVAS_BLOB_TIMEOUT_MS/);
+  assert.match(source, /readUploadHeader/);
+  assert.match(source, /Fall back to the original bytes/);
+});
+
+test("payment-collections bucket MIME refresh must not block uploads", () => {
+  const source = fs.readFileSync(new URL("../app/api/payment-collections/route.js", import.meta.url), "utf8");
+  assert.match(source, /Never block attachment saves if updateBucket/);
+  assert.match(source, /sniffUploadHeader/);
+  assert.match(source, /image\/jpg/);
 });
 
 test("legal remove uses a long PATCH timeout and skips office GPS", () => {

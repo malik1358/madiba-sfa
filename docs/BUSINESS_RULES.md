@@ -76,7 +76,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Salesmen named in `COLLECTION_QUEUE_EXCLUDED_SALESMEN` (`Zia`, `Asrar Ahmed`) are removed from the collection queue. This is a business filter, not dead code.
 - Scheduled revisit dates are redacted for viewers who should not see another collector’s private schedule (`redactCollectionVisitScheduleForViewer`).
 - Legal transfer removes the customer from the normal queue and lists them on `/management/payment-collections/legal`.
-- Receipt copies and payment copies go to the `payment-collections` bucket. The save path must not hang when a Funds Received PDF is attached (that bug was fixed; keep the save path bounded).
+- Receipt copies and payment copies go to the `payment-collections` bucket. The save path must not hang when a Funds Received PDF or camera photo is attached: online saves upload directly (no IndexedDB serialize-first), photo compression is time-bounded with a fallback to the original file, bucket MIME refresh is best-effort, and Saving clears before the queue reload.
 - Receipts Not in Tally (`app/lib/receiptsNotInTally.js`) matches app collection receipts to the Tally receipt upload. Amount tolerance is 0.02. Default date window is 1 day. The UI allows a window up to 30 days. Do not raise that cap without checking the page and the API together.
 - Collection report WhatsApp distance uses the same prior visits as the report. The service role recomputes distance because client RLS cannot see every previous row.
 
@@ -93,6 +93,7 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 - Average days uses paid receipts first. Open invoices are included only when they are older than that paid average. Younger FIFO residuals are excluded.
 - Partial credit notes and sales returns appear in the credit-note table, not as reversed invoices.
 - Avg days / FIFO settlement must load sales history from day 1 through today (customer-history `fullHistory=1` / `scope=settlement`). That includes Customer Audit, Payment Settlement, Order PDF, New Order payment behavior, and WhatsApp avg-days helpers. Do not use the default ~6-month BI performance window for avg days — receipts are still full-ledger, and truncated sales skew the weighted average dramatically.
+- Screens and PDFs that show avg days also show a parallel **6-month avg** (`avgDaysToPay6m`): sales + receipts + open invoices on/after the first day of the month that is `HISTORIC_PERFORMANCE_MONTHS` before the current KSA month (same span as the BI performance window). Open invoices still enter only when older than that window’s paid-only avg. Lifetime remains `avgDaysToPay`.
 - Tolerance for amount matches is 0.02.
 - Customer Audit and New Order payment-behavior summaries also show receipt amount collected in the last 10 days (date-windowed by receipt date).
 

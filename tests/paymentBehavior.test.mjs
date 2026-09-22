@@ -359,9 +359,12 @@ test("truncated sales window with full receipts skews avg days vs full ledger", 
     transactions: allTransactions.filter((row) => row.transaction_date >= "2026-03-01"),
     receipts: allReceipts,
     todayIso: "2026-09-21",
+    includeSixMonthWindow: false,
   });
 
   assert.equal(full.avgDaysToPay, 92); // amount-weighted 100d + 10d
+  assert.equal(full.avgDaysToPay6m, 10); // only NEW falls in 6m window with its receipt
+  assert.equal(full.avgDays6mFromDate, "2026-03-01");
   assert.notEqual(truncated.avgDaysToPay, full.avgDaysToPay);
   assert.ok(
     Math.abs(truncated.avgDaysToPay - full.avgDaysToPay) >= 20,

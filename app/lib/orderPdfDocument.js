@@ -9,6 +9,7 @@ import {
   syncOutstandingCustomerFromInvoices,
   toNumber as parseOutstandingNumber,
 } from "./outstanding.js";
+import { formatAvgDaysDualLine } from "./paymentBehavior.js";
 import {
   DEFAULT_PAYMENT_TYPE,
   DEFAULT_PRICING_REGION,
@@ -737,14 +738,18 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
   const paymentBehavior = analytics?.paymentBehavior || null;
   const paymentBehaviorLines = [];
-  if (paymentBehavior?.avgDaysToPay != null) {
-    paymentBehaviorLines.push(`Avg days to pay: ${paymentBehavior.avgDaysToPay}`);
+  const avgDaysLine = formatAvgDaysDualLine(paymentBehavior);
+  if (avgDaysLine) {
+    paymentBehaviorLines.push(avgDaysLine);
     if (Number(paymentBehavior.openAmountInAvg || 0) > 0.009) {
       paymentBehaviorLines[0] += " (paid avg + open older than that avg)";
-    } else {
+    } else if (paymentBehavior.avgDaysToPay != null) {
       paymentBehaviorLines[0] += " from receipts";
     }
-    if (paymentBehavior.medianDaysToPay != null && paymentBehavior.medianDaysToPay !== paymentBehavior.avgDaysToPay) {
+    if (
+      paymentBehavior.medianDaysToPay != null
+      && paymentBehavior.medianDaysToPay !== paymentBehavior.avgDaysToPay
+    ) {
       paymentBehaviorLines[0] += ` (median ${paymentBehavior.medianDaysToPay})`;
     }
     if (

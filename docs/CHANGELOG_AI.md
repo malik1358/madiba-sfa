@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-22** — Missing-invoice chase now includes a separate `Waiting for credit application` table in the 1-hour digest email, and the re-send cadence matches the business rule at 15 minutes instead of 12. The same queue stays excluded from the non-actionable lists.
 - **2026-09-21** — Sales-order submit now auto-blocks customers when Avg Days to Pay is 120+ (salesmen see the customer but submit is rejected). Customer Audit shows the block status, and admin can apply/remove a per-customer unblock override via `customer_order_block_override:<code>`.
 - **2026-09-21** — Gloves VAT is 0% on sales orders (New Order, PDF, WhatsApp), not only on settlement. `getPricedOrderLine` / `summarizePricedLines` honor `vatRateForProduct` (GLOVE/VINYL/قفاز). Labels switch to `VAT 0%` for gloves-only carts; do not treat `vatAmount === 0` as missing and fall back to 15%.
 - **2026-09-21** — Customer Audit and New Order now include “receipt amount in last 10 days” sourced from customer-history receipts, using receipt-date windowing.

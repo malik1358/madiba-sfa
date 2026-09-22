@@ -17,8 +17,8 @@ test("collection save path uses local customer data and resilient offline helper
   assert.match(source, /customer: row/);
   assert.match(source, /skipReverseGeocode: offline/);
   assert.match(source, /scope: salesScope/);
-  assert.match(source, /queueFirst: offline \|\| !hasAttachments/);
-  assert.match(source, /timeoutMs: hasAttachments \? 45000 : 12000/);
+  assert.match(source, /queueFirst: true/);
+  assert.match(source, /timeoutMs: shareFiles\.length > 0 \? 45000 : 12000/);
   assert.match(source, /skipTimeline: true/);
   assert.match(source, /row\.avg_days_to_pay/);
   assert.match(source, /COLLECTION_TRANSLATE_TIMEOUT_MS = 2500/);
@@ -73,11 +73,11 @@ test("visit distance metrics skip supabase timeline while offline", () => {
   assert.match(source, /timelineTimeoutMs = 0/);
 });
 
-test("collection saves are offline-first without attachments", () => {
+test("collection saves are offline-first including attachments", () => {
   const source = fs.readFileSync(
     new URL("../app/management/payment-collections/PaymentCollectionsView.jsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /Text-only visits: save on-device first/);
-  assert.match(source, /queueFirst: offline \|\| !hasAttachments/);
+  assert.match(source, /Always save on-device first \(including Funds Received PDF\/photo\)/);
+  assert.match(source, /queueFirst: true/);
 });

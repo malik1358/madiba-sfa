@@ -1923,8 +1923,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
         if (receiptFile) shareFiles.push(receiptFile);
       }
 
-      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-      const hasAttachments = shareFiles.length > 0;
       const saveResult = await postFormDataResilient({
         url: "/api/payment-collections",
         formData,
@@ -1935,14 +1933,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
           type: "collection_visit",
           customerCode: row.customer_code,
         },
-        // Large PDF receipts need more than a short probe timeout on mobile data.
-        timeoutMs: hasAttachments ? 45000 : 12000,
+        // Always save on-device first (including Funds Received PDF/photo). Sync
+        // re-resolves Android MIME on upload so queued attachments do not stick.
+        timeoutMs: shareFiles.length > 0 ? 45000 : 12000,
         queueOnTimeout: true,
-        // Text-only visits: save on-device first and sync in the background so
-        // flaky "online" mobile data cannot block collectors for tens of seconds.
-        // Attachment visits still try the server first (avoids IndexedDB serialize
-        // of large camera PDFs), then queue on timeout — sync re-resolves MIME.
-        queueFirst: offline || !hasAttachments,
+        queueFirst: true,
       });
 
       // Clear Saving before success UI / queue refresh so attachment saves do not

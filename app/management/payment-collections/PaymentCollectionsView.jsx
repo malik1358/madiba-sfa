@@ -2178,10 +2178,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerCode: row.customer_code,
           action,
         },
-        // Legal remove used to time out at the default 4s while the API rebuilt
-        // the whole outstanding queue, so the delete never reached the database.
+        // Legal updates also save on-device first so flaky mobile data cannot block
+        // transfer/remove. Sync applies the PATCH when the connection improves.
         timeoutMs: 60000,
-        queueFirst: typeof navigator !== "undefined" && navigator.onLine === false,
+        queueFirst: true,
       });
 
       if (!saveResult.success) {

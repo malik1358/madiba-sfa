@@ -233,6 +233,7 @@ export default function StockTakePage() {
       const clientSessionId = crypto.randomUUID();
       const result = await postJsonResilient({
         url: "/api/stock-take",
+        queueFirst: true,
         jsonBody: { mode: "start-session", warehouse: warehouseName, clientSessionId },
         headers,
         metadata: { type: "stock_take_session", sessionId: clientSessionId },
@@ -399,6 +400,7 @@ export default function StockTakePage() {
         },
         headers,
         metadata: { type: "stock_take_line", sessionId: session.id, localLineId: localLine.id },
+        queueFirst: true,
       });
       const savedLine = result.queued ? localLine : (result.payload?.line || localLine);
       const nextLines = [savedLine, ...lines.filter((row) => row.id !== savedLine.id)].slice(0, 500);
@@ -442,6 +444,7 @@ export default function StockTakePage() {
         },
         headers: await authHeaders(),
         metadata: { type: "stock_take_update_line", sessionId: session.id, lineId: editingLine.id },
+        queueFirst: true,
       });
       if (!result.success && !result.queued) throw new Error(result.payload?.error || "Unable to update scan.");
       const saved = result.payload?.line || applyStockTakeLineEdit(editingLine, { qty, scannedUom, pallet, location, item });
@@ -472,6 +475,7 @@ export default function StockTakePage() {
         jsonBody: { mode: "delete-line", lineId: line.id },
         headers: await authHeaders(),
         metadata: { type: "stock_take_delete_line", sessionId: session.id, lineId: line.id },
+        queueFirst: true,
       });
       if (!result.success && !result.queued) throw new Error(result.payload?.error || "Unable to delete scan.");
       await persistLines(session.id, lines.filter((row) => row.id !== line.id));
@@ -506,6 +510,7 @@ export default function StockTakePage() {
         jsonBody: { mode: "share-session", sessionId, userId: shareWithId },
         headers: await authHeaders(),
         metadata: { type: "stock_take_share", sessionId },
+        queueFirst: true,
       });
       if (!result.success) throw new Error("Unable to share inventory.");
       await loadOpenSessions();
@@ -527,6 +532,7 @@ export default function StockTakePage() {
         jsonBody: { mode: "archive-session", sessionId: row.id },
         headers: await authHeaders(),
         metadata: { type: "stock_take_archive", sessionId: row.id },
+        queueFirst: true,
       });
       if (!result.success) throw new Error("Unable to archive inventory.");
       if (session?.id === row.id) {

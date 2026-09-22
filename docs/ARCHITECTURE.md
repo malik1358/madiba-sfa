@@ -161,7 +161,7 @@ After a sales import, the BI cube and the daily supplier-order email can rebuild
 
 ## Offline and mobile cache
 
-Field phones cache scope, prices, and customer payloads (`app/lib/mobileDataCache.js`, `offlineDataRefresh.js`, `localDataStore.js`). `/api/mobile-snapshot` and `/api/cron/mobile-snapshot` rebuild snapshots. `/api/offline-data-version` exposes a version key so clients know when to refresh. Queued orders use `app/lib/offlineSyncQueue.js`.
+Field phones cache scope, prices, and customer payloads (`app/lib/mobileDataCache.js`, `offlineDataRefresh.js`, `localDataStore.js`). `/api/mobile-snapshot` and `/api/cron/mobile-snapshot` rebuild snapshots. `/api/offline-data-version` exposes a version key so clients know when to refresh. Queued field writes use `app/lib/offlineSyncQueue.js` via `postJsonResilient` / `postFormDataResilient` / `sendJsonResilient`, which **default to `queueFirst: true`** so collections, visits, orders, stock take, and prospects save on-device first and sync in the background.
 
 Do not assume a page always has a live network read. Several screens render from cache and then refresh.
 

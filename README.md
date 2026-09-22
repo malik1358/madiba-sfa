@@ -3,33 +3,27 @@ KSA Sales Force Automation System
 
 ## Environments
 
-The application uses two isolated environments:
+There is **no permanent cloud staging environment**. Local PC is development and staging. Cloud is production only.
 
-| Environment | Git branch | Vercel project | Database |
-| --- | --- | --- | --- |
-| Staging / UAT | `staging` | Separate staging project | Separate staging Supabase project |
-| Production | `main` | Existing production project | Production Supabase project |
+| Environment | Where | Git | Hosting | Database |
+| --- | --- | --- | --- | --- |
+| Local / staging | Developer PC | Any working branch | `npm run dev` | Local / dev Supabase only |
+| Production | Cloud | `main` | Vercel production | Production Supabase |
 
-Never configure the staging Vercel project with production Supabase credentials.
+Never put production Supabase credentials in `.env.local` or any local/dev config.
 
 ### Release flow
 
-1. Develop and test changes on a feature branch.
-2. Open a pull request into `staging`.
-3. Merge after the `Build` check passes; developers and UAT test the staging URL.
-4. After UAT approval, open a pull request from `staging` into `main`.
-5. Merge only after the `Build` check passes. Vercel then deploys production.
+```text
+local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  Vercel production
+```
 
-### One-time staging setup
+1. Develop, test, and stage on your local PC against local/dev Supabase.
+2. Push a temporary feature or AI branch and open a pull request into `main`.
+3. Merge only after the GitHub `Build` check passes.
+4. Vercel deploys production from `main` only.
 
-1. Create a new Supabase project for staging and apply the same schema as production. Use sanitized test data only.
-2. In Vercel, create a second project by importing this GitHub repository.
-3. Name it `madiba-sfa-staging` and set its Production Branch to `staging`.
-4. Add the variables from [.env.example](.env.example) to the staging Vercel project. Use staging Supabase values and set `NEXT_PUBLIC_APP_ENV=staging`.
-5. Keep the existing production Vercel project on `main`, with `NEXT_PUBLIC_APP_ENV=production`.
-6. In GitHub branch protection, require pull requests and the `Build` status check for both `staging` and `main`.
-
-The staging deployment displays a yellow `STAGING / UAT - TEST DATA ONLY` banner on every page.
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for env names, crons, and Android notes. AI agents: start with [AGENTS.md](AGENTS.md) and [docs/](docs/).
 
 ## Internal Android app
 

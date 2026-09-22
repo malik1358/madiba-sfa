@@ -253,8 +253,8 @@ test("buildDailyVisitReportPageUrl points at that salesman and date", () => {
   );
   assert.equal(resolveAppOrigin({}), "https://madiba-sfa.vercel.app");
   assert.equal(
-    resolveAppOrigin({ VERCEL_URL: "madiba-sfa-staging.vercel.app" }),
-    "https://madiba-sfa-staging.vercel.app",
+    resolveAppOrigin({ APP_ORIGIN: "http://localhost:3000" }),
+    "http://localhost:3000",
   );
   assert.equal(
     resolveAppOrigin({
@@ -271,10 +271,17 @@ test("buildDailyVisitReportPageUrl points at that salesman and date", () => {
   );
   assert.equal(
     resolveAppOrigin({
+      NEXT_PUBLIC_APP_ENV: "local",
+      VERCEL_URL: "madiba-abc123xy-maliks-projects-c6b39514.vercel.app",
+    }),
+    "http://localhost:3000",
+  );
+  assert.equal(
+    resolveAppOrigin({
       NEXT_PUBLIC_APP_ENV: "staging",
       VERCEL_URL: "madiba-abc123xy-maliks-projects-c6b39514.vercel.app",
     }),
-    "https://madiba-sfa-staging.vercel.app",
+    "http://localhost:3000",
   );
 });
 

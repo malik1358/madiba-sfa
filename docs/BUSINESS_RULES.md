@@ -40,12 +40,14 @@ Constants in `app/lib/workdayActivity.js`:
 ## Visits
 
 - Visit outcomes on `visits.outcome` are constrained. Field reports in `system_settings` are the source Customer Audit and My Day read for the latest report (`visit_report_latest:<code>`).
+- My Day / Visit Without Order visit saves, inactive/active toggles, and prospect foreclosure are offline-first (`queueFirst`) via the resilient helpers. Save enrichment skips the activity timeline; WhatsApp avg days uses a local customer value when present.
 - Visit plan (`app/lib/salesmanVisitPlan.js`): default 12 visits per salesman. System suggestions need at least 7 days since the last visit (`MIN_SYSTEM_VISIT_GAP_DAYS`). Appointments due today bypass that gap. Score mixes sales opportunity and collection opportunity. The page reads the stored snapshot `salesman_visit_plan_snapshot_v1`. The midnight KSA cron builds it. Email is off unless `SALESMAN_VISIT_PLAN_EMAIL_ENABLED` is true.
 - WhatsApp visit text includes average days to pay (`app/lib/avgDaysWhatsapp.js`). That figure comes from the settlement rules below, not from a single stored column.
 
 ## Orders
 
 - Live statuses on `sales_orders.status`: `DRAFT`, `SUBMITTED`, `CANCELLED`.
+- New Order draft/save and submit are offline-first (`queueFirst` in `useOrder.js`). Queued orders keep a local pending id until sync assigns the server order number.
 - Invoice statuses (strings, in settings JSON) are listed in `ORDER_INVOICE_STATUSES` in `app/lib/orderApproval.js`. Do not invent a new label in one screen only. Pending Orders, missing-invoice email, and time-to-make all compare these strings.
 - `Pending for credit approval` is legacy and is treated like `Pending for approval`.
 - Uploading an invoice PDF moves status to `Invoice made` when a file is stored. Setting `Invoice made` without a PDF is rejected.
@@ -135,3 +137,4 @@ These strings and numbers are duplicated by design. Change them in the shared mo
 - Role matrix (`moduleAccess.js`)
 - Customer code matchers (`outstanding.js`, `customerAccess.js`)
 - Table color classes for any new or edited report
+- Field write path (`offlineApi.js` defaults `queueFirst: true` for resilient JSON/form saves)

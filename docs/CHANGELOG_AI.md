@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-22** — Field saves are offline-first by default: `postJsonResilient` / `sendJsonResilient` / `postFormDataResilient` use `queueFirst: true`. Applied across Collections (including attachments + legal), My Day visit/inactive/active/foreclose, New Order draft/submit, Stock Take, and New Customer prospect link/follow-up. Visit/order enrichment skips the activity timeline; My Day uses local avg-days when present.
 - **2026-09-22** — Collection visit saves (including Funds Received PDF/photo attachments) are offline-first (`queueFirst`) and sync in the background. Save uses queue-row `avg_days_to_pay`, skips client timeline (`skipTimeline`), and caps Arabic translate at 2.5s. Sync re-resolves Android MIME so queued attachments do not stick.
 - **2026-09-22** — Collection visit saves were online-first whenever `navigator.onLine` was true, so flaky field data made every entry wait on translate / avg-days history / activity timeline / server upload. First pass made text-only visits offline-first; follow-up also queues attachment visits on-device first.
 - **2026-09-22** — Production client crash after PR #315: `supabaseGuard` threw in the browser because `VERCEL`/`VERCEL_ENV` are not available in client bundles. Guard now skips when `typeof window !== "undefined"`; server instrumentation and local scripts still block production Supabase locally.

@@ -312,11 +312,13 @@ export function useOrder({
         location,
         customer: selectedCustomer,
         savedAt: capturedAt,
+        skipTimeline: true,
       });
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
+        queueFirst: true,
         jsonBody: buildOrderPayload({
           action: 'save_draft',
           selectedCustomer,
@@ -450,11 +452,13 @@ export function useOrder({
         location,
         customer: selectedCustomer,
         savedAt: capturedAt,
+        skipTimeline: true,
       });
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
+        queueFirst: true,
         jsonBody: buildOrderPayload({
           action: 'submit',
           selectedCustomer,

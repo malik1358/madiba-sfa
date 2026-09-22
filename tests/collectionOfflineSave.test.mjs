@@ -61,6 +61,7 @@ test("legal remove uses a long PATCH timeout and skips office GPS", () => {
   );
   assert.match(viewSource, /timeoutMs: 60000/);
   assert.match(viewSource, /skipGpsForOfficeRemove/);
+  assert.match(viewSource, /queueFirst: true/);
   assert.match(apiSource, /shouldRequireGpsAccessGate\(scope\.userRole\)/);
   assert.match(apiSource, /Skip rebuilding the full outstanding queue/);
 });

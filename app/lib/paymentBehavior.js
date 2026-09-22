@@ -739,10 +739,10 @@ export function weightedAverageDays(observations = []) {
 }
 
 /**
- * First day of the month that starts the rolling “6 historic months + current”
- * avg-days window (same span as the BI performance months helper).
+ * First day of the month that starts the rolling historic-performance avg-days
+ * window (same span as the BI performance months helper).
  */
-export function avgDaysSixMonthFromIso(todayIso = new Date().toISOString().slice(0, 10)) {
+export function avgDaysHistoricPerformanceFromIso(todayIso = new Date().toISOString().slice(0, 10)) {
   const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
   const currentMonth = ksaMonthKey(new Date(`${today}T12:00:00Z`));
   const fromMonth = shiftMonthKey(currentMonth, -HISTORIC_PERFORMANCE_MONTHS);
@@ -937,7 +937,7 @@ export function buildPaymentBehavior({
     return lifetime;
   }
 
-  const fromIso = avgDaysSixMonthFromIso(todayIso);
+  const fromIso = avgDaysHistoricPerformanceFromIso(todayIso);
   const windowed = filterPaymentLedgerFromDate({
     transactions,
     receipts,
@@ -1554,4 +1554,3 @@ export function buildPaymentSettlementLedger({
     outstandingInvoices: outstanding.invoices,
   };
 }
-

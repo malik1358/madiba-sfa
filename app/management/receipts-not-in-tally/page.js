@@ -6,9 +6,11 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
 import ExportableTable from "../../components/ExportableTable";
+import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
+import { excelFilterCellText } from "../../lib/biExcelFilters";
 import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -41,8 +43,8 @@ const TEXT = {
     ar: "لم يتم رفع سجل إيصالات تالي بعد. استورد ملف الإيصالات أولاً.",
   },
   hint: {
-    en: "Match rule: same customer, amount within 0.02, and receipt date within the selected day window of the app visit date (KSA). Choose 0–30 days. One Tally voucher is used at most once.",
-    ar: "قاعدة المطابقة: نفس العميل، فرق المبلغ حتى 0.02، وتاريخ إيصال تالي ضمن نافذة الأيام المحددة حول تاريخ زيارة التطبيق (توقيت السعودية). اختر من 0 إلى 30 يوماً. يُستخدم كل قسيمة تالي مرة واحدة فقط.",
+    en: "Match rule: same customer (code or same trading name), amount within 1.00, and receipt date within the selected day window of the app visit date (KSA). Choose 0–30 days. One Tally voucher is used at most once.",
+    ar: "قاعدة المطابقة: نفس العميل (الكود أو نفس الاسم التجاري)، فرق المبلغ حتى 1.00، وتاريخ إيصال تالي ضمن نافذة الأيام المحددة حول تاريخ زيارة التطبيق (توقيت السعودية). اختر من 0 إلى 30 يوماً. يُستخدم كل قسيمة تالي مرة واحدة فقط.",
   },
   appReceipts: { en: "App receipts", ar: "إيصالات التطبيق" },
   matched: { en: "Matched to Tally", ar: "مطابق لتالي" },
@@ -61,7 +63,11 @@ const TEXT = {
   status: { en: "Status", ar: "الحالة" },
   total: { en: "Total", ar: "الإجمالي" },
   none: { en: "None", ar: "لا يوجد" },
+  shown: { en: "shown", ar: "ظاهر" },
 };
+
+const FILTER_KEYS = ["visitDate", "time", "customer", "amount", "mode", "status", "collector"];
+
 
 function monthStart(today = getKsaDateString()) {
   return `${today.slice(0, 7)}-01`;
@@ -98,6 +104,19 @@ function formatMode(value) {
   return text.replace(/_/g, " ");
 }
 
+function receiptFilterValue(row, key) {
+  if (key === "visitDate") return formatDateDisplay(row.visitDate);
+  if (key === "time") return formatTime(row.savedAt);
+  if (key === "customer") {
+    return excelFilterCellText(`${row.customerName || row.customerCode || ""} ${row.customerCode || ""}`);
+  }
+  if (key === "amount") return formatAmount(row.amountReceived);
+  if (key === "mode") return formatMode(row.receiptMode);
+  if (key === "status") return formatMode(row.paymentStatus);
+  if (key === "collector") return excelFilterCellText(row.collectorName || "-");
+  return "-";
+}
+
 export default function ReceiptsNotInTallyPage() {
   const { language, dir, setLanguage } = useAppLanguage();
   const t = translate(language, TEXT);
@@ -120,7 +139,17 @@ export default function ReceiptsNotInTallyPage() {
     [report],
   );
 
-  const missingTotal = Number(report?.summary?.missingTotal || 0);
+  const {
+    filters,
+    options,
+    visibleRows,
+    setFilter,
+  } = useBiExcelFilters(missingRows, FILTER_KEYS, receiptFilterValue);
+
+  const missingTotal = useMemo(
+    () => visibleRows.reduce((sum, row) => sum + Number(row.amountReceived || 0), 0),
+    [visibleRows],
+  );
 
   useEffect(() => {
     if (loadingAccess) return undefined;
@@ -343,7 +372,7 @@ export default function ReceiptsNotInTallyPage() {
                 </section>
                 <section className="moduleMetricCard">
                   <span>{t("missingAmount")}</span>
-                  <strong>{formatAmount(missingTotal)}</strong>
+                  <strong>{formatAmount(report.summary?.missingTotal)}</strong>
                 </section>
               </div>
 
@@ -351,7 +380,9 @@ export default function ReceiptsNotInTallyPage() {
                 <div className="moduleSectionHeader">
                   <h2>{t("missing")}</h2>
                   <span>
-                    {missingRows.length} · {formatAmount(missingTotal)}
+                    {visibleRows.length} {t("shown")} / {missingRows.length}
+                    {" · "}
+                    {formatAmount(missingTotal)}
                   </span>
                 </div>
 
@@ -363,17 +394,17 @@ export default function ReceiptsNotInTallyPage() {
                   <table className="moduleTable moduleBiTable">
                     <thead>
                       <tr>
-                        <th>{t("visitDate")}</th>
-                        <th>{t("time")}</th>
-                        <th>{t("customer")}</th>
-                        <th className="moduleBiTotalCol">{t("amount")}</th>
-                        <th>{t("mode")}</th>
-                        <th>{t("status")}</th>
-                        <th>{t("collector")}</th>
+                        <BiExcelHead label={t("visitDate")} filterKey="visitDate" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("time")} filterKey="time" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("customer")} filterKey="customer" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("amount")} filterKey="amount" options={options} filters={filters} onChange={setFilter} className="moduleBiTotalCol" />
+                        <BiExcelHead label={t("mode")} filterKey="mode" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("status")} filterKey="status" options={options} filters={filters} onChange={setFilter} />
+                        <BiExcelHead label={t("collector")} filterKey="collector" options={options} filters={filters} onChange={setFilter} />
                       </tr>
                     </thead>
                     <tbody>
-                      {missingRows.map((row) => (
+                      {visibleRows.map((row) => (
                         <tr key={row.id}>
                           <td>{formatDateDisplay(row.visitDate)}</td>
                           <td>{formatTime(row.savedAt)}</td>
@@ -389,13 +420,13 @@ export default function ReceiptsNotInTallyPage() {
                           <td>{row.collectorName || "-"}</td>
                         </tr>
                       ))}
-                      {missingRows.length === 0 && (
+                      {visibleRows.length === 0 && (
                         <tr>
                           <td colSpan={7}>{t("noRows")}</td>
                         </tr>
                       )}
                     </tbody>
-                    {missingRows.length > 0 ? (
+                    {visibleRows.length > 0 ? (
                       <tfoot>
                         <tr>
                           <td colSpan={3}><strong>{t("total")}</strong></td>

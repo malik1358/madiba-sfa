@@ -1,7 +1,13 @@
-import { isSameOutstandingCustomer, toNumber } from "./outstanding.js";
+import {
+  extractLeadingCustomerCodeAndName,
+  isSameOutstandingCustomer,
+  normalizeName,
+  toNumber,
+} from "./outstanding.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
-export const RECEIPT_AMOUNT_TOLERANCE = 0.02;
+/** Allow small bank/cash rounding differences (e.g. 4896.00 vs 4895.90). */
+export const RECEIPT_AMOUNT_TOLERANCE = 1;
 export const DEFAULT_DATE_WINDOW_DAYS = 1;
 
 function parseIsoDate(value) {
@@ -22,6 +28,62 @@ function daysBetween(leftIso, rightIso) {
 
 function amountsMatch(left, right, tolerance = RECEIPT_AMOUNT_TOLERANCE) {
   return Math.abs(toNumber(left) - toNumber(right)) <= tolerance;
+}
+
+function comparableReceiptCustomerName(customerCode, customerName) {
+  const rawName = String(customerName || "").trim();
+  const rawCode = String(customerCode || "").trim();
+  // Prefer the party name only — do not append the account code, or different
+  // codes for the same trading name (1106 vs 1108) would never match.
+  const fromName = extractLeadingCustomerCodeAndName(rawName);
+  let name = fromName.customer_name || rawName;
+  if (!name && rawCode) {
+    name = extractLeadingCustomerCodeAndName(rawCode).customer_name || "";
+  }
+  if (rawCode) {
+    const escaped = rawCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    name = name
+      .replace(new RegExp(`^${escaped}[\\s_-]+`, "i"), "")
+      .replace(new RegExp(`[\\s_-]+${escaped}$`, "i"), "")
+      .trim();
+  }
+  return normalizeName(name)
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Receipt reconcile match: prefer account-code identity, but also accept the same
+ * trading name when Tally and the app use different customer codes (e.g. 1106 vs 1108).
+ */
+export function isSameReceiptCustomer(receiptCode, receiptName, visitCode, visitName) {
+  if (isSameOutstandingCustomer(receiptCode, receiptName, visitCode, visitName)) {
+    return true;
+  }
+  const left = comparableReceiptCustomerName(receiptCode, receiptName);
+  const right = comparableReceiptCustomerName(visitCode, visitName);
+  return Boolean(left && right && left.length >= 8 && left === right);
+}
+
+function receiptCustomerMatchRank(receipt, visit) {
+  if (isSameOutstandingCustomer(
+    receipt.customer_code,
+    receipt.customer_name || receipt.particulars,
+    visit.customer_code,
+    visit.customer_name,
+  )) {
+    return 0;
+  }
+  if (isSameReceiptCustomer(
+    receipt.customer_code,
+    receipt.customer_name || receipt.particulars,
+    visit.customer_code,
+    visit.customer_name,
+  )) {
+    return 1;
+  }
+  return null;
 }
 
 function normalizeAppVisit(visit) {
@@ -95,19 +157,19 @@ export function reconcileAppReceiptsToTally({
     tallyPool.forEach((receipt) => {
       if (receipt._used) return;
       if (!amountsMatch(visit.amount_received, receipt.amount, amountTolerance)) return;
-      if (!isSameOutstandingCustomer(
-        receipt.customer_code,
-        receipt.customer_name || receipt.particulars,
-        visit.customer_code,
-        visit.customer_name,
-      )) {
-        return;
-      }
+      const customerRank = receiptCustomerMatchRank(receipt, visit);
+      if (customerRank === null) return;
 
       const dayGap = daysBetween(visit.visit_date, receipt.receipt_date);
       if (dayGap > maxDayGap) return;
 
-      const score = (dayGap * 1000) + (receipt.vch_no ? 0 : 1) + (receipt._index * 0.0001);
+      const amountGap = Math.abs(visit.amount_received - receipt.amount);
+      // Prefer exact customer codes, closer dates, then closer amounts.
+      const score = (customerRank * 100000)
+        + (dayGap * 1000)
+        + (amountGap * 10)
+        + (receipt.vch_no ? 0 : 1)
+        + (receipt._index * 0.0001);
       if (score < bestScore) {
         bestScore = score;
         best = receipt;

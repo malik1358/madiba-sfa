@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  excelDateToIso,
   findReceiptHeaderRow,
   parseParticularsParty,
   parseReceiptRegisterRows,
@@ -67,6 +68,12 @@ test("parseParticularsParty keeps letter suffixes on customer codes", () => {
   const party = parseParticularsParty("1194C  Muhammed Awad Awn  Al-Rahmani Est.");
   assert.equal(party.customer_code, "1194C");
   assert.match(party.customer_name, /Muhammed Awad Awn/i);
+});
+
+test("excelDateToIso reads US-style dates when the day is > 12", () => {
+  assert.equal(excelDateToIso("9/20/2026"), "2026-09-20");
+  assert.equal(excelDateToIso("20/9/2026"), "2026-09-20");
+  assert.equal(excelDateToIso("09-18-2026"), "2026-09-18");
 });
 
 test("prioritizeReceiptSheets prefers Export when no receipt sheet name exists", () => {

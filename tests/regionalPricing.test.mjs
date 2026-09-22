@@ -7,6 +7,7 @@ import {
   formatDiscountDetail,
   formatPdfDiscountDetail,
   formatDiscountPercent,
+  formatOrderVatLabel,
   getPricedOrderLine,
   isVatExemptProduct,
   lookupDiscountRate,
@@ -198,4 +199,40 @@ test("vinyl glove SKUs are VAT-exempt even when sales name omits Gloves", () => 
   assert.equal(isVatExemptProduct({ item_name: "A003948_MADIBA VINYL GLOVES SIZE Do Not Use" }), true);
   assert.equal(vatRateForProduct({ item_name: "A003949_MADIBA VINYL Do Not Use" }), 0);
   assert.equal(vatRateForProduct({ item_name: "Paper A4", category: "Stationery" }), 0.15);
+});
+
+test("glove order lines are priced with zero VAT on New Order and PDF totals", () => {
+  const gloves = getPricedOrderLine({
+    wholesaleRate: 48,
+    quantity: 100,
+    item_code: "A006298",
+    item_name: "MADIBA VINYL GLOVES SIZE MEDIUM TRANSPARENT CLEAR",
+  });
+  assert.equal(gloves.vatRate, 0);
+  assert.equal(gloves.vatAmount, 0);
+  assert.equal(gloves.lineTotalInclVat, 4800);
+
+  const xl = getPricedOrderLine({
+    wholesaleRate: 54,
+    quantity: 50,
+    item_code: "A006300",
+    item_name: "MADIBA VINYL GLOVES SIZE XL TRANSPARENT CLEAR",
+  });
+  const gloveTotals = summarizePricedLines([gloves, xl]);
+  assert.equal(gloveTotals.amountExclVat, 7500);
+  assert.equal(gloveTotals.vatAmount, 0);
+  assert.equal(gloveTotals.amountInclVat, 7500);
+  assert.equal(formatOrderVatLabel(gloveTotals), "VAT 0%");
+  assert.equal(formatOrderVatLabel(gloveTotals, { language: "ar" }), "ضريبة 0%");
+
+  const paper = getPricedOrderLine({
+    wholesaleRate: 100,
+    quantity: 10,
+    item_name: "Paper A4",
+  });
+  const mixed = summarizePricedLines([gloves, paper]);
+  assert.equal(mixed.amountExclVat, 5800);
+  assert.equal(Number(mixed.vatAmount.toFixed(2)), 150);
+  assert.equal(formatOrderVatLabel(mixed), "VAT");
+  assert.equal(formatOrderVatLabel({ amountExclVat: 1000, vatAmount: 150 }), "VAT 15%");
 });

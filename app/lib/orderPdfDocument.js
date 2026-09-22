@@ -9,10 +9,12 @@ import {
   syncOutstandingCustomerFromInvoices,
   toNumber as parseOutstandingNumber,
 } from "./outstanding.js";
+import { formatAvgDaysDualLine } from "./paymentBehavior.js";
 import {
   DEFAULT_PAYMENT_TYPE,
   DEFAULT_PRICING_REGION,
   VAT_RATE,
+  formatOrderVatLabel,
   formatPdfDiscountDetail,
   formatMoneyAmount,
   getPricedOrderLine,
@@ -22,9 +24,12 @@ import {
   pricingRegionLabel,
   regionPriceMapFor,
   summarizePricedLines,
+  vatAmountFromExcl,
+  vatRateForProduct,
 } from "./regionalPricing.js";
 import { evaluateOrderSchemes, lookupSchemeApplication } from "./orderSchemes.js";
 import { loadPricePayload } from "./pricePayload.js";
+import { buildSettlementCustomerHistoryUrl } from "./customerHistoryApi.js";
 import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import {
   formatOrderPdfOrderNumberLabel,
@@ -126,11 +131,19 @@ function fallbackPdfLine(line) {
   const storedRate = toAmount(line?.rate);
   const wholesaleRate = toAmount(line?.wholesaleRate || storedRate);
   const lineValue = toAmount(line?.lineValue ?? line?.line_value ?? line?.lineTotal ?? quantity * storedRate);
-  const vatAmount = toAmount(line?.vatAmount ?? lineValue * VAT_RATE);
+  const vatRate = Number.isFinite(Number(line?.vatRate))
+    ? Number(line.vatRate)
+    : vatRateForProduct(line);
+  const vatAmount = toAmount(
+    Number.isFinite(Number(line?.vatAmount))
+      ? line.vatAmount
+      : vatAmountFromExcl(lineValue, vatRate)
+  );
 
   return {
     item_code: line?.item_code || "-",
     item_name: line?.item_name || "-",
+    category: line?.category || "",
     quantity,
     wholesaleRate,
     rate: storedRate || wholesaleRate,
@@ -144,6 +157,7 @@ function fallbackPdfLine(line) {
     wholesaleLineValue: toAmount(line?.wholesaleLineValue ?? quantity * wholesaleRate),
     lineValue,
     lineTotal: lineValue,
+    vatRate,
     vatAmount,
     lineTotalInclVat: toAmount(line?.lineTotalInclVat ?? lineValue + vatAmount),
   };
@@ -181,6 +195,9 @@ export function mapSavedOrderLinesToPdfLines(lines = [], {
       schemeUnitDiscount: scheme.unitDiscount,
       schemeDiscountedQty: scheme.discountedQty,
       excludeCashDiscount: scheme.excludeCashDiscount === true,
+      item_code: code,
+      item_name: line?.item_name || existing.item_name,
+      category: line?.category || existing.category,
     });
 
     return {
@@ -188,6 +205,7 @@ export function mapSavedOrderLinesToPdfLines(lines = [], {
       ...priced,
       item_code: line?.item_code || existing.item_code,
       item_name: line?.item_name || existing.item_name,
+      category: line?.category || existing.category,
       cashDiscount,
       valueDiscount,
       cashApplied: priced.applied.cash,
@@ -358,8 +376,15 @@ export async function enrichOrderPdfLiveData(snapshot, {
   if (authHeaders && liveCustomerCode && !skipHistory) {
     dataLookups.push((async () => {
       try {
+        // Avg days / FIFO settlement need day-1 sales history. The default
+        // customer-history window is only ~6 months and skews avg days badly
+        // when all receipts are applied against a truncated invoice set.
         const historyResponse = await fetch(
-          `${customerHistoryApi}?customerCode=${encodeURIComponent(liveCustomerCode)}&customerName=${encodeURIComponent(liveCustomerName || "")}`,
+          buildSettlementCustomerHistoryUrl(
+            customerHistoryApi,
+            liveCustomerCode,
+            liveCustomerName || "",
+          ),
           { headers: authHeaders }
         );
         const historyPayload = await historyResponse.json().catch(() => ({}));
@@ -523,8 +548,13 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const tableStartX = marginX;
   const pdfTotals = snapshot.totals || summarizePricedLines(snapshot.lines || []);
   const subtotal = Number(pdfTotals.amountExclVat || snapshot.grandTotal || 0);
-  const vatAmount = Number(pdfTotals.vatAmount || subtotal * VAT_RATE);
-  const totalWithVat = Number(pdfTotals.amountInclVat || subtotal + vatAmount);
+  const vatAmount = Number.isFinite(Number(pdfTotals.vatAmount))
+    ? Number(pdfTotals.vatAmount)
+    : subtotal * VAT_RATE;
+  const totalWithVat = Number.isFinite(Number(pdfTotals.amountInclVat))
+    ? Number(pdfTotals.amountInclVat)
+    : subtotal + vatAmount;
+  const vatLabel = formatOrderVatLabel(pdfTotals);
 
   const discountVisibility = resolveOrderPdfDiscountVisibility(snapshot.lines || [], pdfTotals);
   const columns = [
@@ -536,7 +566,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     ...(discountVisibility.value ? [{ key: "valueDiscount", label: "Value Disc", width: 52, align: "right" }] : []),
     ...(discountVisibility.scheme ? [{ key: "schemeDiscount", label: "Scheme", width: 44, align: "right" }] : []),
     { key: "exclVat", label: "Excl. VAT", width: 54, align: "right" },
-    { key: "vat", label: "VAT 15%", width: 48, align: "right" },
+    { key: "vat", label: vatLabel, width: 48, align: "right" },
     { key: "inclVat", label: "Incl. VAT", width: 54, align: "right" },
   ];
   const reservedWidth = columns.reduce((sum, column) => sum + (column.key === "item_name" ? 0 : column.width), 0);
@@ -547,7 +577,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     { label: "Items", value: String(snapshot.itemCount ?? (snapshot.lines || []).length), align: "left" },
     { label: "Total Qty", value: formatQty(snapshot.totalQuantity), align: "left" },
     { label: "Without VAT", value: formatMoneyAmount(subtotal), align: "left" },
-    { label: "VAT 15%", value: formatMoneyAmount(vatAmount), align: "left" },
+    { label: vatLabel, value: formatMoneyAmount(vatAmount), align: "left" },
     { label: "After VAT", value: formatMoneyAmount(totalWithVat), align: "left" },
   ];
 
@@ -708,14 +738,18 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
   const paymentBehavior = analytics?.paymentBehavior || null;
   const paymentBehaviorLines = [];
-  if (paymentBehavior?.avgDaysToPay != null) {
-    paymentBehaviorLines.push(`Avg days to pay: ${paymentBehavior.avgDaysToPay}`);
+  const avgDaysLine = formatAvgDaysDualLine(paymentBehavior);
+  if (avgDaysLine) {
+    paymentBehaviorLines.push(avgDaysLine);
     if (Number(paymentBehavior.openAmountInAvg || 0) > 0.009) {
       paymentBehaviorLines[0] += " (paid avg + open older than that avg)";
-    } else {
+    } else if (paymentBehavior.avgDaysToPay != null) {
       paymentBehaviorLines[0] += " from receipts";
     }
-    if (paymentBehavior.medianDaysToPay != null && paymentBehavior.medianDaysToPay !== paymentBehavior.avgDaysToPay) {
+    if (
+      paymentBehavior.medianDaysToPay != null
+      && paymentBehavior.medianDaysToPay !== paymentBehavior.avgDaysToPay
+    ) {
       paymentBehaviorLines[0] += ` (median ${paymentBehavior.medianDaysToPay})`;
     }
     if (
@@ -764,7 +798,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
     ...(discountVisibility.value ? [["Value discount", formatMoneyAmount(pdfTotals.valueDiscountTotal)]] : []),
     ...(discountVisibility.scheme ? [["Scheme discount", formatMoneyAmount(pdfTotals.schemeDiscountTotal)]] : []),
     ["Amount without VAT", formatMoneyAmount(subtotal)],
-    ["VAT 15%", formatMoneyAmount(vatAmount)],
+    [vatLabel, formatMoneyAmount(vatAmount)],
   ];
   const summaryBoxHeight = 16 + summaryRows.length * 16 + 28;
   const combinedSectionHeight = hasOutstandingBuckets

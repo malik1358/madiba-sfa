@@ -8,6 +8,7 @@ import {
   findLegalTransferForCustomer,
   redactCollectionVisitScheduleForViewer,
 } from "../../lib/paymentCollections.js";
+import { enrichCollectionRecordsWithAvgDays } from "../../lib/collectionAvgDays.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { buildGpsActivityNote, normalizeGpsCapturePlatform } from "../../lib/geo.js";
 import { shouldRequireGpsAccessGate, shouldRequireTransactionGps } from "../../lib/moduleAccess.js";
@@ -49,6 +50,8 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const COLLECTION_FILES_BUCKET = "payment-collections";
 const COLLECTION_FILE_MIME_TYPES = [
   "image/jpeg",
+  "image/jpg",
+  "image/pjpeg",
   "image/png",
   "image/webp",
   "image/heic",
@@ -235,14 +238,29 @@ async function countCollectionVisitsForUserDay(admin, userId, dateString = getKs
   return Number(count || 0);
 }
 
-function storageExtension(file) {
+function storageExtension(file, buffer = null) {
+  const contentType = resolveUploadContentType(file, buffer);
+  if (contentType === "application/pdf") return "pdf";
+  if (contentType === "image/png") return "png";
+  if (contentType === "image/webp") return "webp";
+  if (contentType === "image/heic") return "heic";
+  if (contentType === "image/heif") return "heif";
   return storageExtensionFromUpload(file);
 }
 
-function uploadContentType(file) {
+function uploadContentType(file, buffer = null) {
   // Android / WebView often labels PDFs as application/octet-stream.
-  // Prefer extension (and ignore generic MIME) so storage accepts the upload.
-  return resolveUploadContentType(file);
+  // Prefer extension/magic bytes (and ignore generic MIME) so storage accepts the upload.
+  return resolveUploadContentType(file, buffer);
+}
+
+async function sniffUploadHeader(file) {
+  try {
+    if (!file || typeof file.slice !== "function") return null;
+    return new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  } catch {
+    return null;
+  }
 }
 
 async function ensureCollectionFilesBucket(admin) {
@@ -265,8 +283,16 @@ async function ensureCollectionFilesBucket(admin) {
     return;
   }
 
-  const { error: updateError } = await admin.storage.updateBucket(COLLECTION_FILES_BUCKET, bucketConfig);
-  if (updateError) throw updateError;
+  // Best-effort MIME refresh only. Never block attachment saves if updateBucket
+  // is slow, permission-denied, or unsupported on this project.
+  try {
+    const { error: updateError } = await admin.storage.updateBucket(COLLECTION_FILES_BUCKET, bucketConfig);
+    if (updateError) {
+      console.warn("Unable to refresh payment-collections bucket settings:", updateError);
+    }
+  } catch (updateError) {
+    console.warn("Unable to refresh payment-collections bucket settings:", updateError);
+  }
 }
 
 function formatRouteError(error) {
@@ -869,7 +895,13 @@ export async function GET(request) {
 
     const scope = await getSalesScope(admin, user.id);
     const records = await fetchOutstandingAndCollectionRecords(admin, scope);
-    const queues = buildCollectionQueues(records);
+    let enrichedRecords = records;
+    try {
+      enrichedRecords = await enrichCollectionRecordsWithAvgDays(admin, records);
+    } catch (enrichError) {
+      console.error("Unable to enrich collection avg paying days:", enrichError);
+    }
+    const queues = buildCollectionQueues(enrichedRecords);
 
     return Response.json({
       success: true,
@@ -1016,13 +1048,14 @@ export async function POST(request) {
     }
 
     if (paymentCopyFile && paymentCopyFile.size > 0) {
-      const ext = storageExtension(paymentCopyFile);
+      const paymentHeader = await sniffUploadHeader(paymentCopyFile);
+      const ext = storageExtension(paymentCopyFile, paymentHeader);
       const paymentCopyPath = `payment-copies/${customerCode}-${Date.now()}-payment.${ext}`;
       const { data: paymentData, error: paymentError } = await admin.storage
         .from(COLLECTION_FILES_BUCKET)
         .upload(paymentCopyPath, paymentCopyFile, {
           upsert: true,
-          contentType: uploadContentType(paymentCopyFile),
+          contentType: uploadContentType(paymentCopyFile, paymentHeader),
         });
 
       if (paymentError) throw normalizeStorageError(paymentError);
@@ -1030,13 +1063,14 @@ export async function POST(request) {
     }
 
     if (receiptCopyFile && receiptCopyFile.size > 0) {
-      const ext = storageExtension(receiptCopyFile);
+      const receiptHeader = await sniffUploadHeader(receiptCopyFile);
+      const ext = storageExtension(receiptCopyFile, receiptHeader);
       const receiptCopyPath = `receipt-copies/${customerCode}-${Date.now()}-receipt.${ext}`;
       const { data: receiptData, error: receiptError } = await admin.storage
         .from(COLLECTION_FILES_BUCKET)
         .upload(receiptCopyPath, receiptCopyFile, {
           upsert: true,
-          contentType: uploadContentType(receiptCopyFile),
+          contentType: uploadContentType(receiptCopyFile, receiptHeader),
         });
 
       if (receiptError) throw normalizeStorageError(receiptError);

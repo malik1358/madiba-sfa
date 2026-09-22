@@ -337,6 +337,41 @@ test("buildCreditNotes aggregates negative sales lines with VAT", () => {
   assert.equal(Number(notes[0].amount.toFixed(2)), 172.5);
 });
 
+test("truncated sales window with full receipts skews avg days vs full ledger", () => {
+  // Older invoice paid slowly (100d) + newer invoice paid quickly (10d).
+  // Truncating sales to only the recent month (while keeping all receipts)
+  // applies the early receipt to the wrong invoice set and inflates avg days.
+  const allTransactions = [
+    { transaction_date: "2025-06-01", voucher_number: "OLD", sales_amount: 10000, category: "Paper" },
+    { transaction_date: "2026-08-01", voucher_number: "NEW", sales_amount: 1000, category: "Paper" },
+  ];
+  const allReceipts = [
+    { receipt_date: "2025-09-09", amount: 11500 }, // 100 days on OLD
+    { receipt_date: "2026-08-11", amount: 1150 }, // 10 days on NEW
+  ];
+
+  const full = buildPaymentBehavior({
+    transactions: allTransactions,
+    receipts: allReceipts,
+    todayIso: "2026-09-21",
+  });
+  const truncated = buildPaymentBehavior({
+    transactions: allTransactions.filter((row) => row.transaction_date >= "2026-03-01"),
+    receipts: allReceipts,
+    todayIso: "2026-09-21",
+    includeSixMonthWindow: false,
+  });
+
+  assert.equal(full.avgDaysToPay, 92); // amount-weighted 100d + 10d
+  assert.equal(full.avgDaysToPay6m, 10); // only NEW falls in 6m window with its receipt
+  assert.equal(full.avgDays6mFromDate, "2026-03-01");
+  assert.notEqual(truncated.avgDaysToPay, full.avgDaysToPay);
+  assert.ok(
+    Math.abs(truncated.avgDaysToPay - full.avgDaysToPay) >= 20,
+    `truncated window must not be used for avg days (got ${truncated.avgDaysToPay} vs full ${full.avgDaysToPay})`,
+  );
+});
+
 test("immediate same-day credit note reversal is excluded from avg days to pay", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [

@@ -48,9 +48,11 @@ export async function postFormDataResilient({
   queueOnTimeout = true,
   queueFirst = false,
 }) {
-  const payload = await formDataToOfflinePayload(formData);
-
+  // Only serialize files into IndexedDB when we actually need to queue.
+  // Reading large camera PDFs/photos into ArrayBuffer before every online
+  // upload made Funds Received saves feel stuck on mobile.
   async function queueForSync() {
+    const payload = await formDataToOfflinePayload(formData);
     const queued = await enqueueOfflineRequest({
       url,
       method: "POST",

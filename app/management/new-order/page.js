@@ -22,6 +22,7 @@ import {
   buildEffectivePriceList,
   formatDiscountDetail,
   formatDiscountPercent,
+  formatOrderVatLabel,
   allowedOrderPricingRegions,
   formatMoneyAmount,
   getPricedOrderLine,
@@ -56,10 +57,13 @@ import { createOrderPdfDocument, formatHistoryChange, preloadOrderPdfLibrary, re
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 import { isExcludedNewOrderCustomer } from "../../lib/buildingMaterialCustomerFilter";
+import { buildSettlementCustomerHistoryUrl } from "../../lib/customerHistoryApi";
 import { processOfflineQueue } from "../../lib/offlineApi";
 import { isQueuedPendingOrderId } from "../../lib/queuedSalesOrders";
 import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
+import { blockedByAvgDaysMessage, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
+import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient";
 
 const PRICE_CACHE_API = "/api/pricing/cache";
 const CUSTOMER_HISTORY_API = "/api/customer-history";
@@ -76,7 +80,7 @@ function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-function OrderTotalsPanel({ totals, actions, remark }) {
+function OrderTotalsPanel({ totals, actions, remark, language = "en" }) {
   const cashLabel = totals.cashDiscountTotal > 0
     ? formatMoneyAmount(totals.cashDiscountTotal)
     : "None";
@@ -86,6 +90,7 @@ function OrderTotalsPanel({ totals, actions, remark }) {
   const schemeLabel = totals.schemeDiscountTotal > 0
     ? formatMoneyAmount(totals.schemeDiscountTotal)
     : "None";
+  const vatLabel = formatOrderVatLabel(totals, { language });
 
   return (
     <>
@@ -111,7 +116,7 @@ function OrderTotalsPanel({ totals, actions, remark }) {
           <strong>{formatMoneyAmount(totals.amountExclVat)}</strong>
         </div>
         <div>
-          <span>VAT 15%</span>
+          <span>{vatLabel}</span>
           <strong>{formatMoneyAmount(totals.vatAmount)}</strong>
         </div>
         <div className="moduleOrderTotalsIncl">
@@ -641,6 +646,7 @@ export default function NewOrderPage() {
   });
   const [customerDocumentCompliance, setCustomerDocumentCompliance] = useState(null);
   const [accessScope, setAccessScope] = useState(null);
+  const [orderBlock, setOrderBlock] = useState(null);
   const [prefilledCustomer, setPrefilledCustomer] = useState(null);
   const [editOrderId, setEditOrderId] = useState("");
 
@@ -938,6 +944,7 @@ export default function NewOrderPage() {
     editOrderId,
     language,
     userRole: accessScope?.role || "",
+    orderBlock,
   });
 
   const schemeApplications = useMemo(
@@ -973,6 +980,9 @@ export default function NewOrderPage() {
         schemeUnitDiscount: scheme.unitDiscount,
         schemeDiscountedQty: scheme.discountedQty,
         excludeCashDiscount: scheme.excludeCashDiscount === true,
+        item_code: item.item_code,
+        item_name: item.item_name,
+        category: item.category,
       });
       return {
         ...priced,
@@ -1007,6 +1017,30 @@ export default function NewOrderPage() {
     }),
     [customerDocumentCompliance, orderGrandTotal, outstandingInfo.customer, paymentType]
   );
+  const orderBlockFromAnalytics = useMemo(
+    () => {
+      if (orderBlock) {
+        return {
+          ...orderBlock,
+          ...resolveOrderBlockStatus({
+            avgDaysToPay: orderBlock.avgDaysToPay,
+            threshold: orderBlock.threshold,
+            override: orderBlock.override || orderBlock,
+          }),
+        };
+      }
+      return resolveOrderBlockStatus({
+        avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
+      });
+    },
+    [analytics?.paymentBehavior?.avgDaysToPay, orderBlock],
+  );
+  const orderBlockedMessage = orderBlockFromAnalytics.blocked
+    ? blockedByAvgDaysMessage({
+      threshold: orderBlockFromAnalytics.threshold,
+      avgDaysToPay: orderBlockFromAnalytics.avgDaysToPay,
+    })
+    : "";
 
   const buildOrderSnapshot = useCallback(
     (orderId, statusLabel, orderNumber = "", visitDistance = null) => {
@@ -1286,6 +1320,36 @@ export default function NewOrderPage() {
     }
   }, [setError]);
 
+  useEffect(() => {
+    async function loadOrderBlockStatus() {
+      if (!selectedCustomer?.customer_code) {
+        setOrderBlock(null);
+        return;
+      }
+
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error("Please login again.");
+
+        const payload = await fetchCustomerOrderBlockStatus(
+          session.access_token,
+          selectedCustomer.customer_code,
+          selectedCustomer.customer_name,
+        );
+        setOrderBlock(payload);
+      } catch {
+        setOrderBlock(null);
+      }
+    }
+
+    loadOrderBlockStatus();
+  }, [selectedCustomer?.customer_code, selectedCustomer?.customer_name]);
+
   const fetchCustomerDocuments = useCallback(async (customer) => {
     if (!customer?.customer_code) {
       setCustomerDocumentCompliance(null);
@@ -1517,8 +1581,14 @@ export default function NewOrderPage() {
         }
 
         async function loadHistory(refresh = false) {
+          // fullHistory: avg days / FIFO must use day-1 sales, not the 6-month BI window.
           const response = await fetch(
-            `${CUSTOMER_HISTORY_API}?customerCode=${encodeURIComponent(selectedCustomer.customer_code)}&customerName=${encodeURIComponent(selectedCustomer.customer_name || "")}${refresh ? "&refresh=1" : ""}`,
+            buildSettlementCustomerHistoryUrl(
+              CUSTOMER_HISTORY_API,
+              selectedCustomer.customer_code,
+              selectedCustomer.customer_name || "",
+              { refresh },
+            ),
             {
               headers: {
                 Authorization: `Bearer ${accessToken}`,
@@ -1643,6 +1713,9 @@ export default function NewOrderPage() {
                     ? " (paid avg + open older than that avg)"
                     : " from collected receipts")
                 : "Avg days to pay unavailable (need sales + receipts or open invoices)"}
+              {analytics.paymentBehavior.avgDaysToPay6m != null
+                ? ` · 6m ${analytics.paymentBehavior.avgDaysToPay6m}`
+                : ""}
               {analytics.paymentBehavior.medianDaysToPay != null
                 && analytics.paymentBehavior.medianDaysToPay !== analytics.paymentBehavior.avgDaysToPay
                 ? ` · median ${analytics.paymentBehavior.medianDaysToPay}`
@@ -1660,6 +1733,9 @@ export default function NewOrderPage() {
                 : ""}
               {Number(analytics.paymentBehavior.outstandingOverdueCount || 0) > 0
                 ? ` · ${analytics.paymentBehavior.outstandingOverdueCount} overdue`
+                : ""}
+              {Number(analytics.receiptAmountLast10Days || 0) > 0
+                ? ` · receipts last 10d ${Number(analytics.receiptAmountLast10Days).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
                 : ""}
             </div>
           ) : null}
@@ -1811,7 +1887,11 @@ export default function NewOrderPage() {
 
             {!loadingCustomerHistory && analytics && (
               <>
-                <CustomerHeader customer={selectedCustomer} analytics={analytics} />
+                <CustomerHeader
+                  customer={selectedCustomer}
+                  analytics={analytics}
+                  orderBlock={orderBlockFromAnalytics}
+                />
                 <MonthlyPerformance analytics={analytics} />
                 <CategoryPerformance
                   analytics={analytics}
@@ -1963,6 +2043,9 @@ export default function NewOrderPage() {
                                 schemeUnitDiscount: scheme.unitDiscount,
                                 schemeDiscountedQty: scheme.discountedQty,
                                 excludeCashDiscount: scheme.excludeCashDiscount === true,
+                                item_code: item.item_code,
+                                item_name: item.item_name,
+                                category: item.category,
                               });
                               const nameIsCode = normalizeCode(item.item_name) === normalizeCode(item.item_code);
                               const hasSourceBadge = item.source === "PRICE_SHEET_ONLY";
@@ -2033,6 +2116,7 @@ export default function NewOrderPage() {
               />
               <OrderTotalsPanel
                 totals={orderTotals}
+                language={language}
                 actions={(
                   <div className="moduleOrderBar">
                     <div>
@@ -2043,7 +2127,11 @@ export default function NewOrderPage() {
                       <button type="button" onClick={handleSaveDraft} disabled={savingOrder || submittingOrder || downloadingPdf}>
                         {savingOrder ? "Saving..." : draftOrderId ? "Update Draft" : "Save Draft"}
                       </button>
-                      <button type="button" onClick={handleSubmitOrder} disabled={savingOrder || submittingOrder || downloadingPdf}>
+                      <button
+                        type="button"
+                        onClick={handleSubmitOrder}
+                        disabled={savingOrder || submittingOrder || downloadingPdf || orderBlockFromAnalytics.blocked}
+                      >
                         {submittingOrder ? "Submitting..." : "Submit Order"}
                       </button>
                     </div>
@@ -2055,10 +2143,11 @@ export default function NewOrderPage() {
                     style={{
                       marginTop: "10px",
                       fontWeight: 700,
-                      color: creditApproval.required ? "#9b1c1c" : undefined,
+                      color: (creditApproval.required || orderBlockFromAnalytics.blocked) ? "#9b1c1c" : undefined,
                     }}
                   >
                     {creditApproval.remark}
+                    {orderBlockedMessage ? ` · ${orderBlockedMessage}` : ""}
                   </div>
                 )}
               />
@@ -2111,7 +2200,7 @@ export default function NewOrderPage() {
                   </div>
                 </div>
 
-                {lastSavedOrder.totals ? <OrderTotalsPanel totals={lastSavedOrder.totals} /> : null}
+                {lastSavedOrder.totals ? <OrderTotalsPanel totals={lastSavedOrder.totals} language={language} /> : null}
 
                 {lastSavedOrder.creditApprovalRemark ? (
                   <div
@@ -2138,7 +2227,7 @@ export default function NewOrderPage() {
                         <th>Value Discount</th>
                         <th>Scheme</th>
                         <th>Without VAT</th>
-                        <th>VAT 15%</th>
+                        <th>{formatOrderVatLabel(lastSavedOrder.totals || {}, { language })}</th>
                         <th>After VAT</th>
                       </tr>
                     </thead>

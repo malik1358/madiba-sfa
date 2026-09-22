@@ -83,6 +83,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/user/sales-scope` — visible salesman codes
 - `/api/customers/visible`, `/api/customers/lookup`, `/api/customers/contact`, `/api/customers/location`
 - `/api/customer-history`, `/api/customer-meta`, `/api/customer-documents`, `/api/customer-visits`
+- `/api/customer-order-block` (Avg-days order block status + admin override)
 - `/api/prospects`, `/api/visit-reports`, `/api/gps-ping`
 - `/api/sales-orders`, `/api/order-history`, `/api/order-invoice`
 - `/api/sales-invoices`, `/api/outstanding`, `/api/performance`
@@ -184,7 +185,7 @@ BI pages call `/api/business-dashboard` and `/api/business-dashboard/category-gr
 
 ## Collections architecture
 
-`/api/payment-collections` builds queues from the outstanding dataset, customer master, and `collection_visits`. Priority scoring is `buildCollectionPriority` in `app/lib/paymentCollections.js`. Legal escalation is `legal_transfers`. Files go to the `payment-collections` storage bucket.
+`/api/payment-collections` builds queues from the outstanding dataset, customer master, and `collection_visits`. Priority scoring is `buildCollectionPriority` in `app/lib/paymentCollections.js`. Legal escalation is `legal_transfers`. Files go to the `payment-collections` storage bucket. Online visit saves upload multipart directly; IndexedDB serialization runs only when queuing offline/timeout retries. Client photo prep (`prepareUploadFile`) is time-bounded so Android camera HEIC/JPEG cannot leave Saving stuck.
 
 The collections UI was split so a background queue refresh does not remount the open visit form. Do not tie a full page reload to that refresh (see the fix in PR #313).
 

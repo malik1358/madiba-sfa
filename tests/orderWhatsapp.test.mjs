@@ -29,6 +29,30 @@ test("buildOrderWhatsappSummary includes order totals and pdf note", () => {
   assert.match(summary, /Region: dammam/);
 });
 
+test("buildOrderWhatsappSummary keeps gloves VAT at zero", () => {
+  const summary = buildOrderWhatsappSummary({
+    orderId: 454,
+    statusLabel: "Submitted",
+    customerCode: "1001",
+    customerName: "ABRAJ AL RISALA INTERNATIONAL TRADING Co.",
+    salesmanCode: "ABAD01",
+    itemCount: 3,
+    totalQuantity: 250,
+    grandTotal: 12300,
+    paymentType: "credit",
+    pricingRegion: "riyadh",
+    totals: {
+      amountExclVat: 12300,
+      vatAmount: 0,
+      amountInclVat: 12300,
+    },
+  }, "en");
+
+  assert.match(summary, /VAT 0%: 0/);
+  assert.match(summary, /Amount after VAT: 12,300/);
+  assert.doesNotMatch(summary, /VAT 15%/);
+});
+
 test("buildOrderWhatsappSummary includes avg days to pay with blank lines around it", () => {
   const summary = buildOrderWhatsappSummary({
     orderId: 470,

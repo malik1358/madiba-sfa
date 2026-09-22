@@ -18,6 +18,7 @@ import {
   findLegalTransferForCustomer,
   formatLatestCollectionVisitRemark,
   hasCollectionVisit,
+  sumCollectionReceivedInLastDays,
   assertCollectionVisitRemark,
   collectionVisitRequiresRemark,
   hasCollectionVisitRemark,
@@ -1058,4 +1059,40 @@ test("collection visit remark is required when full overdue is not received", ()
     }),
     { message: COLLECTION_VISIT_REMARK_REQUIRED_ERROR },
   );
+});
+
+test("sumCollectionReceivedInLastDays totals amounts within the inclusive window", () => {
+  const total = sumCollectionReceivedInLastDays([
+    { saved_at: "2026-09-20T08:00:00Z", amount_received: 1000 },
+    { saved_at: "2026-09-12T08:00:00Z", amount_received: 500 },
+    { saved_at: "2026-09-11T08:00:00Z", amount_received: 250 },
+    { saved_at: "2026-09-21T08:00:00Z", amount_received: 50 },
+    { saved_at: "2026-09-15T08:00:00Z", amount_received: 0 },
+  ], { todayIso: "2026-09-21T12:00:00Z", days: 10 });
+
+  assert.equal(total, 1550);
+});
+
+test("buildCollectionQueues exposes received_last_10_days from collection history", () => {
+  const queues = buildCollectionQueues([{
+    customer_code: "1586",
+    customer_name: "AL BAYT AL ALAMY TRADING EST",
+    invoices: [{
+      ref_no: "NFD/1",
+      pending_amount: 1000,
+      due_date: "2026-08-01",
+      overdue_days: 51,
+      salesman: "Abdul Rehman",
+    }],
+    collection_history: [
+      { saved_at: "2026-09-18T10:00:00Z", amount_received: 400 },
+      { saved_at: "2026-09-14T10:00:00Z", amount_received: 200 },
+      { saved_at: "2026-08-01T10:00:00Z", amount_received: 900 },
+    ],
+    latest_collection: { saved_at: "2026-09-18T10:00:00Z", amount_received: 400 },
+    legal_transfer: null,
+  }], "2026-09-21T12:00:00Z");
+
+  assert.equal(queues.dueCustomers.length, 1);
+  assert.equal(queues.dueCustomers[0].received_last_10_days, 600);
 });

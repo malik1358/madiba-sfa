@@ -73,6 +73,49 @@ test("mapSavedOrderLinesToPdfLines keeps stored totals when catalog does not mat
   assert.equal(line.lineTotalInclVat, 1656);
 });
 
+test("mapSavedOrderLinesToPdfLines applies zero VAT to vinyl gloves", () => {
+  const lines = mapSavedOrderLinesToPdfLines([
+    {
+      item_code: "A006298",
+      item_name: "MADIBA VINYL GLOVES SIZE MEDIUM TRANSPARENT CLEAR",
+      quantity: 100,
+      rate: 48,
+      line_value: 4800,
+    },
+    {
+      item_code: "A006300",
+      item_name: "MADIBA VINYL GLOVES SIZE XL TRANSPARENT CLEAR",
+      quantity: 50,
+      rate: 54,
+      line_value: 2700,
+    },
+  ]);
+  assert.equal(lines[0].vatAmount, 0);
+  assert.equal(lines[0].lineTotalInclVat, 4800);
+  assert.equal(lines[1].vatAmount, 0);
+  assert.equal(lines[1].lineTotalInclVat, 2700);
+
+  const snapshot = buildOrderPdfSnapshotFromSavedOrder({
+    order: { id: 454, status: "SUBMITTED", customer_code: "1001", customer_name: "Gloves Co" },
+    lines: [
+      {
+        item_code: "A006298",
+        item_name: "MADIBA VINYL GLOVES SIZE MEDIUM TRANSPARENT CLEAR",
+        quantity: 100,
+        rate: 48,
+        line_value: 4800,
+      },
+    ],
+  });
+  assert.equal(snapshot.totals.vatAmount, 0);
+  assert.equal(snapshot.totals.amountInclVat, 4800);
+
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, snapshot);
+  assert.ok(doc.texts.includes("VAT 0%"));
+  assert.equal(doc.texts.includes("VAT 15%"), false);
+});
+
 test("mapSavedOrderLinesToPdfLines applies the A005425 mix scheme to alias paper codes", () => {
   const [line] = mapSavedOrderLinesToPdfLines(
     [
@@ -821,6 +864,61 @@ test("enrichOrderPdfLiveData with skipPricing refreshes outstanding and keeps sa
     assert.equal(snapshot.outstanding.customer?.total, 1200);
     assert.equal(snapshot.outstanding.customerInvoices.length, 1);
     assert.ok(analytics == null || typeof analytics === "object");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("enrichOrderPdfLiveData requests fullHistory for avg-days settlement ledger", async () => {
+  const originalFetch = global.fetch;
+  const historyUrls = [];
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/api/outstanding")) {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          bucketLabels: ["0-30"],
+          customer: { customer_code: "1009", total_outstanding: 100 },
+          customerInvoices: [],
+        }),
+      };
+    }
+    if (href.includes("/api/customer-history")) {
+      historyUrls.push(href);
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          fullHistory: true,
+          receipts: [{ receipt_date: "2026-03-01", amount: 1150 }],
+          transactions: [
+            { transaction_date: "2026-01-01", voucher_number: "OLD", sales_amount: 1000, category: "Paper" },
+          ],
+        }),
+      };
+    }
+    if (href.includes("/api/pricing/cache")) {
+      return { ok: true, json: async () => ({ success: true, items: [] }) };
+    }
+    return { ok: false, json: async () => ({}) };
+  };
+
+  try {
+    await enrichOrderPdfLiveData({
+      orderId: 454,
+      customerCode: "1009",
+      customerName: "ABRAJ",
+      lines: [],
+      totals: { amountExclVat: 0 },
+      grandTotal: 0,
+      outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+    }, { accessToken: "token", skipPricing: true });
+
+    assert.equal(historyUrls.length, 1);
+    assert.match(historyUrls[0], /fullHistory=1/);
+    assert.match(historyUrls[0], /scope=settlement/);
   } finally {
     global.fetch = originalFetch;
   }

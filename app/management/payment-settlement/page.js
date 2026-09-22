@@ -402,15 +402,31 @@ export default function PaymentSettlementPage() {
                   <div className="auditSummaryCard">
                     <span>Avg Days to Pay</span>
                     <strong>
-                      {ledger.summary.avgDaysToPay != null ? `${ledger.summary.avgDaysToPay} days` : "—"}
+                      {ledger.summary.avgDaysToPay != null
+                        ? (
+                          ledger.summary.avgDaysToPay6m != null
+                            ? `${ledger.summary.avgDaysToPay} days · 6m ${ledger.summary.avgDaysToPay6m}`
+                            : `${ledger.summary.avgDaysToPay} days`
+                        )
+                        : (ledger.summary.avgDaysToPay6m != null
+                          ? `6m ${ledger.summary.avgDaysToPay6m} days`
+                          : "—")}
                     </strong>
                     <em className="auditSummaryCardMeta">
                       {ledger.summary.avgDaysToPay != null
                         ? (Number(ledger.summary.openAmountInAvg || 0) > 0.009
-                          ? "Paid avg + open invoices older than that avg only"
-                          : "From collected receipts")
+                          ? "Lifetime · paid avg + open invoices older than that avg only"
+                          : "Lifetime · from collected receipts")
                         : "Needs sales, receipts, or open invoices"}
                     </em>
+                    {ledger.summary.avgDaysToPay6m != null ? (
+                      <em className="auditSummaryCardMeta">
+                        Last 6 months: {formatCount(ledger.summary.avgDaysToPay6m)} days
+                        {Number(ledger.summary.openAmountInAvg6m || 0) > 0.009
+                          ? " · includes open older than 6m paid avg"
+                          : ""}
+                      </em>
+                    ) : null}
                     {ledger.summary.avgDaysPaidOnly != null
                       && Number(ledger.summary.openAmountInAvg || 0) > 0.009
                       && ledger.summary.avgDaysPaidOnly !== ledger.summary.avgDaysToPay ? (
@@ -526,7 +542,7 @@ export default function PaymentSettlementPage() {
                 </ExportableTable>
               </section>
 
-              <section className="moduleSection">
+              <section className="moduleSection" id="invoices-settlement">
                 <div className="moduleSectionHeader">
                   <h2>Invoices & Settlement</h2>
                   <span>

@@ -54,6 +54,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Pending Orders shows both `Current outstanding` and `Outstanding >60 days` from the uploaded outstanding dataset for the customer. The >60 value is the sum of buckets `61-90`, `91-120`, and `>120`.
 - Orders created before the KSA day `2026-09-01` with no uploaded invoice are legacy and should be closed as `Rejected by management` / `Pre-September 2026 — invoice not uploaded`. Missing-invoice chase starts at `MISSING_INVOICE_CREATED_FROM = 2026-09-01`, after a 60-minute grace, and not more often than every 12 minutes.
 - Credit approval (`app/lib/creditApproval.js`): cash orders skip it. Otherwise approval is required when outstanding over 60 days is greater than zero (buckets `61-90`, `91-120`, `>120`), or when order value plus total outstanding is over 10,000 and the credit application is missing or expired. Expired means expiry date is before today, or issue date plus one year is before today.
+- Sales-order submission is blocked when `Avg Days to Pay >= 120` for the selected customer. Salesmen can still view the customer and build the order, but submit gets a blocking error. Admin can apply a per-customer unblock override from Customer Audit; removing that override re-enables the automatic block rule.
 - Quantity caps live in `order_quantity_controls` (week window in Riyadh, customer scope). Defaults are in `DEFAULT_ORDER_QUANTITY_CONTROLS`. Enforcement is `assertOrderQuantityControls`.
 - Schemes live in the `order_schemes` setting.
 
@@ -62,6 +63,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Browser prices come from `price_catalog_cache` via `/api/pricing/cache`.
 - Sync (`/api/admin/price-sync`) writes a snapshot and the cache, and appends `item_price_history` when a price changes. History UI shows at least the last five prices.
 - VAT default on `products.vat_percent` is 15. Settlement line gross-up uses `regionalPricing.js` (category-aware), not a flat 15 for every line.
+- **Gloves are VAT-exempt (0%)** on orders and settlement. `isVatExemptProduct` / `vatRateForProduct` in `regionalPricing.js` match `GLOVE`, `VINYL`, or Arabic `قفاز` in category/name/code. `getPricedOrderLine` and `summarizePricedLines` must use that rate (do not hardcode 15% on New Order / order PDF / WhatsApp). Mixed carts label the VAT column as plain `VAT`; gloves-only as `VAT 0%`; taxable-only as `VAT 15%`.
 - Item master `tally_unit` / `tally_item_name` feed the Tally sales-voucher Excel export. Sources: `excel_import`, `invoice_pdf`, `manual`.
 
 ## Outstanding and collections
@@ -74,7 +76,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Salesmen named in `COLLECTION_QUEUE_EXCLUDED_SALESMEN` (`Zia`, `Asrar Ahmed`) are removed from the collection queue. This is a business filter, not dead code.
 - Scheduled revisit dates are redacted for viewers who should not see another collector’s private schedule (`redactCollectionVisitScheduleForViewer`).
 - Legal transfer removes the customer from the normal queue and lists them on `/management/payment-collections/legal`.
-- Receipt copies and payment copies go to the `payment-collections` bucket. The save path must not hang when a Funds Received PDF is attached (that bug was fixed; keep the save path bounded).
+- Receipt copies and payment copies go to the `payment-collections` bucket. The save path must not hang when a Funds Received PDF or camera photo is attached: online saves upload directly (no IndexedDB serialize-first), photo compression is time-bounded with a fallback to the original file, bucket MIME refresh is best-effort, and Saving clears before the queue reload.
 - Receipts Not in Tally (`app/lib/receiptsNotInTally.js`) matches app collection receipts to the Tally receipt upload. Amount tolerance is 0.02. Default date window is 1 day. The UI allows a window up to 30 days. Do not raise that cap without checking the page and the API together.
 - Collection report WhatsApp distance uses the same prior visits as the report. The service role recomputes distance because client RLS cannot see every previous row.
 
@@ -90,8 +92,10 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 - A next-day **reissue** is not a reversal. Orphan credit notes that do not match an invoice reduce open balance rather than being dropped.
 - Average days uses paid receipts first. Open invoices are included only when they are older than that paid average. Younger FIFO residuals are excluded.
 - Partial credit notes and sales returns appear in the credit-note table, not as reversed invoices.
-- Customer Audit loads history from day 1 through today for this ledger. Do not shorten that window or the FIFO result changes.
+- Avg days / FIFO settlement must load sales history from day 1 through today (customer-history `fullHistory=1` / `scope=settlement`). That includes Customer Audit, Payment Settlement, Order PDF, New Order payment behavior, and WhatsApp avg-days helpers. Do not use the default ~6-month BI performance window for avg days — receipts are still full-ledger, and truncated sales skew the weighted average dramatically.
+- Screens and PDFs that show avg days also show a parallel **6-month avg** (`avgDaysToPay6m`): sales + receipts + open invoices on/after the first day of the month that is `HISTORIC_PERFORMANCE_MONTHS` before the current KSA month (same span as the BI performance window). Open invoices still enter only when older than that window’s paid-only avg. Lifetime remains `avgDaysToPay`.
 - Tolerance for amount matches is 0.02.
+- Customer Audit and New Order payment-behavior summaries also show receipt amount collected in the last 10 days (date-windowed by receipt date).
 
 ## Sales import and BI
 

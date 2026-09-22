@@ -10,6 +10,10 @@ import {
   ksaMonthKey,
   shiftMonthKey,
 } from "./monthlyPerformanceMonths.js";
+import { getKsaDateString } from "./workdayActivity.js";
+
+export const HISTORIC_PERFORMANCE_SHORT_LABEL = `${HISTORIC_PERFORMANCE_MONTHS}m`;
+export const HISTORIC_PERFORMANCE_PERIOD_LABEL = `Last ${HISTORIC_PERFORMANCE_MONTHS} months`;
 
 function dateOnly(value) {
   return parseOutstandingSheetDate(value) || String(value || "").slice(0, 10);
@@ -743,8 +747,10 @@ export function weightedAverageDays(observations = []) {
  * window (same span as the BI performance months helper).
  */
 export function avgDaysHistoricPerformanceFromIso(todayIso = new Date().toISOString().slice(0, 10)) {
-  const today = dateOnly(todayIso) || new Date().toISOString().slice(0, 10);
-  const currentMonth = ksaMonthKey(new Date(`${today}T12:00:00Z`));
+  const today = dateOnly(todayIso) || getKsaDateString();
+  const currentMonth = /^\d{4}-\d{2}-\d{2}$/.test(today)
+    ? today.slice(0, 7)
+    : ksaMonthKey();
   const fromMonth = shiftMonthKey(currentMonth, -HISTORIC_PERFORMANCE_MONTHS);
   return fromMonth ? `${fromMonth}-01` : "";
 }
@@ -956,7 +962,9 @@ export function buildPaymentBehavior({
   if (six.avgDaysToPay != null) {
     const hasLifetime = lifetime.avgDaysToPay != null
       || (summaryLabel && summaryLabel !== "Payment days unavailable");
-    summaryLabel += hasLifetime ? ` · 6m ${six.avgDaysToPay}` : `Avg ${six.avgDaysToPay} days to pay (6m)`;
+    summaryLabel += hasLifetime
+      ? ` · ${HISTORIC_PERFORMANCE_SHORT_LABEL} ${six.avgDaysToPay}`
+      : `Avg ${six.avgDaysToPay} days to pay (${HISTORIC_PERFORMANCE_SHORT_LABEL})`;
   }
 
   return {
@@ -972,11 +980,11 @@ export function buildPaymentBehavior({
 
 export function formatPaymentDaysLabel(behavior) {
   if (!behavior || behavior.avgDaysToPay == null) {
-    if (behavior?.avgDaysToPay6m != null) return `6m ${behavior.avgDaysToPay6m} days`;
+    if (behavior?.avgDaysToPay6m != null) return `${HISTORIC_PERFORMANCE_SHORT_LABEL} ${behavior.avgDaysToPay6m} days`;
     return "—";
   }
   if (behavior.avgDaysToPay6m != null) {
-    return `${behavior.avgDaysToPay} days · 6m ${behavior.avgDaysToPay6m}`;
+    return `${behavior.avgDaysToPay} days · ${HISTORIC_PERFORMANCE_SHORT_LABEL} ${behavior.avgDaysToPay6m}`;
   }
   return `${behavior.avgDaysToPay} days`;
 }
@@ -984,7 +992,7 @@ export function formatPaymentDaysLabel(behavior) {
 /** Compact dual label for PDF / one-line summaries. */
 export function formatAvgDaysDualLine(behavior, {
   lifetimePrefix = "Avg days to pay",
-  sixMonthLabel = "6m",
+  sixMonthLabel = HISTORIC_PERFORMANCE_SHORT_LABEL,
 } = {}) {
   if (!behavior) return "";
   const lifetime = behavior.avgDaysToPay;

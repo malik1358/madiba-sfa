@@ -8,7 +8,11 @@ import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
-import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
+import {
+  buildPaymentSettlementLedger,
+  HISTORIC_PERFORMANCE_PERIOD_LABEL,
+  HISTORIC_PERFORMANCE_SHORT_LABEL,
+} from "../../lib/paymentBehavior.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -421,9 +425,9 @@ export default function PaymentSettlementPage() {
                     </em>
                     {ledger.summary.avgDaysToPay6m != null ? (
                       <em className="auditSummaryCardMeta">
-                        Last 6 months: {formatCount(ledger.summary.avgDaysToPay6m)} days
+                        {HISTORIC_PERFORMANCE_PERIOD_LABEL}: {formatCount(ledger.summary.avgDaysToPay6m)} days
                         {Number(ledger.summary.openAmountInAvg6m || 0) > 0.009
-                          ? " · includes open older than 6m paid avg"
+                          ? ` · includes open older than ${HISTORIC_PERFORMANCE_SHORT_LABEL} paid avg`
                           : ""}
                       </em>
                     ) : null}

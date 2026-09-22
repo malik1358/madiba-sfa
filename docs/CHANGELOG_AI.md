@@ -6,6 +6,8 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-22** — Collection visit saves (including Funds Received PDF/photo attachments) are offline-first (`queueFirst`) and sync in the background. Save uses queue-row `avg_days_to_pay`, skips client timeline (`skipTimeline`), and caps Arabic translate at 2.5s. Sync re-resolves Android MIME so queued attachments do not stick.
+- **2026-09-22** — Collection visit saves were online-first whenever `navigator.onLine` was true, so flaky field data made every entry wait on translate / avg-days history / activity timeline / server upload. First pass made text-only visits offline-first; follow-up also queues attachment visits on-device first.
 - **2026-09-22** — Production client crash after PR #315: `supabaseGuard` threw in the browser because `VERCEL`/`VERCEL_ENV` are not available in client bundles. Guard now skips when `typeof window !== "undefined"`; server instrumentation and local scripts still block production Supabase locally.
 - **2026-09-22** — Day-route / daily visit Working hours now use only non-far customer transactions at or after 08:00 KSA (`resolveDayRouteWorkingHours`). Midnight and early-morning near stops no longer inflate the total; far visit reports stay excluded.
 - **2026-09-22** — Payment Collections attachment saves: online path no longer serializes files into IndexedDB before upload; camera photo compression has load/canvas timeouts with original-file fallback; storage bucket `updateBucket` is best-effort; Saving clears before queue reload; selected attachment names show in the form. Server sniffs PDF magic bytes and accepts Android `image/jpg`.
@@ -52,7 +54,7 @@ From merged pull requests on `main` (newest first):
 - Pending Order Queue has a current outstanding column (PR #303).
 - Tally order Excel export and item-master unit import exist. Large unit imports must not time out without a clear error (PRs #300 and #304).
 - Live time-to-make is shown for `Pending for invoice creation` (PR #308).
-- Saving a Funds Received collection must not hang on PDF or camera attachments (PR #309; follow-up 2026-09-22 bounded compression / online upload path).
+- Saving a Funds Received collection must not hang on PDF or camera attachments (PR #309; follow-up 2026-09-22 bounded compression). All collection visits (with or without attachments) must remain offline-first (`queueFirst`) so field saves do not wait on flaky mobile data; sync re-resolves Android MIME.
 - Sheet names for exports should come from the snapshot the user is looking at (PR #289).
 
 ## Known drift (docs or SQL versus code)

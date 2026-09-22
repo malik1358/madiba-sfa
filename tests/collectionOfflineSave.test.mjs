@@ -17,9 +17,12 @@ test("collection save path uses local customer data and resilient offline helper
   assert.match(source, /customer: row/);
   assert.match(source, /skipReverseGeocode: offline/);
   assert.match(source, /scope: salesScope/);
-  assert.match(source, /queueFirst: typeof navigator !== "undefined" && navigator\.onLine === false/);
-  assert.match(source, /queueFirst: offline/);
-  assert.match(source, /timeoutMs: shareFiles\.length > 0 \? 90000 : 25000/);
+  assert.match(source, /queueFirst: offline \|\| !hasAttachments/);
+  assert.match(source, /timeoutMs: hasAttachments \? 45000 : 12000/);
+  assert.match(source, /skipTimeline: true/);
+  assert.match(source, /row\.avg_days_to_pay/);
+  assert.match(source, /COLLECTION_TRANSLATE_TIMEOUT_MS = 2500/);
+  assert.doesNotMatch(source, /loadCustomerAvgDaysToPay/);
   assert.match(source, /receipt-copy\.pdf/);
   assert.match(source, /setSavingCustomerCode\(""\);/);
   assert.match(source, /void loadQueue\(rowKey\(row\)\);/);
@@ -65,5 +68,16 @@ test("legal remove uses a long PATCH timeout and skips office GPS", () => {
 test("visit distance metrics skip supabase timeline while offline", () => {
   const source = fs.readFileSync(new URL("../app/lib/visitDistanceWhatsapp.js", import.meta.url), "utf8");
   assert.match(source, /navigator\.onLine === false/);
-  assert.match(source, /if \(!offline\)/);
+  assert.match(source, /if \(!offline && !skipTimeline\)/);
+  assert.match(source, /skipTimeline = false/);
+  assert.match(source, /timelineTimeoutMs = 0/);
+});
+
+test("collection saves are offline-first without attachments", () => {
+  const source = fs.readFileSync(
+    new URL("../app/management/payment-collections/PaymentCollectionsView.jsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /Text-only visits: save on-device first/);
+  assert.match(source, /queueFirst: offline \|\| !hasAttachments/);
 });

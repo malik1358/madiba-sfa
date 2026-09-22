@@ -71,14 +71,14 @@ export async function GET(request) {
     });
 
     const authHeader = request.headers.get("authorization");
-    const avgDaysToPay = await resolveTrustedAvgDaysToPayForCustomer({
+    const avgDays = await resolveTrustedAvgDaysToPayForCustomer({
       request,
       authHeader,
       customerCode,
       customerName,
     });
     const override = await readOverride(admin, customerCode);
-    const status = resolveOrderBlockStatus({ avgDaysToPay, override });
+    const status = resolveOrderBlockStatus({ ...avgDays, override });
     return NextResponse.json({
       success: true,
       customerCode,
@@ -152,14 +152,14 @@ export async function POST(request) {
 
     const override = await readOverride(admin, customerCode);
     const authHeader = request.headers.get("authorization");
-    const avgDaysToPay = await resolveTrustedAvgDaysToPayForCustomer({
+    const avgDays = await resolveTrustedAvgDaysToPayForCustomer({
       request,
       authHeader,
       customerCode,
       customerName,
     });
     const status = resolveOrderBlockStatus({
-      avgDaysToPay,
+      ...avgDays,
       override,
       threshold: ORDER_BLOCK_AVG_DAYS_THRESHOLD,
     });

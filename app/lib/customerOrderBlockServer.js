@@ -45,5 +45,8 @@ export async function resolveTrustedAvgDaysToPayForCustomer({
       : [],
   });
 
-  return settlement?.summary?.avgDaysToPay ?? null;
+  return {
+    avgDaysToPay: settlement?.summary?.avgDaysToPay ?? null,
+    avgDaysToPay6m: settlement?.summary?.avgDaysToPay6m ?? null,
+  };
 }

@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-22** — Day-route / daily visit Working hours now use only non-far customer transactions at or after 08:00 KSA (`resolveDayRouteWorkingHours`). Midnight and early-morning near stops no longer inflate the total; far visit reports stay excluded.
 - **2026-09-22** — Payment Collections attachment saves: online path no longer serializes files into IndexedDB before upload; camera photo compression has load/canvas timeouts with original-file fallback; storage bucket `updateBucket` is best-effort; Saving clears before queue reload; selected attachment names show in the form. Server sniffs PDF magic bytes and accepts Android `image/jpg`.
 - **2026-09-21** — Sales-order submit now auto-blocks customers when Avg Days to Pay is 120+ (salesmen see the customer but submit is rejected). Customer Audit shows the block status, and admin can apply/remove a per-customer unblock override via `customer_order_block_override:<code>`.
 - **2026-09-21** — Gloves VAT is 0% on sales orders (New Order, PDF, WhatsApp), not only on settlement. `getPricedOrderLine` / `summarizePricedLines` honor `vatRateForProduct` (GLOVE/VINYL/قفاز). Labels switch to `VAT 0%` for gloves-only carts; do not treat `vatAmount === 0` as missing and fall back to 15%.

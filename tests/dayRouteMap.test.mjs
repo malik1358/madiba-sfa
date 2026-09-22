@@ -156,3 +156,29 @@ test("resolveDayRouteWorkingHours is blank without a near customer transaction",
   assert.equal(hours.minutes, null);
   assert.equal(hours.value, "-");
 });
+
+test("resolveDayRouteWorkingHours ignores pre-8am KSA near stops and far stops", () => {
+  // KSA = UTC+3: 00:24, 06:09, 11:09, 16:50 Far, 18:33
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-06T21:24:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T03:09:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T08:09:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T13:50:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: true },
+    { savedAt: "2026-09-07T15:33:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
+  ]);
+
+  // 11:09 → 18:33 KSA = 7h 24m (far 16:50 excluded; midnight/6am excluded)
+  assert.equal(hours.minutes, 444);
+  assert.equal(hours.value, "7h 24m");
+});
+
+test("resolveDayRouteWorkingHours is blank when only pre-8am or far customer stops exist", () => {
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-06T21:24:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T03:09:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T13:50:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: true },
+  ]);
+
+  assert.equal(hours.minutes, null);
+  assert.equal(hours.value, "-");
+});

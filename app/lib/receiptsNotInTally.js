@@ -9,6 +9,11 @@ import { getKsaDateString } from "./workdayActivity.js";
 /** Allow small bank/cash rounding differences (e.g. 4896.00 vs 4895.90). */
 export const RECEIPT_AMOUNT_TOLERANCE = 1;
 export const DEFAULT_DATE_WINDOW_DAYS = 1;
+const RECEIPT_MATCH_CUSTOMER_RANK_WEIGHT = 100000;
+const RECEIPT_MATCH_DAY_GAP_WEIGHT = 1000;
+const RECEIPT_MATCH_AMOUNT_GAP_WEIGHT = 10;
+const RECEIPT_MATCH_MISSING_VOUCHER_PENALTY = 1;
+const RECEIPT_MATCH_INDEX_TIEBREAKER_WEIGHT = 0.0001;
 
 function parseIsoDate(value) {
   const text = String(value || "").trim().slice(0, 10);
@@ -165,11 +170,11 @@ export function reconcileAppReceiptsToTally({
 
       const amountGap = Math.abs(visit.amount_received - receipt.amount);
       // Prefer exact customer codes, closer dates, then closer amounts.
-      const score = (customerRank * 100000)
-        + (dayGap * 1000)
-        + (amountGap * 10)
-        + (receipt.vch_no ? 0 : 1)
-        + (receipt._index * 0.0001);
+      const score = (customerRank * RECEIPT_MATCH_CUSTOMER_RANK_WEIGHT)
+        + (dayGap * RECEIPT_MATCH_DAY_GAP_WEIGHT)
+        + (amountGap * RECEIPT_MATCH_AMOUNT_GAP_WEIGHT)
+        + (receipt.vch_no ? 0 : RECEIPT_MATCH_MISSING_VOUCHER_PENALTY)
+        + (receipt._index * RECEIPT_MATCH_INDEX_TIEBREAKER_WEIGHT);
       if (score < bestScore) {
         bestScore = score;
         best = receipt;

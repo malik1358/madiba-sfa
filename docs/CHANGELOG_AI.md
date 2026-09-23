@@ -6,7 +6,8 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
-- **2026-09-23** — Sales order numbers are allotted offline per salesman (`PARVEZ-0042`) and never change after sync. Client allocates via `allocateLocalSalesOrderNumber`; `/api/sales-orders` stores the client `orderNumber` and does not rewrite an existing value. PDF/WhatsApp use that permanent number immediately.
+- **2026-09-23** — Sales order numbers use a short salesman prefix: `P01` when the first letter is unique among peers, otherwise 2+ letters (`PA01` vs `PR01`). Still allotted offline and never rewritten after sync.
+- **2026-09-23** — Sales order numbers are allotted offline per salesman and never change after sync. Client allocates via `allocateLocalSalesOrderNumber`; `/api/sales-orders` stores the client `orderNumber` and does not rewrite an existing value. PDF/WhatsApp use that permanent number immediately.
 - **2026-09-23** — Offline-first order PDFs: queued local orders no longer block Save/Share PDF waiting for a server order number. PDF/WhatsApp use `Order No. Pending sync` only as a legacy fallback when no allotted number exists yet (`formatSalesOrderNumberForDisplay`).
 - **2026-09-22** — Field saves are offline-first by default: `postJsonResilient` / `sendJsonResilient` / `postFormDataResilient` use `queueFirst: true`. Applied across Collections (including attachments + legal), My Day visit/inactive/active/foreclose, New Order draft/submit, Stock Take, and New Customer prospect link/follow-up. Visit/order enrichment skips the activity timeline; My Day uses local avg-days when present.
 - **2026-09-22** — Collection visit saves (including Funds Received PDF/photo attachments) are offline-first (`queueFirst`) and sync in the background. Save uses queue-row `avg_days_to_pay`, skips client timeline (`skipTimeline`), and caps Arabic translate at 2.5s. Sync re-resolves Android MIME so queued attachments do not stick.

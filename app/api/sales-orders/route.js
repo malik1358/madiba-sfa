@@ -28,8 +28,8 @@ import {
   isSalesmanOrderNumberForCode,
   maxSequenceFromOrderNumbers,
   nextSalesmanOrderSequence,
-  normalizeSalesmanOrderPrefix,
   parseSalesmanOrderNumber,
+  resolveSalesmanOrderPrefix,
 } from "../../lib/salesmanOrderNumber.js";
 
 export const runtime = "nodejs";
@@ -311,24 +311,42 @@ function storedOrderNumber(order) {
   return String(order.id);
 }
 
-async function readMaxSalesmanOrderSequence(admin, salesmanCode) {
-  const prefix = normalizeSalesmanOrderPrefix(salesmanCode);
+async function loadSalesmanPeerCodes(admin) {
+  if (!admin) return [];
+  const { data, error } = await admin
+    .from("profiles")
+    .select("salesman_code")
+    .limit(5000);
+  if (error) throw error;
+  return (data || []).map((row) => row.salesman_code).filter(Boolean);
+}
+
+async function readMaxSalesmanOrderSequence(admin, salesmanCode, peerCodes = []) {
+  const prefix = resolveSalesmanOrderPrefix(salesmanCode, peerCodes);
   if (!prefix || !admin) return 0;
 
   const { data, error } = await admin
     .from("sales_orders")
     .select("order_number")
-    .ilike("order_number", `${prefix}-%`)
+    .ilike("order_number", `${prefix}%`)
     .limit(5000);
   if (error) throw error;
-  return maxSequenceFromOrderNumbers((data || []).map((row) => row.order_number), salesmanCode);
+  return maxSequenceFromOrderNumbers(
+    (data || []).map((row) => row.order_number),
+    salesmanCode,
+    peerCodes,
+  );
 }
 
-async function allocateServerSalesmanOrderNumber(admin, salesmanCode) {
-  const prefix = normalizeSalesmanOrderPrefix(salesmanCode);
+async function allocateServerSalesmanOrderNumber(admin, salesmanCode, peerCodes = []) {
+  const peers = peerCodes.length ? peerCodes : await loadSalesmanPeerCodes(admin);
+  const prefix = resolveSalesmanOrderPrefix(salesmanCode, peers);
   if (!prefix) return "";
-  const maxSeq = await readMaxSalesmanOrderSequence(admin, salesmanCode);
-  return formatSalesmanOrderNumber(salesmanCode, nextSalesmanOrderSequence(maxSeq));
+  const maxSeq = await readMaxSalesmanOrderSequence(admin, salesmanCode, peers);
+  return formatSalesmanOrderNumber(salesmanCode, nextSalesmanOrderSequence(maxSeq), {
+    prefix,
+    peerCodes: peers,
+  });
 }
 
 function normalizeClientOrderNumber(rawOrderNumber, salesmanCode) {

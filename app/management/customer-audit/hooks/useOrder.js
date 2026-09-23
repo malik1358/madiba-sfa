@@ -325,9 +325,13 @@ export function useOrder({
         skipTimeline: true,
       });
 
+      const peerCodes = Object.keys(accessScope?.pricingRegionBySalesmanCode || {});
       const allottedOrderNumber = await allocateLocalSalesOrderNumber(
         selectedCustomer.current_salesman_code,
-        { existingOrderNumber: draftOrderNumber },
+        {
+          existingOrderNumber: draftOrderNumber,
+          peerCodes,
+        },
       );
       setDraftOrderNumber(allottedOrderNumber);
 
@@ -479,9 +483,13 @@ export function useOrder({
         skipTimeline: true,
       });
 
+      const peerCodes = Object.keys(accessScope?.pricingRegionBySalesmanCode || {});
       const allottedOrderNumber = await allocateLocalSalesOrderNumber(
         selectedCustomer?.current_salesman_code,
-        { existingOrderNumber: draftOrderNumber },
+        {
+          existingOrderNumber: draftOrderNumber,
+          peerCodes,
+        },
       );
       setDraftOrderNumber(allottedOrderNumber);
 

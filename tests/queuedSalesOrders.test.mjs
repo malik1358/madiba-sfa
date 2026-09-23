@@ -20,13 +20,13 @@ test("queued sales orders map to pending queue rows", () => {
       customerCode: "PROSPECT-OFF-1",
       customerName: "test",
       salesmanCode: "ADMIN",
-      orderNumber: "ADMIN-0007",
+      orderNumber: "A07",
       lines: [{ item_code: "A", quantity: 2 }],
     },
   });
 
   assert.equal(row.id, "pending:e6506fa4-bb8");
-  assert.equal(row.order_number, "ADMIN-0007");
+  assert.equal(row.order_number, "A07");
   assert.equal(isQueuedPendingOrderId(row.id), true);
   assert.equal(row.queuedLocally, true);
   assert.equal(row.status, "SUBMITTED");

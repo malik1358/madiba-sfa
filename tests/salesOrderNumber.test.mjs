@@ -26,7 +26,8 @@ test("formatSalesOrderNumber does not treat pending queue ids as the live number
 test("formatOrderPdfOrderNumberLabel prints a provisional label for queued orders", () => {
   assert.equal(formatOrderPdfOrderNumberLabel({ id: 296 }), "Order No. 296");
   assert.equal(formatOrderPdfOrderNumberLabel({ order_number: "SO-1001" }), "Order No. SO-1001");
-  assert.equal(formatOrderPdfOrderNumberLabel({ order_number: "PARVEZ-0042" }), "Order No. PARVEZ-0042");
+  assert.equal(formatOrderPdfOrderNumberLabel({ order_number: "P01" }), "Order No. P01");
+  assert.equal(formatOrderPdfOrderNumberLabel({ order_number: "PA03" }), "Order No. PA03");
   assert.equal(requireSalesOrderNumber({ orderId: 337 }), "337");
   assert.equal(
     formatOrderPdfOrderNumberLabel({ id: "pending:8981a846-ca3" }),
@@ -37,8 +38,8 @@ test("formatOrderPdfOrderNumberLabel prints a provisional label for queued order
     "Pending sync",
   );
   assert.equal(
-    formatSalesOrderNumber({ id: "pending:x", orderNumber: "PARVEZ-0003" }),
-    "PARVEZ-0003",
+    formatSalesOrderNumber({ id: "pending:x", orderNumber: "P03" }),
+    "P03",
   );
   assert.throws(() => requireSalesOrderNumber({ id: "pending:8981a846-ca3" }), /Order number is required/);
   assert.throws(() => requireSalesOrderNumber({}), /Order number is required/);

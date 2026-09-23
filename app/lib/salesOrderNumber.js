@@ -40,7 +40,7 @@ export function requireSalesOrderNumber(source = {}) {
   return orderNumber;
 }
 
-/** Mandatory PDF header line, e.g. "Order No. 296" or "Order No. Pending sync" while queued. */
+/** Mandatory PDF header line, e.g. "Order No. 296" or "Order No. PARVEZ-0042". */
 export function formatOrderPdfOrderNumberLabel(source = {}) {
   const orderNumber = formatSalesOrderNumberForDisplay(source);
   if (!orderNumber) {

@@ -23,6 +23,14 @@ import {
   resolveOrderBlockStatus,
 } from "../../lib/customerOrderBlock.js";
 import { resolveTrustedAvgDaysToPayForCustomer } from "../../lib/customerOrderBlockServer.js";
+import {
+  formatSalesmanOrderNumber,
+  isSalesmanOrderNumberForCode,
+  maxSequenceFromOrderNumbers,
+  nextSalesmanOrderSequence,
+  normalizeSalesmanOrderPrefix,
+  parseSalesmanOrderNumber,
+} from "../../lib/salesmanOrderNumber.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -303,18 +311,80 @@ function storedOrderNumber(order) {
   return String(order.id);
 }
 
-async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "") {
+async function readMaxSalesmanOrderSequence(admin, salesmanCode) {
+  const prefix = normalizeSalesmanOrderPrefix(salesmanCode);
+  if (!prefix || !admin) return 0;
+
+  const { data, error } = await admin
+    .from("sales_orders")
+    .select("order_number")
+    .ilike("order_number", `${prefix}-%`)
+    .limit(5000);
+  if (error) throw error;
+  return maxSequenceFromOrderNumbers((data || []).map((row) => row.order_number), salesmanCode);
+}
+
+async function allocateServerSalesmanOrderNumber(admin, salesmanCode) {
+  const prefix = normalizeSalesmanOrderPrefix(salesmanCode);
+  if (!prefix) return "";
+  const maxSeq = await readMaxSalesmanOrderSequence(admin, salesmanCode);
+  return formatSalesmanOrderNumber(salesmanCode, nextSalesmanOrderSequence(maxSeq));
+}
+
+function normalizeClientOrderNumber(rawOrderNumber, salesmanCode) {
+  const text = String(rawOrderNumber || "").trim();
+  if (!text) return "";
+  const parsed = parseSalesmanOrderNumber(text);
+  if (!parsed) return "";
+  if (salesmanCode && !isSalesmanOrderNumberForCode(parsed.orderNumber, salesmanCode)) {
+    return "";
+  }
+  return parsed.orderNumber;
+}
+
+async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "", {
+  salesmanCode = "",
+  preferredOrderNumber = "",
+} = {}) {
   const current = String(existingOrderNumber || "").trim();
   if (current) return current;
-  const next = String(orderId);
+
+  const preferred = normalizeClientOrderNumber(preferredOrderNumber, salesmanCode);
+  if (preferred) {
+    const { error } = await admin
+      .from("sales_orders")
+      .update({ order_number: preferred })
+      .eq("id", orderId);
+    if (!error) return preferred;
+    if (!/duplicate|unique/i.test(String(error.message || ""))) {
+      throw error;
+    }
+  }
+
+  if (salesmanCode) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const next = await allocateServerSalesmanOrderNumber(admin, salesmanCode);
+      if (!next) break;
+      const { error } = await admin
+        .from("sales_orders")
+        .update({ order_number: next })
+        .eq("id", orderId);
+      if (!error) return next;
+      if (!/duplicate|unique/i.test(String(error.message || ""))) {
+        throw error;
+      }
+    }
+  }
+
+  const fallback = String(orderId);
   const { error } = await admin
     .from("sales_orders")
-    .update({ order_number: next })
+    .update({ order_number: fallback })
     .eq("id", orderId);
   if (error && !/duplicate|unique/i.test(String(error.message || ""))) {
     throw error;
   }
-  return next;
+  return fallback;
 }
 
 async function persistDraftOrder(admin, {
@@ -325,12 +395,14 @@ async function persistDraftOrder(admin, {
   salesmanCode,
   lines,
   capturedAt,
+  clientOrderNumber = "",
 }) {
   const nowIso = capturedAt || new Date().toISOString();
   const resolvedCustomerCode = await resolvePersistedCustomerCode(admin, customerCode);
   let existingLines = [];
   let resolvedOrderId = orderId ? Number(orderId) : null;
   let resolvedOrderNumber = "";
+  const preferredOrderNumber = normalizeClientOrderNumber(clientOrderNumber, salesmanCode);
 
   if (resolvedOrderId) {
     await ensureOrderAccess(admin, resolvedOrderId, userId);
@@ -343,18 +415,36 @@ async function persistDraftOrder(admin, {
   }
 
   if (!resolvedOrderId) {
-    const { data: newOrder, error: orderError } = await admin
+    const insertRow = {
+      customer_code: resolvedCustomerCode,
+      customer_name: customerName,
+      salesman_code: salesmanCode,
+      status: "DRAFT",
+      created_by: userId,
+      updated_at: nowIso,
+    };
+    if (preferredOrderNumber) {
+      insertRow.order_number = preferredOrderNumber;
+    }
+
+    let newOrder = null;
+    let orderError = null;
+    ({ data: newOrder, error: orderError } = await admin
       .from("sales_orders")
-      .insert({
-        customer_code: resolvedCustomerCode,
-        customer_name: customerName,
-        salesman_code: salesmanCode,
-        status: "DRAFT",
-        created_by: userId,
-        updated_at: nowIso,
-      })
+      .insert(insertRow)
       .select("id,order_number")
-      .single();
+      .single());
+
+    if (orderError && preferredOrderNumber && /duplicate|unique/i.test(String(orderError.message || ""))) {
+      // Rare multi-device collision: keep creating the order, then allot the next
+      // free salesman number. Prefer never rewriting a number that already printed.
+      delete insertRow.order_number;
+      ({ data: newOrder, error: orderError } = await admin
+        .from("sales_orders")
+        .insert(insertRow)
+        .select("id,order_number")
+        .single());
+    }
 
     if (orderError) throw orderError;
     resolvedOrderId = newOrder.id;
@@ -376,7 +466,16 @@ async function persistDraftOrder(admin, {
     resolvedOrderNumber = storedOrderNumber(updatedOrder);
   }
 
-  resolvedOrderNumber = await ensureStoredOrderNumber(admin, resolvedOrderId, resolvedOrderNumber);
+  // Never replace an order number that already exists on the row.
+  resolvedOrderNumber = await ensureStoredOrderNumber(
+    admin,
+    resolvedOrderId,
+    resolvedOrderNumber,
+    {
+      salesmanCode,
+      preferredOrderNumber: resolvedOrderNumber ? "" : preferredOrderNumber,
+    },
+  );
 
   const { error: deleteError } = await admin
     .from("sales_order_items")
@@ -546,6 +645,7 @@ export async function POST(request) {
     const capturePlatform = normalizeGpsCapturePlatform(body?.platform);
     const loadedOrderStatus = String(body?.loadedOrderStatus || "DRAFT").trim().toUpperCase();
     const requestedOrderId = body?.orderId ? Number(body.orderId) : null;
+    const clientOrderNumber = String(body?.orderNumber || body?.order_number || "").trim();
     const creditApprovalRequired = Boolean(body?.creditApprovalRequired);
     const orderBlockThreshold = body?.orderBlockSnapshot?.threshold ?? null;
 
@@ -646,6 +746,7 @@ export async function POST(request) {
       salesmanCode,
       lines: pricedLines,
       capturedAt,
+      clientOrderNumber,
     });
     const historyCustomerCode = persistedCustomerCode || customerCode;
 

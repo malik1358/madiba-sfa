@@ -1215,7 +1215,6 @@ export default function NewOrderPage() {
     const queued = isQueuedPendingOrderId(saved.orderId);
     const orderNumber = formatSalesOrderNumberForDisplay(
       { id: saved.orderId, orderNumber: saved.orderNumber },
-      { pendingLabel: language === "ar" ? "على الجهاز" : "on this device" },
     ) || "—";
     const savedMessage = queued
       ? (language === "ar"
@@ -1241,7 +1240,6 @@ export default function NewOrderPage() {
     const queued = isQueuedPendingOrderId(saved.orderId);
     const orderNumber = formatSalesOrderNumberForDisplay(
       { id: saved.orderId, orderNumber: saved.orderNumber },
-      { pendingLabel: language === "ar" ? "على الجهاز" : "on this device" },
     ) || "—";
     const savedMessage = queued
       ? (language === "ar"

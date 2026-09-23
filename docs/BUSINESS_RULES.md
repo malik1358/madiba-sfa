@@ -47,12 +47,13 @@ Constants in `app/lib/workdayActivity.js`:
 ## Orders
 
 - Live statuses on `sales_orders.status`: `DRAFT`, `SUBMITTED`, `CANCELLED`.
-- New Order draft/save and submit are offline-first (`queueFirst` in `useOrder.js`). Queued orders keep a local pending id until sync assigns the server order number.
+- New Order draft/save and submit are offline-first (`queueFirst` in `useOrder.js`). Queued orders keep a local pending id until sync assigns the server row id.
+- Order numbers are salesman-wise and allotted on the device before sync: `{SALESMANCODE}-{NNNN}` (e.g. `PARVEZ-0042`). The client sends `orderNumber` on save/submit; the API stores it and must not rewrite it after sync. PDF/WhatsApp use that permanent number immediately.
 - Invoice statuses (strings, in settings JSON) are listed in `ORDER_INVOICE_STATUSES` in `app/lib/orderApproval.js`. Do not invent a new label in one screen only. Pending Orders, missing-invoice email, and time-to-make all compare these strings.
 - `Pending for credit approval` is legacy and is treated like `Pending for approval`.
 - Uploading an invoice PDF moves status to `Invoice made` when a file is stored. Setting `Invoice made` without a PDF is rejected.
 - Time-to-make clock runs for `Pending for invoice creation` and stops when status leaves that queue. Show the live duration; do not freeze it at submit time.
-- Order PDFs must show a mandatory `Order No.` label (`app/lib/salesOrderNumber.js`). Queued offline orders print `Order No. Pending sync` (never a raw `pending:` queue id). After sync, share again to pick up the live number.
+- Order PDFs must show a mandatory `Order No.` label (`app/lib/salesOrderNumber.js`). New offline orders use the permanent salesman series (`PARVEZ-0042`). Legacy queued rows without a number may still show `Order No. Pending sync` until sync; never print a raw `pending:` queue id.
 - Cash-discount breakdown is printed on pending-order PDFs. Do not drop it when editing the PDF builder.
 - Pending Orders shows both `Current outstanding` and `Outstanding >60 days` from the uploaded outstanding dataset for the customer. The >60 value is the sum of buckets `61-90`, `91-120`, and `>120`.
 - Orders created before the KSA day `2026-09-01` with no uploaded invoice are legacy and should be closed as `Rejected by management` / `Pre-September 2026 — invoice not uploaded`. Missing-invoice chase starts at `MISSING_INVOICE_CREATED_FROM = 2026-09-01`, after a 60-minute grace, and not more often than every 12 minutes.

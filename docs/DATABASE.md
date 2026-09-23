@@ -92,6 +92,8 @@ RLS lets a user insert and read their own rows. `logs_select_own_or_admin` also 
 
 `sales_orders`: `order_number` unique, `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `status` `DRAFT|SUBMITTED|CANCELLED`, totals, `created_by`, `submitted_at`.
 
+Field order numbers are allotted offline per salesman as `{SALESMANCODE}-{NNNN}` (see `app/lib/salesmanOrderNumber.js` / `offlineOrderNumber.js`). The client sends `orderNumber` with the save payload; `/api/sales-orders` persists that value and must not replace it with the bigint `id` after sync. Legacy rows may still use the numeric id string as `order_number`.
+
 `sales_order_items`: `order_id`, `item_code` unique per order, `item_name`, `category`, `quantity`, `rate`, `line_value`.
 
 `orders` / `order_lines`: legacy. `orders.status` includes `DRAFT`, `SUBMITTED`, `ACCEPTED`, `PROCESSING`, `DELIVERED`, `CANCELLED`. `order_lines.recommendation_type` is `NEW`, `BUY_MORE`, or `REORDER`.

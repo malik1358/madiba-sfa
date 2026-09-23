@@ -314,32 +314,28 @@ test("renderOrderPdfDocument includes the historic Monthly Performance table", (
   assert.ok(doc.texts.includes("AUG"));
 });
 
-test("renderOrderPdfDocument requires a real order number and never prints a pending queue id", () => {
+test("renderOrderPdfDocument allows queued orders with a provisional Order No. label", () => {
   const doc = createMockDoc();
-  assert.throws(
-    () =>
-      renderOrderPdfDocument(doc, {
-        orderId: "pending:8981a846-ca3",
-        orderNumber: "pending:8981a846-ca3",
-        statusLabel: "Submitted",
-        savedAtIso: "2026-09-07T08:30:44.000Z",
-        customerCode: "1059",
-        customerName: "Test",
-        salesmanCode: "ADMIN",
-        paymentType: "credit",
-        pricingRegion: "riyadh",
-        itemCount: 0,
-        totalQuantity: 0,
-        grandTotal: 0,
-        totals: {},
-        lines: [],
-        history: [],
-        outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
-      }),
-    /Order number is required/
-  );
+  renderOrderPdfDocument(doc, {
+    orderId: "pending:8981a846-ca3",
+    orderNumber: "pending:8981a846-ca3",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-09-07T08:30:44.000Z",
+    customerCode: "1059",
+    customerName: "Test",
+    salesmanCode: "ADMIN",
+    paymentType: "credit",
+    pricingRegion: "riyadh",
+    itemCount: 0,
+    totalQuantity: 0,
+    grandTotal: 0,
+    totals: {},
+    lines: [],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+  assert.ok(doc.texts.includes("Order No. Pending sync"));
   assert.equal(doc.texts.some((text) => text.includes("pending:")), false);
-  assert.equal(doc.texts.some((text) => text.includes("Order No.")), false);
 });
 
 test("renderOrderPdfDocument hides cash and value percents when they are not applied", () => {

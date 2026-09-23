@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-23** — Offline-first order PDFs: queued local orders no longer block Save/Share PDF waiting for a server order number. PDF/WhatsApp use `Order No. Pending sync` until sync assigns the live number (`formatSalesOrderNumberForDisplay`).
 - **2026-09-22** — Field saves are offline-first by default: `postJsonResilient` / `sendJsonResilient` / `postFormDataResilient` use `queueFirst: true`. Applied across Collections (including attachments + legal), My Day visit/inactive/active/foreclose, New Order draft/submit, Stock Take, and New Customer prospect link/follow-up. Visit/order enrichment skips the activity timeline; My Day uses local avg-days when present.
 - **2026-09-22** — Collection visit saves (including Funds Received PDF/photo attachments) are offline-first (`queueFirst`) and sync in the background. Save uses queue-row `avg_days_to_pay`, skips client timeline (`skipTimeline`), and caps Arabic translate at 2.5s. Sync re-resolves Android MIME so queued attachments do not stick.
 - **2026-09-22** — Collection visit saves were online-first whenever `navigator.onLine` was true, so flaky field data made every entry wait on translate / avg-days history / activity timeline / server upload. First pass made text-only visits offline-first; follow-up also queues attachment visits on-device first.
@@ -47,7 +48,7 @@ From merged pull requests on `main` (newest first):
 - Uploading an invoice PDF sets status to `Invoice made` (PR #312).
 - Pending-order PDFs show the cash-discount breakdown (PR #310).
 - Pending Orders must stay usable when the outstanding dataset is large (PR #311). Do not load or filter that sheet on the main thread in a way that freezes the page.
-- Order PDFs always show an `Order No.` label (PR #298).
+- Order PDFs always show an `Order No.` label (PR #298). Queued offline orders use `Pending sync` instead of blocking PDF share.
 - Inactivity hierarchy email waits 70 minutes, not 40 (PR #299).
 - WhatsApp visit and order summaries include average days to pay (PRs #297 and #307).
 - Customer Audit settlement uses day-1 history, FIFO open versus Tally open, and does not treat next-day reissues as reversals. Orphan credit notes apply to open (PRs #306, #302, #296, #295).

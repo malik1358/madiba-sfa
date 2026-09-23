@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   formatOrderPdfOrderNumberLabel,
   formatSalesOrderNumber,
+  formatSalesOrderNumberForDisplay,
   isPlaceholderSalesOrderNumber,
   requireSalesOrderNumber,
   salesOrderNumberNeedsLiveLookup,
@@ -22,10 +23,19 @@ test("formatSalesOrderNumber does not treat pending queue ids as the live number
   assert.equal(salesOrderNumberNeedsLiveLookup({ id: 296 }), false);
 });
 
-test("formatOrderPdfOrderNumberLabel requires a real number in Order No. format", () => {
+test("formatOrderPdfOrderNumberLabel prints a provisional label for queued orders", () => {
   assert.equal(formatOrderPdfOrderNumberLabel({ id: 296 }), "Order No. 296");
   assert.equal(formatOrderPdfOrderNumberLabel({ order_number: "SO-1001" }), "Order No. SO-1001");
   assert.equal(requireSalesOrderNumber({ orderId: 337 }), "337");
-  assert.throws(() => formatOrderPdfOrderNumberLabel({ id: "pending:8981a846-ca3" }), /Order number is required/);
+  assert.equal(
+    formatOrderPdfOrderNumberLabel({ id: "pending:8981a846-ca3" }),
+    "Order No. Pending sync",
+  );
+  assert.equal(
+    formatSalesOrderNumberForDisplay({ orderId: "pending:8981a846-ca3" }),
+    "Pending sync",
+  );
+  assert.throws(() => requireSalesOrderNumber({ id: "pending:8981a846-ca3" }), /Order number is required/);
   assert.throws(() => requireSalesOrderNumber({}), /Order number is required/);
+  assert.throws(() => formatOrderPdfOrderNumberLabel({}), /Order number is required/);
 });

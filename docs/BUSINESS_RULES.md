@@ -52,7 +52,7 @@ Constants in `app/lib/workdayActivity.js`:
 - `Pending for credit approval` is legacy and is treated like `Pending for approval`.
 - Uploading an invoice PDF moves status to `Invoice made` when a file is stored. Setting `Invoice made` without a PDF is rejected.
 - Time-to-make clock runs for `Pending for invoice creation` and stops when status leaves that queue. Show the live duration; do not freeze it at submit time.
-- Order PDFs must show a mandatory `Order No.` label (`app/lib/salesOrderNumber.js`). Placeholder numbers are not acceptable on the PDF.
+- Order PDFs must show a mandatory `Order No.` label (`app/lib/salesOrderNumber.js`). Queued offline orders print `Order No. Pending sync` (never a raw `pending:` queue id). After sync, share again to pick up the live number.
 - Cash-discount breakdown is printed on pending-order PDFs. Do not drop it when editing the PDF builder.
 - Pending Orders shows both `Current outstanding` and `Outstanding >60 days` from the uploaded outstanding dataset for the customer. The >60 value is the sum of buckets `61-90`, `91-120`, and `>120`.
 - Orders created before the KSA day `2026-09-01` with no uploaded invoice are legacy and should be closed as `Rejected by management` / `Pre-September 2026 — invoice not uploaded`. Missing-invoice chase starts at `MISSING_INVOICE_CREATED_FROM = 2026-09-01`, after a 60-minute grace, and not more often than every 12 minutes.

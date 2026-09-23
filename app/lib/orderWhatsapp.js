@@ -1,5 +1,5 @@
 import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
-import { formatSalesOrderNumber } from "./salesOrderNumber.js";
+import { formatSalesOrderNumberForDisplay } from "./salesOrderNumber.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 import { formatOrderVatLabel, VAT_RATE } from "./regionalPricing.js";
 
@@ -58,7 +58,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
 
   return [
     labels.title,
-        `${labels.orderId}: ${formatSalesOrderNumber(snapshot) || "—"}`,
+        `${labels.orderId}: ${formatSalesOrderNumberForDisplay(snapshot) || "—"}`,
     `${labels.customer}: ${snapshot.customerName || snapshot.customerCode || "-"}`,
     `${labels.code}: ${snapshot.customerCode || "-"}`,
     `${labels.salesman}: ${snapshot.salesmanCode || "-"}`,

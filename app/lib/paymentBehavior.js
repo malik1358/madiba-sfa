@@ -61,6 +61,26 @@ function invoiceKey(invoiceDate, voucherNumber) {
   return `${dateOnly(invoiceDate)}::${String(voucherNumber || "").trim()}`;
 }
 
+/**
+ * Cash sales vouchers (RC / DC / JC / …): region letter(s) + C in the voucher
+ * type/prefix (before /). Credit-style codes like CNFD / CN / RNFD are excluded.
+ */
+export function isCashSalesVoucher(voucherNumber = "") {
+  const raw = String(voucherNumber || "").trim().toUpperCase();
+  if (!raw) return false;
+  if (
+    /^(CN|SR)([\s\/-]|$)/.test(raw)
+    || /\bCN\b/.test(raw)
+    || raw.includes("CREDIT NOTE")
+    || raw.includes("SALES RETURN")
+  ) {
+    return false;
+  }
+  const prefix = (raw.split(/[\/\-\s]/)[0] || raw).replace(/[^A-Z0-9]/g, "");
+  // RC, DC, JC, C, RC100 — not CNFD / NFD / RNFD.
+  return /^[A-Z]{0,2}C\d*$/.test(prefix);
+}
+
 function normalizeRef(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
 }
@@ -565,7 +585,9 @@ export function buildSortedReceipts(receipts = []) {
 
 /**
  * FIFO-match receipts onto sales invoices to estimate days-to-pay.
- * Receipts have no invoice ref, so oldest open invoice is paid first.
+ * Cash sales vouchers (RC / DC / JC — C in the voucher prefix) take the first
+ * receipt on/after the invoice before older credit bills; any leftover then
+ * follows normal oldest-open FIFO across remaining invoices.
  * Invoices reversed immediately by credit notes are excluded from matching.
  * Unpaired credit notes (orphans) also reduce open remaining in date order,
  * so Tally blank CNs that wipe older bills are reflected in Machine Open.
@@ -576,7 +598,12 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
   const { reversals, reversedKeys } = findImmediateCreditNoteReversals(allInvoices, creditNotes);
   const invoices = allInvoices
     .filter((invoice) => !reversedKeys.has(invoiceKey(invoice.invoice_date, invoice.voucher_number)))
-    .map((invoice) => ({ ...invoice, remaining: toNumber(invoice.amount) }));
+    .map((invoice) => ({
+      ...invoice,
+      remaining: toNumber(invoice.amount),
+      is_cash: isCashSalesVoucher(invoice.voucher_number),
+      cash_first_receipt_used: false,
+    }));
   const pairedCreditNoteKeys = new Set(
     reversals.map((row) => invoiceKey(row.credit_note_date, row.credit_note_voucher)),
   );
@@ -608,30 +635,46 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
   const allocations = [];
   let unmatchedReceiptAmount = 0;
 
+  function applyToInvoice(event, invoice, remaining) {
+    if (remaining <= 0.009 || invoice.remaining <= 0.009) return remaining;
+    if (event.date < invoice.invoice_date) return remaining;
+    const applied = Math.min(remaining, invoice.remaining);
+    if (event.kind === "receipt" && applied > 0) {
+      const days = isoDaysBetween(event.date, invoice.invoice_date);
+      if (days != null) {
+        allocations.push({
+          invoice_date: invoice.invoice_date,
+          voucher_number: invoice.voucher_number,
+          receipt_date: event.date,
+          vch_no: event.vch_no,
+          amount: applied,
+          days,
+        });
+      }
+    }
+    invoice.remaining = Math.max(0, invoice.remaining - applied);
+    return Math.max(0, remaining - applied);
+  }
+
   for (const event of events) {
     let remaining = event.amount;
 
+    // Receipts: first receipt after each cash invoice settles that cash bill first.
+    if (event.kind === "receipt") {
+      for (const invoice of invoices) {
+        if (remaining <= 0.009) break;
+        if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;
+        if (invoice.remaining <= 0.009) continue;
+        if (event.date < invoice.invoice_date) continue;
+        remaining = applyToInvoice(event, invoice, remaining);
+        invoice.cash_first_receipt_used = true;
+      }
+    }
+
+    // Balance (and unpaired CNs): normal oldest-open FIFO.
     for (const invoice of invoices) {
       if (remaining <= 0.009) break;
-      if (invoice.remaining <= 0.009) continue;
-      if (event.date < invoice.invoice_date) continue;
-
-      const applied = Math.min(remaining, invoice.remaining);
-      if (event.kind === "receipt" && applied > 0) {
-        const days = isoDaysBetween(event.date, invoice.invoice_date);
-        if (days != null) {
-          allocations.push({
-            invoice_date: invoice.invoice_date,
-            voucher_number: invoice.voucher_number,
-            receipt_date: event.date,
-            vch_no: event.vch_no,
-            amount: applied,
-            days,
-          });
-        }
-      }
-      invoice.remaining = Math.max(0, invoice.remaining - applied);
-      remaining = Math.max(0, remaining - applied);
+      remaining = applyToInvoice(event, invoice, remaining);
     }
 
     if (event.kind === "receipt") {

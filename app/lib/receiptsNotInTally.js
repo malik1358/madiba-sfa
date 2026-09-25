@@ -9,6 +9,8 @@ import { getKsaDateString } from "./workdayActivity.js";
 /** Allow small bank/cash rounding differences (e.g. 4896.00 vs 4895.90). */
 export const RECEIPT_AMOUNT_TOLERANCE = 1;
 export const DEFAULT_DATE_WINDOW_DAYS = 1;
+/** Drop near-identical double-saves by the same collector on the same day. */
+export const DUPLICATE_VISIT_MINUTES = 5;
 const RECEIPT_MATCH_CUSTOMER_RANK_WEIGHT = 100000;
 const RECEIPT_MATCH_DAY_GAP_WEIGHT = 1000;
 const RECEIPT_MATCH_AMOUNT_GAP_WEIGHT = 10;
@@ -124,29 +126,102 @@ function normalizeTallyReceipt(receipt) {
   };
 }
 
+function visitTimestampMs(visit) {
+  const ts = Date.parse(String(visit?.saved_at || ""));
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function isNearDuplicateAppVisit(left, right, {
+  amountTolerance = RECEIPT_AMOUNT_TOLERANCE,
+  withinMinutes = DUPLICATE_VISIT_MINUTES,
+} = {}) {
+  if (!left || !right) return false;
+  if (String(left.customer_code || "").trim().toUpperCase()
+    !== String(right.customer_code || "").trim().toUpperCase()) {
+    return false;
+  }
+  if (String(left.created_by || "") !== String(right.created_by || "")) return false;
+  if (!amountsMatch(left.amount_received, right.amount_received, amountTolerance)) return false;
+  if (String(left.visit_date || "") !== String(right.visit_date || "")) return false;
+
+  const leftTs = visitTimestampMs(left);
+  const rightTs = visitTimestampMs(right);
+  if (leftTs === null || rightTs === null) return true;
+  return Math.abs(leftTs - rightTs) <= Math.max(0, Number(withinMinutes) || 0) * 60 * 1000;
+}
+
+/**
+ * Keep the earliest visit when the same collector records the same customer + amount
+ * on the same day within a short time window (typical double-save).
+ */
+export function dedupeAppReceiptVisits(appVisits = [], {
+  amountTolerance = RECEIPT_AMOUNT_TOLERANCE,
+  withinMinutes = DUPLICATE_VISIT_MINUTES,
+} = {}) {
+  const sorted = (Array.isArray(appVisits) ? appVisits : [])
+    .map(normalizeAppVisit)
+    .sort((left, right) => {
+      if (left.visit_date !== right.visit_date) return left.visit_date.localeCompare(right.visit_date);
+      const leftTs = visitTimestampMs(left);
+      const rightTs = visitTimestampMs(right);
+      if (leftTs !== null && rightTs !== null && leftTs !== rightTs) return leftTs - rightTs;
+      return String(left.id || "").localeCompare(String(right.id || ""));
+    });
+
+  const kept = [];
+  const duplicatesDropped = [];
+
+  sorted.forEach((visit) => {
+    const original = kept.find((candidate) => isNearDuplicateAppVisit(candidate, visit, {
+      amountTolerance,
+      withinMinutes,
+    }));
+    if (original) {
+      duplicatesDropped.push({
+        id: visit.id,
+        duplicateOf: original.id,
+        visit_date: visit.visit_date,
+        customer_code: visit.customer_code,
+        amount_received: visit.amount_received,
+        created_by: visit.created_by,
+        saved_at: visit.saved_at,
+      });
+      return;
+    }
+    kept.push(visit);
+  });
+
+  return { visits: kept, duplicatesDropped };
+}
+
 /**
  * Soft-join app FUNDS_RECEIVED visits to Tally receipt register rows.
  * Matching: same customer + amount within tolerance + date within windowDays.
  * Exact-date matches run first so nearby visits do not steal same-day vouchers.
  * Each Tally row is consumed at most once.
+ * Near-duplicate app visits (same collector/customer/amount/day within a few minutes)
+ * are collapsed before matching so double-saves are not listed as missing.
  */
 export function reconcileAppReceiptsToTally({
   appVisits = [],
   tallyReceipts = [],
   windowDays = DEFAULT_DATE_WINDOW_DAYS,
   amountTolerance = RECEIPT_AMOUNT_TOLERANCE,
+  duplicateWithinMinutes = DUPLICATE_VISIT_MINUTES,
 } = {}) {
-  const visits = (Array.isArray(appVisits) ? appVisits : [])
-    .map(normalizeAppVisit)
-    .filter((visit) => (
+  const { visits: dedupedVisits, duplicatesDropped } = dedupeAppReceiptVisits(
+    (Array.isArray(appVisits) ? appVisits : []).map(normalizeAppVisit).filter((visit) => (
       visit.amount_received > 0
       && (visit.visit_outcome === "FUNDS_RECEIVED" || !visit.visit_outcome)
       && visit.visit_date
-    ))
-    .sort((left, right) => {
-      if (left.visit_date !== right.visit_date) return left.visit_date.localeCompare(right.visit_date);
-      return String(left.saved_at || "").localeCompare(String(right.saved_at || ""));
-    });
+    )),
+    { amountTolerance, withinMinutes: duplicateWithinMinutes },
+  );
+
+  const visits = dedupedVisits.sort((left, right) => {
+    if (left.visit_date !== right.visit_date) return left.visit_date.localeCompare(right.visit_date);
+    return String(left.saved_at || "").localeCompare(String(right.saved_at || ""));
+  });
 
   const tallyPool = (Array.isArray(tallyReceipts) ? tallyReceipts : [])
     .map(normalizeTallyReceipt)
@@ -228,13 +303,16 @@ export function reconcileAppReceiptsToTally({
     appCount: visits.length,
     matchedCount: matched.length,
     missingCount: missingInTally.length,
+    duplicateCount: duplicatesDropped.length,
     appTotal,
     matchedTotal,
     missingTotal,
     windowDays,
     amountTolerance,
+    duplicateWithinMinutes,
     missingInTally,
     matched,
+    duplicatesDropped,
   };
 }
 

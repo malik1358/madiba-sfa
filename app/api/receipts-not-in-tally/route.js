@@ -253,6 +253,7 @@ export async function GET(request) {
         appCount: reconciliation.appCount,
         matchedCount: reconciliation.matchedCount,
         missingCount: reconciliation.missingCount,
+        duplicateCount: reconciliation.duplicateCount,
         appTotal: reconciliation.appTotal,
         matchedTotal: reconciliation.matchedTotal,
         missingTotal: reconciliation.missingTotal,

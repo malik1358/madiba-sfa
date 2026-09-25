@@ -78,7 +78,7 @@ Without `google-services.json` and `FIREBASE_SERVICE_ACCOUNT_JSON`, background G
 
 ## What you need on your PC (only if building locally)
 
-1. **Node.js 22+** (required: `package.json` engines `>=22.0.0`, `.nvmrc`, and CI)
+1. **Node.js 20+** (already used for this repo)
 2. **Android Studio** â€” https://developer.android.com/studio
    - During setup, install **Android SDK**, **SDK Platform Tools**, and **Android SDK Build-Tools**
 3. **Java 17** â€” usually bundled with Android Studio
@@ -200,17 +200,19 @@ Android only shows a generic error for all of these. When in doubt: **uninstall 
 
 ---
 
-## Staging / UAT APK
+## Staging / local APK
 
-To point the shell at staging instead of production:
+To point the Capacitor shell at your **local** Next.js server (or another non-production host) instead of production:
 
 ```powershell
-$env:CAPACITOR_SERVER_URL = "https://YOUR-STAGING-URL.vercel.app"
+$env:CAPACITOR_SERVER_URL = "http://YOUR-LAN-IP:3000"
 npm run cap:sync
 npm run cap:open:android
 ```
 
-Rebuild the APK after changing the URL.
+Use HTTPS for any non-local host. Cleartext to a LAN IP may require Android cleartext / network-security config; prefer a local tunnel with HTTPS when possible.
+
+Rebuild the APK after changing the URL. Do not point local debug builds at production Supabase credentials.
 
 ---
 

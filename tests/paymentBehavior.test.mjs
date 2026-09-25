@@ -7,6 +7,7 @@ import {
   buildPaymentSettlementLedger,
   buildSalesInvoices,
   findImmediateCreditNoteReversals,
+  isCashSalesVoucher,
   matchPaymentsFifo,
   weightedAverageDays,
 } from "../app/lib/paymentBehavior.js";
@@ -150,6 +151,75 @@ test("FIFO applies oldest invoice first when one receipt covers two bills", () =
   assert.equal(allocations[1].voucher_number, "2");
   assert.equal(allocations[1].days, 12);
   assert.equal(Number(allocations[1].amount.toFixed(2)), 690);
+});
+
+test("isCashSalesVoucher detects RC/DC/JC and skips credit notes", () => {
+  assert.equal(isCashSalesVoucher("RC/100"), true);
+  assert.equal(isCashSalesVoucher("DC/12"), true);
+  assert.equal(isCashSalesVoucher("JC-9"), true);
+  assert.equal(isCashSalesVoucher("NFD/902"), false);
+  assert.equal(isCashSalesVoucher("RNFD/190"), false);
+  assert.equal(isCashSalesVoucher("CNFD/APR/024"), false);
+  assert.equal(isCashSalesVoucher("CN/149"), false);
+});
+
+test("first receipt after cash voucher settles cash before older credit invoices", () => {
+  // Older credit open, then cash RC — first receipt after RC must clear RC first.
+  const { allocations, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-08-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-09-13", voucher_number: "RC/100", sales_amount: 2000, category: "Paper" },
+    ],
+    [{ receipt_date: "2026-09-14", amount: 2300 }],
+  );
+
+  assert.equal(allocations[0].voucher_number, "RC/100");
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 2300);
+  const cash = invoices.find((row) => row.voucher_number === "RC/100");
+  const credit = invoices.find((row) => row.voucher_number === "NFD/1");
+  assert.equal(Number(cash.remaining.toFixed(2)), 0);
+  assert.equal(Number(credit.remaining.toFixed(2)), 1150);
+});
+
+test("cash receipt leftover after RC goes to credit invoices on FIFO", () => {
+  const { allocations, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-08-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-08-15", voucher_number: "NFD/2", sales_amount: 500, category: "Paper" },
+      { transaction_date: "2026-09-13", voucher_number: "RC/100", sales_amount: 800, category: "Paper" },
+    ],
+    [{ receipt_date: "2026-09-14", amount: 2000 }],
+  );
+
+  // RC 800*1.15=920 first; leftover 1080 → NFD/1 1150 (partial 1080)
+  assert.equal(allocations[0].voucher_number, "RC/100");
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 920);
+  assert.equal(allocations[1].voucher_number, "NFD/1");
+  assert.equal(Number(allocations[1].amount.toFixed(2)), 1080);
+  const nfd1 = invoices.find((row) => row.voucher_number === "NFD/1");
+  const nfd2 = invoices.find((row) => row.voucher_number === "NFD/2");
+  assert.equal(Number(nfd1.remaining.toFixed(2)), 70);
+  assert.equal(Number(nfd2.remaining.toFixed(2)), 575);
+});
+
+test("second receipt after cash uses normal FIFO including unfinished cash", () => {
+  // First receipt after RC is tiny — marks cash priority used; second receipt is plain FIFO.
+  const { allocations } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-08-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-09-13", voucher_number: "RC/100", sales_amount: 2000, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2026-09-14", amount: 100 },
+      { receipt_date: "2026-09-20", amount: 3000 },
+    ],
+  );
+
+  assert.equal(allocations[0].voucher_number, "RC/100");
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 100);
+  // Second receipt: oldest open first → finish NFD/1 then RC
+  assert.equal(allocations[1].voucher_number, "NFD/1");
+  assert.equal(allocations[2].voucher_number, "RC/100");
 });
 
 test("gloves sales stay excl VAT when matching receipts", () => {

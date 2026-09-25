@@ -12,6 +12,8 @@ import {
 import { queueTransactionBossAlerts } from "../../lib/transactionBossAlerts.js";
 import { validateNextVisitDate } from "../../lib/nextVisitDate.js";
 import { slimVisitStockChecks } from "../../lib/visitReportSave.js";
+import { promoteEntryGpsToCustomerIfMissing } from "../../lib/customerGpsHistory.js";
+import { isProspectCustomerCode } from "../../lib/customerCode.js";
 import { resolveSalesScopeForUserId } from "../user/sales-scope/route.js";
 
 export const runtime = "nodejs";
@@ -196,6 +198,19 @@ export async function PATCH(request) {
           throw gpsLogError;
         }
       }
+
+      if (!isProspectCustomerCode(storedCustomerCode)) {
+        await promoteEntryGpsToCustomerIfMissing(admin, {
+          customerCode: storedCustomerCode,
+          latitude,
+          longitude,
+          actor: {
+            id: scope.userId,
+            role: scope.role,
+          },
+          customerRow: visibleCustomer,
+        });
+      }
     }
 
     return NextResponse.json({ success: true, customer: updatedCustomer });
@@ -239,13 +254,14 @@ export async function POST(request) {
       );
     }
 
-    await ensureCustomerVisible(admin, customerCode, scope);
+    const visibleCustomer = await ensureCustomerVisible(admin, customerCode, scope);
+    const storedCustomerCode = normalizeCode(visibleCustomer.customer_code || customerCode);
 
     const nextVisitAt = validateNextVisitDate(body?.nextVisitAt, { required: true });
 
     const stockChecks = slimVisitStockChecks(body?.stockChecks);
     const value = {
-      customer_code: customerCode,
+      customer_code: storedCustomerCode,
       customer_name: String(body?.customerName || "").trim(),
       outcome: String(body?.outcome || "").trim(),
       next_visit_at: nextVisitAt,
@@ -266,7 +282,7 @@ export async function POST(request) {
       }
       : value.location,
     {
-      customer_code: customerCode,
+      customer_code: storedCustomerCode,
       customer_name: value.customer_name,
       outcome: value.outcome,
       next_visit_at: nextVisitAt,
@@ -289,11 +305,28 @@ export async function POST(request) {
       }
     }
 
+    if (
+      Number.isFinite(visitLatitude)
+      && Number.isFinite(visitLongitude)
+      && !isProspectCustomerCode(storedCustomerCode)
+    ) {
+      await promoteEntryGpsToCustomerIfMissing(admin, {
+        customerCode: storedCustomerCode,
+        latitude: visitLatitude,
+        longitude: visitLongitude,
+        actor: {
+          id: scope.userId,
+          role: scope.role,
+        },
+        customerRow: visibleCustomer,
+      });
+    }
+
     const { error: upsertLatestError } = await admin
       .from("system_settings")
       .upsert(
         {
-          setting_key: latestSettingKey(customerCode),
+          setting_key: latestSettingKey(storedCustomerCode),
           setting_value: JSON.stringify(value),
         },
         { onConflict: "setting_key" }
@@ -304,7 +337,7 @@ export async function POST(request) {
     const { error: insertHistoryError } = await admin
       .from("system_settings")
       .insert({
-        setting_key: historySettingKey(customerCode),
+        setting_key: historySettingKey(storedCustomerCode),
         setting_value: JSON.stringify(value),
       });
 
@@ -316,15 +349,15 @@ export async function POST(request) {
     queueTransactionBossAlerts(admin, {
       actorUserId: scope.userId,
       transactionType: "VISIT_REPORT",
-      referenceKey: `visit:${customerCode}:${value.captured_at}`,
+      referenceKey: `visit:${storedCustomerCode}:${value.captured_at}`,
       details: {
-        customerCode,
+        customerCode: storedCustomerCode,
         customerName: value.customer_name,
         outcome: value.outcome,
       },
     });
 
-    return NextResponse.json({ success: true, customerCode, value, logged: !visitLogError });
+    return NextResponse.json({ success: true, customerCode: storedCustomerCode, value, logged: !visitLogError });
   } catch (error) {
     const message = error.message || "Unable to save visit report.";
     const status = /access|session|customer not found/i.test(message)

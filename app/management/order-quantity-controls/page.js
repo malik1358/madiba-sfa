@@ -11,6 +11,7 @@ import {
   DEFAULT_ORDER_QUANTITY_CONTROLS,
   createEmptyQuantityControlDraft,
   describeOrderQuantityControl,
+  formatItemCodesLabel,
 } from "../../lib/orderQuantityControls";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -19,8 +20,8 @@ import ItemCodeSearchField from "./ItemCodeSearchField";
 const TEXT = {
   title: { en: "Sales Qty Limits", ar: "حدود كمية البيع للعميل" },
   subtitle: {
-    en: "Limit how many cartons of an item each customer can buy per week.",
-    ar: "حدد الحد الأقصى لكراتين الصنف التي يمكن لكل عميل شراؤها أسبوعياً.",
+    en: "Limit cartons per customer per week for one item, or a shared total across several SKUs.",
+    ar: "حدد حد الكراتين لكل عميل أسبوعياً لصنف واحد، أو إجمالي مشترك لعدة أصناف.",
   },
   back: { en: "← Management", ar: "← الإدارة" },
   schemes: { en: "Schemes", ar: "العروض" },
@@ -29,13 +30,14 @@ const TEXT = {
   saving: { en: "Saving...", ar: "جاري الحفظ..." },
   add: { en: "Add control", ar: "إضافة حد" },
   remove: { en: "Remove", ar: "حذف" },
+  removeItem: { en: "Remove item", ar: "إزالة الصنف" },
   saved: {
     en: "Controls saved. New and edited sales orders will enforce the active limits.",
     ar: "تم حفظ الحدود. ستُطبَّق الحدود النشطة على الطلبات الجديدة والمعدلة.",
   },
   defaultHint: {
-    en: "A004075 is limited to 20 CTN per customer per week by default. Save to keep this rule, or turn it off.",
-    ar: "الصنف A004075 محدود بـ 20 كرتون لكل عميل أسبوعياً افتراضياً. احفظ لتثبيت القاعدة أو عطّلها.",
+    en: "A004075 is limited to 20 CTN per customer per week by default. Save to keep this rule, or turn it off. Add more items to the same rule to share one weekly cap.",
+    ar: "الصنف A004075 محدود بـ 20 كرتون لكل عميل أسبوعياً افتراضياً. احفظ لتثبيت القاعدة أو عطّلها. أضف أصنافاً أخرى لنفس القاعدة لمشاركة حد أسبوعي واحد.",
   },
   enabled: { en: "Enabled", ar: "مفعّل" },
   disabled: { en: "Disabled", ar: "معطّل" },
@@ -43,12 +45,19 @@ const TEXT = {
   activeRules: { en: "Active", ar: "مفعّلة" },
   status: { en: "Status", ar: "الحالة" },
   name: { en: "Rule name", ar: "اسم القاعدة" },
-  item: { en: "Item", ar: "الصنف" },
-  itemSearch: { en: "Search item code or name", ar: "ابحث بكود أو اسم الصنف" },
+  items: { en: "Items in this limit", ar: "الأصناف في هذا الحد" },
+  addItem: { en: "Add item to group", ar: "إضافة صنف للمجموعة" },
+  itemSearch: { en: "Search item code or name to add", ar: "ابحث بكود أو اسم الصنف للإضافة" },
+  noItemsYet: { en: "No items yet — search below to add one or more SKUs.", ar: "لا أصناف بعد — ابحث بالأسفل لإضافة صنف أو أكثر." },
+  groupHint: {
+    en: "Several SKUs share one Max CTN / week total (not per item).",
+    ar: "عدة أصناف تتشارك حداً واحداً من الكراتين أسبوعياً (وليس لكل صنف).",
+  },
   maxQty: { en: "Max CTN / week", ar: "الحد الأقصى كرتون / أسبوع" },
   summary: { en: "Summary", ar: "الملخص" },
   searching: { en: "Searching...", ar: "جاري البحث..." },
   noMatches: { en: "No matching items", ar: "لا توجد أصناف مطابقة" },
+  alreadyInRule: { en: "That item is already in this rule.", ar: "هذا الصنف موجود مسبقاً في هذه القاعدة." },
 };
 
 function newControlId() {
@@ -56,21 +65,44 @@ function newControlId() {
   return `qty-control-${Date.now()}`;
 }
 
+function normalizeCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function draftItemCodes(control) {
+  if (Array.isArray(control?.itemCodes) && control.itemCodes.length) {
+    return [...new Set(control.itemCodes.map(normalizeCode).filter(Boolean))];
+  }
+  const single = normalizeCode(control?.itemCode);
+  return single ? [single] : [];
+}
+
 function toDraft(control) {
+  const itemCodes = draftItemCodes(control);
+  const itemNames = { ...(control.itemNames || {}) };
+  itemCodes.forEach((code) => {
+    if (!itemNames[code] && control.itemName && code === normalizeCode(control.itemCode)) {
+      itemNames[code] = String(control.itemName || "").trim();
+    }
+  });
   return {
     ...createEmptyQuantityControlDraft(),
     ...control,
+    itemCodes,
+    itemCode: itemCodes[0] || "",
+    itemNames,
     maxQty: String(control.maxQty ?? 20),
-    itemName: String(control.itemName || "").trim(),
   };
 }
 
 function fromDraft(draft, index) {
+  const itemCodes = draftItemCodes(draft);
   return {
     id: draft.id || `qty-control-${index + 1}`,
     name: draft.name,
     active: draft.active !== false,
-    itemCode: String(draft.itemCode || "").trim().toUpperCase(),
+    itemCode: itemCodes[0] || "",
+    itemCodes,
     maxQty: Number(draft.maxQty || 0),
     unit: String(draft.unit || "CTN").trim().toUpperCase() || "CTN",
     period: "week",
@@ -78,19 +110,27 @@ function fromDraft(draft, index) {
   };
 }
 
-function defaultRuleName(itemCode, itemName, maxQty) {
-  const code = String(itemCode || "").trim().toUpperCase();
-  if (!code) return "New item weekly limit";
-  const label = itemName && itemName !== code ? `${code} (${itemName})` : code;
-  return `${label} max ${maxQty || 20} CTN / customer / week`;
+function defaultRuleName(itemCodes, itemNames, maxQty) {
+  const codes = (itemCodes || []).map(normalizeCode).filter(Boolean);
+  if (codes.length === 0) return "New item weekly limit";
+  if (codes.length === 1) {
+    const code = codes[0];
+    const itemName = itemNames?.[code] || "";
+    const label = itemName && itemName !== code ? `${code} (${itemName})` : code;
+    return `${label} max ${maxQty || 20} CTN / customer / week`;
+  }
+  return `${formatItemCodesLabel(codes)} max ${maxQty || 20} CTN combined / customer / week`;
 }
 
-function shouldAutofillName(name, previousItemCode) {
+function shouldAutofillName(name, previousItemCodes) {
   const current = String(name || "").trim();
   if (!current) return true;
   if (current === "New item weekly limit") return true;
-  const prev = String(previousItemCode || "").trim().toUpperCase();
-  if (prev && current.toUpperCase().startsWith(prev)) return true;
+  const prevCodes = (previousItemCodes || []).map(normalizeCode).filter(Boolean);
+  if (prevCodes.length === 0) return true;
+  const prevLabel = formatItemCodesLabel(prevCodes);
+  if (prevLabel && current.toUpperCase().startsWith(prevLabel.toUpperCase())) return true;
+  if (prevCodes.length === 1 && current.toUpperCase().startsWith(prevCodes[0])) return true;
   return false;
 }
 
@@ -103,6 +143,7 @@ export default function OrderQuantityControlsPage() {
   const [message, setMessage] = useState("");
   const [configured, setConfigured] = useState(false);
   const [controls, setControls] = useState(() => DEFAULT_ORDER_QUANTITY_CONTROLS.map(toDraft));
+  const [searchResetKeys, setSearchResetKeys] = useState({});
 
   usePopupMessages({ message, error });
 
@@ -112,7 +153,9 @@ export default function OrderQuantityControlsPage() {
   );
 
   async function resolveItemNames(rows) {
-    const codes = [...new Set(rows.map((row) => String(row.itemCode || "").trim().toUpperCase()).filter(Boolean))];
+    const codes = [...new Set(
+      rows.flatMap((row) => draftItemCodes(row)).filter(Boolean),
+    )];
     if (codes.length === 0) return rows;
 
     const nameByCode = {};
@@ -154,10 +197,17 @@ export default function OrderQuantityControlsPage() {
     }
 
     return rows.map((row) => {
-      const code = String(row.itemCode || "").trim().toUpperCase();
+      const itemCodes = draftItemCodes(row);
+      const itemNames = { ...(row.itemNames || {}) };
+      itemCodes.forEach((code) => {
+        if (!itemNames[code] && nameByCode[code]) itemNames[code] = nameByCode[code];
+      });
       return {
         ...row,
-        itemName: row.itemName || nameByCode[code] || "",
+        itemCodes,
+        itemCode: itemCodes[0] || "",
+        itemNames,
+        itemName: itemNames[itemCodes[0]] || row.itemName || "",
       };
     });
   }
@@ -233,7 +283,10 @@ export default function OrderQuantityControlsPage() {
       const next = (payload.controls || []).map(toDraft);
       const withNames = await resolveItemNames(next.map((row, index) => ({
         ...row,
-        itemName: controls[index]?.itemName || row.itemName || "",
+        itemNames: {
+          ...(controls[index]?.itemNames || {}),
+          ...(row.itemNames || {}),
+        },
       })));
       setControls(withNames);
       setConfigured(true);
@@ -251,18 +304,62 @@ export default function OrderQuantityControlsPage() {
     )));
   }
 
-  function selectItem(index, item) {
+  function addItemToControl(index, item) {
+    const nextCode = normalizeCode(item.itemCode);
+    if (!nextCode) return;
+
+    const target = controls[index];
+    if (!target) return;
+    const previousCodes = draftItemCodes(target);
+    if (previousCodes.includes(nextCode)) {
+      setError(t("alreadyInRule"));
+      setSearchResetKeys((current) => ({
+        ...current,
+        [index]: (current[index] || 0) + 1,
+      }));
+      return;
+    }
+
+    setError("");
+    const nextCodes = [...previousCodes, nextCode];
+    const nextNames = {
+      ...(target.itemNames || {}),
+      [nextCode]: String(item.itemName || "").trim(),
+    };
+    const nextMax = target.maxQty || "20";
+    const patch = {
+      itemCodes: nextCodes,
+      itemCode: nextCodes[0] || "",
+      itemNames: nextNames,
+      itemName: nextNames[nextCodes[0]] || "",
+    };
+    if (shouldAutofillName(target.name, previousCodes)) {
+      patch.name = defaultRuleName(nextCodes, nextNames, nextMax);
+    }
+    updateControl(index, patch);
+    setSearchResetKeys((current) => ({
+      ...current,
+      [index]: (current[index] || 0) + 1,
+    }));
+  }
+
+  function removeItemFromControl(index, itemCode) {
+    const removeCode = normalizeCode(itemCode);
     setControls((current) => current.map((control, controlIndex) => {
       if (controlIndex !== index) return control;
-      const nextCode = String(item.itemCode || "").trim().toUpperCase();
-      const nextName = String(item.itemName || "").trim();
+      const previousCodes = draftItemCodes(control);
+      const nextCodes = previousCodes.filter((code) => code !== removeCode);
+      const nextNames = { ...(control.itemNames || {}) };
+      delete nextNames[removeCode];
       const nextMax = control.maxQty || "20";
       const patch = {
-        itemCode: nextCode,
-        itemName: nextName,
+        itemCodes: nextCodes,
+        itemCode: nextCodes[0] || "",
+        itemNames: nextNames,
+        itemName: nextNames[nextCodes[0]] || "",
       };
-      if (shouldAutofillName(control.name, control.itemCode)) {
-        patch.name = defaultRuleName(nextCode, nextName, nextMax);
+      if (shouldAutofillName(control.name, previousCodes)) {
+        patch.name = defaultRuleName(nextCodes, nextNames, nextMax);
       }
       return { ...control, ...patch };
     }));
@@ -277,7 +374,8 @@ export default function OrderQuantityControlsPage() {
         name: "New item weekly limit",
         active: true,
         itemCode: "",
-        itemName: "",
+        itemCodes: [],
+        itemNames: {},
         maxQty: 20,
       }),
     ]);
@@ -323,80 +421,111 @@ export default function OrderQuantityControlsPage() {
           ) : (
             <>
               <div className="moduleQtyLimitList">
-                {controls.map((control, index) => (
-                  <section key={control.id || index} className="moduleQtyLimitCard">
-                    <div className="moduleQtyLimitCardTop">
-                      <label className="moduleQtyLimitStatus">
+                {controls.map((control, index) => {
+                  const itemCodes = draftItemCodes(control);
+                  const itemNames = control.itemNames || {};
+                  return (
+                    <section key={control.id || index} className="moduleQtyLimitCard">
+                      <div className="moduleQtyLimitCardTop">
+                        <label className="moduleQtyLimitStatus">
+                          <input
+                            type="checkbox"
+                            checked={control.active !== false}
+                            onChange={(event) => updateControl(index, { active: event.target.checked })}
+                          />
+                          <span>{control.active !== false ? t("enabled") : t("disabled")}</span>
+                        </label>
+                        <button
+                          type="button"
+                          className="moduleInlineButton"
+                          onClick={() => removeControl(index)}
+                        >
+                          {t("remove")}
+                        </button>
+                      </div>
+
+                      <label className="moduleQtyLimitField">
+                        <span>{t("name")}</span>
                         <input
-                          type="checkbox"
-                          checked={control.active !== false}
-                          onChange={(event) => updateControl(index, { active: event.target.checked })}
+                          className="moduleInput"
+                          value={control.name}
+                          onChange={(event) => updateControl(index, { name: event.target.value })}
                         />
-                        <span>{control.active !== false ? t("enabled") : t("disabled")}</span>
                       </label>
-                      <button
-                        type="button"
-                        className="moduleInlineButton"
-                        onClick={() => removeControl(index)}
-                      >
-                        {t("remove")}
-                      </button>
-                    </div>
 
-                    <label className="moduleQtyLimitField">
-                      <span>{t("name")}</span>
-                      <input
-                        className="moduleInput"
-                        value={control.name}
-                        onChange={(event) => updateControl(index, { name: event.target.value })}
-                      />
-                    </label>
+                      <div className="moduleQtyLimitField">
+                        <span>{t("items")}</span>
+                        {itemCodes.length === 0 ? (
+                          <p className="moduleHint moduleQtyLimitItemMeta">{t("noItemsYet")}</p>
+                        ) : (
+                          <ul className="moduleQtyLimitItemChips">
+                            {itemCodes.map((code) => (
+                              <li key={code} className="moduleQtyLimitItemChip">
+                                <span className="moduleQtyLimitItemChipLabel">
+                                  <strong>{code}</strong>
+                                  {itemNames[code] && itemNames[code] !== code
+                                    ? <small>{itemNames[code]}</small>
+                                    : null}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="moduleQtyLimitItemChipRemove"
+                                  aria-label={`${t("removeItem")} ${code}`}
+                                  onClick={() => removeItemFromControl(index, code)}
+                                >
+                                  ×
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {itemCodes.length > 1 ? (
+                          <small className="moduleHint moduleQtyLimitItemMeta">{t("groupHint")}</small>
+                        ) : null}
+                      </div>
 
-                    <label className="moduleQtyLimitField">
-                      <span>{t("item")}</span>
-                      <ItemCodeSearchField
-                        value={control.itemCode}
-                        itemName={control.itemName}
-                        placeholder={t("itemSearch")}
-                        searchingLabel={t("searching")}
-                        noMatchesLabel={t("noMatches")}
-                        onSelect={(item) => selectItem(index, item)}
-                      />
-                      {control.itemCode ? (
-                        <small className="moduleHint moduleQtyLimitItemMeta">
-                          {control.itemCode}
-                          {control.itemName && control.itemName !== control.itemCode
-                            ? ` — ${control.itemName}`
-                            : ""}
-                        </small>
-                      ) : null}
-                    </label>
+                      <label className="moduleQtyLimitField">
+                        <span>{t("addItem")}</span>
+                        <ItemCodeSearchField
+                          key={`qty-search-${control.id || index}-${searchResetKeys[index] || 0}`}
+                          value=""
+                          itemName=""
+                          placeholder={t("itemSearch")}
+                          searchingLabel={t("searching")}
+                          noMatchesLabel={t("noMatches")}
+                          onSelect={(item) => {
+                            if (!item?.itemCode) return;
+                            addItemToControl(index, item);
+                          }}
+                        />
+                      </label>
 
-                    <label className="moduleQtyLimitField moduleQtyLimitFieldNarrow">
-                      <span>{t("maxQty")}</span>
-                      <input
-                        className="moduleInput"
-                        type="number"
-                        min="1"
-                        inputMode="numeric"
-                        value={control.maxQty}
-                        onChange={(event) => {
-                          const maxQty = event.target.value;
-                          const patch = { maxQty };
-                          if (shouldAutofillName(control.name, control.itemCode) && control.itemCode) {
-                            patch.name = defaultRuleName(control.itemCode, control.itemName, maxQty);
-                          }
-                          updateControl(index, patch);
-                        }}
-                      />
-                    </label>
+                      <label className="moduleQtyLimitField moduleQtyLimitFieldNarrow">
+                        <span>{t("maxQty")}</span>
+                        <input
+                          className="moduleInput"
+                          type="number"
+                          min="1"
+                          inputMode="numeric"
+                          value={control.maxQty}
+                          onChange={(event) => {
+                            const maxQty = event.target.value;
+                            const patch = { maxQty };
+                            if (shouldAutofillName(control.name, itemCodes) && itemCodes.length) {
+                              patch.name = defaultRuleName(itemCodes, itemNames, maxQty);
+                            }
+                            updateControl(index, patch);
+                          }}
+                        />
+                      </label>
 
-                    <p className="moduleQtyLimitSummary">
-                      <strong>{t("summary")}:</strong>{" "}
-                      {describeOrderQuantityControl(fromDraft(control, index))}
-                    </p>
-                  </section>
-                ))}
+                      <p className="moduleQtyLimitSummary">
+                        <strong>{t("summary")}:</strong>{" "}
+                        {describeOrderQuantityControl(fromDraft(control, index))}
+                      </p>
+                    </section>
+                  );
+                })}
               </div>
 
               <div className="moduleQtyLimitFooter">

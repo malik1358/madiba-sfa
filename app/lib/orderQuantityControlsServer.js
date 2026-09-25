@@ -89,10 +89,17 @@ export async function assertOrderQuantityControls({
   const active = activeOrderQuantityControls(controls);
   if (active.length === 0) return { ok: true, violations: [] };
 
-  const relevantCodes = active.map((control) => control.itemCode);
+  const relevantCodes = [...new Set(
+    active.flatMap((control) => (
+      Array.isArray(control.itemCodes) && control.itemCodes.length
+        ? control.itemCodes
+        : [control.itemCode]
+    )).map(normalizeCode).filter(Boolean),
+  )];
+  const relevantSet = new Set(relevantCodes);
   const hasRelevantLine = (lines || []).some((line) => {
     const code = normalizeCode(line?.item_code || line?.itemCode);
-    return relevantCodes.includes(code) && Number(line?.quantity || 0) > 0;
+    return relevantSet.has(code) && Number(line?.quantity || 0) > 0;
   });
   if (!hasRelevantLine) return { ok: true, violations: [] };
 

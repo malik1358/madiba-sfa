@@ -47,7 +47,6 @@ import {
   normalizeKsaMobile,
   updateCustomerMobile,
 } from "../../lib/customerContact";
-import { loadCustomerAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
 import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { slimVisitStockChecks } from "../../lib/visitReportSave";
@@ -67,7 +66,7 @@ import {
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useUnsavedEntryGuard } from "../../hooks/useUnsavedEntryGuard";
 import { useAppPopup } from "../../components/AppPopupProvider";
-import { postJsonResilient } from "../../lib/offlineApi";
+import { postJsonResilient, sendJsonResilient } from "../../lib/offlineApi";
 import { queueTransactionAlert } from "../../lib/transactionAlertClient";
 import { requestLoginFirstCustomerHintCheck } from "../../lib/loginFirstCustomerHint";
 import { copyTextToClipboard } from "../../lib/whatsappShare";
@@ -1332,29 +1331,28 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
+      await promptCustomerGpsIfFar(customer, location, session.access_token);
       const capturedAt = new Date().toISOString();
-      const [visitDistance, avgDaysToPay] = await Promise.all([
-        loadVisitDistanceMetrics({
-          supabase,
-          userId: session.user.id,
-          location,
-          customer,
-          savedAt: capturedAt,
-        }),
-        loadCustomerAvgDaysToPay({
-          accessToken: session.access_token,
-          customerCode: customer.customer_code,
-          customerName: customer.customer_name || "",
-          scope: accessScope,
-        }),
-      ]);
+      // Prefer local customer data and skip the activity timeline so visit saves
+      // stay as fast as offline-first collection entry on flaky mobile data.
+      const visitDistance = await loadVisitDistanceMetrics({
+        supabase,
+        userId: session.user.id,
+        location,
+        customer,
+        savedAt: capturedAt,
+        skipTimeline: true,
+      });
+      const avgDaysToPay = customer.avg_days_to_pay == null || customer.avg_days_to_pay === ""
+        ? null
+        : Number(customer.avg_days_to_pay);
       summaryText = buildFieldVisitWhatsappSummary({
         customer,
         visitForm,
         salesmanName: formatCollectorDisplayName(profile || {}),
         salesmanCode: profile?.salesman_code || "",
         visitDistance,
-        avgDaysToPay,
+        avgDaysToPay: Number.isFinite(avgDaysToPay) ? avgDaysToPay : null,
       });
       void copyTextToClipboard(summaryText);
       const platform = await resolveGpsCapturePlatform();
@@ -1363,6 +1361,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       const saveResult = await postJsonResilient({
         url: "/api/visit-reports",
         timeoutMs: 20000,
+        queueFirst: true,
         jsonBody: {
           customerCode: customer.customer_code,
           customerName: customer.customer_name,
@@ -1474,20 +1473,25 @@ export default function MyDayPage({ mode = "default" } = {}) {
       await promptCustomerGpsIfFar(customer, location, session.access_token);
       const platform = await resolveGpsCapturePlatform();
 
-      const response = await fetch("/api/visit-reports", {
+      const saveResult = await sendJsonResilient({
+        url: "/api/visit-reports",
         method: "PATCH",
+        queueFirst: true,
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ customerCode: code, isActive: false, location, platform }),
+        jsonBody: { customerCode: code, isActive: false, location, platform },
+        metadata: {
+          type: "customer_inactive",
+          customerCode: code,
+        },
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result?.success) {
+      if (!saveResult.success) {
+        const apiError = String(saveResult?.error || saveResult?.message || "");
         throw new Error(
-          result?.error === CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR
+          apiError === CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR
             ? t("inactiveBlockedOutstanding")
-            : (result?.error || "Unable to mark customer inactive."),
+            : (apiError || "Unable to mark customer inactive."),
         );
       }
 
@@ -1552,26 +1556,31 @@ export default function MyDayPage({ mode = "default" } = {}) {
         throw new Error("Please login again.");
       }
 
-      const response = await fetch("/api/prospects", {
+      const saveResult = await sendJsonResilient({
+        url: "/api/prospects",
         method: "PATCH",
+        queueFirst: true,
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({
+        jsonBody: {
           action: "foreclose",
           id: prospectId || undefined,
           offline_id: offlineId || undefined,
           remarks: `Foreclosed from My Day on ${new Date().toISOString().slice(0, 10)}`,
-        }),
+        },
+        metadata: {
+          type: "prospect_foreclose",
+          customerCode: code,
+          offlineId: offlineId || "",
+        },
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.error || "Unable to foreclose this lead.");
+      if (!saveResult.success) {
+        throw new Error(saveResult.message || "Unable to foreclose this lead.");
       }
 
       await markLocalProspectRejected({
-        id: result?.data?.id || prospectId || undefined,
+        id: saveResult.payload?.data?.id || prospectId || undefined,
         offline_id: offlineId || undefined,
       }).catch(() => null);
 
@@ -1618,17 +1627,21 @@ export default function MyDayPage({ mode = "default" } = {}) {
       await promptCustomerGpsIfFar(customer, location, session.access_token);
       const platform = await resolveGpsCapturePlatform();
 
-      const response = await fetch("/api/visit-reports", {
+      const saveResult = await sendJsonResilient({
+        url: "/api/visit-reports",
         method: "PATCH",
+        queueFirst: true,
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ customerCode: code, isActive: true, location, platform }),
+        jsonBody: { customerCode: code, isActive: true, location, platform },
+        metadata: {
+          type: "customer_active",
+          customerCode: code,
+        },
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.error || "Unable to mark customer active.");
+      if (!saveResult.success) {
+        throw new Error(saveResult.message || "Unable to mark customer active.");
       }
 
       if (accessScope) {

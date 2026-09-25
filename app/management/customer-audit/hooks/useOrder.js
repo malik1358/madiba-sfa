@@ -7,6 +7,7 @@ import { postJsonResilient } from '../../../lib/offlineApi';
 import { upsertLocalPendingOrder } from '../../../lib/mobileDataCache';
 import { promptCustomerMobileUpdateIfMissing } from '../../../lib/customerContact';
 import { buildQueuedPendingOrderId } from '../../../lib/queuedSalesOrders';
+import { allocateLocalSalesOrderNumber, rememberSalesmanOrderSequence } from '../../../lib/offlineOrderNumber';
 import { resolveGpsCapturePlatform } from '../../../lib/geo';
 import { loadVisitDistanceMetrics } from '../../../lib/visitDistanceWhatsapp';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
@@ -43,6 +44,7 @@ function buildOrderPayload({
   platform,
   creditApprovalRequired = false,
   orderBlock = null,
+  orderNumber = "",
 }) {
   const pricedLines = priceOrderLines(
     orderItems.map((item) => ({
@@ -64,6 +66,7 @@ function buildOrderPayload({
   return {
     action,
     orderId: draftOrderId && !isPendingOrderId(draftOrderId) ? Number(draftOrderId) : null,
+    orderNumber: String(orderNumber || "").trim() || undefined,
     customerCode: selectedCustomer.customer_code,
     customerName: selectedCustomer.customer_name,
     salesmanCode: selectedCustomer.current_salesman_code,
@@ -107,6 +110,7 @@ export function useOrder({
   orderBlock = null,
 }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
+  const [draftOrderNumber, setDraftOrderNumber] = useState('');
   const [orderQuantities, setOrderQuantities] = useState({});
   const [savingOrder, setSavingOrder] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
@@ -136,6 +140,7 @@ export function useOrder({
     async function loadDraftOrderOrEditOrder() {
       if (!selectedCustomer && !editOrderId) {
         setDraftOrderId(null);
+        setDraftOrderNumber('');
         setOrderQuantities({});
         setOrderHistory([]);
         return;
@@ -158,7 +163,7 @@ export function useOrder({
         if (editOrderId) {
           const { data: requestedOrder, error: requestedError } = await supabase
             .from('sales_orders')
-            .select('id, customer_code, status, created_by')
+            .select('id, customer_code, status, created_by, order_number')
             .eq('id', editOrderId)
             .maybeSingle();
 
@@ -179,7 +184,7 @@ export function useOrder({
         } else {
           let draftQuery = supabase
             .from('sales_orders')
-            .select('id, customer_code, status, created_by')
+            .select('id, customer_code, status, created_by, order_number')
             .eq('customer_code', selectedCustomer.customer_code)
             .eq('status', 'DRAFT')
             .order('updated_at', { ascending: false })
@@ -200,6 +205,7 @@ export function useOrder({
 
         if (!order) {
           setDraftOrderId(null);
+          setDraftOrderNumber('');
           setOrderQuantities({});
           setLoadedOrderStatus('DRAFT');
           setOrderHistory([]);
@@ -207,6 +213,10 @@ export function useOrder({
         }
 
         setDraftOrderId(order.id);
+        setDraftOrderNumber(String(order.order_number || '').trim());
+        if (order.order_number && selectedCustomer?.current_salesman_code) {
+          void rememberSalesmanOrderSequence(selectedCustomer.current_salesman_code, order.order_number);
+        }
         setLoadedOrderStatus(String(order.status || 'DRAFT').toUpperCase());
         const { data: lines, error: lineError } = await supabase
           .from('sales_order_items')
@@ -312,11 +322,23 @@ export function useOrder({
         location,
         customer: selectedCustomer,
         savedAt: capturedAt,
+        skipTimeline: true,
       });
+
+      const peerCodes = Object.keys(accessScope?.pricingRegionBySalesmanCode || {});
+      const allottedOrderNumber = await allocateLocalSalesOrderNumber(
+        selectedCustomer.current_salesman_code,
+        {
+          existingOrderNumber: draftOrderNumber,
+          peerCodes,
+        },
+      );
+      setDraftOrderNumber(allottedOrderNumber);
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
+        queueFirst: true,
         jsonBody: buildOrderPayload({
           action: 'save_draft',
           selectedCustomer,
@@ -332,6 +354,7 @@ export function useOrder({
           location,
           capturedAt,
           platform,
+          orderNumber: allottedOrderNumber,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -340,6 +363,7 @@ export function useOrder({
           type: 'sales_order',
           action: 'save_draft',
           customerCode: selectedCustomer.customer_code,
+          orderNumber: allottedOrderNumber,
         },
       });
 
@@ -354,6 +378,7 @@ export function useOrder({
             customer_code: selectedCustomer.customer_code,
             customer_name: selectedCustomer.customer_name,
             salesman_code: String(selectedCustomer.current_salesman_code || '').trim().toUpperCase(),
+            order_number: allottedOrderNumber,
             created_at: capturedAt,
             updated_at: capturedAt,
             status: 'DRAFT',
@@ -367,7 +392,7 @@ export function useOrder({
         if (!options.silent) {
           setMessage(saveResult.message || 'Draft saved on device. It will sync automatically when you are back online.');
         }
-        return { orderId: pendingOrderId, orderNumber: "", visitDistance };
+        return { orderId: pendingOrderId, orderNumber: allottedOrderNumber, visitDistance };
       }
 
       const payload = saveResult.payload || {};
@@ -375,7 +400,12 @@ export function useOrder({
         throw new Error('Unable to save draft order.');
       }
 
+      const confirmedNumber = String(payload.orderNumber || allottedOrderNumber || payload.orderId || '').trim();
       setDraftOrderId(payload.orderId);
+      setDraftOrderNumber(confirmedNumber);
+      if (confirmedNumber) {
+        void rememberSalesmanOrderSequence(selectedCustomer.current_salesman_code, confirmedNumber);
+      }
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'DRAFT').toUpperCase());
       requestLoginFirstCustomerHintCheck();
@@ -384,7 +414,7 @@ export function useOrder({
       }
       return {
         orderId: payload.orderId,
-        orderNumber: payload.orderNumber || String(payload.orderId),
+        orderNumber: confirmedNumber,
         visitDistance,
       };
     } catch (err) {
@@ -393,7 +423,7 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, draftOrderId, draftOrderNumber, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
     if (orderItems.length === 0) {
@@ -450,11 +480,23 @@ export function useOrder({
         location,
         customer: selectedCustomer,
         savedAt: capturedAt,
+        skipTimeline: true,
       });
+
+      const peerCodes = Object.keys(accessScope?.pricingRegionBySalesmanCode || {});
+      const allottedOrderNumber = await allocateLocalSalesOrderNumber(
+        selectedCustomer?.current_salesman_code,
+        {
+          existingOrderNumber: draftOrderNumber,
+          peerCodes,
+        },
+      );
+      setDraftOrderNumber(allottedOrderNumber);
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
+        queueFirst: true,
         jsonBody: buildOrderPayload({
           action: 'submit',
           selectedCustomer,
@@ -472,6 +514,7 @@ export function useOrder({
           platform,
           creditApprovalRequired: Boolean(options.creditApprovalRequired ?? creditApprovalRequired),
           orderBlock,
+          orderNumber: allottedOrderNumber,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -480,6 +523,7 @@ export function useOrder({
           type: 'sales_order',
           action: 'submit',
           customerCode: selectedCustomer?.customer_code || '',
+          orderNumber: allottedOrderNumber,
         },
       });
 
@@ -494,6 +538,7 @@ export function useOrder({
             customer_code: selectedCustomer?.customer_code || '',
             customer_name: selectedCustomer?.customer_name || '',
             salesman_code: String(selectedCustomer?.current_salesman_code || '').trim().toUpperCase(),
+            order_number: allottedOrderNumber,
             created_at: capturedAt,
             updated_at: capturedAt,
             status: 'SUBMITTED',
@@ -509,7 +554,7 @@ export function useOrder({
         }
         setShowOrderReview(false);
         setLoadedOrderStatus('SUBMITTED');
-        return { orderId: pendingOrderId, orderNumber: "", visitDistance };
+        return { orderId: pendingOrderId, orderNumber: allottedOrderNumber, visitDistance };
       }
 
       const payload = saveResult.payload || {};
@@ -517,17 +562,22 @@ export function useOrder({
         throw new Error('Unable to submit order.');
       }
 
+      const confirmedNumber = String(payload.orderNumber || allottedOrderNumber || payload.orderId || '').trim();
       setDraftOrderId(payload.orderId);
+      setDraftOrderNumber(confirmedNumber);
+      if (confirmedNumber) {
+        void rememberSalesmanOrderSequence(selectedCustomer?.current_salesman_code, confirmedNumber);
+      }
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'SUBMITTED').toUpperCase());
       requestLoginFirstCustomerHintCheck();
       if (!options.silent) {
-        setMessage(`Order #${payload.orderNumber || payload.orderId} submitted successfully.`);
+        setMessage(`Order #${confirmedNumber} submitted successfully.`);
       }
       setShowOrderReview(false);
       return {
         orderId: payload.orderId,
-        orderNumber: payload.orderNumber || String(payload.orderId),
+        orderNumber: confirmedNumber,
         visitDistance,
       };
     } catch (err) {
@@ -536,7 +586,7 @@ export function useOrder({
     } finally {
       setSubmittingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, creditApprovalRequired, draftOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, creditApprovalRequired, draftOrderId, draftOrderNumber, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

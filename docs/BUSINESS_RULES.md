@@ -40,17 +40,20 @@ Constants in `app/lib/workdayActivity.js`:
 ## Visits
 
 - Visit outcomes on `visits.outcome` are constrained. Field reports in `system_settings` are the source Customer Audit and My Day read for the latest report (`visit_report_latest:<code>`).
+- My Day / Visit Without Order visit saves, inactive/active toggles, and prospect foreclosure are offline-first (`queueFirst`) via the resilient helpers. Save enrichment skips the activity timeline; WhatsApp avg days uses a local customer value when present.
 - Visit plan (`app/lib/salesmanVisitPlan.js`): default 12 visits per salesman. System suggestions need at least 7 days since the last visit (`MIN_SYSTEM_VISIT_GAP_DAYS`). Appointments due today bypass that gap. Score mixes sales opportunity and collection opportunity. The page reads the stored snapshot `salesman_visit_plan_snapshot_v1`. The midnight KSA cron builds it. Email is off unless `SALESMAN_VISIT_PLAN_EMAIL_ENABLED` is true.
 - WhatsApp visit text includes average days to pay (`app/lib/avgDaysWhatsapp.js`). That figure comes from the settlement rules below, not from a single stored column.
 
 ## Orders
 
 - Live statuses on `sales_orders.status`: `DRAFT`, `SUBMITTED`, `CANCELLED`.
+- New Order draft/save and submit are offline-first (`queueFirst` in `useOrder.js`). Queued orders keep a local pending id until sync assigns the server row id.
+- Order numbers are salesman-wise and allotted on the device before sync: short prefix + sequence (e.g. `P01` for Parvez). If another salesman shares the same first letter, the prefix grows to 2+ letters (`PA01` vs `PR01`). The client sends `orderNumber` on save/submit; the API stores it and must not rewrite it after sync. PDF/WhatsApp use that permanent number immediately.
 - Invoice statuses (strings, in settings JSON) are listed in `ORDER_INVOICE_STATUSES` in `app/lib/orderApproval.js`. Do not invent a new label in one screen only. Pending Orders, missing-invoice email, and time-to-make all compare these strings.
 - `Pending for credit approval` is legacy and is treated like `Pending for approval`.
 - Uploading an invoice PDF moves status to `Invoice made` when a file is stored. Setting `Invoice made` without a PDF is rejected.
 - Time-to-make clock runs for `Pending for invoice creation` and stops when status leaves that queue. Show the live duration; do not freeze it at submit time.
-- Order PDFs must show a mandatory `Order No.` label (`app/lib/salesOrderNumber.js`). Placeholder numbers are not acceptable on the PDF.
+- Order PDFs must show a mandatory `Order No.` label (`app/lib/salesOrderNumber.js`). New offline orders use the permanent short salesman series (`P01` / `PA01`). Legacy queued rows without a number may still show `Order No. Pending sync` until sync; never print a raw `pending:` queue id.
 - Cash-discount breakdown is printed on pending-order PDFs. Do not drop it when editing the PDF builder.
 - Pending Orders shows both `Current outstanding` and `Outstanding >60 days` from the uploaded outstanding dataset for the customer. The >60 value is the sum of buckets `61-90`, `91-120`, and `>120`.
 - Orders created before the KSA day `2026-09-01` with no uploaded invoice are legacy and should be closed as `Rejected by management` / `Pre-September 2026 — invoice not uploaded`. Missing-invoice chase starts at `MISSING_INVOICE_CREATED_FROM = 2026-09-01`, after a 60-minute grace, and not more often than every 12 minutes.
@@ -77,7 +80,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Salesmen named in `COLLECTION_QUEUE_EXCLUDED_SALESMEN` (`Zia`, `Asrar Ahmed`) are removed from the collection queue. This is a business filter, not dead code.
 - Scheduled revisit dates are redacted for viewers who should not see another collector’s private schedule (`redactCollectionVisitScheduleForViewer`).
 - Legal transfer removes the customer from the normal queue and lists them on `/management/payment-collections/legal`.
-- Receipt copies and payment copies go to the `payment-collections` bucket. The save path must not hang when a Funds Received PDF or camera photo is attached: online saves upload directly (no IndexedDB serialize-first), photo compression is time-bounded with a fallback to the original file, bucket MIME refresh is best-effort, and Saving clears before the queue reload.
+- Receipt copies and payment copies go to the `payment-collections` bucket. Collection visits (including Funds Received with PDF/photo) save on-device first (`queueFirst`) and sync in the background so flaky mobile data cannot block collectors. Sync re-resolves Android MIME for queued attachments. Photo compression is time-bounded with a fallback to the original file, bucket MIME refresh is best-effort, and Saving clears before the queue reload. Save enrichment uses the queue row’s `avg_days_to_pay` and skips the client activity-timeline fetch; the API patches previous-visit distance when the visit syncs.
 - Receipts Not in Tally (`app/lib/receiptsNotInTally.js`) matches app collection receipts to the Tally receipt upload. Amount tolerance is 0.02. Default date window is 1 day. The UI allows a window up to 30 days. Do not raise that cap without checking the page and the API together.
 - Collection report WhatsApp distance uses the same prior visits as the report. The service role recomputes distance because client RLS cannot see every previous row.
 
@@ -112,8 +115,8 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 
 - Customer GPS updates record `gps_updated_at`, actor, and source: `customer_master`, `visit`, or `excel_import`.
 - History rows go to `customer_gps_history` with the previous coordinates.
-- When a field visit (or order GPS capture) has coordinates and the customer master has **no** saved GPS, the visit location is **auto-promoted** onto `customers.latitude/longitude` (source `visit`) without asking. If the customer already has GPS and the salesman is farther than `CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM` (0.5 km), the app still prompts before overwriting.
-- Outstanding Without GPS lists customers who have an outstanding balance and no saved coordinates. Rows can still show a last visit when that visit was older than auto-promote, GPS was blocked, or the role did not require transaction GPS. The daily email goes to each salesman, with hierarchy bosses on CC, at 00:25 KSA, skipping the Friday holiday the same way as other salesman emails.
+- When a field visit (or order GPS capture) has coordinates and the customer master has **no** saved GPS, the visit location is **auto-promoted** onto `customers.latitude/longitude` (source `visit`) without asking. This runs on the server in `/api/visit-reports` and payment-collection saves (`promoteEntryGpsToCustomerIfMissing`), and on the client via `maybePromptCustomerLocationUpdate`. If the customer already has GPS and the salesman is farther than `CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM` (0.5 km), the app still prompts before overwriting.
+- Outstanding Without GPS lists customers who have an outstanding balance and no saved coordinates. Rows can still show a last visit when that visit was older than auto-promote, GPS was blocked, or the role did not require transaction GPS. After this promote rule is live, a new visit with entry GPS should clear the customer from the list. The daily email goes to each salesman, with hierarchy bosses on CC, at 00:25 KSA, skipping the Friday holiday the same way as other salesman emails.
 - GPS pings are rejected when the KSA workday is already ended.
 
 ## Email and push rules
@@ -136,3 +139,4 @@ These strings and numbers are duplicated by design. Change them in the shared mo
 - Role matrix (`moduleAccess.js`)
 - Customer code matchers (`outstanding.js`, `customerAccess.js`)
 - Table color classes for any new or edited report
+- Field write path (`offlineApi.js` defaults `queueFirst: true` for resilient JSON/form saves)

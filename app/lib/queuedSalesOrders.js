@@ -19,9 +19,11 @@ export function queuedSalesOrderToRow(item) {
   const action = String(item?.metadata?.action || body.action || "submit").toLowerCase();
   const createdAt = new Date(Number(item?.createdAt || Date.now())).toISOString();
   const updatedAt = new Date(Number(item?.updatedAt || item?.createdAt || Date.now())).toISOString();
+  const orderNumber = String(body.orderNumber || item?.metadata?.orderNumber || "").trim();
 
   return {
     id: buildQueuedPendingOrderId(item?.id),
+    order_number: orderNumber,
     customer_code: body.customerCode || item?.metadata?.customerCode || "",
     customer_name: body.customerName || "",
     salesman_code: String(body.salesmanCode || "").trim().toUpperCase(),

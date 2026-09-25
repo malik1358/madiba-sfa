@@ -57,3 +57,91 @@ test("planCustomerLocationUpdates keeps previous GPS for history", () => {
   assert.equal(plan.updates[0].previous_latitude, 24.1);
   assert.equal(plan.updates[0].previous_longitude, 46.2);
 });
+
+test("customerRowHasSavedGps requires both coordinates", async () => {
+  const { customerRowHasSavedGps } = await import("../app/lib/customerGpsHistory.js");
+  assert.equal(customerRowHasSavedGps({ latitude: 24.7, longitude: 46.6 }), true);
+  assert.equal(customerRowHasSavedGps({ latitude: 24.7 }), false);
+  assert.equal(customerRowHasSavedGps({ latitude: null, longitude: null }), false);
+});
+
+test("promoteEntryGpsToCustomerIfMissing writes when customer has no GPS", async () => {
+  const { promoteEntryGpsToCustomerIfMissing, CUSTOMER_GPS_SOURCE } = await import("../app/lib/customerGpsHistory.js");
+  const updates = [];
+  const history = [];
+  const admin = {
+    from(table) {
+      if (table === "customers") {
+        return {
+          update(payload) {
+            updates.push(payload);
+            return {
+              eq() {
+                return {
+                  select() {
+                    return {
+                      async maybeSingle() {
+                        return {
+                          data: {
+                            customer_code: "1573",
+                            latitude: payload.latitude,
+                            longitude: payload.longitude,
+                          },
+                          error: null,
+                        };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+      if (table === "customer_gps_history") {
+        return {
+          async insert(row) {
+            history.push(row);
+            return { error: null };
+          },
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    },
+  };
+
+  const result = await promoteEntryGpsToCustomerIfMissing(admin, {
+    customerCode: "1573",
+    latitude: 24.7136,
+    longitude: 46.6753,
+    actor: { id: "u1", salesman_name: "Abdul", role: "salesman" },
+    customerRow: { customer_code: "1573", latitude: null, longitude: null },
+  });
+
+  assert.equal(result?.latitude, 24.7136);
+  assert.equal(result?.longitude, 46.6753);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].gps_update_source, CUSTOMER_GPS_SOURCE.visit);
+  assert.equal(history.length, 1);
+});
+
+test("promoteEntryGpsToCustomerIfMissing skips when customer already has GPS", async () => {
+  const { promoteEntryGpsToCustomerIfMissing } = await import("../app/lib/customerGpsHistory.js");
+  let touched = false;
+  const admin = {
+    from() {
+      touched = true;
+      throw new Error("should not query when GPS already saved");
+    },
+  };
+
+  const result = await promoteEntryGpsToCustomerIfMissing(admin, {
+    customerCode: "1573",
+    latitude: 24.7136,
+    longitude: 46.6753,
+    customerRow: { customer_code: "1573", latitude: 24.1, longitude: 46.2 },
+  });
+
+  assert.equal(result, null);
+  assert.equal(touched, false);
+});

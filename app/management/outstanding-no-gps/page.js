@@ -50,8 +50,8 @@ const TEXT = {
   showing: { en: "Showing", ar: "عرض" },
   totalOutstanding: { en: "Total outstanding", ar: "إجمالي المستحقات" },
   hint: {
-    en: "New visits auto-promote GPS onto the customer master when none is saved yet. Rows here are usually older visits where GPS was skipped, blocked, or never captured. Save GPS from Customer Master to clear them.",
-    ar: "الزيارات الجديدة تنسخ GPS تلقائياً إلى سجل العميل إذا لم يكن محفوظاً. الصفوف هنا غالباً لزيارات أقدم تُركت بدون موقع أو مُنع فيها GPS. احفظ GPS من سجل العملاء لإزالتها.",
+    en: "New visits auto-save entry GPS onto the customer master when none is stored yet. Rows here are usually older visits where GPS was skipped, blocked, or never captured — or visits before this rule. Save GPS from Customer Master, or visit again with GPS on, to clear them.",
+    ar: "الزيارات الجديدة تحفظ GPS الدخول تلقائياً في سجل العميل إذا لم يكن محفوظاً. الصفوف هنا غالباً لزيارات أقدم تُركت بدون موقع أو مُنع فيها GPS — أو قبل هذه القاعدة. احفظ GPS من سجل العملاء أو زر مجدداً مع تفعيل GPS لإزالتها.",
   },
 };
 

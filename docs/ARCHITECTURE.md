@@ -161,14 +161,14 @@ After a sales import, the BI cube and the daily supplier-order email can rebuild
 
 ## Offline and mobile cache
 
-Field phones cache scope, prices, and customer payloads (`app/lib/mobileDataCache.js`, `offlineDataRefresh.js`, `localDataStore.js`). `/api/mobile-snapshot` and `/api/cron/mobile-snapshot` rebuild snapshots. `/api/offline-data-version` exposes a version key so clients know when to refresh. Queued orders use `app/lib/offlineSyncQueue.js`.
+Field phones cache scope, prices, and customer payloads (`app/lib/mobileDataCache.js`, `offlineDataRefresh.js`, `localDataStore.js`). `/api/mobile-snapshot` and `/api/cron/mobile-snapshot` rebuild snapshots. `/api/offline-data-version` exposes a version key so clients know when to refresh. Queued field writes use `app/lib/offlineSyncQueue.js` via `postJsonResilient` / `postFormDataResilient` / `sendJsonResilient`, which **default to `queueFirst: true`** so collections, visits, orders, stock take, and prospects save on-device first and sync in the background. Sales order numbers are allotted offline per salesman (`app/lib/offlineOrderNumber.js`) and persist unchanged through sync.
 
 Do not assume a page always has a live network read. Several screens render from cache and then refresh.
 
 ## GPS
 
 - Background and idle pings: `app/lib/nativeFieldTracking.js` and `POST /api/gps-ping`. Pings are `daily_activity_logs` rows with `entry_type = GPS_PING` and a JSON note. They are allowed only inside an open KSA work session (after morning attendance, before end of day).
-- Customer coordinates: `PATCH /api/customers/location` updates `customers.latitude/longitude` and the GPS audit columns, and inserts `customer_gps_history`. Field visits auto-promote GPS onto the customer when none is saved yet (`customerLocation.js`); far-from-saved still prompts.
+- Customer coordinates: `PATCH /api/customers/location` updates `customers.latitude/longitude` and the GPS audit columns, and inserts `customer_gps_history`. Field visits auto-promote GPS onto the customer when none is saved yet — server-side in `/api/visit-reports` and collection saves (`promoteEntryGpsToCustomerIfMissing`), and client-side in `customerLocation.js`. Far-from-saved still prompts.
 - Collection visits store their own lat/long on `collection_visits` when those columns exist.
 - Invoice makers and admins do not run the background GPS tracker (`shouldEnableBackgroundGps`).
 
@@ -185,7 +185,7 @@ BI pages call `/api/business-dashboard` and `/api/business-dashboard/category-gr
 
 ## Collections architecture
 
-`/api/payment-collections` builds queues from the outstanding dataset, customer master, and `collection_visits`. Priority scoring is `buildCollectionPriority` in `app/lib/paymentCollections.js`. Legal escalation is `legal_transfers`. Files go to the `payment-collections` storage bucket. Online visit saves upload multipart directly; IndexedDB serialization runs only when queuing offline/timeout retries. Client photo prep (`prepareUploadFile`) is time-bounded so Android camera HEIC/JPEG cannot leave Saving stuck.
+`/api/payment-collections` builds queues from the outstanding dataset, customer master, and `collection_visits`. Priority scoring is `buildCollectionPriority` in `app/lib/paymentCollections.js`. Legal escalation is `legal_transfers`. Files go to the `payment-collections` storage bucket. Visit saves (including Funds Received attachments) are offline-first (`queueFirst`): files serialize into IndexedDB only for the local queue, then sync uploads multipart with MIME re-resolved for Android. Client photo prep (`prepareUploadFile`) is time-bounded so Android camera HEIC/JPEG cannot leave Saving stuck. Client save enrichment uses cached queue `avg_days_to_pay` and skips the activity timeline (`skipTimeline`); the API recomputes visit-distance lines with the service role on sync.
 
 The collections UI was split so a background queue refresh does not remount the open visit form. Do not tie a full page reload to that refresh (see the fix in PR #313).
 

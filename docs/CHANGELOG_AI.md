@@ -6,7 +6,15 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
-- **2026-09-22** — Visit GPS is auto-promoted onto the customer master when the customer has no saved coordinates (`maybePromptCustomerLocationUpdate` / `evaluateCustomerLocationUpdatePrompt`). Far-from-saved still prompts before overwrite. Outstanding Without GPS can still list customers with a last visit from older skipped/blocked GPS captures.
+- **2026-09-25** — My Day visit reports now auto-promote entry GPS onto the customer master when none is saved. Root cause: `/api/visit-reports` stored visit location in settings/activity logs only. Server promotes via `promoteEntryGpsToCustomerIfMissing`; client also calls the location helper on save. Far-from-saved still prompts before overwrite.
+- **2026-09-23** — Sales order numbers use a short salesman prefix: `P01` when the first letter is unique among peers, otherwise 2+ letters (`PA01` vs `PR01`). Still allotted offline and never rewritten after sync.
+- **2026-09-23** — Sales order numbers are allotted offline per salesman and never change after sync. Client allocates via `allocateLocalSalesOrderNumber`; `/api/sales-orders` stores the client `orderNumber` and does not rewrite an existing value. PDF/WhatsApp use that permanent number immediately.
+- **2026-09-23** — Offline-first order PDFs: queued local orders no longer block Save/Share PDF waiting for a server order number. PDF/WhatsApp use `Order No. Pending sync` only as a legacy fallback when no allotted number exists yet (`formatSalesOrderNumberForDisplay`).
+- **2026-09-22** — Field saves are offline-first by default: `postJsonResilient` / `sendJsonResilient` / `postFormDataResilient` use `queueFirst: true`. Applied across Collections (including attachments + legal), My Day visit/inactive/active/foreclose, New Order draft/submit, Stock Take, and New Customer prospect link/follow-up. Visit/order enrichment skips the activity timeline; My Day uses local avg-days when present.
+- **2026-09-22** — Collection visit saves (including Funds Received PDF/photo attachments) are offline-first (`queueFirst`) and sync in the background. Save uses queue-row `avg_days_to_pay`, skips client timeline (`skipTimeline`), and caps Arabic translate at 2.5s. Sync re-resolves Android MIME so queued attachments do not stick.
+- **2026-09-22** — Collection visit saves were online-first whenever `navigator.onLine` was true, so flaky field data made every entry wait on translate / avg-days history / activity timeline / server upload. First pass made text-only visits offline-first; follow-up also queues attachment visits on-device first.
+- **2026-09-22** — Production client crash after PR #315: `supabaseGuard` threw in the browser because `VERCEL`/`VERCEL_ENV` are not available in client bundles. Guard now skips when `typeof window !== "undefined"`; server instrumentation and local scripts still block production Supabase locally.
+- **2026-09-22** — Visit GPS is auto-promoted onto the customer master when the customer has no saved coordinates (`maybePromptCustomerLocationUpdate` / `evaluateCustomerLocationUpdatePrompt`). Far-from-saved still prompts before overwrite.
 - **2026-09-22** — Day-route / daily visit Working hours now use only non-far customer transactions at or after 08:00 KSA (`resolveDayRouteWorkingHours`). Midnight and early-morning near stops no longer inflate the total; far visit reports stay excluded.
 - **2026-09-22** — Payment Collections attachment saves: online path no longer serializes files into IndexedDB before upload; camera photo compression has load/canvas timeouts with original-file fallback; storage bucket `updateBucket` is best-effort; Saving clears before queue reload; selected attachment names show in the form. Server sniffs PDF magic bytes and accepts Android `image/jpg`.
 - **2026-09-21** — Sales-order submit now auto-blocks customers when Avg Days to Pay is 120+ (salesmen see the customer but submit is rejected). Customer Audit shows the block status, and admin can apply/remove a per-customer unblock override via `customer_order_block_override:<code>`.
@@ -14,7 +22,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 - **2026-09-21** — Avg days to pay now shows both lifetime and last-6-month figures wherever lifetime was shown (Customer Audit, Payment Settlement, New Order, Order PDF, WhatsApp). 6m uses sales+receipts from the BI performance from-month; open invoices still only blend when older than that window’s paid avg.
 - **2026-09-21** — Customer Audit and New Order now include “receipt amount in last 10 days” sourced from customer-history receipts, using receipt-date windowing.
 - **2026-09-21** — Avg days to pay on Order PDF and New Order was using the default ~6-month customer-history window while receipts stayed full-ledger, so a small collection looked like a huge avg-days swing vs Customer Audit. Both now request `fullHistory=1&scope=settlement` like settlement screens.
-- **2026-09-21** — Hard local guard blocks the production Supabase project ref (`ynmtlzyqvmurpmfretji`) outside Vercel (`app/lib/supabaseGuard.js`, `instrumentation.js`, browser client, local scripts). Preview and production Vercel deploys are allowed. No secrets logged.
+- **2026-09-21** — Hard local guard blocks the production Supabase project ref (`ynmtlzyqvmurpmfretji`) outside Vercel (`app/lib/supabaseGuard.js`, `instrumentation.js`, server-side `getSupabaseClient()`, local scripts). Preview and production Vercel deploys are allowed. Browser does not enforce (see 2026-09-22 note). No secrets logged.
 - **2026-09-21** — Env semantics: `NEXT_PUBLIC_APP_ENV` local/development (and legacy staging) → LOCAL banner; removed hardcoded `madiba-sfa-staging.vercel.app` origin fallback in favor of explicit `APP_ORIGIN` / localhost. Production origin resolution unchanged when env is production or unset.
 - **2026-09-21** — Canonical deploy model is now local/dev → feature/AI branch → PR/CI → `main` → Vercel production. No permanent cloud staging. Docs updated (`README`, `AGENTS.md`, Copilot instructions, `docs/DEPLOYMENT.md`, related handover files, `ANDROID_APK.md`).
 - **2026-09-21** — Pending Orders now shows both current outstanding and `Outstanding >60 days` from the uploaded outstanding dataset, with the >60 figure summed from `61-90`, `91-120`, and `>120`.
@@ -44,7 +52,7 @@ From merged pull requests on `main` (newest first):
 - Uploading an invoice PDF sets status to `Invoice made` (PR #312).
 - Pending-order PDFs show the cash-discount breakdown (PR #310).
 - Pending Orders must stay usable when the outstanding dataset is large (PR #311). Do not load or filter that sheet on the main thread in a way that freezes the page.
-- Order PDFs always show an `Order No.` label (PR #298).
+- Order PDFs always show an `Order No.` label (PR #298). New orders use a permanent salesman-wise offline series; only legacy queued rows without a number fall back to `Pending sync`.
 - Inactivity hierarchy email waits 70 minutes, not 40 (PR #299).
 - WhatsApp visit and order summaries include average days to pay (PRs #297 and #307).
 - Customer Audit settlement uses day-1 history, FIFO open versus Tally open, and does not treat next-day reissues as reversals. Orphan credit notes apply to open (PRs #306, #302, #296, #295).
@@ -52,7 +60,7 @@ From merged pull requests on `main` (newest first):
 - Pending Order Queue has a current outstanding column (PR #303).
 - Tally order Excel export and item-master unit import exist. Large unit imports must not time out without a clear error (PRs #300 and #304).
 - Live time-to-make is shown for `Pending for invoice creation` (PR #308).
-- Saving a Funds Received collection must not hang on PDF or camera attachments (PR #309; follow-up 2026-09-22 bounded compression / online upload path).
+- Saving a Funds Received collection must not hang on PDF or camera attachments (PR #309; follow-up 2026-09-22 bounded compression). All collection visits (with or without attachments) must remain offline-first (`queueFirst`) so field saves do not wait on flaky mobile data; sync re-resolves Android MIME.
 - Sheet names for exports should come from the snapshot the user is looking at (PR #289).
 
 ## Known drift (docs or SQL versus code)

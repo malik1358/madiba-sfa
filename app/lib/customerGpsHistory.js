@@ -214,3 +214,62 @@ export async function applyCustomerGpsUpdate(admin, {
 
   return data;
 }
+
+export function customerRowHasSavedGps(row) {
+  const latitudeRaw = row?.latitude;
+  const longitudeRaw = row?.longitude;
+  if (latitudeRaw === null || latitudeRaw === undefined || latitudeRaw === "") return false;
+  if (longitudeRaw === null || longitudeRaw === undefined || longitudeRaw === "") return false;
+  const latitude = Number(latitudeRaw);
+  const longitude = Number(longitudeRaw);
+  return Number.isFinite(latitude) && Number.isFinite(longitude) && latitude !== 0 && longitude !== 0;
+}
+
+/**
+ * When a visit/collection has entry GPS and the customer master has none,
+ * write those coordinates onto the customer (source = visit). Never overwrites
+ * an existing pin — far-from-saved stays a client prompt.
+ */
+export async function promoteEntryGpsToCustomerIfMissing(admin, {
+  customerCode,
+  latitude,
+  longitude,
+  actor = {},
+  customerRow = null,
+  selectColumns = CUSTOMER_LOCATION_SELECT,
+} = {}) {
+  const code = String(customerCode || "").trim();
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!code || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  let row = customerRow;
+  if (!row) {
+    const { data, error } = await admin
+      .from("customers")
+      .select("customer_code,latitude,longitude,city,area")
+      .eq("customer_code", code)
+      .maybeSingle();
+    if (error) throw error;
+    row = data;
+  }
+  if (!row) return null;
+  if (customerRowHasSavedGps(row)) return null;
+
+  try {
+    return await applyCustomerGpsUpdate(admin, {
+      customerCode: String(row.customer_code || code).trim(),
+      latitude: lat,
+      longitude: lng,
+      previousLatitude: row.latitude,
+      previousLongitude: row.longitude,
+      actor,
+      source: CUSTOMER_GPS_SOURCE.visit,
+      selectColumns,
+    });
+  } catch (error) {
+    // Visit/collection save must not fail because GPS promote failed.
+    console.warn("Customer GPS auto-promote skipped", error);
+    return null;
+  }
+}

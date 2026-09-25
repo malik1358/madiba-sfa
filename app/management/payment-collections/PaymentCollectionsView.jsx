@@ -62,7 +62,7 @@ import {
 } from "../../lib/collectionQueueSearch";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
-import { formatAvgDaysToPayWhatsappLines, loadCustomerAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
+import { formatAvgDaysToPayWhatsappLines } from "../../lib/avgDaysWhatsapp";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { formatCollectionLastVisitWhatsappLines } from "../../lib/collectionVisitSummary";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -572,6 +572,8 @@ async function countCollectionPendingSync() {
   return pending.filter((item) => item.metadata?.type === "collection_visit").length;
 }
 
+const COLLECTION_TRANSLATE_TIMEOUT_MS = 2500;
+
 async function resolveEnglishRemarkForSave(arabicRemark, englishRemark) {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     const english = String(englishRemark || "").trim();
@@ -579,10 +581,10 @@ async function resolveEnglishRemarkForSave(arabicRemark, englishRemark) {
     if (english && english !== arabic) return english;
     return arabic;
   }
-  return resolveEnglishRemark(arabicRemark, englishRemark);
+  return resolveEnglishRemark(arabicRemark, englishRemark, COLLECTION_TRANSLATE_TIMEOUT_MS);
 }
 
-async function resolveEnglishRemark(arabicRemark, englishRemark) {
+async function resolveEnglishRemark(arabicRemark, englishRemark, timeoutMs = 8000) {
   const arabic = String(arabicRemark || "").trim();
   const english = String(englishRemark || "").trim();
   if (!arabic) return english;
@@ -591,7 +593,7 @@ async function resolveEnglishRemark(arabicRemark, englishRemark) {
   // visit note cannot override the current Arabic text.
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1843,20 +1845,22 @@ export default function PaymentCollectionsView({ view = "due" }) {
         || cashQueuePriorityByKey.get(rowKey(row))
         || 0;
 
-      const [visitDistance, avgDaysToPay] = await Promise.all([
-        loadVisitDistanceMetrics({
-          supabase,
-          userId: session.user.id,
-          location: gps,
-          customer: locationUpdate.customer || row,
-          savedAt: new Date().toISOString(),
-        }),
-        loadCustomerAvgDaysToPay({
-          accessToken: session.access_token,
-          customerCode: row.customer_code,
-          customerName: row.customer_name || "",
-        }),
-      ]);
+      // Prefer local queue data for avg days and skip the activity timeline.
+      // Live history/timeline fetches were making every save wait on the network
+      // even when the visit itself can be queued offline. Distance-from-customer
+      // still uses GPS + customer coords; the API patches previous-visit distance
+      // when the queued save syncs.
+      const visitDistance = await loadVisitDistanceMetrics({
+        supabase,
+        userId: session.user.id,
+        location: gps,
+        customer: locationUpdate.customer || row,
+        savedAt: new Date().toISOString(),
+        skipTimeline: true,
+      });
+      const avgDaysToPay = row.avg_days_to_pay == null || row.avg_days_to_pay === ""
+        ? null
+        : Number(row.avg_days_to_pay);
 
       const summaryText = buildVisitSummary(
         row,
@@ -1867,7 +1871,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           visitNumberForDay,
           queuePriority: resolvedQueuePriority,
           visitDistance,
-          avgDaysToPay,
+          avgDaysToPay: Number.isFinite(avgDaysToPay) ? avgDaysToPay : null,
           lastVisit: row?.latest_collection || null,
         },
       );
@@ -1919,7 +1923,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
         if (receiptFile) shareFiles.push(receiptFile);
       }
 
-      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
       const saveResult = await postFormDataResilient({
         url: "/api/payment-collections",
         formData,
@@ -1930,13 +1933,11 @@ export default function PaymentCollectionsView({ view = "due" }) {
           type: "collection_visit",
           customerCode: row.customer_code,
         },
-        // Large PDF receipts need more than a short probe timeout on mobile data.
-        timeoutMs: shareFiles.length > 0 ? 90000 : 25000,
+        // Always save on-device first (including Funds Received PDF/photo). Sync
+        // re-resolves Android MIME on upload so queued attachments do not stick.
+        timeoutMs: shareFiles.length > 0 ? 45000 : 12000,
         queueOnTimeout: true,
-        // Only queue-first when offline. Online uploads (especially PDF receipts)
-        // should hit the server directly so Android octet-stream PDFs are normalized
-        // and saved immediately instead of sitting in a stuck IndexedDB sync item.
-        queueFirst: offline,
+        queueFirst: true,
       });
 
       // Clear Saving before success UI / queue refresh so attachment saves do not
@@ -2177,10 +2178,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerCode: row.customer_code,
           action,
         },
-        // Legal remove used to time out at the default 4s while the API rebuilt
-        // the whole outstanding queue, so the delete never reached the database.
+        // Legal updates also save on-device first so flaky mobile data cannot block
+        // transfer/remove. Sync applies the PATCH when the connection improves.
         timeoutMs: 60000,
-        queueFirst: typeof navigator !== "undefined" && navigator.onLine === false,
+        queueFirst: true,
       });
 
       if (!saveResult.success) {

@@ -39,6 +39,7 @@ import {
   patchCollectionVisitSummaryVisitNumber,
 } from "../../lib/collectionVisitSummary.js";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp.js";
+import { promoteEntryGpsToCustomerIfMissing } from "../../lib/customerGpsHistory.js";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
 import {
   resolveUploadContentType,
@@ -1216,6 +1217,19 @@ export async function POST(request) {
         referenceId: insertData?.id,
       },
     });
+
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      await promoteEntryGpsToCustomerIfMissing(admin, {
+        customerCode,
+        latitude,
+        longitude,
+        actor: {
+          id: user.id,
+          email: user.email,
+          role: scope.userRole,
+        },
+      });
+    }
 
     return Response.json({
       success: true,

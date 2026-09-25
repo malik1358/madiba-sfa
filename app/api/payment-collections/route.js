@@ -841,16 +841,14 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       invoices: customerInvoices,
       todayIso,
     });
-    const hasUploadedOutstandingWorkbook = outstandingRows.length > 0;
     const salesmanFromUpload = resolveUploadedOutstandingSalesman({
       customerInvoices,
       aggregateRowSalesman: aggregateRowSalesmanByCode.get(customer.customer_code)
         || String(uploadedOutstanding?.salesman || "").trim(),
     });
-    // When an outstanding workbook is loaded, salesman comes from that file only —
-    // not from customer-master / last sales-invoice assignment.
-    const salesmanFromMaster = !hasUploadedOutstandingWorkbook
-      && !isPlaceholderSalesmanValue(customer.current_salesman_code)
+    // Prefer uploaded outstanding salesman; fall back to customer-master assignment
+    // so the queue filter still has names when the upload salesman cell is blank.
+    const salesmanFromMaster = !isPlaceholderSalesmanValue(customer.current_salesman_code)
       ? (salesmanMap.get(normalizeCode(customer.current_salesman_code)) || customer.current_salesman_code)
       : "";
 
@@ -862,6 +860,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
         customer.customer_name,
       ),
       current_salesman_code: customer.current_salesman_code,
+      salesman_code: normalizeCode(customer.current_salesman_code) || "",
       salesman_name: salesmanFromUpload || salesmanFromMaster,
       city: customer.city,
       area: customer.area,

@@ -17,6 +17,8 @@ import {
   findAllLegalTransferCustomerCodes,
   findLegalTransferForCustomer,
   formatLatestCollectionVisitRemark,
+  getCollectionSalesmanLabel,
+  buildCollectionSalesmanOptions,
   hasCollectionVisit,
   sumCollectionReceivedInLastDays,
   assertCollectionVisitRemark,
@@ -1095,4 +1097,42 @@ test("buildCollectionQueues exposes received_last_10_days from collection histor
 
   assert.equal(queues.dueCustomers.length, 1);
   assert.equal(queues.dueCustomers[0].received_last_10_days, 600);
+});
+
+test("getCollectionSalesmanLabel falls back to invoice salesman and current code", () => {
+  assert.equal(getCollectionSalesmanLabel({
+    salesman_name: "Abdul Rehman",
+    salesman_code: "SM01",
+  }), "SM01 - Abdul Rehman");
+
+  assert.equal(getCollectionSalesmanLabel({
+    salesman_name: "",
+    invoices: [{ salesman: "Ahmed Nabil", pending_amount: 100 }],
+  }), "Ahmed Nabil");
+
+  assert.equal(getCollectionSalesmanLabel({
+    salesman_name: "",
+    current_salesman_code: "SM99",
+    invoices: [],
+  }), "SM99");
+
+  assert.equal(getCollectionSalesmanLabel({
+    salesman_name: "",
+    invoices: [{ salesman: "--" }],
+  }), "");
+});
+
+test("buildCollectionSalesmanOptions lists unique salesman labels from queue rows", () => {
+  const options = buildCollectionSalesmanOptions([
+    { salesman_name: "Abdul Rehman" },
+    { salesman_name: "", invoices: [{ salesman: "Ahmed Nabil" }] },
+    { salesman_name: "Abdul Rehman" },
+    { salesman_name: "", current_salesman_code: "SM99" },
+  ]);
+
+  assert.deepEqual(options.map((option) => option.label).sort(), [
+    "Abdul Rehman",
+    "Ahmed Nabil",
+    "SM99",
+  ]);
 });

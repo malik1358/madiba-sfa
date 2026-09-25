@@ -47,7 +47,9 @@ import { resolveAuthSession } from "../../lib/authSession";
 import { requestLoginFirstCustomerHintCheck } from "../../lib/loginFirstCustomerHint";
 import {
   assertCollectionVisitRemark,
+  buildCollectionSalesmanOptions,
   collectionVisitRequiresRemark,
+  getCollectionSalesmanLabel,
   isCashOnlyQueueCustomer,
   isCashQueueCustomer,
   isScheduledRevisitQueueCustomer,
@@ -455,7 +457,7 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   const lines = [
     `${t("summaryCustomer")}: ${row.customer_name || row.customer_code}`,
     `${t("summaryCode")}: ${row.customer_code || "-"}`,
-    `${t("summarySalesman")}: ${row.salesman_name || row.salesman_code || "-"}`,
+    `${t("summarySalesman")}: ${getSalesmanLabel(row) || "-"}`,
     `${t("summaryOutcome")}: ${outcomeText || t("summaryNotSpecified")}`,
   ];
 
@@ -645,29 +647,11 @@ function normalizeSalesmanKey(value) {
 }
 
 function getSalesmanLabel(row) {
-  const name = String(row?.salesman_name || "").trim();
-  const code = String(row?.salesman_code || "").trim();
-  if (code && name) return `${code} - ${name}`;
-  return name || code || "";
+  return getCollectionSalesmanLabel(row);
 }
 
 function buildSalesmanOptions(rows) {
-  const byKey = new Map();
-
-  (rows || []).forEach((row) => {
-    const label = getSalesmanLabel(row);
-    const key = normalizeSalesmanKey(label);
-    if (!key) return;
-
-    const existing = byKey.get(key);
-    if (!existing || label.length > existing.length) {
-      byKey.set(key, label);
-    }
-  });
-
-  return [...byKey.entries()]
-    .map(([key, label]) => ({ key, label }))
-    .sort((left, right) => left.label.localeCompare(right.label));
+  return buildCollectionSalesmanOptions(rows);
 }
 
 function rowMatchesSalesmanSelection(row, selectedKeys) {
@@ -2904,7 +2888,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                               <div className="moduleHint">{t("legalSearchMatch")}</div>
                             ) : null}
                           </td>
-                          <td data-label={t("salesman")}>{row.salesman_name || row.salesman_code || "-"}</td>
+                          <td data-label={t("salesman")}>{getSalesmanLabel(row) || "-"}</td>
                           <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                           <td data-label={t("amount")} className="moduleCollectorCellPrimary">{formatMoney(isNotDue ? row.total_not_due_amount : row.total_due_amount)}</td>
                           <td data-label={t("cashBucket")}>{formatMoney(row.outstanding_cash)}</td>

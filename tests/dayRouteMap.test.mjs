@@ -146,15 +146,16 @@ test("resolveDayRouteWorkingHours stops at lunch out when lunch in was not punch
   assert.equal(hours.value, "4h");
 });
 
-test("resolveDayRouteWorkingHours is blank without a near customer transaction", () => {
+test("resolveDayRouteWorkingHours falls back to attendance when only far or login/logout exist", () => {
   const hours = resolveDayRouteWorkingHours([
     { savedAt: "2026-09-07T07:34:00.000Z", transactionType: "MORNING_ATTENDANCE" },
     { savedAt: "2026-09-07T16:10:00.000Z", transactionType: "END_OF_DAY" },
     { savedAt: "2026-09-07T11:00:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: true },
   ]);
 
-  assert.equal(hours.minutes, null);
-  assert.equal(hours.value, "-");
+  // 10:34 → 19:10 KSA with no lunch = 8h 36m
+  assert.equal(hours.minutes, 516);
+  assert.equal(hours.value, "8h 36m");
 });
 
 test("resolveDayRouteWorkingHours ignores pre-8am KSA near stops and far stops", () => {
@@ -172,7 +173,7 @@ test("resolveDayRouteWorkingHours ignores pre-8am KSA near stops and far stops",
   assert.equal(hours.value, "7h 24m");
 });
 
-test("resolveDayRouteWorkingHours is blank when only pre-8am or far customer stops exist", () => {
+test("resolveDayRouteWorkingHours is blank when only pre-8am or far stops exist and attendance is missing", () => {
   const hours = resolveDayRouteWorkingHours([
     { savedAt: "2026-09-06T21:24:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
     { savedAt: "2026-09-07T03:09:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
@@ -181,4 +182,32 @@ test("resolveDayRouteWorkingHours is blank when only pre-8am or far customer sto
 
   assert.equal(hours.minutes, null);
   assert.equal(hours.value, "-");
+});
+
+test("resolveDayRouteWorkingHours attendance fallback clamps midnight login to 08:00 KSA", () => {
+  // Login 00:20 KSA, lunch 17:03–17:04, logout 23:59 — no near after-8am visits
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-06T21:20:00.000Z", transactionType: "MORNING_ATTENDANCE" },
+    { savedAt: "2026-09-07T14:03:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
+    { savedAt: "2026-09-07T14:04:00.000Z", transactionType: "LUNCH_BREAK_IN" },
+    { savedAt: "2026-09-07T20:59:00.000Z", transactionType: "END_OF_DAY" },
+  ]);
+
+  // 08:00→17:03 + 17:04→23:59 = 9h 3m + 6h 55m = 15h 58m
+  assert.equal(hours.minutes, 958);
+  assert.equal(hours.value, "15h 58m");
+});
+
+test("resolveDayRouteWorkingHours attendance fallback matches login after 8am with lunch", () => {
+  // Login 10:40 KSA, lunch 17:03–17:04, logout 23:59 — screenshot-style idle-only day
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-07T07:40:00.000Z", transactionType: "MORNING_ATTENDANCE" },
+    { savedAt: "2026-09-07T14:03:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
+    { savedAt: "2026-09-07T14:04:00.000Z", transactionType: "LUNCH_BREAK_IN" },
+    { savedAt: "2026-09-07T20:59:00.000Z", transactionType: "END_OF_DAY" },
+  ]);
+
+  // 10:40→17:03 + 17:04→23:59 = 6h 23m + 6h 55m = 13h 18m
+  assert.equal(hours.minutes, 798);
+  assert.equal(hours.value, "13h 18m");
 });

@@ -1,9 +1,33 @@
 import { hasGpsCoordinates } from "./geo.js";
 import { formatIdleDuration, formatNarrativeTime } from "./collectionDaySummary.js";
-import { formatWorkingHours, getKsaDateTimeParts } from "./workdayActivity.js";
+import {
+  calculateWorkingHoursMinutes,
+  formatWorkingHours,
+  getKsaDateString,
+  getKsaDateTimeParts,
+} from "./workdayActivity.js";
 
 /** Day-route working hours count only non-far customer stops from this KSA hour onward. */
 export const DAY_ROUTE_WORKING_HOURS_START_HOUR = 8;
+
+/** Build an ISO timestamp for hour:minute on a KSA calendar date (Asia/Riyadh = UTC+3). */
+function ksaClockIso(dateString, hour, minute = 0) {
+  const match = String(dateString || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, 0, 0)).toISOString();
+}
+
+function clampIsoToDayRouteWorkingHoursStart(iso) {
+  const ts = Date.parse(String(iso || ""));
+  if (!Number.isFinite(ts)) return iso;
+  const floorIso = ksaClockIso(getKsaDateString(new Date(ts)), DAY_ROUTE_WORKING_HOURS_START_HOUR);
+  const floorTs = Date.parse(String(floorIso || ""));
+  if (!Number.isFinite(floorTs)) return iso;
+  return ts < floorTs ? floorIso : iso;
+}
 
 const NEAR_CUSTOMER_TRANSACTION_TYPES = new Set([
   "VISIT_REPORT",
@@ -280,16 +304,29 @@ function workingMinutesFromNearTransactions({ startAt, endAt, lunchOutAt, lunchI
 
 export function resolveDayRouteWorkingHours(source = []) {
   const near = nearCustomerTransactions(source);
-  if (!near.length) {
-    return { minutes: null, value: formatWorkingHours(null) };
+  const { loginAt, lunchOutAt, lunchInAt, logoutAt } = extractWorkdayTimesFromRoute(source);
+
+  if (near.length >= 2) {
+    const nearMinutes = workingMinutesFromNearTransactions({
+      startAt: near[0].at,
+      endAt: near[near.length - 1].at,
+      lunchOutAt,
+      lunchInAt,
+    });
+    if (nearMinutes != null) {
+      return {
+        minutes: nearMinutes,
+        value: formatWorkingHours(nearMinutes),
+      };
+    }
   }
 
-  const { lunchOutAt, lunchInAt } = extractWorkdayTimesFromRoute(source);
-  const minutes = workingMinutesFromNearTransactions({
-    startAt: near[0].at,
-    endAt: near[near.length - 1].at,
+  // No usable non-far after-8am span: fall back to attendance hours, never starting before 08:00 KSA.
+  const minutes = calculateWorkingHoursMinutes({
+    loginAt: loginAt ? clampIsoToDayRouteWorkingHoursStart(loginAt) : null,
     lunchOutAt,
     lunchInAt,
+    logoutAt,
   });
   return {
     minutes,

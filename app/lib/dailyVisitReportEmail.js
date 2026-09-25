@@ -267,9 +267,7 @@ export function buildUserVisitReportEmail({
   const routeSvg = buildDayRouteSvg(routePoints, { idleGaps, showIdleLabels: false });
   const workdayStops = buildWorkdayRouteStops(routePoints, idleGaps);
   const workingHoursValue = resolveDayRouteWorkingHours(entries.length ? entries : routePoints).value;
-  const workingHoursHtml = workingHoursValue !== "-"
-    ? `<p style="font-size: 12px; margin: 8px 0 0;"><strong>Working hours:</strong> ${escapeHtml(workingHoursValue)}</p>`
-    : "";
+  const workingHoursHtml = `<p style="font-size: 12px; margin: 8px 0 0;"><strong>Working hours:</strong> ${escapeHtml(workingHoursValue)}</p>`;
   const activitySplit = user?.activitySplit || buildVisitDaySplit(entries, user?.daySummary?.stats || {});
   const locationNotes = Array.isArray(user?.locationNotes) && user.locationNotes.length
     ? user.locationNotes

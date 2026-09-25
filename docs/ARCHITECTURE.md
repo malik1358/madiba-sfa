@@ -168,7 +168,7 @@ Do not assume a page always has a live network read. Several screens render from
 ## GPS
 
 - Background and idle pings: `app/lib/nativeFieldTracking.js` and `POST /api/gps-ping`. Pings are `daily_activity_logs` rows with `entry_type = GPS_PING` and a JSON note. They are allowed only inside an open KSA work session (after morning attendance, before end of day).
-- Customer coordinates: `POST /api/customers/location` updates `customers.latitude/longitude` and the GPS audit columns, and inserts `customer_gps_history`.
+- Customer coordinates: `PATCH /api/customers/location` updates `customers.latitude/longitude` and the GPS audit columns, and inserts `customer_gps_history`. Field visits auto-promote GPS onto the customer when none is saved yet — server-side in `/api/visit-reports` and collection saves (`promoteEntryGpsToCustomerIfMissing`), and client-side in `customerLocation.js`. Far-from-saved still prompts.
 - Collection visits store their own lat/long on `collection_visits` when those columns exist.
 - Invoice makers and admins do not run the background GPS tracker (`shouldEnableBackgroundGps`).
 

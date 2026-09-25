@@ -43,12 +43,13 @@ const TEXT = {
     ar: "لم يتم رفع سجل إيصالات تالي بعد. استورد ملف الإيصالات أولاً.",
   },
   hint: {
-    en: "Match rule: same customer (code or same trading name), amount within 1.00, and receipt date within the selected day window of the app visit date (KSA). Choose 0–30 days. One Tally voucher is used at most once.",
-    ar: "قاعدة المطابقة: نفس العميل (الكود أو نفس الاسم التجاري)، فرق المبلغ حتى 1.00، وتاريخ إيصال تالي ضمن نافذة الأيام المحددة حول تاريخ زيارة التطبيق (توقيت السعودية). اختر من 0 إلى 30 يوماً. يُستخدم كل قسيمة تالي مرة واحدة فقط.",
+    en: "Match rule: same customer (code or same trading name), amount within 1.00, and receipt date within the selected day window of the app visit date (KSA). Choose 0–30 days. One Tally voucher is used at most once. Same collector + customer + amount on the same day within 5 minutes is treated as a duplicate and hidden.",
+    ar: "قاعدة المطابقة: نفس العميل (الكود أو نفس الاسم التجاري)، فرق المبلغ حتى 1.00، وتاريخ إيصال تالي ضمن نافذة الأيام المحددة حول تاريخ زيارة التطبيق (توقيت السعودية). اختر من 0 إلى 30 يوماً. يُستخدم كل قسيمة تالي مرة واحدة فقط. نفس المحصل + العميل + المبلغ في نفس اليوم خلال 5 دقائق يُعتبر تكراراً ويُخفى.",
   },
   appReceipts: { en: "App receipts", ar: "إيصالات التطبيق" },
   matched: { en: "Matched to Tally", ar: "مطابق لتالي" },
   missing: { en: "Missing in Tally", ar: "غير موجود في تالي" },
+  duplicatesHidden: { en: "Duplicates hidden", ar: "تكرارات مخفية" },
   missingAmount: { en: "Missing amount", ar: "المبلغ الناقص" },
   appTotal: { en: "App total", ar: "إجمالي التطبيق" },
   tallyFile: { en: "Tally file", ar: "ملف تالي" },
@@ -365,6 +366,10 @@ export default function ReceiptsNotInTallyPage() {
                 <section className="moduleMetricCard">
                   <span>{t("missing")}</span>
                   <strong>{report.summary?.missingCount || 0}</strong>
+                </section>
+                <section className="moduleMetricCard">
+                  <span>{t("duplicatesHidden")}</span>
+                  <strong>{report.summary?.duplicateCount || 0}</strong>
                 </section>
                 <section className="moduleMetricCard">
                   <span>{t("appTotal")}</span>

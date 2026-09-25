@@ -115,7 +115,8 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 
 - Customer GPS updates record `gps_updated_at`, actor, and source: `customer_master`, `visit`, or `excel_import`.
 - History rows go to `customer_gps_history` with the previous coordinates.
-- Outstanding Without GPS lists customers who have an outstanding balance and no saved coordinates. The daily email goes to each salesman, with hierarchy bosses on CC, at 00:25 KSA, skipping the Friday holiday the same way as other salesman emails.
+- When a field visit (or order GPS capture) has coordinates and the customer master has **no** saved GPS, the visit location is **auto-promoted** onto `customers.latitude/longitude` (source `visit`) without asking. This runs on the server in `/api/visit-reports` and payment-collection saves (`promoteEntryGpsToCustomerIfMissing`), and on the client via `maybePromptCustomerLocationUpdate`. If the customer already has GPS and the salesman is farther than `CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM` (0.5 km), the app still prompts before overwriting.
+- Outstanding Without GPS lists customers who have an outstanding balance and no saved coordinates. Rows can still show a last visit when that visit was older than auto-promote, GPS was blocked, or the role did not require transaction GPS. After this promote rule is live, a new visit with entry GPS should clear the customer from the list. The daily email goes to each salesman, with hierarchy bosses on CC, at 00:25 KSA, skipping the Friday holiday the same way as other salesman emails.
 - GPS pings are rejected when the KSA workday is already ended.
 
 ## Email and push rules

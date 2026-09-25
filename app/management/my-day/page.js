@@ -1331,6 +1331,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
+      await promptCustomerGpsIfFar(customer, location, session.access_token);
       const capturedAt = new Date().toISOString();
       // Prefer local customer data and skip the activity timeline so visit saves
       // stay as fast as offline-first collection entry on flaky mobile data.

@@ -152,3 +152,70 @@ test("reconcileAppReceiptsToTally matches same trading name with small amount di
   assert.equal(result.missingCount, 0);
   assert.equal(result.matched[0].tally.vch_no, "1599");
 });
+
+test("reconcileAppReceiptsToTally hides near-duplicate app visits by same collector", () => {
+  const result = reconcileAppReceiptsToTally({
+    appVisits: [
+      {
+        id: "first",
+        customer_code: "1441",
+        customer_name: "Jazeerat Al-Tawfeer",
+        amount_received: 3674,
+        visit_outcome: "FUNDS_RECEIVED",
+        visit_date: "2026-09-18",
+        saved_at: "2026-09-17T22:30:00.000Z",
+        created_by: "collector-1",
+      },
+      {
+        id: "dup",
+        customer_code: "1441",
+        customer_name: "Jazeerat Al-Tawfeer",
+        amount_received: 3674,
+        visit_outcome: "FUNDS_RECEIVED",
+        visit_date: "2026-09-18",
+        saved_at: "2026-09-17T22:30:20.000Z",
+        created_by: "collector-1",
+      },
+    ],
+    tallyReceipts: [],
+  });
+
+  assert.equal(result.appCount, 1);
+  assert.equal(result.duplicateCount, 1);
+  assert.equal(result.missingCount, 1);
+  assert.equal(result.missingInTally[0].id, "first");
+  assert.equal(result.missingTotal, 3674);
+  assert.equal(result.duplicatesDropped[0].duplicateOf, "first");
+});
+
+test("reconcileAppReceiptsToTally keeps separate visits outside the duplicate window", () => {
+  const result = reconcileAppReceiptsToTally({
+    appVisits: [
+      {
+        id: "morning",
+        customer_code: "1441",
+        customer_name: "Jazeerat Al-Tawfeer",
+        amount_received: 3674,
+        visit_outcome: "FUNDS_RECEIVED",
+        visit_date: "2026-09-18",
+        saved_at: "2026-09-18T08:00:00.000Z",
+        created_by: "collector-1",
+      },
+      {
+        id: "afternoon",
+        customer_code: "1441",
+        customer_name: "Jazeerat Al-Tawfeer",
+        amount_received: 3674,
+        visit_outcome: "FUNDS_RECEIVED",
+        visit_date: "2026-09-18",
+        saved_at: "2026-09-18T10:00:00.000Z",
+        created_by: "collector-1",
+      },
+    ],
+    tallyReceipts: [],
+  });
+
+  assert.equal(result.appCount, 2);
+  assert.equal(result.duplicateCount, 0);
+  assert.equal(result.missingCount, 2);
+});

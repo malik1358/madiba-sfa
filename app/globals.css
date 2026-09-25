@@ -7813,6 +7813,70 @@ button.moduleBiDashKpi:focus-visible {
   margin: 0;
 }
 
+.moduleQtyLimitItemChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.moduleQtyLimitItemChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid #c5d8dd;
+  border-radius: 999px;
+  background: #f3fbfb;
+  color: #073f4c;
+}
+
+.moduleQtyLimitItemChipLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.moduleQtyLimitItemChipLabel strong {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.moduleQtyLimitItemChipLabel small {
+  font-size: 11px;
+  color: #4a646b;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.moduleQtyLimitItemChipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: #0f4c5c;
+  color: #ffffff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.moduleQtyLimitItemChipRemove:hover {
+  background: #0a3843;
+}
+
 .moduleQtyLimitSummary {
   margin: 0;
   padding: 10px 12px;

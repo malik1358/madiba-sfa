@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-26** — Outstanding Compare customer list has **Show differences only** (on by default). It keeps customers whose auto-loaded Difference (computed − Tally) is over 0.02, or that have any invoice open gap. Customer name opens Payment Settlement `#invoices-settlement`, and that page now scrolls to the hash after the ledger loads. The per-customer fetch uses `/api/customer-history?...&lite=1`, which returns no peer rows and does not write the history cache. No migration.
 - **2026-09-26** — Daily Visit Report **Distance from previous** on visit/order rows now sums path since the previous customer stop through idle GPS **and** lunch/login bridge rows (`transaction_type` LUNCH_BREAK_*/MORNING_ATTENDANCE/END_OF_DAY were previously treated as anchors because only `entry_type` was checked). Example: Visit #2 → idle → lunch → Visit #3 shows ~22.8 km on Visit #3, not only the last hop.
 - **2026-09-26** — Daily Visit Report **Distance from previous** on visit/order rows now includes path through idle GPS pings (`resolveDistanceFromPreviousVisitKm`). Example: visit → idle 0.04 km → visit shows 0.04 on the next visit. Route total still sums hop-by-hop (no double count).
 - **2026-09-26** — Daily Visit Report collapses repeated visit/collection activity-log saves (same user, customer, outcome, within 2 minutes) so multi-tap duplicates show as one row (`hideDuplicateVisitEntries`).

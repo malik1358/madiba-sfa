@@ -98,6 +98,7 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 
 - Machine Open is FIFO: sales minus cash applied to that invoice, then credit notes allocated to that invoice.
 - Tally Open is the pending amount on the outstanding upload for that invoice. They are allowed to differ. Outstanding Compare and the Open delta exist to show the gap.
+- Outstanding Compare “Show differences only” (default on) lists a customer when |computed − Tally| > 0.02 or any invoice has an open gap. The customer name opens Payment Settlement → Invoices & Settlement.
 - Do not force FIFO open or paid to equal the outstanding file. Tests in `tests/paymentBehavior.test.mjs` lock this (including the case “open is FIFO residual, not outstanding 610”).
 - Cash is applied oldest invoice first.
 - Same-day or next-day credit notes (`IMMEDIATE_REVERSAL_MAX_DAYS = 1`) that match the invoice (amount and line fingerprint) are immediate reversals. They stay inside sales but are excluded from average days. They are not “payments”.

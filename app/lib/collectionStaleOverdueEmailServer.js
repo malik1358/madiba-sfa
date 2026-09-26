@@ -10,16 +10,116 @@ import {
   resolveCollectionStaleOverdueDigestRecipients,
 } from "./collectionStaleOverdueEmail.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
+import { resolveCustomerAccountCode } from "./outstanding.js";
 import {
   getKsaDateString,
   getKsaWeekdayIndex,
   getKsaWeekdayIndexForDateString,
 } from "./workdayActivity.js";
 
+const VISIT_REPORT_LATEST_PREFIX = "visit_report_latest:";
+
 function envFlagEnabled(value, defaultValue = true) {
   const raw = String(value ?? "").trim().toLowerCase();
   if (!raw) return defaultValue;
   return raw !== "0" && raw !== "false" && raw !== "no";
+}
+
+function normalizeCustomerCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function customerCodeAliases(value) {
+  const raw = normalizeCustomerCode(value);
+  const canonical = normalizeCustomerCode(resolveCustomerAccountCode(value));
+  return [...new Set([raw, canonical].filter(Boolean))];
+}
+
+function chunk(values, size = 80) {
+  const list = Array.isArray(values) ? values : [];
+  const batches = [];
+  for (let index = 0; index < list.length; index += size) {
+    batches.push(list.slice(index, index + size));
+  }
+  return batches;
+}
+
+function laterIso(...values) {
+  let latest = "";
+  let latestMs = Number.NEGATIVE_INFINITY;
+  (values || []).forEach((value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return;
+    const ms = Date.parse(raw);
+    if (!Number.isFinite(ms)) return;
+    if (ms >= latestMs) {
+      latestMs = ms;
+      latest = new Date(ms).toISOString();
+    }
+  });
+  return latest;
+}
+
+export async function loadLastVisitWithoutOrderByCustomer(admin, customerCodes = []) {
+  const latest = new Map();
+  const codes = [...new Set(
+    (customerCodes || [])
+      .flatMap((code) => customerCodeAliases(code))
+      .filter(Boolean),
+  )];
+  if (!codes.length || typeof admin?.from !== "function") return latest;
+
+  for (const batch of chunk(codes, 80)) {
+    const settingKeys = batch.map((code) => `${VISIT_REPORT_LATEST_PREFIX}${code}`);
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_key,setting_value")
+      .in("setting_key", settingKeys);
+    if (error) {
+      const message = String(error?.message || error?.details || "").toLowerCase();
+      if (error?.code === "42P01" || message.includes("does not exist")) break;
+      throw error;
+    }
+
+    (data || []).forEach((row) => {
+      try {
+        const parsed = JSON.parse(String(row?.setting_value || "null"));
+        const fromKey = String(row?.setting_key || "").slice(VISIT_REPORT_LATEST_PREFIX.length);
+        const customerCode = normalizeCustomerCode(parsed?.customer_code || fromKey);
+        const visitAt = parsed?.captured_at || parsed?.saved_at || "";
+        if (!customerCode || !visitAt) return;
+        customerCodeAliases(customerCode).forEach((alias) => {
+          latest.set(alias, laterIso(latest.get(alias), visitAt));
+        });
+      } catch {
+        // Ignore malformed visit-without-order settings.
+      }
+    });
+  }
+
+  return latest;
+}
+
+export function attachLastVisitWithoutOrder(rows = [], visitByCustomer = new Map()) {
+  return (rows || []).map((row) => {
+    const aliases = customerCodeAliases(row?.customer_code);
+    let visitAt = "";
+    aliases.forEach((alias) => {
+      visitAt = laterIso(visitAt, visitByCustomer.get(alias));
+    });
+    return {
+      ...row,
+      last_visit_without_order_at: visitAt || row?.last_visit_without_order_at || "",
+    };
+  });
+}
+
+export async function enrichDueCustomersWithVisitWithoutOrder(admin, rows = []) {
+  const visitByCustomer = await loadLastVisitWithoutOrderByCustomer(
+    admin,
+    (rows || []).map((row) => row?.customer_code),
+  );
+  return attachLastVisitWithoutOrder(rows, visitByCustomer);
 }
 
 export function parseCollectionStaleOverdueReportDate(value, now = new Date()) {
@@ -92,7 +192,8 @@ async function loadDueCollectionCustomers(admin, {
 
   const records = await fetchOutstandingAndCollectionRecords(admin, scope);
   const queues = buildCollectionQueues(records);
-  return Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
+  const dueCustomers = Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
+  return enrichDueCustomersWithVisitWithoutOrder(admin, dueCustomers);
 }
 
 export async function runCollectionStaleOverdueEmailCycle(admin, {

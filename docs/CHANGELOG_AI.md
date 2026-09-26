@@ -6,6 +6,8 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-26** — Daily Visit Report **Distance from previous** on visit/order rows now includes path through idle GPS pings (`resolveDistanceFromPreviousVisitKm`). Example: visit → idle 0.04 km → visit shows 0.04 on the next visit. Route total still sums hop-by-hop (no double count).
+- **2026-09-26** — Daily Visit Report collapses repeated visit/collection activity-log saves (same user, customer, outcome, within 2 minutes) so multi-tap duplicates show as one row (`hideDuplicateVisitEntries`).
 - **2026-09-26** — ZAHRAT still appeared on Outstanding Without GPS after visit GPS existed: dirty row `Zahrat Ghubaira…` had no pin, clean `Zahrat` did, and sibling/backfill matched codes case-sensitively (`ZAHRAT` ≠ `Zahrat`). Sibling exclude is now case-insensitive; backfill writes to `stored_customer_code` and looks up visit GPS by canonical code.
 - **2026-09-26** — Order number sequences jumped (MOI01 next to MOI414/MOI417). Cause: offline cache treated bare numeric ids as sequences, and the server accepted stale low preferred numbers. Fix: `rememberSalesmanOrderSequence` only learns from real series numbers; server `resolvePreferredOrderNumber` rejects preferred ≤ current prefix max and allots the next free number; max-sequence reads page all matching rows.
 - **2026-09-26** — Outstanding Without GPS could still list 1428/1457 after visit GPS backfill because dirty siblings (`1428_Name…`) had no pin while clean `1428` did. Without-GPS fetches now drop rows whose canonical code already has GPS (`excludeRowsWithCanonicalGpsSibling`).

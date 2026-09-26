@@ -535,6 +535,40 @@ export function findPreviousWaitingAnchorRow(rows, index) {
   return null;
 }
 
+/**
+ * For a customer visit/order row, sum hop distances from the previous non-idle
+ * entry through any idle GPS pings up to this row. Idle rows keep their own
+ * single-hop distance. Route totals should still use hop-by-hop enrichment so
+ * idle distance is not double-counted.
+ */
+export function resolveDistanceFromPreviousVisitKm(rows, index) {
+  const list = Array.isArray(rows) ? rows : [];
+  const row = list[index];
+  if (!row) return null;
+
+  if (isIdleGpsPingTimelineRow(row)) {
+    const value = row.distanceFromPreviousKm;
+    return value === null || value === undefined || !Number.isFinite(Number(value))
+      ? null
+      : Number(value);
+  }
+
+  const previousAnchor = findPreviousWaitingAnchorRow(list, index);
+  const startIndex = previousAnchor ? list.indexOf(previousAnchor) : -1;
+  if (startIndex < 0 && index === 0) return null;
+
+  let total = 0;
+  let hasSegment = false;
+  for (let cursor = Math.max(0, startIndex + 1); cursor <= index; cursor += 1) {
+    const value = list[cursor]?.distanceFromPreviousKm;
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) continue;
+    total += Number(value);
+    hasSegment = true;
+  }
+
+  return hasSegment ? total : null;
+}
+
 export function resolveWaitingMinutesFromPreviousVisit(
   rows,
   index,

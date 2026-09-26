@@ -187,20 +187,28 @@ export async function excludeRowsWithCanonicalGpsSibling(admin, rows) {
   const canonicalCodes = [...new Set(
     missing
       .map((row) => customerMasterCanonicalCode(row))
-      .filter(Boolean),
+      .filter(Boolean)
+      .map((code) => String(code).trim().toUpperCase()),
   )];
   if (!canonicalCodes.length) return list;
 
   const codesWithGps = new Set();
-  for (const batch of chunkValues(canonicalCodes, 80)) {
+  for (const batch of chunkValues(canonicalCodes, 40)) {
+    // Case-insensitive: clean row may be `Zahrat` while canonical is `ZAHRAT`.
+    const orFilter = batch
+      .map((code) => `customer_code.ilike.${String(code).replace(/[,()]/g, "")}`)
+      .filter(Boolean)
+      .join(",");
+    if (!orFilter) continue;
+
     const { data, error } = await admin
       .from("customers")
       .select("customer_code,latitude,longitude")
-      .in("customer_code", batch);
+      .or(orFilter);
     if (error) throw error;
     (data || []).forEach((row) => {
       if (!customerHasSavedGps(row)) return;
-      const code = customerMasterCanonicalCode(row);
+      const code = String(customerMasterCanonicalCode(row) || "").trim().toUpperCase();
       if (code) codesWithGps.add(code);
     });
   }
@@ -208,7 +216,7 @@ export async function excludeRowsWithCanonicalGpsSibling(admin, rows) {
   if (!codesWithGps.size) return list;
   return list.filter((row) => {
     if (customerHasSavedGps(row)) return true;
-    const code = customerMasterCanonicalCode(row);
+    const code = String(customerMasterCanonicalCode(row) || "").trim().toUpperCase();
     return !code || !codesWithGps.has(code);
   });
 }
@@ -240,8 +248,10 @@ export function dedupeCustomerMasterRows(rows) {
     if (!key) continue;
 
     const display = resolveCustomerMasterExportFields(row);
+    const storedCode = String(row?.stored_customer_code || row?.customer_code || "").trim();
     const normalized = {
       ...row,
+      stored_customer_code: storedCode,
       customer_code: display.customer_code || row.customer_code || "",
       customer_name: display.customer_name || row.customer_name || "",
     };

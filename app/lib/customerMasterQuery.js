@@ -157,6 +157,62 @@ export function customerHasSavedGps(row) {
   return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
 }
 
+export function customerMasterCanonicalCode(row) {
+  const display = resolveCustomerMasterExportFields(row);
+  return (
+    canonicalCustomerCode(display.customer_code || row?.customer_code)
+    || String(display.customer_code || row?.customer_code || "").trim().toUpperCase()
+  );
+}
+
+function chunkValues(values, size) {
+  const items = [...values];
+  const batches = [];
+  for (let index = 0; index < items.length; index += size) {
+    batches.push(items.slice(index, index + size));
+  }
+  return batches;
+}
+
+/**
+ * Without-GPS SQL filter can still return dirty codes like `1428_Name…`
+ * while the clean `1428` row already has GPS. Drop those so Outstanding
+ * Without GPS / Customer Master do not keep showing a false missing pin.
+ */
+export async function excludeRowsWithCanonicalGpsSibling(admin, rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const missing = list.filter((row) => !customerHasSavedGps(row));
+  if (!missing.length) return list;
+
+  const canonicalCodes = [...new Set(
+    missing
+      .map((row) => customerMasterCanonicalCode(row))
+      .filter(Boolean),
+  )];
+  if (!canonicalCodes.length) return list;
+
+  const codesWithGps = new Set();
+  for (const batch of chunkValues(canonicalCodes, 80)) {
+    const { data, error } = await admin
+      .from("customers")
+      .select("customer_code,latitude,longitude")
+      .in("customer_code", batch);
+    if (error) throw error;
+    (data || []).forEach((row) => {
+      if (!customerHasSavedGps(row)) return;
+      const code = customerMasterCanonicalCode(row);
+      if (code) codesWithGps.add(code);
+    });
+  }
+
+  if (!codesWithGps.size) return list;
+  return list.filter((row) => {
+    if (customerHasSavedGps(row)) return true;
+    const code = customerMasterCanonicalCode(row);
+    return !code || !codesWithGps.has(code);
+  });
+}
+
 function customerMasterRowScore(row) {
   let score = 0;
   if (customerHasSavedGps(row)) score += 100;
@@ -291,7 +347,12 @@ export async function fetchAllFilteredCustomers(admin, filters) {
 
   const outstandingDataset = await readOutstandingDataset(admin);
   const enriched = enrichCustomerMasterOutstanding(searched, outstandingDataset);
-  return applyCustomerMasterOutstandingFilter(enriched, filters.outstandingFilter);
+  const outstandingFiltered = applyCustomerMasterOutstandingFilter(enriched, filters.outstandingFilter);
+  const gpsFilter = String(filters.gpsFilter || "all").toLowerCase();
+  if (gpsFilter === "without" || gpsFilter === "missing") {
+    return excludeRowsWithCanonicalGpsSibling(admin, outstandingFiltered);
+  }
+  return outstandingFiltered;
 }
 
 export function customerMasterExportRows(customers) {

@@ -304,9 +304,11 @@ export function patchCollectionVisitSummaryEnglishRemark(
 export function buildStoredCollectionVisitSummary(row, visit, options = {}, labels = COLLECTION_VISIT_SUMMARY_LABELS) {
   if (!visit) return "";
 
+  // Salesman is the customer book / outstanding salesman on the queue row —
+  // never the collector who saved the visit (scheduled_by_name).
   const reportRow = {
     ...row,
-    salesman_name: visit.scheduled_by_name || row.salesman_name,
+    salesman_name: row.salesman_name,
     salesman_code: row.salesman_code,
   };
 

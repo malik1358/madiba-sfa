@@ -78,6 +78,7 @@ Constants in `app/lib/workdayActivity.js`:
 
 - Aging buckets: `0-30`, `31-60`, `61-90`, `91-120`, `>120`.
 - The uploaded sheet is the operational outstanding book once it has been stored. Column detection is heuristic (`detectOutstandingColumnIndexes` in `app/lib/outstanding.js`). Do not replace it with a fixed column index. Payment Collections ignores `public.invoices` while that workbook has rows.
+- Collection-queue **Salesman** label: prefer the uploaded Salesman cell (invoice, then aggregate row). When that cell is blank, fill invoice salesman from `active_sales` by matching `ref_no` → `voucher_number`, then resolve the row label with `resolveCollectionQueueSalesman` (prefer customer-master book owner when they appear on any open invoice — shared-book cases — else voucher-derived name, else master alone so filters still have names). Do not show the collector who saved the visit as Salesman.
 - Cash versus credit uses `ref_no` / cash markers (`invoiceHasCashRef`, `isInvoiceCashDue`).
 - Queue priority uses exposure (amount and age), due state, last outcome, and scheduled revisits (`buildCollectionPriority`). Customers with a future scheduled revisit are not treated the same as overdue cash.
 - A collection visit needs an Arabic or English remark for the outcomes/statuses listed in `collectionVisitRequiresRemark`.

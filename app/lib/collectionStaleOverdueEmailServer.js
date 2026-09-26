@@ -45,6 +45,22 @@ export function resolveCollectionStaleOverdueEmailSchedule(date, now = new Date(
   return { date: reportDate, skipped: false, reason: "" };
 }
 
+export function resolveCollectionStaleOverdueRouteTrigger({
+  date,
+  force,
+  to,
+  trigger,
+} = {}) {
+  const explicitTrigger = String(trigger || "").trim().toLowerCase();
+  if (explicitTrigger === "manual" || explicitTrigger === "cron") {
+    return explicitTrigger;
+  }
+  if (String(date || "").trim() || String(force || "").trim() || String(to || "").trim()) {
+    return "manual";
+  }
+  return "cron";
+}
+
 export async function loadLastCollectionStaleOverdueEmailMarker(admin) {
   const { data, error } = await admin
     .from("system_settings")

@@ -10,6 +10,7 @@ import {
 } from "../app/lib/collectionStaleOverdueEmail.js";
 import {
   resolveCollectionStaleOverdueEmailSchedule,
+  resolveCollectionStaleOverdueRouteTrigger,
   runCollectionStaleOverdueEmailCycle,
 } from "../app/lib/collectionStaleOverdueEmailServer.js";
 
@@ -215,4 +216,12 @@ test("resolveCollectionStaleOverdueEmailSchedule skips Friday", () => {
   const schedule = resolveCollectionStaleOverdueEmailSchedule("", new Date("2026-09-25T12:00:00+03:00"));
   assert.equal(schedule.skipped, true);
   assert.equal(schedule.reason, "friday_holiday");
+});
+
+test("resolveCollectionStaleOverdueRouteTrigger keeps manual reruns manual", () => {
+  assert.equal(resolveCollectionStaleOverdueRouteTrigger({}), "cron");
+  assert.equal(resolveCollectionStaleOverdueRouteTrigger({ date: "2026-09-26" }), "manual");
+  assert.equal(resolveCollectionStaleOverdueRouteTrigger({ force: "true" }), "manual");
+  assert.equal(resolveCollectionStaleOverdueRouteTrigger({ to: "ops@madiba.com" }), "manual");
+  assert.equal(resolveCollectionStaleOverdueRouteTrigger({ trigger: "cron", date: "2026-09-26" }), "cron");
 });

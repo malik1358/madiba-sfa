@@ -1,4 +1,4 @@
-import { extractLeadingCustomerCodeAndName, normalizeCode } from "./outstanding.js";
+import { customerAccountCodesMatch, extractLeadingCustomerCodeAndName, normalizeCode } from "./outstanding.js";
 
 export function parsePartyName(partyRaw) {
   const text = String(partyRaw || "").trim();
@@ -37,6 +37,28 @@ export function canonicalCustomerCode(value) {
 
   const extracted = normalizeCode(extractLeadingCustomerCodeAndName(raw).customer_code);
   return extracted || raw.split(/\s+/)[0] || raw;
+}
+
+export function resolveExistingCollectionCustomerCode(candidates, targetCode) {
+  const normalizedTarget = canonicalCustomerCode(targetCode);
+  if (!normalizedTarget) return "";
+
+  const matchingCandidates = (candidates || [])
+    .map((candidate) => canonicalCustomerCode(candidate))
+    .filter((candidate) => customerAccountCodesMatch(candidate, normalizedTarget));
+
+  if (matchingCandidates.length === 0) return "";
+
+  return matchingCandidates.reduce((bestMatch, candidate) => {
+    if (
+      !bestMatch
+      || candidate.length > bestMatch.length
+      || (candidate.length === bestMatch.length && candidate.localeCompare(bestMatch) < 0)
+    ) {
+      return candidate;
+    }
+    return bestMatch;
+  }, "");
 }
 
 export function normalizeCustomerNameKey(value) {

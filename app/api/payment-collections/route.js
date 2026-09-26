@@ -31,6 +31,7 @@ import {
   resolveOutstandingInvoiceCustomerCode,
   toNumber,
 } from "../../lib/outstanding.js";
+import { resolveExistingCollectionCustomerCode } from "../../lib/customerCode.js";
 import { needsEnglishTranslation, translateText } from "../../lib/translateText.js";
 import { formatCollectionUserDisplayName } from "../../lib/geo.js";
 import {
@@ -91,18 +92,6 @@ function preferMatchingCustomerKey(candidates, targetCode) {
   });
 
   return bestMatch || normalizedTarget;
-}
-
-export function resolveExistingCollectionCustomerCode(candidates, targetCode) {
-  const normalizedTarget = canonicalCustomerCode(targetCode);
-  if (!normalizedTarget) return "";
-
-  const matchingCandidates = (candidates || [])
-    .map((candidate) => String(candidate || "").trim())
-    .filter((candidate) => customerAccountCodesMatch(candidate, normalizedTarget));
-
-  if (matchingCandidates.length === 0) return "";
-  return preferMatchingCustomerKey(matchingCandidates, normalizedTarget);
 }
 
 function findScopedCollectionRecord(records, customerCode) {
@@ -331,7 +320,7 @@ function formatRouteError(error) {
   return "Unable to save collection visit";
 }
 
-async function ensureCollectionCustomerRecord(admin, customerCode, customerName) {
+export async function ensureCollectionCustomerRecord(admin, customerCode, customerName) {
   const code = canonicalCustomerCode(customerCode);
   if (!code) throw new Error("Customer code is required");
 

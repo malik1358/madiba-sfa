@@ -36,6 +36,7 @@ import {
   resolveOutstandingInvoiceCustomerCode,
   resolveOutstandingBucketLabels,
   syncOutstandingCustomerFromInvoices,
+  outstandingCustomerIdentityKey,
   resolveOverdueDaysFromDueDate,
   sanitizeStoredOverdueDays,
   buildOutstandingPdfBucketRows,
@@ -116,6 +117,17 @@ test("keeps a real August sale date when 0-30 outstanding also exists", () => {
   assert.equal(
     clampLatestInvoiceDateToOutstandingBuckets("2026-08-24", { days0To30: 3753 }, "2026-09-01"),
     "2026-08-24",
+  );
+});
+
+test("pending-order customer identity key normalizes the same customer across code and name variants", () => {
+  assert.equal(
+    outstandingCustomerIdentityKey(" 1234c ", "  Al Ahli Trading   Co  "),
+    outstandingCustomerIdentityKey("1234C", "AL AHLI TRADING CO"),
+  );
+  assert.notEqual(
+    outstandingCustomerIdentityKey("1234", "AL AHLI TRADING CO"),
+    outstandingCustomerIdentityKey("1234C", "AL AHLI TRADING CO"),
   );
 });
 

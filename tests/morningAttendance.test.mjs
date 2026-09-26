@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   canAccessWithoutMorningAttendance,
+  WORKDAY_GATE_READY_EVENT,
+  WORKDAY_TIMES_UPDATED_EVENT,
   todayAttendanceBounds,
   todayDateKey,
 } from "../app/lib/morningAttendance.js";
@@ -24,4 +26,8 @@ test("collectors can stay on Payment Collections without morning attendance redi
   assert.equal(canAccessWithoutMorningAttendance("/management/my-collections"), true);
   assert.equal(canAccessWithoutMorningAttendance("/management/payment-collections?customer=1224"), true);
   assert.equal(canAccessWithoutMorningAttendance("/management/new-order"), false);
+});
+
+test("workday gate ready event stays aligned with workday times updated event", () => {
+  assert.equal(WORKDAY_GATE_READY_EVENT, WORKDAY_TIMES_UPDATED_EVENT);
 });

@@ -69,6 +69,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Browser prices come from `price_catalog_cache` via `/api/pricing/cache`.
 - Sync (`/api/admin/price-sync`) writes a snapshot and the cache, and appends `item_price_history` when a price changes. History UI shows at least the last five prices.
 - VAT default on `products.vat_percent` is 15. Settlement line gross-up uses `regionalPricing.js` (category-aware), not a flat 15 for every line.
+- When both cash and value discounts are active on a line, each percentage is calculated from the wholesale base rate (not compounded one on top of the other).
 - **Gloves are VAT-exempt (0%)** on orders and settlement. `isVatExemptProduct` / `vatRateForProduct` in `regionalPricing.js` match `GLOVE`, `VINYL`, or Arabic `قفاز` in category/name/code. `getPricedOrderLine` and `summarizePricedLines` must use that rate (do not hardcode 15% on New Order / order PDF / WhatsApp). Mixed carts label the VAT column as plain `VAT`; gloves-only as `VAT 0%`; taxable-only as `VAT 15%`.
 - Item master `tally_unit` / `tally_item_name` feed the Tally sales-voucher Excel export. Sources: `excel_import`, `invoice_pdf`, `manual`.
 
@@ -119,6 +120,7 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 - History rows go to `customer_gps_history` with the previous coordinates.
 - When a field visit (or order GPS capture) has coordinates and the customer master has **no** saved GPS, the visit location is **auto-promoted** onto `customers.latitude/longitude` (source `visit`) without asking. This runs on the server in `/api/visit-reports` and payment-collection saves (`promoteEntryGpsToCustomerIfMissing`), and on the client via `maybePromptCustomerLocationUpdate`. If the customer already has GPS and the salesman is farther than `CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM` (0.5 km), the app still prompts before overwriting.
 - Outstanding Without GPS lists customers who have an outstanding balance and no saved coordinates. Rows can still show a last visit when that visit was older than auto-promote, GPS was blocked, or the role did not require transaction GPS. After this promote rule is live, a new visit with entry GPS should clear the customer from the list. The daily email goes to each salesman at 00:25 KSA, and hierarchy bosses get one consolidated digest for their subordinate books instead of repeated CC copies. It skips the Friday holiday the same way as other salesman emails.
+- Stale overdue collections email (00:35 KSA, skip Friday) digests due-queue customers where over-60 outstanding (`61-90` + `91-120` + `>120`) is greater than zero, received in the last 10 days is zero, and the last collection visit is older than 7 days (or never visited). One HTML table per salesman. Default recipient `malik@pinasz.com` (`COLLECTION_STALE_OVERDUE_EMAIL_TO`).
 - GPS pings are rejected when the KSA workday is already ended.
 
 ## Email and push rules

@@ -226,33 +226,30 @@ export function getPricedOrderLine({
   const valueRate = parseDiscountRate(valueDiscountRate);
   const lineBeforeDiscount = qty * wholesale;
 
-  let rate = wholesale;
   const applied = { cash: false, value: false, scheme: false };
 
-  if (lineBeforeDiscount >= valueThreshold && valueRate > 0) {
-    rate *= (1 - valueRate);
+  const safeQty = Number.isFinite(qty) ? Math.max(qty, 0) : 0;
+  const wholesaleLineValue = safeQty * wholesale;
+  const valueDiscountApplied = lineBeforeDiscount >= valueThreshold && valueRate > 0;
+  if (valueDiscountApplied) {
     applied.value = true;
   }
-
-  const safeQty = Number.isFinite(qty) ? Math.max(qty, 0) : 0;
   const schemeQty = Math.min(Math.max(Number(schemeDiscountedQty || 0), 0), safeQty);
   const schemeRate = Math.max(Number(schemeUnitDiscount || 0), 0);
   const schemeDiscountAmount = schemeQty * schemeRate;
   const schemeBlocksCash = excludeCashDiscount === true && schemeDiscountAmount > 0;
 
   if (normalizePaymentType(paymentType) === "cash" && cashRate > 0 && !schemeBlocksCash) {
-    rate *= (1 - cashRate);
     applied.cash = true;
   }
 
-  const wholesaleLineValue = safeQty * wholesale;
-  const lineValue = Math.max(0, (safeQty * rate) - schemeDiscountAmount);
+  const valueDiscountAmount = applied.value ? wholesaleLineValue * valueRate : 0;
+  const cashDiscountAmount = applied.cash ? wholesaleLineValue * cashRate : 0;
+  const lineValue = Math.max(0, wholesaleLineValue - valueDiscountAmount - cashDiscountAmount - schemeDiscountAmount);
+  let rate = safeQty > 0 ? lineValue / safeQty : wholesale;
   if (schemeDiscountAmount > 0) {
     applied.scheme = true;
-    rate = safeQty > 0 ? lineValue / safeQty : rate;
   }
-  const valueDiscountAmount = applied.value ? wholesaleLineValue * valueRate : 0;
-  const cashDiscountAmount = applied.cash ? (wholesaleLineValue - valueDiscountAmount) * cashRate : 0;
   const resolvedVatRate = Number.isFinite(Number(vatRate)) && Number(vatRate) >= 0
     ? Number(vatRate)
     : vatRateForProduct({ category, item_name, item_code, vatExempt });

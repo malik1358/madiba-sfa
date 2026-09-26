@@ -224,13 +224,11 @@ export function getPricedOrderLine({
   const wholesale = Number(wholesaleRate || 0);
   const cashRate = parseDiscountRate(cashDiscountRate);
   const valueRate = parseDiscountRate(valueDiscountRate);
-  const lineBeforeDiscount = qty * wholesale;
-
   const applied = { cash: false, value: false, scheme: false };
 
   const safeQty = Number.isFinite(qty) ? Math.max(qty, 0) : 0;
   const wholesaleLineValue = safeQty * wholesale;
-  const valueDiscountApplied = lineBeforeDiscount >= valueThreshold && valueRate > 0;
+  const valueDiscountApplied = wholesaleLineValue >= valueThreshold && valueRate > 0;
   if (valueDiscountApplied) {
     applied.value = true;
   }

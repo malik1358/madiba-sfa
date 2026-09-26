@@ -34,7 +34,7 @@ Routes live under `app/management/`. Labels are in `MODULES` inside `app/lib/mod
 - **Business Intelligence**: category growth, salesman month-over-month, period filters.
 - **Customer Master**, **Salesman Hierarchy**, **Customer Book Shares**, **KPI Targets**, **Schemes**, **Sales Qty Limits**, **Imports**.
 - **Stock Take**: only when `profiles.stock_take_access` is true, or the user is admin.
-- **GPS Map**, **Outstanding Without GPS**, **Daily Visit Report**, **User Activity**, **Item Price History**, **Receipts Not in Tally**.
+- **GPS Map**, **Outstanding Without GPS**, **Daily Visit Report**, **User Activity**, **Working Hours**, **Item Price History**, **Receipts Not in Tally**.
 
 The home page (`app/page.js`) is email/password login, then a dashboard with nearest customers when GPS is available.
 

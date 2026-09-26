@@ -108,6 +108,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 - `/api/mobile-snapshot`, `/api/offline-data-version`, `/api/push-tokens`
 - `/api/app-config`, `/api/build-info`, `/api/user-activity`
+- `/api/working-hours` — attendance-style daily salesman working hours (near-visit lunch segments)
 - `/api/daily-visit-report`, `/api/daily-visit-report/email`, `/api/inactivity-email-log`
 
 **Cron** (`app/api/cron/*`, auth via `CRON_SECRET`)

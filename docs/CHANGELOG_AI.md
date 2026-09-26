@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-26** — Added **Working Hours** attendance report (`/management/working-hours`, `/api/working-hours`) for admin/manager/collector: daily salesman login/lunch/logout plus hours from the day-route near-visit lunch-segment formula.
 - **2026-09-26** — Day-route Working hours with lunch now use near-visit segments: first→last non-far **before lunch out**, plus first→last non-far **after lunch in** (no longer first→lunch out + lunch in→last). Gaps to/from lunch punches are excluded. Still after 08:00 KSA only; attendance fallback unchanged when no usable near segments.
 - **2026-09-26** — Sales order salesman is the person making the order (logged-in profile `salesman_code` / `salesman_name`), not the customer master `current_salesman_code`. Affects `/api/sales-orders`, New Order offline allotment, PDF, WhatsApp, and Pending Orders. Customer salesman remains only as pricing-region fallback via `customerSalesmanCode`.
 - **2026-09-25** — Day-route Working hours line always renders again. When there are not two non-far after-08:00 KSA customer stops, hours fall back to attendance (login clamped to ≥08:00 KSA → logout, minus lunch) so idle-only days still show a total.

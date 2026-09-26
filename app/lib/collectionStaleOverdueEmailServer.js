@@ -154,7 +154,10 @@ export async function runCollectionStaleOverdueEmailCycle(admin, {
   }
 
   const dueCustomers = await loader(admin);
-  const matched = filterCollectionStaleOverdueRows(dueCustomers, { todayKey: reportDate });
+  const matched = filterCollectionStaleOverdueRows(dueCustomers, {
+    todayKey: reportDate,
+    todayIso: asOfIso,
+  });
   const groups = groupCollectionStaleOverdueBySalesman(matched);
 
   if (!matched.length) {
@@ -185,6 +188,7 @@ export async function runCollectionStaleOverdueEmailCycle(admin, {
     date: reportDate,
     groups,
     reportUrl: buildCollectionStaleOverdueReportUrl(env),
+    todayIso: asOfIso,
   });
 
   let sentCount = 0;

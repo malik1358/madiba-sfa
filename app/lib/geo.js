@@ -496,21 +496,23 @@ export function resolveWaitingMinutesFromPrevious(
   return computeWaitingMinutes(row.distanceFromPreviousKm, fromSavedAt, toSavedAt, assumedSpeedKmh);
 }
 
+const TIMELINE_BRIDGE_TYPES = new Set([
+  "GPS_PING",
+  "MORNING_ATTENDANCE",
+  "END_OF_DAY",
+  "LUNCH_BREAK_OUT",
+  "LUNCH_BREAK_IN",
+  "UNLOGGED_IDLE",
+]);
+
 export function isIdleGpsPingTimelineRow(row) {
+  // Daily Visit Report rows use transaction_type (e.g. LUNCH_BREAK_OUT), not entry_type.
   const transactionType = String(row?.transactionType || row?.transaction_type || "").trim().toUpperCase();
-  if (transactionType === "GPS_PING") return true;
+  if (TIMELINE_BRIDGE_TYPES.has(transactionType)) return true;
   const rowType = String(row?.rowType || "").trim().toLowerCase();
   if (rowType === "lunch" || rowType === "attendance" || rowType === "idle") return true;
   const entryType = String(row?.entryType || row?.entry_type || "").trim().toUpperCase();
-  if (
-    entryType === "MORNING_ATTENDANCE"
-    || entryType === "END_OF_DAY"
-    || entryType === "LUNCH_BREAK_OUT"
-    || entryType === "LUNCH_BREAK_IN"
-    || entryType === "UNLOGGED_IDLE"
-  ) {
-    return true;
-  }
+  if (TIMELINE_BRIDGE_TYPES.has(entryType)) return true;
   return false;
 }
 
@@ -536,10 +538,10 @@ export function findPreviousWaitingAnchorRow(rows, index) {
 }
 
 /**
- * For a customer visit/order row, sum hop distances from the previous non-idle
- * entry through any idle GPS pings up to this row. Idle rows keep their own
- * single-hop distance. Route totals should still use hop-by-hop enrichment so
- * idle distance is not double-counted.
+ * For a customer visit/order row, sum hop distances since the previous customer
+ * stop (skipping idle GPS, lunch, and login/logout). Bridge rows keep their own
+ * single-hop distance. Route totals still use hop-by-hop enrichment so path
+ * distance is not double-counted.
  */
 export function resolveDistanceFromPreviousVisitKm(rows, index) {
   const list = Array.isArray(rows) ? rows : [];
@@ -566,7 +568,7 @@ export function resolveDistanceFromPreviousVisitKm(rows, index) {
     hasSegment = true;
   }
 
-  return hasSegment ? total : null;
+  return hasSegment ? Number(total.toFixed(6)) : null;
 }
 
 export function resolveWaitingMinutesFromPreviousVisit(

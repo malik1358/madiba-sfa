@@ -33,6 +33,7 @@ const TEXT = {
   customer: { en: "Customer", ar: "العميل" },
   salesman: { en: "Salesman", ar: "المندوب" },
   totalOutstanding: { en: "Tally outstanding", ar: "مستحق تالي" },
+  computedOutstanding: { en: "Computed outstanding", ar: "المستحق المحسوب" },
   difference: { en: "Difference", ar: "الفرق" },
   compare: { en: "Compare", ar: "قارن" },
   total: { en: "Total", ar: "الإجمالي" },
@@ -41,13 +42,14 @@ const TEXT = {
   deltaPending: { en: "—", ar: "—" },
 };
 
-const CUSTOMER_FILTER_KEYS = ["code", "name", "salesman", "total", "diff"];
+const CUSTOMER_FILTER_KEYS = ["code", "name", "salesman", "total", "computed", "diff"];
 
 const CUSTOMER_COLUMNS = [
   { key: "code", labelKey: "code" },
   { key: "name", labelKey: "customer" },
   { key: "salesman", labelKey: "salesman" },
-  { key: "total", labelKey: "totalOutstanding", className: "moduleBiTotalCol" },
+  { key: "total", labelKey: "totalOutstanding" },
+  { key: "computed", labelKey: "computedOutstanding", className: "moduleBiTotalCol" },
   { key: "diff", labelKey: "difference" },
 ];
 
@@ -172,6 +174,7 @@ export default function OutstandingComparePage() {
           outstanding_total: customerOutstandingTotal(row),
           salesman_name: String(row.salesman_name || row.current_salesman_code || "").trim(),
           open_delta: delta?.status === "ready" ? Number(delta.open_delta || 0) : null,
+          computed_open: delta?.status === "ready" ? Number(delta.computed_open || 0) : null,
           delta_status: delta?.status || "pending",
         };
       })
@@ -204,6 +207,11 @@ export default function OutstandingComparePage() {
     if (key === "code") return String(row.customer_code || "—");
     if (key === "name") return String(row.customer_name || "—");
     if (key === "salesman") return String(row.salesman_name || "—");
+    if (key === "computed") {
+      if (row.delta_status === "ready") return formatMoney(row.computed_open);
+      if (row.delta_status === "loading") return "…";
+      return "—";
+    }
     if (key === "diff") {
       if (row.delta_status === "ready") return formatDelta(row.open_delta);
       if (row.delta_status === "loading") return "…";
@@ -223,6 +231,7 @@ export default function OutstandingComparePage() {
     const ready = visibleCustomers.filter((row) => row.delta_status === "ready");
     return {
       total: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_total || 0), 0),
+      computed: ready.reduce((sum, row) => sum + Number(row.computed_open || 0), 0),
       diff: ready.reduce((sum, row) => sum + Number(row.open_delta || 0), 0),
       diffReady: ready.length,
     };
@@ -545,8 +554,21 @@ export default function OutstandingComparePage() {
                           </Link>
                         </td>
                         <td>{customer.salesman_name || "—"}</td>
-                        <td className={`moduleBiTotalCol ${outstandingCellClass(customer.outstanding_total)}`.trim()}>
-                          <strong>{formatMoney(customer.outstanding_total)}</strong>
+                        <td className={outstandingCellClass(customer.outstanding_total)}>
+                          {formatMoney(customer.outstanding_total)}
+                        </td>
+                        <td className={`moduleBiTotalCol ${
+                          customer.delta_status === "ready"
+                            ? outstandingCellClass(customer.computed_open)
+                            : ""
+                        }`.trim()}>
+                          <strong>
+                            {customer.delta_status === "ready"
+                              ? formatMoney(customer.computed_open)
+                              : customer.delta_status === "loading"
+                                ? t("deltaLoading")
+                                : t("deltaPending")}
+                          </strong>
                         </td>
                         <td className={customer.delta_status === "ready" ? deltaClass(customer.open_delta) : ""}>
                           {customer.delta_status === "ready"
@@ -570,15 +592,20 @@ export default function OutstandingComparePage() {
                   })}
                   {!visibleCustomers.length && !loadingCustomers ? (
                     <tr>
-                      <td colSpan={6}>{t("noCustomers")}</td>
+                      <td colSpan={7}>{t("noCustomers")}</td>
                     </tr>
                   ) : null}
                 </tbody>
                 <tfoot>
                   <tr className="moduleBiTotalRow">
                     <td colSpan={3}><strong>{t("total")}</strong></td>
-                    <td className="moduleBiTotalCol">
+                    <td>
                       <strong>{formatMoney(customerFooter.total)}</strong>
+                    </td>
+                    <td className="moduleBiTotalCol">
+                      <strong>
+                        {customerFooter.diffReady ? formatMoney(customerFooter.computed) : t("deltaPending")}
+                      </strong>
                     </td>
                     <td className={deltaClass(customerFooter.diff)}>
                       <strong>

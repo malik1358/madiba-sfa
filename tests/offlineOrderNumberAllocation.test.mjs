@@ -42,4 +42,12 @@ test("offlineOrderNumber preserves any non-placeholder existing number", () => {
   const source = fs.readFileSync(new URL("../app/lib/offlineOrderNumber.js", import.meta.url), "utf8");
   assert.match(source, /isPlaceholderSalesOrderNumber/);
   assert.match(source, /legacy numeric ids/);
+  assert.match(source, /Bare numeric ids like "414"/);
+});
+
+test("sales-orders API rejects stale low preferred order numbers", () => {
+  const source = fs.readFileSync(new URL("../app/api/sales-orders/route.js", import.meta.url), "utf8");
+  assert.match(source, /shouldAcceptPreferredSalesmanOrderNumber/);
+  assert.match(source, /resolvePreferredOrderNumber/);
+  assert.match(source, /Stale offline number/);
 });

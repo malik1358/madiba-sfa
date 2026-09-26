@@ -10,6 +10,8 @@ const ON_SITE_VISIT_TYPES = new Set([
 
 const SUPERSEDED_ORDER_TYPES = new Set(["ORDER_DRAFT", "ORDER_EDITED"]);
 const SUBMIT_PAIR_WINDOW_MS = 2 * 60 * 1000;
+const DUPLICATE_VISIT_TYPES = new Set(["VISIT_REPORT", "COLLECTION_VISIT"]);
+const DUPLICATE_VISIT_WINDOW_MS = 2 * 60 * 1000;
 
 export function visitEntryType(entry) {
   return String(entry?.transactionType || entry?.transaction_type || "").trim().toUpperCase();
@@ -62,6 +64,64 @@ export function hideSupersededOrderDrafts(entries = []) {
     if (!SUPERSEDED_ORDER_TYPES.has(visitEntryType(entry))) return true;
     return !submits.some((submit) => draftMatchesSubmit(entry, submit));
   });
+}
+
+function visitOutcomeKey(entry) {
+  return String(
+    entry?.visitOutcome
+    || entry?.meta?.visitOutcome
+    || entry?.meta?.outcome
+    || entry?.outcome
+    || "",
+  ).trim().toUpperCase();
+}
+
+function visitAmountKey(entry) {
+  if (visitEntryType(entry) !== "COLLECTION_VISIT") return "";
+  const amount = Number(
+    entry?.amountReceived
+    ?? entry?.amount_received
+    ?? entry?.meta?.amountReceived
+    ?? entry?.meta?.amount_received
+    ?? 0,
+  );
+  return Number.isFinite(amount) ? String(amount) : "0";
+}
+
+function visitDuplicateClusterKey(entry) {
+  const type = visitEntryType(entry);
+  if (!DUPLICATE_VISIT_TYPES.has(type)) return null;
+  const code = normalizeCode(entry?.customerCode || entry?.customer_code);
+  if (!code) return null;
+  const user = String(entry?.userId || entry?.user_id || "").trim();
+  return `${user}|${type}|${code}|${visitOutcomeKey(entry)}|${visitAmountKey(entry)}`;
+}
+
+/**
+ * Collapse repeated visit/collection saves (same user, customer, outcome, within 2 minutes)
+ * so the Daily Visit Report shows one row when the field app saved the same visit multiple times.
+ */
+export function hideDuplicateVisitEntries(entries = []) {
+  const list = Array.isArray(entries) ? entries : [];
+  const kept = [];
+
+  list.forEach((entry) => {
+    const key = visitDuplicateClusterKey(entry);
+    if (!key) {
+      kept.push(entry);
+      return;
+    }
+
+    const ts = entrySavedAtMs(entry);
+    const isDuplicate = kept.some((prior) => {
+      if (visitDuplicateClusterKey(prior) !== key) return false;
+      const delta = Math.abs(entrySavedAtMs(prior) - ts);
+      return Number.isFinite(delta) && delta <= DUPLICATE_VISIT_WINDOW_MS;
+    });
+    if (!isDuplicate) kept.push(entry);
+  });
+
+  return kept;
 }
 
 export function isOnSiteCustomerVisit(entry) {

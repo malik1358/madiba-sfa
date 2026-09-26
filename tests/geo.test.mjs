@@ -11,6 +11,7 @@ import {
   findNearestCustomers,
   formatDistanceKm,
   resolveWaitingMinutesFromPreviousVisit,
+  resolveDistanceFromPreviousVisitKm,
   isIdleGpsPingTimelineRow,
   sumWaitingMinutesFromTimeline,
   coordinateCacheKey,
@@ -324,6 +325,79 @@ test("resolveWaitingMinutesFromPreviousVisit skips idle GPS pings between visits
 
   assert.equal(resolveWaitingMinutesFromPreviousVisit(rows, 1), null);
   assert.equal(resolveWaitingMinutesFromPreviousVisit(rows, 3, 40), 80);
+});
+
+test("resolveDistanceFromPreviousVisitKm rolls idle GPS hops into the next visit", () => {
+  const rows = [
+    {
+      saved_at: "2026-09-26T06:58:00.000Z",
+      latitude: 24.60283,
+      longitude: 46.72902,
+      transaction_type: "COLLECTION_VISIT",
+      distanceFromPreviousKm: null,
+    },
+    {
+      saved_at: "2026-09-26T07:05:00.000Z",
+      latitude: 24.60302,
+      longitude: 46.72873,
+      transaction_type: "GPS_PING",
+      distanceFromPreviousKm: 0.04,
+    },
+    {
+      saved_at: "2026-09-26T07:07:00.000Z",
+      latitude: 24.60299,
+      longitude: 46.72876,
+      transaction_type: "VISIT_REPORT",
+      distanceFromPreviousKm: 0.00,
+    },
+  ];
+
+  assert.equal(resolveDistanceFromPreviousVisitKm(rows, 0), null);
+  assert.equal(resolveDistanceFromPreviousVisitKm(rows, 1), 0.04);
+  assert.equal(resolveDistanceFromPreviousVisitKm(rows, 2), 0.04);
+});
+
+test("resolveDistanceFromPreviousVisitKm sums multiple idle hops without changing route total", () => {
+  const hops = [
+    {
+      saved_at: "2026-09-26T06:00:00.000Z",
+      latitude: 24.60,
+      longitude: 46.72,
+      transaction_type: "COLLECTION_VISIT",
+      distanceFromPreviousKm: null,
+    },
+    {
+      saved_at: "2026-09-26T06:10:00.000Z",
+      latitude: 24.601,
+      longitude: 46.721,
+      transaction_type: "GPS_PING",
+      distanceFromPreviousKm: 0.12,
+    },
+    {
+      saved_at: "2026-09-26T06:20:00.000Z",
+      latitude: 24.603,
+      longitude: 46.723,
+      transaction_type: "GPS_PING",
+      distanceFromPreviousKm: 0.25,
+    },
+    {
+      saved_at: "2026-09-26T06:30:00.000Z",
+      latitude: 24.605,
+      longitude: 46.725,
+      transaction_type: "VISIT_REPORT",
+      distanceFromPreviousKm: 0.08,
+    },
+  ];
+
+  assert.equal(resolveDistanceFromPreviousVisitKm(hops, 1), 0.12);
+  assert.equal(resolveDistanceFromPreviousVisitKm(hops, 2), 0.25);
+  assert.equal(resolveDistanceFromPreviousVisitKm(hops, 3), 0.45);
+
+  const hopTotal = hops.reduce(
+    (total, row) => total + Number(row.distanceFromPreviousKm || 0),
+    0,
+  );
+  assert.equal(hopTotal, 0.45);
 });
 
 test("parseReverseGeocodeAddress maps OpenStreetMap fields", () => {

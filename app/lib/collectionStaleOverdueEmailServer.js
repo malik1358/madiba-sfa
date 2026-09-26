@@ -153,7 +153,6 @@ export async function runCollectionStaleOverdueEmailCycle(admin, {
     && !force
     && !isTestSend
     && marker.date === reportDate
-    && marker.lastSentAt
   ) {
     return { date: reportDate, skipped: true, reason: "already_sent", sentCount: 0, customerCount: 0 };
   }

@@ -195,6 +195,31 @@ test("runCollectionStaleOverdueEmailCycle sends digest with salesman groups", as
   assert.doesNotMatch(sent[0].html, /Recent Receipt/);
 });
 
+test("runCollectionStaleOverdueEmailCycle honors legacy date-only sent markers for cron", async () => {
+  let sent = false;
+  const result = await runCollectionStaleOverdueEmailCycle({}, {
+    date: "2026-09-26",
+    trigger: "cron",
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_USER: "user",
+      SMTP_PASS: "pass",
+      SMTP_FROM: "noreply@madiba.com",
+    },
+    send: async () => {
+      sent = true;
+      return { provider: "smtp" };
+    },
+    loadDueCustomers: async () => ([]),
+    loadLastSentMarker: async () => ({ date: "2026-09-26", lastSentAt: "" }),
+    saveLastSentMarker: async () => {},
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "already_sent");
+  assert.equal(sent, false);
+});
+
 test("filterCollectionStaleOverdueRows keeps only matching due customers", () => {
   const rows = filterCollectionStaleOverdueRows([
     {

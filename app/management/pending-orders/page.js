@@ -26,7 +26,11 @@ import {
   orderNeedsSalesmanNumberRepair,
 } from "../../lib/salesOrderNumber";
 import { formatOrderSalesmanLabel } from "../../lib/orderSalesman";
-import { findOutstandingForCustomer, sortBucketLabels } from "../../lib/outstanding";
+import {
+  findOutstandingForCustomer,
+  outstandingCustomerIdentityKey,
+  sortBucketLabels,
+} from "../../lib/outstanding";
 import { evaluateCreditApproval, outstandingAmountOverSixtyDays } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -185,10 +189,7 @@ function pendingOrderFilterValues(order, meta, approvalRequired = null, outstand
 }
 
 function pendingOrderCustomerKey(order) {
-  return [
-    String(order?.customer_code || "").trim().toUpperCase(),
-    String(order?.customer_name || "").trim().toUpperCase(),
-  ].join("|");
+  return outstandingCustomerIdentityKey(order?.customer_code, order?.customer_name);
 }
 
 function firstCustomerRowFlags(orders) {

@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveCustomerMasterExportFields } from "../app/lib/customerCode.js";
-import { customerMasterExportRows, customerMatchesMasterSearch, dedupeCustomerMasterRows, looksLikeCustomerCodeSearch, postgrestIlikeContains } from "../app/lib/customerMasterQuery.js";
+import {
+  customerMasterCanonicalCode,
+  customerMasterExportRows,
+  customerMatchesMasterSearch,
+  dedupeCustomerMasterRows,
+  excludeRowsWithCanonicalGpsSibling,
+  looksLikeCustomerCodeSearch,
+  postgrestIlikeContains,
+} from "../app/lib/customerMasterQuery.js";
 
 test("resolveCustomerMasterExportFields canonicalizes underscore branch codes", () => {
   const display = resolveCustomerMasterExportFields({
@@ -35,6 +43,53 @@ test("dedupeCustomerMasterRows merges 1409 and 1409_RAWA'I as one account", () =
   assert.equal(rows[0].customer_code, "1409");
   assert.equal(rows[0].customer_name, "Rawa'i Al-Kutub Trading Company");
   assert.equal(rows[0].latest_transaction_date, "2026-09-13");
+});
+
+test("customerMasterCanonicalCode strips dirty underscore suffixes", () => {
+  assert.equal(customerMasterCanonicalCode({
+    customer_code: "1428_Kings Ways Trading Establishment",
+    customer_name: "Kings Ways Trading Establishment",
+  }), "1428");
+});
+
+test("excludeRowsWithCanonicalGpsSibling drops dirty rows when clean code has GPS", async () => {
+  const admin = {
+    from() {
+      return {
+        select() {
+          return {
+            in(_column, codes) {
+              assert.ok(codes.includes("1428"));
+              return Promise.resolve({
+                data: [{ customer_code: "1428", latitude: 26.43, longitude: 50.10 }],
+                error: null,
+              });
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const kept = await excludeRowsWithCanonicalGpsSibling(admin, [
+    {
+      customer_code: "1428_Kings Ways Trading Establishment",
+      customer_name: "Kings Ways Trading Establishment",
+      latitude: null,
+      longitude: null,
+      total_outstanding: 14922,
+    },
+    {
+      customer_code: "9999",
+      customer_name: "Still Missing",
+      latitude: null,
+      longitude: null,
+      total_outstanding: 100,
+    },
+  ]);
+
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].customer_code, "9999");
 });
 
 test("resolveCustomerMasterExportFields splits numeric leading code from party name", () => {

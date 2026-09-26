@@ -18,12 +18,16 @@ import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
 import {
   OUTSTANDING_DATASET_KEY,
+  applySalesVoucherSalesmanToInvoices,
   buildOutstandingRowSalesmanByCode,
+  buildSalesmanByVoucherMap,
   extractLeadingCustomerCodeAndName,
   findOutstandingForCustomer,
   hydrateOutstandingInvoices,
   isPlaceholderSalesmanValue,
+  normalizeOutstandingRef,
   pickLongestCustomerName,
+  resolveCollectionQueueSalesman,
   resolveUploadedOutstandingSalesman,
   customerAccountCodesMatch,
   resolveCustomerAccountCode,
@@ -603,6 +607,40 @@ async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
   return fetchCustomersByCodes(admin, codes);
 }
 
+const SALES_VOUCHER_LOOKUP_BATCH_SIZE = 100;
+
+/**
+ * When the outstanding workbook leaves Salesman blank, look up the salesman from
+ * active_sales by matching Ref. No. → voucher_number. Missing view/table is fine.
+ */
+async function fetchSalesmanByOutstandingVoucher(admin, invoices) {
+  const refs = [...new Set(
+    (invoices || [])
+      .filter((invoice) => isPlaceholderSalesmanValue(invoice?.salesman))
+      .map((invoice) => normalizeOutstandingRef(invoice?.ref_no || invoice?.voucher_number))
+      .filter(Boolean),
+  )];
+
+  if (refs.length === 0) return new Map();
+
+  const salesRows = [];
+  for (let index = 0; index < refs.length; index += SALES_VOUCHER_LOOKUP_BATCH_SIZE) {
+    const batch = refs.slice(index, index + SALES_VOUCHER_LOOKUP_BATCH_SIZE);
+    const { data, error } = await admin
+      .from("active_sales")
+      .select("voucher_number,salesman_code,salesman_name")
+      .in("voucher_number", batch);
+
+    if (error) {
+      if (isMissingTableError(error) || isMissingColumnError(error)) return new Map();
+      throw error;
+    }
+    if (Array.isArray(data)) salesRows.push(...data);
+  }
+
+  return buildSalesmanByVoucherMap(salesRows);
+}
+
 export async function fetchOutstandingAndCollectionRecords(admin, scope) {
   if (!supabaseUrl || !serviceKey) {
     throw new Error("Server configuration is incomplete");
@@ -643,6 +681,11 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
   const customers = await fetchCustomersForOutstanding(admin, outstandingInvoices);
   const aggregateRowSalesmanByCode = buildOutstandingRowSalesmanByCode(outstandingRows);
+  const salesmanByVoucher = await fetchSalesmanByOutstandingVoucher(admin, outstandingInvoices);
+  const outstandingInvoicesWithSalesman = applySalesVoucherSalesmanToInvoices(
+    outstandingInvoices,
+    salesmanByVoucher,
+  );
 
   const visits = Array.isArray(visitsData) ? visitsData : [];
   const legalTransfers = Array.isArray(legalData) ? legalData : [];
@@ -719,7 +762,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     );
   });
 
-  outstandingInvoices.forEach((invoice) => {
+  outstandingInvoicesWithSalesman.forEach((invoice) => {
     const key = resolveOutstandingInvoiceCustomerCode(invoice)
       || canonicalCustomerCode(invoice.customer_code)
       || canonicalCustomerCode(invoice.customer_name);
@@ -847,11 +890,21 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       aggregateRowSalesman: aggregateRowSalesmanByCode.get(customer.customer_code)
         || String(uploadedOutstanding?.salesman || "").trim(),
     });
-    // Prefer uploaded outstanding salesman; fall back to customer-master assignment
-    // so the queue filter still has names when the upload salesman cell is blank.
-    const salesmanFromMaster = !isPlaceholderSalesmanValue(customer.current_salesman_code)
-      ? (salesmanMap.get(normalizeCode(customer.current_salesman_code)) || customer.current_salesman_code)
+    // Prefer uploaded Salesman. When that cell is blank, use active_sales voucher
+    // match (already applied onto customerInvoices), then customer-master book
+    // owner — preferring master when it matches any open invoice (shared books).
+    const masterSalesmanCode = !isPlaceholderSalesmanValue(customer.current_salesman_code)
+      ? normalizeCode(customer.current_salesman_code)
       : "";
+    const masterSalesmanName = masterSalesmanCode
+      ? (salesmanMap.get(masterSalesmanCode) || customer.current_salesman_code)
+      : "";
+    const resolvedSalesman = resolveCollectionQueueSalesman({
+      salesmanFromUpload,
+      customerInvoices,
+      masterSalesmanCode,
+      masterSalesmanName,
+    });
 
     records.push({
       customer_code: customer.customer_code,
@@ -861,8 +914,8 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
         customer.customer_name,
       ),
       current_salesman_code: customer.current_salesman_code,
-      salesman_code: normalizeCode(customer.current_salesman_code) || "",
-      salesman_name: salesmanFromUpload || salesmanFromMaster,
+      salesman_code: resolvedSalesman.salesman_code || masterSalesmanCode || "",
+      salesman_name: resolvedSalesman.salesman_name || "",
       city: customer.city,
       area: customer.area,
       mobile: customer.mobile || "",

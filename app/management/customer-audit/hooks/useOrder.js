@@ -8,6 +8,7 @@ import { upsertLocalPendingOrder } from '../../../lib/mobileDataCache';
 import { promptCustomerMobileUpdateIfMissing } from '../../../lib/customerContact';
 import { buildQueuedPendingOrderId } from '../../../lib/queuedSalesOrders';
 import { allocateLocalSalesOrderNumber, rememberSalesmanOrderSequence } from '../../../lib/offlineOrderNumber';
+import { resolveOrderMakerFromScope } from '../../../lib/orderSalesman';
 import { resolveGpsCapturePlatform } from '../../../lib/geo';
 import { loadVisitDistanceMetrics } from '../../../lib/visitDistanceWhatsapp';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
@@ -30,6 +31,7 @@ function buildPendingOrderId(queueId) {
 function buildOrderPayload({
   action,
   selectedCustomer,
+  orderMaker,
   orderItems,
   priceList,
   paymentType,
@@ -69,7 +71,9 @@ function buildOrderPayload({
     orderNumber: String(orderNumber || "").trim() || undefined,
     customerCode: selectedCustomer.customer_code,
     customerName: selectedCustomer.customer_name,
-    salesmanCode: selectedCustomer.current_salesman_code,
+    salesmanCode: orderMaker?.salesmanCode || "",
+    salesmanName: orderMaker?.salesmanName || "",
+    customerSalesmanCode: String(selectedCustomer.current_salesman_code || "").trim(),
     paymentType: normalizePaymentType(paymentType),
     pricingRegion,
     loadedOrderStatus: loadedOrderStatus || 'DRAFT',
@@ -214,8 +218,9 @@ export function useOrder({
 
         setDraftOrderId(order.id);
         setDraftOrderNumber(String(order.order_number || '').trim());
-        if (order.order_number && selectedCustomer?.current_salesman_code) {
-          void rememberSalesmanOrderSequence(selectedCustomer.current_salesman_code, order.order_number);
+        const orderMaker = resolveOrderMakerFromScope(accessScope);
+        if (order.order_number && orderMaker.salesmanCode) {
+          void rememberSalesmanOrderSequence(orderMaker.salesmanCode, order.order_number);
         }
         setLoadedOrderStatus(String(order.status || 'DRAFT').toUpperCase());
         const { data: lines, error: lineError } = await supabase
@@ -326,8 +331,12 @@ export function useOrder({
       });
 
       const peerCodes = Object.keys(accessScope?.pricingRegionBySalesmanCode || {});
+      const orderMaker = resolveOrderMakerFromScope(accessScope);
+      if (!orderMaker.salesmanCode) {
+        throw new Error('Your profile is missing a salesman code. Ask admin to set it before placing orders.');
+      }
       const allottedOrderNumber = await allocateLocalSalesOrderNumber(
-        selectedCustomer.current_salesman_code,
+        orderMaker.salesmanCode,
         {
           existingOrderNumber: draftOrderNumber,
           peerCodes,
@@ -342,6 +351,7 @@ export function useOrder({
         jsonBody: buildOrderPayload({
           action: 'save_draft',
           selectedCustomer,
+          orderMaker,
           orderItems,
           priceList,
           paymentType,
@@ -377,7 +387,8 @@ export function useOrder({
             id: pendingOrderId,
             customer_code: selectedCustomer.customer_code,
             customer_name: selectedCustomer.customer_name,
-            salesman_code: String(selectedCustomer.current_salesman_code || '').trim().toUpperCase(),
+            salesman_code: String(orderMaker.salesmanCode || '').trim().toUpperCase(),
+            salesman_name: String(orderMaker.salesmanName || orderMaker.salesmanCode || '').trim(),
             order_number: allottedOrderNumber,
             created_at: capturedAt,
             updated_at: capturedAt,
@@ -404,7 +415,7 @@ export function useOrder({
       setDraftOrderId(payload.orderId);
       setDraftOrderNumber(confirmedNumber);
       if (confirmedNumber) {
-        void rememberSalesmanOrderSequence(selectedCustomer.current_salesman_code, confirmedNumber);
+        void rememberSalesmanOrderSequence(orderMaker.salesmanCode, confirmedNumber);
       }
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'DRAFT').toUpperCase());
@@ -484,8 +495,12 @@ export function useOrder({
       });
 
       const peerCodes = Object.keys(accessScope?.pricingRegionBySalesmanCode || {});
+      const orderMaker = resolveOrderMakerFromScope(accessScope);
+      if (!orderMaker.salesmanCode) {
+        throw new Error('Your profile is missing a salesman code. Ask admin to set it before placing orders.');
+      }
       const allottedOrderNumber = await allocateLocalSalesOrderNumber(
-        selectedCustomer?.current_salesman_code,
+        orderMaker.salesmanCode,
         {
           existingOrderNumber: draftOrderNumber,
           peerCodes,
@@ -500,6 +515,7 @@ export function useOrder({
         jsonBody: buildOrderPayload({
           action: 'submit',
           selectedCustomer,
+          orderMaker,
           orderItems,
           priceList,
           paymentType,
@@ -537,7 +553,8 @@ export function useOrder({
             id: pendingOrderId,
             customer_code: selectedCustomer?.customer_code || '',
             customer_name: selectedCustomer?.customer_name || '',
-            salesman_code: String(selectedCustomer?.current_salesman_code || '').trim().toUpperCase(),
+            salesman_code: String(orderMaker.salesmanCode || '').trim().toUpperCase(),
+            salesman_name: String(orderMaker.salesmanName || orderMaker.salesmanCode || '').trim(),
             order_number: allottedOrderNumber,
             created_at: capturedAt,
             updated_at: capturedAt,
@@ -566,7 +583,7 @@ export function useOrder({
       setDraftOrderId(payload.orderId);
       setDraftOrderNumber(confirmedNumber);
       if (confirmedNumber) {
-        void rememberSalesmanOrderSequence(selectedCustomer?.current_salesman_code, confirmedNumber);
+        void rememberSalesmanOrderSequence(orderMaker.salesmanCode, confirmedNumber);
       }
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'SUBMITTED').toUpperCase());

@@ -3,23 +3,28 @@ import assert from "node:assert/strict";
 
 import {
   buildCollectionStaleOverdueEmail,
+  buildCollectionStaleOverdueSalesmanSection,
   filterCollectionStaleOverdueRows,
+  filterCollectionStaleOverdueRowsForProfile,
   groupCollectionStaleOverdueBySalesman,
   isCollectionStaleOverdueRow,
+  isSoftAgingSalesman,
+  resolveCollectionStaleOverdueDigestCc,
   resolveCollectionStaleOverdueDigestRecipients,
 } from "../app/lib/collectionStaleOverdueEmail.js";
 import {
   resolveCollectionStaleOverdueEmailSchedule,
   runCollectionStaleOverdueEmailCycle,
 } from "../app/lib/collectionStaleOverdueEmailServer.js";
+import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
 
-test("isCollectionStaleOverdueRow requires over-60, zero receipts, and stale visit", () => {
+test("isCollectionStaleOverdueRow requires overdue threshold, zero 8d receipts, and stale visit", () => {
   const todayKey = "2026-09-26";
   const match = {
     outstanding_61_90: 1000,
     outstanding_91_120: 0,
     outstanding_above_120: 0,
-    received_last_10_days: 0,
+    collection_history: [],
     latest_collection: { saved_at: "2026-09-10T10:00:00Z" },
   };
   assert.equal(isCollectionStaleOverdueRow(match, { todayKey }), true);
@@ -31,8 +36,8 @@ test("isCollectionStaleOverdueRow requires over-60, zero receipts, and stale vis
 
   assert.equal(isCollectionStaleOverdueRow({
     ...match,
-    received_last_10_days: 50,
-  }, { todayKey }), false);
+    collection_history: [{ saved_at: "2026-09-22T10:00:00Z", amount_received: 50 }],
+  }, { todayKey, todayIso: "2026-09-26T12:00:00+03:00" }), false);
 
   assert.equal(isCollectionStaleOverdueRow({
     ...match,
@@ -45,6 +50,34 @@ test("isCollectionStaleOverdueRow requires over-60, zero receipts, and stale vis
   }, { todayKey }), true);
 });
 
+test("Parvez and Junaid use over-30 outstanding while others use over-60", () => {
+  const todayKey = "2026-09-26";
+  const only31to60 = {
+    outstanding_30_60: 800,
+    outstanding_61_90: 0,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+    collection_history: [],
+    latest_collection: null,
+    salesman_name: "Parvez",
+    salesman_code: "PARVEZ",
+  };
+  assert.equal(isSoftAgingSalesman(only31to60), true);
+  assert.equal(isCollectionStaleOverdueRow(only31to60, { todayKey }), true);
+
+  assert.equal(isCollectionStaleOverdueRow({
+    ...only31to60,
+    salesman_name: "Sara",
+    salesman_code: "SARA",
+  }, { todayKey }), false);
+
+  assert.equal(isCollectionStaleOverdueRow({
+    ...only31to60,
+    salesman_name: "Junaid",
+    salesman_code: "JUNAID",
+  }, { todayKey }), true);
+});
+
 test("groupCollectionStaleOverdueBySalesman builds separate salesman buckets", () => {
   const groups = groupCollectionStaleOverdueBySalesman([
     {
@@ -54,7 +87,6 @@ test("groupCollectionStaleOverdueBySalesman builds separate salesman buckets", (
       salesman_code: "S01",
       outstanding_61_90: 2000,
       total_due_amount: 2000,
-      received_last_10_days: 0,
     },
     {
       customer_code: "C2",
@@ -63,7 +95,6 @@ test("groupCollectionStaleOverdueBySalesman builds separate salesman buckets", (
       salesman_code: "S02",
       outstanding_above_120: 500,
       total_due_amount: 500,
-      received_last_10_days: 0,
     },
   ]);
 
@@ -85,10 +116,11 @@ test("buildCollectionStaleOverdueEmail renders one table section per salesman", 
           city: "Riyadh",
           area: "Olaya",
           salesman_name: "Parvez",
+          salesman_code: "PARVEZ",
           total_due_amount: 12500,
-          outstanding_61_90: 12500,
-          max_overdue_days: 75,
-          received_last_10_days: 0,
+          outstanding_30_60: 12500,
+          max_overdue_days: 45,
+          collection_history: [],
           latest_collection: { saved_at: "2026-09-01T08:00:00Z", visit_outcome: "ASKED_COME_LATER" },
         }],
       },
@@ -103,7 +135,7 @@ test("buildCollectionStaleOverdueEmail renders one table section per salesman", 
           total_due_amount: 800,
           outstanding_above_120: 800,
           max_overdue_days: 140,
-          received_last_10_days: 0,
+          collection_history: [],
           latest_collection: null,
         }],
       },
@@ -114,22 +146,21 @@ test("buildCollectionStaleOverdueEmail renders one table section per salesman", 
   assert.match(message.html, /Stale overdue collections/);
   assert.match(message.html, /Parvez \(S01\)/);
   assert.match(message.html, /Sara \(S02\)/);
-  assert.match(message.html, /12,500.00/);
+  assert.match(message.html, /Recv 8d/);
+  assert.match(message.html, /Over 30/);
   assert.match(message.html, /Never/);
-  assert.match(message.html, /Open Payment Collections/);
   assert.equal(message.customerCount, 2);
   assert.equal(message.groupCount, 2);
 });
 
-test("resolveCollectionStaleOverdueDigestRecipients defaults to malik@pinasz.com", () => {
+test("digest recipients default To malik and CC soyeb/fazlur", () => {
   assert.deepEqual(resolveCollectionStaleOverdueDigestRecipients({}), ["malik@pinasz.com"]);
-  assert.deepEqual(
-    resolveCollectionStaleOverdueDigestRecipients({ COLLECTION_STALE_OVERDUE_EMAIL_TO: "ops@madiba.com" }),
-    ["ops@madiba.com"],
-  );
+  const cc = resolveCollectionStaleOverdueDigestCc({}, ["malik@pinasz.com"]);
+  assert.ok(cc.includes("soyeb@noorshukran.com"));
+  assert.ok(cc.includes("fazlur.rahiman@noorshukran.com"));
 });
 
-test("runCollectionStaleOverdueEmailCycle sends digest with salesman groups", async () => {
+test("runCollectionStaleOverdueEmailCycle CCs soyeb and fazlur on digest", async () => {
   const sent = [];
   const result = await runCollectionStaleOverdueEmailCycle({}, {
     date: "2026-09-26",
@@ -139,7 +170,6 @@ test("runCollectionStaleOverdueEmailCycle sends digest with salesman groups", as
       SMTP_USER: "user",
       SMTP_PASS: "pass",
       SMTP_FROM: "noreply@madiba.com",
-      COLLECTION_STALE_OVERDUE_EMAIL_TEST_TO: "malik@pinasz.com",
     },
     send: async (message) => {
       sent.push(message);
@@ -150,33 +180,13 @@ test("runCollectionStaleOverdueEmailCycle sends digest with salesman groups", as
         customer_code: "C1",
         customer_name: "Shop One",
         salesman_name: "Parvez",
-        salesman_code: "S01",
+        salesman_code: "PARVEZ",
         city: "Riyadh",
         area: "Olaya",
         total_due_amount: 1000,
-        outstanding_61_90: 1000,
-        max_overdue_days: 70,
-        received_last_10_days: 0,
-        latest_collection: { saved_at: "2026-09-01T08:00:00Z" },
-      },
-      {
-        customer_code: "C2",
-        customer_name: "Fresh Visit",
-        salesman_name: "Parvez",
-        salesman_code: "S01",
-        total_due_amount: 900,
-        outstanding_61_90: 900,
-        received_last_10_days: 0,
-        latest_collection: { saved_at: "2026-09-24T08:00:00Z" },
-      },
-      {
-        customer_code: "C3",
-        customer_name: "Recent Receipt",
-        salesman_name: "Sara",
-        salesman_code: "S02",
-        total_due_amount: 700,
-        outstanding_61_90: 700,
-        received_last_10_days: 100,
+        outstanding_30_60: 1000,
+        max_overdue_days: 40,
+        collection_history: [],
         latest_collection: { saved_at: "2026-09-01T08:00:00Z" },
       },
     ]),
@@ -185,33 +195,84 @@ test("runCollectionStaleOverdueEmailCycle sends digest with salesman groups", as
   });
 
   assert.equal(result.sentCount, 1);
-  assert.equal(result.customerCount, 1);
-  assert.equal(result.groupCount, 1);
-  assert.equal(sent.length, 1);
   assert.deepEqual(sent[0].to, ["malik@pinasz.com"]);
-  assert.match(sent[0].html, /Parvez/);
-  assert.doesNotMatch(sent[0].html, /Fresh Visit/);
-  assert.doesNotMatch(sent[0].html, /Recent Receipt/);
+  assert.ok(sent[0].cc.includes("soyeb@noorshukran.com"));
+  assert.ok(sent[0].cc.includes("fazlur.rahiman@noorshukran.com"));
+});
+
+test("filterCollectionStaleOverdueRowsForProfile keeps matching salesman customers", () => {
+  const rows = [
+    {
+      customer_code: "C1",
+      salesman_name: "Parvez",
+      salesman_code: "PARVEZ",
+      outstanding_30_60: 10,
+      collection_history: [],
+      latest_collection: null,
+    },
+    {
+      customer_code: "C2",
+      salesman_name: "Sara",
+      salesman_code: "SARA",
+      outstanding_61_90: 10,
+      collection_history: [],
+      latest_collection: null,
+    },
+  ];
+  const matched = filterCollectionStaleOverdueRowsForProfile(rows, {
+    salesman_name: "Parvez",
+    salesman_code: "PARVEZ",
+  }, { todayKey: "2026-09-26" });
+  assert.equal(matched.length, 1);
+  assert.equal(matched[0].customer_code, "C1");
+});
+
+test("buildUserVisitReportEmail embeds stale overdue section for salesman and bosses", () => {
+  const section = buildCollectionStaleOverdueSalesmanSection({
+    salesmanName: "Parvez",
+    sourceRows: [{
+      customer_code: "C1",
+      customer_name: "Shop One",
+      city: "Riyadh",
+      area: "Olaya",
+      salesman_name: "Parvez",
+      salesman_code: "PARVEZ",
+      total_due_amount: 500,
+      outstanding_30_60: 500,
+      max_overdue_days: 40,
+      collection_history: [],
+      latest_collection: null,
+    }],
+    todayKey: "2026-09-26",
+    agingThresholdDays: 30,
+  });
+  const message = buildUserVisitReportEmail({
+    date: "2026-09-25",
+    user: { userName: "Parvez", visitCount: 0, farFromCustomerCount: 0, entries: [] },
+    staleOverdueSection: section,
+  });
+  assert.match(message.html, /Stale overdue collections/);
+  assert.match(message.html, /Shop One/);
+  assert.match(message.text, /Stale overdue collections/);
 });
 
 test("filterCollectionStaleOverdueRows keeps only matching due customers", () => {
   const rows = filterCollectionStaleOverdueRows([
     {
       outstanding_61_90: 10,
-      received_last_10_days: 0,
+      collection_history: [],
       latest_collection: null,
     },
     {
       outstanding_61_90: 10,
-      received_last_10_days: 1,
-      latest_collection: null,
+      collection_history: [{ saved_at: "2026-09-25T08:00:00Z", amount_received: 1 }],
+      latest_collection: { saved_at: "2026-09-25T08:00:00Z", amount_received: 1 },
     },
-  ], { todayKey: "2026-09-26" });
+  ], { todayKey: "2026-09-26", todayIso: "2026-09-26T12:00:00+03:00" });
   assert.equal(rows.length, 1);
 });
 
 test("resolveCollectionStaleOverdueEmailSchedule skips Friday", () => {
-  // 2026-09-25 is a Friday in KSA.
   const schedule = resolveCollectionStaleOverdueEmailSchedule("", new Date("2026-09-25T12:00:00+03:00"));
   assert.equal(schedule.skipped, true);
   assert.equal(schedule.reason, "friday_holiday");

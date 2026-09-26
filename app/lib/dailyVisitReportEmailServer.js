@@ -18,7 +18,14 @@ import { getMailerConfig, isEmailConfigured, parseEmailList, sendEmail } from ".
 import { consolidatePerformanceSnapshots, isMissingSchemaColumn, normalizeSalesmanCode } from "./performanceKpis.js";
 import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import {
+  buildCollectionStaleOverdueSalesmanSection,
+  filterCollectionStaleOverdueRowsForProfile,
+  resolveOverdueAgingThresholdDays,
+} from "./collectionStaleOverdueEmail.js";
+import { buildCollectionQueues } from "./paymentCollections.js";
+import {
   addKsaCalendarDays,
+  getKsaDateString,
   getKsaWeekdayIndex,
   getKsaWeekdayIndexForDateString,
   getPreviousKsaDateString,
@@ -279,6 +286,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   loadSummary = loadCollectionDaySummaryForUser,
   loadKpis = loadPerformanceSnapshotsForSalesmen,
   loadTeamTargets = loadKpiTargetsBySalesman,
+  loadDueCollectionCustomers = null,
 } = {}) {
   const schedule = resolveDailyVisitReportEmailSchedule(date, now);
   const reportDate = schedule.date;
@@ -316,6 +324,33 @@ export async function runDailyVisitReportEmailCycle(admin, {
     loadProfiles(admin),
     loadAuthUsers(admin),
   ]);
+
+  const staleAsOfKey = getKsaDateString(now instanceof Date ? now : new Date(now));
+  const staleAsOfIso = (now instanceof Date ? now : new Date(now)).toISOString();
+  let dueCollectionCustomers = [];
+  try {
+    let loader = loadDueCollectionCustomers;
+    if (!loader) {
+      const { fetchOutstandingAndCollectionRecords } = await import("../api/payment-collections/route.js");
+      loader = async (client) => {
+        const records = await fetchOutstandingAndCollectionRecords(client, {
+          hasAllAccess: true,
+          visibleSalesmanCodes: [],
+          scopeProfiles: [],
+          userRole: "admin",
+          userId: null,
+          canSeeAllSchedulers: true,
+          visibleSchedulerUserIds: null,
+        });
+        const queues = buildCollectionQueues(records, staleAsOfIso);
+        return Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
+      };
+    }
+    dueCollectionCustomers = await loader(admin);
+  } catch (error) {
+    console.error("Unable to load stale overdue rows for visit report emails:", error);
+    dueCollectionCustomers = [];
+  }
 
   const reportByUserId = new Map((report.users || []).map((user) => [user.userId, user]));
   const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
@@ -489,12 +524,25 @@ export async function runDailyVisitReportEmailCycle(admin, {
       sendToUser,
     });
     const teamPayload = teamPayloadByLeaderId.get(user.userId) || null;
+    const staleRows = filterCollectionStaleOverdueRowsForProfile(
+      dueCollectionCustomers,
+      profile,
+      { todayKey: staleAsOfKey, todayIso: staleAsOfIso },
+    );
+    const staleOverdueSection = buildCollectionStaleOverdueSalesmanSection({
+      salesmanName: userReport.userName || reportDisplayName(profile),
+      sourceRows: staleRows,
+      todayKey: staleAsOfKey,
+      todayIso: staleAsOfIso,
+      agingThresholdDays: resolveOverdueAgingThresholdDays(profile),
+    });
     const message = buildUserVisitReportEmail({
       date: reportDate,
       user: userReport,
       thresholdKm: report.thresholdKm,
       team: teamPayload?.team || null,
       teamMembers: teamPayload?.members || [],
+      staleOverdueSection: staleOverdueSection.customerCount ? staleOverdueSection : null,
     });
     reportMessageByUserId.set(userReport.userId, {
       userId: userReport.userId,

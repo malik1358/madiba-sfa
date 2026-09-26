@@ -97,20 +97,24 @@ test("longest idle place uses GPS inside the gap and names the next customer", (
   assert.equal(workdayStops.some((stop) => stop.kind === "idle"), true);
 });
 
-test("resolveDayRouteWorkingHours uses first and last near customer transactions, not login or logout", () => {
+test("resolveDayRouteWorkingHours uses near visits before lunch out and after lunch in", () => {
   const hours = resolveDayRouteWorkingHours([
     { savedAt: "2026-09-07T06:00:00.000Z", transactionType: "MORNING_ATTENDANCE" },
     { savedAt: "2026-09-07T07:00:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: true },
     { savedAt: "2026-09-07T07:34:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T09:00:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
     { savedAt: "2026-09-07T10:47:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
     { savedAt: "2026-09-07T12:14:00.000Z", transactionType: "LUNCH_BREAK_IN" },
+    { savedAt: "2026-09-07T13:00:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
     { savedAt: "2026-09-07T15:00:00.000Z", transactionType: "COLLECTION_VISIT", isFarFromCustomer: false },
     { savedAt: "2026-09-07T15:40:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: true },
     { savedAt: "2026-09-07T16:10:00.000Z", transactionType: "END_OF_DAY" },
   ]);
 
-  assert.equal(hours.minutes, 359);
-  assert.equal(hours.value, "5h 59m");
+  // Morning 07:34→09:00 (1h 26m) + afternoon 13:00→15:00 (2h) = 3h 26m
+  // Does not count 09:00→lunch out or lunch in→13:00; far stops ignored
+  assert.equal(hours.minutes, 206);
+  assert.equal(hours.value, "3h 26m");
 });
 
 test("resolveDayRouteWorkingHours ignores login and logout when lunch is missing", () => {
@@ -124,7 +128,7 @@ test("resolveDayRouteWorkingHours ignores login and logout when lunch is missing
   assert.equal(hours.value, "8h 36m");
 });
 
-test("resolveDayRouteWorkingHours does not extend past the last near transaction into lunch or logout", () => {
+test("resolveDayRouteWorkingHours does not extend past the last near visit into lunch or logout", () => {
   const hours = resolveDayRouteWorkingHours([
     { savedAt: "2026-09-07T08:00:00.000Z", transactionType: "VISIT_REPORT" },
     { savedAt: "2026-09-07T11:00:00.000Z", transactionType: "ORDER_SUBMITTED" },
@@ -133,17 +137,34 @@ test("resolveDayRouteWorkingHours does not extend past the last near transaction
     { savedAt: "2026-09-07T17:00:00.000Z", transactionType: "END_OF_DAY" },
   ]);
 
+  // Morning only: 08:00→11:00; no near after lunch in
   assert.equal(hours.value, "3h");
 });
 
-test("resolveDayRouteWorkingHours stops at lunch out when lunch in was not punched", () => {
+test("resolveDayRouteWorkingHours ignores visits after lunch out when lunch in was not punched", () => {
   const hours = resolveDayRouteWorkingHours([
     { savedAt: "2026-09-07T08:00:00.000Z", transactionType: "COLLECTION_VISIT" },
+    { savedAt: "2026-09-07T10:00:00.000Z", transactionType: "ORDER_SUBMITTED" },
     { savedAt: "2026-09-07T12:00:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
     { savedAt: "2026-09-07T15:00:00.000Z", transactionType: "VISIT_REPORT" },
   ]);
 
-  assert.equal(hours.value, "4h");
+  // Morning 08:00→10:00 only; 15:00 ignored without lunch in
+  assert.equal(hours.value, "2h");
+});
+
+test("resolveDayRouteWorkingHours is blank for one near visit each side of lunch", () => {
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-07T07:34:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T10:47:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
+    { savedAt: "2026-09-07T12:14:00.000Z", transactionType: "LUNCH_BREAK_IN" },
+    { savedAt: "2026-09-07T15:00:00.000Z", transactionType: "COLLECTION_VISIT", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T16:10:00.000Z", transactionType: "END_OF_DAY" },
+  ]);
+
+  // One stop before lunch and one after → no measurable segment; do not fall back to attendance
+  assert.equal(hours.minutes, null);
+  assert.equal(hours.value, "-");
 });
 
 test("resolveDayRouteWorkingHours falls back to attendance when only far or login/logout exist", () => {
@@ -168,7 +189,7 @@ test("resolveDayRouteWorkingHours ignores pre-8am KSA near stops and far stops",
     { savedAt: "2026-09-07T15:33:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
   ]);
 
-  // 11:09 → 18:33 KSA = 7h 24m (far 16:50 excluded; midnight/6am excluded)
+  // No lunch: 11:09 → 18:33 KSA = 7h 24m (far 16:50 excluded; midnight/6am excluded)
   assert.equal(hours.minutes, 444);
   assert.equal(hours.value, "7h 24m");
 });

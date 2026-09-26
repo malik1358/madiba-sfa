@@ -278,50 +278,66 @@ function nearCustomerTransactions(source = []) {
     .sort((left, right) => left.ts - right.ts);
 }
 
-function lunchOverlapMs(start, end, lunchOutAt, lunchInAt) {
-  const lunchOut = Date.parse(String(lunchOutAt || ""));
-  const lunchIn = Date.parse(String(lunchInAt || ""));
-  if (Number.isFinite(lunchOut) && Number.isFinite(lunchIn) && lunchIn > lunchOut) {
-    const overlapStart = Math.max(start, lunchOut);
-    const overlapEnd = Math.min(end, lunchIn);
-    return overlapEnd > overlapStart ? overlapEnd - overlapStart : 0;
-  }
-  if (Number.isFinite(lunchOut) && !Number.isFinite(lunchIn) && lunchOut > start && lunchOut < end) {
-    return end - lunchOut;
-  }
-  return 0;
-}
-
-function workingMinutesFromNearTransactions({ startAt, endAt, lunchOutAt, lunchInAt }) {
+function spanMinutesBetween(startAt, endAt) {
   const start = Date.parse(String(startAt || ""));
   const end = Date.parse(String(endAt || ""));
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  return Math.round((end - start) / 60000);
+}
 
-  const totalMs = end - start - lunchOverlapMs(start, end, lunchOutAt, lunchInAt);
-  const minutes = Math.round(totalMs / 60000);
-  return minutes > 0 ? minutes : null;
+/**
+ * Prefer non-far customer stops around lunch:
+ * - morning: first near → last near strictly before lunch out
+ * - afternoon: first near strictly after lunch in → last near of the day
+ * Without lunch out: first near → last near of the day.
+ * Without lunch in: morning segment only (visits after lunch out are ignored).
+ */
+function workingMinutesFromNearLunchSegments(near, lunchOutAt, lunchInAt) {
+  if (!near.length) return { applied: false, minutes: null };
+
+  const lunchOut = Date.parse(String(lunchOutAt || ""));
+  const lunchIn = Date.parse(String(lunchInAt || ""));
+
+  if (!Number.isFinite(lunchOut)) {
+    if (near.length < 2) return { applied: true, minutes: null };
+    const mins = spanMinutesBetween(near[0].at, near[near.length - 1].at);
+    return { applied: true, minutes: mins > 0 ? mins : null };
+  }
+
+  const beforeLunch = near.filter((item) => item.ts < lunchOut);
+  const afterLunch = Number.isFinite(lunchIn)
+    ? near.filter((item) => item.ts > lunchIn)
+    : [];
+
+  if (!beforeLunch.length && !afterLunch.length) {
+    return { applied: false, minutes: null };
+  }
+
+  let total = 0;
+  if (beforeLunch.length >= 2) {
+    total += spanMinutesBetween(beforeLunch[0].at, beforeLunch[beforeLunch.length - 1].at);
+  }
+  if (afterLunch.length >= 2) {
+    total += spanMinutesBetween(afterLunch[0].at, afterLunch[afterLunch.length - 1].at);
+  }
+  return { applied: true, minutes: total > 0 ? total : null };
 }
 
 export function resolveDayRouteWorkingHours(source = []) {
   const near = nearCustomerTransactions(source);
   const { loginAt, lunchOutAt, lunchInAt, logoutAt } = extractWorkdayTimesFromRoute(source);
 
-  if (near.length >= 2) {
-    const nearMinutes = workingMinutesFromNearTransactions({
-      startAt: near[0].at,
-      endAt: near[near.length - 1].at,
-      lunchOutAt,
-      lunchInAt,
-    });
-    if (nearMinutes != null) {
+  if (near.length) {
+    const nearResult = workingMinutesFromNearLunchSegments(near, lunchOutAt, lunchInAt);
+    if (nearResult.applied) {
       return {
-        minutes: nearMinutes,
-        value: formatWorkingHours(nearMinutes),
+        minutes: nearResult.minutes,
+        value: formatWorkingHours(nearResult.minutes),
       };
     }
   }
 
-  // No usable non-far after-8am span: fall back to attendance hours, never starting before 08:00 KSA.
+  // No usable non-far after-8am segments: fall back to attendance hours, never starting before 08:00 KSA.
   const minutes = calculateWorkingHoursMinutes({
     loginAt: loginAt ? clampIsoToDayRouteWorkingHoursStart(loginAt) : null,
     lunchOutAt,

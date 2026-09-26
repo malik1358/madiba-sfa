@@ -140,7 +140,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
 
 export default function PaymentSettlementPage() {
   const { language, setLanguage, dir } = useAppLanguage();
-  const t = (key) => translate(TEXT, key, language);
+  const t = translate(language, TEXT);
   const { access } = useModuleAccess();
 
   const [error, setError] = useState("");

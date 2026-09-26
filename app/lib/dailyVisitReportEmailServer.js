@@ -1,4 +1,10 @@
-import { buildTeamVisitReportEmail, buildUserVisitReportEmail, resolveUserReportEmail, resolveVisitReportRecipients } from "./dailyVisitReportEmail.js";
+import {
+  buildTeamVisitReportEmail,
+  buildUserVisitReportEmail,
+  buildVisitReportDigestEmail,
+  resolveUserReportEmail,
+  resolveVisitReportRecipients,
+} from "./dailyVisitReportEmail.js";
 import { resolveReportingChainFromAuth, resolveSubordinateUserIds } from "./salesHierarchy.js";
 import {
   buildDailyVisitReport,
@@ -459,7 +465,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
     });
   }
 
-  const leadersWithTeamInPersonalEmail = new Set();
+  const reportMessageByUserId = new Map();
   for (const { profile, user } of recipients) {
     let userReport = {
       ...user,
@@ -482,6 +488,19 @@ export async function runDailyVisitReportEmailCycle(admin, {
       chainEmails,
       sendToUser,
     });
+    const teamPayload = teamPayloadByLeaderId.get(user.userId) || null;
+    const message = buildUserVisitReportEmail({
+      date: reportDate,
+      user: userReport,
+      thresholdKm: report.thresholdKm,
+      team: teamPayload?.team || null,
+      teamMembers: teamPayload?.members || [],
+    });
+    reportMessageByUserId.set(userReport.userId, {
+      userId: userReport.userId,
+      userName: userReport.userName,
+      message,
+    });
 
     if (!to.length) {
       results.push({
@@ -493,18 +512,8 @@ export async function runDailyVisitReportEmailCycle(admin, {
       continue;
     }
 
-    const teamPayload = teamPayloadByLeaderId.get(user.userId) || null;
-    const message = buildUserVisitReportEmail({
-      date: reportDate,
-      user: userReport,
-      thresholdKm: report.thresholdKm,
-      team: teamPayload?.team || null,
-      teamMembers: teamPayload?.members || [],
-    });
-
     try {
       const sent = await send({ ...message, to }, env);
-      if (teamPayload) leadersWithTeamInPersonalEmail.add(user.userId);
       results.push({
         userId: userReport.userId,
         userName: userReport.userName,
@@ -526,14 +535,14 @@ export async function runDailyVisitReportEmailCycle(admin, {
     }
   }
 
-  async function sendTeamKpiEmail({ userId, userName, to, message }) {
+  async function sendDigestEmail({ userId, userName, to, message, kind }) {
     if (!to.length) {
       results.push({
         userId,
         userName,
         status: "skipped",
         reason: "no_recipients",
-        kind: "team_kpi",
+        kind,
       });
       return [];
     }
@@ -544,7 +553,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
         userName,
         status: "sent",
         to,
-        kind: "team_kpi",
+        kind,
         provider: sent?.provider || null,
       });
       return to;
@@ -554,59 +563,79 @@ export async function runDailyVisitReportEmailCycle(admin, {
         userName,
         status: "failed",
         to,
-        kind: "team_kpi",
+        kind,
         error: error.message || "Unable to send email",
       });
       return [];
     }
   }
 
-  const coveredCompanyEmails = new Set();
+  const usedDigestEmails = new Set();
   const allKpiSnapshots = [...kpiByUserId.values()].filter(snapshotHasKpis);
 
-  for (const [leaderId, payload] of teamPayloadByLeaderId.entries()) {
-    if (leadersWithTeamInPersonalEmail.has(leaderId)) continue;
-
-    const { leader, members, team } = payload;
+  for (const leader of leaders) {
+    const payload = teamPayloadByLeaderId.get(leader.id) || null;
+    const subordinateIds = resolveSubordinateUserIds(authUsers, leader, profiles);
+    const reports = [...subordinateIds]
+      .map((userId) => reportMessageByUserId.get(userId))
+      .filter(Boolean)
+      .sort((left, right) => String(left.userName || "").localeCompare(String(right.userName || "")));
+    if (!reports.length) continue;
     const inbox = resolveUserReportEmail({
       reportEmail: leader.report_email,
       email: leader.email,
     });
-    const delivered = await sendTeamKpiEmail({
+    const delivered = await sendDigestEmail({
       userId: leader.id,
       userName: reportDisplayName(leader),
       to: inbox ? [inbox] : [],
-      message: buildTeamVisitReportEmail({
+      kind: "boss_digest",
+      message: buildVisitReportDigestEmail({
         date: reportDate,
         bossName: leader.salesman_name || leader.salesman_code || "Team",
-        team,
-        members,
+        reports,
+        teamMessage: payload
+          ? buildTeamVisitReportEmail({
+            date: reportDate,
+            bossName: leader.salesman_name || leader.salesman_code || "Team",
+            team: payload.team,
+            members: payload.members,
+          })
+          : null,
       }),
     });
-    if (delivered.length && members.length >= allKpiSnapshots.length) {
-      delivered.forEach((email) => coveredCompanyEmails.add(email));
-    }
+    delivered.forEach((email) => usedDigestEmails.add(email));
   }
 
-  const companyTo = managerEmails.filter((email) => !coveredCompanyEmails.has(email));
-  if (allKpiSnapshots.length && companyTo.length) {
+  const companyTo = managerEmails.filter((email) => !usedDigestEmails.has(email));
+  if (reportMessageByUserId.size && companyTo.length) {
     const companySnapshots = [...allKpiSnapshots].sort((left, right) => (
       String(left.salesmanName || left.salesmanCode || "").localeCompare(
         String(right.salesmanName || right.salesmanCode || ""),
       )
     ));
-    await sendTeamKpiEmail({
+    await sendDigestEmail({
       userId: "all-teams",
       userName: "All teams",
       to: companyTo,
-      message: buildTeamVisitReportEmail({
+      kind: "company_digest",
+      message: buildVisitReportDigestEmail({
         date: reportDate,
         bossName: "All teams",
-        team: consolidatePerformanceSnapshots(companySnapshots, {
-          reportDate,
-          salesmanName: "All teams",
-        }),
-        members: companySnapshots,
+        reports: [...reportMessageByUserId.values()].sort((left, right) => (
+          String(left.userName || "").localeCompare(String(right.userName || ""))
+        )),
+        teamMessage: companySnapshots.length
+          ? buildTeamVisitReportEmail({
+            date: reportDate,
+            bossName: "All teams",
+            team: consolidatePerformanceSnapshots(companySnapshots, {
+              reportDate,
+              salesmanName: "All teams",
+            }),
+            members: companySnapshots,
+          })
+          : null,
       }),
     });
   }

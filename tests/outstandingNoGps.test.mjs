@@ -205,3 +205,62 @@ test("backfillCustomerGpsFromLastVisits promotes missing master GPS from visit m
   assert.equal(customer.latitude, 24.581979);
   assert.equal(updates.length, 1);
 });
+
+test("backfillCustomerGpsFromLastVisits writes onto stored dirty code using canonical visit GPS", async () => {
+  const updatedCodes = [];
+  const admin = {
+    from(table) {
+      if (table === "customers") {
+        return {
+          update(payload) {
+            return {
+              eq(_column, code) {
+                updatedCodes.push(code);
+                return {
+                  select() {
+                    return {
+                      async maybeSingle() {
+                        return {
+                          data: {
+                            customer_code: code,
+                            latitude: payload.latitude,
+                            longitude: payload.longitude,
+                          },
+                          error: null,
+                        };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+      if (table === "customer_gps_history") {
+        return {
+          async insert() {
+            return { error: null };
+          },
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    },
+  };
+
+  const customer = {
+    customer_code: "ZAHRAT",
+    stored_customer_code: "Zahrat Ghubaira Trading Establishment",
+    latitude: null,
+    longitude: null,
+  };
+  const result = await backfillCustomerGpsFromLastVisits(admin, [customer], {
+    visitGpsByCustomer: new Map([
+      ["ZAHRAT", { latitude: 24.612613, longitude: 46.653108, visitAt: "2026-09-17T09:13:56Z" }],
+    ]),
+  });
+
+  assert.equal(result.promoted, 1);
+  assert.deepEqual(updatedCodes, ["Zahrat Ghubaira Trading Establishment"]);
+  assert.equal(customer.latitude, 24.612613);
+});

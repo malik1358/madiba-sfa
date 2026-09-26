@@ -58,10 +58,10 @@ test("excludeRowsWithCanonicalGpsSibling drops dirty rows when clean code has GP
       return {
         select() {
           return {
-            in(_column, codes) {
-              assert.ok(codes.includes("1428"));
+            or(filter) {
+              assert.match(String(filter || ""), /customer_code\.ilike\./i);
               return Promise.resolve({
-                data: [{ customer_code: "1428", latitude: 26.43, longitude: 50.10 }],
+                data: [{ customer_code: "Zahrat", latitude: 24.61, longitude: 46.69 }],
                 error: null,
               });
             },
@@ -73,11 +73,11 @@ test("excludeRowsWithCanonicalGpsSibling drops dirty rows when clean code has GP
 
   const kept = await excludeRowsWithCanonicalGpsSibling(admin, [
     {
-      customer_code: "1428_Kings Ways Trading Establishment",
-      customer_name: "Kings Ways Trading Establishment",
+      customer_code: "Zahrat Ghubaira Trading Establishment",
+      customer_name: "Zahrat Ghubaira Trading Establishment",
       latitude: null,
       longitude: null,
-      total_outstanding: 14922,
+      total_outstanding: 1352,
     },
     {
       customer_code: "9999",

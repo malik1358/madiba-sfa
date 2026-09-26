@@ -1,4 +1,4 @@
-import { resolveCustomerMasterExportFields } from "./customerCode.js";
+import { canonicalCustomerCode, resolveCustomerMasterExportFields } from "./customerCode.js";
 import {
   customerHasSavedGps,
   fetchAllFilteredCustomers,
@@ -407,6 +407,17 @@ export async function loadLastVisitGpsByCustomer(admin, customerCodes) {
   return latest;
 }
 
+function visitGpsLookupCodes(row) {
+  const stored = String(row?.stored_customer_code || "").trim();
+  const display = String(row?.customer_code || "").trim();
+  const canonical = canonicalCustomerCode(stored || display);
+  return [...new Set(
+    [stored, display, canonical]
+      .map((value) => String(value || "").trim().toUpperCase())
+      .filter(Boolean),
+  )];
+}
+
 export async function backfillCustomerGpsFromLastVisits(admin, customers, {
   actor = { role: "system", salesman_name: "Visit GPS backfill" },
   visitGpsByCustomer = null,
@@ -414,28 +425,35 @@ export async function backfillCustomerGpsFromLastVisits(admin, customers, {
   const rows = Array.isArray(customers) ? customers : [];
   if (rows.length === 0) return { promoted: 0, codes: [] };
 
-  const gpsByCode = visitGpsByCustomer || await loadLastVisitGpsByCustomer(
-    admin,
-    rows.map((row) => row?.customer_code),
-  );
+  const lookupCodes = [...new Set(rows.flatMap((row) => visitGpsLookupCodes(row)))];
+  const gpsByCode = visitGpsByCustomer || await loadLastVisitGpsByCustomer(admin, lookupCodes);
 
   const codes = [];
   for (const row of rows) {
     if (customerHasSavedGps(row)) continue;
-    const code = String(row?.customer_code || "").trim();
-    if (!code) continue;
-    const visitGps = gpsByCode.get(code.toUpperCase());
+    const storedCode = String(row?.stored_customer_code || row?.customer_code || "").trim();
+    if (!storedCode) continue;
+
+    let visitGps = null;
+    for (const key of visitGpsLookupCodes(row)) {
+      visitGps = gpsByCode.get(key);
+      if (visitGps) break;
+    }
     if (!visitGps) continue;
 
     const updated = await promoteEntryGpsToCustomerIfMissing(admin, {
-      customerCode: code,
+      // Write onto the real customers row (may be a dirty/name code), not only the display code.
+      customerCode: storedCode,
       latitude: visitGps.latitude,
       longitude: visitGps.longitude,
       actor,
-      customerRow: row,
+      customerRow: {
+        ...row,
+        customer_code: storedCode,
+      },
     });
     if (updated) {
-      codes.push(code.toUpperCase());
+      codes.push(storedCode.toUpperCase());
       row.latitude = visitGps.latitude;
       row.longitude = visitGps.longitude;
     }

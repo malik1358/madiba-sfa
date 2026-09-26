@@ -53,7 +53,7 @@ function median(values) {
   return sorted[mid];
 }
 
-/** Same-day or next-day credit notes count as an immediate reverse (not payment). */
+/** Same-day / next-day full CNs reverse immediately; exact item+qty mirrors reverse on any later date. */
 export const IMMEDIATE_REVERSAL_MAX_DAYS = 1;
 const AMOUNT_TOLERANCE = 0.02;
 
@@ -129,6 +129,37 @@ function itemOverlapCount(leftItems = [], rightItems = []) {
     right.set(key, available - 1);
   });
   return overlap;
+}
+
+/** Multiset equality for fingerprint lists (order-independent). */
+function fingerprintMultisetsEqual(leftItems = [], rightItems = []) {
+  const left = Array.isArray(leftItems) ? leftItems.filter(Boolean) : [];
+  const right = Array.isArray(rightItems) ? rightItems.filter(Boolean) : [];
+  if (left.length === 0 || right.length === 0) return false;
+  if (left.length !== right.length) return false;
+  return itemOverlapCount(left, right) === left.length;
+}
+
+/** code|qty only — ignores line amount so CN sign/abs differences still match. */
+function itemQtyFingerprints(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((fingerprint) => {
+      const parts = String(fingerprint || "").split("|");
+      if (parts.length < 2) return "";
+      return `${parts[0]}|${parts[1]}`;
+    })
+    .filter(Boolean);
+}
+
+/**
+ * True when both vouchers share the same item codes and quantities
+ * (full mirror return / reissue cancel), regardless of line-amount sign.
+ */
+export function itemsAndQtyExactlyMatch(leftItems = [], rightItems = []) {
+  return fingerprintMultisetsEqual(
+    itemQtyFingerprints(leftItems),
+    itemQtyFingerprints(rightItems),
+  );
 }
 
 function itemCodeOverlapCount(leftCodes = [], rightCodes = []) {
@@ -467,8 +498,10 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
 }
 
 /**
- * Pair invoices with credit notes dated the same day or up to maxDays after
- * for the same full amount (classic void / same-day reissue cancel).
+ * Pair invoices with credit notes that fully reverse them.
+ *
+ * 1) Same-day or next-day full amount (classic void / reissue cancel).
+ * 2) Any later date when amount AND items+qty exactly match (full mirror CN).
  *
  * A CN dated BEFORE an invoice must not reverse that later sale — that pattern
  * is a live reissue (e.g. CN 121 voids 2384 on 31 Dec; sale 2397 on 1 Jan stays open).
@@ -501,10 +534,9 @@ export function findImmediateCreditNoteReversals(
       .map((note, index) => {
         if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) return null;
 
-        // CN must be on/after the invoice (0 … maxDays). Never reverse a later sale
-        // with an earlier CN — that later voucher is the live reissue.
+        // CN must be on/after the invoice. Never reverse a later sale with an earlier CN.
         const offset = isoDayOffset(invoice.invoice_date, note.credit_date);
-        if (offset == null || offset < 0 || offset > maxDays) return null;
+        if (offset == null || offset < 0) return null;
         const days = offset;
 
         const amountOk = amountsMatch(note.remaining, invoiceAmount)
@@ -526,15 +558,26 @@ export function findImmediateCreditNoteReversals(
           || (Array.isArray(note.items) && note.items.length > 0);
         const invoiceHasItems = (Array.isArray(invoice.item_codes) && invoice.item_codes.length > 0)
           || (Array.isArray(invoice.items) && invoice.items.length > 0);
-        // When both sides have items, require overlap so a same-amount CN does not
-        // reverse the wrong bill within the window.
-        if (noteHasItems && invoiceHasItems && itemOverlap <= 0 && !refHit) return null;
+        const exactMirror = noteHasItems
+          && invoiceHasItems
+          && itemsAndQtyExactlyMatch(note.items, invoice.items);
+        const withinWindow = days <= maxDays;
+
+        // Outside the ±1 day window: only exact amount + exact items/qty mirrors reverse.
+        if (!withinWindow && !exactMirror) return null;
+
+        // Inside the window: when both sides have items, require overlap (or ref) so a
+        // same-amount CN does not reverse the wrong bill.
+        if (withinWindow && noteHasItems && invoiceHasItems && itemOverlap <= 0 && !refHit) {
+          return null;
+        }
 
         return {
           note,
           index,
           days,
-          score: (refHit ? 1000 : 0)
+          score: (exactMirror ? 5000 : 0)
+            + (refHit ? 1000 : 0)
             + (itemOverlap * 50)
             + (amountOk ? 100 : 0)
             + (noteVoucher ? 25 : 0)

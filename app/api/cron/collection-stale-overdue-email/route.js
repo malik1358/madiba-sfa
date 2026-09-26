@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
 import { formatSupabaseError, withJwtClockSkewRetry } from "../../../lib/dailySalesmanResumeServer.js";
-import { runCollectionStaleOverdueEmailCycle } from "../../../lib/collectionStaleOverdueEmailServer.js";
+import {
+  resolveCollectionStaleOverdueRouteTrigger,
+  runCollectionStaleOverdueEmailCycle,
+} from "../../../lib/collectionStaleOverdueEmailServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -53,12 +56,6 @@ async function readParams(request) {
   }
 }
 
-function resolveTrigger(request, value) {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "cron" || normalized === "manual") return normalized;
-  return String(request.method || "").toUpperCase() === "POST" ? "cron" : "manual";
-}
-
 async function handleRequest(request) {
   try {
     if (!isCronAuthorized(request)) {
@@ -74,7 +71,7 @@ async function handleRequest(request) {
       const admin = createAdminClient();
       return runCollectionStaleOverdueEmailCycle(admin, {
         date,
-        trigger: resolveTrigger(request, trigger),
+        trigger: resolveCollectionStaleOverdueRouteTrigger({ date, force, to, trigger }),
         env: {
           ...process.env,
           ...(String(force || "").trim() ? { COLLECTION_STALE_OVERDUE_EMAIL_FORCE: "true" } : {}),

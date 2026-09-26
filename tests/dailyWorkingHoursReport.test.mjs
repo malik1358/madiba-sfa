@@ -63,10 +63,12 @@ test("buildDailyWorkingHoursRows sorts by name and summarize totals", () => {
   assert.equal(rows[0].userName, "Ahmed");
   assert.equal(rows[1].userName, "Belal");
   assert.equal(rows[0].workingHoursLabel, "3h");
+  assert.equal(rows[1].workingHoursLabel, "0h");
+  assert.equal(rows[1].workingHoursMinutes, 0);
 
   const totals = summarizeDailyWorkingHours(rows);
   assert.equal(totals.userCount, 2);
   assert.equal(totals.loggedInCount, 1);
-  assert.equal(totals.withHoursCount, 2);
-  assert.equal(totals.totalWorkingMinutes, 3 * 60 + 9 * 60);
+  assert.equal(totals.withHoursCount, 1);
+  assert.equal(totals.totalWorkingMinutes, 3 * 60);
 });

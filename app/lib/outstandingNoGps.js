@@ -491,6 +491,5 @@ export async function fetchOutstandingNoGpsCustomers(admin, {
     lastVisitByCustomer,
   })).filter((row) => shouldIncludeOutstandingNoGpsCustomer(row, { legalTransfers }));
 
-  void backfill;
   return sortOutstandingNoGpsRows(enriched, sort);
 }

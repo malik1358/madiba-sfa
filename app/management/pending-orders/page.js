@@ -21,7 +21,10 @@ import {
   mergeServerAndQueuedOrders,
 } from "../../lib/queuedSalesOrders";
 import { processOfflineQueue } from "../../lib/offlineApi";
-import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
+import {
+  formatSalesOrderNumber,
+  orderNeedsSalesmanNumberRepair,
+} from "../../lib/salesOrderNumber";
 import { formatOrderSalesmanLabel } from "../../lib/orderSalesman";
 import { findOutstandingForCustomer, sortBucketLabels } from "../../lib/outstanding";
 import { evaluateCreditApproval, outstandingAmountOverSixtyDays } from "../../lib/creditApproval";
@@ -1051,7 +1054,50 @@ export default function PendingOrdersPage() {
             .filter((order) => !isQueuedPendingOrderId(order.id))
             .map((order) => order.id);
           void loadInvoiceMeta(serverIds, session.user.id, merged);
+          void repairBareNumericOrderNumbers(merged, session.access_token);
           return merged;
+        }
+
+        async function repairBareNumericOrderNumbers(orderList, accessToken) {
+          if (!accessToken) return;
+          const needsRepair = (Array.isArray(orderList) ? orderList : [])
+            .filter((order) => orderNeedsSalesmanNumberRepair(order))
+            .slice(0, 40)
+            .map((order) => Number(order.id))
+            .filter((id) => Number.isFinite(id) && id > 0);
+          if (needsRepair.length === 0) return;
+
+          try {
+            const response = await fetch("/api/sales-orders", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                action: "repair_order_numbers",
+                orderIds: needsRepair,
+              }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.success || !Array.isArray(payload.repaired)) return;
+            if (cancelled || payload.repaired.length === 0) return;
+
+            const byId = new Map(
+              payload.repaired.map((row) => [String(row.orderId), String(row.orderNumber || "").trim()]),
+            );
+            setOrders((current) => {
+              const next = (current || []).map((order) => {
+                const repairedNumber = byId.get(String(order.id));
+                if (!repairedNumber) return order;
+                return { ...order, order_number: repairedNumber };
+              });
+              ordersRef.current = next;
+              return next;
+            });
+          } catch {
+            // Queue still usable if repair fails; numbers stay until next load.
+          }
         }
 
         const ordersResult = await fetchPendingOrdersCached(session.user.id, scope, {

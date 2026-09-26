@@ -25,11 +25,13 @@ async function readParams(request) {
   const queryDate = url.searchParams.get("date");
   const queryForce = url.searchParams.get("force");
   const queryTo = url.searchParams.get("to");
+  const queryTrigger = url.searchParams.get("trigger");
   if (String(request.method || "").toUpperCase() === "GET") {
     return {
       date: queryDate || "",
       force: queryForce,
       to: queryTo || "",
+      trigger: queryTrigger || "",
     };
   }
 
@@ -39,14 +41,22 @@ async function readParams(request) {
       date: body?.date || queryDate || "",
       force: body?.force ?? queryForce,
       to: body?.to || queryTo || "",
+      trigger: body?.trigger || queryTrigger || "",
     };
   } catch {
     return {
       date: queryDate || "",
       force: queryForce,
       to: queryTo || "",
+      trigger: queryTrigger || "",
     };
   }
+}
+
+function resolveTrigger(request, value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "cron" || normalized === "manual") return normalized;
+  return String(request.method || "").toUpperCase() === "POST" ? "cron" : "manual";
 }
 
 async function handleRequest(request) {
@@ -59,12 +69,12 @@ async function handleRequest(request) {
       return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
     }
 
-    const { date, force, to } = await readParams(request);
+    const { date, force, to, trigger } = await readParams(request);
     const result = await withJwtClockSkewRetry(async () => {
       const admin = createAdminClient();
       return runCollectionStaleOverdueEmailCycle(admin, {
         date,
-        trigger: String(to || "").trim() ? "manual" : "cron",
+        trigger: resolveTrigger(request, trigger),
         env: {
           ...process.env,
           ...(String(force || "").trim() ? { COLLECTION_STALE_OVERDUE_EMAIL_FORCE: "true" } : {}),

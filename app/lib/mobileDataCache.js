@@ -52,9 +52,10 @@ function customersCacheKey(scope, enriched = false) {
 }
 
 function customerHistoryCacheKey(scope, customerCode, { fullHistory = false } = {}) {
-  // v4: customer audit settlement needs day-1 history (fullHistory), not the 6-month window.
+  // v5: invalidate browsers that cached pre-rate-merge double-counted sales (e.g. NFD/1337).
+  // fullHistory = day-1 settlement history, not the 6-month BI window.
   const historySuffix = fullHistory ? ":full" : "";
-  return `history:v4${historySuffix}:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
+  return `history:v5${historySuffix}:${buildScopeHash(scope)}:${String(customerCode || "").trim().toUpperCase()}`;
 }
 
 function itemsMasterCacheKey() {

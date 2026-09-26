@@ -55,6 +55,7 @@ import NearestCustomerSuggestions from "../../components/NearestCustomerSuggesti
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
 import { createOrderPdfDocument, formatHistoryChange, preloadOrderPdfLibrary, resolveLiveOrderPdfSnapshot } from "../../lib/orderPdfDocument";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
+import { resolveOrderMakerFromScope } from "../../lib/orderSalesman";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 import { isExcludedNewOrderCustomer } from "../../lib/buildingMaterialCustomerFilter";
 import { buildSettlementCustomerHistoryUrl } from "../../lib/customerHistoryApi";
@@ -1051,6 +1052,7 @@ export default function NewOrderPage() {
       const savedAtIso = new Date().toISOString();
       const lines = pricedOrderLines;
       const totals = summarizePricedLines(lines);
+      const orderMaker = resolveOrderMakerFromScope(accessScope);
 
       return {
         orderId,
@@ -1059,7 +1061,8 @@ export default function NewOrderPage() {
         savedAtIso,
         customerCode: selectedCustomer.customer_code,
         customerName: selectedCustomer.customer_name,
-        salesmanCode: selectedCustomer.current_salesman_code,
+        salesmanCode: orderMaker.salesmanCode,
+        salesmanName: orderMaker.salesmanName,
         paymentType: normalizePaymentType(paymentType),
         pricingRegion,
         itemCount: orderSummary.itemCount,
@@ -1078,6 +1081,7 @@ export default function NewOrderPage() {
       };
     },
     [
+      accessScope,
       orderHistory,
       orderItems,
       orderSummary.itemCount,

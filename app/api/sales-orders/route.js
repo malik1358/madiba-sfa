@@ -31,6 +31,7 @@ import {
   parseSalesmanOrderNumber,
   resolveSalesmanOrderPrefix,
 } from "../../lib/salesmanOrderNumber.js";
+import { resolveOrderMakerFromProfile } from "../../lib/orderSalesman.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -411,6 +412,7 @@ async function persistDraftOrder(admin, {
   customerCode,
   customerName,
   salesmanCode,
+  salesmanName = "",
   lines,
   capturedAt,
   clientOrderNumber = "",
@@ -421,6 +423,7 @@ async function persistDraftOrder(admin, {
   let resolvedOrderId = orderId ? Number(orderId) : null;
   let resolvedOrderNumber = "";
   const preferredOrderNumber = normalizeClientOrderNumber(clientOrderNumber, salesmanCode);
+  const resolvedSalesmanName = String(salesmanName || salesmanCode || "").trim();
 
   if (resolvedOrderId) {
     await ensureOrderAccess(admin, resolvedOrderId, userId);
@@ -437,6 +440,7 @@ async function persistDraftOrder(admin, {
       customer_code: resolvedCustomerCode,
       customer_name: customerName,
       salesman_code: salesmanCode,
+      salesman_name: resolvedSalesmanName || null,
       status: "DRAFT",
       created_by: userId,
       updated_at: nowIso,
@@ -474,6 +478,7 @@ async function persistDraftOrder(admin, {
         customer_code: resolvedCustomerCode,
         customer_name: customerName,
         salesman_code: salesmanCode,
+        salesman_name: resolvedSalesmanName || null,
         updated_at: nowIso,
       })
       .eq("id", resolvedOrderId)
@@ -654,7 +659,7 @@ export async function POST(request) {
     const action = String(body?.action || "save_draft").trim().toLowerCase();
     const customerCode = String(body?.customerCode || "").trim();
     const customerName = String(body?.customerName || "").trim();
-    const salesmanCode = String(body?.salesmanCode || "").trim();
+    const customerSalesmanCode = String(body?.customerSalesmanCode || "").trim();
     const requestedPaymentType = normalizePaymentType(body?.paymentType);
     const requestedPricingRegion = normalizePricingRegion(body?.pricingRegion);
     const lines = Array.isArray(body?.lines) ? body.lines : [];
@@ -717,25 +722,37 @@ export async function POST(request) {
 
     const { data: profile, error: profileError } = await admin
       .from("profiles")
-      .select("role")
+      .select("role,salesman_code,salesman_name")
       .eq("id", user.id)
       .maybeSingle();
 
     if (profileError) throw profileError;
+
+    // Ownership is always the person making the order, not the customer master salesman.
+    const orderMaker = resolveOrderMakerFromProfile(profile);
+    const salesmanCode = orderMaker.salesmanCode || String(scope.currentSalesmanCode || "").trim();
+    const salesmanName = orderMaker.salesmanName || salesmanCode;
+    if (!salesmanCode) {
+      return NextResponse.json({
+        success: false,
+        error: "Your profile is missing a salesman code. Ask admin to set it before placing orders.",
+      }, { status: 400 });
+    }
 
     const requireGps = shouldRequireTransactionGps(profile?.role);
     if (requireGps && (!Number.isFinite(latitude) || !Number.isFinite(longitude))) {
       return NextResponse.json({ success: false, error: GPS_REQUIRED_ERROR }, { status: 400 });
     }
 
+    const pricingSalesmanCode = customerSalesmanCode || salesmanCode;
     const catalog = await loadCachedPricingCatalog(admin);
     const pricedCatalog = resolveCatalogForOrder(catalog, {
       selectedRegion: requestedPricingRegion,
       currentUserRegion: userMetadata.pricing_region,
       currentUserRegions: userMetadata.pricing_regions,
-      customerSalesmanCode: salesmanCode,
-      pricingRegionBySalesmanCode: salesmanCode
-        ? { [String(salesmanCode).trim().toUpperCase()]: requestedPricingRegion || userMetadata.pricing_region }
+      customerSalesmanCode: pricingSalesmanCode,
+      pricingRegionBySalesmanCode: pricingSalesmanCode
+        ? { [String(pricingSalesmanCode).trim().toUpperCase()]: requestedPricingRegion || userMetadata.pricing_region }
         : {},
       paymentType: requestedPaymentType,
     });
@@ -762,6 +779,7 @@ export async function POST(request) {
       customerCode,
       customerName,
       salesmanCode,
+      salesmanName,
       lines: pricedLines,
       capturedAt,
       clientOrderNumber,

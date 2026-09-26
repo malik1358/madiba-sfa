@@ -149,7 +149,7 @@ Both exist in the production schema:
 - `orders` / `order_lines` — older recommendation-style orders tied to `visits`.
 - `sales_orders` / `sales_order_items` — the live order entry path (`/api/sales-orders`).
 
-New field orders go to `sales_orders`. Invoice status is not a column on that table. It is `system_settings.setting_key = order_invoice_meta:<id>`.
+New field orders go to `sales_orders`. Invoice status is not a column on that table. It is `system_settings.setting_key = order_invoice_meta:<id>`. Order `salesman_code` / `salesman_name` are set from the authenticated maker’s profile in `/api/sales-orders` (not from customer master assignment).
 
 ## Imports and the active batch
 

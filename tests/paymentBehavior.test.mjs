@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildCreditNotes,
+  buildCustomerOutstandingReconcileRow,
   buildDaysToPayObservations,
   buildPaymentBehavior,
   buildPaymentSettlementLedger,
@@ -10,6 +11,31 @@ import {
   matchPaymentsFifo,
   weightedAverageDays,
 } from "../app/lib/paymentBehavior.js";
+
+test("buildCustomerOutstandingReconcileRow flags SFA vs Tally customer differences", () => {
+  const diff = buildCustomerOutstandingReconcileRow({
+    customer: { customer_code: " c01 ", customer_name: "Alpha" },
+    ledger: { outstandingCompareTotals: { computed_open: 1150, discrepancy_count: 0, has_outstanding_rows: true } },
+    tallyOutstanding: 1000,
+  });
+  assert.equal(diff.customer_code, "C01");
+  assert.equal(diff.difference, 150);
+  assert.equal(diff.has_difference, true);
+
+  const match = buildCustomerOutstandingReconcileRow({
+    customer: { customer_code: "C02" },
+    ledger: { outstandingCompareTotals: { computed_open: 500.01, discrepancy_count: 0 } },
+    tallyOutstanding: 500,
+  });
+  assert.equal(match.has_difference, false);
+
+  const netZeroGaps = buildCustomerOutstandingReconcileRow({
+    customer: { customer_code: "C03" },
+    ledger: { outstandingCompareTotals: { computed_open: 500, discrepancy_count: 2 } },
+    tallyOutstanding: 500,
+  });
+  assert.equal(netZeroGaps.has_difference, true);
+});
 
 test("buildSalesInvoices aggregates voucher lines by date and adds 15% VAT", () => {
   const invoices = buildSalesInvoices([

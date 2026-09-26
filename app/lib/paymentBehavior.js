@@ -1229,6 +1229,30 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
 }
 
 /**
+ * Customer-level Tally vs SFA outstanding row for the all-customers difference report.
+ * Tally = customer total on the outstanding upload; SFA = computed open (cash FIFO + CN).
+ */
+export function buildCustomerOutstandingReconcileRow({ customer = {}, ledger = null, tallyOutstanding = 0 } = {}) {
+  const totals = ledger?.outstandingCompareTotals || {};
+  const tally = toNumber(tallyOutstanding);
+  const sfa = toNumber(totals.computed_open);
+  const difference = sfa - tally;
+  const invoiceGapCount = Number(totals.discrepancy_count || 0);
+  return {
+    customer_code: String(customer.customer_code || "").trim().toUpperCase(),
+    customer_name: customer.customer_name || "",
+    tally_outstanding: tally,
+    sfa_outstanding: sfa,
+    difference,
+    invoice_gap_count: invoiceGapCount,
+    unmatched_receipt_amount: toNumber(totals.unmatched_receipt_amount),
+    unmatched_credit_note_amount: toNumber(totals.unmatched_credit_note_amount),
+    has_outstanding_rows: Boolean(totals.has_outstanding_rows),
+    has_difference: Math.abs(difference) > AMOUNT_TOLERANCE || invoiceGapCount > 0,
+  };
+}
+
+/**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
  * Paid / Open / Status follow cash FIFO (+ nested credit notes for display). Outstanding upload
  * is kept on each row for Tally comparison screens — it does not rewrite Paid/Open.

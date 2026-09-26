@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
@@ -9,7 +9,10 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
-import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
+import {
+  buildCustomerOutstandingReconcileRow,
+  buildPaymentSettlementLedger,
+} from "../../lib/paymentBehavior.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -38,7 +41,25 @@ const TEXT = {
   compare: { en: "Compare", ar: "قارن" },
   total: { en: "Total", ar: "الإجمالي" },
   noCustomers: { en: "No matching customers.", ar: "لا يوجد عملاء مطابقون." },
+  diffTitle: { en: "Tally vs SFA — differences only", ar: "تالي مقابل النظام — الفروق فقط" },
+  diffHint: {
+    en: "Scans the customers listed below (use search to narrow) and keeps only customers where SFA outstanding differs from Tally or any invoice has a gap. Click a customer name for Invoices & Settlement.",
+    ar: "يفحص العملاء المعروضين أدناه (استخدم البحث للتضييق) ويعرض فقط العملاء الذين يختلف مستحقهم في النظام عن تالي أو لديهم فاتورة بفرق. اضغط اسم العميل لعرض الفواتير والتسوية.",
+  },
+  scan: { en: "Scan customers", ar: "فحص العملاء" },
+  stop: { en: "Stop", ar: "إيقاف" },
+  tallyOutstanding: { en: "Tally Outstanding", ar: "مستحق تالي" },
+  sfaOutstanding: { en: "SFA Outstanding", ar: "مستحق النظام" },
+  difference: { en: "Difference (SFA − Tally)", ar: "الفرق (النظام − تالي)" },
+  invoiceGaps: { en: "Invoice gaps", ar: "فواتير بفروق" },
+  unmatchedReceipts: { en: "Unapplied receipts", ar: "تحصيلات غير مطبقة" },
+  unmatchedCn: { en: "Unapplied CN", ar: "إشعارات دائن غير مطبقة" },
+  noDifferences: { en: "No differences found in scanned customers.", ar: "لا توجد فروق في العملاء المفحوصين." },
+  notScanned: { en: "Click Scan to build the difference report.", ar: "اضغط فحص لإنشاء تقرير الفروق." },
+  failed: { en: "failed", ar: "فشل" },
 };
+
+const SCAN_CONCURRENCY = 4;
 
 const CUSTOMER_FILTER_KEYS = ["code", "name", "d0", "d30", "d61", "d90", "total"];
 
@@ -105,6 +126,10 @@ export default function OutstandingComparePage() {
   const [loadingCompare, setLoadingCompare] = useState(false);
   const [ledger, setLedger] = useState(null);
   const [autoCode, setAutoCode] = useState("");
+  const [scanRows, setScanRows] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState({ done: 0, total: 0, failed: 0 });
+  const stopScanRef = useRef(false);
 
   const canAccess = access.canAccess("outstandingCompare")
     || access.canAccess("paymentSettlement")
@@ -232,6 +257,90 @@ export default function OutstandingComparePage() {
     }
   }, []);
 
+  const scanDifferences = useCallback(async (list) => {
+    const supabase = getSupabaseClient();
+    if (!supabase || !list.length) return;
+
+    stopScanRef.current = false;
+    setScanning(true);
+    setScanRows([]);
+    setScanProgress({ done: 0, total: list.length, failed: 0 });
+    setError("");
+
+    try {
+      const session = await resolveAuthSession(supabase);
+      const headers = { Authorization: `Bearer ${session.access_token}` };
+      const found = [];
+      let cursor = 0;
+      let done = 0;
+      let failed = 0;
+
+      const worker = async () => {
+        while (!stopScanRef.current && cursor < list.length) {
+          const customer = list[cursor];
+          cursor += 1;
+          try {
+            const code = encodeURIComponent(customer.customer_code || "");
+            const name = encodeURIComponent(customer.customer_name || "");
+            const [historyResponse, outstandingResponse] = await Promise.all([
+              fetch(`/api/customer-history?customerCode=${code}&customerName=${name}&fullHistory=1&scope=settlement&lite=1`, { headers }),
+              fetch(`/api/outstanding?customerCode=${code}&customerName=${name}`, { headers }),
+            ]);
+            const historyPayload = await historyResponse.json().catch(() => ({}));
+            const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
+            if (!historyResponse.ok || !historyPayload.success) {
+              throw new Error(historyPayload.error || "history failed");
+            }
+            const customerLedger = buildPaymentSettlementLedger({
+              transactions: Array.isArray(historyPayload.transactions) ? historyPayload.transactions : [],
+              receipts: Array.isArray(historyPayload.receipts) ? historyPayload.receipts : [],
+              outstandingCustomer: outstandingPayload?.customer || null,
+              outstandingInvoices: Array.isArray(outstandingPayload?.customerInvoices)
+                ? outstandingPayload.customerInvoices
+                : [],
+            });
+            const row = buildCustomerOutstandingReconcileRow({
+              customer,
+              ledger: customerLedger,
+              tallyOutstanding: customerOutstandingTotal(customer),
+            });
+            if (row.has_difference) {
+              found.push(row);
+              setScanRows([...found].sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference)));
+            }
+          } catch {
+            failed += 1;
+          }
+          done += 1;
+          setScanProgress({ done, total: list.length, failed });
+        }
+      };
+
+      await Promise.all(Array.from({ length: Math.min(SCAN_CONCURRENCY, list.length) }, worker));
+      setMessage(`${found.length} customer(s) with Tally vs SFA differences.`);
+    } catch (err) {
+      setError(err.message || "Unable to scan customers.");
+    } finally {
+      setScanning(false);
+    }
+  }, []);
+
+  const scanFooter = useMemo(() => {
+    const rows = scanRows || [];
+    return {
+      tally: rows.reduce((sum, row) => sum + row.tally_outstanding, 0),
+      sfa: rows.reduce((sum, row) => sum + row.sfa_outstanding, 0),
+      difference: rows.reduce((sum, row) => sum + row.difference, 0),
+      gaps: rows.reduce((sum, row) => sum + row.invoice_gap_count, 0),
+      receipts: rows.reduce((sum, row) => sum + row.unmatched_receipt_amount, 0),
+      cn: rows.reduce((sum, row) => sum + row.unmatched_credit_note_amount, 0),
+    };
+  }, [scanRows]);
+
+  useEffect(() => () => {
+    stopScanRef.current = true;
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -311,6 +420,109 @@ export default function OutstandingComparePage() {
               <Link href="/management" className="moduleBackLink">{t("back")}</Link>
             </div>
           </div>
+
+          <section className="moduleSection">
+            <div className="moduleSectionHeader">
+              <h2>{t("diffTitle")}</h2>
+              <span>
+                {scanProgress.total
+                  ? `${formatCount(scanProgress.done)} / ${formatCount(scanProgress.total)}`
+                    + (scanProgress.failed ? ` · ${formatCount(scanProgress.failed)} ${t("failed")}` : "")
+                  : ""}
+              </span>
+            </div>
+            <p className="moduleHint">{t("diffHint")}</p>
+            <div className="moduleFilterRow">
+              {scanning ? (
+                <button
+                  type="button"
+                  className="moduleInlineButton moduleActionButton"
+                  onClick={() => { stopScanRef.current = true; }}
+                >
+                  {t("stop")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="moduleInlineButton moduleActionButton"
+                  onClick={() => void scanDifferences(visibleCustomers)}
+                  disabled={loadingCustomers || !visibleCustomers.length}
+                >
+                  {`${t("scan")} (${formatCount(visibleCustomers.length)})`}
+                </button>
+              )}
+            </div>
+            <ExportableTable filename="tally-vs-sfa-outstanding-differences" sheetName="Differences" className="moduleTableWrap moduleBiTableWrap">
+              <table className="moduleTable moduleBiTable">
+                <thead>
+                  <tr>
+                    <th>{t("code")}</th>
+                    <th>{t("customer")}</th>
+                    <th>{t("tallyOutstanding")}</th>
+                    <th>{t("sfaOutstanding")}</th>
+                    <th className="moduleBiTotalCol">{t("difference")}</th>
+                    <th>{t("invoiceGaps")}</th>
+                    <th>{t("unmatchedReceipts")}</th>
+                    <th>{t("unmatchedCn")}</th>
+                    <th>{t("compare")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(scanRows || []).map((row) => (
+                    <tr key={`diff-${row.customer_code}`}>
+                      <td>{row.customer_code || "—"}</td>
+                      <td>
+                        <Link href={settlementHref(row.customer_code)} className="moduleInlineButton">
+                          {row.customer_name || row.customer_code || "—"}
+                        </Link>
+                      </td>
+                      <td>{formatMoney(row.tally_outstanding)}</td>
+                      <td>{formatMoney(row.sfa_outstanding)}</td>
+                      <td className={`moduleBiTotalCol ${deltaClass(row.difference)}`.trim()}>
+                        <strong>{formatDelta(row.difference)}</strong>
+                      </td>
+                      <td>{formatCount(row.invoice_gap_count)}</td>
+                      <td>{formatMoney(row.unmatched_receipt_amount)}</td>
+                      <td>{formatMoney(row.unmatched_credit_note_amount)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="moduleInlineButton moduleActionButton"
+                          onClick={() => {
+                            const match = customers.find((c) => String(c.customer_code || "").toUpperCase() === row.customer_code);
+                            void loadCompare(match || row);
+                          }}
+                          disabled={loadingCompare}
+                        >
+                          {t("compare")}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {scanRows && !scanRows.length && !scanning ? (
+                    <tr><td colSpan={9}>{t("noDifferences")}</td></tr>
+                  ) : null}
+                  {!scanRows && !scanning ? (
+                    <tr><td colSpan={9}>{t("notScanned")}</td></tr>
+                  ) : null}
+                </tbody>
+                <tfoot>
+                  <tr className="moduleBiTotalRow">
+                    <td colSpan={2}><strong>{t("total")}</strong></td>
+                    <td><strong>{formatMoney(scanFooter.tally)}</strong></td>
+                    <td><strong>{formatMoney(scanFooter.sfa)}</strong></td>
+                    <td className={`moduleBiTotalCol ${deltaClass(scanFooter.difference)}`.trim()}>
+                      <strong>{formatDelta(scanFooter.difference)}</strong>
+                    </td>
+                    <td><strong>{formatCount(scanFooter.gaps)}</strong></td>
+                    <td><strong>{formatMoney(scanFooter.receipts)}</strong></td>
+                    <td><strong>{formatMoney(scanFooter.cn)}</strong></td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </ExportableTable>
+          </section>
 
           <section className="moduleSection">
             <div className="moduleSectionHeader">

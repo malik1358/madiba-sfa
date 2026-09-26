@@ -69,11 +69,61 @@ export function resolveVisitReportRecipients({
   const to = [];
 
   if (user) to.push(user);
-  [...chain, ...managers].forEach((address) => {
-    if (!to.includes(address)) to.push(address);
-  });
 
   return { to, userEmail: user || "", managerEmails: managers, chainEmails: chain };
+}
+
+function extractEmailBodyHtml(value) {
+  const html = String(value || "").trim();
+  if (!html) return "";
+  const match = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  return (match?.[1] || html).trim();
+}
+
+export function buildVisitReportDigestEmail({
+  date,
+  bossName = "",
+  reports = [],
+  teamMessage = null,
+} = {}) {
+  const leaderName = String(bossName || "").trim();
+  const digestReports = (reports || []).filter((row) => row?.message);
+  const subject = leaderName
+    ? `Daily Visit Report — Team digest — ${leaderName} — ${date}`
+    : `Daily Visit Report — All teams digest — ${date}`;
+  const intro = leaderName
+    ? `Daily visit reports for your subordinates on ${date} (KSA).`
+    : `Daily visit reports for all included users on ${date} (KSA).`;
+  const teamHtml = extractEmailBodyHtml(teamMessage?.html);
+  const reportHtml = digestReports.length
+    ? digestReports.map(({ userName, message }, index) => `<section style="margin:${index ? "20px" : "0"} 0 0;border:1px solid #d5dee3;border-radius:12px;overflow:hidden;background:#ffffff;">
+      <div style="background:#0f4c5c;color:#ffffff;padding:10px 14px;font-size:14px;font-weight:700;">${escapeHtml(userName || "Salesman")}</div>
+      <div style="padding:14px 16px;">${extractEmailBodyHtml(message?.html)}</div>
+    </section>`).join("")
+    : `<p style="color:#64748b;">No subordinate reports were available.</p>`;
+  const html = `<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #12263f; line-height: 1.4; background:#f8fafc; padding:16px;">
+  <div style="max-width:1100px;margin:0 auto;">
+    <h1 style="font-size: 20px; margin-bottom: 8px;">Daily Visit Report</h1>
+    <p style="margin: 0 0 16px;">${escapeHtml(intro)}</p>
+    ${teamHtml ? `<section style="margin:0 0 20px;border:1px solid #d5dee3;border-radius:12px;overflow:hidden;background:#ffffff;padding:16px;">${teamHtml}</section>` : ""}
+    ${reportHtml}
+  </div>
+</body>
+</html>`;
+  const text = [
+    leaderName ? `Daily visit reports for ${leaderName}` : "Daily visit reports for all teams",
+    `Date: ${date} (KSA)`,
+    "",
+    teamMessage?.text ? `${teamMessage.text}\n` : "",
+    ...digestReports.flatMap(({ userName, message }) => [
+      `=== ${userName || "Salesman"} ===`,
+      String(message?.text || "").trim(),
+      "",
+    ]),
+  ].filter(Boolean).join("\n");
+  return { subject, html, text };
 }
 
 function distanceFromCustomerLabel(entry) {

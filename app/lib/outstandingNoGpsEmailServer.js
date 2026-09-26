@@ -172,6 +172,8 @@ export async function runOutstandingNoGpsEmailCycle(admin, {
   const results = [];
   let sentCount = 0;
   let failedCount = 0;
+  const usedDigestEmails = new Set();
+  const bossRowsById = new Map();
 
   if (sendToUsers) {
     for (const group of groups) {
@@ -184,16 +186,22 @@ export async function runOutstandingNoGpsEmailCycle(admin, {
         includeSalesman: false,
         reportUrl,
       });
-      const chainEmails = resolveReportingChainFromAuth({
+      const chain = resolveReportingChainFromAuth({
         actorUserId: group.profile?.id,
         profiles,
         authUsers,
-      }).map((boss) => normalizeDeliverableEmail(boss?.report_email) || normalizeDeliverableEmail(boss?.email))
-        .filter(Boolean);
+      });
+      chain.forEach((boss) => {
+        if (!boss?.id) return;
+        if (!bossRowsById.has(boss.id)) {
+          bossRowsById.set(boss.id, { boss, rows: [] });
+        }
+        bossRowsById.get(boss.id).rows.push(...group.rows);
+      });
       const recipients = salesmanOutstandingNoGpsRecipients({
         reportEmail: group.profile?.report_email,
         email: group.profile?.email,
-        chainEmails,
+        chainEmails: [],
       });
       if (!recipients.to.length) {
         results.push({ salesmanName, skipped: true, reason: "no_recipients", customerCount: rows.length });
@@ -203,7 +211,6 @@ export async function runOutstandingNoGpsEmailCycle(admin, {
         const sent = await send({
           ...message,
           to: recipients.to,
-          ...(recipients.cc.length ? { cc: recipients.cc } : {}),
         }, env);
         sentCount += 1;
         results.push({
@@ -211,7 +218,7 @@ export async function runOutstandingNoGpsEmailCycle(admin, {
           skipped: false,
           customerCount: rows.length,
           to: recipients.to,
-          cc: recipients.cc,
+          cc: [],
           provider: sent?.provider || null,
         });
       } catch (error) {
@@ -222,31 +229,79 @@ export async function runOutstandingNoGpsEmailCycle(admin, {
           failed: true,
           customerCount: rows.length,
           to: recipients.to,
-          cc: recipients.cc,
+          cc: [],
           error: error.message || "Unable to send email",
         });
       }
     }
   }
 
+  const bossDigests = [...bossRowsById.values()].sort((left, right) => (
+    String(left.boss?.salesman_name || left.boss?.salesman_code || "").localeCompare(
+      String(right.boss?.salesman_name || right.boss?.salesman_code || ""),
+    )
+  ));
+  for (const { boss, rows } of bossDigests) {
+    const inbox = normalizeDeliverableEmail(boss?.report_email) || normalizeDeliverableEmail(boss?.email);
+    const digestRows = buildRowsForCustomers(rows);
+    if (!inbox || !digestRows.length) continue;
+    const message = buildOutstandingNoGpsEmail({
+      date: reportDate,
+      salesmanName: boss?.salesman_name || boss?.salesman_code || "Team",
+      rows: digestRows,
+      includeSalesman: true,
+      reportUrl,
+      audience: "boss",
+    });
+    try {
+      const sent = await send({ ...message, to: [inbox] }, env);
+      sentCount += 1;
+      usedDigestEmails.add(inbox);
+      results.push({
+        salesmanName: boss?.salesman_name || boss?.salesman_code || "Team",
+        skipped: false,
+        customerCount: digestRows.length,
+        to: [inbox],
+        cc: [],
+        kind: "boss_digest",
+        provider: sent?.provider || null,
+      });
+    } catch (error) {
+      failedCount += 1;
+      results.push({
+        salesmanName: boss?.salesman_name || boss?.salesman_code || "Team",
+        skipped: false,
+        failed: true,
+        customerCount: digestRows.length,
+        to: [inbox],
+        cc: [],
+        kind: "boss_digest",
+        error: error.message || "Unable to send email",
+      });
+    }
+  }
+
   const digestRows = buildRowsForCustomers(customers);
-  if (digestTo.length) {
+  const filteredDigestTo = digestTo.filter((email) => !usedDigestEmails.has(email));
+  if (filteredDigestTo.length) {
     const message = buildOutstandingNoGpsEmail({
       date: reportDate,
       salesmanName: "",
       rows: digestRows,
       includeSalesman: true,
       reportUrl,
+      audience: "digest",
     });
     try {
-      const sent = await send({ ...message, to: digestTo, cc: digestCc }, env);
+      const sent = await send({ ...message, to: filteredDigestTo, cc: digestCc.filter((email) => !usedDigestEmails.has(email)) }, env);
       sentCount += 1;
       results.push({
         salesmanName: "all",
         skipped: false,
         customerCount: digestRows.length,
-        to: digestTo,
-        cc: digestCc,
+        to: filteredDigestTo,
+        cc: digestCc.filter((email) => !usedDigestEmails.has(email)),
+        kind: "company_digest",
         provider: sent?.provider || null,
       });
     } catch (error) {
@@ -256,8 +311,9 @@ export async function runOutstandingNoGpsEmailCycle(admin, {
         skipped: false,
         failed: true,
         customerCount: digestRows.length,
-        to: digestTo,
-        cc: digestCc,
+        to: filteredDigestTo,
+        cc: digestCc.filter((email) => !usedDigestEmails.has(email)),
+        kind: "company_digest",
         error: error.message || "Unable to send email",
       });
     }

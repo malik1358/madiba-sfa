@@ -220,14 +220,19 @@ test("runOutstandingNoGpsEmailCycle emails each salesman with bosses on CC", asy
   });
 
   assert.equal(result.skipped, false);
-  assert.equal(result.sentCount, 2);
+  assert.equal(result.sentCount, 3);
   assert.equal(result.customerCount, 2);
   assert.equal(sent[0].to[0], "parvez.report@madiba.com");
-  assert.deepEqual(sent[0].cc, ["boss.report@madiba.com"]);
+  assert.deepEqual(sent[0].cc, []);
   assert.match(sent[0].html, /visit these customers/i);
   assert.match(sent[0].html, /AL TAWFEER/);
   assert.equal(sent[1].to[0], "sara@madiba.com");
-  assert.deepEqual(sent[1].cc, ["boss.report@madiba.com"]);
+  assert.deepEqual(sent[1].cc, []);
+  const bossDigest = sent.find((message) => message.to[0] === "boss.report@madiba.com");
+  assert.ok(bossDigest);
+  assert.match(bossDigest.html, /across your subordinates/i);
+  assert.match(bossDigest.html, /Parvez \(S01\)/);
+  assert.match(bossDigest.html, /Sara \(S02\)/);
   assert.equal(saved.length, 1);
   assert.equal(saved[0].reportDate, "2026-09-16");
   assert.equal(saved[0].trigger, "cron");

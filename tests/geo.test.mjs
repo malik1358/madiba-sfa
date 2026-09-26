@@ -357,6 +357,47 @@ test("resolveDistanceFromPreviousVisitKm rolls idle GPS hops into the next visit
   assert.equal(resolveDistanceFromPreviousVisitKm(rows, 2), 0.04);
 });
 
+test("resolveDistanceFromPreviousVisitKm sums idle and lunch hops since last visit", () => {
+  const rows = [
+    {
+      saved_at: "2026-09-26T07:07:00.000Z",
+      transaction_type: "VISIT_REPORT",
+      distanceFromPreviousKm: 0.04,
+    },
+    {
+      saved_at: "2026-09-26T07:52:00.000Z",
+      transaction_type: "GPS_PING",
+      distanceFromPreviousKm: 3.85,
+    },
+    {
+      saved_at: "2026-09-26T08:50:00.000Z",
+      transaction_type: "GPS_PING",
+      distanceFromPreviousKm: 0.14,
+    },
+    {
+      saved_at: "2026-09-26T10:40:00.000Z",
+      transaction_type: "LUNCH_BREAK_OUT",
+      distanceFromPreviousKm: 11.45,
+    },
+    {
+      saved_at: "2026-09-26T12:52:00.000Z",
+      transaction_type: "LUNCH_BREAK_IN",
+      distanceFromPreviousKm: 7.04,
+    },
+    {
+      saved_at: "2026-09-26T13:19:00.000Z",
+      transaction_type: "VISIT_REPORT",
+      distanceFromPreviousKm: 0.32,
+    },
+  ];
+
+  assert.equal(isIdleGpsPingTimelineRow(rows[3]), true);
+  assert.equal(isIdleGpsPingTimelineRow(rows[4]), true);
+  assert.equal(resolveDistanceFromPreviousVisitKm(rows, 1), 3.85);
+  assert.equal(resolveDistanceFromPreviousVisitKm(rows, 3), 11.45);
+  assert.equal(resolveDistanceFromPreviousVisitKm(rows, 5), 22.8);
+});
+
 test("resolveDistanceFromPreviousVisitKm sums multiple idle hops without changing route total", () => {
   const hops = [
     {
@@ -398,6 +439,15 @@ test("resolveDistanceFromPreviousVisitKm sums multiple idle hops without changin
     0,
   );
   assert.equal(hopTotal, 0.45);
+});
+
+test("isIdleGpsPingTimelineRow treats lunch and login transaction_type as bridge rows", () => {
+  assert.equal(isIdleGpsPingTimelineRow({ transaction_type: "LUNCH_BREAK_OUT" }), true);
+  assert.equal(isIdleGpsPingTimelineRow({ transactionType: "LUNCH_BREAK_IN" }), true);
+  assert.equal(isIdleGpsPingTimelineRow({ transaction_type: "MORNING_ATTENDANCE" }), true);
+  assert.equal(isIdleGpsPingTimelineRow({ transaction_type: "END_OF_DAY" }), true);
+  assert.equal(isIdleGpsPingTimelineRow({ transaction_type: "VISIT_REPORT" }), false);
+  assert.equal(isIdleGpsPingTimelineRow({ transaction_type: "COLLECTION_VISIT" }), false);
 });
 
 test("parseReverseGeocodeAddress maps OpenStreetMap fields", () => {

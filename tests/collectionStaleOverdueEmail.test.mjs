@@ -15,6 +15,7 @@ import {
 import {
   attachLastVisitWithoutOrder,
   resolveCollectionStaleOverdueEmailSchedule,
+  resolveCollectionStaleOverdueRouteTrigger,
   runCollectionStaleOverdueEmailCycle,
 } from "../app/lib/collectionStaleOverdueEmailServer.js";
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
@@ -292,6 +293,31 @@ test("buildUserVisitReportEmail embeds stale overdue section for salesman and bo
   assert.match(message.text, /Stale overdue collections/);
 });
 
+test("runCollectionStaleOverdueEmailCycle honors legacy date-only sent markers for cron", async () => {
+  let sent = false;
+  const result = await runCollectionStaleOverdueEmailCycle({}, {
+    date: "2026-09-26",
+    trigger: "cron",
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_USER: "user",
+      SMTP_PASS: "pass",
+      SMTP_FROM: "noreply@madiba.com",
+    },
+    send: async () => {
+      sent = true;
+      return { provider: "smtp" };
+    },
+    loadDueCustomers: async () => ([]),
+    loadLastSentMarker: async () => ({ date: "2026-09-26", lastSentAt: "" }),
+    saveLastSentMarker: async () => {},
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "already_sent");
+  assert.equal(sent, false);
+});
+
 test("filterCollectionStaleOverdueRows keeps only matching due customers", () => {
   const rows = filterCollectionStaleOverdueRows([
     {
@@ -312,4 +338,12 @@ test("resolveCollectionStaleOverdueEmailSchedule skips Friday", () => {
   const schedule = resolveCollectionStaleOverdueEmailSchedule("", new Date("2026-09-25T12:00:00+03:00"));
   assert.equal(schedule.skipped, true);
   assert.equal(schedule.reason, "friday_holiday");
+});
+
+test("resolveCollectionStaleOverdueRouteTrigger keeps manual reruns manual", () => {
+  assert.equal(resolveCollectionStaleOverdueRouteTrigger({}), "cron");
+  assert.equal(resolveCollectionStaleOverdueRouteTrigger({ date: "2026-09-26" }), "manual");
+  assert.equal(resolveCollectionStaleOverdueRouteTrigger({ force: "true" }), "manual");
+  assert.equal(resolveCollectionStaleOverdueRouteTrigger({ to: "ops@madiba.com" }), "manual");
+  assert.equal(resolveCollectionStaleOverdueRouteTrigger({ trigger: "cron", date: "2026-09-26" }), "cron");
 });

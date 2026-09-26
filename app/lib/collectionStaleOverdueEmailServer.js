@@ -9,6 +9,8 @@ import {
   resolveCollectionStaleOverdueDigestCc,
   resolveCollectionStaleOverdueDigestRecipients,
 } from "./collectionStaleOverdueEmail.js";
+import { isFarFromCustomer } from "./customerLocation.js";
+import { extractGpsFromVisitLocation } from "./outstandingNoGps.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
 import { resolveCustomerAccountCode } from "./outstanding.js";
 import {
@@ -18,6 +20,7 @@ import {
 } from "./workdayActivity.js";
 
 const VISIT_REPORT_LATEST_PREFIX = "visit_report_latest:";
+const VISIT_REPORT_HISTORY_PREFIX = "visit_report_history:";
 
 function envFlagEnabled(value, defaultValue = true) {
   const raw = String(value ?? "").trim().toLowerCase();
@@ -60,6 +63,130 @@ function laterIso(...values) {
   return latest;
 }
 
+function emptyVisitMeta() {
+  return { visitAt: "", isFar: false, nearVisitAt: "" };
+}
+
+function parseVisitSettingPayload(row) {
+  try {
+    const parsed = JSON.parse(String(row?.setting_value || "null"));
+    if (!parsed || typeof parsed !== "object") return null;
+    const fromKey = String(row?.setting_key || "");
+    let customerCode = normalizeCustomerCode(parsed?.customer_code || "");
+    if (!customerCode && fromKey.startsWith(VISIT_REPORT_LATEST_PREFIX)) {
+      customerCode = normalizeCustomerCode(fromKey.slice(VISIT_REPORT_LATEST_PREFIX.length));
+    } else if (!customerCode && fromKey.startsWith(VISIT_REPORT_HISTORY_PREFIX)) {
+      const rest = fromKey.slice(VISIT_REPORT_HISTORY_PREFIX.length);
+      customerCode = normalizeCustomerCode(rest.split(":")[0] || "");
+    }
+    const visitAt = parsed?.captured_at || parsed?.saved_at || "";
+    if (!customerCode || !visitAt) return null;
+    return {
+      customerCode,
+      visitAt,
+      location: extractGpsFromVisitLocation(parsed?.location) || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function visitIsFar(visit, customerGps) {
+  if (!visit?.location || !customerGps) return false;
+  return isFarFromCustomer(visit.location, customerGps);
+}
+
+function preferLaterVisitMeta(current, candidate) {
+  const base = current && typeof current === "object" ? current : emptyVisitMeta();
+  const next = candidate && typeof candidate === "object" ? candidate : emptyVisitMeta();
+  const baseMs = Date.parse(base.visitAt) || Number.NEGATIVE_INFINITY;
+  const nextMs = Date.parse(next.visitAt) || Number.NEGATIVE_INFINITY;
+
+  let visitAt = base.visitAt || "";
+  let isFar = Boolean(base.isFar);
+  if (nextMs > baseMs) {
+    visitAt = next.visitAt || "";
+    isFar = Boolean(next.isFar);
+  } else if (nextMs === baseMs && next.visitAt) {
+    visitAt = next.visitAt || base.visitAt || "";
+    isFar = Boolean(base.isFar || next.isFar);
+  }
+
+  return {
+    visitAt: visitAt ? laterIso(visitAt) : "",
+    isFar: Boolean(visitAt && isFar),
+    nearVisitAt: laterIso(base.nearVisitAt, next.nearVisitAt),
+  };
+}
+
+async function loadCustomerGpsByCode(admin, codes = []) {
+  const map = new Map();
+  const list = [...new Set((codes || []).map(normalizeCustomerCode).filter(Boolean))];
+  if (!list.length || typeof admin?.from !== "function") return map;
+
+  for (const batch of chunk(list, 80)) {
+    const { data, error } = await admin
+      .from("customers")
+      .select("customer_code,latitude,longitude")
+      .in("customer_code", batch);
+    if (error) {
+      const message = String(error?.message || error?.details || "").toLowerCase();
+      if (error?.code === "42P01" || message.includes("does not exist")) break;
+      throw error;
+    }
+    (data || []).forEach((row) => {
+      const code = normalizeCustomerCode(row?.customer_code);
+      if (!code) return;
+      const gps = {
+        latitude: Number(row?.latitude),
+        longitude: Number(row?.longitude),
+      };
+      customerCodeAliases(code).forEach((alias) => {
+        map.set(alias, gps);
+      });
+    });
+  }
+  return map;
+}
+
+async function loadNearVisitFromHistory(admin, customerCodes = [], customerGpsByCode = new Map()) {
+  const nearByCode = new Map();
+  const codes = [...new Set((customerCodes || []).map(normalizeCustomerCode).filter(Boolean))];
+  if (!codes.length || typeof admin?.from !== "function") return nearByCode;
+
+  await Promise.all(codes.map(async (code) => {
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_key,setting_value")
+      .like("setting_key", `${VISIT_REPORT_HISTORY_PREFIX}${code}:%`)
+      .order("setting_key", { ascending: false })
+      .limit(40);
+    if (error) {
+      const message = String(error?.message || error?.details || "").toLowerCase();
+      if (error?.code === "42P01" || message.includes("does not exist")) return;
+      throw error;
+    }
+
+    let bestNear = "";
+    (data || []).forEach((row) => {
+      const visit = parseVisitSettingPayload(row);
+      if (!visit) return;
+      const gps = customerGpsByCode.get(visit.customerCode)
+        || customerGpsByCode.get(code)
+        || null;
+      if (visitIsFar(visit, gps)) return;
+      bestNear = laterIso(bestNear, visit.visitAt);
+    });
+    if (bestNear) {
+      customerCodeAliases(code).forEach((alias) => {
+        nearByCode.set(alias, laterIso(nearByCode.get(alias), bestNear));
+      });
+    }
+  }));
+
+  return nearByCode;
+}
+
 export async function loadLastVisitWithoutOrderByCustomer(admin, customerCodes = []) {
   const latest = new Map();
   const codes = [...new Set(
@@ -69,6 +196,7 @@ export async function loadLastVisitWithoutOrderByCustomer(admin, customerCodes =
   )];
   if (!codes.length || typeof admin?.from !== "function") return latest;
 
+  const visitPayloads = [];
   for (const batch of chunk(codes, 80)) {
     const settingKeys = batch.map((code) => `${VISIT_REPORT_LATEST_PREFIX}${code}`);
     const { data, error } = await admin
@@ -80,20 +208,38 @@ export async function loadLastVisitWithoutOrderByCustomer(admin, customerCodes =
       if (error?.code === "42P01" || message.includes("does not exist")) break;
       throw error;
     }
-
     (data || []).forEach((row) => {
-      try {
-        const parsed = JSON.parse(String(row?.setting_value || "null"));
-        const fromKey = String(row?.setting_key || "").slice(VISIT_REPORT_LATEST_PREFIX.length);
-        const customerCode = normalizeCustomerCode(parsed?.customer_code || fromKey);
-        const visitAt = parsed?.captured_at || parsed?.saved_at || "";
-        if (!customerCode || !visitAt) return;
-        customerCodeAliases(customerCode).forEach((alias) => {
-          latest.set(alias, laterIso(latest.get(alias), visitAt));
-        });
-      } catch {
-        // Ignore malformed visit-without-order settings.
-      }
+      const visit = parseVisitSettingPayload(row);
+      if (visit) visitPayloads.push(visit);
+    });
+  }
+
+  const customerGpsByCode = await loadCustomerGpsByCode(
+    admin,
+    visitPayloads.map((visit) => visit.customerCode),
+  );
+
+  const farCodes = new Set();
+  visitPayloads.forEach((visit) => {
+    const gps = customerGpsByCode.get(visit.customerCode) || null;
+    const isFar = visitIsFar(visit, gps);
+    const visitAt = laterIso("", visit.visitAt);
+    const nearVisitAt = isFar ? "" : visitAt;
+    if (isFar) farCodes.add(visit.customerCode);
+    const meta = { visitAt, isFar, nearVisitAt };
+    customerCodeAliases(visit.customerCode).forEach((alias) => {
+      latest.set(alias, preferLaterVisitMeta(latest.get(alias), meta));
+    });
+  });
+
+  if (farCodes.size) {
+    const nearFromHistory = await loadNearVisitFromHistory(admin, [...farCodes], customerGpsByCode);
+    nearFromHistory.forEach((nearVisitAt, alias) => {
+      const current = latest.get(alias) || emptyVisitMeta();
+      latest.set(alias, {
+        ...current,
+        nearVisitAt: laterIso(current.nearVisitAt, nearVisitAt),
+      });
     });
   }
 
@@ -103,13 +249,21 @@ export async function loadLastVisitWithoutOrderByCustomer(admin, customerCodes =
 export function attachLastVisitWithoutOrder(rows = [], visitByCustomer = new Map()) {
   return (rows || []).map((row) => {
     const aliases = customerCodeAliases(row?.customer_code);
-    let visitAt = "";
+    let meta = emptyVisitMeta();
     aliases.forEach((alias) => {
-      visitAt = laterIso(visitAt, visitByCustomer.get(alias));
+      const value = visitByCustomer.get(alias);
+      if (value == null) return;
+      if (typeof value === "string") {
+        meta = preferLaterVisitMeta(meta, { visitAt: value, isFar: false, nearVisitAt: value });
+        return;
+      }
+      meta = preferLaterVisitMeta(meta, value);
     });
     return {
       ...row,
-      last_visit_without_order_at: visitAt || row?.last_visit_without_order_at || "",
+      last_visit_without_order_at: meta.visitAt || row?.last_visit_without_order_at || "",
+      last_visit_without_order_is_far: Boolean(meta.visitAt && meta.isFar),
+      last_near_visit_without_order_at: meta.nearVisitAt || row?.last_near_visit_without_order_at || "",
     };
   });
 }

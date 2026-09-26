@@ -6,7 +6,8 @@ import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
-import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
+import { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
+import ExcelColumnFilter from "../../components/ExcelColumnFilter";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
@@ -22,7 +23,7 @@ const TEXT = {
   },
   back: { en: "← Management", ar: "← الإدارة" },
   settlement: { en: "Full Payment Settlement", ar: "تسوية المدفوعات كاملة" },
-  search: { en: "Search customer code or name", ar: "بحث بكود أو اسم العميل" },
+  search: { en: "Search customer, code, or salesman", ar: "بحث بالعميل أو الكود أو المندوب" },
   loading: { en: "Loading comparison...", ar: "جاري تحميل المقارنة..." },
   selectCustomer: {
     en: "Select a customer to compare Tally outstanding with computed open (cash + credit notes).",
@@ -30,6 +31,7 @@ const TEXT = {
   },
   code: { en: "Code", ar: "الكود" },
   customer: { en: "Customer", ar: "العميل" },
+  salesman: { en: "Salesman", ar: "المندوب" },
   days0To30: { en: "0–30", ar: "0–30" },
   days30To60: { en: "30–60", ar: "30–60" },
   days61To90: { en: "61–90", ar: "61–90" },
@@ -40,7 +42,18 @@ const TEXT = {
   noCustomers: { en: "No matching customers.", ar: "لا يوجد عملاء مطابقون." },
 };
 
-const CUSTOMER_FILTER_KEYS = ["code", "name", "d0", "d30", "d61", "d90", "total"];
+const CUSTOMER_FILTER_KEYS = ["code", "name", "salesman", "d0", "d30", "d61", "d90", "total"];
+
+const CUSTOMER_COLUMNS = [
+  { key: "code", labelKey: "code" },
+  { key: "name", labelKey: "customer" },
+  { key: "salesman", labelKey: "salesman" },
+  { key: "d0", labelKey: "days0To30" },
+  { key: "d30", labelKey: "days30To60" },
+  { key: "d61", labelKey: "days61To90" },
+  { key: "d90", labelKey: "daysAbove90" },
+  { key: "total", labelKey: "totalOutstanding", className: "moduleBiTotalCol" },
+];
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -116,12 +129,14 @@ export default function OutstandingComparePage() {
       .map((row) => ({
         ...row,
         outstanding_total: customerOutstandingTotal(row),
+        salesman_name: String(row.salesman_name || row.current_salesman_code || "").trim(),
       }))
       .filter((row) => {
         if (!needle) return true;
         const code = String(row.customer_code || "").toLowerCase();
         const name = String(row.customer_name || "").toLowerCase();
-        return code.includes(needle) || name.includes(needle);
+        const salesman = String(row.salesman_name || "").toLowerCase();
+        return code.includes(needle) || name.includes(needle) || salesman.includes(needle);
       })
       .sort((a, b) => {
         const byOutstanding = Number(b.outstanding_total || 0) - Number(a.outstanding_total || 0);
@@ -134,6 +149,7 @@ export default function OutstandingComparePage() {
   const customerFilterValue = useCallback((row, key) => {
     if (key === "code") return String(row.customer_code || "—");
     if (key === "name") return String(row.customer_name || "—");
+    if (key === "salesman") return String(row.salesman_name || "—");
     if (key === "d0") return formatMoney(row.outstanding_0_30);
     if (key === "d30") return formatMoney(row.outstanding_30_60);
     if (key === "d61") return formatMoney(row.outstanding_61_90);
@@ -330,60 +346,36 @@ export default function OutstandingComparePage() {
               />
             </div>
             <ExportableTable filename="outstanding-compare-customers" sheetName="Customers" className="moduleTableWrap moduleBiTableWrap">
-              <table className="moduleTable moduleBiTable">
+              <table className="moduleTable moduleBiTable moduleStackedHeaderTable">
                 <thead>
                   <tr>
-                    <BiExcelHead
-                      label={t("code")}
-                      filterKey="code"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("customer")}
-                      filterKey="name"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("days0To30")}
-                      filterKey="d0"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("days30To60")}
-                      filterKey="d30"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("days61To90")}
-                      filterKey="d61"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("daysAbove90")}
-                      filterKey="d90"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("totalOutstanding")}
-                      filterKey="total"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                      className="moduleBiTotalCol"
-                    />
-                    <th>{t("compare")}</th>
+                    {CUSTOMER_COLUMNS.map((column) => (
+                      <th
+                        key={`label-${column.key}`}
+                        className={column.className || undefined}
+                        data-column-filter-label={t(column.labelKey)}
+                      >
+                        {t(column.labelKey)}
+                      </th>
+                    ))}
+                    <th data-column-filter-label={t("compare")}>{t("compare")}</th>
+                  </tr>
+                  <tr className="moduleTableColumnFilterRow">
+                    {CUSTOMER_COLUMNS.map((column) => (
+                      <th
+                        key={`filter-${column.key}`}
+                        className={column.className || undefined}
+                        data-column-filter-label={t(column.labelKey)}
+                      >
+                        <ExcelColumnFilter
+                          label={t(column.labelKey)}
+                          options={customerFilterOptions[column.key] || []}
+                          selected={customerFilters[column.key]}
+                          onChange={(selected) => setCustomerFilter(column.key, selected)}
+                        />
+                      </th>
+                    ))}
+                    <th data-column-filter-label={t("compare")} />
                   </tr>
                 </thead>
                 <tbody>
@@ -402,6 +394,7 @@ export default function OutstandingComparePage() {
                             {customer.customer_name || "—"}
                           </Link>
                         </td>
+                        <td>{customer.salesman_name || "—"}</td>
                         <td className={outstandingCellClass(customer.outstanding_0_30)}>
                           {formatMoney(customer.outstanding_0_30)}
                         </td>
@@ -432,13 +425,13 @@ export default function OutstandingComparePage() {
                   })}
                   {!visibleCustomers.length && !loadingCustomers ? (
                     <tr>
-                      <td colSpan={8}>{t("noCustomers")}</td>
+                      <td colSpan={9}>{t("noCustomers")}</td>
                     </tr>
                   ) : null}
                 </tbody>
                 <tfoot>
                   <tr className="moduleBiTotalRow">
-                    <td colSpan={2}><strong>{t("total")}</strong></td>
+                    <td colSpan={3}><strong>{t("total")}</strong></td>
                     <td><strong>{formatMoney(customerFooter.d0)}</strong></td>
                     <td><strong>{formatMoney(customerFooter.d30)}</strong></td>
                     <td><strong>{formatMoney(customerFooter.d61)}</strong></td>

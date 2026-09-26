@@ -105,6 +105,13 @@ export function isSalesmanOrderNumberForCode(orderNumber, salesmanCode) {
 export function maxSequenceFromOrderNumbers(orderNumbers = [], salesmanCode = "", peerCodes = []) {
   const expectedPrefix = resolveSalesmanOrderPrefix(salesmanCode, peerCodes);
   if (!expectedPrefix) return 0;
+  return maxSequenceForPrefix(orderNumbers, expectedPrefix);
+}
+
+/** Max sequence among numbers that use this exact letter prefix (e.g. MOI → 417). */
+export function maxSequenceForPrefix(orderNumbers = [], prefix = "") {
+  const expectedPrefix = String(prefix || "").trim().toUpperCase();
+  if (!expectedPrefix) return 0;
   let max = 0;
   (Array.isArray(orderNumbers) ? orderNumbers : []).forEach((value) => {
     const parsed = parseSalesmanOrderNumber(value);
@@ -118,4 +125,34 @@ export function nextSalesmanOrderSequence(currentMax = 0) {
   const max = Number(currentMax);
   if (!Number.isFinite(max) || max < 0) return 1;
   return Math.floor(max) + 1;
+}
+
+/**
+ * Accept a client-preferred series number only when it is ahead of the known
+ * server max and not already used. Rejects stale low numbers like MOI01 when
+ * the series is already at MOI417.
+ */
+export function shouldAcceptPreferredSalesmanOrderNumber({
+  preferredOrderNumber = "",
+  salesmanCode = "",
+  serverMaxSequence = 0,
+  usedOrderNumbers = [],
+} = {}) {
+  const preferred = String(preferredOrderNumber || "").trim().toUpperCase();
+  if (!preferred || !isSalesmanOrderNumberForCode(preferred, salesmanCode)) {
+    return false;
+  }
+  const parsed = parseSalesmanOrderNumber(preferred);
+  if (!parsed) return false;
+
+  const used = new Set(
+    (Array.isArray(usedOrderNumbers) ? usedOrderNumbers : [])
+      .map((value) => String(value || "").trim().toUpperCase())
+      .filter(Boolean),
+  );
+  if (used.has(parsed.orderNumber) || used.has(preferred)) return false;
+
+  const serverMax = Number(serverMaxSequence);
+  const knownMax = Number.isFinite(serverMax) && serverMax > 0 ? Math.floor(serverMax) : 0;
+  return parsed.sequence > knownMax;
 }

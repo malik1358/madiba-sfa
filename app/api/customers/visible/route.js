@@ -647,6 +647,9 @@ async function attachOutstandingValues(admin, customers) {
       outstanding_30_60: summary.days30To60,
       outstanding_61_90: summary.days61To90,
       outstanding_above_90: summary.daysAbove90,
+      salesman_name: String(outstanding?.salesman || "").trim()
+        || String(customer?.current_salesman_code || "").trim()
+        || "",
     };
   });
 }
@@ -769,6 +772,7 @@ export async function buildVisibleCustomersForScope(admin, scope, options = {}) 
         outstanding_30_60: Number(customer?.outstanding_30_60 || 0),
         outstanding_61_90: Number(customer?.outstanding_61_90 || 0),
         outstanding_above_90: Number(customer?.outstanding_above_90 || 0),
+        salesman_name: String(customer?.salesman_name || customer?.current_salesman_code || "").trim(),
       }));
     }
   }

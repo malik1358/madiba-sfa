@@ -20,7 +20,7 @@ import {
 } from "../app/lib/collectionStaleOverdueEmailServer.js";
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
 
-test("isCollectionStaleOverdueRow requires overdue threshold, zero 8d receipts, and stale visit", () => {
+test("isCollectionStaleOverdueRow requires overdue, zero 8d receipts, and stale near VWO", () => {
   const todayKey = "2026-09-26";
   const match = {
     outstanding_61_90: 1000,
@@ -28,6 +28,9 @@ test("isCollectionStaleOverdueRow requires overdue threshold, zero 8d receipts, 
     outstanding_above_120: 0,
     collection_history: [],
     latest_collection: { saved_at: "2026-09-10T10:00:00Z" },
+    last_visit_without_order_at: "2026-09-10T10:00:00Z",
+    last_near_visit_without_order_at: "2026-09-10T10:00:00Z",
+    last_visit_without_order_is_far: false,
   };
   assert.equal(isCollectionStaleOverdueRow(match, { todayKey }), true);
 
@@ -41,14 +44,38 @@ test("isCollectionStaleOverdueRow requires overdue threshold, zero 8d receipts, 
     collection_history: [{ saved_at: "2026-09-22T10:00:00Z", amount_received: 50 }],
   }, { todayKey, todayIso: "2026-09-26T12:00:00+03:00" }), false);
 
+  // Recent collection alone does not exclude; near VWO age does.
   assert.equal(isCollectionStaleOverdueRow({
     ...match,
-    latest_collection: { saved_at: "2026-09-20T10:00:00Z" },
+    latest_collection: { saved_at: "2026-09-25T10:00:00Z" },
+  }, { todayKey }), true);
+
+  assert.equal(isCollectionStaleOverdueRow({
+    ...match,
+    last_visit_without_order_at: "2026-09-22T10:00:00Z",
+    last_near_visit_without_order_at: "2026-09-22T10:00:00Z",
   }, { todayKey }), false);
+
+  // FAR latest visit is ignored for the age gate.
+  assert.equal(isCollectionStaleOverdueRow({
+    ...match,
+    last_visit_without_order_at: "2026-09-25T10:00:00Z",
+    last_visit_without_order_is_far: true,
+    last_near_visit_without_order_at: "2026-09-10T10:00:00Z",
+  }, { todayKey }), true);
+
+  assert.equal(isCollectionStaleOverdueRow({
+    ...match,
+    last_visit_without_order_at: "2026-09-25T10:00:00Z",
+    last_visit_without_order_is_far: true,
+    last_near_visit_without_order_at: "",
+  }, { todayKey }), true);
 
   assert.equal(isCollectionStaleOverdueRow({
     ...match,
     latest_collection: null,
+    last_visit_without_order_at: "",
+    last_near_visit_without_order_at: "",
   }, { todayKey }), true);
 });
 
@@ -107,10 +134,46 @@ test("groupCollectionStaleOverdueBySalesman builds separate salesman buckets", (
 
 test("attachLastVisitWithoutOrder maps visit_report_latest dates onto due rows", () => {
   const visitByCustomer = new Map([
-    ["C1", "2026-09-05T09:00:00.000Z"],
+    ["C1", { visitAt: "2026-09-05T09:00:00.000Z", isFar: true, nearVisitAt: "2026-08-01T09:00:00.000Z" }],
   ]);
   const [row] = attachLastVisitWithoutOrder([{ customer_code: "C1" }], visitByCustomer);
   assert.equal(row.last_visit_without_order_at, "2026-09-05T09:00:00.000Z");
+  assert.equal(row.last_visit_without_order_is_far, true);
+  assert.equal(row.last_near_visit_without_order_at, "2026-08-01T09:00:00.000Z");
+});
+
+test("buildCollectionStaleOverdueEmail marks FAR visits in the table", () => {
+  const message = buildCollectionStaleOverdueEmail({
+    date: "2026-09-26",
+    groups: [{
+      salesmanName: "Parvez",
+      rows: [{
+        customer_code: "C1",
+        customer_name: "Shop One",
+        city: "Riyadh",
+        area: "Olaya",
+        salesman_name: "Parvez",
+        salesman_code: "PARVEZ",
+        latitude: 24.7,
+        longitude: 46.7,
+        total_due_amount: 500,
+        outstanding_30_60: 500,
+        max_overdue_days: 40,
+        collection_history: [],
+        latest_collection: {
+          saved_at: "2026-09-01T08:00:00Z",
+          latitude: 25.5,
+          longitude: 47.5,
+        },
+        last_visit_without_order_at: "2026-09-05T09:00:00+03:00",
+        last_visit_without_order_is_far: true,
+        last_near_visit_without_order_at: "2026-08-01T09:00:00+03:00",
+      }],
+    }],
+  });
+  assert.match(message.html, /FAR/);
+  assert.match(message.html, /2026-09-05/);
+  assert.match(message.text, /FAR/);
 });
 
 test("buildCollectionStaleOverdueEmail includes last visit without order column", () => {

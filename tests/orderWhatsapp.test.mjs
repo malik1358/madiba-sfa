@@ -10,6 +10,7 @@ test("buildOrderWhatsappSummary includes order totals and pdf note", () => {
     customerCode: "1542",
     customerName: "Sultan Salem Ahmed Al-Shehri Accessories Establishment",
     salesmanCode: "ABD01",
+    salesmanName: "Abdul",
     itemCount: 3,
     totalQuantity: 12,
     grandTotal: 1000,
@@ -19,6 +20,7 @@ test("buildOrderWhatsappSummary includes order totals and pdf note", () => {
 
   assert.match(summary, /Sales order/);
   assert.match(summary, /Order #: 210/);
+  assert.match(summary, /Salesman: Abdul/);
   assert.match(summary, /Amount without VAT: 1,000/);
   assert.match(summary, /VAT 15%: 150/);
   assert.match(summary, /Amount after VAT: 1,150/);

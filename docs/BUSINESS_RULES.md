@@ -48,7 +48,9 @@ Constants in `app/lib/workdayActivity.js`:
 
 - Live statuses on `sales_orders.status`: `DRAFT`, `SUBMITTED`, `CANCELLED`.
 - New Order draft/save and submit are offline-first (`queueFirst` in `useOrder.js`). Queued orders keep a local pending id until sync assigns the server row id.
+- Order `salesman_code` / `salesman_name` are the **person making the order** (logged-in profile), not the customer master `current_salesman_code`. Shared-book or manager orders therefore show the maker on PDF, WhatsApp, and Pending Orders. Order-number series follow the maker too. Customer master salesman is still used only for pricing-region fallback (`customerSalesmanCode`).
 - Order numbers are salesman-wise and allotted on the device before sync: short prefix + sequence (e.g. `P01` for Parvez). If another salesman shares the same first letter, the prefix grows to 2+ letters (`PA01` vs `PR01`). The client sends `orderNumber` on save/submit; the API stores it and must not rewrite it after sync. PDF/WhatsApp use that permanent number immediately.
+- Re-saving or re-submitting an existing order must keep its stored `order_number`, including legacy numeric values (e.g. `503`). Do not allot a new salesman series number on edit — that makes the PDF show a number the server will never adopt, so the order looks “not synced.”
 - Invoice statuses (strings, in settings JSON) are listed in `ORDER_INVOICE_STATUSES` in `app/lib/orderApproval.js`. Do not invent a new label in one screen only. Pending Orders, missing-invoice email, and time-to-make all compare these strings.
 - `Pending for credit approval` is legacy and is treated like `Pending for approval`.
 - Uploading an invoice PDF moves status to `Invoice made` when a file is stored. Setting `Invoice made` without a PDF is rejected.

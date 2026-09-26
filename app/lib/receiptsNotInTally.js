@@ -8,7 +8,7 @@ import { getKsaDateString } from "./workdayActivity.js";
 
 /** Allow small bank/cash rounding differences (e.g. 4896.00 vs 4895.90). */
 export const RECEIPT_AMOUNT_TOLERANCE = 1;
-export const DEFAULT_DATE_WINDOW_DAYS = 1;
+export const DEFAULT_DATE_WINDOW_DAYS = 5;
 /** Drop near-identical double-saves by the same collector on the same day. */
 export const DUPLICATE_VISIT_MINUTES = 5;
 const RECEIPT_MATCH_CUSTOMER_RANK_WEIGHT = 100000;

@@ -36,6 +36,7 @@ import {
   formatSalesOrderNumber,
   salesOrderNumberNeedsLiveLookup,
 } from "./salesOrderNumber.js";
+import { formatOrderSalesmanLabel } from "./orderSalesman.js";
 import { isQueuedPendingOrderId } from "./queuedSalesOrders.js";
 import {
   isPlaceholderProspectName,
@@ -244,6 +245,7 @@ export function buildOrderPdfSnapshotFromSavedOrder({
     customerCode: order?.customer_code || "",
     customerName: order?.customer_name || "",
     salesmanCode: order?.salesman_code || "",
+    salesmanName: order?.salesman_name || order?.salesman_code || "",
     paymentType: resolvedPayment,
     pricingRegion: resolvedRegion,
     itemCount: pdfLines.length,
@@ -642,7 +644,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
 
   const rightColX = marginX + contentWidth - 210;
   doc.text(`Date: ${formatKsaDateTime(snapshot.savedAtIso)}`, rightColX, marginTop + 24);
-  doc.text(`Salesman: ${snapshot.salesmanCode || "-"}`, rightColX, marginTop + 40);
+  doc.text(`Salesman: ${formatOrderSalesmanLabel(snapshot)}`, rightColX, marginTop + 40);
 
   doc.setLineWidth(0.8);
   doc.roundedRect(marginX, marginTop + 120, contentWidth, 56, 5, 5);

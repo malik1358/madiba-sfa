@@ -20,13 +20,16 @@ export function queuedSalesOrderToRow(item) {
   const createdAt = new Date(Number(item?.createdAt || Date.now())).toISOString();
   const updatedAt = new Date(Number(item?.updatedAt || item?.createdAt || Date.now())).toISOString();
   const orderNumber = String(body.orderNumber || item?.metadata?.orderNumber || "").trim();
+  const salesmanCode = String(body.salesmanCode || "").trim().toUpperCase();
+  const salesmanName = String(body.salesmanName || salesmanCode || "").trim();
 
   return {
     id: buildQueuedPendingOrderId(item?.id),
     order_number: orderNumber,
     customer_code: body.customerCode || item?.metadata?.customerCode || "",
     customer_name: body.customerName || "",
-    salesman_code: String(body.salesmanCode || "").trim().toUpperCase(),
+    salesman_code: salesmanCode,
+    salesman_name: salesmanName,
     created_by: null,
     created_at: createdAt,
     updated_at: updatedAt,

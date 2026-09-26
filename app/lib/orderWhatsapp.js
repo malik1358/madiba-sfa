@@ -2,6 +2,7 @@ import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
 import { formatSalesOrderNumberForDisplay } from "./salesOrderNumber.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 import { formatOrderVatLabel, VAT_RATE } from "./regionalPricing.js";
+import { formatOrderSalesmanLabel } from "./orderSalesman.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -61,7 +62,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
         `${labels.orderId}: ${formatSalesOrderNumberForDisplay(snapshot) || "—"}`,
     `${labels.customer}: ${snapshot.customerName || snapshot.customerCode || "-"}`,
     `${labels.code}: ${snapshot.customerCode || "-"}`,
-    `${labels.salesman}: ${snapshot.salesmanCode || "-"}`,
+    `${labels.salesman}: ${formatOrderSalesmanLabel(snapshot)}`,
     `${labels.status}: ${snapshot.statusLabel || "-"}`,
     `${labels.payment}: ${String(snapshot.paymentType || "credit").toUpperCase()}`,
     `${labels.region}: ${snapshot.pricingRegion || "riyadh"}`,

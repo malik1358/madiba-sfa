@@ -11,6 +11,7 @@ import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { fetchJsonWithTimeout, resolveAuthSession, startReportSafetyTimer } from "../../lib/authSession";
 import { excelFilterCellText } from "../../lib/biExcelFilters";
+import { DEFAULT_DATE_WINDOW_DAYS } from "../../lib/receiptsNotInTally";
 import { getKsaDateString } from "../../lib/workdayActivity";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
@@ -126,7 +127,7 @@ export default function ReceiptsNotInTallyPage() {
 
   const [fromDate, setFromDate] = useState(() => monthStart());
   const [toDate, setToDate] = useState(() => getKsaDateString());
-  const [windowDays, setWindowDays] = useState("1");
+  const [windowDays, setWindowDays] = useState(String(DEFAULT_DATE_WINDOW_DAYS));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [report, setReport] = useState(null);
@@ -188,7 +189,7 @@ export default function ReceiptsNotInTallyPage() {
         const params = new URLSearchParams({
           from: fromDate,
           to: toDate,
-          windowDays: String(windowDays || "1"),
+          windowDays: String(windowDays || DEFAULT_DATE_WINDOW_DAYS),
         });
 
         const { response, payload } = await fetchJsonWithTimeout(

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildTeamVisitReportEmail,
   buildUserVisitReportEmail,
+  buildVisitReportDigestEmail,
   resolveUserReportEmail,
   resolveVisitReportRecipients,
 } from "../app/lib/dailyVisitReportEmail.js";
@@ -36,7 +37,7 @@ test("parseEmailList splits mixed separators and ignores invalid values", () => 
   );
 });
 
-test("resolveVisitReportRecipients sends each user separately and copies managers", () => {
+test("resolveVisitReportRecipients keeps personal sends on the user inbox only", () => {
   assert.deepEqual(
     resolveVisitReportRecipients({
       userEmail: "salesman@madiba.com",
@@ -44,7 +45,7 @@ test("resolveVisitReportRecipients sends each user separately and copies manager
       sendToUser: true,
     }),
     {
-      to: ["salesman@madiba.com", "boss@madiba.com"],
+      to: ["salesman@madiba.com"],
       userEmail: "salesman@madiba.com",
       managerEmails: ["boss@madiba.com", "salesman@madiba.com"],
       chainEmails: [],
@@ -52,15 +53,20 @@ test("resolveVisitReportRecipients sends each user separately and copies manager
   );
 });
 
-test("resolveVisitReportRecipients copies every head in the reporting chain", () => {
+test("resolveVisitReportRecipients keeps boss chain separate from personal recipients", () => {
   assert.deepEqual(
     resolveVisitReportRecipients({
       reportEmail: "belal@company.com",
       managerEmails: "office@madiba.com",
       chainEmails: ["ahmed.nabil@noorshukran.com", "soyeb@company.com", "ahmed.nabil@noorshukran.com"],
       sendToUser: true,
-    }).to,
-    ["belal@company.com", "ahmed.nabil@noorshukran.com", "soyeb@company.com", "office@madiba.com"],
+    }),
+    {
+      to: ["belal@company.com"],
+      userEmail: "belal@company.com",
+      managerEmails: ["office@madiba.com"],
+      chainEmails: ["ahmed.nabil@noorshukran.com", "soyeb@company.com"],
+    },
   );
 });
 
@@ -78,19 +84,44 @@ test("login usernames at .local are not treated as report inboxes", () => {
       managerEmails: "boss@madiba.com",
       sendToUser: true,
     }).to,
-    ["ahmed@company.com", "boss@madiba.com"],
+    ["ahmed@company.com"],
   );
 });
 
-test("resolveVisitReportRecipients can send only to managers", () => {
+test("resolveVisitReportRecipients returns no personal recipients when send-to-user is disabled", () => {
   assert.deepEqual(
     resolveVisitReportRecipients({
       userEmail: "salesman@madiba.com",
       managerEmails: "boss@madiba.com",
       sendToUser: false,
     }).to,
-    ["boss@madiba.com"],
+    [],
   );
+});
+
+test("buildVisitReportDigestEmail combines multiple subordinate reports into one boss email", () => {
+  const message = buildVisitReportDigestEmail({
+    date: "2026-09-26",
+    bossName: "Boss One",
+    reports: [
+      {
+        userName: "Belal",
+        message: buildUserVisitReportEmail({ date: "2026-09-26", user: { userName: "Belal", entries: [] } }),
+      },
+      {
+        userName: "Sara",
+        message: buildUserVisitReportEmail({ date: "2026-09-26", user: { userName: "Sara", entries: [] } }),
+      },
+    ],
+    teamMessage: buildTeamVisitReportEmail({ date: "2026-09-26", bossName: "Boss One", members: [] }),
+  });
+
+  assert.match(message.subject, /Team digest/);
+  assert.match(message.html, /Daily visit reports for your subordinates/);
+  assert.match(message.html, /Belal/);
+  assert.match(message.html, /Sara/);
+  assert.match(message.text, /=== Belal ===/);
+  assert.match(message.text, /=== Sara ===/);
 });
 
 test("buildUserVisitReportEmail includes the user name and timeline", () => {
@@ -373,7 +404,7 @@ test("isEmailConfigured requires from plus SMTP or Resend", () => {
   assert.equal(isEmailConfigured(getMailerConfig({ RESEND_API_KEY: "re_test", SMTP_FROM: "sfa@madiba.com" })), true);
 });
 
-test("runDailyVisitReportEmailCycle sends one email per field user", async () => {
+test("runDailyVisitReportEmailCycle sends personal emails plus one company digest", async () => {
   const sent = [];
   const result = await runDailyVisitReportEmailCycle({}, {
     date: "2026-09-02",
@@ -410,12 +441,13 @@ test("runDailyVisitReportEmailCycle sends one email per field user", async () =>
     loadSummary: async () => ({ daySummary: { lines: ["No visits today."] } }),
   });
 
-  assert.equal(result.sentCount, 2);
-  assert.equal(sent.length, 2);
+  assert.equal(result.sentCount, 3);
+  assert.equal(sent.length, 3);
   assert.equal(sent[0].subject.includes("Sales One") || sent[1].subject.includes("Sales One"), true);
   assert.equal(sent.some((message) => message.subject.includes("Sales Two")), true);
-  assert.equal(sent.some((message) => message.subject.includes("Boss")), false);
-  assert.deepEqual(sent.find((message) => message.subject.includes("Sales One")).to, ["one@company.com", "manager@madiba.com"]);
+  assert.equal(sent.some((message) => /Team digest — All teams/.test(message.subject)), true);
+  assert.deepEqual(sent.find((message) => message.subject.includes("Sales One")).to, ["one@company.com"]);
+  assert.deepEqual(sent.find((message) => /Team digest — All teams/.test(message.subject)).to, ["manager@madiba.com"]);
 });
 
 test("resolveDailyVisitReportEmailSchedule sends Thursday at Friday midnight and Saturday on Sunday", () => {
@@ -445,7 +477,7 @@ test("resolveDailyVisitReportEmailSchedule sends Thursday at Friday midnight and
   assert.equal(manual.date, "2026-09-03");
 });
 
-test("runDailyVisitReportEmailCycle CCs every boss above the salesman", async () => {
+test("runDailyVisitReportEmailCycle sends one consolidated boss digest for the reporting chain", async () => {
   const sent = [];
   const result = await runDailyVisitReportEmailCycle({}, {
     date: "2026-09-02",
@@ -485,8 +517,13 @@ test("runDailyVisitReportEmailCycle CCs every boss above the salesman", async ()
     loadSummary: async () => ({ daySummary: { lines: ["One visit."] } }),
   });
 
-  assert.equal(result.sentCount, 1);
-  assert.deepEqual(sent[0].to, ["ahmed.nabil@noorshukran.com", "soyeb@company.com"]);
+  assert.equal(result.sentCount, 2);
+  const nabilDigest = sent.find((message) => /Team digest — Ahmed Nabil/.test(message.subject));
+  const soyebDigest = sent.find((message) => /Team digest — Soyeb/.test(message.subject));
+  assert.deepEqual(nabilDigest.to, ["ahmed.nabil@noorshukran.com"]);
+  assert.match(nabilDigest.html, /Belal/);
+  assert.deepEqual(soyebDigest.to, ["soyeb@company.com"]);
+  assert.match(soyebDigest.html, /Belal/);
 });
 
 test("resolveVisitReportChainEmails uses each head report inbox", () => {
@@ -540,11 +577,12 @@ test("runDailyVisitReportEmailCycle skips Fazlur Rahman", async () => {
     loadSummary: async () => ({ daySummary: { lines: ["No visits today."] } }),
   });
 
-  assert.equal(result.sentCount, 1);
+  assert.equal(result.sentCount, 2);
   assert.equal(result.skippedCount, 1);
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2);
   assert.match(sent[0].subject, /Belal/);
   assert.equal(sent.some((message) => /FAZLUR/i.test(message.subject)), false);
+  assert.equal(sent.some((message) => /Team digest — All teams/.test(message.subject)), true);
   assert.deepEqual(
     result.results.find((row) => row.userId === "fazlur"),
     {
@@ -657,10 +695,11 @@ test("runDailyVisitReportEmailCycle can send only selected users", async () => {
     loadSummary: async () => ({ daySummary: { lines: ["No visits today."] } }),
   });
 
-  assert.equal(result.sentCount, 1);
-  assert.equal(sent.length, 1);
+  assert.equal(result.sentCount, 2);
+  assert.equal(sent.length, 2);
   assert.match(sent[0].subject, /Sales Two/);
   assert.equal(sent.some((message) => message.subject.includes("Sales One")), false);
+  assert.equal(sent.some((message) => /Team digest — All teams/.test(message.subject)), true);
 });
 
 test("runDailyVisitReportEmailCycle sends bosses one team target vs achievement email", async () => {
@@ -717,8 +756,8 @@ test("runDailyVisitReportEmailCycle sends bosses one team target vs achievement 
     ]),
   });
 
-  const teamEmails = sent.filter((message) => /Team target vs achievement/.test(message.subject));
-  assert.equal(result.results.filter((row) => row.kind === "team_kpi" && row.status === "sent").length, teamEmails.length);
+  const teamEmails = sent.filter((message) => /Team digest/.test(message.subject));
+  assert.equal(result.results.filter((row) => /_digest$/.test(row.kind || "") && row.status === "sent").length, teamEmails.length);
   assert.ok(teamEmails.length >= 2);
   assert.equal(teamEmails.some((message) => message.to.includes("ahmed.nabil@noorshukran.com")), true);
   assert.equal(teamEmails.some((message) => message.to.includes("soyeb@company.com")), true);
@@ -837,17 +876,17 @@ test("salesman heads get team target vs achievement inside their own visit email
   assert.match(junaidEmail.text, /Team target vs achievement/);
   assert.equal(result.results.some((row) => row.userId === "junaid" && row.hasTeamKpis), true);
 
-  // Standalone team email is only for heads who did not already get team KPIs in a personal report.
   assert.equal(
     sent.some((message) => (
-      /Team target vs achievement/.test(message.subject)
+      /Team digest/.test(message.subject)
       && message.to.includes("junaid.thonse@noorshukran.com")
+      && message.html.includes("PARVEZ")
     )),
-    false,
+    true,
   );
   assert.equal(
     sent.some((message) => (
-      /Team target vs achievement/.test(message.subject)
+      /Team digest/.test(message.subject)
       && message.to.includes("soyeb@company.com")
     )),
     true,

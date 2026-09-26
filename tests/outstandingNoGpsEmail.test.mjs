@@ -125,7 +125,7 @@ test("resolveOutstandingNoGpsEmailSchedule skips Friday holiday", () => {
   assert.equal(saturday.date, "2026-09-19");
 });
 
-test("runOutstandingNoGpsEmailCycle emails each salesman with bosses on CC", async () => {
+test("runOutstandingNoGpsEmailCycle sends user emails plus one boss digest", async () => {
   const sent = [];
   const saved = [];
   const result = await runOutstandingNoGpsEmailCycle({}, {
@@ -220,17 +220,98 @@ test("runOutstandingNoGpsEmailCycle emails each salesman with bosses on CC", asy
   });
 
   assert.equal(result.skipped, false);
-  assert.equal(result.sentCount, 2);
+  assert.equal(result.sentCount, 3);
   assert.equal(result.customerCount, 2);
   assert.equal(sent[0].to[0], "parvez.report@madiba.com");
-  assert.deepEqual(sent[0].cc, ["boss.report@madiba.com"]);
+  assert.equal(sent[0].cc, undefined);
   assert.match(sent[0].html, /visit these customers/i);
   assert.match(sent[0].html, /AL TAWFEER/);
   assert.equal(sent[1].to[0], "sara@madiba.com");
-  assert.deepEqual(sent[1].cc, ["boss.report@madiba.com"]);
+  assert.equal(sent[1].cc, undefined);
+  const bossDigest = sent.find((message) => message.to[0] === "boss.report@madiba.com");
+  assert.ok(bossDigest);
+  assert.match(bossDigest.html, /across your subordinates/i);
+  assert.match(bossDigest.html, /Parvez \(S01\)/);
+  assert.match(bossDigest.html, /Sara \(S02\)/);
   assert.equal(saved.length, 1);
   assert.equal(saved[0].reportDate, "2026-09-16");
   assert.equal(saved[0].trigger, "cron");
+});
+
+test("runOutstandingNoGpsEmailCycle de-duplicates boss digest customers", async () => {
+  const sent = [];
+  await runOutstandingNoGpsEmailCycle({}, {
+    trigger: "cron",
+    now: new Date("2026-09-16T00:25:00+03:00"),
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadCustomers: async () => ([
+      {
+        customer_code: "1062C",
+        customer_name: "AL TAWFEER",
+        current_salesman_code: "S01",
+        salesman_name: "Parvez",
+        city: "Riyadh",
+        area: "Olaya",
+        total_outstanding: 12500,
+      },
+      {
+        customer_code: "1062C",
+        customer_name: "AL TAWFEER",
+        current_salesman_code: "S01",
+        salesman_name: "Parvez",
+        city: "Riyadh",
+        area: "Olaya",
+        total_outstanding: 12500,
+      },
+    ]),
+    loadProfiles: async () => ([
+      {
+        id: "u1",
+        salesman_code: "S01",
+        salesman_name: "Parvez",
+        email: "parvez@madiba.com",
+        report_email: "parvez.report@madiba.com",
+        role: "salesman",
+        is_active: true,
+      },
+      {
+        id: "boss1",
+        salesman_code: "MGR",
+        salesman_name: "Boss One",
+        email: "boss@madiba.com",
+        report_email: "boss.report@madiba.com",
+        role: "manager",
+        is_active: true,
+      },
+    ]),
+    loadLastSentMarker: async () => ({ date: "", lastSentAt: "" }),
+    saveLastSentMarker: async () => {},
+    listAuthUsers: async () => ([
+      {
+        id: "u1",
+        user_metadata: {
+          salesman_code: "S01",
+          head_salesman_code: "MGR",
+          head_salesman_name: "Boss One",
+        },
+      },
+      {
+        id: "boss1",
+        user_metadata: {
+          salesman_code: "MGR",
+          salesman_name: "Boss One",
+        },
+      },
+    ]),
+  });
+
+  const bossDigest = sent.find((message) => message.to[0] === "boss.report@madiba.com");
+  assert.ok(bossDigest);
+  assert.match(bossDigest.html, /Total \(1 customer\)/);
 });
 
 test("runOutstandingNoGpsEmailCycle skips cron when already sent for the report date", async () => {

@@ -26,10 +26,11 @@ import { resolveTrustedAvgDaysToPayForCustomer } from "../../lib/customerOrderBl
 import {
   formatSalesmanOrderNumber,
   isSalesmanOrderNumberForCode,
-  maxSequenceFromOrderNumbers,
+  maxSequenceForPrefix,
   nextSalesmanOrderSequence,
   parseSalesmanOrderNumber,
   resolveSalesmanOrderPrefix,
+  shouldAcceptPreferredSalesmanOrderNumber,
 } from "../../lib/salesmanOrderNumber.js";
 import {
   isBareNumericOrderIdFallback,
@@ -327,17 +328,25 @@ async function readMaxSalesmanOrderSequence(admin, salesmanCode, peerCodes = [])
   const prefix = resolveSalesmanOrderPrefix(salesmanCode, peerCodes);
   if (!prefix || !admin) return 0;
 
-  const { data, error } = await admin
-    .from("sales_orders")
-    .select("order_number")
-    .ilike("order_number", `${prefix}%`)
-    .limit(5000);
-  if (error) throw error;
-  return maxSequenceFromOrderNumbers(
-    (data || []).map((row) => row.order_number),
-    salesmanCode,
-    peerCodes,
-  );
+  // Page through every matching row — an unordered limit(5000) can miss MOI417
+  // and then allot MOI01 again.
+  const pageSize = 1000;
+  let offset = 0;
+  let max = 0;
+  for (;;) {
+    const { data, error } = await admin
+      .from("sales_orders")
+      .select("order_number")
+      .ilike("order_number", `${prefix}%`)
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    const rows = data || [];
+    max = Math.max(max, maxSequenceForPrefix(rows.map((row) => row.order_number), prefix));
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+    if (offset > 50000) break;
+  }
+  return max;
 }
 
 async function allocateServerSalesmanOrderNumber(admin, salesmanCode, peerCodes = []) {
@@ -362,6 +371,38 @@ function normalizeClientOrderNumber(rawOrderNumber, salesmanCode) {
   return parsed.orderNumber;
 }
 
+async function resolvePreferredOrderNumber(admin, preferredOrderNumber, salesmanCode) {
+  const preferred = normalizeClientOrderNumber(preferredOrderNumber, salesmanCode);
+  if (!preferred || !salesmanCode) return "";
+
+  const peers = await loadSalesmanPeerCodes(admin);
+  const prefix = resolveSalesmanOrderPrefix(salesmanCode, peers);
+  const serverMax = await readMaxSalesmanOrderSequence(admin, salesmanCode, peers);
+
+  const { data: existingRows, error } = await admin
+    .from("sales_orders")
+    .select("order_number")
+    .eq("order_number", preferred)
+    .limit(1);
+  if (error) throw error;
+  const used = (existingRows || []).map((row) => row.order_number);
+
+  if (shouldAcceptPreferredSalesmanOrderNumber({
+    preferredOrderNumber: preferred,
+    salesmanCode,
+    serverMaxSequence: serverMax,
+    usedOrderNumbers: used,
+  })) {
+    return preferred;
+  }
+
+  // Stale offline number (MOI01 while server is at MOI417) or duplicate — allot next.
+  return formatSalesmanOrderNumber(salesmanCode, nextSalesmanOrderSequence(serverMax), {
+    prefix,
+    peerCodes: peers,
+  });
+}
+
 async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "", {
   salesmanCode = "",
   preferredOrderNumber = "",
@@ -375,7 +416,9 @@ async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "",
     return currentRaw;
   }
 
-  const preferred = normalizeClientOrderNumber(preferredOrderNumber, salesmanCode);
+  const preferred = salesmanCode
+    ? await resolvePreferredOrderNumber(admin, preferredOrderNumber, salesmanCode)
+    : normalizeClientOrderNumber(preferredOrderNumber, salesmanCode);
   if (preferred) {
     const { error } = await admin
       .from("sales_orders")
@@ -423,8 +466,11 @@ async function persistDraftOrder(admin, {
   let existingLines = [];
   let resolvedOrderId = orderId ? Number(orderId) : null;
   let resolvedOrderNumber = "";
-  const preferredOrderNumber = normalizeClientOrderNumber(clientOrderNumber, salesmanCode);
   const resolvedSalesmanName = String(salesmanName || salesmanCode || "").trim();
+  // For brand-new rows, reject stale low client numbers (MOI01 while series is at MOI417).
+  const preferredOrderNumber = resolvedOrderId
+    ? normalizeClientOrderNumber(clientOrderNumber, salesmanCode)
+    : await resolvePreferredOrderNumber(admin, clientOrderNumber, salesmanCode);
 
   if (resolvedOrderId) {
     await ensureOrderAccess(admin, resolvedOrderId, userId);

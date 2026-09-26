@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-26** — Outstanding Without GPS still listed customers with a last visit because pre-promote visits stored GPS only on `visit_report_latest` / activity logs. Report load and the email job now backfill customer master from that last-visit GPS (`backfillCustomerGpsFromLastVisits`) when the master pin is missing.
 - **2026-09-26** — Daily **Stale overdue collections** email: `/api/cron/collection-stale-overdue-email` + workflow `collection-stale-overdue-email.yml` (00:35 KSA, skip Friday). Filters due queue where over-60 outstanding > 0, received last 10 days = 0, last collection visit older than 7 days (or never). One HTML table per salesman. Default To: `malik@pinasz.com` (`COLLECTION_STALE_OVERDUE_EMAIL_TO` override).
 - **2026-09-26** — Cash and value discount percentages on the same order line now each compute from the wholesale base rate (non-compounded), so equal rates (for example 2% + 2%) produce equal discount amounts per line.
 - **2026-09-26** — Added **Working Hours** attendance report (`/management/working-hours`, `/api/working-hours`) for admin/manager/collector: daily salesman login/lunch/logout plus hours from the day-route near-visit lunch-segment formula.

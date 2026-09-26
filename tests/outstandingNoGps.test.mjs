@@ -1,14 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  backfillCustomerGpsFromLastVisits,
   customerHasExcludedOutstandingNoGpsSalesman,
   customerIsTransferredToLegal,
   customerMatchesSalesmanFilter,
   dateOnly,
   enrichOutstandingNoGpsRow,
+  extractGpsFromVisitLocation,
   formatSalesmanDisplay,
   laterVisitAt,
   outstandingNoGpsExportRows,
+  preferLaterVisitGps,
   shouldIncludeOutstandingNoGpsCustomer,
   sortOutstandingNoGpsRows,
 } from "../app/lib/outstandingNoGps.js";
@@ -130,4 +133,75 @@ test("outstandingNoGpsExportRows writes report columns", () => {
   assert.equal(exported["Last Invoice Date"], "2026-07-15");
   assert.equal(exported["Last Visit Date"], "2026-08-20");
   assert.equal(exported["Outstanding Amount"], 12500);
+});
+
+test("extractGpsFromVisitLocation requires finite non-zero coordinates", () => {
+  assert.deepEqual(extractGpsFromVisitLocation({ latitude: 24.58, longitude: 46.57 }), {
+    latitude: 24.58,
+    longitude: 46.57,
+  });
+  assert.equal(extractGpsFromVisitLocation({ latitude: 0, longitude: 46.57 }), null);
+  assert.equal(extractGpsFromVisitLocation(null), null);
+});
+
+test("preferLaterVisitGps keeps the newest visit pin", () => {
+  const older = { latitude: 1, longitude: 2, visitAt: "2026-09-01T00:00:00Z" };
+  const newer = { latitude: 3, longitude: 4, visitAt: "2026-09-24T00:00:00Z" };
+  assert.equal(preferLaterVisitGps(older, newer), newer);
+  assert.equal(preferLaterVisitGps(newer, older), newer);
+});
+
+test("backfillCustomerGpsFromLastVisits promotes missing master GPS from visit map", async () => {
+  const updates = [];
+  const admin = {
+    from(table) {
+      if (table === "customers") {
+        return {
+          update(payload) {
+            updates.push(payload);
+            return {
+              eq() {
+                return {
+                  select() {
+                    return {
+                      async maybeSingle() {
+                        return {
+                          data: {
+                            customer_code: "1573",
+                            latitude: payload.latitude,
+                            longitude: payload.longitude,
+                          },
+                          error: null,
+                        };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+      if (table === "customer_gps_history") {
+        return {
+          async insert() {
+            return { error: null };
+          },
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    },
+  };
+
+  const customer = { customer_code: "1573", latitude: null, longitude: null };
+  const result = await backfillCustomerGpsFromLastVisits(admin, [customer], {
+    visitGpsByCustomer: new Map([
+      ["1573", { latitude: 24.581979, longitude: 46.576307, visitAt: "2026-09-24T06:26:26Z" }],
+    ]),
+  });
+
+  assert.equal(result.promoted, 1);
+  assert.deepEqual(result.codes, ["1573"]);
+  assert.equal(customer.latitude, 24.581979);
+  assert.equal(updates.length, 1);
 });

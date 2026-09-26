@@ -85,6 +85,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `daily-salesman-resume-email.yml` | `15 21 * * *` | 00:15 KSA previous day | `/api/cron/daily-salesman-resume-email` |
 | `daily-supplier-order-email.yml` | `20 21 * * 0-3,5,6` | 00:20 KSA, skip Friday | `/api/cron/daily-supplier-order-email` |
 | `outstanding-no-gps-email.yml` | `25 21 * * 0-3,5,6` | 00:25 KSA, skip Friday | `/api/cron/outstanding-no-gps-email` |
+| `collection-stale-overdue-email.yml` | `35 21 * * 0-3,5,6` | 00:35 KSA, skip Friday | `/api/cron/collection-stale-overdue-email` |
 | `price-sync.yml` | `0 */8 * * *` | Every 8 hours | `/api/admin/price-sync` |
 | `mobile-snapshot.yml` | `0 */4 * * *` | Every 4 hours, batched | `/api/cron/mobile-snapshot` |
 | `missing-invoice-email.yml` | Every 15 min, 03:30–14:30 UTC, days `0-4,6` | 09:00–20:00 IST, Saturday–Thursday. Backup for pg_cron | `/api/cron/missing-invoice-email` |

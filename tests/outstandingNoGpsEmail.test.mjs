@@ -238,6 +238,82 @@ test("runOutstandingNoGpsEmailCycle sends user emails plus one boss digest", asy
   assert.equal(saved[0].trigger, "cron");
 });
 
+test("runOutstandingNoGpsEmailCycle de-duplicates boss digest customers", async () => {
+  const sent = [];
+  await runOutstandingNoGpsEmailCycle({}, {
+    trigger: "cron",
+    now: new Date("2026-09-16T00:25:00+03:00"),
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadCustomers: async () => ([
+      {
+        customer_code: "1062C",
+        customer_name: "AL TAWFEER",
+        current_salesman_code: "S01",
+        salesman_name: "Parvez",
+        city: "Riyadh",
+        area: "Olaya",
+        total_outstanding: 12500,
+      },
+      {
+        customer_code: "1062C",
+        customer_name: "AL TAWFEER",
+        current_salesman_code: "S01",
+        salesman_name: "Parvez",
+        city: "Riyadh",
+        area: "Olaya",
+        total_outstanding: 12500,
+      },
+    ]),
+    loadProfiles: async () => ([
+      {
+        id: "u1",
+        salesman_code: "S01",
+        salesman_name: "Parvez",
+        email: "parvez@madiba.com",
+        report_email: "parvez.report@madiba.com",
+        role: "salesman",
+        is_active: true,
+      },
+      {
+        id: "boss1",
+        salesman_code: "MGR",
+        salesman_name: "Boss One",
+        email: "boss@madiba.com",
+        report_email: "boss.report@madiba.com",
+        role: "manager",
+        is_active: true,
+      },
+    ]),
+    loadLastSentMarker: async () => ({ date: "", lastSentAt: "" }),
+    saveLastSentMarker: async () => {},
+    listAuthUsers: async () => ([
+      {
+        id: "u1",
+        user_metadata: {
+          salesman_code: "S01",
+          head_salesman_code: "MGR",
+          head_salesman_name: "Boss One",
+        },
+      },
+      {
+        id: "boss1",
+        user_metadata: {
+          salesman_code: "MGR",
+          salesman_name: "Boss One",
+        },
+      },
+    ]),
+  });
+
+  const bossDigest = sent.find((message) => message.to[0] === "boss.report@madiba.com");
+  assert.ok(bossDigest);
+  assert.match(bossDigest.html, /Total \(1 customer\)/);
+});
+
 test("runOutstandingNoGpsEmailCycle skips cron when already sent for the report date", async () => {
   const result = await runOutstandingNoGpsEmailCycle({}, {
     trigger: "cron",

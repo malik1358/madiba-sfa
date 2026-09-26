@@ -98,6 +98,22 @@ function buildRowsForCustomers(customers, { profile = null } = {}) {
   return (customers || []).map((row) => buildOutstandingNoGpsEmailRow(row, { profile }));
 }
 
+function dedupeOutstandingNoGpsCustomers(customers = []) {
+  const seen = new Set();
+  const rows = [];
+  (customers || []).forEach((row) => {
+    const key = [
+      String(row?.customer_code || "").trim().toUpperCase(),
+      String(row?.current_salesman_code || row?.salesman_code || "").trim().toUpperCase(),
+      String(row?.customer_name || "").trim().toUpperCase(),
+    ].join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(row);
+  });
+  return rows;
+}
+
 export async function runOutstandingNoGpsEmailCycle(admin, {
   date,
   trigger = "manual",
@@ -243,7 +259,7 @@ export async function runOutstandingNoGpsEmailCycle(admin, {
   ));
   for (const { boss, rows } of bossDigests) {
     const inbox = normalizeDeliverableEmail(boss?.report_email) || normalizeDeliverableEmail(boss?.email);
-    const digestRows = buildRowsForCustomers(rows);
+    const digestRows = buildRowsForCustomers(dedupeOutstandingNoGpsCustomers(rows));
     if (!inbox || !digestRows.length) continue;
     const message = buildOutstandingNoGpsEmail({
       date: reportDate,

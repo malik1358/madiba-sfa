@@ -353,8 +353,10 @@ const TEXT = {
   filterProbability: { en: "Filter probability", ar: "تصفية الاحتمالية" },
   filterOutcome: { en: "Filter outcome", ar: "تصفية النتيجة" },
   filterLastVisitRemark: { en: "Filter remark", ar: "تصفية الملاحظة" },
-  filterLastUpdate: { en: "Filter last update", ar: "تصفية آخر تحديث" },
+  filterLastUpdateFrom: { en: "From", ar: "من" },
+  filterLastUpdateTo: { en: "To", ar: "إلى" },
   filterLastReceiptDate: { en: "Filter receipt date", ar: "تصفية تاريخ الإيصال" },
+  sortByColumn: { en: "Sort by this column", ar: "ترتيب حسب هذا العمود" },
   invDate: { en: "Date", ar: "التاريخ" },
   invRef: { en: "Ref", ar: "المرجع" },
   invPending: { en: "Pending", ar: "المعلق" },
@@ -410,7 +412,31 @@ const EMPTY_CREDIT_COLUMN_FILTERS = {
   probability: [],
   lastOutcome: [],
   lastVisitRemark: "",
-  lastUpdate: "",
+  lastUpdateFrom: "",
+  lastUpdateTo: "",
+};
+
+const CREDIT_SORT_NUMERIC_KEYS = new Set([
+  "dueAmount",
+  "cash",
+  "receivedLast10Days",
+  "avgPayingDays",
+  "bucket30",
+  "bucket31to60",
+  "bucket61to90",
+  "bucket91to120",
+  "bucket120plus",
+  "maxOverdue",
+  "dueInvoices",
+  "probability",
+  "lastUpdate",
+]);
+
+const PROBABILITY_SORT_RANK = {
+  high: 3,
+  medium: 2,
+  low: 1,
+  na: 0,
 };
 
 const RECEIPT_MODE_KEYS = {
@@ -732,6 +758,111 @@ function matchesMultiSelectFilter(selectedValues, actualValue) {
   return selectedValues.includes(String(actualValue || "").trim());
 }
 
+function resolveLastVisitDateKey(row) {
+  const savedAt = row?.latest_collection?.saved_at;
+  if (!savedAt) return "";
+  const parsed = new Date(savedAt);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return getKsaDateString(parsed);
+}
+
+function matchesDateRangeFilter(dateKey, from, to) {
+  const fromKey = String(from || "").trim();
+  const toKey = String(to || "").trim();
+  if (!fromKey && !toKey) return true;
+  if (!dateKey) return false;
+  if (fromKey && dateKey < fromKey) return false;
+  if (toKey && dateKey > toKey) return false;
+  return true;
+}
+
+function isEmptySortValue(value) {
+  return value == null || value === "";
+}
+
+function compareCreditSortValues(left, right, sortKey) {
+  const leftEmpty = isEmptySortValue(left);
+  const rightEmpty = isEmptySortValue(right);
+  if (leftEmpty && rightEmpty) return 0;
+  if (leftEmpty) return 1;
+  if (rightEmpty) return -1;
+
+  if (CREDIT_SORT_NUMERIC_KEYS.has(sortKey)) {
+    return Number(left) - Number(right);
+  }
+
+  return String(left).localeCompare(String(right), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function resolveCreditSortValue(row, sortKey, t) {
+  switch (sortKey) {
+    case "code":
+      return String(row?.customer_code || "");
+    case "customer":
+      return String(row?.customer_name || row?.customer_code || "");
+    case "salesman":
+      return getSalesmanLabel(row) || "";
+    case "cityArea":
+      return `${row?.city || "-"} / ${row?.area || "-"}`;
+    case "dueAmount":
+      return resolveRowDueAmount(row);
+    case "cash":
+      return Number(row?.outstanding_cash || 0);
+    case "receivedLast10Days":
+      return Number(row?.received_last_10_days || 0);
+    case "avgPayingDays":
+      return row?.avg_days_to_pay == null || row?.avg_days_to_pay === ""
+        ? null
+        : Number(row.avg_days_to_pay);
+    case "lastReceiptDate":
+      return String(row?.last_receipt_date || "").trim();
+    case "bucket30":
+      return Number(row?.outstanding_0_30 || 0);
+    case "bucket31to60":
+      return Number(row?.outstanding_30_60 || 0);
+    case "bucket61to90":
+      return Number(row?.outstanding_61_90 || 0);
+    case "bucket91to120":
+      return Number(row?.outstanding_91_120 || 0);
+    case "bucket120plus":
+      return Number(row?.outstanding_above_120 || 0);
+    case "maxOverdue":
+      return Number(row?.max_overdue_days || 0);
+    case "dueInvoices":
+      return resolveRowDueInvoiceCount(row);
+    case "probability":
+      return PROBABILITY_SORT_RANK[resolveRowProbabilityKey(row)] ?? 0;
+    case "lastOutcome":
+      return formatOutcomeLabel(row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status, t);
+    case "lastVisitRemark":
+      return formatLatestCollectionVisitRemark(row?.latest_collection) || "";
+    case "lastUpdate": {
+      const savedAt = row?.latest_collection?.saved_at;
+      if (!savedAt) return null;
+      const ts = Date.parse(savedAt);
+      return Number.isNaN(ts) ? null : ts;
+    }
+    default:
+      return "";
+  }
+}
+
+function sortCreditRows(rows, creditSort, t) {
+  const sortKey = String(creditSort?.key || "").trim();
+  if (!sortKey) return rows;
+  const direction = creditSort?.dir === "desc" ? -1 : 1;
+  return [...rows].sort((left, right) => (
+    compareCreditSortValues(
+      resolveCreditSortValue(left, sortKey, t),
+      resolveCreditSortValue(right, sortKey, t),
+      sortKey,
+    ) * direction
+  ));
+}
+
 function resolveRowDueAmount(row) {
   const isNotDue = row?.queue_kind === "not_due";
   return Number(isNotDue ? row?.total_not_due_amount : row?.total_due_amount) || 0;
@@ -753,7 +884,7 @@ function resolveRowOutcomeKey(row) {
   return String(row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status || "").trim().toUpperCase();
 }
 
-function rowMatchesCreditColumnFilters(row, filters, t) {
+function rowMatchesCreditColumnFilters(row, filters) {
   if (!includesTextFilter(row?.customer_code, filters.code)) return false;
   if (!includesTextFilter(row?.customer_name || row?.customer_code, filters.customer)) return false;
   if (!matchesMultiSelectFilter(filters.salesman, normalizeSalesmanKey(getSalesmanLabel(row)))) return false;
@@ -773,7 +904,7 @@ function rowMatchesCreditColumnFilters(row, filters, t) {
   if (!matchesMultiSelectFilter(filters.probability, resolveRowProbabilityKey(row))) return false;
   if (!matchesMultiSelectFilter(filters.lastOutcome, resolveRowOutcomeKey(row))) return false;
   if (!includesTextFilter(formatLatestCollectionVisitRemark(row?.latest_collection), filters.lastVisitRemark)) return false;
-  if (!includesTextFilter(formatLastUpdateText(row, t), filters.lastUpdate)) return false;
+  if (!matchesDateRangeFilter(resolveLastVisitDateKey(row), filters.lastUpdateFrom, filters.lastUpdateTo)) return false;
   return true;
 }
 
@@ -980,6 +1111,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [todayVisitCount, setTodayVisitCount] = useState(0);
   const [expandedRevisitDates, setExpandedRevisitDates] = useState(() => new Set());
   const [creditColumnFilters, setCreditColumnFilters] = useState(EMPTY_CREDIT_COLUMN_FILTERS);
+  const [creditSort, setCreditSort] = useState({ key: "", dir: "asc" });
   const [exportingDueQueue, setExportingDueQueue] = useState(false);
   const isMobileLayout = useMobileLayout();
   const locationPromptResolverRef = useRef(null);
@@ -1457,22 +1589,50 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   const tableRows = useMemo(() => {
     const applyColumnFilters = (rows) => (
-      rows.filter((row) => rowMatchesCreditColumnFilters(row, creditColumnFilters, t))
+      rows.filter((row) => rowMatchesCreditColumnFilters(row, creditColumnFilters))
     );
+    const applySort = (rows) => sortCreditRows(rows, creditSort, t);
 
     if (view !== "due") {
-      return applyColumnFilters(visibleRows).map((row) => ({ type: "customer", row }));
+      return applySort(applyColumnFilters(visibleRows)).map((row) => ({ type: "customer", row }));
     }
 
-    const filteredDue = applyColumnFilters(visibleRows);
-    const filteredNotDue = applyColumnFilters(visibleNotDueRows);
+    const filteredDue = applySort(applyColumnFilters(visibleRows));
+    const filteredNotDue = applySort(applyColumnFilters(visibleNotDueRows));
     const items = filteredDue.map((row) => ({ type: "customer", row }));
     if (filteredNotDue.length > 0) {
       items.push({ type: "separator" });
       filteredNotDue.forEach((row) => items.push({ type: "customer", row }));
     }
     return items;
-  }, [creditColumnFilters, t, visibleNotDueRows, visibleRows, view]);
+  }, [creditColumnFilters, creditSort, t, visibleNotDueRows, visibleRows, view]);
+
+  function toggleCreditSort(sortKey) {
+    setCreditSort((current) => {
+      if (current.key !== sortKey) return { key: sortKey, dir: "asc" };
+      if (current.dir === "asc") return { key: sortKey, dir: "desc" };
+      return { key: "", dir: "asc" };
+    });
+  }
+
+  function renderCreditSortHeader(sortKey, label) {
+    const active = creditSort.key === sortKey;
+    const indicator = active ? (creditSort.dir === "asc" ? " ▲" : " ▼") : "";
+    return (
+      <th aria-sort={active ? (creditSort.dir === "asc" ? "ascending" : "descending") : "none"}>
+        <button
+          type="button"
+          className="moduleCollectorSortButton"
+          title={t("sortByColumn")}
+          aria-label={`${label}. ${t("sortByColumn")}`}
+          onClick={() => toggleCreditSort(sortKey)}
+        >
+          <span>{label}</span>
+          {indicator ? <span aria-hidden="true">{indicator}</span> : null}
+        </button>
+      </th>
+    );
+  }
 
   const creditQueueCount = useMemo(
     () => tableRows.filter((item) => item.type === "customer").length,
@@ -2603,26 +2763,26 @@ export default function PaymentCollectionsView({ view = "due" }) {
               <table className="moduleTable moduleCollectorTable">
                 <thead>
                   <tr>
-                    <th>{t("customerCode")}</th>
-                    <th>{t("customer")}</th>
-                    <th>{t("salesman")}</th>
-                    <th>{t("cityArea")}</th>
-                    <th>{t("amount")}</th>
-                    <th>{t("cashBucket")}</th>
-                    <th>{t("receivedLast10Days")}</th>
-                    <th>{t("avgPayingDays")}</th>
-                    <th>{t("lastReceiptDate")}</th>
-                    <th>{t("bucket30")}</th>
-                    <th>{t("bucket31to60")}</th>
-                    <th>{t("bucket61to90")}</th>
-                    <th>{t("bucket91to120")}</th>
-                    <th>{t("bucket120plus")}</th>
-                    <th>{t("overdue")}</th>
-                    <th>{t("invoices")}</th>
-                    <th>{t("probability")}</th>
-                    <th>{t("lastOutcome")}</th>
-                    <th>{t("lastVisitRemark")}</th>
-                    <th>{t("lastUpdate")}</th>
+                    {renderCreditSortHeader("code", t("customerCode"))}
+                    {renderCreditSortHeader("customer", t("customer"))}
+                    {renderCreditSortHeader("salesman", t("salesman"))}
+                    {renderCreditSortHeader("cityArea", t("cityArea"))}
+                    {renderCreditSortHeader("dueAmount", t("amount"))}
+                    {renderCreditSortHeader("cash", t("cashBucket"))}
+                    {renderCreditSortHeader("receivedLast10Days", t("receivedLast10Days"))}
+                    {renderCreditSortHeader("avgPayingDays", t("avgPayingDays"))}
+                    {renderCreditSortHeader("lastReceiptDate", t("lastReceiptDate"))}
+                    {renderCreditSortHeader("bucket30", t("bucket30"))}
+                    {renderCreditSortHeader("bucket31to60", t("bucket31to60"))}
+                    {renderCreditSortHeader("bucket61to90", t("bucket61to90"))}
+                    {renderCreditSortHeader("bucket91to120", t("bucket91to120"))}
+                    {renderCreditSortHeader("bucket120plus", t("bucket120plus"))}
+                    {renderCreditSortHeader("maxOverdue", t("overdue"))}
+                    {renderCreditSortHeader("dueInvoices", t("invoices"))}
+                    {renderCreditSortHeader("probability", t("probability"))}
+                    {renderCreditSortHeader("lastOutcome", t("lastOutcome"))}
+                    {renderCreditSortHeader("lastVisitRemark", t("lastVisitRemark"))}
+                    {renderCreditSortHeader("lastUpdate", t("lastUpdate"))}
                     <th>{t("actions")}</th>
                   </tr>
                   <tr className="moduleCollectorFilterRow">
@@ -2834,16 +2994,30 @@ export default function PaymentCollectionsView({ view = "due" }) {
                       />
                     </th>
                     <th>
-                      <input
-                        className="moduleInput moduleCollectorColumnFilter"
-                        type="text"
-                        value={creditColumnFilters.lastUpdate}
-                        placeholder={t("filterLastUpdate")}
-                        onChange={(event) => setCreditColumnFilters((current) => ({
-                          ...current,
-                          lastUpdate: event.target.value,
-                        }))}
-                      />
+                      <div className="moduleCollectorDateRangeFilter">
+                        <input
+                          className="moduleInput moduleCollectorColumnFilter"
+                          type="date"
+                          value={creditColumnFilters.lastUpdateFrom}
+                          title={t("filterLastUpdateFrom")}
+                          aria-label={t("filterLastUpdateFrom")}
+                          onChange={(event) => setCreditColumnFilters((current) => ({
+                            ...current,
+                            lastUpdateFrom: event.target.value,
+                          }))}
+                        />
+                        <input
+                          className="moduleInput moduleCollectorColumnFilter"
+                          type="date"
+                          value={creditColumnFilters.lastUpdateTo}
+                          title={t("filterLastUpdateTo")}
+                          aria-label={t("filterLastUpdateTo")}
+                          onChange={(event) => setCreditColumnFilters((current) => ({
+                            ...current,
+                            lastUpdateTo: event.target.value,
+                          }))}
+                        />
+                      </div>
                     </th>
                     <th>
                       <button

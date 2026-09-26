@@ -5518,6 +5518,42 @@ th:has(.moduleTableColumnFilterInput) {
   white-space: nowrap;
 }
 
+.moduleCollectorSortButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.moduleCollectorSortButton:hover,
+.moduleCollectorSortButton:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+.moduleCollectorDateRangeFilter {
+  display: grid;
+  gap: 4px;
+  min-width: 118px;
+}
+
+.moduleCollectorDateRangeFilter .moduleCollectorColumnFilter {
+  min-width: 0;
+}
+
 @media (max-width: 900px) {
   /* Too many columns for a phone, so each row becomes a labelled card. */
   .moduleCollectorTableWrap {

@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-26** — Pending Orders showed bare numeric ids (e.g. `641` next to `MOI01`) when allotment collision left `order_number` blank and the API treated the row id as the number. Fix: never persist id as `order_number`; allot next salesman series instead; Pending Orders calls `repair_order_numbers` for blank/id-equal rows.
 - **2026-09-26** — Added **Working Hours** attendance report (`/management/working-hours`, `/api/working-hours`) for admin/manager/collector: daily salesman login/lunch/logout plus hours from the day-route near-visit lunch-segment formula.
 - **2026-09-26** — Day-route Working hours with lunch now use near-visit segments: first→last non-far **before lunch out**, plus first→last non-far **after lunch in** (no longer first→lunch out + lunch in→last). Gaps to/from lunch punches are excluded. Still after 08:00 KSA only; attendance fallback unchanged when no usable near segments.
 - **2026-09-26** — Daily Visit Report and Outstanding Without GPS boss distribution is now consolidated: field users still receive their own emails, but hierarchy bosses get one digest of subordinate reports instead of being copied on every subordinate email.

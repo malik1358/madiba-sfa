@@ -93,6 +93,18 @@ function preferMatchingCustomerKey(candidates, targetCode) {
   return bestMatch || normalizedTarget;
 }
 
+export function resolveExistingCollectionCustomerCode(candidates, targetCode) {
+  const normalizedTarget = canonicalCustomerCode(targetCode);
+  if (!normalizedTarget) return "";
+
+  const matchingCandidates = (candidates || [])
+    .map((candidate) => String(candidate || "").trim())
+    .filter((candidate) => customerAccountCodesMatch(candidate, normalizedTarget));
+
+  if (matchingCandidates.length === 0) return "";
+  return preferMatchingCustomerKey(matchingCandidates, normalizedTarget);
+}
+
 function findScopedCollectionRecord(records, customerCode) {
   const target = canonicalCustomerCode(customerCode);
   if (!target) return null;
@@ -331,6 +343,20 @@ async function ensureCollectionCustomerRecord(admin, customerCode, customerName)
 
   if (lookupError) throw lookupError;
   if (existing) return code;
+
+  const { data: fuzzyMatches, error: fuzzyLookupError } = await admin
+    .from("customers")
+    .select("customer_code")
+    .ilike("customer_code", `${code}%`)
+    .limit(25);
+
+  if (fuzzyLookupError) throw fuzzyLookupError;
+
+  const existingCode = resolveExistingCollectionCustomerCode(
+    (fuzzyMatches || []).map((row) => row?.customer_code),
+    code,
+  );
+  if (existingCode) return existingCode;
 
   const name = String(customerName || code).trim() || code;
   const { error: insertError } = await admin
@@ -1032,7 +1058,7 @@ export async function POST(request) {
       customerCode = matchedRecord.customer_code;
     }
 
-    await ensureCollectionCustomerRecord(admin, customerCode, customerName);
+    customerCode = await ensureCollectionCustomerRecord(admin, customerCode, customerName);
 
     // Handle file uploads for payment and receipt copies
     let paymentCopyUrl = null;

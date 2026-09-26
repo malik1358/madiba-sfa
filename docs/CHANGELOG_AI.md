@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-26** — Collection saves now reuse the existing customer-master account code when outstanding rows use a variant like `1608` vs `1608C`. `/api/payment-collections` resolves the matching master code before insert so the visit stays visible in the queue/report and the WhatsApp summary flow can complete after sync.
 - **2026-09-26** — Outstanding Without GPS still listed customers with a last visit because pre-promote visits stored GPS only on `visit_report_latest` / activity logs. Report load and the email job now backfill customer master from that last-visit GPS (`backfillCustomerGpsFromLastVisits`) when the master pin is missing.
 - **2026-09-26** — Stale overdue collections: Parvez/Junaid use over-30 outstanding; everyone else over-60. Receipt lookback is 8 days. Default To `malik@pinasz.com`, CC Soyeb + Fazlur. Same salesman table is embedded in each salesman’s daily visit report (and boss digests).
 - **2026-09-26** — Daily **Stale overdue collections** email: `/api/cron/collection-stale-overdue-email` + workflow `collection-stale-overdue-email.yml` (00:35 KSA, skip Friday). Filters due queue where over-60 outstanding > 0, received last 10 days = 0, last collection visit older than 7 days (or never). One HTML table per salesman. Default To: `malik@pinasz.com` (`COLLECTION_STALE_OVERDUE_EMAIL_TO` override).

@@ -369,10 +369,15 @@ export function useOrder({
 
       if (saveResult.queued) {
         const pendingOrderId = buildPendingOrderId(saveResult.queueId);
+        const existingServerOrderId = draftOrderId && !isPendingOrderId(draftOrderId)
+          ? draftOrderId
+          : null;
         if (!draftOrderId) {
           setDraftOrderId(pendingOrderId);
         }
-        if (accessScope) {
+        // Only invent a local pending row for brand-new offline drafts. Re-saves of
+        // an existing server order already appear in Pending Orders as that id.
+        if (accessScope && !existingServerOrderId) {
           void upsertLocalPendingOrder(session.user.id, accessScope, {
             id: pendingOrderId,
             customer_code: selectedCustomer.customer_code,
@@ -392,7 +397,11 @@ export function useOrder({
         if (!options.silent) {
           setMessage(saveResult.message || 'Draft saved on device. It will sync automatically when you are back online.');
         }
-        return { orderId: pendingOrderId, orderNumber: allottedOrderNumber, visitDistance };
+        return {
+          orderId: existingServerOrderId || pendingOrderId,
+          orderNumber: allottedOrderNumber,
+          visitDistance,
+        };
       }
 
       const payload = saveResult.payload || {};
@@ -529,10 +538,15 @@ export function useOrder({
 
       if (saveResult.queued) {
         const pendingOrderId = buildPendingOrderId(saveResult.queueId);
+        const existingServerOrderId = draftOrderId && !isPendingOrderId(draftOrderId)
+          ? draftOrderId
+          : null;
         if (!draftOrderId) {
           setDraftOrderId(pendingOrderId);
         }
-        if (accessScope) {
+        // Only invent a local pending row for brand-new offline submits. Re-submits of
+        // an existing server order already appear in Pending Orders as that id.
+        if (accessScope && !existingServerOrderId) {
           void upsertLocalPendingOrder(session.user.id, accessScope, {
             id: pendingOrderId,
             customer_code: selectedCustomer?.customer_code || '',
@@ -554,7 +568,11 @@ export function useOrder({
         }
         setShowOrderReview(false);
         setLoadedOrderStatus('SUBMITTED');
-        return { orderId: pendingOrderId, orderNumber: allottedOrderNumber, visitDistance };
+        return {
+          orderId: existingServerOrderId || pendingOrderId,
+          orderNumber: allottedOrderNumber,
+          visitDistance,
+        };
       }
 
       const payload = saveResult.payload || {};

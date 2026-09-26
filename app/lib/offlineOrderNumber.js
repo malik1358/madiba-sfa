@@ -9,6 +9,7 @@ import {
   parseSalesmanOrderNumber,
   resolveSalesmanOrderPrefix,
 } from "./salesmanOrderNumber.js";
+import { isPlaceholderSalesOrderNumber } from "./salesOrderNumber.js";
 import { isSalesOrderQueueItem } from "./queuedSalesOrders.js";
 
 const SEQ_CACHE_PREFIX = "salesOrderSeq:v2:";
@@ -127,14 +128,20 @@ async function maxSequenceFromPendingQueue(salesmanCode, peerCodes, prefix) {
 /**
  * Allot the next permanent salesman order number on this device (e.g. P01).
  * The same value is sent to the server on sync and must not be rewritten.
+ *
+ * Also preserves any already-stored number on an existing order — including
+ * legacy numeric ids like "503". Re-saving must not invent a new series number
+ * (e.g. ABA02) that the server will refuse to adopt while the PDF shows it.
  */
 export async function allocateLocalSalesOrderNumber(salesmanCode, {
   existingOrderNumber = "",
   peerCodes = [],
 } = {}) {
   const existing = String(existingOrderNumber || "").trim();
-  if (existing && isSalesmanOrderNumberForCode(existing, salesmanCode)) {
-    await rememberSalesmanOrderSequence(salesmanCode, existing, { peerCodes });
+  if (existing && !isPlaceholderSalesOrderNumber(existing)) {
+    if (isSalesmanOrderNumberForCode(existing, salesmanCode)) {
+      await rememberSalesmanOrderSequence(salesmanCode, existing, { peerCodes });
+    }
     return existing;
   }
 

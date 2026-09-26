@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-26** — Order ABA02 / customer 1281 looked “offline not synced” while Abadalla was online. Root cause: re-submit of existing order **#503** (legacy `order_number` `503`) allotted a new device number `ABA02` because only short salesman-series numbers were preserved. Sync updated `#503` successfully; PDF showed `ABA02` so it looked missing. Fix: `allocateLocalSalesOrderNumber` keeps any non-placeholder existing number; re-saves of server orders no longer invent a local `pending:` Pending Orders row.
 - **2026-09-25** — Day-route Working hours line always renders again. When there are not two non-far after-08:00 KSA customer stops, hours fall back to attendance (login clamped to ≥08:00 KSA → logout, minus lunch) so idle-only days still show a total.
 - **2026-09-25** — My Day visit reports now auto-promote entry GPS onto the customer master when none is saved. Root cause: `/api/visit-reports` stored visit location in settings/activity logs only. Server promotes via `promoteEntryGpsToCustomerIfMissing`; client also calls the location helper on save. Far-from-saved still prompts before overwrite.
 - **2026-09-23** — Sales order numbers use a short salesman prefix: `P01` when the first letter is unique among peers, otherwise 2+ letters (`PA01` vs `PR01`). Still allotted offline and never rewritten after sync.

@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-26** — Outstanding Without GPS still listed customers with a last visit because pre-promote visits stored GPS only on `visit_report_latest` / activity logs. Report load and the email job now backfill customer master from that last-visit GPS (`backfillCustomerGpsFromLastVisits`) when the master pin is missing.
 - **2026-09-26** — Added **Working Hours** attendance report (`/management/working-hours`, `/api/working-hours`) for admin/manager/collector: daily salesman login/lunch/logout plus hours from the day-route near-visit lunch-segment formula.
 - **2026-09-26** — Day-route Working hours with lunch now use near-visit segments: first→last non-far **before lunch out**, plus first→last non-far **after lunch in** (no longer first→lunch out + lunch in→last). Gaps to/from lunch punches are excluded. Still after 08:00 KSA only; attendance fallback unchanged when no usable near segments.
 - **2026-09-26** — Daily Visit Report and Outstanding Without GPS boss distribution is now consolidated: field users still receive their own emails, but hierarchy bosses get one digest of subordinate reports instead of being copied on every subordinate email.

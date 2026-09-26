@@ -104,7 +104,7 @@ function settlementHref(customerCode) {
 
 export default function OutstandingComparePage() {
   const { language, setLanguage, dir } = useAppLanguage();
-  const t = (key) => translate(TEXT, key, language);
+  const t = translate(language, TEXT);
   const { access, loading: loadingAccess } = useModuleAccess();
 
   const [error, setError] = useState("");

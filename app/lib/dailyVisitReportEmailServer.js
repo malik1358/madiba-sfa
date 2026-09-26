@@ -22,6 +22,7 @@ import {
   filterCollectionStaleOverdueRowsForProfile,
   resolveOverdueAgingThresholdDays,
 } from "./collectionStaleOverdueEmail.js";
+import { enrichDueCustomersWithVisitWithoutOrder } from "./collectionStaleOverdueEmailServer.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
 import {
   addKsaCalendarDays,
@@ -343,7 +344,8 @@ export async function runDailyVisitReportEmailCycle(admin, {
           visibleSchedulerUserIds: null,
         });
         const queues = buildCollectionQueues(records, staleAsOfIso);
-        return Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
+        const dueCustomers = Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
+        return enrichDueCustomersWithVisitWithoutOrder(client, dueCustomers);
       };
     }
     dueCollectionCustomers = await loader(admin);

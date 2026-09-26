@@ -13,6 +13,7 @@ import {
   resolveCollectionStaleOverdueDigestRecipients,
 } from "../app/lib/collectionStaleOverdueEmail.js";
 import {
+  attachLastVisitWithoutOrder,
   resolveCollectionStaleOverdueEmailSchedule,
   runCollectionStaleOverdueEmailCycle,
 } from "../app/lib/collectionStaleOverdueEmailServer.js";
@@ -103,6 +104,40 @@ test("groupCollectionStaleOverdueBySalesman builds separate salesman buckets", (
   assert.equal(groups.reduce((sum, group) => sum + group.rows.length, 0), 2);
 });
 
+test("attachLastVisitWithoutOrder maps visit_report_latest dates onto due rows", () => {
+  const visitByCustomer = new Map([
+    ["C1", "2026-09-05T09:00:00.000Z"],
+  ]);
+  const [row] = attachLastVisitWithoutOrder([{ customer_code: "C1" }], visitByCustomer);
+  assert.equal(row.last_visit_without_order_at, "2026-09-05T09:00:00.000Z");
+});
+
+test("buildCollectionStaleOverdueEmail includes last visit without order column", () => {
+  const message = buildCollectionStaleOverdueEmail({
+    date: "2026-09-26",
+    groups: [{
+      salesmanName: "Parvez",
+      rows: [{
+        customer_code: "C1",
+        customer_name: "Shop One",
+        city: "Riyadh",
+        area: "Olaya",
+        salesman_name: "Parvez",
+        salesman_code: "PARVEZ",
+        total_due_amount: 500,
+        outstanding_30_60: 500,
+        max_overdue_days: 40,
+        collection_history: [],
+        latest_collection: { saved_at: "2026-09-01T08:00:00Z" },
+        last_visit_without_order_at: "2026-09-05T09:00:00+03:00",
+      }],
+    }],
+  });
+  assert.match(message.html, /Last visit w\/o order/);
+  assert.match(message.html, /2026-09-05/);
+  assert.match(message.html, /Last collection/);
+});
+
 test("buildCollectionStaleOverdueEmail renders one table section per salesman", () => {
   const message = buildCollectionStaleOverdueEmail({
     date: "2026-09-26",
@@ -149,6 +184,7 @@ test("buildCollectionStaleOverdueEmail renders one table section per salesman", 
   assert.match(message.html, /Recv 8d/);
   assert.match(message.html, /Over 30/);
   assert.match(message.html, /Never/);
+  assert.match(message.html, /Last visit w\/o order/);
   assert.equal(message.customerCount, 2);
   assert.equal(message.groupCount, 2);
 });

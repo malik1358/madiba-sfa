@@ -231,6 +231,18 @@ export function agingBucketLabel(thresholdDays = COLLECTION_STALE_OVERDUE_DEFAUL
   return Number(thresholdDays) <= 30 ? "Over 30" : "Over 60";
 }
 
+export function resolveLastVisitWithoutOrderDateKey(row = {}) {
+  const raw = row?.last_visit_without_order_at
+    || row?.last_visit_without_order_date
+    || row?.visit_without_order_at
+    || "";
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(raw).trim())) return String(raw).trim();
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return getKsaDateString(parsed);
+}
+
 export function buildCollectionStaleOverdueEmailRow(row = {}, {
   todayIso = "",
   todayKey = "",
@@ -240,6 +252,7 @@ export function buildCollectionStaleOverdueEmailRow(row = {}, {
   const name = String(row?.customer_name || "").trim();
   const customer = code && name ? `${code} — ${name}` : (code || name || "-");
   const visitKey = resolveLastCollectionVisitDateKey(row);
+  const visitWithoutOrderKey = resolveLastVisitWithoutOrderDateKey(row);
   const threshold = agingThresholdDays == null
     ? resolveOverdueAgingThresholdDays(row)
     : Number(agingThresholdDays) || COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS;
@@ -261,6 +274,7 @@ export function buildCollectionStaleOverdueEmailRow(row = {}, {
       days: COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS,
     }),
     lastVisitDate: visitKey || "Never",
+    lastVisitWithoutOrderDate: visitWithoutOrderKey || "Never",
     lastOutcome: String(
       row?.latest_collection?.visit_outcome
       || row?.latest_collection?.payment_status
@@ -289,7 +303,8 @@ function tableHeader(agingLabel = "Over 60") {
     <th style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;">${escapeHtml(agingLabel)}</th>
     <th style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;">Max overdue</th>
     <th style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;">Recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d</th>
-    <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last visit</th>
+    <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last collection</th>
+    <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last visit w/o order</th>
     <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last outcome</th>
   </tr>`;
 }
@@ -304,6 +319,7 @@ function tableRow(row, index) {
     <td style="text-align:right;border:1px solid #99f6e4;padding:8px;">${escapeHtml(String(row.maxOverdueDays))}</td>
     <td style="text-align:right;border:1px solid #99f6e4;padding:8px;">${escapeHtml(formatCollectionMoney(row.receivedLookbackDays))}</td>
     <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.lastVisitDate)}</td>
+    <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.lastVisitWithoutOrderDate)}</td>
     <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.lastOutcome)}</td>
   </tr>`;
 }
@@ -313,7 +329,7 @@ function totalRow(totals) {
     <td style="padding:10px 8px;border:1px solid #0a3a45;" colspan="2">Total (${totals.customers} customer${totals.customers === 1 ? "" : "s"})</td>
     <td style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;background:#0f766e;">${escapeHtml(formatCollectionMoney(totals.dueAmount))}</td>
     <td style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;background:#b91c1c;">${escapeHtml(formatCollectionMoney(totals.overdueAmount))}</td>
-    <td style="padding:10px 8px;border:1px solid #0a3a45;" colspan="4"></td>
+    <td style="padding:10px 8px;border:1px solid #0a3a45;" colspan="5"></td>
   </tr>`;
 }
 
@@ -321,7 +337,7 @@ function renderTable(rows, agingLabel = "Over 60") {
   const totals = summarizeCollectionStaleOverdueRows(rows);
   const body = rows.length
     ? rows.map((row, index) => tableRow(row, index)).join("")
-    : `<tr><td colspan="8" style="border:1px solid #99f6e4;padding:12px;background:#fff7ed;color:#9a3412;">No matching customers.</td></tr>`;
+    : `<tr><td colspan="9" style="border:1px solid #99f6e4;padding:12px;background:#fff7ed;color:#9a3412;">No matching customers.</td></tr>`;
   return `<table style="border-collapse: collapse; font-size: 13px; width: 100%; border:1px solid #99f6e4;">
     <thead>${tableHeader(agingLabel)}</thead>
     <tbody>${body}${rows.length ? totalRow(totals) : ""}</tbody>
@@ -397,7 +413,7 @@ export function buildCollectionStaleOverdueSalesmanSection({
   const text = [
     `Stale overdue collections — ${who}`,
     `${agingLabel} days · recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d = 0 · visit > ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS}d`,
-    `Customer | City/Area | Due | ${agingLabel} | Max overdue | Recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d | Last visit | Last outcome`,
+    `Customer | City/Area | Due | ${agingLabel} | Max overdue | Recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d | Last collection | Last visit w/o order | Last outcome`,
     ...rows.map((row) => [
       row.customer,
       `${row.city} / ${row.area}`,
@@ -406,6 +422,7 @@ export function buildCollectionStaleOverdueSalesmanSection({
       row.maxOverdueDays,
       formatCollectionMoney(row.receivedLookbackDays),
       row.lastVisitDate,
+      row.lastVisitWithoutOrderDate,
       row.lastOutcome,
     ].join(" | ")),
     `Total | ${totals.customers} customers | ${formatCollectionMoney(totals.dueAmount)} | ${formatCollectionMoney(totals.overdueAmount)}`,

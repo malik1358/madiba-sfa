@@ -12,6 +12,7 @@ import {
   formatGpsCapturePlatformLabel,
   computeSpeedKmh,
   resolveWaitingMinutesFromPreviousVisit,
+  resolveDistanceFromPreviousVisitKm,
   computeEstimatedTransitHours,
   haversineDistanceKm,
   findPreviousWaitingAnchorRow,
@@ -407,12 +408,14 @@ function enrichEntries(entries, customerMap, profileMap) {
     const entryLocation = { latitude: entry.latitude, longitude: entry.longitude };
     const distanceKm = distanceFromCustomerKm(entryLocation, customer);
     const farFromCustomer = isFarFromCustomer(entryLocation, customer);
-    const previous = index > 0 ? withRoute[index - 1] : null;
-    const speedKmh = previous
-      ? computeSpeedKmh(entry.distanceFromPreviousKm, previous.saved_at, entry.saved_at)
+    const previousAnchor = findPreviousWaitingAnchorRow(timelineForWaiting, index);
+    const distanceFromPreviousKm = resolveDistanceFromPreviousVisitKm(withRoute, index);
+    const speedFromAt = previousAnchor?.savedAt ?? previousAnchor?.saved_at
+      ?? (index > 0 ? withRoute[index - 1]?.saved_at : null);
+    const speedKmh = speedFromAt
+      ? computeSpeedKmh(distanceFromPreviousKm, speedFromAt, entry.saved_at)
       : null;
     const waitingMinutesFromPrevious = resolveWaitingMinutesFromPreviousVisit(timelineForWaiting, index);
-    const previousAnchor = findPreviousWaitingAnchorRow(timelineForWaiting, index);
     const anchorDistanceKm = previousAnchor && hasGpsCoordinates(previousAnchor) && hasGpsCoordinates(entry)
       ? haversineDistanceKm(
         Number(previousAnchor.latitude),
@@ -452,7 +455,7 @@ function enrichEntries(entries, customerMap, profileMap) {
       hasEntryGps: hasGpsCoordinates(entry),
       hasCustomerLocation: customerHasSavedLocation(customer),
       distanceFromCustomerKm: distanceKm,
-      distanceFromPreviousKm: entry.distanceFromPreviousKm,
+      distanceFromPreviousKm,
       speedKmh,
       waitingMinutesFromPrevious,
       estimatedTransitMinutesFromPrevious,

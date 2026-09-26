@@ -539,9 +539,11 @@ function buildStoredVisitReport(row, englishRemark, t, visit = null, options = {
   const selectedVisit = visit || row?.latest_collection;
   if (!selectedVisit) return "";
 
+  // Salesman is the customer book / outstanding salesman on the queue row —
+  // never the collector who saved the visit (scheduled_by_name).
   const reportRow = {
     ...row,
-    salesman_name: selectedVisit.scheduled_by_name || row.salesman_name,
+    salesman_name: row.salesman_name,
     salesman_code: row.salesman_code,
   };
 

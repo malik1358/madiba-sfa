@@ -20,9 +20,10 @@ test("useOrder allots permanent salesman order numbers offline", () => {
 test("sales-orders API persists client order numbers without rewrite", () => {
   const source = fs.readFileSync(new URL("../app/api/sales-orders/route.js", import.meta.url), "utf8");
   assert.match(source, /clientOrderNumber/);
-  assert.match(source, /Never replace an order number that already exists/);
+  assert.match(source, /Keep any already-stored number on normal save\/edit/);
   assert.match(source, /allocateServerSalesmanOrderNumber/);
   assert.match(source, /preferredOrderNumber/);
+  assert.match(source, /Never persist the bigint row id as order_number/);
 });
 
 test("allocateLocalSalesOrderNumber preserves legacy numeric ids on resubmit", async () => {

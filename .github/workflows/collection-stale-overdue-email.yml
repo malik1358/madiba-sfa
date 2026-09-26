@@ -65,11 +65,14 @@ jobs:
           force_raw = os.environ.get("FORCE_VALUE", "").strip().lower()
           if event_name == "schedule":
             force = False
+            trigger = "cron"
           elif force_raw:
             force = force_raw not in ("0", "false", "no")
+            trigger = "manual"
           else:
             force = True
-          payload = {"force": force}
+            trigger = "manual"
+          payload = {"force": force, "trigger": trigger}
           date = os.environ.get("DATE_VALUE", "").strip()
           to = os.environ.get("TO_VALUE", "").strip()
           if date:

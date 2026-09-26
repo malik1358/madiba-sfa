@@ -279,6 +279,7 @@ export function buildUserVisitReportEmail({
   thresholdKm = 0.5,
   team = null,
   teamMembers = [],
+  staleOverdueSection = null,
 } = {}) {
   const userName = String(user?.userName || "User").trim() || "User";
   const subject = `Daily Visit Report — ${userName} — ${date}`;
@@ -337,6 +338,7 @@ export function buildUserVisitReportEmail({
     "",
     ...kpiText,
     ...teamKpiText,
+    ...(staleOverdueSection?.text ? [staleOverdueSection.text] : []),
     ...entries.map((entry) => {
       const waiting = entry.waitingMinutesFromPrevious == null
         ? "-"
@@ -437,6 +439,7 @@ export function buildUserVisitReportEmail({
   ${coachingHtml}
   ${kpiHtml}
   ${teamKpiHtml}
+  ${staleOverdueSection?.html || ""}
   ${routeHtml}
   ${legendHtml}
   <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; font-size: 12px; width: 100%;">

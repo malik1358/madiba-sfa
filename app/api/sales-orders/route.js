@@ -31,6 +31,10 @@ import {
   parseSalesmanOrderNumber,
   resolveSalesmanOrderPrefix,
 } from "../../lib/salesmanOrderNumber.js";
+import {
+  isBareNumericOrderIdFallback,
+  readStoredSalesOrderNumber,
+} from "../../lib/salesOrderNumber.js";
 import { resolveOrderMakerFromProfile } from "../../lib/orderSalesman.js";
 
 export const runtime = "nodejs";
@@ -306,10 +310,7 @@ async function resolvePersistedCustomerCode(admin, customerCode) {
 }
 
 function storedOrderNumber(order) {
-  const orderNumber = String(order?.order_number || "").trim();
-  if (orderNumber) return orderNumber;
-  if (order?.id == null || order.id === "") return "";
-  return String(order.id);
+  return readStoredSalesOrderNumber(order);
 }
 
 async function loadSalesmanPeerCodes(admin) {
@@ -364,9 +365,15 @@ function normalizeClientOrderNumber(rawOrderNumber, salesmanCode) {
 async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "", {
   salesmanCode = "",
   preferredOrderNumber = "",
+  repairBareNumericId = false,
 } = {}) {
-  const current = String(existingOrderNumber || "").trim();
-  if (current) return current;
+  const currentRaw = String(existingOrderNumber || "").trim();
+  // Keep any already-stored number on normal save/edit, including legacy numeric
+  // values like "503" (see ABA02 / re-submit rule). Only the explicit repair path
+  // may replace a bare id-equal number.
+  if (currentRaw && !(repairBareNumericId && isBareNumericOrderIdFallback(currentRaw, orderId))) {
+    return currentRaw;
+  }
 
   const preferred = normalizeClientOrderNumber(preferredOrderNumber, salesmanCode);
   if (preferred) {
@@ -381,7 +388,7 @@ async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "",
   }
 
   if (salesmanCode) {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
       const next = await allocateServerSalesmanOrderNumber(admin, salesmanCode);
       if (!next) break;
       const { error } = await admin
@@ -395,15 +402,9 @@ async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "",
     }
   }
 
-  const fallback = String(orderId);
-  const { error } = await admin
-    .from("sales_orders")
-    .update({ order_number: fallback })
-    .eq("id", orderId);
-  if (error && !/duplicate|unique/i.test(String(error.message || ""))) {
-    throw error;
-  }
-  return fallback;
+  // Never persist the bigint row id as order_number (e.g. "641"). That made Pending
+  // Orders look numeric. Leave blank so the client can retry allotment.
+  return "";
 }
 
 async function persistDraftOrder(admin, {
@@ -489,16 +490,20 @@ async function persistDraftOrder(admin, {
     resolvedOrderNumber = storedOrderNumber(updatedOrder);
   }
 
-  // Never replace an order number that already exists on the row.
+  // Never treat a missing/invalid number as "already set" — always keep trying the
+  // client preferred series number (or allocate the next salesman number).
   resolvedOrderNumber = await ensureStoredOrderNumber(
     admin,
     resolvedOrderId,
     resolvedOrderNumber,
     {
       salesmanCode,
-      preferredOrderNumber: resolvedOrderNumber ? "" : preferredOrderNumber,
+      preferredOrderNumber,
     },
   );
+  if (!resolvedOrderNumber) {
+    throw new Error("Unable to allot a salesman order number. Please retry.");
+  }
 
   const { error: deleteError } = await admin
     .from("sales_order_items")
@@ -600,7 +605,7 @@ export async function GET(request) {
       const sinceIso = new Date(Date.now() - RECENT_ORDER_LOOKUP_MS).toISOString();
       const { data, error } = await admin
         .from("sales_orders")
-        .select("id,order_number,status,customer_code,customer_name,created_by,updated_at")
+        .select("id,order_number,status,customer_code,customer_name,created_by,salesman_code,updated_at")
         .eq("customer_code", customerCode)
         .eq("created_by", user.id)
         .gte("updated_at", sinceIso)
@@ -622,7 +627,9 @@ export async function GET(request) {
       return NextResponse.json({ success: false, error: "You do not have access to this order." }, { status: 403 });
     }
 
-    const orderNumber = await ensureStoredOrderNumber(admin, order.id, order.order_number);
+    const orderNumber = await ensureStoredOrderNumber(admin, order.id, order.order_number, {
+      salesmanCode: order.salesman_code || "",
+    });
     const liveCustomerCode = await resolvePersistedCustomerCode(admin, order.customer_code);
     if (liveCustomerCode && liveCustomerCode !== order.customer_code) {
       await admin.from("sales_orders").update({ customer_code: liveCustomerCode }).eq("id", order.id);
@@ -657,6 +664,45 @@ export async function POST(request) {
 
     const body = await request.json();
     const action = String(body?.action || "save_draft").trim().toLowerCase();
+
+    if (action === "repair_order_numbers") {
+      const admin = createClient(supabaseUrl, serviceKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const user = await getAuthUser(admin, authHeader.replace("Bearer ", ""));
+      const scope = await resolveSalesScopeForUserId(admin, user.id);
+      const requestedIds = Array.isArray(body?.orderIds)
+        ? body.orderIds.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)
+        : [];
+      const uniqueIds = [...new Set(requestedIds)].slice(0, 40);
+      if (uniqueIds.length === 0) {
+        return NextResponse.json({ success: true, repaired: [] });
+      }
+
+      const { data: orders, error: ordersError } = await admin
+        .from("sales_orders")
+        .select("id,order_number,salesman_code,created_by,status,customer_code")
+        .in("id", uniqueIds);
+      if (ordersError) throw ordersError;
+
+      const repaired = [];
+      for (const order of orders || []) {
+        if (!canAccessOrder(order, scope, user.id)) continue;
+        const nextNumber = await ensureStoredOrderNumber(admin, order.id, order.order_number, {
+          salesmanCode: order.salesman_code || "",
+          repairBareNumericId: true,
+        });
+        if (!nextNumber) continue;
+        if (nextNumber !== String(order.order_number || "").trim()) {
+          repaired.push({ orderId: order.id, orderNumber: nextNumber });
+        } else {
+          repaired.push({ orderId: order.id, orderNumber: nextNumber });
+        }
+      }
+
+      return NextResponse.json({ success: true, repaired });
+    }
+
     const customerCode = String(body?.customerCode || "").trim();
     const customerName = String(body?.customerName || "").trim();
     const customerSalesmanCode = String(body?.customerSalesmanCode || "").trim();

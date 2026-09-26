@@ -1,12 +1,19 @@
 import { resolveAppOrigin } from "./inactivityEmail.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
-import { getCollectionSalesmanLabel } from "./paymentCollections.js";
+import { getCollectionSalesmanLabel, sumCollectionReceivedInLastDays } from "./paymentCollections.js";
 import { addKsaCalendarDays, getKsaDateString } from "./workdayActivity.js";
 
 export const COLLECTION_STALE_OVERDUE_EMAIL_LAST_SENT_KEY = "collection_stale_overdue_email_last_sent";
 export const DEFAULT_COLLECTION_STALE_OVERDUE_EMAIL_TO = "malik@pinasz.com";
+export const DEFAULT_COLLECTION_STALE_OVERDUE_EMAIL_CC = [
+  "soyeb@noorshukran.com",
+  "fazlur.rahiman@noorshukran.com",
+];
 export const COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS = 7;
-export const COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS = 10;
+export const COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS = 8;
+export const COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS = 60;
+export const COLLECTION_STALE_OVERDUE_SOFT_AGING_DAYS = 30;
+export const COLLECTION_STALE_OVERDUE_SOFT_AGING_SALESMEN = ["PARVEZ", "JUNAID"];
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -25,6 +32,50 @@ function mergeEmailList(defaults, extraValue) {
   return [...new Set([...base, ...extras])];
 }
 
+export function comparableSalesmanIdentity(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function collectSalesmanIdentities(source = {}) {
+  const identities = new Set();
+  [
+    source?.salesman_code,
+    source?.salesman_name,
+    source?.current_salesman_code,
+    source?.userName,
+    getCollectionSalesmanLabel(source),
+  ].forEach((value) => {
+    const comparable = comparableSalesmanIdentity(value);
+    if (!comparable) return;
+    identities.add(comparable);
+    comparable.split(/\s+/).forEach((token) => {
+      if (token.length >= 3) identities.add(token);
+    });
+    const parenthetical = String(value || "").match(/\(([^)]+)\)/);
+    if (parenthetical) {
+      const alias = comparableSalesmanIdentity(parenthetical[1]);
+      if (alias) identities.add(alias);
+    }
+  });
+  return identities;
+}
+
+export function isSoftAgingSalesman(source = {}) {
+  const identities = collectSalesmanIdentities(source);
+  return COLLECTION_STALE_OVERDUE_SOFT_AGING_SALESMEN.some((name) => identities.has(name));
+}
+
+export function resolveOverdueAgingThresholdDays(source = {}) {
+  return isSoftAgingSalesman(source)
+    ? COLLECTION_STALE_OVERDUE_SOFT_AGING_DAYS
+    : COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS;
+}
+
 export function resolveCollectionStaleOverdueDigestRecipients(env = process.env) {
   const configured = mergeEmailList([], env.COLLECTION_STALE_OVERDUE_EMAIL_TO);
   if (configured.length) return configured;
@@ -33,7 +84,7 @@ export function resolveCollectionStaleOverdueDigestRecipients(env = process.env)
 
 export function resolveCollectionStaleOverdueDigestCc(env = process.env, to = []) {
   const recipients = new Set((to || []).map((email) => String(email || "").trim().toLowerCase()));
-  return mergeEmailList([], env.COLLECTION_STALE_OVERDUE_EMAIL_CC)
+  return mergeEmailList(DEFAULT_COLLECTION_STALE_OVERDUE_EMAIL_CC, env.COLLECTION_STALE_OVERDUE_EMAIL_CC)
     .filter((email) => !recipients.has(email));
 }
 
@@ -41,6 +92,24 @@ export function overdueOver60Amount(row = {}) {
   return Number(row?.outstanding_61_90 || 0)
     + Number(row?.outstanding_91_120 || 0)
     + Number(row?.outstanding_above_120 || 0);
+}
+
+export function overdueAboveThresholdAmount(row = {}, thresholdDays = COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS) {
+  const over60 = overdueOver60Amount(row);
+  if (Number(thresholdDays) <= 30) {
+    return Number(row?.outstanding_30_60 || 0) + over60;
+  }
+  return over60;
+}
+
+export function resolveReceivedInLookbackDays(row = {}, {
+  todayIso = new Date().toISOString(),
+  days = COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS,
+} = {}) {
+  const history = Array.isArray(row?.collection_history)
+    ? row.collection_history
+    : (row?.latest_collection ? [row.latest_collection] : []);
+  return sumCollectionReceivedInLastDays(history, { todayIso, days });
 }
 
 export function resolveLastCollectionVisitDateKey(row = {}) {
@@ -64,15 +133,52 @@ export function isCollectionVisitOlderThanDays(row = {}, {
 
 export function isCollectionStaleOverdueRow(row = {}, {
   todayKey = "",
+  todayIso = "",
   minVisitAgeDays = COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS,
+  receiptLookbackDays = COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS,
+  agingThresholdDays = null,
 } = {}) {
-  if (overdueOver60Amount(row) <= 0) return false;
-  if (Number(row?.received_last_10_days || 0) > 0) return false;
-  return isCollectionVisitOlderThanDays(row, { todayKey, minAgeDays: minVisitAgeDays });
+  const today = String(todayKey || "").trim() || getKsaDateString();
+  const threshold = agingThresholdDays == null
+    ? resolveOverdueAgingThresholdDays(row)
+    : Number(agingThresholdDays) || COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS;
+  if (overdueAboveThresholdAmount(row, threshold) <= 0) return false;
+
+  const asOfIso = String(todayIso || "").trim() || `${today}T12:00:00+03:00`;
+  if (resolveReceivedInLookbackDays(row, { todayIso: asOfIso, days: receiptLookbackDays }) > 0) {
+    return false;
+  }
+  return isCollectionVisitOlderThanDays(row, { todayKey: today, minAgeDays: minVisitAgeDays });
 }
 
 export function filterCollectionStaleOverdueRows(rows = [], options = {}) {
   return (rows || []).filter((row) => isCollectionStaleOverdueRow(row, options));
+}
+
+export function collectionRowMatchesSalesmanProfile(row = {}, profile = {}) {
+  const profileIds = collectSalesmanIdentities(profile);
+  if (!profileIds.size) return false;
+  const rowIds = collectSalesmanIdentities({
+    salesman_code: row?.salesman_code || row?.current_salesman_code,
+    salesman_name: getCollectionSalesmanLabel(row),
+    current_salesman_code: row?.current_salesman_code,
+  });
+  for (const identity of rowIds) {
+    if (profileIds.has(identity)) return true;
+  }
+  return false;
+}
+
+export function filterCollectionStaleOverdueRowsForProfile(rows = [], profile = {}, options = {}) {
+  const threshold = options.agingThresholdDays == null
+    ? resolveOverdueAgingThresholdDays(profile)
+    : options.agingThresholdDays;
+  return (rows || [])
+    .filter((row) => collectionRowMatchesSalesmanProfile(row, profile))
+    .filter((row) => isCollectionStaleOverdueRow(row, {
+      ...options,
+      agingThresholdDays: threshold,
+    }));
 }
 
 export function collectionStaleOverdueGroupKey(row = {}) {
@@ -105,7 +211,8 @@ export function groupCollectionStaleOverdueBySalesman(rows = []) {
     .map((group) => ({
       ...group,
       rows: [...group.rows].sort((left, right) => (
-        overdueOver60Amount(right) - overdueOver60Amount(left)
+        overdueAboveThresholdAmount(right, resolveOverdueAgingThresholdDays(right))
+          - overdueAboveThresholdAmount(left, resolveOverdueAgingThresholdDays(left))
         || Number(right?.total_due_amount || 0) - Number(left?.total_due_amount || 0)
         || String(left?.customer_name || "").localeCompare(String(right?.customer_name || ""))
       )),
@@ -120,11 +227,37 @@ export function formatCollectionMoney(value) {
   return number.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function buildCollectionStaleOverdueEmailRow(row = {}) {
+export function agingBucketLabel(thresholdDays = COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS) {
+  return Number(thresholdDays) <= 30 ? "Over 30" : "Over 60";
+}
+
+export function resolveLastVisitWithoutOrderDateKey(row = {}) {
+  const raw = row?.last_visit_without_order_at
+    || row?.last_visit_without_order_date
+    || row?.visit_without_order_at
+    || "";
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(raw).trim())) return String(raw).trim();
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return getKsaDateString(parsed);
+}
+
+export function buildCollectionStaleOverdueEmailRow(row = {}, {
+  todayIso = "",
+  todayKey = "",
+  agingThresholdDays = null,
+} = {}) {
   const code = String(row?.customer_code || "").trim();
   const name = String(row?.customer_name || "").trim();
   const customer = code && name ? `${code} — ${name}` : (code || name || "-");
   const visitKey = resolveLastCollectionVisitDateKey(row);
+  const visitWithoutOrderKey = resolveLastVisitWithoutOrderDateKey(row);
+  const threshold = agingThresholdDays == null
+    ? resolveOverdueAgingThresholdDays(row)
+    : Number(agingThresholdDays) || COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS;
+  const today = String(todayKey || "").trim() || getKsaDateString();
+  const asOfIso = String(todayIso || "").trim() || `${today}T12:00:00+03:00`;
   return {
     customer,
     customerCode: code || "-",
@@ -133,10 +266,15 @@ export function buildCollectionStaleOverdueEmailRow(row = {}) {
     area: String(row?.area || "").trim() || "-",
     salesman: collectionStaleOverdueSalesmanDisplay(row),
     dueAmount: Number(row?.total_due_amount || 0) || 0,
-    over60Amount: overdueOver60Amount(row),
+    overdueAmount: overdueAboveThresholdAmount(row, threshold),
+    agingLabel: agingBucketLabel(threshold),
     maxOverdueDays: Number(row?.max_overdue_days || 0) || 0,
-    receivedLast10Days: Number(row?.received_last_10_days || 0) || 0,
+    receivedLookbackDays: resolveReceivedInLookbackDays(row, {
+      todayIso: asOfIso,
+      days: COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS,
+    }),
     lastVisitDate: visitKey || "Never",
+    lastVisitWithoutOrderDate: visitWithoutOrderKey || "Never",
     lastOutcome: String(
       row?.latest_collection?.visit_outcome
       || row?.latest_collection?.payment_status
@@ -150,22 +288,23 @@ export function summarizeCollectionStaleOverdueRows(rows = []) {
     (totals, row) => {
       totals.customers += 1;
       totals.dueAmount += Number(row?.dueAmount || 0);
-      totals.over60Amount += Number(row?.over60Amount || 0);
+      totals.overdueAmount += Number(row?.overdueAmount || 0);
       return totals;
     },
-    { customers: 0, dueAmount: 0, over60Amount: 0 },
+    { customers: 0, dueAmount: 0, overdueAmount: 0 },
   );
 }
 
-function tableHeader() {
+function tableHeader(agingLabel = "Over 60") {
   return `<tr style="background:linear-gradient(90deg,#0f766e,#0f4c5c);background-color:#0f4c5c;color:#ffffff;">
     <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Customer</th>
     <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">City / Area</th>
     <th style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;">Due</th>
-    <th style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;">Over 60</th>
+    <th style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;">${escapeHtml(agingLabel)}</th>
     <th style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;">Max overdue</th>
-    <th style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;">Recv 10d</th>
-    <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last visit</th>
+    <th style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;">Recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d</th>
+    <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last collection</th>
+    <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last visit w/o order</th>
     <th style="text-align:left;padding:10px 8px;border:1px solid #0a3a45;">Last outcome</th>
   </tr>`;
 }
@@ -176,10 +315,11 @@ function tableRow(row, index) {
     <td style="border:1px solid #99f6e4;padding:8px;font-weight:700;color:#0f4c5c;">${escapeHtml(row.customer)}</td>
     <td style="border:1px solid #99f6e4;padding:8px;">${escapeHtml(`${row.city} / ${row.area}`)}</td>
     <td style="text-align:right;border:1px solid #99f6e4;padding:8px;">${escapeHtml(formatCollectionMoney(row.dueAmount))}</td>
-    <td style="text-align:right;border:1px solid #99f6e4;padding:8px;font-weight:700;color:#b91c1c;">${escapeHtml(formatCollectionMoney(row.over60Amount))}</td>
+    <td style="text-align:right;border:1px solid #99f6e4;padding:8px;font-weight:700;color:#b91c1c;">${escapeHtml(formatCollectionMoney(row.overdueAmount))}</td>
     <td style="text-align:right;border:1px solid #99f6e4;padding:8px;">${escapeHtml(String(row.maxOverdueDays))}</td>
-    <td style="text-align:right;border:1px solid #99f6e4;padding:8px;">${escapeHtml(formatCollectionMoney(row.receivedLast10Days))}</td>
+    <td style="text-align:right;border:1px solid #99f6e4;padding:8px;">${escapeHtml(formatCollectionMoney(row.receivedLookbackDays))}</td>
     <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.lastVisitDate)}</td>
+    <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.lastVisitWithoutOrderDate)}</td>
     <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.lastOutcome)}</td>
   </tr>`;
 }
@@ -188,18 +328,18 @@ function totalRow(totals) {
   return `<tr style="background:#0f4c5c;color:#ffffff;font-weight:700;">
     <td style="padding:10px 8px;border:1px solid #0a3a45;" colspan="2">Total (${totals.customers} customer${totals.customers === 1 ? "" : "s"})</td>
     <td style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;background:#0f766e;">${escapeHtml(formatCollectionMoney(totals.dueAmount))}</td>
-    <td style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;background:#b91c1c;">${escapeHtml(formatCollectionMoney(totals.over60Amount))}</td>
-    <td style="padding:10px 8px;border:1px solid #0a3a45;" colspan="4"></td>
+    <td style="text-align:right;padding:10px 8px;border:1px solid #0a3a45;background:#b91c1c;">${escapeHtml(formatCollectionMoney(totals.overdueAmount))}</td>
+    <td style="padding:10px 8px;border:1px solid #0a3a45;" colspan="5"></td>
   </tr>`;
 }
 
-function renderTable(rows) {
+function renderTable(rows, agingLabel = "Over 60") {
   const totals = summarizeCollectionStaleOverdueRows(rows);
   const body = rows.length
     ? rows.map((row, index) => tableRow(row, index)).join("")
-    : `<tr><td colspan="8" style="border:1px solid #99f6e4;padding:12px;background:#fff7ed;color:#9a3412;">No matching customers.</td></tr>`;
+    : `<tr><td colspan="9" style="border:1px solid #99f6e4;padding:12px;background:#fff7ed;color:#9a3412;">No matching customers.</td></tr>`;
   return `<table style="border-collapse: collapse; font-size: 13px; width: 100%; border:1px solid #99f6e4;">
-    <thead>${tableHeader()}</thead>
+    <thead>${tableHeader(agingLabel)}</thead>
     <tbody>${body}${rows.length ? totalRow(totals) : ""}</tbody>
   </table>`;
 }
@@ -227,56 +367,95 @@ function summaryCards(totals, groupCount) {
     </td>
     <td style="width:25%;padding:0 0 0 6px;vertical-align:top;">
       <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:12px;">
-        <div style="font-size:11px;font-weight:700;color:#b91c1c;text-transform:uppercase;letter-spacing:0.04em;">Over 60 days</div>
-        <div style="font-size:18px;font-weight:800;color:#7f1d1d;margin-top:4px;">${escapeHtml(formatCollectionMoney(totals.over60Amount))}</div>
+        <div style="font-size:11px;font-weight:700;color:#b91c1c;text-transform:uppercase;letter-spacing:0.04em;">Overdue filter</div>
+        <div style="font-size:18px;font-weight:800;color:#7f1d1d;margin-top:4px;">${escapeHtml(formatCollectionMoney(totals.overdueAmount))}</div>
       </div>
     </td>
   </tr>
 </table>`;
 }
 
-function renderSalesmanSections(groups) {
+export function buildCollectionStaleOverdueSalesmanSection({
+  salesmanName = "",
+  sourceRows = [],
+  todayKey = "",
+  todayIso = "",
+  agingThresholdDays = null,
+} = {}) {
+  const threshold = agingThresholdDays == null
+    ? (sourceRows[0] ? resolveOverdueAgingThresholdDays(sourceRows[0]) : COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS)
+    : Number(agingThresholdDays) || COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS;
+  const rows = (sourceRows || []).map((row) => buildCollectionStaleOverdueEmailRow(row, {
+    todayKey,
+    todayIso,
+    agingThresholdDays: threshold,
+  }));
+  const totals = summarizeCollectionStaleOverdueRows(rows);
+  const agingLabel = agingBucketLabel(threshold);
+  if (!rows.length) {
+    return { html: "", text: "", customerCount: 0, totals, agingLabel };
+  }
+
+  const who = String(salesmanName || "").trim() || "Salesman";
+  const html = `<div style="margin:18px 0 8px;">
+    <h2 style="font-size:16px;margin:0 0 8px;color:#0f4c5c;">Stale overdue collections</h2>
+    <p style="margin:0 0 10px;font-size:12px;color:#475569;">
+      ${escapeHtml(who)} · ${escapeHtml(agingLabel)} days · no receipt in last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days · last visit older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days
+    </p>
+    <div style="margin:0 0 8px;">
+      <span style="font-size:12px;font-weight:700;color:#0e7490;background:#ecfeff;border:1px solid #67e8f9;border-radius:999px;padding:4px 10px;">
+        ${escapeHtml(String(totals.customers))} · ${escapeHtml(agingLabel)} ${escapeHtml(formatCollectionMoney(totals.overdueAmount))}
+      </span>
+    </div>
+    ${renderTable(rows, agingLabel)}
+  </div>`;
+
+  const text = [
+    `Stale overdue collections — ${who}`,
+    `${agingLabel} days · recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d = 0 · visit > ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS}d`,
+    `Customer | City/Area | Due | ${agingLabel} | Max overdue | Recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d | Last collection | Last visit w/o order | Last outcome`,
+    ...rows.map((row) => [
+      row.customer,
+      `${row.city} / ${row.area}`,
+      formatCollectionMoney(row.dueAmount),
+      formatCollectionMoney(row.overdueAmount),
+      row.maxOverdueDays,
+      formatCollectionMoney(row.receivedLookbackDays),
+      row.lastVisitDate,
+      row.lastVisitWithoutOrderDate,
+      row.lastOutcome,
+    ].join(" | ")),
+    `Total | ${totals.customers} customers | ${formatCollectionMoney(totals.dueAmount)} | ${formatCollectionMoney(totals.overdueAmount)}`,
+    "",
+  ].join("\n");
+
+  return { html, text, customerCount: totals.customers, totals, agingLabel };
+}
+
+function renderSalesmanSections(groups, options = {}) {
   if (!groups.length) {
     return `<div style="padding:14px;border:1px solid #fed7aa;background:#fff7ed;border-radius:10px;color:#9a3412;">No customers match the stale overdue filters today.</div>`;
   }
 
   return groups.map((group) => {
-    const rows = (group.rows || []).map((row) => buildCollectionStaleOverdueEmailRow(row));
-    const totals = summarizeCollectionStaleOverdueRows(rows);
-    return `<div style="margin:0 0 22px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px;">
-        <h3 style="margin:0;font-size:16px;color:#0f4c5c;">${escapeHtml(group.salesmanName)}</h3>
-        <span style="font-size:12px;font-weight:700;color:#0e7490;background:#ecfeff;border:1px solid #67e8f9;border-radius:999px;padding:4px 10px;">
-          ${escapeHtml(String(totals.customers))} · Over 60 ${escapeHtml(formatCollectionMoney(totals.over60Amount))}
-        </span>
-      </div>
-      ${renderTable(rows)}
-    </div>`;
+    const section = buildCollectionStaleOverdueSalesmanSection({
+      salesmanName: group.salesmanName,
+      sourceRows: group.rows || [],
+      todayKey: options.todayKey,
+      todayIso: options.todayIso,
+    });
+    return section.html;
   }).join("");
 }
 
-function textSections(groups) {
+function textSections(groups, options = {}) {
   if (!groups.length) return "No customers match the stale overdue filters today.";
-  return groups.map((group) => {
-    const rows = (group.rows || []).map((row) => buildCollectionStaleOverdueEmailRow(row));
-    const totals = summarizeCollectionStaleOverdueRows(rows);
-    return [
-      `## ${group.salesmanName}`,
-      "Customer | City/Area | Due | Over 60 | Max overdue | Recv 10d | Last visit | Last outcome",
-      ...rows.map((row) => [
-        row.customer,
-        `${row.city} / ${row.area}`,
-        formatCollectionMoney(row.dueAmount),
-        formatCollectionMoney(row.over60Amount),
-        row.maxOverdueDays,
-        formatCollectionMoney(row.receivedLast10Days),
-        row.lastVisitDate,
-        row.lastOutcome,
-      ].join(" | ")),
-      `Total | ${totals.customers} customers | ${formatCollectionMoney(totals.dueAmount)} | ${formatCollectionMoney(totals.over60Amount)}`,
-      "",
-    ].join("\n");
-  }).join("\n");
+  return groups.map((group) => buildCollectionStaleOverdueSalesmanSection({
+    salesmanName: group.salesmanName,
+    sourceRows: group.rows || [],
+    todayKey: options.todayKey,
+    todayIso: options.todayIso,
+  }).text).join("\n");
 }
 
 export function buildCollectionStaleOverdueReportUrl(env = process.env) {
@@ -288,14 +467,18 @@ export function buildCollectionStaleOverdueEmail({
   date,
   groups = [],
   reportUrl = "",
+  todayIso = "",
 } = {}) {
   const allRows = groups.flatMap((group) => (
-    (group.rows || []).map((row) => buildCollectionStaleOverdueEmailRow(row))
+    (group.rows || []).map((row) => buildCollectionStaleOverdueEmailRow(row, {
+      todayKey: date,
+      todayIso,
+    }))
   ));
   const totals = summarizeCollectionStaleOverdueRows(allRows);
   const subject = `Stale overdue collections ${date} — ${totals.customers} customers / ${groups.length} salesmen`;
   const link = String(reportUrl || "").trim();
-  const intro = `Customers with outstanding older than 60 days, no receipt in the last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days, and no collection visit in the last ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (or never visited). One table per salesman.`;
+  const intro = `Customers needing credit follow-up: outstanding older than 60 days (Parvez & Junaid: older than 30 days), no receipt in the last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days, and no collection visit in the last ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (or never visited). One table per salesman.`;
 
   const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #0f172a; line-height: 1.5; background:#f8fafc; padding:16px;">
   <div style="max-width:1100px;margin:0 auto;background:#ffffff;border:1px solid #99f6e4;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,76,92,0.12);">
@@ -307,9 +490,9 @@ export function buildCollectionStaleOverdueEmail({
     <div style="padding:18px 20px 8px;">
       <p style="margin:0 0 14px;color:#334155;">${escapeHtml(intro)}</p>
       ${summaryCards(totals, groups.length)}
-      ${renderSalesmanSections(groups)}
+      ${renderSalesmanSections(groups, { todayKey: date, todayIso })}
       ${link ? `<p style="margin:16px 0 0;"><a href="${escapeHtml(link)}" style="color:#0f766e;font-weight:700;">Open Payment Collections</a></p>` : ""}
-      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">Daily digest for credit follow-up. Filters: over-60 outstanding &gt; 0, received last 10 days = 0, last collection visit older than 7 days.</p>
+      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">Daily digest for credit follow-up. Default To: malik@pinasz.com. CC: Soyeb and Fazlur.</p>
     </div>
   </div>
 </div>`;
@@ -318,7 +501,7 @@ export function buildCollectionStaleOverdueEmail({
     `Stale overdue collections — ${date}`,
     intro,
     "",
-    textSections(groups),
+    textSections(groups, { todayKey: date, todayIso }),
     link ? `Report: ${link}` : "",
   ].filter(Boolean).join("\n");
 

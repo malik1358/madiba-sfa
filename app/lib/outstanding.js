@@ -726,21 +726,34 @@ export function detectOutstandingSalesmanColumn(headerRow) {
   return bestIndex;
 }
 
+export function normalizeOutstandingRef(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
 export function pickOutstandingSalesmanName(invoices) {
   const counts = new Map();
+  const amounts = new Map();
 
   (invoices || []).forEach((invoice) => {
     const name = String(invoice?.salesman || "").trim();
     if (isPlaceholderSalesmanValue(name)) return;
     counts.set(name, (counts.get(name) || 0) + 1);
+    amounts.set(name, (amounts.get(name) || 0) + toNumber(invoice?.pending_amount));
   });
 
   let bestName = "";
   let bestCount = 0;
+  let bestAmount = 0;
 
   counts.forEach((count, name) => {
-    if (count > bestCount) {
+    const amount = amounts.get(name) || 0;
+    if (
+      count > bestCount
+      || (count === bestCount && amount > bestAmount)
+      || (count === bestCount && amount === bestAmount && name.localeCompare(bestName) < 0)
+    ) {
       bestCount = count;
+      bestAmount = amount;
       bestName = name;
     }
   });
@@ -769,6 +782,110 @@ export function resolveUploadedOutstandingSalesman({
   if (!isPlaceholderSalesmanValue(fromAggregate)) return fromAggregate;
 
   return "";
+}
+
+/**
+ * Map active-sales voucher rows → salesman display name.
+ * Used only when the outstanding upload left the Salesman cell blank.
+ */
+export function buildSalesmanByVoucherMap(salesRows) {
+  const byVoucher = new Map();
+
+  (salesRows || []).forEach((row) => {
+    const voucher = normalizeOutstandingRef(row?.voucher_number || row?.ref_no);
+    if (!voucher) return;
+    const name = String(row?.salesman_name || row?.salesman_code || row?.salesman || "").trim();
+    if (isPlaceholderSalesmanValue(name)) return;
+    if (!byVoucher.has(voucher)) byVoucher.set(voucher, name);
+  });
+
+  return byVoucher;
+}
+
+/**
+ * Fill blank outstanding-invoice salesman cells from matching sales vouchers.
+ * Does not overwrite a non-placeholder upload salesman.
+ */
+export function applySalesVoucherSalesmanToInvoices(invoices, salesmanByVoucher) {
+  const map = salesmanByVoucher instanceof Map
+    ? salesmanByVoucher
+    : buildSalesmanByVoucherMap(salesmanByVoucher);
+
+  if (!map.size) return invoices || [];
+
+  return (invoices || []).map((invoice) => {
+    if (!isPlaceholderSalesmanValue(invoice?.salesman)) return invoice;
+    const voucher = normalizeOutstandingRef(invoice?.ref_no || invoice?.voucher_number);
+    const fromSales = voucher ? map.get(voucher) : "";
+    if (!fromSales) return invoice;
+    return { ...invoice, salesman: fromSales };
+  });
+}
+
+function salesmanValuesMatch(left, right) {
+  const leftRaw = String(left || "").trim();
+  const rightRaw = String(right || "").trim();
+  if (!leftRaw || !rightRaw) return false;
+  if (normalizeCode(leftRaw) === normalizeCode(rightRaw)) return true;
+  return normalizeComparableName(leftRaw) === normalizeComparableName(rightRaw);
+}
+
+/**
+ * Collection-queue salesman label when the outstanding workbook Salesman cell
+ * is blank: prefer the customer-master book owner when they appear on any open
+ * invoice (shared-book cases), else the voucher-derived invoice salesman, else
+ * the master assignment alone so filters still have names.
+ */
+export function resolveCollectionQueueSalesman({
+  salesmanFromUpload = "",
+  customerInvoices = [],
+  masterSalesmanCode = "",
+  masterSalesmanName = "",
+} = {}) {
+  const fromUpload = String(salesmanFromUpload || "").trim();
+  if (!isPlaceholderSalesmanValue(fromUpload)) {
+    return {
+      salesman_name: fromUpload,
+      salesman_code: normalizeCode(fromUpload),
+      source: "upload",
+    };
+  }
+
+  const masterCode = normalizeCode(masterSalesmanCode);
+  const masterName = String(masterSalesmanName || masterSalesmanCode || "").trim();
+  const invoiceSalesman = pickOutstandingSalesmanName(customerInvoices);
+
+  if (masterCode || !isPlaceholderSalesmanValue(masterName)) {
+    const masterMatchesInvoice = (customerInvoices || []).some((invoice) => (
+      salesmanValuesMatch(invoice?.salesman, masterCode)
+      || salesmanValuesMatch(invoice?.salesman, masterName)
+    ));
+    if (masterMatchesInvoice) {
+      return {
+        salesman_name: (!isPlaceholderSalesmanValue(masterName) ? masterName : masterCode),
+        salesman_code: masterCode,
+        source: "master_matching_invoice",
+      };
+    }
+  }
+
+  if (!isPlaceholderSalesmanValue(invoiceSalesman)) {
+    return {
+      salesman_name: invoiceSalesman,
+      salesman_code: normalizeCode(invoiceSalesman),
+      source: "sales_voucher",
+    };
+  }
+
+  if (!isPlaceholderSalesmanValue(masterName) || masterCode) {
+    return {
+      salesman_name: (!isPlaceholderSalesmanValue(masterName) ? masterName : masterCode),
+      salesman_code: masterCode,
+      source: "master",
+    };
+  }
+
+  return { salesman_name: "", salesman_code: "", source: "none" };
 }
 
 export function buildOutstandingRowSalesmanByCode(rows) {

@@ -11,9 +11,11 @@ import {
   detectOutstandingSalesmanColumn,
   extractLeadingCustomerCodeAndName,
   applyOutstandingRowSalesman,
+  applySalesVoucherSalesmanToInvoices,
   buildOutstandingRowSalesmanByCode,
   isPlaceholderSalesmanValue,
   pickOutstandingSalesmanName,
+  resolveCollectionQueueSalesman,
   resolveUploadedOutstandingSalesman,
   pickLongestCustomerName,
   findOutstandingForCustomer,
@@ -172,6 +174,85 @@ test("resolveUploadedOutstandingSalesman backfills from upload rows, not custome
       aggregateRowSalesman: "",
     }),
     "",
+  );
+});
+
+test("applySalesVoucherSalesmanToInvoices fills blank salesman from matching vouchers", () => {
+  const enriched = applySalesVoucherSalesmanToInvoices(
+    [
+      { ref_no: "NFD/868", salesman: "", pending_amount: 14795.35 },
+      { ref_no: "RNFD/158", salesman: "", pending_amount: 61312.25 },
+      { ref_no: "KEEP/1", salesman: "Upload Name", pending_amount: 10 },
+    ],
+    [
+      { voucher_number: "NFD/868", salesman_name: "AHMED NABIL" },
+      { voucher_number: "RNFD/158", salesman_name: "ABADALLA ANTHANATH" },
+      { voucher_number: "KEEP/1", salesman_name: "Should Not Overwrite" },
+    ],
+  );
+
+  assert.deepEqual(
+    enriched.map((invoice) => [invoice.ref_no, invoice.salesman]),
+    [
+      ["NFD/868", "AHMED NABIL"],
+      ["RNFD/158", "ABADALLA ANTHANATH"],
+      ["KEEP/1", "Upload Name"],
+    ],
+  );
+});
+
+test("resolveCollectionQueueSalesman prefers master when it matches an open invoice", () => {
+  const resolved = resolveCollectionQueueSalesman({
+    salesmanFromUpload: "",
+    customerInvoices: [
+      { salesman: "AHMED NABIL", pending_amount: 14795.35 },
+      { salesman: "ABADALLA ANTHANATH", pending_amount: 61312.25 },
+    ],
+    masterSalesmanCode: "AHMED NABIL",
+    masterSalesmanName: "AHMED NABIL",
+  });
+
+  assert.equal(resolved.salesman_name, "AHMED NABIL");
+  assert.equal(resolved.source, "master_matching_invoice");
+});
+
+test("resolveCollectionQueueSalesman uses sales voucher when master is wrong", () => {
+  const resolved = resolveCollectionQueueSalesman({
+    salesmanFromUpload: "",
+    customerInvoices: [
+      { salesman: "AHMED NABIL", pending_amount: 14795.35 },
+      { salesman: "ABADALLA ANTHANATH", pending_amount: 61312.25 },
+    ],
+    masterSalesmanCode: "ABDUL REHMAN",
+    masterSalesmanName: "ABDUL REHMAN",
+  });
+
+  // Tie-break by pending amount so the larger open invoice wins.
+  assert.equal(resolved.salesman_name, "ABADALLA ANTHANATH");
+  assert.equal(resolved.source, "sales_voucher");
+});
+
+test("resolveCollectionQueueSalesman keeps upload salesman over master and vouchers", () => {
+  const resolved = resolveCollectionQueueSalesman({
+    salesmanFromUpload: "Ahmed Nabil",
+    customerInvoices: [
+      { salesman: "ABADALLA ANTHANATH", pending_amount: 61312.25 },
+    ],
+    masterSalesmanCode: "ABDUL REHMAN",
+    masterSalesmanName: "ABDUL REHMAN",
+  });
+
+  assert.equal(resolved.salesman_name, "Ahmed Nabil");
+  assert.equal(resolved.source, "upload");
+});
+
+test("pickOutstandingSalesmanName breaks ties by pending amount", () => {
+  assert.equal(
+    pickOutstandingSalesmanName([
+      { salesman: "AHMED NABIL", pending_amount: 14795.35 },
+      { salesman: "ABADALLA ANTHANATH", pending_amount: 61312.25 },
+    ]),
+    "ABADALLA ANTHANATH",
   );
 });
 

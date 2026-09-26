@@ -16,20 +16,24 @@ test("resolveExistingCollectionCustomerCode avoids unrelated numeric prefixes", 
 function createCustomerAdmin({ exact = null, fuzzy = [], insertError = null } = {}) {
   const calls = {
     inserted: [],
+    exactPattern: "",
     ilikePattern: "",
   };
 
   const customersQuery = {
-    eq(column, value) {
-      assert.equal(column, "customer_code");
-      return {
-        async maybeSingle() {
-          return { data: exact ? { customer_code: value } : null, error: null };
-        },
-      };
-    },
     ilike(column, pattern) {
       assert.equal(column, "customer_code");
+      if (!pattern.includes("%")) {
+        calls.exactPattern = pattern;
+        return {
+          async maybeSingle() {
+            return {
+              data: exact ? { customer_code: exact } : null,
+              error: null,
+            };
+          },
+        };
+      }
       calls.ilikePattern = pattern;
       return {
         async limit(limitValue) {
@@ -67,7 +71,19 @@ test("ensureCollectionCustomerRecord reuses existing suffix account variants ins
   const customerCode = await ensureCollectionCustomerRecord(admin, "1608", "1608 TEST CUSTOMER");
 
   assert.equal(customerCode, "1608C");
+  assert.equal(admin.calls.exactPattern, "1608");
   assert.equal(admin.calls.ilikePattern, "1608%");
+  assert.equal(admin.calls.inserted.length, 0);
+});
+
+test("ensureCollectionCustomerRecord preserves the stored exact customer code casing", async () => {
+  const admin = createCustomerAdmin({ exact: "1608c" });
+
+  const customerCode = await ensureCollectionCustomerRecord(admin, "1608C", "1608 TEST CUSTOMER");
+
+  assert.equal(customerCode, "1608c");
+  assert.equal(admin.calls.exactPattern, "1608C");
+  assert.equal(admin.calls.ilikePattern, "");
   assert.equal(admin.calls.inserted.length, 0);
 });
 

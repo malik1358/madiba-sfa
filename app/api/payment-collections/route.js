@@ -324,6 +324,15 @@ export async function ensureCollectionCustomerRecord(admin, customerCode, custom
   const code = canonicalCustomerCode(customerCode);
   if (!code) throw new Error("Customer code is required");
 
+  const { data: existing, error: lookupError } = await admin
+    .from("customers")
+    .select("customer_code")
+    .ilike("customer_code", code)
+    .maybeSingle();
+
+  if (lookupError) throw lookupError;
+  if (existing?.customer_code) return String(existing.customer_code).trim() || code;
+
   const { data: fuzzyMatches, error: fuzzyLookupError } = await admin
     .from("customers")
     .select("customer_code")

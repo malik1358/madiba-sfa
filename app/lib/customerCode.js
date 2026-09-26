@@ -44,21 +44,30 @@ export function resolveExistingCollectionCustomerCode(candidates, targetCode) {
   if (!normalizedTarget) return "";
 
   const matchingCandidates = (candidates || [])
-    .map((candidate) => canonicalCustomerCode(candidate))
-    .filter((candidate) => customerAccountCodesMatch(candidate, normalizedTarget));
+    .map((candidate) => {
+      const raw = String(candidate || "").trim();
+      return {
+        raw,
+        canonical: canonicalCustomerCode(raw),
+      };
+    })
+    .filter((candidate) => candidate.raw && customerAccountCodesMatch(candidate.raw, normalizedTarget));
 
   if (matchingCandidates.length === 0) return "";
 
   return matchingCandidates.reduce((bestMatch, candidate) => {
     if (
       !bestMatch
-      || candidate.length > bestMatch.length
-      || (candidate.length === bestMatch.length && candidate.localeCompare(bestMatch) < 0)
+      || candidate.canonical.length > bestMatch.canonical.length
+      || (
+        candidate.canonical.length === bestMatch.canonical.length
+        && candidate.canonical.localeCompare(bestMatch.canonical) < 0
+      )
     ) {
       return candidate;
     }
     return bestMatch;
-  }, "");
+  }, null)?.raw || "";
 }
 
 export function normalizeCustomerNameKey(value) {

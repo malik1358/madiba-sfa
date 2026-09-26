@@ -125,7 +125,7 @@ test("resolveOutstandingNoGpsEmailSchedule skips Friday holiday", () => {
   assert.equal(saturday.date, "2026-09-19");
 });
 
-test("runOutstandingNoGpsEmailCycle emails each salesman with bosses on CC", async () => {
+test("runOutstandingNoGpsEmailCycle sends user emails plus one boss digest", async () => {
   const sent = [];
   const saved = [];
   const result = await runOutstandingNoGpsEmailCycle({}, {
@@ -223,11 +223,11 @@ test("runOutstandingNoGpsEmailCycle emails each salesman with bosses on CC", asy
   assert.equal(result.sentCount, 3);
   assert.equal(result.customerCount, 2);
   assert.equal(sent[0].to[0], "parvez.report@madiba.com");
-  assert.deepEqual(sent[0].cc, []);
+  assert.equal(sent[0].cc, undefined);
   assert.match(sent[0].html, /visit these customers/i);
   assert.match(sent[0].html, /AL TAWFEER/);
   assert.equal(sent[1].to[0], "sara@madiba.com");
-  assert.deepEqual(sent[1].cc, []);
+  assert.equal(sent[1].cc, undefined);
   const bossDigest = sent.find((message) => message.to[0] === "boss.report@madiba.com");
   assert.ok(bossDigest);
   assert.match(bossDigest.html, /across your subordinates/i);

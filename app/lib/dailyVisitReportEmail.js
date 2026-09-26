@@ -60,9 +60,9 @@ export function resolveVisitReportRecipients({
   const managers = parseEmailList(
     Array.isArray(managerEmails) ? managerEmails.join(",") : managerEmails,
   );
-  const chain = parseEmailList(
+  const chain = [...new Set(parseEmailList(
     Array.isArray(chainEmails) ? chainEmails.join(",") : chainEmails,
-  );
+  ))];
   const user = sendToUser
     ? resolveUserReportEmail({ reportEmail, email: userEmail || email })
     : "";

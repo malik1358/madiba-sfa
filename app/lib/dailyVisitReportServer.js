@@ -24,7 +24,7 @@ import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { sumOrderLineValue } from "./collectionDaySummary.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
 import { buildDayRoutePoints } from "./dayRouteMap.js";
-import { assignOnSiteVisitNumbers, buildVisitDaySplit, hideSupersededOrderDrafts, loginLogoutLocationNotes } from "./dailyVisitReportStats.js";
+import { assignOnSiteVisitNumbers, buildVisitDaySplit, hideDuplicateVisitEntries, hideSupersededOrderDrafts, loginLogoutLocationNotes } from "./dailyVisitReportStats.js";
 import { filterLogsByKsaEventDate, ksaDayBounds } from "./workdayActivity.js";
 import {
   isPlaceholderProspectName,
@@ -559,7 +559,7 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
     grouped.get(key).push(entry);
   });
   grouped.forEach((rows, key) => {
-    grouped.set(key, hideSupersededOrderDrafts(rows));
+    grouped.set(key, hideDuplicateVisitEntries(hideSupersededOrderDrafts(rows)));
   });
 
   const users = [...grouped.entries()].map(([entryUserId, rows]) => {

@@ -6,9 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
-<<<<<<< HEAD
-- **2026-09-22** — Missing-invoice chase now includes a separate `Waiting for credit application` table in the 1-hour digest email, and the re-send cadence matches the business rule at 15 minutes instead of 12. The same queue stays excluded from the non-actionable lists.
-=======
+- **2026-09-27** — Missing-invoice chase now includes a separate `Waiting for credit application` table in the 1-hour digest email, and the re-send cadence matches the business rule at 15 minutes instead of 12. The same queue stays excluded from the non-actionable lists.
 - **2026-09-27** — Inactive customers are no longer hidden from report customer lists: `/api/customers/visible` now supports `includeInactive=1`, and Customer Audit / Payment Settlement / Outstanding Compare request that flag. Visit suggestions keep the active-only suggestion pool behavior.
 - **2026-09-27** — Field visit WhatsApp was missing Avg days to pay after offline-first saves stopped calling history at save time and My Day never stored `avg_days_to_pay` on the visit row. Fix: prefetch avg days (lifetime + 6m) when the visit form opens, keep both on the local row, and include them in field/collection WhatsApp the same way orders already do. Save still stays offline-first (no `loadCustomerAvgDaysToPay` on the save path).
 - **2026-09-26** — Daily Visit Report **Distance from previous** on visit/order rows now sums path since the previous customer stop through idle GPS **and** lunch/login bridge rows (`transaction_type` LUNCH_BREAK_*/MORNING_ATTENDANCE/END_OF_DAY were previously treated as anchors because only `entry_type` was checked). Example: Visit #2 → idle → lunch → Visit #3 shows ~22.8 km on Visit #3, not only the last hop.
@@ -41,7 +39,6 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 - **2026-09-22** — Visit GPS is auto-promoted onto the customer master when the customer has no saved coordinates (`maybePromptCustomerLocationUpdate` / `evaluateCustomerLocationUpdatePrompt`). Far-from-saved still prompts before overwrite.
 - **2026-09-22** — Day-route / daily visit Working hours now use only non-far customer transactions at or after 08:00 KSA (`resolveDayRouteWorkingHours`). Midnight and early-morning near stops no longer inflate the total; far visit reports stay excluded.
 - **2026-09-22** — Payment Collections attachment saves: online path no longer serializes files into IndexedDB before upload; camera photo compression has load/canvas timeouts with original-file fallback; storage bucket `updateBucket` is best-effort; Saving clears before queue reload; selected attachment names show in the form. Server sniffs PDF magic bytes and accepts Android `image/jpg`.
->>>>>>> 595b97b5708a16e32602ceb4dd3549ab0f82d41c
 - **2026-09-21** — Sales-order submit now auto-blocks customers when Avg Days to Pay is 120+ (salesmen see the customer but submit is rejected). Customer Audit shows the block status, and admin can apply/remove a per-customer unblock override via `customer_order_block_override:<code>`.
 - **2026-09-21** — Gloves VAT is 0% on sales orders (New Order, PDF, WhatsApp), not only on settlement. `getPricedOrderLine` / `summarizePricedLines` honor `vatRateForProduct` (GLOVE/VINYL/قفاز). Labels switch to `VAT 0%` for gloves-only carts; do not treat `vatAmount === 0` as missing and fall back to 15%.
 - **2026-09-21** — Avg days to pay now shows both lifetime and last-6-month figures wherever lifetime was shown (Customer Audit, Payment Settlement, New Order, Order PDF, WhatsApp). 6m uses sales+receipts from the BI performance from-month; open invoices still only blend when older than that window’s paid avg.

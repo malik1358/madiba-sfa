@@ -48,6 +48,11 @@ import {
   updateCustomerMobile,
 } from "../../lib/customerContact";
 import { buildFieldVisitWhatsappSummary } from "../../lib/fieldVisitWhatsapp";
+import {
+  awaitAvgDaysPrefetch,
+  prefetchCustomerAvgDaysForVisit,
+  resolveLocalAvgDaysToPay,
+} from "../../lib/avgDaysWhatsapp";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { slimVisitStockChecks } from "../../lib/visitReportSave";
 import {
@@ -364,6 +369,8 @@ function visitRowFromCustomerRecord(customer, extras = {}) {
     outstanding_30_60: Number(customer.outstanding_30_60 || 0),
     outstanding_61_90: Number(customer.outstanding_61_90 || 0),
     outstanding_above_90: Number(customer.outstanding_above_90 || 0),
+    avg_days_to_pay: customer.avg_days_to_pay ?? customer.avgDaysToPay ?? null,
+    avg_days_to_pay_6m: customer.avg_days_to_pay_6m ?? customer.avgDaysToPay6m ?? null,
     latitude: customer.latitude,
     longitude: customer.longitude,
     status: extras.status || customer.status || "Planned",
@@ -431,6 +438,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
   const [dictationSupported, setDictationSupported] = useState(false);
   const [dictationActive, setDictationActive] = useState(false);
   const speechRecognitionRef = useRef(null);
+  const avgDaysPrefetchByCodeRef = useRef(new Map());
   const [visitForm, setVisitForm] = useState({
     outcome: "COME_BACK_LATER",
     nextVisitAt: "",
@@ -955,6 +963,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
             outstanding_30_60: Number(row.outstanding_30_60 || 0),
             outstanding_61_90: Number(row.outstanding_61_90 || 0),
             outstanding_above_90: Number(row.outstanding_above_90 || 0),
+            avg_days_to_pay: row.avg_days_to_pay ?? row.avgDaysToPay ?? null,
+            avg_days_to_pay_6m: row.avg_days_to_pay_6m ?? row.avgDaysToPay6m ?? null,
             latitude: row.latitude,
             longitude: row.longitude,
             status: todayCustomers.has(customerCode) ? "Visited" : "Planned",
@@ -1211,6 +1221,40 @@ export default function MyDayPage({ mode = "default" } = {}) {
       stockChecks: [],
     });
 
+    // Warm avg days while the salesman fills the form so WhatsApp can use a
+    // local value at save time without blocking the offline-first save path.
+    void (async () => {
+      const codeKey = String(customer?.customer_code || "").trim().toUpperCase();
+      if (!codeKey || resolveLocalAvgDaysToPay(customer)) return;
+      try {
+        const supabaseClient = getSupabaseClient();
+        if (!supabaseClient) return;
+        const {
+          data: { session },
+        } = await supabaseClient.auth.getSession();
+        if (!session?.access_token) return;
+        const promise = prefetchCustomerAvgDaysForVisit({
+          accessToken: session.access_token,
+          customerCode: customer.customer_code,
+          customerName: customer.customer_name || "",
+          scope: accessScope,
+        });
+        avgDaysPrefetchByCodeRef.current.set(codeKey, promise);
+        const avgDays = await promise;
+        if (!avgDays) return;
+        setVisitStatusRows((current) => current.map((row) => {
+          if (String(row.customer_code || "").trim().toUpperCase() !== codeKey) return row;
+          return {
+            ...row,
+            avg_days_to_pay: avgDays.avgDaysToPay ?? row.avg_days_to_pay ?? null,
+            avg_days_to_pay_6m: avgDays.avgDaysToPay6m ?? row.avg_days_to_pay_6m ?? null,
+          };
+        }));
+      } catch {
+        // Avg days is optional for the visit save itself.
+      }
+    })();
+
     try {
       const supabase = getSupabaseClient();
       if (!supabase) {
@@ -1343,16 +1387,30 @@ export default function MyDayPage({ mode = "default" } = {}) {
         savedAt: capturedAt,
         skipTimeline: true,
       });
-      const avgDaysToPay = customer.avg_days_to_pay == null || customer.avg_days_to_pay === ""
-        ? null
-        : Number(customer.avg_days_to_pay);
+      const customerCodeKey = String(customer.customer_code || "").trim().toUpperCase();
+      let avgDaysToPay = resolveLocalAvgDaysToPay(customer);
+      if (!avgDaysToPay && customerCodeKey) {
+        const pending = avgDaysPrefetchByCodeRef.current.get(customerCodeKey);
+        const prefetched = await awaitAvgDaysPrefetch(pending, 1500);
+        avgDaysToPay = resolveLocalAvgDaysToPay(prefetched);
+        if (avgDaysToPay) {
+          setVisitStatusRows((current) => current.map((row) => {
+            if (String(row.customer_code || "").trim().toUpperCase() !== customerCodeKey) return row;
+            return {
+              ...row,
+              avg_days_to_pay: avgDaysToPay.avgDaysToPay ?? row.avg_days_to_pay ?? null,
+              avg_days_to_pay_6m: avgDaysToPay.avgDaysToPay6m ?? row.avg_days_to_pay_6m ?? null,
+            };
+          }));
+        }
+      }
       summaryText = buildFieldVisitWhatsappSummary({
         customer,
         visitForm,
         salesmanName: formatCollectorDisplayName(profile || {}),
         salesmanCode: profile?.salesman_code || "",
         visitDistance,
-        avgDaysToPay: Number.isFinite(avgDaysToPay) ? avgDaysToPay : null,
+        avgDaysToPay,
       });
       void copyTextToClipboard(summaryText);
       const platform = await resolveGpsCapturePlatform();

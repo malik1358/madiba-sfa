@@ -16,6 +16,8 @@ test("My Day visit and status updates are offline-first", () => {
   assert.match(source, /type: "customer_inactive"/);
   assert.match(source, /type: "customer_active"/);
   assert.match(source, /type: "prospect_foreclose"/);
+  assert.match(source, /prefetchCustomerAvgDaysForVisit/);
+  assert.match(source, /resolveLocalAvgDaysToPay/);
   assert.doesNotMatch(source, /loadCustomerAvgDaysToPay/);
 });
 

@@ -122,14 +122,14 @@ export async function loadSalesRowsByCustomer(admin, customerCodes = []) {
   return byCode;
 }
 
-export function resolveCollectionAvgDaysToPay({
+export function resolveCollectionAvgDaysBehavior({
   transactions = [],
   receipts = [],
   invoices = [],
   totalOutstanding = 0,
   todayIso = new Date().toISOString(),
 } = {}) {
-  const behavior = buildPaymentBehavior({
+  return buildPaymentBehavior({
     transactions,
     receipts,
     outstandingCustomer: {
@@ -139,6 +139,10 @@ export function resolveCollectionAvgDaysToPay({
     outstandingInvoices: Array.isArray(invoices) ? invoices : [],
     todayIso,
   });
+}
+
+export function resolveCollectionAvgDaysToPay(options = {}) {
+  const behavior = resolveCollectionAvgDaysBehavior(options);
   return behavior?.avgDaysToPay ?? null;
 }
 
@@ -167,7 +171,7 @@ export function attachAvgDaysToPayToRecords(records, {
       0,
     );
     const receipts = lookupByCustomerCode(receiptsByCustomer, code);
-    const avgDaysToPay = resolveCollectionAvgDaysToPay({
+    const behavior = resolveCollectionAvgDaysBehavior({
       transactions: lookupByCustomerCode(salesByCustomer, code),
       receipts,
       invoices,
@@ -176,7 +180,8 @@ export function attachAvgDaysToPayToRecords(records, {
     });
     return {
       ...record,
-      avg_days_to_pay: avgDaysToPay,
+      avg_days_to_pay: behavior?.avgDaysToPay ?? null,
+      avg_days_to_pay_6m: behavior?.avgDaysToPay6m ?? null,
       last_receipt_date: resolveLastReceiptDate(receipts),
     };
   });

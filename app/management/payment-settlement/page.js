@@ -212,7 +212,7 @@ export default function PaymentSettlementPage() {
     setError("");
     try {
       const session = await resolveAuthSession(supabase);
-      const response = await fetch("/api/customers/visible", {
+      const response = await fetch("/api/customers/visible?includeInactive=1", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const payload = await response.json().catch(() => ({}));

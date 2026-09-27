@@ -708,6 +708,7 @@ async function loadActiveSalesMixByCustomer(admin) {
 export async function buildVisibleCustomersForScope(admin, scope, options = {}) {
   const includeRecentSales = Boolean(options.includeRecentSales);
   const includeOutstanding = Boolean(options.includeOutstanding);
+  const includeInactive = Boolean(options.includeInactive);
   const excludeBuildingMaterial = Boolean(options.excludeBuildingMaterial);
   const warnings = [];
 
@@ -777,6 +778,16 @@ export async function buildVisibleCustomersForScope(admin, scope, options = {}) 
     }
   }
 
+  if (includeInactive && inactiveCustomers.length > 0) {
+    responseCustomers = dedupeCustomerMasterRows([
+      ...responseCustomers,
+      ...inactiveCustomers.map((customer) => ({
+        ...customer,
+        is_active: false,
+      })),
+    ]);
+  }
+
   return {
     customers: responseCustomers,
     inactiveCustomers,
@@ -804,6 +815,7 @@ export async function GET(request) {
     const searchParams = new URL(request.url).searchParams;
     const includeRecentSales = searchParams.get("includeRecentSales") === "1";
     const includeOutstanding = searchParams.get("includeOutstanding") === "1";
+    const includeInactive = searchParams.get("includeInactive") === "1";
     const excludeBuildingMaterial = searchParams.get("excludeBuildingMaterial") === "1";
 
     const {
@@ -813,6 +825,7 @@ export async function GET(request) {
     } = await buildVisibleCustomersForScope(admin, scope, {
       includeRecentSales,
       includeOutstanding,
+      includeInactive,
       excludeBuildingMaterial,
     });
 

@@ -31,6 +31,7 @@ Constants in `app/lib/workdayActivity.js`:
 
 - Compare customer and salesman codes with the same normalizer the caller already uses (trim, uppercase, collapse spaces). Leading-code extraction exists because some sheets store `CODE Name` in one cell (`extractLeadingCustomerCodeAndName`).
 - A customer can remain visible to the previous salesman after transfer (`previous_salesman_code`).
+- Inactive customers stay visible in report customer pickers (for example Customer Audit, Payment Settlement, Outstanding Compare). Visit suggestions still keep inactive customers out of the active suggestion pool.
 - Mutual visibility is hardcoded in `MUTUAL_SALESMAN_GROUPS`: `JUNAID`, `PARVEZ`, `SOYEB` see each other’s books.
 - One-way book shares are hardcoded in `SHARED_CUSTOMER_BOOKS` and can also be rows in `customer_book_shares`. Examples in code: Ahmed Nabil’s book is shared to Abdalla; Mohammed Mubeen’s book is shared to Moinudin Khaja and Junaid. Do not “clean up” these names as unused data.
 - “Do not use” customers (name matches `/do\s*not\s*use/i`) are excluded from visit status.

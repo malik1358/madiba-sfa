@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-27** — Inactive customers are no longer hidden from report customer lists: `/api/customers/visible` now supports `includeInactive=1`, and Customer Audit / Payment Settlement / Outstanding Compare request that flag. Visit suggestions keep the active-only suggestion pool behavior.
 - **2026-09-27** — Field visit WhatsApp was missing Avg days to pay after offline-first saves stopped calling history at save time and My Day never stored `avg_days_to_pay` on the visit row. Fix: prefetch avg days (lifetime + 6m) when the visit form opens, keep both on the local row, and include them in field/collection WhatsApp the same way orders already do. Save still stays offline-first (no `loadCustomerAvgDaysToPay` on the save path).
 - **2026-09-26** — Daily Visit Report **Distance from previous** on visit/order rows now sums path since the previous customer stop through idle GPS **and** lunch/login bridge rows (`transaction_type` LUNCH_BREAK_*/MORNING_ATTENDANCE/END_OF_DAY were previously treated as anchors because only `entry_type` was checked). Example: Visit #2 → idle → lunch → Visit #3 shows ~22.8 km on Visit #3, not only the last hop.
 - **2026-09-26** — Daily Visit Report **Distance from previous** on visit/order rows now includes path through idle GPS pings (`resolveDistanceFromPreviousVisitKm`). Example: visit → idle 0.04 km → visit shows 0.04 on the next visit. Route total still sums hop-by-hop (no double count).

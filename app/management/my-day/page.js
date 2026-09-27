@@ -1233,13 +1233,16 @@ export default function MyDayPage({ mode = "default" } = {}) {
           data: { session },
         } = await supabaseClient.auth.getSession();
         if (!session?.access_token) return;
-        const promise = prefetchCustomerAvgDaysForVisit({
+        const existingPromise = avgDaysPrefetchByCodeRef.current.get(codeKey);
+        const promise = existingPromise || prefetchCustomerAvgDaysForVisit({
           accessToken: session.access_token,
           customerCode: customer.customer_code,
           customerName: customer.customer_name || "",
           scope: accessScope,
         });
-        avgDaysPrefetchByCodeRef.current.set(codeKey, promise);
+        if (!existingPromise) {
+          avgDaysPrefetchByCodeRef.current.set(codeKey, promise);
+        }
         try {
           const avgDays = await promise;
           if (!avgDays) return;

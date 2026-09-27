@@ -779,13 +779,23 @@ export async function buildVisibleCustomersForScope(admin, scope, options = {}) 
   }
 
   if (includeInactive && inactiveCustomers.length > 0) {
-    responseCustomers = dedupeCustomerMasterRows([
-      ...responseCustomers,
-      ...inactiveCustomers.map((customer) => ({
+    const mergedCustomersByCode = new Map();
+    for (const customer of responseCustomers) {
+      const codeKey = String(customer?.customer_code || "").trim().toUpperCase();
+      if (!codeKey) continue;
+      mergedCustomersByCode.set(codeKey, customer);
+    }
+    for (const customer of inactiveCustomers) {
+      const codeKey = String(customer?.customer_code || "").trim().toUpperCase();
+      if (!codeKey) continue;
+      const existing = mergedCustomersByCode.get(codeKey);
+      mergedCustomersByCode.set(codeKey, {
+        ...(existing || {}),
         ...customer,
         is_active: false,
-      })),
-    ]);
+      });
+    }
+    responseCustomers = dedupeCustomerMasterRows(Array.from(mergedCustomersByCode.values()));
   }
 
   return {

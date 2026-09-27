@@ -244,7 +244,7 @@ export default function OutstandingComparePage() {
     setError("");
     try {
       const session = await resolveAuthSession(supabase);
-      const response = await fetch("/api/customers/visible?includeOutstanding=1", {
+      const response = await fetch("/api/customers/visible?includeOutstanding=1&includeInactive=1", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const payload = await response.json().catch(() => ({}));

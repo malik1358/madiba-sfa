@@ -205,14 +205,27 @@ export async function loadVisitDistanceMetrics({
   location = null,
   customer = {},
   savedAt = "",
+  // Field collection saves should not wait on activity-timeline reads.
+  // Distance-from-customer still works from GPS + customer coords; the
+  // payment-collections API recomputes previous-visit distance on sync.
+  skipTimeline = false,
+  timelineTimeoutMs = 0,
 } = {}) {
   const capturedAt = savedAt || new Date().toISOString();
   let previousGpsRow = null;
   let previousVisitRow = null;
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-  if (!offline) {
+  if (!offline && !skipTimeline) {
     try {
-      const timeline = await loadTodayVisitTimelineRows(supabase, userId);
+      const timelinePromise = loadTodayVisitTimelineRows(supabase, userId);
+      const timeline = timelineTimeoutMs > 0
+        ? await Promise.race([
+          timelinePromise,
+          new Promise((resolve) => {
+            setTimeout(() => resolve([]), timelineTimeoutMs);
+          }),
+        ])
+        : await timelinePromise;
       ({ previousGpsRow, previousVisitRow } = findPreviousVisitDistanceAnchors(timeline, capturedAt));
     } catch {
       previousGpsRow = null;

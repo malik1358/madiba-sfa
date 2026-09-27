@@ -208,16 +208,26 @@ export function buildOutstandingNoGpsEmail({
   rows = [],
   includeSalesman = false,
   reportUrl = "",
+  audience = "",
 } = {}) {
   const totals = summarizeOutstandingNoGpsRows(rows);
   const who = String(salesmanName || "").trim();
+  const normalizedAudience = String(audience || "").trim().toLowerCase()
+    || (includeSalesman ? (who ? "boss" : "digest") : "salesman");
   const subject = who
     ? `Outstanding without GPS ${date} — ${who} (${totals.customers})`
     : `Outstanding without GPS ${date} — all salesmen (${totals.customers})`;
   const link = String(reportUrl || "").trim();
-  const intro = who
+  const intro = normalizedAudience === "salesman"
     ? `Please visit these customers who have an outstanding balance and no saved GPS on the customer master. Collect what you can and update their GPS from Customer Master.`
-    : `Customers with an outstanding balance and no saved GPS on the customer master, grouped by salesman. Zia, Asrar Ahmed, and legal transfers are excluded.`;
+    : normalizedAudience === "boss"
+      ? `Customers with an outstanding balance and no saved GPS across your subordinates. Review and follow up with the team so each customer is visited and the master GPS is updated.`
+      : `Customers with an outstanding balance and no saved GPS on the customer master, grouped by salesman. Zia, Asrar Ahmed, and legal transfers are excluded.`;
+  const footer = normalizedAudience === "salesman"
+    ? "Visit each customer, handle the outstanding balance, and save GPS from Customer Master so the location sticks on the master record. Bosses receive a separate consolidated team email."
+    : normalizedAudience === "boss"
+      ? "This team digest groups all included subordinate customers in one email so bosses do not need to track repeated CC copies."
+      : "This digest groups all included customers in one email by salesman.";
 
   const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #0f172a; line-height: 1.5; background:#f8fafc; padding:16px;">
   <div style="max-width:960px;margin:0 auto;background:#ffffff;border:1px solid #99f6e4;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,76,92,0.12);">
@@ -232,7 +242,7 @@ export function buildOutstandingNoGpsEmail({
       ${summaryCards(totals)}
       ${renderTable(rows, { includeSalesman })}
       ${link ? `<p style="margin:16px 0 0;"><a href="${escapeHtml(link)}" style="color:#0f766e;font-weight:700;">Open Outstanding Without GPS report</a></p>` : ""}
-      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">Visit each customer, handle the outstanding balance, and save GPS from Customer Master so the location sticks on the master record. Hierarchy bosses are copied on each salesman email.</p>
+      <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">${escapeHtml(footer)}</p>
     </div>
   </div>
 </div>`;

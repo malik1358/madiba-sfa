@@ -5,6 +5,15 @@ import {
   toNumber,
 } from "./outstanding.js";
 import { amountInclVatFromExcl, vatRateForProduct } from "./regionalPricing.js";
+import {
+  HISTORIC_PERFORMANCE_MONTHS,
+  ksaMonthKey,
+  shiftMonthKey,
+} from "./monthlyPerformanceMonths.js";
+import { getKsaDateString } from "./workdayActivity.js";
+
+export const HISTORIC_PERFORMANCE_SHORT_LABEL = `${HISTORIC_PERFORMANCE_MONTHS}m`;
+export const HISTORIC_PERFORMANCE_PERIOD_LABEL = `Last ${HISTORIC_PERFORMANCE_MONTHS} months`;
 
 function dateOnly(value) {
   return parseOutstandingSheetDate(value) || String(value || "").slice(0, 10);
@@ -44,12 +53,32 @@ function median(values) {
   return sorted[mid];
 }
 
-/** Same-day or next-day credit notes count as an immediate reverse (not payment). */
+/** Same-day / next-day full CNs reverse immediately; exact item+qty mirrors reverse on any later date. */
 export const IMMEDIATE_REVERSAL_MAX_DAYS = 1;
 const AMOUNT_TOLERANCE = 0.02;
 
 function invoiceKey(invoiceDate, voucherNumber) {
   return `${dateOnly(invoiceDate)}::${String(voucherNumber || "").trim()}`;
+}
+
+/**
+ * Cash sales vouchers (RC / DC / JC / …): region letter(s) + C in the voucher
+ * type/prefix (before /). Credit-style codes like CNFD / CN / RNFD are excluded.
+ */
+export function isCashSalesVoucher(voucherNumber = "") {
+  const raw = String(voucherNumber || "").trim().toUpperCase();
+  if (!raw) return false;
+  if (
+    /^(CN|SR)([\s\/-]|$)/.test(raw)
+    || /\bCN\b/.test(raw)
+    || raw.includes("CREDIT NOTE")
+    || raw.includes("SALES RETURN")
+  ) {
+    return false;
+  }
+  const prefix = (raw.split(/[\/\-\s]/)[0] || raw).replace(/[^A-Z0-9]/g, "");
+  // RC, DC, JC, C, RC100 — not CNFD / NFD / RNFD.
+  return /^[A-Z]{0,2}C\d*$/.test(prefix);
 }
 
 function normalizeRef(value) {
@@ -100,6 +129,37 @@ function itemOverlapCount(leftItems = [], rightItems = []) {
     right.set(key, available - 1);
   });
   return overlap;
+}
+
+/** Multiset equality for fingerprint lists (order-independent). */
+function fingerprintMultisetsEqual(leftItems = [], rightItems = []) {
+  const left = Array.isArray(leftItems) ? leftItems.filter(Boolean) : [];
+  const right = Array.isArray(rightItems) ? rightItems.filter(Boolean) : [];
+  if (left.length === 0 || right.length === 0) return false;
+  if (left.length !== right.length) return false;
+  return itemOverlapCount(left, right) === left.length;
+}
+
+/** code|qty only — ignores line amount so CN sign/abs differences still match. */
+function itemQtyFingerprints(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((fingerprint) => {
+      const parts = String(fingerprint || "").split("|");
+      if (parts.length < 2) return "";
+      return `${parts[0]}|${parts[1]}`;
+    })
+    .filter(Boolean);
+}
+
+/**
+ * True when both vouchers share the same item codes and quantities
+ * (full mirror return / reissue cancel), regardless of line-amount sign.
+ */
+export function itemsAndQtyExactlyMatch(leftItems = [], rightItems = []) {
+  return fingerprintMultisetsEqual(
+    itemQtyFingerprints(leftItems),
+    itemQtyFingerprints(rightItems),
+  );
 }
 
 function itemCodeOverlapCount(leftCodes = [], rightCodes = []) {
@@ -438,8 +498,10 @@ export function attachCreditNotesToInvoices(invoiceRows = [], creditNotes = []) 
 }
 
 /**
- * Pair invoices with credit notes dated the same day or up to maxDays after
- * for the same full amount (classic void / same-day reissue cancel).
+ * Pair invoices with credit notes that fully reverse them.
+ *
+ * 1) Same-day or next-day full amount (classic void / reissue cancel).
+ * 2) Any later date when amount AND items+qty exactly match (full mirror CN).
  *
  * A CN dated BEFORE an invoice must not reverse that later sale — that pattern
  * is a live reissue (e.g. CN 121 voids 2384 on 31 Dec; sale 2397 on 1 Jan stays open).
@@ -472,10 +534,9 @@ export function findImmediateCreditNoteReversals(
       .map((note, index) => {
         if (toNumber(note.remaining) <= AMOUNT_TOLERANCE) return null;
 
-        // CN must be on/after the invoice (0 … maxDays). Never reverse a later sale
-        // with an earlier CN — that later voucher is the live reissue.
+        // CN must be on/after the invoice. Never reverse a later sale with an earlier CN.
         const offset = isoDayOffset(invoice.invoice_date, note.credit_date);
-        if (offset == null || offset < 0 || offset > maxDays) return null;
+        if (offset == null || offset < 0) return null;
         const days = offset;
 
         const amountOk = amountsMatch(note.remaining, invoiceAmount)
@@ -497,15 +558,26 @@ export function findImmediateCreditNoteReversals(
           || (Array.isArray(note.items) && note.items.length > 0);
         const invoiceHasItems = (Array.isArray(invoice.item_codes) && invoice.item_codes.length > 0)
           || (Array.isArray(invoice.items) && invoice.items.length > 0);
-        // When both sides have items, require overlap so a same-amount CN does not
-        // reverse the wrong bill within the window.
-        if (noteHasItems && invoiceHasItems && itemOverlap <= 0 && !refHit) return null;
+        const exactMirror = noteHasItems
+          && invoiceHasItems
+          && itemsAndQtyExactlyMatch(note.items, invoice.items);
+        const withinWindow = days <= maxDays;
+
+        // Outside the ±1 day window: only exact amount + exact items/qty mirrors reverse.
+        if (!withinWindow && !exactMirror) return null;
+
+        // Inside the window: when both sides have items, require overlap (or ref) so a
+        // same-amount CN does not reverse the wrong bill.
+        if (withinWindow && noteHasItems && invoiceHasItems && itemOverlap <= 0 && !refHit) {
+          return null;
+        }
 
         return {
           note,
           index,
           days,
-          score: (refHit ? 1000 : 0)
+          score: (exactMirror ? 5000 : 0)
+            + (refHit ? 1000 : 0)
             + (itemOverlap * 50)
             + (amountOk ? 100 : 0)
             + (noteVoucher ? 25 : 0)
@@ -556,7 +628,9 @@ export function buildSortedReceipts(receipts = []) {
 
 /**
  * FIFO-match receipts onto sales invoices to estimate days-to-pay.
- * Receipts have no invoice ref, so oldest open invoice is paid first.
+ * Cash sales vouchers (RC / DC / JC — C in the voucher prefix) take the first
+ * receipt on/after the invoice before older credit bills; any leftover then
+ * follows normal oldest-open FIFO across remaining invoices.
  * Invoices reversed immediately by credit notes are excluded from matching.
  * Unpaired credit notes (orphans) also reduce open remaining in date order,
  * so Tally blank CNs that wipe older bills are reflected in Machine Open.
@@ -567,7 +641,12 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
   const { reversals, reversedKeys } = findImmediateCreditNoteReversals(allInvoices, creditNotes);
   const invoices = allInvoices
     .filter((invoice) => !reversedKeys.has(invoiceKey(invoice.invoice_date, invoice.voucher_number)))
-    .map((invoice) => ({ ...invoice, remaining: toNumber(invoice.amount) }));
+    .map((invoice) => ({
+      ...invoice,
+      remaining: toNumber(invoice.amount),
+      is_cash: isCashSalesVoucher(invoice.voucher_number),
+      cash_first_receipt_used: false,
+    }));
   const pairedCreditNoteKeys = new Set(
     reversals.map((row) => invoiceKey(row.credit_note_date, row.credit_note_voucher)),
   );
@@ -599,30 +678,46 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
   const allocations = [];
   let unmatchedReceiptAmount = 0;
 
+  function applyToInvoice(event, invoice, remaining) {
+    if (remaining <= 0.009 || invoice.remaining <= 0.009) return remaining;
+    if (event.date < invoice.invoice_date) return remaining;
+    const applied = Math.min(remaining, invoice.remaining);
+    if (event.kind === "receipt" && applied > 0) {
+      const days = isoDaysBetween(event.date, invoice.invoice_date);
+      if (days != null) {
+        allocations.push({
+          invoice_date: invoice.invoice_date,
+          voucher_number: invoice.voucher_number,
+          receipt_date: event.date,
+          vch_no: event.vch_no,
+          amount: applied,
+          days,
+        });
+      }
+    }
+    invoice.remaining = Math.max(0, invoice.remaining - applied);
+    return Math.max(0, remaining - applied);
+  }
+
   for (const event of events) {
     let remaining = event.amount;
 
+    // Receipts: first receipt after each cash invoice settles that cash bill first.
+    if (event.kind === "receipt") {
+      for (const invoice of invoices) {
+        if (remaining <= 0.009) break;
+        if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;
+        if (invoice.remaining <= 0.009) continue;
+        if (event.date < invoice.invoice_date) continue;
+        remaining = applyToInvoice(event, invoice, remaining);
+        invoice.cash_first_receipt_used = true;
+      }
+    }
+
+    // Balance (and unpaired CNs): normal oldest-open FIFO.
     for (const invoice of invoices) {
       if (remaining <= 0.009) break;
-      if (invoice.remaining <= 0.009) continue;
-      if (event.date < invoice.invoice_date) continue;
-
-      const applied = Math.min(remaining, invoice.remaining);
-      if (event.kind === "receipt" && applied > 0) {
-        const days = isoDaysBetween(event.date, invoice.invoice_date);
-        if (days != null) {
-          allocations.push({
-            invoice_date: invoice.invoice_date,
-            voucher_number: invoice.voucher_number,
-            receipt_date: event.date,
-            vch_no: event.vch_no,
-            amount: applied,
-            days,
-          });
-        }
-      }
-      invoice.remaining = Math.max(0, invoice.remaining - applied);
-      remaining = Math.max(0, remaining - applied);
+      remaining = applyToInvoice(event, invoice, remaining);
     }
 
     if (event.kind === "receipt") {
@@ -733,11 +828,57 @@ export function weightedAverageDays(observations = []) {
   return weighted / totalAmount;
 }
 
+/**
+ * First day of the month that starts the rolling historic-performance avg-days
+ * window (same span as the BI performance months helper).
+ */
+export function avgDaysHistoricPerformanceFromIso(todayIso = new Date().toISOString().slice(0, 10)) {
+  const today = dateOnly(todayIso) || getKsaDateString();
+  const currentMonth = /^\d{4}-\d{2}-\d{2}$/.test(today)
+    ? today.slice(0, 7)
+    : ksaMonthKey();
+  const fromMonth = shiftMonthKey(currentMonth, -HISTORIC_PERFORMANCE_MONTHS);
+  return fromMonth ? `${fromMonth}-01` : "";
+}
+
+export function filterPaymentLedgerFromDate({
+  transactions = [],
+  receipts = [],
+  outstandingInvoices = [],
+  fromIso = "",
+} = {}) {
+  const from = dateOnly(fromIso);
+  if (!from) {
+    return {
+      transactions: Array.isArray(transactions) ? transactions : [],
+      receipts: Array.isArray(receipts) ? receipts : [],
+      outstandingInvoices: Array.isArray(outstandingInvoices) ? outstandingInvoices : [],
+    };
+  }
+  const onOrAfter = (value) => {
+    const iso = dateOnly(value);
+    return iso && iso >= from;
+  };
+  return {
+    transactions: (Array.isArray(transactions) ? transactions : [])
+      .filter((row) => onOrAfter(row?.transaction_date)),
+    receipts: (Array.isArray(receipts) ? receipts : [])
+      .filter((row) => onOrAfter(row?.receipt_date)),
+    outstandingInvoices: (Array.isArray(outstandingInvoices) ? outstandingInvoices : [])
+      .filter((row) => onOrAfter(row?.invoice_date)),
+  };
+}
+
 export function emptyPaymentBehavior() {
   return {
     avgDaysToPay: null,
     avgDaysPaidOnly: null,
     medianDaysToPay: null,
+    avgDaysToPay6m: null,
+    avgDaysPaidOnly6m: null,
+    medianDaysToPay6m: null,
+    openAmountInAvg6m: 0,
+    avgDays6mFromDate: "",
     paidAllocationCount: 0,
     paidAmount: 0,
     openAmountInAvg: 0,
@@ -753,13 +894,7 @@ export function emptyPaymentBehavior() {
   };
 }
 
-/**
- * Combine sales+receipt FIFO days-to-pay with outstanding unpaid bill stats.
- * Avg days starts from paid receipts, then blends only open unpaid invoices
- * older than that paid-only avg (so open age can raise, never reduce, the avg).
- * Paid-only avg is kept as avgDaysPaidOnly for comparison.
- */
-export function buildPaymentBehavior({
+function buildPaymentBehaviorCore({
   transactions = [],
   receipts = [],
   outstandingCustomer = null,
@@ -846,6 +981,11 @@ export function buildPaymentBehavior({
     avgDaysToPay,
     avgDaysPaidOnly,
     medianDaysToPay,
+    avgDaysToPay6m: null,
+    avgDaysPaidOnly6m: null,
+    medianDaysToPay6m: null,
+    openAmountInAvg6m: 0,
+    avgDays6mFromDate: "",
     paidAllocationCount: allocations.length,
     paidAmount,
     openAmountInAvg,
@@ -861,9 +1001,94 @@ export function buildPaymentBehavior({
   };
 }
 
+/**
+ * Combine sales+receipt FIFO days-to-pay with outstanding unpaid bill stats.
+ * Avg days starts from paid receipts, then blends only open unpaid invoices
+ * older than that paid-only avg (so open age can raise, never reduce, the avg).
+ * Paid-only avg is kept as avgDaysPaidOnly for comparison.
+ * Also computes a parallel 6-month window (sales + receipts + open from that
+ * from-date) exposed as avgDaysToPay6m / avgDaysPaidOnly6m.
+ */
+export function buildPaymentBehavior({
+  transactions = [],
+  receipts = [],
+  outstandingCustomer = null,
+  outstandingInvoices = [],
+  todayIso = new Date().toISOString().slice(0, 10),
+  includeSixMonthWindow = true,
+} = {}) {
+  const lifetime = buildPaymentBehaviorCore({
+    transactions,
+    receipts,
+    outstandingCustomer,
+    outstandingInvoices,
+    todayIso,
+  });
+
+  if (!includeSixMonthWindow) {
+    return lifetime;
+  }
+
+  const fromIso = avgDaysHistoricPerformanceFromIso(todayIso);
+  const windowed = filterPaymentLedgerFromDate({
+    transactions,
+    receipts,
+    outstandingInvoices,
+    fromIso,
+  });
+  const six = buildPaymentBehaviorCore({
+    transactions: windowed.transactions,
+    receipts: windowed.receipts,
+    outstandingCustomer,
+    outstandingInvoices: windowed.outstandingInvoices,
+    todayIso,
+  });
+
+  let summaryLabel = lifetime.summaryLabel;
+  if (six.avgDaysToPay != null) {
+    const hasLifetime = lifetime.avgDaysToPay != null
+      || (summaryLabel && summaryLabel !== "Payment days unavailable");
+    summaryLabel += hasLifetime
+      ? ` · ${HISTORIC_PERFORMANCE_SHORT_LABEL} ${six.avgDaysToPay}`
+      : `Avg ${six.avgDaysToPay} days to pay (${HISTORIC_PERFORMANCE_SHORT_LABEL})`;
+  }
+
+  return {
+    ...lifetime,
+    avgDaysToPay6m: six.avgDaysToPay,
+    avgDaysPaidOnly6m: six.avgDaysPaidOnly,
+    medianDaysToPay6m: six.medianDaysToPay,
+    openAmountInAvg6m: six.openAmountInAvg,
+    avgDays6mFromDate: fromIso,
+    summaryLabel,
+  };
+}
+
 export function formatPaymentDaysLabel(behavior) {
-  if (!behavior || behavior.avgDaysToPay == null) return "—";
+  if (!behavior || behavior.avgDaysToPay == null) {
+    if (behavior?.avgDaysToPay6m != null) return `${HISTORIC_PERFORMANCE_SHORT_LABEL} ${behavior.avgDaysToPay6m} days`;
+    return "—";
+  }
+  if (behavior.avgDaysToPay6m != null) {
+    return `${behavior.avgDaysToPay} days · ${HISTORIC_PERFORMANCE_SHORT_LABEL} ${behavior.avgDaysToPay6m}`;
+  }
   return `${behavior.avgDaysToPay} days`;
+}
+
+/** Compact dual label for PDF / one-line summaries. */
+export function formatAvgDaysDualLine(behavior, {
+  lifetimePrefix = "Avg days to pay",
+  sixMonthLabel = HISTORIC_PERFORMANCE_SHORT_LABEL,
+} = {}) {
+  if (!behavior) return "";
+  const lifetime = behavior.avgDaysToPay;
+  const six = behavior.avgDaysToPay6m;
+  if (lifetime == null && six == null) return "";
+  if (lifetime != null && six != null) {
+    return `${lifetimePrefix}: ${lifetime} lifetime · ${six} (${sixMonthLabel})`;
+  }
+  if (lifetime != null) return `${lifetimePrefix}: ${lifetime}`;
+  return `${lifetimePrefix}: ${six} (${sixMonthLabel})`;
 }
 
 /**
@@ -1423,4 +1648,3 @@ export function buildPaymentSettlementLedger({
     outstandingInvoices: outstanding.invoices,
   };
 }
-

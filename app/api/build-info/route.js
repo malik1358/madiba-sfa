@@ -1,16 +1,15 @@
 import { resolveBuildId, resolveBuildTime, formatBuildDateTime } from "../../lib/buildInfo.js";
+import { resolveAppEnvironmentLabel } from "../../lib/appEnvironment.js";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const isStaging = process.env.NEXT_PUBLIC_APP_ENV === "staging";
-
   return Response.json(
     {
       success: true,
       buildId: resolveBuildId(),
       buildTime: formatBuildDateTime(resolveBuildTime()),
-      environment: isStaging ? "STAGING" : "PRODUCTION",
+      environment: resolveAppEnvironmentLabel(),
     },
     {
       headers: {

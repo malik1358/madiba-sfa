@@ -61,6 +61,7 @@ body {
   letter-spacing: 0;
 }
 
+.globalAppStatusLOCAL,
 .globalAppStatusSTAGING {
   top: 34px;
   background: #39464a;
@@ -4967,15 +4968,18 @@ th:has(.moduleTableColumnFilterInput) {
   border: 1px solid #c7d7dc;
   border-radius: 8px;
   background: #ffffff;
+  color: #18333a;
 }
 
 .moduleCollectorCheckboxList .moduleCollectorCheckbox {
   margin: 0;
   cursor: pointer;
+  color: #18333a;
 }
 
 .moduleCollectorCheckboxList .moduleCollectorCheckbox span {
   line-height: 1.3;
+  color: #18333a;
 }
 
 .moduleCollectorCheckboxSelectAll {
@@ -5499,12 +5503,55 @@ th:has(.moduleTableColumnFilterInput) {
 .moduleCollectorColumnFilterSelect {
   min-height: 30px;
   max-height: 72px;
+  color: #18333a;
+  background: #ffffff;
+}
+
+.moduleCollectorColumnFilterSelect option {
+  color: #18333a;
+  background: #ffffff;
 }
 
 .moduleCollectorColumnFilterClear {
   width: 100%;
   font-size: 0.75rem;
   white-space: nowrap;
+}
+
+.moduleCollectorSortButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.moduleCollectorSortButton:hover,
+.moduleCollectorSortButton:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+.moduleCollectorDateRangeFilter {
+  display: grid;
+  gap: 4px;
+  min-width: 118px;
+}
+
+.moduleCollectorDateRangeFilter .moduleCollectorColumnFilter {
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
@@ -7800,6 +7847,70 @@ button.moduleBiDashKpi:focus-visible {
 
 .moduleQtyLimitItemMeta {
   margin: 0;
+}
+
+.moduleQtyLimitItemChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.moduleQtyLimitItemChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid #c5d8dd;
+  border-radius: 999px;
+  background: #f3fbfb;
+  color: #073f4c;
+}
+
+.moduleQtyLimitItemChipLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.moduleQtyLimitItemChipLabel strong {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.moduleQtyLimitItemChipLabel small {
+  font-size: 11px;
+  color: #4a646b;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.moduleQtyLimitItemChipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: #0f4c5c;
+  color: #ffffff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.moduleQtyLimitItemChipRemove:hover {
+  background: #0a3843;
 }
 
 .moduleQtyLimitSummary {

@@ -1,0 +1,108 @@
+name: Receipts Not in Tally Email
+
+on:
+  schedule:
+    # 05:35 UTC = 08:35 KSA — month-to-date open list (mistakes excluded).
+    # Skips Friday holiday the same way as other daily digests (Sun–Thu + Sat).
+    - cron: "35 5 * * 0-3,5,6"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Report date YYYY-MM-DD (KSA). Empty = current KSA day for cron logic."
+        required: false
+        default: ""
+      to:
+        description: "Test-only recipient override (skips default digest list)."
+        required: false
+        default: ""
+      force:
+        description: "Force send even if already marked sent"
+        required: false
+        default: "true"
+
+permissions: {}
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger receipts not in Tally email endpoint
+        env:
+          RECEIPTS_NOT_IN_TALLY_EMAIL_URL: ${{ secrets.RECEIPTS_NOT_IN_TALLY_EMAIL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+          INPUT_TO: ${{ github.event.inputs.to }}
+          INPUT_FORCE: ${{ github.event.inputs.force }}
+        run: |
+          DEFAULT_RECEIPTS_NOT_IN_TALLY_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/receipts-not-in-tally-email'
+          RECEIPTS_NOT_IN_TALLY_EMAIL_URL_TRIMMED="$(printf '%s' "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE="$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_TRIMMED"
+
+          if [[ -z "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE" ]]; then
+            echo "RECEIPTS_NOT_IN_TALLY_EMAIL_URL secret is missing; falling back to default endpoint."
+            RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE="$DEFAULT_RECEIPTS_NOT_IN_TALLY_EMAIL_URL"
+          elif [[ ! "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE" =~ /api/cron/receipts-not-in-tally-email([/?].*)?$ ]]; then
+            echo "RECEIPTS_NOT_IN_TALLY_EMAIL_URL secret does not point to /api/cron/receipts-not-in-tally-email; falling back to default endpoint."
+            RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE="$DEFAULT_RECEIPTS_NOT_IN_TALLY_EMAIL_URL"
+          fi
+
+          if [[ -z "$CRON_SECRET" ]]; then
+            echo "CRON_SECRET secret is missing"
+            exit 1
+          fi
+
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          export EVENT_NAME
+          export FORCE_VALUE="${INPUT_FORCE:-}"
+          export DATE_VALUE="$(printf '%s' "$INPUT_DATE" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          export TO_VALUE="$(printf '%s' "$INPUT_TO" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          python3 - <<'PY' > payload.json
+          import json, os
+          event_name = os.environ.get("EVENT_NAME", "").strip()
+          force_raw = os.environ.get("FORCE_VALUE", "").strip().lower()
+          if event_name == "schedule":
+            force = False
+          elif force_raw:
+            force = force_raw not in ("0", "false", "no")
+          else:
+            force = True
+          payload = {"force": force}
+          date = os.environ.get("DATE_VALUE", "").strip()
+          to = os.environ.get("TO_VALUE", "").strip()
+          if date:
+            payload["date"] = date
+          if to:
+            payload["to"] = to
+          print(json.dumps(payload))
+          PY
+
+          echo "Request payload:"
+          cat payload.json
+
+          post_report() {
+            local target_url="$1"
+            curl -sS -L --post301 --post302 --post303 --max-time 180 -o response.json -w "%{http_code}" -X POST "$target_url" \
+              -H "x-cron-secret: $CRON_SECRET_TRIMMED" \
+              -H "Content-Type: application/json" \
+              --data @payload.json
+          }
+
+          status_code="$(post_report "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE")"
+
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE" != "$DEFAULT_RECEIPTS_NOT_IN_TALLY_EMAIL_URL" ]]; then
+            echo "Primary RECEIPTS_NOT_IN_TALLY_EMAIL_URL failed with HTTP $status_code; retrying default endpoint."
+            RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE="$DEFAULT_RECEIPTS_NOT_IN_TALLY_EMAIL_URL"
+            status_code="$(post_report "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE")"
+          fi
+
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+            echo "Receipts not in Tally email failed with HTTP $status_code"
+            cat response.json
+            exit 1
+          fi
+
+          echo "Receipts not in Tally email succeeded with HTTP $status_code"
+          cat response.json

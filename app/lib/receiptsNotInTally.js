@@ -1,8 +1,21 @@
-import { isSameOutstandingCustomer, toNumber } from "./outstanding.js";
+import {
+  extractLeadingCustomerCodeAndName,
+  isSameOutstandingCustomer,
+  normalizeName,
+  toNumber,
+} from "./outstanding.js";
 import { getKsaDateString } from "./workdayActivity.js";
 
-export const RECEIPT_AMOUNT_TOLERANCE = 0.02;
-export const DEFAULT_DATE_WINDOW_DAYS = 1;
+/** Allow small bank/cash rounding differences (e.g. 4896.00 vs 4895.90). */
+export const RECEIPT_AMOUNT_TOLERANCE = 1;
+export const DEFAULT_DATE_WINDOW_DAYS = 5;
+/** Drop near-identical double-saves by the same collector on the same day. */
+export const DUPLICATE_VISIT_MINUTES = 5;
+const RECEIPT_MATCH_CUSTOMER_RANK_WEIGHT = 100000;
+const RECEIPT_MATCH_DAY_GAP_WEIGHT = 1000;
+const RECEIPT_MATCH_AMOUNT_GAP_WEIGHT = 10;
+const RECEIPT_MATCH_MISSING_VOUCHER_PENALTY = 1;
+const RECEIPT_MATCH_INDEX_TIEBREAKER_WEIGHT = 0.0001;
 
 function parseIsoDate(value) {
   const text = String(value || "").trim().slice(0, 10);
@@ -22,6 +35,62 @@ function daysBetween(leftIso, rightIso) {
 
 function amountsMatch(left, right, tolerance = RECEIPT_AMOUNT_TOLERANCE) {
   return Math.abs(toNumber(left) - toNumber(right)) <= tolerance;
+}
+
+function comparableReceiptCustomerName(customerCode, customerName) {
+  const rawName = String(customerName || "").trim();
+  const rawCode = String(customerCode || "").trim();
+  // Prefer the party name only — do not append the account code, or different
+  // codes for the same trading name (1106 vs 1108) would never match.
+  const fromName = extractLeadingCustomerCodeAndName(rawName);
+  let name = fromName.customer_name || rawName;
+  if (!name && rawCode) {
+    name = extractLeadingCustomerCodeAndName(rawCode).customer_name || "";
+  }
+  if (rawCode) {
+    const escaped = rawCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    name = name
+      .replace(new RegExp(`^${escaped}[\\s_-]+`, "i"), "")
+      .replace(new RegExp(`[\\s_-]+${escaped}$`, "i"), "")
+      .trim();
+  }
+  return normalizeName(name)
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Receipt reconcile match: prefer account-code identity, but also accept the same
+ * trading name when Tally and the app use different customer codes (e.g. 1106 vs 1108).
+ */
+export function isSameReceiptCustomer(receiptCode, receiptName, visitCode, visitName) {
+  if (isSameOutstandingCustomer(receiptCode, receiptName, visitCode, visitName)) {
+    return true;
+  }
+  const left = comparableReceiptCustomerName(receiptCode, receiptName);
+  const right = comparableReceiptCustomerName(visitCode, visitName);
+  return Boolean(left && right && left.length >= 8 && left === right);
+}
+
+function receiptCustomerMatchRank(receipt, visit) {
+  if (isSameOutstandingCustomer(
+    receipt.customer_code,
+    receipt.customer_name || receipt.particulars,
+    visit.customer_code,
+    visit.customer_name,
+  )) {
+    return 0;
+  }
+  if (isSameReceiptCustomer(
+    receipt.customer_code,
+    receipt.customer_name || receipt.particulars,
+    visit.customer_code,
+    visit.customer_name,
+  )) {
+    return 1;
+  }
+  return null;
 }
 
 function normalizeAppVisit(visit) {
@@ -57,29 +126,102 @@ function normalizeTallyReceipt(receipt) {
   };
 }
 
+function visitTimestampMs(visit) {
+  const ts = Date.parse(String(visit?.saved_at || ""));
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function isNearDuplicateAppVisit(left, right, {
+  amountTolerance = RECEIPT_AMOUNT_TOLERANCE,
+  withinMinutes = DUPLICATE_VISIT_MINUTES,
+} = {}) {
+  if (!left || !right) return false;
+  if (String(left.customer_code || "").trim().toUpperCase()
+    !== String(right.customer_code || "").trim().toUpperCase()) {
+    return false;
+  }
+  if (String(left.created_by || "") !== String(right.created_by || "")) return false;
+  if (!amountsMatch(left.amount_received, right.amount_received, amountTolerance)) return false;
+  if (String(left.visit_date || "") !== String(right.visit_date || "")) return false;
+
+  const leftTs = visitTimestampMs(left);
+  const rightTs = visitTimestampMs(right);
+  if (leftTs === null || rightTs === null) return true;
+  return Math.abs(leftTs - rightTs) <= Math.max(0, Number(withinMinutes) || 0) * 60 * 1000;
+}
+
+/**
+ * Keep the earliest visit when the same collector records the same customer + amount
+ * on the same day within a short time window (typical double-save).
+ */
+export function dedupeAppReceiptVisits(appVisits = [], {
+  amountTolerance = RECEIPT_AMOUNT_TOLERANCE,
+  withinMinutes = DUPLICATE_VISIT_MINUTES,
+} = {}) {
+  const sorted = (Array.isArray(appVisits) ? appVisits : [])
+    .map(normalizeAppVisit)
+    .sort((left, right) => {
+      if (left.visit_date !== right.visit_date) return left.visit_date.localeCompare(right.visit_date);
+      const leftTs = visitTimestampMs(left);
+      const rightTs = visitTimestampMs(right);
+      if (leftTs !== null && rightTs !== null && leftTs !== rightTs) return leftTs - rightTs;
+      return String(left.id || "").localeCompare(String(right.id || ""));
+    });
+
+  const kept = [];
+  const duplicatesDropped = [];
+
+  sorted.forEach((visit) => {
+    const original = kept.find((candidate) => isNearDuplicateAppVisit(candidate, visit, {
+      amountTolerance,
+      withinMinutes,
+    }));
+    if (original) {
+      duplicatesDropped.push({
+        id: visit.id,
+        duplicateOf: original.id,
+        visit_date: visit.visit_date,
+        customer_code: visit.customer_code,
+        amount_received: visit.amount_received,
+        created_by: visit.created_by,
+        saved_at: visit.saved_at,
+      });
+      return;
+    }
+    kept.push(visit);
+  });
+
+  return { visits: kept, duplicatesDropped };
+}
+
 /**
  * Soft-join app FUNDS_RECEIVED visits to Tally receipt register rows.
  * Matching: same customer + amount within tolerance + date within windowDays.
  * Exact-date matches run first so nearby visits do not steal same-day vouchers.
  * Each Tally row is consumed at most once.
+ * Near-duplicate app visits (same collector/customer/amount/day within a few minutes)
+ * are collapsed before matching so double-saves are not listed as missing.
  */
 export function reconcileAppReceiptsToTally({
   appVisits = [],
   tallyReceipts = [],
   windowDays = DEFAULT_DATE_WINDOW_DAYS,
   amountTolerance = RECEIPT_AMOUNT_TOLERANCE,
+  duplicateWithinMinutes = DUPLICATE_VISIT_MINUTES,
 } = {}) {
-  const visits = (Array.isArray(appVisits) ? appVisits : [])
-    .map(normalizeAppVisit)
-    .filter((visit) => (
+  const { visits: dedupedVisits, duplicatesDropped } = dedupeAppReceiptVisits(
+    (Array.isArray(appVisits) ? appVisits : []).map(normalizeAppVisit).filter((visit) => (
       visit.amount_received > 0
       && (visit.visit_outcome === "FUNDS_RECEIVED" || !visit.visit_outcome)
       && visit.visit_date
-    ))
-    .sort((left, right) => {
-      if (left.visit_date !== right.visit_date) return left.visit_date.localeCompare(right.visit_date);
-      return String(left.saved_at || "").localeCompare(String(right.saved_at || ""));
-    });
+    )),
+    { amountTolerance, withinMinutes: duplicateWithinMinutes },
+  );
+
+  const visits = dedupedVisits.sort((left, right) => {
+    if (left.visit_date !== right.visit_date) return left.visit_date.localeCompare(right.visit_date);
+    return String(left.saved_at || "").localeCompare(String(right.saved_at || ""));
+  });
 
   const tallyPool = (Array.isArray(tallyReceipts) ? tallyReceipts : [])
     .map(normalizeTallyReceipt)
@@ -95,19 +237,19 @@ export function reconcileAppReceiptsToTally({
     tallyPool.forEach((receipt) => {
       if (receipt._used) return;
       if (!amountsMatch(visit.amount_received, receipt.amount, amountTolerance)) return;
-      if (!isSameOutstandingCustomer(
-        receipt.customer_code,
-        receipt.customer_name || receipt.particulars,
-        visit.customer_code,
-        visit.customer_name,
-      )) {
-        return;
-      }
+      const customerRank = receiptCustomerMatchRank(receipt, visit);
+      if (customerRank === null) return;
 
       const dayGap = daysBetween(visit.visit_date, receipt.receipt_date);
       if (dayGap > maxDayGap) return;
 
-      const score = (dayGap * 1000) + (receipt.vch_no ? 0 : 1) + (receipt._index * 0.0001);
+      const amountGap = Math.abs(visit.amount_received - receipt.amount);
+      // Prefer exact customer codes, closer dates, then closer amounts.
+      const score = (customerRank * RECEIPT_MATCH_CUSTOMER_RANK_WEIGHT)
+        + (dayGap * RECEIPT_MATCH_DAY_GAP_WEIGHT)
+        + (amountGap * RECEIPT_MATCH_AMOUNT_GAP_WEIGHT)
+        + (receipt.vch_no ? 0 : RECEIPT_MATCH_MISSING_VOUCHER_PENALTY)
+        + (receipt._index * RECEIPT_MATCH_INDEX_TIEBREAKER_WEIGHT);
       if (score < bestScore) {
         bestScore = score;
         best = receipt;
@@ -161,13 +303,16 @@ export function reconcileAppReceiptsToTally({
     appCount: visits.length,
     matchedCount: matched.length,
     missingCount: missingInTally.length,
+    duplicateCount: duplicatesDropped.length,
     appTotal,
     matchedTotal,
     missingTotal,
     windowDays,
     amountTolerance,
+    duplicateWithinMinutes,
     missingInTally,
     matched,
+    duplicatesDropped,
   };
 }
 

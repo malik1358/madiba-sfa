@@ -10,5 +10,6 @@ Whenever you add or change a tabular report (management tables, Business Intelli
 - Color the header row (teal `#0f4c5c` on white text) and zebra the body rows.
 - Color value cells that compare to a previous period: green when up, red when down, a distinct tone for the current MTD/QTD/YTD period.
 - Add a Total column and/or Total footer wherever amounts can be cross-checked.
+- Always add Excel-style column filter options on every filterable column (`ExcelColumnFilter` / `BiExcelHead` + `useBiExcelFilters`, or `ExportableTable` column filters). Never ship a data table without column filters.
 - Reuse existing classes: `moduleTable`, `moduleBiTable`, `moduleBiMonthCell--up`, `moduleBiMonthCell--down`, `moduleBiMonthCell--current`, `moduleBiTotalCol`.
 - Do not ship a plain white spreadsheet-style table.

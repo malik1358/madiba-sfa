@@ -218,6 +218,48 @@ export function formatLatestCollectionVisitRemark(latestCollection) {
   return arabic || english;
 }
 
+/** Display label for a collection-queue row's salesman (upload name, then invoices, then code). */
+export function getCollectionSalesmanLabel(row) {
+  const name = String(row?.salesman_name || "").trim();
+  const code = String(row?.salesman_code || row?.current_salesman_code || "").trim();
+
+  if (name && !isPlaceholderSalesmanValue(name)) {
+    if (
+      code
+      && !isPlaceholderSalesmanValue(code)
+      && normalizeCode(code) !== normalizeCode(name)
+    ) {
+      return `${code} - ${name}`;
+    }
+    return name;
+  }
+
+  const fromInvoices = pickOutstandingSalesmanName(row?.invoices);
+  if (fromInvoices) return fromInvoices;
+
+  if (code && !isPlaceholderSalesmanValue(code)) return code;
+  return "";
+}
+
+export function buildCollectionSalesmanOptions(rows) {
+  const byKey = new Map();
+
+  (rows || []).forEach((row) => {
+    const label = getCollectionSalesmanLabel(row);
+    const key = String(label || "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (!key) return;
+
+    const existing = byKey.get(key);
+    if (!existing || label.length > existing.length) {
+      byKey.set(key, label);
+    }
+  });
+
+  return [...byKey.entries()]
+    .map(([key, label]) => ({ key, label }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
 export const COLLECTION_VISIT_REMARK_REQUIRED_ERROR =
   "Remark is required when full overdue is not received.";
 

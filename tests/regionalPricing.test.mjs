@@ -92,6 +92,24 @@ test("value discount applies when SKU value exceeds 5000 SAR", () => {
   assert.equal(Number(above.rate.toFixed(2)), 97);
 });
 
+test("value discount ignores negative or invalid quantities", () => {
+  const negative = getPricedOrderLine({
+    wholesaleRate: 100,
+    quantity: -60,
+    valueDiscountRate: 0.03,
+  });
+  const invalid = getPricedOrderLine({
+    wholesaleRate: 100,
+    quantity: Number.NaN,
+    valueDiscountRate: 0.03,
+  });
+
+  assert.equal(negative.applied.value, false);
+  assert.equal(negative.lineValue, 0);
+  assert.equal(invalid.applied.value, false);
+  assert.equal(invalid.lineValue, 0);
+});
+
 test("cash and value discounts can stack", () => {
   const priced = getPricedOrderLine({
     wholesaleRate: 114.33,
@@ -103,7 +121,7 @@ test("cash and value discounts can stack", () => {
 
   assert.equal(priced.applied.cash, true);
   assert.equal(priced.applied.value, true);
-  assert.equal(Number(priced.rate.toFixed(4)), Number((114.33 * 0.97 * 0.98).toFixed(4)));
+  assert.equal(Number(priced.rate.toFixed(4)), Number((114.33 * (1 - 0.03 - 0.02)).toFixed(4)));
 });
 
 test("A004190 credit line over 5000 applies value only; cash stacks both", () => {
@@ -136,7 +154,7 @@ test("A004190 credit line over 5000 applies value only; cash stacks both", () =>
   assert.equal(formatDiscountDetail(0.02, false, 0), "—");
   assert.equal(cash.applied.value, true);
   assert.equal(cash.applied.cash, true);
-  assert.equal(Number(cash.rate.toFixed(4)), Number((58 * 0.96 * 0.96).toFixed(4)));
+  assert.equal(Number(cash.rate.toFixed(4)), Number((58 * (1 - 0.04 - 0.04)).toFixed(4)));
 });
 
 test("buildEffectivePriceList uses current quantity for value discount", () => {
@@ -148,7 +166,7 @@ test("buildEffectivePriceList uses current quantity for value discount", () => {
     quantities: { A006061: 50 },
   });
 
-  assert.equal(Number(prices.A006061.toFixed(4)), Number((114.33 * 0.97 * 0.98).toFixed(4)));
+  assert.equal(Number(prices.A006061.toFixed(4)), Number((114.33 * (1 - 0.03 - 0.02)).toFixed(4)));
 });
 
 test("resolveOrderPricingRegion prefers the logged-in user region", () => {

@@ -72,6 +72,12 @@ export async function GET(request) {
     const allCustomers = await fetchOutstandingNoGpsCustomers(admin, {
       search,
       sort,
+      actor: {
+        id: access.user?.id,
+        role: access.role,
+        salesman_name: "Visit GPS backfill",
+      },
+      backfillFromVisits: true,
     });
     const salesmen = uniqueOutstandingNoGpsSalesmen(allCustomers);
     const customers = allCustomers.filter((row) => customerMatchesSalesmanFilter(row, salesmanFilter));

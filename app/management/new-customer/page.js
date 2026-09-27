@@ -759,6 +759,7 @@ export default function NewCustomerPage() {
         location,
         customer: prospectCustomer,
         savedAt: capturedAt,
+        skipTimeline: true,
       });
 
       const result = await postJsonResilient({
@@ -998,24 +999,30 @@ export default function NewCustomerPage() {
       const session = await resolveAuthSession(supabase, 8000);
       if (!session?.access_token) throw new Error("Please login again.");
 
-      const response = await fetch("/api/prospects", {
+      const saveResult = await postJsonResilient({
+        url: "/api/prospects",
         method: "PATCH",
+        queueFirst: true,
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({
+        jsonBody: {
           action: "link_customer",
           id: linkProspect.id,
           customer_code: customerCode,
           copy_gps: linkCopyGps,
           overwrite_customer_gps: linkOverwriteGps,
-        }),
+        },
+        metadata: {
+          type: "prospect_link_customer",
+          prospectId: linkProspect.id,
+          customerCode,
+        },
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || "Unable to link prospect to customer.");
+      if (!saveResult.success) {
+        throw new Error(saveResult.message || "Unable to link prospect to customer.");
       }
+      const result = saveResult.payload || {};
 
       setRecent((current) => current.map((row) => (
         row.id === linkProspect.id
@@ -1028,9 +1035,15 @@ export default function NewCustomerPage() {
       )));
 
       const gpsNote = result.linkedCustomer?.gpsCopied ? " GPS copied to customer." : "";
-      setMessage(`Prospect ${linkProspect.id} linked to ${customerCode}.${gpsNote}`);
+      setMessage(
+        saveResult.queued
+          ? `Prospect ${linkProspect.id} link to ${customerCode} saved on this device.`
+          : `Prospect ${linkProspect.id} linked to ${customerCode}.${gpsNote}`,
+      );
       closeLinkProspect();
-      await loadProspectsList(session.access_token);
+      if (!saveResult.queued) {
+        await loadProspectsList(session.access_token);
+      }
     } catch (err) {
       setError(err.message || "Unable to link prospect to customer.");
     } finally {

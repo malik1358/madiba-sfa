@@ -21,7 +21,11 @@ import {
   mergeServerAndQueuedOrders,
 } from "../../lib/queuedSalesOrders";
 import { processOfflineQueue } from "../../lib/offlineApi";
-import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
+import {
+  formatSalesOrderNumber,
+  orderNeedsSalesmanNumberRepair,
+} from "../../lib/salesOrderNumber";
+import { formatOrderSalesmanLabel } from "../../lib/orderSalesman";
 import { findOutstandingForCustomer, sortBucketLabels } from "../../lib/outstanding";
 import { evaluateCreditApproval, outstandingAmountOverSixtyDays } from "../../lib/creditApproval";
 import { formatComparisonDiff } from "../../lib/invoiceOrderCompare";
@@ -163,7 +167,7 @@ function pendingOrderFilterValues(order, meta, approvalRequired = null, outstand
   return {
     orderId: displayOrDash(formatSalesOrderNumber(order) || order.id),
     customer: displayOrDash(order.customer_name || order.customer_code),
-    salesman: displayOrDash(order.salesman_code),
+    salesman: displayOrDash(formatOrderSalesmanLabel(order)),
     status: displayOrDash(order.status),
     invoiceStatus: displayOrDash(invoiceStatus),
     uploadedAt: displayOrDash(formatDateTime(meta?.invoiceUploadedAt)),
@@ -1050,7 +1054,50 @@ export default function PendingOrdersPage() {
             .filter((order) => !isQueuedPendingOrderId(order.id))
             .map((order) => order.id);
           void loadInvoiceMeta(serverIds, session.user.id, merged);
+          void repairBareNumericOrderNumbers(merged, session.access_token);
           return merged;
+        }
+
+        async function repairBareNumericOrderNumbers(orderList, accessToken) {
+          if (!accessToken) return;
+          const needsRepair = (Array.isArray(orderList) ? orderList : [])
+            .filter((order) => orderNeedsSalesmanNumberRepair(order))
+            .slice(0, 40)
+            .map((order) => Number(order.id))
+            .filter((id) => Number.isFinite(id) && id > 0);
+          if (needsRepair.length === 0) return;
+
+          try {
+            const response = await fetch("/api/sales-orders", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                action: "repair_order_numbers",
+                orderIds: needsRepair,
+              }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.success || !Array.isArray(payload.repaired)) return;
+            if (cancelled || payload.repaired.length === 0) return;
+
+            const byId = new Map(
+              payload.repaired.map((row) => [String(row.orderId), String(row.orderNumber || "").trim()]),
+            );
+            setOrders((current) => {
+              const next = (current || []).map((order) => {
+                const repairedNumber = byId.get(String(order.id));
+                if (!repairedNumber) return order;
+                return { ...order, order_number: repairedNumber };
+              });
+              ordersRef.current = next;
+              return next;
+            });
+          } catch {
+            // Queue still usable if repair fails; numbers stay until next load.
+          }
         }
 
         const ordersResult = await fetchPendingOrdersCached(session.user.id, scope, {
@@ -1464,7 +1511,7 @@ export default function PendingOrdersPage() {
         "Order Number": formatSalesOrderNumber(order) || order.id,
         Customer: order.customer_name || order.customer_code || "-",
         "Customer Code": order.customer_code || "-",
-        Salesman: order.salesman_code || "-",
+        Salesman: formatOrderSalesmanLabel(order),
         Status: order.status || "-",
         "Invoice Status": invoiceStatusText(
           invoiceMetaByOrder?.[order.id],
@@ -1724,7 +1771,7 @@ export default function PendingOrdersPage() {
                         <tr>
                           <td>{formatSalesOrderNumber(order) || order.id}</td>
                           <td>{order.customer_name || order.customer_code || "-"}</td>
-                          <td>{order.salesman_code || "-"}</td>
+                          <td>{formatOrderSalesmanLabel(order)}</td>
                           <td>{order.status || "-"}</td>
                           <td>{invoiceStatusText(meta, order, approvalRequired)}</td>
                           <td>{formatDateTime(meta?.invoiceUploadedAt)}</td>

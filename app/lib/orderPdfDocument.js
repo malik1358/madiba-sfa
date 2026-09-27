@@ -9,6 +9,7 @@ import {
   syncOutstandingCustomerFromInvoices,
   toNumber as parseOutstandingNumber,
 } from "./outstanding.js";
+import { formatAvgDaysDualLine } from "./paymentBehavior.js";
 import {
   DEFAULT_PAYMENT_TYPE,
   DEFAULT_PRICING_REGION,
@@ -35,6 +36,7 @@ import {
   formatSalesOrderNumber,
   salesOrderNumberNeedsLiveLookup,
 } from "./salesOrderNumber.js";
+import { formatOrderSalesmanLabel } from "./orderSalesman.js";
 import { isQueuedPendingOrderId } from "./queuedSalesOrders.js";
 import {
   isPlaceholderProspectName,
@@ -243,6 +245,7 @@ export function buildOrderPdfSnapshotFromSavedOrder({
     customerCode: order?.customer_code || "",
     customerName: order?.customer_name || "",
     salesmanCode: order?.salesman_code || "",
+    salesmanName: order?.salesman_name || order?.salesman_code || "",
     paymentType: resolvedPayment,
     pricingRegion: resolvedRegion,
     itemCount: pdfLines.length,
@@ -641,7 +644,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
 
   const rightColX = marginX + contentWidth - 210;
   doc.text(`Date: ${formatKsaDateTime(snapshot.savedAtIso)}`, rightColX, marginTop + 24);
-  doc.text(`Salesman: ${snapshot.salesmanCode || "-"}`, rightColX, marginTop + 40);
+  doc.text(`Salesman: ${formatOrderSalesmanLabel(snapshot)}`, rightColX, marginTop + 40);
 
   doc.setLineWidth(0.8);
   doc.roundedRect(marginX, marginTop + 120, contentWidth, 56, 5, 5);
@@ -737,14 +740,18 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   const outstandingInvoices = Array.isArray(snapshot.outstanding?.customerInvoices) ? snapshot.outstanding.customerInvoices : [];
   const paymentBehavior = analytics?.paymentBehavior || null;
   const paymentBehaviorLines = [];
-  if (paymentBehavior?.avgDaysToPay != null) {
-    paymentBehaviorLines.push(`Avg days to pay: ${paymentBehavior.avgDaysToPay}`);
+  const avgDaysLine = formatAvgDaysDualLine(paymentBehavior);
+  if (avgDaysLine) {
+    paymentBehaviorLines.push(avgDaysLine);
     if (Number(paymentBehavior.openAmountInAvg || 0) > 0.009) {
       paymentBehaviorLines[0] += " (paid avg + open older than that avg)";
-    } else {
+    } else if (paymentBehavior.avgDaysToPay != null) {
       paymentBehaviorLines[0] += " from receipts";
     }
-    if (paymentBehavior.medianDaysToPay != null && paymentBehavior.medianDaysToPay !== paymentBehavior.avgDaysToPay) {
+    if (
+      paymentBehavior.medianDaysToPay != null
+      && paymentBehavior.medianDaysToPay !== paymentBehavior.avgDaysToPay
+    ) {
       paymentBehaviorLines[0] += ` (median ${paymentBehavior.medianDaysToPay})`;
     }
     if (

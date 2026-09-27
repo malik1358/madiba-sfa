@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildCollectionVisitSummary,
+  buildStoredCollectionVisitSummary,
   isPriorityCollectionVisit,
   patchCollectionVisitSummaryEnglishRemark,
   patchCollectionVisitSummaryVisitDistance,
@@ -14,6 +15,36 @@ test("isPriorityCollectionVisit marks high and medium probability as priority", 
   assert.equal(isPriorityCollectionVisit({ probabilityLabel: "Medium" }).isPriority, true);
   assert.equal(isPriorityCollectionVisit({ probabilityLabel: "Low" }).isPriority, false);
   assert.equal(isPriorityCollectionVisit({ queuePriority: 4 }).isPriority, true);
+});
+
+test("buildStoredCollectionVisitSummary uses queue salesman, not collector scheduled_by_name", () => {
+  const summary = buildStoredCollectionVisitSummary(
+    {
+      customer_name: "1224 RAWAAT MAZAYA GIFT LUXURIES TRADING CO.",
+      customer_code: "1224",
+      salesman_name: "AHMED NABIL",
+      outstanding_0_30: 0,
+      outstanding_30_60: 61312.25,
+      outstanding_61_90: 0,
+      outstanding_91_120: 0,
+      outstanding_above_120: 14795.35,
+    },
+    {
+      visit_outcome: "ASKED_COME_LATER",
+      payment_status: "PROMISED",
+      receipt_mode: "CASH",
+      next_visit_at: "2026-09-27",
+      remark_arabic: "غير موجود",
+      remark_english: "unavailable",
+      scheduled_by_name: "collector",
+      queue_priority: 6,
+      probability_label: "High",
+      visit_number_for_day: 10,
+    },
+  );
+
+  assert.match(summary, /Salesman: AHMED NABIL/);
+  assert.doesNotMatch(summary, /Salesman: collector/);
 });
 
 test("buildCollectionVisitSummary includes queue priority and outstanding buckets", () => {

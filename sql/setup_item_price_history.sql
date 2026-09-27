@@ -1,5 +1,5 @@
 -- Item catalog price history (one row per price change per region).
--- Run in Supabase SQL Editor (staging and production).
+-- Run in Supabase SQL Editor (local/dev and production).
 
 begin;
 

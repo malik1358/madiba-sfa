@@ -86,6 +86,103 @@ test("maybePromptCustomerLocationUpdate syncs in-memory customer GPS when accept
   }
 });
 
+test("maybePromptCustomerLocationUpdate auto-promotes when customer has no saved GPS", async () => {
+  const originalFetch = globalThis.fetch;
+  const customer = {
+    customer_code: "1533",
+    customer_name: "Metro al tawfeer",
+    area: "",
+  };
+  const entry = { latitude: 24.7136, longitude: 46.6753 };
+  let patchCount = 0;
+  let promptCalls = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    if (String(options.method || "GET").toUpperCase() === "PATCH") {
+      patchCount += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          customer: {
+            ...customer,
+            latitude: entry.latitude,
+            longitude: entry.longitude,
+          },
+        }),
+      };
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  try {
+    const {
+      CUSTOMER_LOCATION_UPDATE_UPDATE,
+      maybePromptCustomerLocationUpdate,
+    } = await import("../app/lib/customerLocation.js");
+
+    const choice = await maybePromptCustomerLocationUpdate({
+      customerCode: "1533",
+      customerName: "Metro al tawfeer",
+      entryLocation: entry,
+      accessToken: "token",
+      customer,
+      skipReverseGeocode: true,
+      promptChoice: async () => {
+        promptCalls += 1;
+        return CUSTOMER_LOCATION_UPDATE_UPDATE;
+      },
+    });
+
+    assert.equal(choice, CUSTOMER_LOCATION_UPDATE_UPDATE);
+    assert.equal(promptCalls, 0);
+    assert.equal(patchCount, 1);
+    assert.equal(customer.latitude, entry.latitude);
+    assert.equal(customer.longitude, entry.longitude);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("evaluateCustomerLocationUpdatePrompt marks missing GPS for auto-promote", async () => {
+  const { evaluateCustomerLocationUpdatePrompt } = await import("../app/lib/customerLocation.js");
+  const prompt = await evaluateCustomerLocationUpdatePrompt({
+    customerCode: "1566",
+    customerName: "Qutouf Al-Basem Company",
+    entryLocation: { latitude: 24.7136, longitude: 46.6753 },
+    accessToken: "token",
+    customer: {
+      customer_code: "1566",
+      customer_name: "Qutouf Al-Basem Company",
+    },
+    skipReverseGeocode: true,
+  });
+
+  assert.equal(prompt?.autoPromote, true);
+  assert.match(String(prompt?.message || ""), /No saved location/);
+});
+
+test("evaluateCustomerLocationUpdatePrompt does not auto-promote when far from saved GPS", async () => {
+  const { evaluateCustomerLocationUpdatePrompt } = await import("../app/lib/customerLocation.js");
+  const prompt = await evaluateCustomerLocationUpdatePrompt({
+    customerCode: "1234",
+    customerName: "Far Shop",
+    entryLocation: { latitude: 24.8, longitude: 46.8 },
+    accessToken: "token",
+    customer: {
+      customer_code: "1234",
+      customer_name: "Far Shop",
+      latitude: 24.7136,
+      longitude: 46.6753,
+      area: "Olaya",
+    },
+    skipReverseGeocode: true,
+  });
+
+  assert.equal(prompt?.autoPromote, false);
+  assert.match(String(prompt?.message || ""), /km from/);
+});
+
 test("isFarFromCustomer flags entries beyond threshold", () => {
   const entry = { latitude: 24.7136, longitude: 46.6753 };
   const customer = { latitude: 24.7236, longitude: 46.6853 };

@@ -3,6 +3,7 @@ import { getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
 export const MORNING_ATTENDANCE_COMPLETE_EVENT = "madiba-morning-attendance-complete";
 export const WORKDAY_TIMES_UPDATED_EVENT = "madiba-workday-times-updated";
+export const WORKDAY_GATE_READY_EVENT = WORKDAY_TIMES_UPDATED_EVENT;
 
 export function isMorningAttendanceRequiredForRole(role) {
   return normalizeAccessRole(role) !== "admin" && shouldRequireTransactionGps(role);

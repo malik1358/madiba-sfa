@@ -647,6 +647,9 @@ async function attachOutstandingValues(admin, customers) {
       outstanding_30_60: summary.days30To60,
       outstanding_61_90: summary.days61To90,
       outstanding_above_90: summary.daysAbove90,
+      salesman_name: String(outstanding?.salesman || "").trim()
+        || String(customer?.current_salesman_code || "").trim()
+        || "",
     };
   });
 }
@@ -705,6 +708,7 @@ async function loadActiveSalesMixByCustomer(admin) {
 export async function buildVisibleCustomersForScope(admin, scope, options = {}) {
   const includeRecentSales = Boolean(options.includeRecentSales);
   const includeOutstanding = Boolean(options.includeOutstanding);
+  const includeInactive = Boolean(options.includeInactive);
   const excludeBuildingMaterial = Boolean(options.excludeBuildingMaterial);
   const warnings = [];
 
@@ -769,8 +773,19 @@ export async function buildVisibleCustomersForScope(admin, scope, options = {}) 
         outstanding_30_60: Number(customer?.outstanding_30_60 || 0),
         outstanding_61_90: Number(customer?.outstanding_61_90 || 0),
         outstanding_above_90: Number(customer?.outstanding_above_90 || 0),
+        salesman_name: String(customer?.salesman_name || customer?.current_salesman_code || "").trim(),
       }));
     }
+  }
+
+  if (includeInactive && inactiveCustomers.length > 0) {
+    responseCustomers = dedupeCustomerMasterRows([
+      ...responseCustomers,
+      ...inactiveCustomers.map((customer) => ({
+        ...customer,
+        is_active: false,
+      })),
+    ]);
   }
 
   return {
@@ -800,6 +815,7 @@ export async function GET(request) {
     const searchParams = new URL(request.url).searchParams;
     const includeRecentSales = searchParams.get("includeRecentSales") === "1";
     const includeOutstanding = searchParams.get("includeOutstanding") === "1";
+    const includeInactive = searchParams.get("includeInactive") === "1";
     const excludeBuildingMaterial = searchParams.get("excludeBuildingMaterial") === "1";
 
     const {
@@ -809,6 +825,7 @@ export async function GET(request) {
     } = await buildVisibleCustomersForScope(admin, scope, {
       includeRecentSales,
       includeOutstanding,
+      includeInactive,
       excludeBuildingMaterial,
     });
 

@@ -1,6 +1,9 @@
 import { hasGpsCoordinates } from "./geo.js";
 import { formatIdleDuration, formatNarrativeTime } from "./collectionDaySummary.js";
-import { formatWorkingHours } from "./workdayActivity.js";
+import { formatWorkingHours, getKsaDateTimeParts } from "./workdayActivity.js";
+
+/** Day-route working hours count only non-far customer stops from this KSA hour onward. */
+export const DAY_ROUTE_WORKING_HOURS_START_HOUR = 8;
 
 const NEAR_CUSTOMER_TRANSACTION_TYPES = new Set([
   "VISIT_REPORT",
@@ -204,6 +207,12 @@ function isNearCustomerTransaction(item) {
   return !item?.isFarFromCustomer;
 }
 
+function isAtOrAfterDayRouteWorkingHoursStart(ts) {
+  if (!Number.isFinite(ts)) return false;
+  const { hour } = getKsaDateTimeParts(new Date(ts));
+  return hour >= DAY_ROUTE_WORKING_HOURS_START_HOUR;
+}
+
 export function extractWorkdayTimesFromRoute(source = []) {
   const ordered = [...(source || [])]
     .map((item) => {
@@ -236,51 +245,82 @@ function nearCustomerTransactions(source = []) {
         ts,
       };
     })
-    .filter((item) => item.at && Number.isFinite(item.ts) && isNearCustomerTransaction(item))
+    .filter((item) => (
+      item.at
+      && Number.isFinite(item.ts)
+      && isNearCustomerTransaction(item)
+      && isAtOrAfterDayRouteWorkingHoursStart(item.ts)
+    ))
     .sort((left, right) => left.ts - right.ts);
 }
 
-function lunchOverlapMs(start, end, lunchOutAt, lunchInAt) {
-  const lunchOut = Date.parse(String(lunchOutAt || ""));
-  const lunchIn = Date.parse(String(lunchInAt || ""));
-  if (Number.isFinite(lunchOut) && Number.isFinite(lunchIn) && lunchIn > lunchOut) {
-    const overlapStart = Math.max(start, lunchOut);
-    const overlapEnd = Math.min(end, lunchIn);
-    return overlapEnd > overlapStart ? overlapEnd - overlapStart : 0;
-  }
-  if (Number.isFinite(lunchOut) && !Number.isFinite(lunchIn) && lunchOut > start && lunchOut < end) {
-    return end - lunchOut;
-  }
-  return 0;
-}
-
-function workingMinutesFromNearTransactions({ startAt, endAt, lunchOutAt, lunchInAt }) {
+function spanMinutesBetween(startAt, endAt) {
   const start = Date.parse(String(startAt || ""));
   const end = Date.parse(String(endAt || ""));
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  return Math.round((end - start) / 60000);
+}
 
-  const totalMs = end - start - lunchOverlapMs(start, end, lunchOutAt, lunchInAt);
-  const minutes = Math.round(totalMs / 60000);
-  return minutes > 0 ? minutes : null;
+/**
+ * Prefer non-far customer stops around lunch:
+ * - morning: first near → last near strictly before lunch out
+ * - afternoon: first near strictly after lunch in → last near of the day
+ * Without lunch out: first near → last near of the day.
+ * Without lunch in: morning segment only (visits after lunch out are ignored).
+ */
+function workingMinutesFromNearLunchSegments(near, lunchOutAt, lunchInAt) {
+  if (!near.length) return { applied: false, minutes: null };
+
+  const lunchOut = Date.parse(String(lunchOutAt || ""));
+  const lunchIn = Date.parse(String(lunchInAt || ""));
+
+  if (!Number.isFinite(lunchOut)) {
+    if (near.length < 2) return { applied: true, minutes: null };
+    const mins = spanMinutesBetween(near[0].at, near[near.length - 1].at);
+    return { applied: true, minutes: mins > 0 ? mins : null };
+  }
+
+  const beforeLunch = near.filter((item) => item.ts < lunchOut);
+  const afterLunch = Number.isFinite(lunchIn)
+    ? near.filter((item) => item.ts > lunchIn)
+    : [];
+
+  if (!beforeLunch.length && !afterLunch.length) {
+    return { applied: false, minutes: null };
+  }
+
+  let total = 0;
+  if (beforeLunch.length >= 2) {
+    total += spanMinutesBetween(beforeLunch[0].at, beforeLunch[beforeLunch.length - 1].at);
+  }
+  if (afterLunch.length >= 2) {
+    total += spanMinutesBetween(afterLunch[0].at, afterLunch[afterLunch.length - 1].at);
+  }
+  return { applied: true, minutes: total > 0 ? total : null };
+}
+
+function formatDayRouteWorkingHoursValue(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return "0h";
+  return formatWorkingHours(minutes);
 }
 
 export function resolveDayRouteWorkingHours(source = []) {
   const near = nearCustomerTransactions(source);
-  if (!near.length) {
-    return { minutes: null, value: formatWorkingHours(null) };
+  const { lunchOutAt, lunchInAt } = extractWorkdayTimesFromRoute(source);
+
+  if (near.length) {
+    const nearResult = workingMinutesFromNearLunchSegments(near, lunchOutAt, lunchInAt);
+    if (nearResult.applied) {
+      const minutes = Number(nearResult.minutes || 0);
+      return {
+        minutes: minutes > 0 ? minutes : 0,
+        value: formatDayRouteWorkingHoursValue(minutes),
+      };
+    }
   }
 
-  const { lunchOutAt, lunchInAt } = extractWorkdayTimesFromRoute(source);
-  const minutes = workingMinutesFromNearTransactions({
-    startAt: near[0].at,
-    endAt: near[near.length - 1].at,
-    lunchOutAt,
-    lunchInAt,
-  });
-  return {
-    minutes,
-    value: formatWorkingHours(minutes),
-  };
+  // No non-far customer stops after 08:00 KSA → zero (login/logout/GPS alone do not count).
+  return { minutes: 0, value: "0h" };
 }
 
 export function buildNamedRouteStops(points = [], idleGaps = []) {

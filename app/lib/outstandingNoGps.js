@@ -1,9 +1,10 @@
-import { resolveCustomerMasterExportFields } from "./customerCode.js";
+import { canonicalCustomerCode, resolveCustomerMasterExportFields } from "./customerCode.js";
 import {
   customerHasSavedGps,
   fetchAllFilteredCustomers,
   readOutstandingDataset,
 } from "./customerMasterQuery.js";
+import { promoteEntryGpsToCustomerIfMissing } from "./customerGpsHistory.js";
 import {
   findOutstandingForCustomer,
   hydrateOutstandingInvoices,
@@ -17,6 +18,23 @@ import {
 } from "./paymentCollections.js";
 
 const VISIT_REPORT_LATEST_PREFIX = "visit_report_latest:";
+
+export function extractGpsFromVisitLocation(location) {
+  if (!location || typeof location !== "object") return null;
+  const latitude = Number(location.latitude ?? location.lat);
+  const longitude = Number(location.longitude ?? location.lng ?? location.lon);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (latitude === 0 || longitude === 0) return null;
+  return { latitude, longitude };
+}
+
+export function preferLaterVisitGps(current, candidate) {
+  if (!candidate?.latitude || !candidate?.longitude) return current || null;
+  if (!current) return candidate;
+  const currentMs = Date.parse(current.visitAt || "") || Number.NEGATIVE_INFINITY;
+  const candidateMs = Date.parse(candidate.visitAt || "") || Number.NEGATIVE_INFINITY;
+  return candidateMs >= currentMs ? candidate : current;
+}
 
 export function dateOnly(value) {
   const input = String(value || "").trim();
@@ -320,17 +338,158 @@ async function loadLastVisitByCustomer(admin, customerCodes) {
   return latest;
 }
 
+/**
+ * Latest entry GPS per customer from My Day visit reports and collection visits.
+ * Used to backfill customer master when older visits never promoted coordinates.
+ */
+export async function loadLastVisitGpsByCustomer(admin, customerCodes) {
+  const latest = new Map();
+  const codes = [...new Set(
+    (customerCodes || [])
+      .map((code) => String(code || "").trim().toUpperCase())
+      .filter(Boolean),
+  )];
+
+  if (codes.length === 0) return latest;
+
+  for (const batch of chunk(codes, 80)) {
+    const settingKeys = batch.map((code) => `${VISIT_REPORT_LATEST_PREFIX}${code}`);
+    const { data, error } = await admin
+      .from("system_settings")
+      .select("setting_key,setting_value")
+      .in("setting_key", settingKeys);
+
+    if (error && !isMissingRelationError(error)) throw error;
+
+    (data || []).forEach((row) => {
+      try {
+        const parsed = JSON.parse(String(row?.setting_value || "null"));
+        const customerCode = String(parsed?.customer_code || String(row?.setting_key || "").slice(VISIT_REPORT_LATEST_PREFIX.length))
+          .trim()
+          .toUpperCase();
+        const gps = extractGpsFromVisitLocation(parsed?.location);
+        if (!customerCode || !gps) return;
+        latest.set(customerCode, preferLaterVisitGps(latest.get(customerCode), {
+          ...gps,
+          visitAt: parsed?.captured_at || parsed?.saved_at || "",
+          source: "visit_report",
+        }));
+      } catch {
+        // Ignore malformed visit fallback records.
+      }
+    });
+  }
+
+  for (const batch of chunk(codes, 80)) {
+    const { data, error } = await admin
+      .from("collection_visits")
+      .select("customer_code,saved_at,latitude,longitude")
+      .in("customer_code", batch)
+      .order("saved_at", { ascending: false })
+      .limit(4000);
+
+    if (error && isMissingRelationError(error)) break;
+    if (error && String(error.message || "").toLowerCase().includes("column")) break;
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const customerCode = String(row?.customer_code || "").trim().toUpperCase();
+      const gps = extractGpsFromVisitLocation(row);
+      if (!customerCode || !gps) return;
+      latest.set(customerCode, preferLaterVisitGps(latest.get(customerCode), {
+        ...gps,
+        visitAt: row?.saved_at || "",
+        source: "collection_visit",
+      }));
+    });
+  }
+
+  return latest;
+}
+
+function visitGpsLookupCodes(row) {
+  const stored = String(row?.stored_customer_code || "").trim();
+  const display = String(row?.customer_code || "").trim();
+  const canonical = canonicalCustomerCode(stored || display);
+  return [...new Set(
+    [stored, display, canonical]
+      .map((value) => String(value || "").trim().toUpperCase())
+      .filter(Boolean),
+  )];
+}
+
+export async function backfillCustomerGpsFromLastVisits(admin, customers, {
+  actor = { role: "system", salesman_name: "Visit GPS backfill" },
+  visitGpsByCustomer = null,
+} = {}) {
+  const rows = Array.isArray(customers) ? customers : [];
+  if (rows.length === 0) return { promoted: 0, codes: [] };
+
+  const lookupCodes = [...new Set(rows.flatMap((row) => visitGpsLookupCodes(row)))];
+  const gpsByCode = visitGpsByCustomer || await loadLastVisitGpsByCustomer(admin, lookupCodes);
+
+  const codes = [];
+  for (const row of rows) {
+    if (customerHasSavedGps(row)) continue;
+    const storedCode = String(row?.stored_customer_code || row?.customer_code || "").trim();
+    if (!storedCode) continue;
+
+    let visitGps = null;
+    for (const key of visitGpsLookupCodes(row)) {
+      visitGps = gpsByCode.get(key);
+      if (visitGps) break;
+    }
+    if (!visitGps) continue;
+
+    const updated = await promoteEntryGpsToCustomerIfMissing(admin, {
+      // Write onto the real customers row (may be a dirty/name code), not only the display code.
+      customerCode: storedCode,
+      latitude: visitGps.latitude,
+      longitude: visitGps.longitude,
+      actor,
+      customerRow: {
+        ...row,
+        customer_code: storedCode,
+      },
+    });
+    if (updated) {
+      codes.push(storedCode.toUpperCase());
+      row.latitude = visitGps.latitude;
+      row.longitude = visitGps.longitude;
+    }
+  }
+
+  return { promoted: codes.length, codes };
+}
+
 export async function fetchOutstandingNoGpsCustomers(admin, {
   search = "",
   sort = "outstanding",
   activeFilter = "all",
+  actor = null,
+  backfillFromVisits = true,
 } = {}) {
-  const customers = await fetchAllFilteredCustomers(admin, {
+  let customers = await fetchAllFilteredCustomers(admin, {
     search,
     gpsFilter: "without",
     outstandingFilter: "with",
     activeFilter,
   });
+
+  if (backfillFromVisits && customers.length) {
+    const backfill = await backfillCustomerGpsFromLastVisits(admin, customers, {
+      actor: actor || { role: "system", salesman_name: "Visit GPS backfill" },
+    });
+    if (backfill.promoted > 0) {
+      // Re-read without-GPS set so promoted customers drop off the report.
+      customers = await fetchAllFilteredCustomers(admin, {
+        search,
+        gpsFilter: "without",
+        outstandingFilter: "with",
+        activeFilter,
+      });
+    }
+  }
 
   const outstandingDataset = await readOutstandingDataset(admin);
   const invoices = hydrateOutstandingInvoices(outstandingDataset);

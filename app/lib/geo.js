@@ -496,21 +496,23 @@ export function resolveWaitingMinutesFromPrevious(
   return computeWaitingMinutes(row.distanceFromPreviousKm, fromSavedAt, toSavedAt, assumedSpeedKmh);
 }
 
+const TIMELINE_BRIDGE_TYPES = new Set([
+  "GPS_PING",
+  "MORNING_ATTENDANCE",
+  "END_OF_DAY",
+  "LUNCH_BREAK_OUT",
+  "LUNCH_BREAK_IN",
+  "UNLOGGED_IDLE",
+]);
+
 export function isIdleGpsPingTimelineRow(row) {
+  // Daily Visit Report rows use transaction_type (e.g. LUNCH_BREAK_OUT), not entry_type.
   const transactionType = String(row?.transactionType || row?.transaction_type || "").trim().toUpperCase();
-  if (transactionType === "GPS_PING") return true;
+  if (TIMELINE_BRIDGE_TYPES.has(transactionType)) return true;
   const rowType = String(row?.rowType || "").trim().toLowerCase();
   if (rowType === "lunch" || rowType === "attendance" || rowType === "idle") return true;
   const entryType = String(row?.entryType || row?.entry_type || "").trim().toUpperCase();
-  if (
-    entryType === "MORNING_ATTENDANCE"
-    || entryType === "END_OF_DAY"
-    || entryType === "LUNCH_BREAK_OUT"
-    || entryType === "LUNCH_BREAK_IN"
-    || entryType === "UNLOGGED_IDLE"
-  ) {
-    return true;
-  }
+  if (TIMELINE_BRIDGE_TYPES.has(entryType)) return true;
   return false;
 }
 
@@ -533,6 +535,40 @@ export function findPreviousWaitingAnchorRow(rows, index) {
     if (!isIdleGpsPingTimelineRow(candidate)) return candidate;
   }
   return null;
+}
+
+/**
+ * For a customer visit/order row, sum hop distances since the previous customer
+ * stop (skipping idle GPS, lunch, and login/logout). Bridge rows keep their own
+ * single-hop distance. Route totals still use hop-by-hop enrichment so path
+ * distance is not double-counted.
+ */
+export function resolveDistanceFromPreviousVisitKm(rows, index) {
+  const list = Array.isArray(rows) ? rows : [];
+  const row = list[index];
+  if (!row) return null;
+
+  if (isIdleGpsPingTimelineRow(row)) {
+    const value = row.distanceFromPreviousKm;
+    return value === null || value === undefined || !Number.isFinite(Number(value))
+      ? null
+      : Number(value);
+  }
+
+  const previousAnchor = findPreviousWaitingAnchorRow(list, index);
+  const startIndex = previousAnchor ? list.indexOf(previousAnchor) : -1;
+  if (startIndex < 0 && index === 0) return null;
+
+  let total = 0;
+  let hasSegment = false;
+  for (let cursor = Math.max(0, startIndex + 1); cursor <= index; cursor += 1) {
+    const value = list[cursor]?.distanceFromPreviousKm;
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) continue;
+    total += Number(value);
+    hasSegment = true;
+  }
+
+  return hasSegment ? Number(total.toFixed(6)) : null;
 }
 
 export function resolveWaitingMinutesFromPreviousVisit(

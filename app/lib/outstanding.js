@@ -272,14 +272,44 @@ export function extractLeadingCustomerCodeAndName(value) {
     return { customer_code: "", customer_name: "" };
   }
 
-  const match = text.match(/^([A-Z0-9-]{3,20})[\s_\-]+(.+)$/i);
-  if (!match || !leadingTokenLooksLikeCustomerCode(match[1])) {
+  let separatorIndex = -1;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === " " || char === "_" || char === "-") {
+      separatorIndex = index;
+      break;
+    }
+  }
+
+  if (separatorIndex < 0) {
+    return { customer_code: "", customer_name: text };
+  }
+
+  const leading = text.slice(0, separatorIndex).trim();
+  if (
+    leading.length < 3
+    || leading.length > 20
+    || !/^[A-Z0-9-]+$/i.test(leading)
+    || !leadingTokenLooksLikeCustomerCode(leading)
+  ) {
+    return { customer_code: "", customer_name: text };
+  }
+
+  let nameStart = separatorIndex;
+  while (nameStart < text.length) {
+    const char = text[nameStart];
+    if (char !== " " && char !== "_" && char !== "-") break;
+    nameStart += 1;
+  }
+
+  const customerName = text.slice(nameStart).trim();
+  if (!customerName) {
     return { customer_code: "", customer_name: text };
   }
 
   return {
-    customer_code: String(match[1] || "").trim(),
-    customer_name: String(match[2] || "").trim(),
+    customer_code: leading,
+    customer_name: customerName,
   };
 }
 
@@ -388,16 +418,28 @@ export function parseOutstandingSheetDate(value) {
 
   const dmyMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
   if (dmyMatch) {
-    const day = Number(dmyMatch[1]);
-    const month = Number(dmyMatch[2]);
+    const left = Number(dmyMatch[1]);
+    const right = Number(dmyMatch[2]);
     let year = Number(dmyMatch[3]);
     if (year < 100) year += 2000;
-    const parsed = utcDateString(year, month, day);
+    // Disambiguate US MDY (9/20/2026) vs DMY (20/9/2026) when one side is > 12.
+    if (right > 12 && left >= 1 && left <= 12) {
+      const parsed = utcDateString(year, left, right);
+      if (parsed) return parsed;
+    }
+    if (left > 12 && right >= 1 && right <= 12) {
+      const parsed = utcDateString(year, right, left);
+      if (parsed) return parsed;
+    }
+    const parsed = utcDateString(year, right, left);
     if (parsed) return parsed;
   }
 
   const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  if (!Number.isNaN(parsed.getTime())) {
+    return utcDateString(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate())
+      || parsed.toISOString().slice(0, 10);
+  }
   return "";
 }
 
@@ -684,21 +726,34 @@ export function detectOutstandingSalesmanColumn(headerRow) {
   return bestIndex;
 }
 
+export function normalizeOutstandingRef(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
 export function pickOutstandingSalesmanName(invoices) {
   const counts = new Map();
+  const amounts = new Map();
 
   (invoices || []).forEach((invoice) => {
     const name = String(invoice?.salesman || "").trim();
     if (isPlaceholderSalesmanValue(name)) return;
     counts.set(name, (counts.get(name) || 0) + 1);
+    amounts.set(name, (amounts.get(name) || 0) + toNumber(invoice?.pending_amount));
   });
 
   let bestName = "";
   let bestCount = 0;
+  let bestAmount = 0;
 
   counts.forEach((count, name) => {
-    if (count > bestCount) {
+    const amount = amounts.get(name) || 0;
+    if (
+      count > bestCount
+      || (count === bestCount && amount > bestAmount)
+      || (count === bestCount && amount === bestAmount && name.localeCompare(bestName) < 0)
+    ) {
       bestCount = count;
+      bestAmount = amount;
       bestName = name;
     }
   });
@@ -727,6 +782,110 @@ export function resolveUploadedOutstandingSalesman({
   if (!isPlaceholderSalesmanValue(fromAggregate)) return fromAggregate;
 
   return "";
+}
+
+/**
+ * Map active-sales voucher rows → salesman display name.
+ * Used only when the outstanding upload left the Salesman cell blank.
+ */
+export function buildSalesmanByVoucherMap(salesRows) {
+  const byVoucher = new Map();
+
+  (salesRows || []).forEach((row) => {
+    const voucher = normalizeOutstandingRef(row?.voucher_number || row?.ref_no);
+    if (!voucher) return;
+    const name = String(row?.salesman_name || row?.salesman_code || row?.salesman || "").trim();
+    if (isPlaceholderSalesmanValue(name)) return;
+    if (!byVoucher.has(voucher)) byVoucher.set(voucher, name);
+  });
+
+  return byVoucher;
+}
+
+/**
+ * Fill blank outstanding-invoice salesman cells from matching sales vouchers.
+ * Does not overwrite a non-placeholder upload salesman.
+ */
+export function applySalesVoucherSalesmanToInvoices(invoices, salesmanByVoucher) {
+  const map = salesmanByVoucher instanceof Map
+    ? salesmanByVoucher
+    : buildSalesmanByVoucherMap(salesmanByVoucher);
+
+  if (!map.size) return invoices || [];
+
+  return (invoices || []).map((invoice) => {
+    if (!isPlaceholderSalesmanValue(invoice?.salesman)) return invoice;
+    const voucher = normalizeOutstandingRef(invoice?.ref_no || invoice?.voucher_number);
+    const fromSales = voucher ? map.get(voucher) : "";
+    if (!fromSales) return invoice;
+    return { ...invoice, salesman: fromSales };
+  });
+}
+
+function salesmanValuesMatch(left, right) {
+  const leftRaw = String(left || "").trim();
+  const rightRaw = String(right || "").trim();
+  if (!leftRaw || !rightRaw) return false;
+  if (normalizeCode(leftRaw) === normalizeCode(rightRaw)) return true;
+  return normalizeComparableName(leftRaw) === normalizeComparableName(rightRaw);
+}
+
+/**
+ * Collection-queue salesman label when the outstanding workbook Salesman cell
+ * is blank: prefer the customer-master book owner when they appear on any open
+ * invoice (shared-book cases), else the voucher-derived invoice salesman, else
+ * the master assignment alone so filters still have names.
+ */
+export function resolveCollectionQueueSalesman({
+  salesmanFromUpload = "",
+  customerInvoices = [],
+  masterSalesmanCode = "",
+  masterSalesmanName = "",
+} = {}) {
+  const fromUpload = String(salesmanFromUpload || "").trim();
+  if (!isPlaceholderSalesmanValue(fromUpload)) {
+    return {
+      salesman_name: fromUpload,
+      salesman_code: normalizeCode(fromUpload),
+      source: "upload",
+    };
+  }
+
+  const masterCode = normalizeCode(masterSalesmanCode);
+  const masterName = String(masterSalesmanName || masterSalesmanCode || "").trim();
+  const invoiceSalesman = pickOutstandingSalesmanName(customerInvoices);
+
+  if (masterCode || !isPlaceholderSalesmanValue(masterName)) {
+    const masterMatchesInvoice = (customerInvoices || []).some((invoice) => (
+      salesmanValuesMatch(invoice?.salesman, masterCode)
+      || salesmanValuesMatch(invoice?.salesman, masterName)
+    ));
+    if (masterMatchesInvoice) {
+      return {
+        salesman_name: (!isPlaceholderSalesmanValue(masterName) ? masterName : masterCode),
+        salesman_code: masterCode,
+        source: "master_matching_invoice",
+      };
+    }
+  }
+
+  if (!isPlaceholderSalesmanValue(invoiceSalesman)) {
+    return {
+      salesman_name: invoiceSalesman,
+      salesman_code: normalizeCode(invoiceSalesman),
+      source: "sales_voucher",
+    };
+  }
+
+  if (!isPlaceholderSalesmanValue(masterName) || masterCode) {
+    return {
+      salesman_name: (!isPlaceholderSalesmanValue(masterName) ? masterName : masterCode),
+      salesman_code: masterCode,
+      source: "master",
+    };
+  }
+
+  return { salesman_name: "", salesman_code: "", source: "none" };
 }
 
 export function buildOutstandingRowSalesmanByCode(rows) {
@@ -1564,5 +1723,4 @@ export function resolveVisitLastInvoiceDate(row, todayIso = new Date().toISOStri
     todayIso,
   ) || laterDateOnly(row?.latest_transaction_date, row?.last_invoice_date) || "";
 }
-
 

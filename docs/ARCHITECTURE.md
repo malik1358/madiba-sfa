@@ -33,7 +33,7 @@ The service role is server-only. Losing the scope checks in an API route would e
 
 `app/layout.js` wraps every page with:
 
-- Staging banner when `NEXT_PUBLIC_APP_ENV === "staging"`.
+- Non-production banner when `NEXT_PUBLIC_APP_ENV` is `local`, `development`, `dev`, or legacy `staging` (`app/lib/appEnvironment.js`).
 - `BuildUpdateWatcher`, PWA shell, native field tracking, morning-attendance redirect, workday time bar, main nav, back button, logout.
 - `AppLanguageProvider` and `AppPopupProvider`.
 
@@ -108,6 +108,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 - `/api/mobile-snapshot`, `/api/offline-data-version`, `/api/push-tokens`
 - `/api/app-config`, `/api/build-info`, `/api/user-activity`
+- `/api/working-hours` — attendance-style daily salesman working hours (near-visit lunch segments)
 - `/api/daily-visit-report`, `/api/daily-visit-report/email`, `/api/inactivity-email-log`
 
 **Cron** (`app/api/cron/*`, auth via `CRON_SECRET`)
@@ -149,7 +150,7 @@ Both exist in the production schema:
 - `orders` / `order_lines` — older recommendation-style orders tied to `visits`.
 - `sales_orders` / `sales_order_items` — the live order entry path (`/api/sales-orders`).
 
-New field orders go to `sales_orders`. Invoice status is not a column on that table. It is `system_settings.setting_key = order_invoice_meta:<id>`.
+New field orders go to `sales_orders`. Invoice status is not a column on that table. It is `system_settings.setting_key = order_invoice_meta:<id>`. Order `salesman_code` / `salesman_name` are set from the authenticated maker’s profile in `/api/sales-orders` (not from customer master assignment).
 
 ## Imports and the active batch
 
@@ -161,14 +162,14 @@ After a sales import, the BI cube and the daily supplier-order email can rebuild
 
 ## Offline and mobile cache
 
-Field phones cache scope, prices, and customer payloads (`app/lib/mobileDataCache.js`, `offlineDataRefresh.js`, `localDataStore.js`). `/api/mobile-snapshot` and `/api/cron/mobile-snapshot` rebuild snapshots. `/api/offline-data-version` exposes a version key so clients know when to refresh. Queued orders use `app/lib/offlineSyncQueue.js`.
+Field phones cache scope, prices, and customer payloads (`app/lib/mobileDataCache.js`, `offlineDataRefresh.js`, `localDataStore.js`). `/api/mobile-snapshot` and `/api/cron/mobile-snapshot` rebuild snapshots. `/api/offline-data-version` exposes a version key so clients know when to refresh. Queued field writes use `app/lib/offlineSyncQueue.js` via `postJsonResilient` / `postFormDataResilient` / `sendJsonResilient`, which **default to `queueFirst: true`** so collections, visits, orders, stock take, and prospects save on-device first and sync in the background. Sales order numbers are allotted offline per salesman (`app/lib/offlineOrderNumber.js`) and persist unchanged through sync.
 
 Do not assume a page always has a live network read. Several screens render from cache and then refresh.
 
 ## GPS
 
 - Background and idle pings: `app/lib/nativeFieldTracking.js` and `POST /api/gps-ping`. Pings are `daily_activity_logs` rows with `entry_type = GPS_PING` and a JSON note. They are allowed only inside an open KSA work session (after morning attendance, before end of day).
-- Customer coordinates: `POST /api/customers/location` updates `customers.latitude/longitude` and the GPS audit columns, and inserts `customer_gps_history`.
+- Customer coordinates: `PATCH /api/customers/location` updates `customers.latitude/longitude` and the GPS audit columns, and inserts `customer_gps_history`. Field visits auto-promote GPS onto the customer when none is saved yet — server-side in `/api/visit-reports` and collection saves (`promoteEntryGpsToCustomerIfMissing`), and client-side in `customerLocation.js`. Outstanding Without GPS also backfills from `visit_report_latest` / collection visit GPS when the master pin is still empty. Far-from-saved still prompts.
 - Collection visits store their own lat/long on `collection_visits` when those columns exist.
 - Invoice makers and admins do not run the background GPS tracker (`shouldEnableBackgroundGps`).
 
@@ -185,7 +186,7 @@ BI pages call `/api/business-dashboard` and `/api/business-dashboard/category-gr
 
 ## Collections architecture
 
-`/api/payment-collections` builds queues from the outstanding dataset, customer master, and `collection_visits`. Priority scoring is `buildCollectionPriority` in `app/lib/paymentCollections.js`. Legal escalation is `legal_transfers`. Files go to the `payment-collections` storage bucket.
+`/api/payment-collections` builds queues from the outstanding dataset, customer master, and `collection_visits`. Priority scoring is `buildCollectionPriority` in `app/lib/paymentCollections.js`. Legal escalation is `legal_transfers`. Files go to the `payment-collections` storage bucket. Visit saves (including Funds Received attachments) are offline-first (`queueFirst`): files serialize into IndexedDB only for the local queue, then sync uploads multipart with MIME re-resolved for Android. Client photo prep (`prepareUploadFile`) is time-bounded so Android camera HEIC/JPEG cannot leave Saving stuck. Client save enrichment uses cached queue `avg_days_to_pay` and skips the activity timeline (`skipTimeline`); the API recomputes visit-distance lines with the service role on sync.
 
 The collections UI was split so a background queue refresh does not remount the open visit form. Do not tie a full page reload to that refresh (see the fix in PR #313).
 

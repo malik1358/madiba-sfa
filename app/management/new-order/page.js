@@ -55,12 +55,13 @@ import NearestCustomerSuggestions from "../../components/NearestCustomerSuggesti
 import { buildOrderPdfFileName, saveOrShareOrderPdf } from "../../lib/orderPdfExport";
 import { createOrderPdfDocument, formatHistoryChange, preloadOrderPdfLibrary, resolveLiveOrderPdfSnapshot } from "../../lib/orderPdfDocument";
 import { buildOrderWhatsappSummary } from "../../lib/orderWhatsapp";
+import { resolveOrderMakerFromScope } from "../../lib/orderSalesman";
 import { isNativeMobilePlatform } from "../../lib/whatsappShare";
 import { isExcludedNewOrderCustomer } from "../../lib/buildingMaterialCustomerFilter";
 import { buildSettlementCustomerHistoryUrl } from "../../lib/customerHistoryApi";
 import { processOfflineQueue } from "../../lib/offlineApi";
 import { isQueuedPendingOrderId } from "../../lib/queuedSalesOrders";
-import { formatSalesOrderNumber } from "../../lib/salesOrderNumber";
+import { formatSalesOrderNumber, formatSalesOrderNumberForDisplay } from "../../lib/salesOrderNumber";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
 import { blockedByAvgDaysMessage, resolveOrderBlockStatus } from "../../lib/customerOrderBlock";
 import { fetchCustomerOrderBlockStatus } from "../../lib/customerOrderBlockClient";
@@ -1024,6 +1025,7 @@ export default function NewOrderPage() {
           ...orderBlock,
           ...resolveOrderBlockStatus({
             avgDaysToPay: orderBlock.avgDaysToPay,
+            avgDaysToPay6m: orderBlock.avgDaysToPay6m,
             threshold: orderBlock.threshold,
             override: orderBlock.override || orderBlock,
           }),
@@ -1031,9 +1033,10 @@ export default function NewOrderPage() {
       }
       return resolveOrderBlockStatus({
         avgDaysToPay: analytics?.paymentBehavior?.avgDaysToPay ?? null,
+        avgDaysToPay6m: analytics?.paymentBehavior?.avgDaysToPay6m ?? null,
       });
     },
-    [analytics?.paymentBehavior?.avgDaysToPay, orderBlock],
+    [analytics?.paymentBehavior?.avgDaysToPay, analytics?.paymentBehavior?.avgDaysToPay6m, orderBlock],
   );
   const orderBlockedMessage = orderBlockFromAnalytics.blocked
     ? blockedByAvgDaysMessage({
@@ -1049,6 +1052,7 @@ export default function NewOrderPage() {
       const savedAtIso = new Date().toISOString();
       const lines = pricedOrderLines;
       const totals = summarizePricedLines(lines);
+      const orderMaker = resolveOrderMakerFromScope(accessScope);
 
       return {
         orderId,
@@ -1057,7 +1061,8 @@ export default function NewOrderPage() {
         savedAtIso,
         customerCode: selectedCustomer.customer_code,
         customerName: selectedCustomer.customer_name,
-        salesmanCode: selectedCustomer.current_salesman_code,
+        salesmanCode: orderMaker.salesmanCode,
+        salesmanName: orderMaker.salesmanName,
         paymentType: normalizePaymentType(paymentType),
         pricingRegion,
         itemCount: orderSummary.itemCount,
@@ -1076,6 +1081,7 @@ export default function NewOrderPage() {
       };
     },
     [
+      accessScope,
       orderHistory,
       orderItems,
       orderSummary.itemCount,
@@ -1097,12 +1103,12 @@ export default function NewOrderPage() {
       setDownloadingPdf(true);
       try {
         if (options.fast) {
-          const orderNumber = formatSalesOrderNumber(snapshot) || snapshot.orderId;
+          const orderNumber = formatSalesOrderNumberForDisplay(snapshot) || "syncing";
           // Keep the already-loaded customer analytics so the Monthly Performance
           // (historic sales) table still appears without waiting on live lookups.
           const doc = await createOrderPdfDocument(snapshot, { analytics: analytics || null });
           const fileName = buildOrderPdfFileName({
-            orderId: orderNumber || "syncing",
+            orderId: orderNumber,
             customerCode: snapshot.customerCode,
             savedAtIso: new Date().toISOString(),
           });
@@ -1129,11 +1135,11 @@ export default function NewOrderPage() {
             ? () => processOfflineQueue(async () => accessToken)
             : undefined,
         });
-        const orderNumber = formatSalesOrderNumber(liveSnapshot);
+        const orderNumber = formatSalesOrderNumberForDisplay(liveSnapshot) || "syncing";
         const doc = await createOrderPdfDocument(liveSnapshot, { analytics: monthlyAnalytics });
 
         const fileName = buildOrderPdfFileName({
-          orderId: orderNumber || "syncing",
+          orderId: orderNumber,
           customerCode: liveSnapshot.customerCode || snapshot.customerCode,
           savedAtIso: new Date().toISOString(),
         });
@@ -1162,12 +1168,7 @@ export default function NewOrderPage() {
         if (error?.name === "AbortError" || String(error?.message || "").toLowerCase().includes("cancel")) {
           return { method: "cancelled" };
         }
-        const message = String(error?.message || "");
-        if (/order number is required/i.test(message)) {
-          setError("Order number is required before the PDF can be generated. Wait for sync, then try Save / Share PDF again.");
-        } else {
-          setError("Order saved, but PDF could not be prepared. Please try Save / Share PDF again.");
-        }
+        setError("Order saved, but PDF could not be prepared. Please try Save / Share PDF again.");
         return { method: "error" };
       } finally {
         setDownloadingPdf(false);
@@ -1216,8 +1217,9 @@ export default function NewOrderPage() {
     if (!snapshot) return;
 
     const queued = isQueuedPendingOrderId(saved.orderId);
-    const orderNumber = formatSalesOrderNumber({ id: saved.orderId, orderNumber: saved.orderNumber })
-      || (queued ? (language === "ar" ? "على الجهاز" : "on this device") : "—");
+    const orderNumber = formatSalesOrderNumberForDisplay(
+      { id: saved.orderId, orderNumber: saved.orderNumber },
+    ) || "—";
     const savedMessage = queued
       ? (language === "ar"
         ? `تم حفظ مسودة الطلب #${orderNumber} على الجهاز وسيتم المزامنة تلقائياً.`
@@ -1240,8 +1242,9 @@ export default function NewOrderPage() {
     if (!snapshot) return;
 
     const queued = isQueuedPendingOrderId(saved.orderId);
-    const orderNumber = formatSalesOrderNumber({ id: saved.orderId, orderNumber: saved.orderNumber })
-      || (queued ? (language === "ar" ? "على الجهاز" : "on this device") : "—");
+    const orderNumber = formatSalesOrderNumberForDisplay(
+      { id: saved.orderId, orderNumber: saved.orderNumber },
+    ) || "—";
     const savedMessage = queued
       ? (language === "ar"
         ? `تم حفظ الطلب #${orderNumber} على الجهاز وسيتم الإرسال عند عودة الاتصال.`
@@ -1255,7 +1258,7 @@ export default function NewOrderPage() {
 
   const shareText = useMemo(() => {
     if (!lastSavedOrder) return "";
-    return `Order #${formatSalesOrderNumber(lastSavedOrder) || "—"} (${lastSavedOrder.statusLabel}) for ${lastSavedOrder.customerName} - ${formatMoney(lastSavedOrder.grandTotal)}. PDF downloaded and ready to attach.`;
+    return `Order #${formatSalesOrderNumberForDisplay(lastSavedOrder) || "—"} (${lastSavedOrder.statusLabel}) for ${lastSavedOrder.customerName} - ${formatMoney(lastSavedOrder.grandTotal)}. PDF downloaded and ready to attach.`;
   }, [lastSavedOrder]);
 
   const fetchOutstandingForCustomer = useCallback(async (customer) => {
@@ -1426,7 +1429,7 @@ export default function NewOrderPage() {
 
   const emailShareUrl = useMemo(() => {
     if (!lastSavedOrder) return "#";
-    const subject = `Order #${formatSalesOrderNumber(lastSavedOrder) || "—"} - ${lastSavedOrder.customerName}`;
+    const subject = `Order #${formatSalesOrderNumberForDisplay(lastSavedOrder) || "—"} - ${lastSavedOrder.customerName}`;
     const body = `${shareText}\n\nUse Save / Share PDF in the app to attach the order PDF.`;
     return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }, [lastSavedOrder, shareText]);
@@ -1713,6 +1716,9 @@ export default function NewOrderPage() {
                     ? " (paid avg + open older than that avg)"
                     : " from collected receipts")
                 : "Avg days to pay unavailable (need sales + receipts or open invoices)"}
+              {analytics.paymentBehavior.avgDaysToPay6m != null
+                ? ` · 6m ${analytics.paymentBehavior.avgDaysToPay6m}`
+                : ""}
               {analytics.paymentBehavior.medianDaysToPay != null
                 && analytics.paymentBehavior.medianDaysToPay !== analytics.paymentBehavior.avgDaysToPay
                 ? ` · median ${analytics.paymentBehavior.medianDaysToPay}`
@@ -2169,7 +2175,7 @@ export default function NewOrderPage() {
                 <div className="moduleReviewMeta">
                   <div>
                     <span>Order Number</span>
-                    <strong>#{formatSalesOrderNumber(lastSavedOrder) || "—"}</strong>
+                    <strong>#{formatSalesOrderNumberForDisplay(lastSavedOrder) || "—"}</strong>
                   </div>
                   <div>
                     <span>Customer</span>
@@ -2255,8 +2261,8 @@ export default function NewOrderPage() {
                     onClick={() => {
                       void presentOrderWhatsappShare(lastSavedOrder, {
                         savedMessage: language === "ar"
-                          ? `PDF للطلب #${formatSalesOrderNumber(lastSavedOrder) || "—"} جاهز للمشاركة.`
-                          : `Order #${formatSalesOrderNumber(lastSavedOrder) || "—"} PDF is ready to share.`,
+                          ? `PDF للطلب #${formatSalesOrderNumberForDisplay(lastSavedOrder) || "—"} جاهز للمشاركة.`
+                          : `Order #${formatSalesOrderNumberForDisplay(lastSavedOrder) || "—"} PDF is ready to share.`,
                       });
                     }}
                   >

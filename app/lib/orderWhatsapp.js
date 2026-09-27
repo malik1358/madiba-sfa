@@ -1,7 +1,8 @@
 import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
-import { formatSalesOrderNumber } from "./salesOrderNumber.js";
+import { formatSalesOrderNumberForDisplay } from "./salesOrderNumber.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 import { formatOrderVatLabel, VAT_RATE } from "./regionalPricing.js";
+import { formatOrderSalesmanLabel } from "./orderSalesman.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -40,22 +41,28 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     totalInclVat: isAr ? "المبلغ بعد الضريبة" : "Amount after VAT",
     pdfAttached: isAr ? "ملف PDF مرفق." : "PDF attached.",
     avgDaysToPay: isAr ? "متوسط أيام الدفع" : "Avg days to pay",
+    avgDaysToPay6mLabel: isAr ? "متوسط 6 أشهر" : "6-month avg",
   };
 
   const cashDiscount = Number(totals.cashDiscountTotal || 0);
   const valueDiscount = Number(totals.valueDiscountTotal || 0);
   const schemeDiscount = Number(totals.schemeDiscountTotal || 0);
-  const avgDaysToPay = options.analytics?.paymentBehavior?.avgDaysToPay
-    ?? snapshot.paymentBehavior?.avgDaysToPay
-    ?? snapshot.avgDaysToPay
-    ?? null;
+  const paymentBehavior = options.analytics?.paymentBehavior
+    || snapshot.paymentBehavior
+    || null;
+  const avgDaysToPay = paymentBehavior
+    ? {
+      avgDaysToPay: paymentBehavior.avgDaysToPay ?? null,
+      avgDaysToPay6m: paymentBehavior.avgDaysToPay6m ?? null,
+    }
+    : (snapshot.avgDaysToPay ?? null);
 
   return [
     labels.title,
-        `${labels.orderId}: ${formatSalesOrderNumber(snapshot) || "—"}`,
+        `${labels.orderId}: ${formatSalesOrderNumberForDisplay(snapshot) || "—"}`,
     `${labels.customer}: ${snapshot.customerName || snapshot.customerCode || "-"}`,
     `${labels.code}: ${snapshot.customerCode || "-"}`,
-    `${labels.salesman}: ${snapshot.salesmanCode || "-"}`,
+    `${labels.salesman}: ${formatOrderSalesmanLabel(snapshot)}`,
     `${labels.status}: ${snapshot.statusLabel || "-"}`,
     `${labels.payment}: ${String(snapshot.paymentType || "credit").toUpperCase()}`,
     `${labels.region}: ${snapshot.pricingRegion || "riyadh"}`,

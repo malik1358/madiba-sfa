@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatPaymentDaysLabel } from "../../../lib/paymentBehavior.js";
+import { formatPaymentDaysLabel, HISTORIC_PERFORMANCE_PERIOD_LABEL, HISTORIC_PERFORMANCE_SHORT_LABEL } from "../../../lib/paymentBehavior.js";
 import { blockedByAvgDaysMessage } from "../../../lib/customerOrderBlock.js";
 
 export default function CustomerHeader({
@@ -49,9 +49,18 @@ export default function CustomerHeader({
           <strong>{avgDaysLabel}</strong>
           {payment?.avgDaysToPay != null ? (
             <em className="auditSummaryCardMeta">
+              Lifetime
               {Number(payment.openAmountInAvg || 0) > 0.009
-                ? "Paid avg + open older than that avg only"
-                : "From collected receipts"}
+                ? " · paid avg + open older than that avg only"
+                : " · from collected receipts"}
+            </em>
+          ) : null}
+          {payment?.avgDaysToPay6m != null ? (
+            <em className="auditSummaryCardMeta">
+              {HISTORIC_PERFORMANCE_PERIOD_LABEL}: {payment.avgDaysToPay6m} days
+              {Number(payment.openAmountInAvg6m || 0) > 0.009
+                ? ` · includes open older than ${HISTORIC_PERFORMANCE_SHORT_LABEL} paid avg`
+                : ""}
             </em>
           ) : null}
           {payment?.avgDaysPaidOnly != null

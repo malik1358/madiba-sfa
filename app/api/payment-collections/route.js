@@ -18,12 +18,16 @@ import { resolveSubordinateUserIds } from "../../lib/salesHierarchy.js";
 import { loadShareRowsForScope } from "../../lib/customerBookShares.js";
 import {
   OUTSTANDING_DATASET_KEY,
+  applySalesVoucherSalesmanToInvoices,
   buildOutstandingRowSalesmanByCode,
+  buildSalesmanByVoucherMap,
   extractLeadingCustomerCodeAndName,
   findOutstandingForCustomer,
   hydrateOutstandingInvoices,
   isPlaceholderSalesmanValue,
+  normalizeOutstandingRef,
   pickLongestCustomerName,
+  resolveCollectionQueueSalesman,
   resolveUploadedOutstandingSalesman,
   customerAccountCodesMatch,
   resolveCustomerAccountCode,
@@ -39,6 +43,7 @@ import {
   patchCollectionVisitSummaryVisitNumber,
 } from "../../lib/collectionVisitSummary.js";
 import { loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp.js";
+import { promoteEntryGpsToCustomerIfMissing } from "../../lib/customerGpsHistory.js";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
 import {
   resolveUploadContentType,
@@ -50,6 +55,8 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const COLLECTION_FILES_BUCKET = "payment-collections";
 const COLLECTION_FILE_MIME_TYPES = [
   "image/jpeg",
+  "image/jpg",
+  "image/pjpeg",
   "image/png",
   "image/webp",
   "image/heic",
@@ -199,7 +206,7 @@ async function readOutstandingDataset(admin) {
     }
   }
 
-  // Staging/dev fallback when no outstanding workbook has been uploaded yet.
+  // Local/dev fallback when no outstanding workbook has been uploaded yet.
   return {
     invoices: await readOutstandingInvoicesFromTable(admin),
     rows: [],
@@ -236,14 +243,29 @@ async function countCollectionVisitsForUserDay(admin, userId, dateString = getKs
   return Number(count || 0);
 }
 
-function storageExtension(file) {
+function storageExtension(file, buffer = null) {
+  const contentType = resolveUploadContentType(file, buffer);
+  if (contentType === "application/pdf") return "pdf";
+  if (contentType === "image/png") return "png";
+  if (contentType === "image/webp") return "webp";
+  if (contentType === "image/heic") return "heic";
+  if (contentType === "image/heif") return "heif";
   return storageExtensionFromUpload(file);
 }
 
-function uploadContentType(file) {
+function uploadContentType(file, buffer = null) {
   // Android / WebView often labels PDFs as application/octet-stream.
-  // Prefer extension (and ignore generic MIME) so storage accepts the upload.
-  return resolveUploadContentType(file);
+  // Prefer extension/magic bytes (and ignore generic MIME) so storage accepts the upload.
+  return resolveUploadContentType(file, buffer);
+}
+
+async function sniffUploadHeader(file) {
+  try {
+    if (!file || typeof file.slice !== "function") return null;
+    return new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  } catch {
+    return null;
+  }
 }
 
 async function ensureCollectionFilesBucket(admin) {
@@ -266,8 +288,16 @@ async function ensureCollectionFilesBucket(admin) {
     return;
   }
 
-  const { error: updateError } = await admin.storage.updateBucket(COLLECTION_FILES_BUCKET, bucketConfig);
-  if (updateError) throw updateError;
+  // Best-effort MIME refresh only. Never block attachment saves if updateBucket
+  // is slow, permission-denied, or unsupported on this project.
+  try {
+    const { error: updateError } = await admin.storage.updateBucket(COLLECTION_FILES_BUCKET, bucketConfig);
+    if (updateError) {
+      console.warn("Unable to refresh payment-collections bucket settings:", updateError);
+    }
+  } catch (updateError) {
+    console.warn("Unable to refresh payment-collections bucket settings:", updateError);
+  }
 }
 
 function formatRouteError(error) {
@@ -577,6 +607,40 @@ async function fetchCustomersForOutstanding(admin, outstandingInvoices) {
   return fetchCustomersByCodes(admin, codes);
 }
 
+const SALES_VOUCHER_LOOKUP_BATCH_SIZE = 100;
+
+/**
+ * When the outstanding workbook leaves Salesman blank, look up the salesman from
+ * active_sales by matching Ref. No. → voucher_number. Missing view/table is fine.
+ */
+async function fetchSalesmanByOutstandingVoucher(admin, invoices) {
+  const refs = [...new Set(
+    (invoices || [])
+      .filter((invoice) => isPlaceholderSalesmanValue(invoice?.salesman))
+      .map((invoice) => normalizeOutstandingRef(invoice?.ref_no || invoice?.voucher_number))
+      .filter(Boolean),
+  )];
+
+  if (refs.length === 0) return new Map();
+
+  const salesRows = [];
+  for (let index = 0; index < refs.length; index += SALES_VOUCHER_LOOKUP_BATCH_SIZE) {
+    const batch = refs.slice(index, index + SALES_VOUCHER_LOOKUP_BATCH_SIZE);
+    const { data, error } = await admin
+      .from("active_sales")
+      .select("voucher_number,salesman_code,salesman_name")
+      .in("voucher_number", batch);
+
+    if (error) {
+      if (isMissingTableError(error) || isMissingColumnError(error)) return new Map();
+      throw error;
+    }
+    if (Array.isArray(data)) salesRows.push(...data);
+  }
+
+  return buildSalesmanByVoucherMap(salesRows);
+}
+
 export async function fetchOutstandingAndCollectionRecords(admin, scope) {
   if (!supabaseUrl || !serviceKey) {
     throw new Error("Server configuration is incomplete");
@@ -617,6 +681,11 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
 
   const customers = await fetchCustomersForOutstanding(admin, outstandingInvoices);
   const aggregateRowSalesmanByCode = buildOutstandingRowSalesmanByCode(outstandingRows);
+  const salesmanByVoucher = await fetchSalesmanByOutstandingVoucher(admin, outstandingInvoices);
+  const outstandingInvoicesWithSalesman = applySalesVoucherSalesmanToInvoices(
+    outstandingInvoices,
+    salesmanByVoucher,
+  );
 
   const visits = Array.isArray(visitsData) ? visitsData : [];
   const legalTransfers = Array.isArray(legalData) ? legalData : [];
@@ -693,7 +762,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     );
   });
 
-  outstandingInvoices.forEach((invoice) => {
+  outstandingInvoicesWithSalesman.forEach((invoice) => {
     const key = resolveOutstandingInvoiceCustomerCode(invoice)
       || canonicalCustomerCode(invoice.customer_code)
       || canonicalCustomerCode(invoice.customer_name);
@@ -816,18 +885,26 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
       invoices: customerInvoices,
       todayIso,
     });
-    const hasUploadedOutstandingWorkbook = outstandingRows.length > 0;
     const salesmanFromUpload = resolveUploadedOutstandingSalesman({
       customerInvoices,
       aggregateRowSalesman: aggregateRowSalesmanByCode.get(customer.customer_code)
         || String(uploadedOutstanding?.salesman || "").trim(),
     });
-    // When an outstanding workbook is loaded, salesman comes from that file only —
-    // not from customer-master / last sales-invoice assignment.
-    const salesmanFromMaster = !hasUploadedOutstandingWorkbook
-      && !isPlaceholderSalesmanValue(customer.current_salesman_code)
-      ? (salesmanMap.get(normalizeCode(customer.current_salesman_code)) || customer.current_salesman_code)
+    // Prefer uploaded Salesman. When that cell is blank, use active_sales voucher
+    // match (already applied onto customerInvoices), then customer-master book
+    // owner — preferring master when it matches any open invoice (shared books).
+    const masterSalesmanCode = !isPlaceholderSalesmanValue(customer.current_salesman_code)
+      ? normalizeCode(customer.current_salesman_code)
       : "";
+    const masterSalesmanName = masterSalesmanCode
+      ? (salesmanMap.get(masterSalesmanCode) || customer.current_salesman_code)
+      : "";
+    const resolvedSalesman = resolveCollectionQueueSalesman({
+      salesmanFromUpload,
+      customerInvoices,
+      masterSalesmanCode,
+      masterSalesmanName,
+    });
 
     records.push({
       customer_code: customer.customer_code,
@@ -837,7 +914,8 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
         customer.customer_name,
       ),
       current_salesman_code: customer.current_salesman_code,
-      salesman_name: salesmanFromUpload || salesmanFromMaster,
+      salesman_code: resolvedSalesman.salesman_code || masterSalesmanCode || "",
+      salesman_name: resolvedSalesman.salesman_name || "",
       city: customer.city,
       area: customer.area,
       mobile: customer.mobile || "",
@@ -1023,13 +1101,14 @@ export async function POST(request) {
     }
 
     if (paymentCopyFile && paymentCopyFile.size > 0) {
-      const ext = storageExtension(paymentCopyFile);
+      const paymentHeader = await sniffUploadHeader(paymentCopyFile);
+      const ext = storageExtension(paymentCopyFile, paymentHeader);
       const paymentCopyPath = `payment-copies/${customerCode}-${Date.now()}-payment.${ext}`;
       const { data: paymentData, error: paymentError } = await admin.storage
         .from(COLLECTION_FILES_BUCKET)
         .upload(paymentCopyPath, paymentCopyFile, {
           upsert: true,
-          contentType: uploadContentType(paymentCopyFile),
+          contentType: uploadContentType(paymentCopyFile, paymentHeader),
         });
 
       if (paymentError) throw normalizeStorageError(paymentError);
@@ -1037,13 +1116,14 @@ export async function POST(request) {
     }
 
     if (receiptCopyFile && receiptCopyFile.size > 0) {
-      const ext = storageExtension(receiptCopyFile);
+      const receiptHeader = await sniffUploadHeader(receiptCopyFile);
+      const ext = storageExtension(receiptCopyFile, receiptHeader);
       const receiptCopyPath = `receipt-copies/${customerCode}-${Date.now()}-receipt.${ext}`;
       const { data: receiptData, error: receiptError } = await admin.storage
         .from(COLLECTION_FILES_BUCKET)
         .upload(receiptCopyPath, receiptCopyFile, {
           upsert: true,
-          contentType: uploadContentType(receiptCopyFile),
+          contentType: uploadContentType(receiptCopyFile, receiptHeader),
         });
 
       if (receiptError) throw normalizeStorageError(receiptError);
@@ -1189,6 +1269,19 @@ export async function POST(request) {
         referenceId: insertData?.id,
       },
     });
+
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      await promoteEntryGpsToCustomerIfMissing(admin, {
+        customerCode,
+        latitude,
+        longitude,
+        actor: {
+          id: user.id,
+          email: user.email,
+          role: scope.userRole,
+        },
+      });
+    }
 
     return Response.json({
       success: true,

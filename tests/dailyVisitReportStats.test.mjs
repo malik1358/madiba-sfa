@@ -6,6 +6,7 @@ import {
   buildVisitDaySplit,
   entryDisplayAmount,
   formatVisitEntryOutcome,
+  hideDuplicateVisitEntries,
   hideSupersededOrderDrafts,
   loginLogoutLocationNotes,
 } from "../app/lib/dailyVisitReportStats.js";
@@ -101,6 +102,88 @@ test("hides a same-minute draft without order id when submit is for the same cus
 
   assert.equal(visible.length, 1);
   assert.equal(visible[0].transaction_type, "ORDER_SUBMITTED");
+});
+
+test("hides repeated visit report saves for the same customer within two minutes", () => {
+  const visible = hideDuplicateVisitEntries([
+    { transactionType: "GPS_PING", savedAt: "2026-09-26T07:05:00.000Z", userId: "u1" },
+    {
+      transactionType: "VISIT_REPORT",
+      customerCode: "1078C",
+      savedAt: "2026-09-26T07:07:00.000Z",
+      userId: "u1",
+      meta: { outcome: "PURCHASE_MANAGER_NOT_AVAILABLE" },
+    },
+    {
+      transactionType: "VISIT_REPORT",
+      customerCode: "1078C",
+      savedAt: "2026-09-26T07:07:01.000Z",
+      userId: "u1",
+      meta: { outcome: "PURCHASE_MANAGER_NOT_AVAILABLE" },
+    },
+    {
+      transactionType: "VISIT_REPORT",
+      customerCode: "1078C",
+      savedAt: "2026-09-26T07:07:02.000Z",
+      userId: "u1",
+      meta: { outcome: "PURCHASE_MANAGER_NOT_AVAILABLE" },
+    },
+    {
+      transactionType: "VISIT_REPORT",
+      customerCode: "1078C",
+      savedAt: "2026-09-26T07:07:03.000Z",
+      userId: "u1",
+      meta: { outcome: "PURCHASE_MANAGER_NOT_AVAILABLE" },
+    },
+    { transactionType: "VISIT_REPORT", customerCode: "2001", savedAt: "2026-09-26T08:00:00.000Z", userId: "u1", meta: { outcome: "STOCKS_AVAILABLE" } },
+  ]);
+
+  assert.equal(visible.length, 3);
+  assert.equal(visible[0].transactionType, "GPS_PING");
+  assert.equal(visible[1].customerCode, "1078C");
+  assert.equal(visible[2].customerCode, "2001");
+});
+
+test("keeps later visit reports for the same customer outside the duplicate window", () => {
+  const visible = hideDuplicateVisitEntries([
+    {
+      transactionType: "VISIT_REPORT",
+      customerCode: "1078C",
+      savedAt: "2026-09-26T07:07:00.000Z",
+      userId: "u1",
+      meta: { outcome: "ASKED_COME_LATER" },
+    },
+    {
+      transactionType: "VISIT_REPORT",
+      customerCode: "1078C",
+      savedAt: "2026-09-26T09:10:00.000Z",
+      userId: "u1",
+      meta: { outcome: "ASKED_COME_LATER" },
+    },
+  ]);
+
+  assert.equal(visible.length, 2);
+});
+
+test("does not merge collection visits with different amounts", () => {
+  const visible = hideDuplicateVisitEntries([
+    {
+      transactionType: "COLLECTION_VISIT",
+      customerCode: "1198",
+      savedAt: "2026-09-26T10:00:00.000Z",
+      userId: "u1",
+      meta: { visitOutcome: "FUNDS_RECEIVED", amountReceived: 100 },
+    },
+    {
+      transactionType: "COLLECTION_VISIT",
+      customerCode: "1198",
+      savedAt: "2026-09-26T10:00:05.000Z",
+      userId: "u1",
+      meta: { visitOutcome: "FUNDS_RECEIVED", amountReceived: 200 },
+    },
+  ]);
+
+  assert.equal(visible.length, 2);
 });
 
 test("entryDisplayAmount uses order value when collection amount is empty", () => {

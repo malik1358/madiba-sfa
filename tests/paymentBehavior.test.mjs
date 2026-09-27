@@ -7,6 +7,7 @@ import {
   buildPaymentSettlementLedger,
   buildSalesInvoices,
   findImmediateCreditNoteReversals,
+  isCashSalesVoucher,
   matchPaymentsFifo,
   weightedAverageDays,
 } from "../app/lib/paymentBehavior.js";
@@ -150,6 +151,75 @@ test("FIFO applies oldest invoice first when one receipt covers two bills", () =
   assert.equal(allocations[1].voucher_number, "2");
   assert.equal(allocations[1].days, 12);
   assert.equal(Number(allocations[1].amount.toFixed(2)), 690);
+});
+
+test("isCashSalesVoucher detects RC/DC/JC and skips credit notes", () => {
+  assert.equal(isCashSalesVoucher("RC/100"), true);
+  assert.equal(isCashSalesVoucher("DC/12"), true);
+  assert.equal(isCashSalesVoucher("JC-9"), true);
+  assert.equal(isCashSalesVoucher("NFD/902"), false);
+  assert.equal(isCashSalesVoucher("RNFD/190"), false);
+  assert.equal(isCashSalesVoucher("CNFD/APR/024"), false);
+  assert.equal(isCashSalesVoucher("CN/149"), false);
+});
+
+test("first receipt after cash voucher settles cash before older credit invoices", () => {
+  // Older credit open, then cash RC — first receipt after RC must clear RC first.
+  const { allocations, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-08-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-09-13", voucher_number: "RC/100", sales_amount: 2000, category: "Paper" },
+    ],
+    [{ receipt_date: "2026-09-14", amount: 2300 }],
+  );
+
+  assert.equal(allocations[0].voucher_number, "RC/100");
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 2300);
+  const cash = invoices.find((row) => row.voucher_number === "RC/100");
+  const credit = invoices.find((row) => row.voucher_number === "NFD/1");
+  assert.equal(Number(cash.remaining.toFixed(2)), 0);
+  assert.equal(Number(credit.remaining.toFixed(2)), 1150);
+});
+
+test("cash receipt leftover after RC goes to credit invoices on FIFO", () => {
+  const { allocations, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-08-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-08-15", voucher_number: "NFD/2", sales_amount: 500, category: "Paper" },
+      { transaction_date: "2026-09-13", voucher_number: "RC/100", sales_amount: 800, category: "Paper" },
+    ],
+    [{ receipt_date: "2026-09-14", amount: 2000 }],
+  );
+
+  // RC 800*1.15=920 first; leftover 1080 → NFD/1 1150 (partial 1080)
+  assert.equal(allocations[0].voucher_number, "RC/100");
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 920);
+  assert.equal(allocations[1].voucher_number, "NFD/1");
+  assert.equal(Number(allocations[1].amount.toFixed(2)), 1080);
+  const nfd1 = invoices.find((row) => row.voucher_number === "NFD/1");
+  const nfd2 = invoices.find((row) => row.voucher_number === "NFD/2");
+  assert.equal(Number(nfd1.remaining.toFixed(2)), 70);
+  assert.equal(Number(nfd2.remaining.toFixed(2)), 575);
+});
+
+test("second receipt after cash uses normal FIFO including unfinished cash", () => {
+  // First receipt after RC is tiny — marks cash priority used; second receipt is plain FIFO.
+  const { allocations } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-08-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-09-13", voucher_number: "RC/100", sales_amount: 2000, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2026-09-14", amount: 100 },
+      { receipt_date: "2026-09-20", amount: 3000 },
+    ],
+  );
+
+  assert.equal(allocations[0].voucher_number, "RC/100");
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 100);
+  // Second receipt: oldest open first → finish NFD/1 then RC
+  assert.equal(allocations[1].voucher_number, "NFD/1");
+  assert.equal(allocations[2].voucher_number, "RC/100");
 });
 
 test("gloves sales stay excl VAT when matching receipts", () => {
@@ -359,9 +429,12 @@ test("truncated sales window with full receipts skews avg days vs full ledger", 
     transactions: allTransactions.filter((row) => row.transaction_date >= "2026-03-01"),
     receipts: allReceipts,
     todayIso: "2026-09-21",
+    includeSixMonthWindow: false,
   });
 
   assert.equal(full.avgDaysToPay, 92); // amount-weighted 100d + 10d
+  assert.equal(full.avgDaysToPay6m, 10); // only NEW falls in 6m window with its receipt
+  assert.equal(full.avgDays6mFromDate, "2026-03-01");
   assert.notEqual(truncated.avgDaysToPay, full.avgDaysToPay);
   assert.ok(
     Math.abs(truncated.avgDaysToPay - full.avgDaysToPay) >= 20,
@@ -717,7 +790,8 @@ test("Tally vs computed outstanding includes credit notes in computed open", () 
         reference: "1691",
         sales_amount: 2250,
         item_code: "ITEM-B",
-        quantity: 1,
+        // Different qty than 2106 so this is not an exact mirror reverse.
+        quantity: 2,
         category: "Paper",
       },
     ],
@@ -741,4 +815,86 @@ test("Tally vs computed outstanding includes credit notes in computed open", () 
 
   const cashGap = (ledger.tallyFifoDiscrepancies || []).find((row) => row.voucher_number === "2106");
   assert.ok(cashGap);
+});
+
+test("exact amount + items/qty CN reverses invoice on any later date", () => {
+  const item = { item_code: "A003595", quantity: 24, category: "Body Care" };
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      {
+        transaction_date: "2026-06-30",
+        voucher_number: "NFD/1050",
+        sales_amount: 18888.37,
+        ...item,
+      },
+      {
+        transaction_date: "2026-07-07",
+        voucher_number: "361",
+        voucher_type: "Credit Note",
+        reference: "NFD/1050",
+        sales_amount: -18888.37,
+        ...item,
+      },
+      {
+        transaction_date: "2026-04-06",
+        voucher_number: "NFD/357",
+        sales_amount: 1000,
+        item_code: "OTHER",
+        quantity: 1,
+        category: "Paper",
+      },
+    ],
+    // Cash that previously stacked on NFD/1050 must settle elsewhere once reversed.
+    receipts: [
+      { receipt_date: "2026-07-07", amount: 5000, vch_no: "1191" },
+      { receipt_date: "2026-08-10", amount: 3400, vch_no: "1411" },
+    ],
+    outstandingInvoices: [],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 1);
+  assert.equal(ledger.reversedInvoices[0].voucher_number, "NFD/1050");
+  assert.equal(ledger.reversedInvoices[0].credit_note_voucher, "361");
+  assert.equal(ledger.reversedInvoices[0].reversal_days, 7);
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "NFD/1050"), false);
+
+  const kept = ledger.invoices.find((row) => row.voucher_number === "NFD/357");
+  assert.ok(kept);
+  assert.equal(Number(kept.paid_amount.toFixed(2)), 1150);
+  assert.ok(
+    !(kept.credit_notes || []).some((note) => String(note.voucher_number) === "361"),
+    "full mirror CN must not also attach under another invoice",
+  );
+});
+
+test("same-amount CN with different items does not reverse outside the 1-day window", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      {
+        transaction_date: "2026-06-30",
+        voucher_number: "NFD/1",
+        sales_amount: 1000,
+        item_code: "ITEM-A",
+        quantity: 10,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-07-10",
+        voucher_number: "CN-9",
+        voucher_type: "Credit Note",
+        sales_amount: -1000,
+        item_code: "ITEM-B",
+        quantity: 10,
+        category: "Paper",
+      },
+    ],
+    receipts: [],
+    outstandingInvoices: [],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 0);
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "NFD/1"), true);
+  assert.equal(ledger.creditNotes.some((row) => row.voucher_number === "CN-9"), true);
 });

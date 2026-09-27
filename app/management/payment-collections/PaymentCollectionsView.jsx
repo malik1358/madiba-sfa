@@ -47,7 +47,9 @@ import { resolveAuthSession } from "../../lib/authSession";
 import { requestLoginFirstCustomerHintCheck } from "../../lib/loginFirstCustomerHint";
 import {
   assertCollectionVisitRemark,
+  buildCollectionSalesmanOptions,
   collectionVisitRequiresRemark,
+  getCollectionSalesmanLabel,
   isCashOnlyQueueCustomer,
   isCashQueueCustomer,
   isScheduledRevisitQueueCustomer,
@@ -62,7 +64,7 @@ import {
 } from "../../lib/collectionQueueSearch";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
-import { formatAvgDaysToPayWhatsappLines, loadCustomerAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
+import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { formatCollectionLastVisitWhatsappLines } from "../../lib/collectionVisitSummary";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -199,6 +201,8 @@ const TEXT = {
   receiptCopy: { en: "Receipt Copy", ar: "صورة الإيصال" },
   capturePhoto: { en: "Take Photo", ar: "التقاط صورة" },
   chooseFile: { en: "Choose File / PDF", ar: "اختيار ملف / PDF" },
+  clearAttachment: { en: "Clear", ar: "مسح" },
+  attachmentSelected: { en: "Selected", ar: "تم الاختيار" },
   saveVisit: { en: "Save Collection Visit", ar: "حفظ زيارة التحصيل" },
   locationUpdateTitle: { en: "Update customer location?", ar: "تحديث موقع العميل؟" },
   locationUpdateAndSave: { en: "Update location and save", ar: "تحديث الموقع والحفظ" },
@@ -326,6 +330,7 @@ const TEXT = {
   summaryLastVisitRemarkArabic: { en: "Last visit remark (Arabic)", ar: "ملاحظة آخر زيارة (عربي)" },
   summaryLastVisitRemarkEnglish: { en: "Last visit remark (English)", ar: "ملاحظة آخر زيارة (انجليزي)" },
   summaryAvgDaysToPay: { en: "Avg days to pay", ar: "متوسط أيام الدفع" },
+  summaryAvgDaysToPay6m: { en: "6-month avg", ar: "متوسط 6 أشهر" },
   summaryGps: { en: "GPS", ar: "GPS" },
   summaryDistanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
   summaryDistanceFromPrevious: { en: "Distance from previous", ar: "المسافة من السابق" },
@@ -349,8 +354,10 @@ const TEXT = {
   filterProbability: { en: "Filter probability", ar: "تصفية الاحتمالية" },
   filterOutcome: { en: "Filter outcome", ar: "تصفية النتيجة" },
   filterLastVisitRemark: { en: "Filter remark", ar: "تصفية الملاحظة" },
-  filterLastUpdate: { en: "Filter last update", ar: "تصفية آخر تحديث" },
+  filterLastUpdateFrom: { en: "From", ar: "من" },
+  filterLastUpdateTo: { en: "To", ar: "إلى" },
   filterLastReceiptDate: { en: "Filter receipt date", ar: "تصفية تاريخ الإيصال" },
+  sortByColumn: { en: "Sort by this column", ar: "ترتيب حسب هذا العمود" },
   invDate: { en: "Date", ar: "التاريخ" },
   invRef: { en: "Ref", ar: "المرجع" },
   invPending: { en: "Pending", ar: "المعلق" },
@@ -406,7 +413,31 @@ const EMPTY_CREDIT_COLUMN_FILTERS = {
   probability: [],
   lastOutcome: [],
   lastVisitRemark: "",
-  lastUpdate: "",
+  lastUpdateFrom: "",
+  lastUpdateTo: "",
+};
+
+const CREDIT_SORT_NUMERIC_KEYS = new Set([
+  "dueAmount",
+  "cash",
+  "receivedLast10Days",
+  "avgPayingDays",
+  "bucket30",
+  "bucket31to60",
+  "bucket61to90",
+  "bucket91to120",
+  "bucket120plus",
+  "maxOverdue",
+  "dueInvoices",
+  "probability",
+  "lastUpdate",
+]);
+
+const PROBABILITY_SORT_RANK = {
+  high: 3,
+  medium: 2,
+  low: 1,
+  na: 0,
 };
 
 const RECEIPT_MODE_KEYS = {
@@ -453,7 +484,7 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   const lines = [
     `${t("summaryCustomer")}: ${row.customer_name || row.customer_code}`,
     `${t("summaryCode")}: ${row.customer_code || "-"}`,
-    `${t("summarySalesman")}: ${row.salesman_name || row.salesman_code || "-"}`,
+    `${t("summarySalesman")}: ${getSalesmanLabel(row) || "-"}`,
     `${t("summaryOutcome")}: ${outcomeText || t("summaryNotSpecified")}`,
   ];
 
@@ -479,8 +510,11 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   lines.push(`${t("bucket91to120")}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${t("bucket120plus")}: ${formatMoney(row.outstanding_above_120)}`);
   lines.push(...formatAvgDaysToPayWhatsappLines(
-    options.avgDaysToPay ?? row.avgDaysToPay ?? row.avg_days_to_pay,
-    { avgDaysToPay: t("summaryAvgDaysToPay") },
+    options.avgDaysToPay ?? resolveLocalAvgDaysToPay(row),
+    {
+      avgDaysToPay: t("summaryAvgDaysToPay"),
+      avgDaysToPay6mLabel: t("summaryAvgDaysToPay6m"),
+    },
   ));
   lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
     gps: t("summaryGps"),
@@ -509,9 +543,11 @@ function buildStoredVisitReport(row, englishRemark, t, visit = null, options = {
   const selectedVisit = visit || row?.latest_collection;
   if (!selectedVisit) return "";
 
+  // Salesman is the customer book / outstanding salesman on the queue row —
+  // never the collector who saved the visit (scheduled_by_name).
   const reportRow = {
     ...row,
-    salesman_name: selectedVisit.scheduled_by_name || row.salesman_name,
+    salesman_name: row.salesman_name,
     salesman_code: row.salesman_code,
   };
 
@@ -570,6 +606,8 @@ async function countCollectionPendingSync() {
   return pending.filter((item) => item.metadata?.type === "collection_visit").length;
 }
 
+const COLLECTION_TRANSLATE_TIMEOUT_MS = 2500;
+
 async function resolveEnglishRemarkForSave(arabicRemark, englishRemark) {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     const english = String(englishRemark || "").trim();
@@ -577,10 +615,10 @@ async function resolveEnglishRemarkForSave(arabicRemark, englishRemark) {
     if (english && english !== arabic) return english;
     return arabic;
   }
-  return resolveEnglishRemark(arabicRemark, englishRemark);
+  return resolveEnglishRemark(arabicRemark, englishRemark, COLLECTION_TRANSLATE_TIMEOUT_MS);
 }
 
-async function resolveEnglishRemark(arabicRemark, englishRemark) {
+async function resolveEnglishRemark(arabicRemark, englishRemark, timeoutMs = 8000) {
   const arabic = String(arabicRemark || "").trim();
   const english = String(englishRemark || "").trim();
   if (!arabic) return english;
@@ -589,7 +627,7 @@ async function resolveEnglishRemark(arabicRemark, englishRemark) {
   // visit note cannot override the current Arabic text.
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -641,29 +679,11 @@ function normalizeSalesmanKey(value) {
 }
 
 function getSalesmanLabel(row) {
-  const name = String(row?.salesman_name || "").trim();
-  const code = String(row?.salesman_code || "").trim();
-  if (code && name) return `${code} - ${name}`;
-  return name || code || "";
+  return getCollectionSalesmanLabel(row);
 }
 
 function buildSalesmanOptions(rows) {
-  const byKey = new Map();
-
-  (rows || []).forEach((row) => {
-    const label = getSalesmanLabel(row);
-    const key = normalizeSalesmanKey(label);
-    if (!key) return;
-
-    const existing = byKey.get(key);
-    if (!existing || label.length > existing.length) {
-      byKey.set(key, label);
-    }
-  });
-
-  return [...byKey.entries()]
-    .map(([key, label]) => ({ key, label }))
-    .sort((left, right) => left.label.localeCompare(right.label));
+  return buildCollectionSalesmanOptions(rows);
 }
 
 function rowMatchesSalesmanSelection(row, selectedKeys) {
@@ -744,6 +764,111 @@ function matchesMultiSelectFilter(selectedValues, actualValue) {
   return selectedValues.includes(String(actualValue || "").trim());
 }
 
+function resolveLastVisitDateKey(row) {
+  const savedAt = row?.latest_collection?.saved_at;
+  if (!savedAt) return "";
+  const parsed = new Date(savedAt);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return getKsaDateString(parsed);
+}
+
+function matchesDateRangeFilter(dateKey, from, to) {
+  const fromKey = String(from || "").trim();
+  const toKey = String(to || "").trim();
+  if (!fromKey && !toKey) return true;
+  if (!dateKey) return false;
+  if (fromKey && dateKey < fromKey) return false;
+  if (toKey && dateKey > toKey) return false;
+  return true;
+}
+
+function isEmptySortValue(value) {
+  return value == null || value === "";
+}
+
+function compareCreditSortValues(left, right, sortKey) {
+  const leftEmpty = isEmptySortValue(left);
+  const rightEmpty = isEmptySortValue(right);
+  if (leftEmpty && rightEmpty) return 0;
+  if (leftEmpty) return 1;
+  if (rightEmpty) return -1;
+
+  if (CREDIT_SORT_NUMERIC_KEYS.has(sortKey)) {
+    return Number(left) - Number(right);
+  }
+
+  return String(left).localeCompare(String(right), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function resolveCreditSortValue(row, sortKey, t) {
+  switch (sortKey) {
+    case "code":
+      return String(row?.customer_code || "");
+    case "customer":
+      return String(row?.customer_name || row?.customer_code || "");
+    case "salesman":
+      return getSalesmanLabel(row) || "";
+    case "cityArea":
+      return `${row?.city || "-"} / ${row?.area || "-"}`;
+    case "dueAmount":
+      return resolveRowDueAmount(row);
+    case "cash":
+      return Number(row?.outstanding_cash || 0);
+    case "receivedLast10Days":
+      return Number(row?.received_last_10_days || 0);
+    case "avgPayingDays":
+      return row?.avg_days_to_pay == null || row?.avg_days_to_pay === ""
+        ? null
+        : Number(row.avg_days_to_pay);
+    case "lastReceiptDate":
+      return String(row?.last_receipt_date || "").trim();
+    case "bucket30":
+      return Number(row?.outstanding_0_30 || 0);
+    case "bucket31to60":
+      return Number(row?.outstanding_30_60 || 0);
+    case "bucket61to90":
+      return Number(row?.outstanding_61_90 || 0);
+    case "bucket91to120":
+      return Number(row?.outstanding_91_120 || 0);
+    case "bucket120plus":
+      return Number(row?.outstanding_above_120 || 0);
+    case "maxOverdue":
+      return Number(row?.max_overdue_days || 0);
+    case "dueInvoices":
+      return resolveRowDueInvoiceCount(row);
+    case "probability":
+      return PROBABILITY_SORT_RANK[resolveRowProbabilityKey(row)] ?? 0;
+    case "lastOutcome":
+      return formatOutcomeLabel(row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status, t);
+    case "lastVisitRemark":
+      return formatLatestCollectionVisitRemark(row?.latest_collection) || "";
+    case "lastUpdate": {
+      const savedAt = row?.latest_collection?.saved_at;
+      if (!savedAt) return null;
+      const ts = Date.parse(savedAt);
+      return Number.isNaN(ts) ? null : ts;
+    }
+    default:
+      return "";
+  }
+}
+
+function sortCreditRows(rows, creditSort, t) {
+  const sortKey = String(creditSort?.key || "").trim();
+  if (!sortKey) return rows;
+  const direction = creditSort?.dir === "desc" ? -1 : 1;
+  return [...rows].sort((left, right) => (
+    compareCreditSortValues(
+      resolveCreditSortValue(left, sortKey, t),
+      resolveCreditSortValue(right, sortKey, t),
+      sortKey,
+    ) * direction
+  ));
+}
+
 function resolveRowDueAmount(row) {
   const isNotDue = row?.queue_kind === "not_due";
   return Number(isNotDue ? row?.total_not_due_amount : row?.total_due_amount) || 0;
@@ -765,7 +890,7 @@ function resolveRowOutcomeKey(row) {
   return String(row?.latest_collection?.visit_outcome || row?.latest_collection?.payment_status || "").trim().toUpperCase();
 }
 
-function rowMatchesCreditColumnFilters(row, filters, t) {
+function rowMatchesCreditColumnFilters(row, filters) {
   if (!includesTextFilter(row?.customer_code, filters.code)) return false;
   if (!includesTextFilter(row?.customer_name || row?.customer_code, filters.customer)) return false;
   if (!matchesMultiSelectFilter(filters.salesman, normalizeSalesmanKey(getSalesmanLabel(row)))) return false;
@@ -785,7 +910,7 @@ function rowMatchesCreditColumnFilters(row, filters, t) {
   if (!matchesMultiSelectFilter(filters.probability, resolveRowProbabilityKey(row))) return false;
   if (!matchesMultiSelectFilter(filters.lastOutcome, resolveRowOutcomeKey(row))) return false;
   if (!includesTextFilter(formatLatestCollectionVisitRemark(row?.latest_collection), filters.lastVisitRemark)) return false;
-  if (!includesTextFilter(formatLastUpdateText(row, t), filters.lastUpdate)) return false;
+  if (!matchesDateRangeFilter(resolveLastVisitDateKey(row), filters.lastUpdateFrom, filters.lastUpdateTo)) return false;
   return true;
 }
 
@@ -992,6 +1117,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
   const [todayVisitCount, setTodayVisitCount] = useState(0);
   const [expandedRevisitDates, setExpandedRevisitDates] = useState(() => new Set());
   const [creditColumnFilters, setCreditColumnFilters] = useState(EMPTY_CREDIT_COLUMN_FILTERS);
+  const [creditSort, setCreditSort] = useState({ key: "", dir: "asc" });
   const [exportingDueQueue, setExportingDueQueue] = useState(false);
   const isMobileLayout = useMobileLayout();
   const locationPromptResolverRef = useRef(null);
@@ -1047,7 +1173,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
     if (text.includes("GPS is required") || text === GPS_REQUIRED_ERROR) return t("msgGpsRequired");
     if (text.includes("Unable to save collection visit")) return t("msgSaveFailed");
     if (text.includes("timed out") || text.toLowerCase().includes("abort")) return t("msgRequestTimeout");
-    if (text.includes("Reading the attached file")) return t("msgRequestTimeout");
+    if (text.includes("Reading the attached file") || text.includes("Reading this photo") || text.includes("Compressing this photo")) {
+      return t("msgRequestTimeout");
+    }
     if (text.toLowerCase().includes("bucket not found") || text.includes("File storage is not configured")) {
       return t("msgStorageUnavailable");
     }
@@ -1467,22 +1595,50 @@ export default function PaymentCollectionsView({ view = "due" }) {
 
   const tableRows = useMemo(() => {
     const applyColumnFilters = (rows) => (
-      rows.filter((row) => rowMatchesCreditColumnFilters(row, creditColumnFilters, t))
+      rows.filter((row) => rowMatchesCreditColumnFilters(row, creditColumnFilters))
     );
+    const applySort = (rows) => sortCreditRows(rows, creditSort, t);
 
     if (view !== "due") {
-      return applyColumnFilters(visibleRows).map((row) => ({ type: "customer", row }));
+      return applySort(applyColumnFilters(visibleRows)).map((row) => ({ type: "customer", row }));
     }
 
-    const filteredDue = applyColumnFilters(visibleRows);
-    const filteredNotDue = applyColumnFilters(visibleNotDueRows);
+    const filteredDue = applySort(applyColumnFilters(visibleRows));
+    const filteredNotDue = applySort(applyColumnFilters(visibleNotDueRows));
     const items = filteredDue.map((row) => ({ type: "customer", row }));
     if (filteredNotDue.length > 0) {
       items.push({ type: "separator" });
       filteredNotDue.forEach((row) => items.push({ type: "customer", row }));
     }
     return items;
-  }, [creditColumnFilters, t, visibleNotDueRows, visibleRows, view]);
+  }, [creditColumnFilters, creditSort, t, visibleNotDueRows, visibleRows, view]);
+
+  function toggleCreditSort(sortKey) {
+    setCreditSort((current) => {
+      if (current.key !== sortKey) return { key: sortKey, dir: "asc" };
+      if (current.dir === "asc") return { key: sortKey, dir: "desc" };
+      return { key: "", dir: "asc" };
+    });
+  }
+
+  function renderCreditSortHeader(sortKey, label) {
+    const active = creditSort.key === sortKey;
+    const indicator = active ? (creditSort.dir === "asc" ? " ▲" : " ▼") : "";
+    return (
+      <th aria-sort={active ? (creditSort.dir === "asc" ? "ascending" : "descending") : "none"}>
+        <button
+          type="button"
+          className="moduleCollectorSortButton"
+          title={t("sortByColumn")}
+          aria-label={`${label}. ${t("sortByColumn")}`}
+          onClick={() => toggleCreditSort(sortKey)}
+        >
+          <span>{label}</span>
+          {indicator ? <span aria-hidden="true">{indicator}</span> : null}
+        </button>
+      </th>
+    );
+  }
 
   const creditQueueCount = useMemo(
     () => tableRows.filter((item) => item.type === "customer").length,
@@ -1839,20 +1995,20 @@ export default function PaymentCollectionsView({ view = "due" }) {
         || cashQueuePriorityByKey.get(rowKey(row))
         || 0;
 
-      const [visitDistance, avgDaysToPay] = await Promise.all([
-        loadVisitDistanceMetrics({
-          supabase,
-          userId: session.user.id,
-          location: gps,
-          customer: locationUpdate.customer || row,
-          savedAt: new Date().toISOString(),
-        }),
-        loadCustomerAvgDaysToPay({
-          accessToken: session.access_token,
-          customerCode: row.customer_code,
-          customerName: row.customer_name || "",
-        }),
-      ]);
+      // Prefer local queue data for avg days and skip the activity timeline.
+      // Live history/timeline fetches were making every save wait on the network
+      // even when the visit itself can be queued offline. Distance-from-customer
+      // still uses GPS + customer coords; the API patches previous-visit distance
+      // when the queued save syncs.
+      const visitDistance = await loadVisitDistanceMetrics({
+        supabase,
+        userId: session.user.id,
+        location: gps,
+        customer: locationUpdate.customer || row,
+        savedAt: new Date().toISOString(),
+        skipTimeline: true,
+      });
+      const avgDaysToPay = resolveLocalAvgDaysToPay(row);
 
       const summaryText = buildVisitSummary(
         row,
@@ -1915,7 +2071,6 @@ export default function PaymentCollectionsView({ view = "due" }) {
         if (receiptFile) shareFiles.push(receiptFile);
       }
 
-      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
       const saveResult = await postFormDataResilient({
         url: "/api/payment-collections",
         formData,
@@ -1926,14 +2081,20 @@ export default function PaymentCollectionsView({ view = "due" }) {
           type: "collection_visit",
           customerCode: row.customer_code,
         },
-        // Large PDF receipts need more than a short probe timeout on mobile data.
-        timeoutMs: shareFiles.length > 0 ? 90000 : 25000,
+        // Always save on-device first (including Funds Received PDF/photo). Sync
+        // re-resolves Android MIME on upload so queued attachments do not stick.
+        timeoutMs: shareFiles.length > 0 ? 45000 : 12000,
         queueOnTimeout: true,
-        // Only queue-first when offline. Online uploads (especially PDF receipts)
-        // should hit the server directly so Android octet-stream PDFs are normalized
-        // and saved immediately instead of sitting in a stuck IndexedDB sync item.
-        queueFirst: offline,
+        queueFirst: true,
       });
+
+      // Clear Saving before success UI / queue refresh so attachment saves do not
+      // look stuck while the outstanding queue reloads on mobile.
+      if (saveWatchdog && typeof window !== "undefined") {
+        window.clearTimeout(saveWatchdog);
+        saveWatchdog = 0;
+      }
+      setSavingCustomerCode("");
 
       const payload = saveResult.payload || {};
       const correctedSummary = String(payload?.summaryText || "").trim();
@@ -1961,7 +2122,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       await refreshPendingSyncCount();
 
       if (!saveResult.queued) {
-        await loadQueue(rowKey(row));
+        void loadQueue(rowKey(row));
       } else {
         const scope = salesScope || (await fetchSalesScopeCached().catch(() => null))?.scope;
         await persistOptimisticVisitSave(row, {
@@ -2165,10 +2326,10 @@ export default function PaymentCollectionsView({ view = "due" }) {
           customerCode: row.customer_code,
           action,
         },
-        // Legal remove used to time out at the default 4s while the API rebuilt
-        // the whole outstanding queue, so the delete never reached the database.
+        // Legal updates also save on-device first so flaky mobile data cannot block
+        // transfer/remove. Sync applies the PATCH when the connection improves.
         timeoutMs: 60000,
-        queueFirst: typeof navigator !== "undefined" && navigator.onLine === false,
+        queueFirst: true,
       });
 
       if (!saveResult.success) {
@@ -2606,26 +2767,26 @@ export default function PaymentCollectionsView({ view = "due" }) {
               <table className="moduleTable moduleCollectorTable">
                 <thead>
                   <tr>
-                    <th>{t("customerCode")}</th>
-                    <th>{t("customer")}</th>
-                    <th>{t("salesman")}</th>
-                    <th>{t("cityArea")}</th>
-                    <th>{t("amount")}</th>
-                    <th>{t("cashBucket")}</th>
-                    <th>{t("receivedLast10Days")}</th>
-                    <th>{t("avgPayingDays")}</th>
-                    <th>{t("lastReceiptDate")}</th>
-                    <th>{t("bucket30")}</th>
-                    <th>{t("bucket31to60")}</th>
-                    <th>{t("bucket61to90")}</th>
-                    <th>{t("bucket91to120")}</th>
-                    <th>{t("bucket120plus")}</th>
-                    <th>{t("overdue")}</th>
-                    <th>{t("invoices")}</th>
-                    <th>{t("probability")}</th>
-                    <th>{t("lastOutcome")}</th>
-                    <th>{t("lastVisitRemark")}</th>
-                    <th>{t("lastUpdate")}</th>
+                    {renderCreditSortHeader("code", t("customerCode"))}
+                    {renderCreditSortHeader("customer", t("customer"))}
+                    {renderCreditSortHeader("salesman", t("salesman"))}
+                    {renderCreditSortHeader("cityArea", t("cityArea"))}
+                    {renderCreditSortHeader("dueAmount", t("amount"))}
+                    {renderCreditSortHeader("cash", t("cashBucket"))}
+                    {renderCreditSortHeader("receivedLast10Days", t("receivedLast10Days"))}
+                    {renderCreditSortHeader("avgPayingDays", t("avgPayingDays"))}
+                    {renderCreditSortHeader("lastReceiptDate", t("lastReceiptDate"))}
+                    {renderCreditSortHeader("bucket30", t("bucket30"))}
+                    {renderCreditSortHeader("bucket31to60", t("bucket31to60"))}
+                    {renderCreditSortHeader("bucket61to90", t("bucket61to90"))}
+                    {renderCreditSortHeader("bucket91to120", t("bucket91to120"))}
+                    {renderCreditSortHeader("bucket120plus", t("bucket120plus"))}
+                    {renderCreditSortHeader("maxOverdue", t("overdue"))}
+                    {renderCreditSortHeader("dueInvoices", t("invoices"))}
+                    {renderCreditSortHeader("probability", t("probability"))}
+                    {renderCreditSortHeader("lastOutcome", t("lastOutcome"))}
+                    {renderCreditSortHeader("lastVisitRemark", t("lastVisitRemark"))}
+                    {renderCreditSortHeader("lastUpdate", t("lastUpdate"))}
                     <th>{t("actions")}</th>
                   </tr>
                   <tr className="moduleCollectorFilterRow">
@@ -2837,16 +2998,30 @@ export default function PaymentCollectionsView({ view = "due" }) {
                       />
                     </th>
                     <th>
-                      <input
-                        className="moduleInput moduleCollectorColumnFilter"
-                        type="text"
-                        value={creditColumnFilters.lastUpdate}
-                        placeholder={t("filterLastUpdate")}
-                        onChange={(event) => setCreditColumnFilters((current) => ({
-                          ...current,
-                          lastUpdate: event.target.value,
-                        }))}
-                      />
+                      <div className="moduleCollectorDateRangeFilter">
+                        <input
+                          className="moduleInput moduleCollectorColumnFilter"
+                          type="date"
+                          value={creditColumnFilters.lastUpdateFrom}
+                          title={t("filterLastUpdateFrom")}
+                          aria-label={t("filterLastUpdateFrom")}
+                          onChange={(event) => setCreditColumnFilters((current) => ({
+                            ...current,
+                            lastUpdateFrom: event.target.value,
+                          }))}
+                        />
+                        <input
+                          className="moduleInput moduleCollectorColumnFilter"
+                          type="date"
+                          value={creditColumnFilters.lastUpdateTo}
+                          title={t("filterLastUpdateTo")}
+                          aria-label={t("filterLastUpdateTo")}
+                          onChange={(event) => setCreditColumnFilters((current) => ({
+                            ...current,
+                            lastUpdateTo: event.target.value,
+                          }))}
+                        />
+                      </div>
                     </th>
                     <th>
                       <button
@@ -2891,7 +3066,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
                               <div className="moduleHint">{t("legalSearchMatch")}</div>
                             ) : null}
                           </td>
-                          <td data-label={t("salesman")}>{row.salesman_name || row.salesman_code || "-"}</td>
+                          <td data-label={t("salesman")}>{getSalesmanLabel(row) || "-"}</td>
                           <td data-label={t("cityArea")}>{`${row.city || "-"} / ${row.area || "-"}`}</td>
                           <td data-label={t("amount")} className="moduleCollectorCellPrimary">{formatMoney(isNotDue ? row.total_not_due_amount : row.total_due_amount)}</td>
                           <td data-label={t("cashBucket")}>{formatMoney(row.outstanding_cash)}</td>
@@ -3183,6 +3358,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                         />
                                       </label>
                                     </div>
+                                    {form.paymentCopy ? (
+                                      <div className="moduleHint" style={{ marginTop: "6px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <span>{t("attachmentSelected")}: {form.paymentCopy.name || "payment-copy"}</span>
+                                        <button
+                                          type="button"
+                                          className="moduleInlineButton moduleActionButton"
+                                          onClick={() => setForm((current) => ({ ...current, paymentCopy: null }))}
+                                        >
+                                          {t("clearAttachment")}
+                                        </button>
+                                      </div>
+                                    ) : null}
                                   </label>
                                   <label>
                                     {t("receiptCopy")}
@@ -3208,6 +3395,18 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                         />
                                       </label>
                                     </div>
+                                    {form.receiptCopy ? (
+                                      <div className="moduleHint" style={{ marginTop: "6px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <span>{t("attachmentSelected")}: {form.receiptCopy.name || "receipt-copy"}</span>
+                                        <button
+                                          type="button"
+                                          className="moduleInlineButton moduleActionButton"
+                                          onClick={() => setForm((current) => ({ ...current, receiptCopy: null }))}
+                                        >
+                                          {t("clearAttachment")}
+                                        </button>
+                                      </div>
+                                    ) : null}
                                   </label>
                                 </div>
 

@@ -133,17 +133,15 @@ export default function DayRouteMap({
               );
             })}
           </ul>
-          {workingHours.value !== "-" ? (
-            <p className="dayRouteMapWorkingHours">
-              <strong>{workingHoursTitle}:</strong> {workingHours.value}
-            </p>
-          ) : null}
+          <p className="dayRouteMapWorkingHours">
+            <strong>{workingHoursTitle}:</strong> {workingHours.value}
+          </p>
         </div>
-      ) : workingHours.value !== "-" ? (
+      ) : (
         <p className="dayRouteMapWorkingHours">
           <strong>{workingHoursTitle}:</strong> {workingHours.value}
         </p>
-      ) : null}
+      )}
     </div>
   );
 }

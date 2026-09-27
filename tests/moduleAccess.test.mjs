@@ -75,6 +75,17 @@ test("invoice-makers can access hierarchy upload and gps map", () => {
   assert.equal(access.canAccess("upload"), true);
   assert.equal(access.canAccess("gpsMap"), true);
   assert.equal(access.canAccess("userActivity"), false);
+  assert.equal(access.canAccess("workingHours"), false);
+});
+
+test("admins and managers can open working hours attendance", () => {
+  assert.equal(buildModuleAccess({ role: "admin" }).canAccess("workingHours"), true);
+  assert.equal(buildModuleAccess({ role: "manager" }).canAccess("workingHours"), true);
+  assert.equal(buildModuleAccess({ role: "collector", salesmanCode: "CL01" }).canAccess("workingHours"), true);
+  assert.equal(buildModuleAccess({ role: "salesman", salesmanCode: "PARVEZ" }).canAccess("workingHours"), false);
+  assert.equal(localizedModuleLabel("workingHours", "en"), "Working Hours");
+  assert.equal(localizedModuleLabel("workingHours", "ar"), "ساعات العمل");
+  assert.equal(moduleLabelForPath("/management/working-hours", "en"), "Working Hours");
 });
 
 test("admins and managers can manage customer book shares", () => {

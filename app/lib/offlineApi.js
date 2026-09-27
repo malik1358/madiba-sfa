@@ -46,11 +46,15 @@ export async function postFormDataResilient({
   onQueued,
   timeoutMs = FORM_UPLOAD_TIMEOUT_MS,
   queueOnTimeout = true,
-  queueFirst = false,
+  // Field saves default to on-device first so flaky mobile data cannot block entry.
+  // Pass queueFirst: false only when an immediate server response is required.
+  queueFirst = true,
 }) {
-  const payload = await formDataToOfflinePayload(formData);
-
+  // Only serialize files into IndexedDB when we actually need to queue.
+  // Reading large camera PDFs/photos into ArrayBuffer before every online
+  // upload made Funds Received saves feel stuck on mobile.
   async function queueForSync() {
+    const payload = await formDataToOfflinePayload(formData);
     const queued = await enqueueOfflineRequest({
       url,
       method: "POST",
@@ -113,7 +117,9 @@ export async function sendJsonResilient({
   headers = {},
   metadata = {},
   onQueued,
-  queueFirst = false,
+  // Field saves default to on-device first so flaky mobile data cannot block entry.
+  // Pass queueFirst: false only when an immediate server response is required.
+  queueFirst = true,
   timeoutMs = ONLINE_PROBE_TIMEOUT_MS,
 }) {
   async function queueForSync() {

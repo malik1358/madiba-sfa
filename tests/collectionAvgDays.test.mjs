@@ -57,4 +57,6 @@ test("attachAvgDaysToPayToRecords fills avg_days_to_pay and last_receipt_date", 
   assert.equal(row.last_receipt_date, "2026-02-01");
   assert.equal(typeof row.avg_days_to_pay, "number");
   assert.ok(row.avg_days_to_pay > 0);
+  assert.equal(typeof row.avg_days_to_pay_6m, "number");
+  assert.ok(row.avg_days_to_pay_6m > 0);
 });

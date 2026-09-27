@@ -53,8 +53,12 @@ export function buildPaymentSettlementPdfModel(ledger) {
     `${Number(totals.partial_invoice_count || 0)} partial`,
     `${Number(totals.open_invoice_count || 0)} open`,
   ];
-  if (summary.avgDaysToPay != null) {
+  if (summary.avgDaysToPay != null && summary.avgDaysToPay6m != null) {
+    subtitleParts.push(`Avg ${summary.avgDaysToPay} lifetime · ${summary.avgDaysToPay6m} (6m)`);
+  } else if (summary.avgDaysToPay != null) {
     subtitleParts.push(`Avg ${summary.avgDaysToPay} days to pay`);
+  } else if (summary.avgDaysToPay6m != null) {
+    subtitleParts.push(`Avg ${summary.avgDaysToPay6m} days to pay (6m)`);
   }
 
   return {

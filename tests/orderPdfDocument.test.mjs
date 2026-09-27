@@ -219,6 +219,7 @@ test("buildOrderPdfSnapshotFromSavedOrder matches the new-order snapshot shape",
       customer_code: "PROSPECT-261",
       customer_name: "INFOGATE TRADING EST",
       salesman_code: "MOINUDIN KHAJA",
+      salesman_name: "Moinudin Khaja",
       updated_at: "2026-09-06T16:02:56.000Z",
     },
     lines: [{ item_code: "A004075", item_name: "THERMAL ROLL", quantity: 20, rate: 72, line_value: 1440 }],
@@ -229,11 +230,38 @@ test("buildOrderPdfSnapshotFromSavedOrder matches the new-order snapshot shape",
   assert.equal(snapshot.orderId, 296);
   assert.equal(snapshot.orderNumber, "296");
   assert.equal(snapshot.statusLabel, "SUBMITTED");
+  assert.equal(snapshot.salesmanCode, "MOINUDIN KHAJA");
+  assert.equal(snapshot.salesmanName, "Moinudin Khaja");
   assert.equal(snapshot.paymentType, "credit");
   assert.equal(snapshot.itemCount, 1);
   assert.equal(snapshot.totalQuantity, 20);
   assert.equal(snapshot.totals.amountExclVat, 1440);
   assert.equal(snapshot.lines[0].item_code, "A004075");
+});
+
+test("renderOrderPdfDocument shows the order-maker salesman name", () => {
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, {
+    orderId: 1140,
+    orderNumber: "JU01",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-09-26T06:46:38.000Z",
+    customerCode: "1140",
+    customerName: "Hamsat Khayal Trading Company",
+    salesmanCode: "JUNAID",
+    salesmanName: "Junaid",
+    paymentType: "credit",
+    pricingRegion: "riyadh",
+    itemCount: 0,
+    totalQuantity: 0,
+    grandTotal: 0,
+    totals: {},
+    lines: [],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+  assert.ok(doc.texts.includes("Salesman: Junaid"));
+  assert.equal(doc.texts.some((text) => text.includes("Salesman: PARVEZ")), false);
 });
 
 test("formatHistoryChange describes added items", () => {
@@ -314,32 +342,28 @@ test("renderOrderPdfDocument includes the historic Monthly Performance table", (
   assert.ok(doc.texts.includes("AUG"));
 });
 
-test("renderOrderPdfDocument requires a real order number and never prints a pending queue id", () => {
+test("renderOrderPdfDocument allows queued orders with a provisional Order No. label", () => {
   const doc = createMockDoc();
-  assert.throws(
-    () =>
-      renderOrderPdfDocument(doc, {
-        orderId: "pending:8981a846-ca3",
-        orderNumber: "pending:8981a846-ca3",
-        statusLabel: "Submitted",
-        savedAtIso: "2026-09-07T08:30:44.000Z",
-        customerCode: "1059",
-        customerName: "Test",
-        salesmanCode: "ADMIN",
-        paymentType: "credit",
-        pricingRegion: "riyadh",
-        itemCount: 0,
-        totalQuantity: 0,
-        grandTotal: 0,
-        totals: {},
-        lines: [],
-        history: [],
-        outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
-      }),
-    /Order number is required/
-  );
+  renderOrderPdfDocument(doc, {
+    orderId: "pending:8981a846-ca3",
+    orderNumber: "pending:8981a846-ca3",
+    statusLabel: "Submitted",
+    savedAtIso: "2026-09-07T08:30:44.000Z",
+    customerCode: "1059",
+    customerName: "Test",
+    salesmanCode: "ADMIN",
+    paymentType: "credit",
+    pricingRegion: "riyadh",
+    itemCount: 0,
+    totalQuantity: 0,
+    grandTotal: 0,
+    totals: {},
+    lines: [],
+    history: [],
+    outstanding: { bucketLabels: [], customer: null, customerInvoices: [] },
+  });
+  assert.ok(doc.texts.includes("Order No. Pending sync"));
   assert.equal(doc.texts.some((text) => text.includes("pending:")), false);
-  assert.equal(doc.texts.some((text) => text.includes("Order No.")), false);
 });
 
 test("renderOrderPdfDocument hides cash and value percents when they are not applied", () => {

@@ -8,7 +8,11 @@ import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
-import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
+import {
+  buildPaymentSettlementLedger,
+  HISTORIC_PERFORMANCE_PERIOD_LABEL,
+  HISTORIC_PERFORMANCE_SHORT_LABEL,
+} from "../../lib/paymentBehavior.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -136,7 +140,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
 
 export default function PaymentSettlementPage() {
   const { language, setLanguage, dir } = useAppLanguage();
-  const t = (key) => translate(TEXT, key, language);
+  const t = translate(language, TEXT);
   const { access } = useModuleAccess();
 
   const [error, setError] = useState("");
@@ -208,7 +212,7 @@ export default function PaymentSettlementPage() {
     setError("");
     try {
       const session = await resolveAuthSession(supabase);
-      const response = await fetch("/api/customers/visible", {
+      const response = await fetch("/api/customers/visible?includeInactive=1", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const payload = await response.json().catch(() => ({}));
@@ -402,15 +406,31 @@ export default function PaymentSettlementPage() {
                   <div className="auditSummaryCard">
                     <span>Avg Days to Pay</span>
                     <strong>
-                      {ledger.summary.avgDaysToPay != null ? `${ledger.summary.avgDaysToPay} days` : "—"}
+                      {ledger.summary.avgDaysToPay != null
+                        ? (
+                          ledger.summary.avgDaysToPay6m != null
+                            ? `${ledger.summary.avgDaysToPay} days · 6m ${ledger.summary.avgDaysToPay6m}`
+                            : `${ledger.summary.avgDaysToPay} days`
+                        )
+                        : (ledger.summary.avgDaysToPay6m != null
+                          ? `6m ${ledger.summary.avgDaysToPay6m} days`
+                          : "—")}
                     </strong>
                     <em className="auditSummaryCardMeta">
                       {ledger.summary.avgDaysToPay != null
                         ? (Number(ledger.summary.openAmountInAvg || 0) > 0.009
-                          ? "Paid avg + open invoices older than that avg only"
-                          : "From collected receipts")
+                          ? "Lifetime · paid avg + open invoices older than that avg only"
+                          : "Lifetime · from collected receipts")
                         : "Needs sales, receipts, or open invoices"}
                     </em>
+                    {ledger.summary.avgDaysToPay6m != null ? (
+                      <em className="auditSummaryCardMeta">
+                        {HISTORIC_PERFORMANCE_PERIOD_LABEL}: {formatCount(ledger.summary.avgDaysToPay6m)} days
+                        {Number(ledger.summary.openAmountInAvg6m || 0) > 0.009
+                          ? ` · includes open older than ${HISTORIC_PERFORMANCE_SHORT_LABEL} paid avg`
+                          : ""}
+                      </em>
+                    ) : null}
                     {ledger.summary.avgDaysPaidOnly != null
                       && Number(ledger.summary.openAmountInAvg || 0) > 0.009
                       && ledger.summary.avgDaysPaidOnly !== ledger.summary.avgDaysToPay ? (

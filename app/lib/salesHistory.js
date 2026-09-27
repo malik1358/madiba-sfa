@@ -2,6 +2,12 @@ function normalizedValue(value) {
   return String(value ?? "").trim().toUpperCase();
 }
 
+/**
+ * Identity for a sales line across re-imports.
+ * Rate is excluded on purpose: later uploads often correct pack/unit rate while
+ * keeping the same qty + sales_amount. Including rate treated those as different
+ * lines and double-counted vouchers (e.g. NFD/1337).
+ */
 function transactionSignature(row) {
   return [
     row?.transaction_date,
@@ -11,7 +17,6 @@ function transactionSignature(row) {
     row?.item_code,
     row?.quantity,
     row?.sales_amount,
-    row?.rate,
   ].map(normalizedValue).join("|");
 }
 

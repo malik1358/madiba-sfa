@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ExportableTable from "../../../components/ExportableTable";
+import { HISTORIC_PERFORMANCE_PERIOD_LABEL, HISTORIC_PERFORMANCE_SHORT_LABEL } from "../../../lib/paymentBehavior.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -220,15 +221,29 @@ export default function InvoiceSettlement({
           <div className="auditSummaryCard">
             <span>Avg Days to Pay</span>
             <strong>
-              {summary.avgDaysToPay != null ? `${summary.avgDaysToPay} days` : "—"}
+              {summary.avgDaysToPay != null
+                ? (
+                  summary.avgDaysToPay6m != null
+                    ? `${summary.avgDaysToPay} days · 6m ${summary.avgDaysToPay6m}`
+                    : `${summary.avgDaysToPay} days`
+                )
+                : (summary.avgDaysToPay6m != null ? `6m ${summary.avgDaysToPay6m} days` : "—")}
             </strong>
             <em className="auditSummaryCardMeta">
               {summary.avgDaysToPay != null
                 ? (Number(summary.openAmountInAvg || 0) > 0.009
-                  ? "Paid avg + open invoices older than that avg only"
-                  : "From collected receipts")
+                  ? "Lifetime · paid avg + open invoices older than that avg only"
+                  : "Lifetime · from collected receipts")
                 : "Needs sales, receipts, or open invoices"}
             </em>
+            {summary.avgDaysToPay6m != null ? (
+              <em className="auditSummaryCardMeta">
+                {HISTORIC_PERFORMANCE_PERIOD_LABEL}: {formatCount(summary.avgDaysToPay6m)} days
+                {Number(summary.openAmountInAvg6m || 0) > 0.009
+                  ? ` · includes open older than ${HISTORIC_PERFORMANCE_SHORT_LABEL} paid avg`
+                  : ""}
+              </em>
+            ) : null}
             {summary.avgDaysPaidOnly != null
               && Number(summary.openAmountInAvg || 0) > 0.009
               && summary.avgDaysPaidOnly !== summary.avgDaysToPay ? (

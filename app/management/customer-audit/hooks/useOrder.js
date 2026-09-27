@@ -7,6 +7,8 @@ import { postJsonResilient } from '../../../lib/offlineApi';
 import { upsertLocalPendingOrder } from '../../../lib/mobileDataCache';
 import { promptCustomerMobileUpdateIfMissing } from '../../../lib/customerContact';
 import { buildQueuedPendingOrderId } from '../../../lib/queuedSalesOrders';
+import { allocateLocalSalesOrderNumber, rememberSalesmanOrderSequence } from '../../../lib/offlineOrderNumber';
+import { resolveOrderMakerFromScope } from '../../../lib/orderSalesman';
 import { resolveGpsCapturePlatform } from '../../../lib/geo';
 import { loadVisitDistanceMetrics } from '../../../lib/visitDistanceWhatsapp';
 import { buildOrderItems, buildOrderSummary, changeOrderQty, decreaseOrderQty, increaseOrderQty } from '../lib/orderHelpers';
@@ -29,6 +31,7 @@ function buildPendingOrderId(queueId) {
 function buildOrderPayload({
   action,
   selectedCustomer,
+  orderMaker,
   orderItems,
   priceList,
   paymentType,
@@ -43,6 +46,7 @@ function buildOrderPayload({
   platform,
   creditApprovalRequired = false,
   orderBlock = null,
+  orderNumber = "",
 }) {
   const pricedLines = priceOrderLines(
     orderItems.map((item) => ({
@@ -64,9 +68,12 @@ function buildOrderPayload({
   return {
     action,
     orderId: draftOrderId && !isPendingOrderId(draftOrderId) ? Number(draftOrderId) : null,
+    orderNumber: String(orderNumber || "").trim() || undefined,
     customerCode: selectedCustomer.customer_code,
     customerName: selectedCustomer.customer_name,
-    salesmanCode: selectedCustomer.current_salesman_code,
+    salesmanCode: orderMaker?.salesmanCode || "",
+    salesmanName: orderMaker?.salesmanName || "",
+    customerSalesmanCode: String(selectedCustomer.current_salesman_code || "").trim(),
     paymentType: normalizePaymentType(paymentType),
     pricingRegion,
     loadedOrderStatus: loadedOrderStatus || 'DRAFT',
@@ -107,6 +114,7 @@ export function useOrder({
   orderBlock = null,
 }) {
   const [draftOrderId, setDraftOrderId] = useState(null);
+  const [draftOrderNumber, setDraftOrderNumber] = useState('');
   const [orderQuantities, setOrderQuantities] = useState({});
   const [savingOrder, setSavingOrder] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
@@ -136,6 +144,7 @@ export function useOrder({
     async function loadDraftOrderOrEditOrder() {
       if (!selectedCustomer && !editOrderId) {
         setDraftOrderId(null);
+        setDraftOrderNumber('');
         setOrderQuantities({});
         setOrderHistory([]);
         return;
@@ -158,7 +167,7 @@ export function useOrder({
         if (editOrderId) {
           const { data: requestedOrder, error: requestedError } = await supabase
             .from('sales_orders')
-            .select('id, customer_code, status, created_by')
+            .select('id, customer_code, status, created_by, order_number')
             .eq('id', editOrderId)
             .maybeSingle();
 
@@ -179,7 +188,7 @@ export function useOrder({
         } else {
           let draftQuery = supabase
             .from('sales_orders')
-            .select('id, customer_code, status, created_by')
+            .select('id, customer_code, status, created_by, order_number')
             .eq('customer_code', selectedCustomer.customer_code)
             .eq('status', 'DRAFT')
             .order('updated_at', { ascending: false })
@@ -200,6 +209,7 @@ export function useOrder({
 
         if (!order) {
           setDraftOrderId(null);
+          setDraftOrderNumber('');
           setOrderQuantities({});
           setLoadedOrderStatus('DRAFT');
           setOrderHistory([]);
@@ -207,6 +217,11 @@ export function useOrder({
         }
 
         setDraftOrderId(order.id);
+        setDraftOrderNumber(String(order.order_number || '').trim());
+        const orderMaker = resolveOrderMakerFromScope(accessScope);
+        if (order.order_number && orderMaker.salesmanCode) {
+          void rememberSalesmanOrderSequence(orderMaker.salesmanCode, order.order_number);
+        }
         setLoadedOrderStatus(String(order.status || 'DRAFT').toUpperCase());
         const { data: lines, error: lineError } = await supabase
           .from('sales_order_items')
@@ -312,14 +327,31 @@ export function useOrder({
         location,
         customer: selectedCustomer,
         savedAt: capturedAt,
+        skipTimeline: true,
       });
+
+      const peerCodes = Object.keys(accessScope?.pricingRegionBySalesmanCode || {});
+      const orderMaker = resolveOrderMakerFromScope(accessScope);
+      if (!orderMaker.salesmanCode) {
+        throw new Error('Your profile is missing a salesman code. Ask admin to set it before placing orders.');
+      }
+      const allottedOrderNumber = await allocateLocalSalesOrderNumber(
+        orderMaker.salesmanCode,
+        {
+          existingOrderNumber: draftOrderNumber,
+          peerCodes,
+        },
+      );
+      setDraftOrderNumber(allottedOrderNumber);
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
+        queueFirst: true,
         jsonBody: buildOrderPayload({
           action: 'save_draft',
           selectedCustomer,
+          orderMaker,
           orderItems,
           priceList,
           paymentType,
@@ -332,6 +364,7 @@ export function useOrder({
           location,
           capturedAt,
           platform,
+          orderNumber: allottedOrderNumber,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -340,20 +373,28 @@ export function useOrder({
           type: 'sales_order',
           action: 'save_draft',
           customerCode: selectedCustomer.customer_code,
+          orderNumber: allottedOrderNumber,
         },
       });
 
       if (saveResult.queued) {
         const pendingOrderId = buildPendingOrderId(saveResult.queueId);
+        const existingServerOrderId = draftOrderId && !isPendingOrderId(draftOrderId)
+          ? draftOrderId
+          : null;
         if (!draftOrderId) {
           setDraftOrderId(pendingOrderId);
         }
-        if (accessScope) {
+        // Only invent a local pending row for brand-new offline drafts. Re-saves of
+        // an existing server order already appear in Pending Orders as that id.
+        if (accessScope && !existingServerOrderId) {
           void upsertLocalPendingOrder(session.user.id, accessScope, {
             id: pendingOrderId,
             customer_code: selectedCustomer.customer_code,
             customer_name: selectedCustomer.customer_name,
-            salesman_code: String(selectedCustomer.current_salesman_code || '').trim().toUpperCase(),
+            salesman_code: String(orderMaker.salesmanCode || '').trim().toUpperCase(),
+            salesman_name: String(orderMaker.salesmanName || orderMaker.salesmanCode || '').trim(),
+            order_number: allottedOrderNumber,
             created_at: capturedAt,
             updated_at: capturedAt,
             status: 'DRAFT',
@@ -367,7 +408,11 @@ export function useOrder({
         if (!options.silent) {
           setMessage(saveResult.message || 'Draft saved on device. It will sync automatically when you are back online.');
         }
-        return { orderId: pendingOrderId, orderNumber: "", visitDistance };
+        return {
+          orderId: existingServerOrderId || pendingOrderId,
+          orderNumber: allottedOrderNumber,
+          visitDistance,
+        };
       }
 
       const payload = saveResult.payload || {};
@@ -375,7 +420,12 @@ export function useOrder({
         throw new Error('Unable to save draft order.');
       }
 
+      const confirmedNumber = String(payload.orderNumber || allottedOrderNumber || payload.orderId || '').trim();
       setDraftOrderId(payload.orderId);
+      setDraftOrderNumber(confirmedNumber);
+      if (confirmedNumber) {
+        void rememberSalesmanOrderSequence(orderMaker.salesmanCode, confirmedNumber);
+      }
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'DRAFT').toUpperCase());
       requestLoginFirstCustomerHintCheck();
@@ -384,7 +434,7 @@ export function useOrder({
       }
       return {
         orderId: payload.orderId,
-        orderNumber: payload.orderNumber || String(payload.orderId),
+        orderNumber: confirmedNumber,
         visitDistance,
       };
     } catch (err) {
@@ -393,7 +443,7 @@ export function useOrder({
     } finally {
       setSavingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, draftOrderId, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, draftOrderId, draftOrderNumber, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
     if (orderItems.length === 0) {
@@ -450,14 +500,31 @@ export function useOrder({
         location,
         customer: selectedCustomer,
         savedAt: capturedAt,
+        skipTimeline: true,
       });
+
+      const peerCodes = Object.keys(accessScope?.pricingRegionBySalesmanCode || {});
+      const orderMaker = resolveOrderMakerFromScope(accessScope);
+      if (!orderMaker.salesmanCode) {
+        throw new Error('Your profile is missing a salesman code. Ask admin to set it before placing orders.');
+      }
+      const allottedOrderNumber = await allocateLocalSalesOrderNumber(
+        orderMaker.salesmanCode,
+        {
+          existingOrderNumber: draftOrderNumber,
+          peerCodes,
+        },
+      );
+      setDraftOrderNumber(allottedOrderNumber);
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
         timeoutMs: 15000,
+        queueFirst: true,
         jsonBody: buildOrderPayload({
           action: 'submit',
           selectedCustomer,
+          orderMaker,
           orderItems,
           priceList,
           paymentType,
@@ -472,6 +539,7 @@ export function useOrder({
           platform,
           creditApprovalRequired: Boolean(options.creditApprovalRequired ?? creditApprovalRequired),
           orderBlock,
+          orderNumber: allottedOrderNumber,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -480,20 +548,28 @@ export function useOrder({
           type: 'sales_order',
           action: 'submit',
           customerCode: selectedCustomer?.customer_code || '',
+          orderNumber: allottedOrderNumber,
         },
       });
 
       if (saveResult.queued) {
         const pendingOrderId = buildPendingOrderId(saveResult.queueId);
+        const existingServerOrderId = draftOrderId && !isPendingOrderId(draftOrderId)
+          ? draftOrderId
+          : null;
         if (!draftOrderId) {
           setDraftOrderId(pendingOrderId);
         }
-        if (accessScope) {
+        // Only invent a local pending row for brand-new offline submits. Re-submits of
+        // an existing server order already appear in Pending Orders as that id.
+        if (accessScope && !existingServerOrderId) {
           void upsertLocalPendingOrder(session.user.id, accessScope, {
             id: pendingOrderId,
             customer_code: selectedCustomer?.customer_code || '',
             customer_name: selectedCustomer?.customer_name || '',
-            salesman_code: String(selectedCustomer?.current_salesman_code || '').trim().toUpperCase(),
+            salesman_code: String(orderMaker.salesmanCode || '').trim().toUpperCase(),
+            salesman_name: String(orderMaker.salesmanName || orderMaker.salesmanCode || '').trim(),
+            order_number: allottedOrderNumber,
             created_at: capturedAt,
             updated_at: capturedAt,
             status: 'SUBMITTED',
@@ -509,7 +585,11 @@ export function useOrder({
         }
         setShowOrderReview(false);
         setLoadedOrderStatus('SUBMITTED');
-        return { orderId: pendingOrderId, orderNumber: "", visitDistance };
+        return {
+          orderId: existingServerOrderId || pendingOrderId,
+          orderNumber: allottedOrderNumber,
+          visitDistance,
+        };
       }
 
       const payload = saveResult.payload || {};
@@ -517,17 +597,22 @@ export function useOrder({
         throw new Error('Unable to submit order.');
       }
 
+      const confirmedNumber = String(payload.orderNumber || allottedOrderNumber || payload.orderId || '').trim();
       setDraftOrderId(payload.orderId);
+      setDraftOrderNumber(confirmedNumber);
+      if (confirmedNumber) {
+        void rememberSalesmanOrderSequence(orderMaker.salesmanCode, confirmedNumber);
+      }
       setOrderHistory(Array.isArray(payload.history) ? payload.history : []);
       setLoadedOrderStatus(String(payload.status || 'SUBMITTED').toUpperCase());
       requestLoginFirstCustomerHintCheck();
       if (!options.silent) {
-        setMessage(`Order #${payload.orderNumber || payload.orderId} submitted successfully.`);
+        setMessage(`Order #${confirmedNumber} submitted successfully.`);
       }
       setShowOrderReview(false);
       return {
         orderId: payload.orderId,
-        orderNumber: payload.orderNumber || String(payload.orderId),
+        orderNumber: confirmedNumber,
         visitDistance,
       };
     } catch (err) {
@@ -536,7 +621,7 @@ export function useOrder({
     } finally {
       setSubmittingOrder(false);
     }
-  }, [accessScope, cashDiscountMap, creditApprovalRequired, draftOrderId, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
+  }, [accessScope, cashDiscountMap, creditApprovalRequired, draftOrderId, draftOrderNumber, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   return {
     draftOrderId,

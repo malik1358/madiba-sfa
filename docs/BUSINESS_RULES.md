@@ -23,6 +23,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Workday window used by helpers: 06:00–22:00 KSA.
 - Background GPS idle threshold: 15 minutes.
 - Auto-close looks back 14 days and inserts `END_OF_DAY` for sessions that have morning attendance and no end (`app/lib/autoCloseWorkdaysServer.js`). Cron closes the previous KSA day at 00:05 KSA and same-day at 23:59 KSA.
+- Day-route / daily visit **Working hours** (`resolveDayRouteWorkingHours` in `app/lib/dayRouteMap.js`): prefer **non-far** customer transactions (`VISIT_REPORT`, `COLLECTION_VISIT`, `ORDER_SUBMITTED`) at or after **08:00 KSA**. With lunch punched: morning = first near → last near **before lunch out**; afternoon = first near **after lunch in** → last near of the day; sum both (gaps to/from lunch punches do not count). Without lunch out: first near → last near of the day. Without lunch in: morning segment only. Pre-8:00 KSA and far rows never set endpoints. When there are no usable near segments (login/logout/GPS only, or only far stops), working hours are **0h** — do not fall back to login→logout. The Day route UI, visit-report email, and **Working Hours** report (`/management/working-hours`) use this formula. This is separate from the 06:00–22:00 helper window and from the User Activity report’s own working-hours column (login→lunch→logout only).
 - Transaction types that count as activity: `VISIT_REPORT`, `ORDER_DRAFT`, `ORDER_EDITED`, `ORDER_SUBMITTED`, `PROSPECT_FOLLOW_UP`, `NOTE`. GPS-only punches do not clear the inactivity warning.
 - `activity_reminders_enabled` on the profile can suppress reminders. Default is true.
 
@@ -30,6 +31,7 @@ Constants in `app/lib/workdayActivity.js`:
 
 - Compare customer and salesman codes with the same normalizer the caller already uses (trim, uppercase, collapse spaces). Leading-code extraction exists because some sheets store `CODE Name` in one cell (`extractLeadingCustomerCodeAndName`).
 - A customer can remain visible to the previous salesman after transfer (`previous_salesman_code`).
+- Inactive customers stay visible in report customer pickers (for example Customer Audit, Payment Settlement, Outstanding Compare). Visit suggestions still keep inactive customers out of the active suggestion pool.
 - Mutual visibility is hardcoded in `MUTUAL_SALESMAN_GROUPS`: `JUNAID`, `PARVEZ`, `SOYEB` see each other’s books.
 - One-way book shares are hardcoded in `SHARED_CUSTOMER_BOOKS` and can also be rows in `customer_book_shares`. Examples in code: Ahmed Nabil’s book is shared to Abdalla; Mohammed Mubeen’s book is shared to Moinudin Khaja and Junaid. Do not “clean up” these names as unused data.
 - “Do not use” customers (name matches `/do\s*not\s*use/i`) are excluded from visit status.
@@ -39,17 +41,26 @@ Constants in `app/lib/workdayActivity.js`:
 ## Visits
 
 - Visit outcomes on `visits.outcome` are constrained. Field reports in `system_settings` are the source Customer Audit and My Day read for the latest report (`visit_report_latest:<code>`).
+- Daily Visit Report collapses repeated `VISIT_REPORT` / `COLLECTION_VISIT` activity-log saves for the same user, customer, outcome (and collection amount) within a 2-minute window (`hideDuplicateVisitEntries`), so multi-tap saves show as one row.
+- Daily Visit Report **Distance from previous** on a customer visit/order row sums hop distances since the previous customer stop through idle GPS, lunch, and login/logout bridge rows (`resolveDistanceFromPreviousVisitKm` / `isIdleGpsPingTimelineRow`). Bridge rows still show their own single hop. Route total distance stays hop-by-hop so path is not double-counted.
+- My Day / Visit Without Order visit saves, inactive/active toggles, and prospect foreclosure are offline-first (`queueFirst`) via the resilient helpers. Save enrichment skips the activity timeline. Avg days for WhatsApp is prefetched when the visit form opens (`prefetchCustomerAvgDaysForVisit`) and stored on the local visit row (`avg_days_to_pay` / `avg_days_to_pay_6m`); save only reads that local value (with a short race on the in-flight prefetch) and never blocks on a fresh history fetch.
 - Visit plan (`app/lib/salesmanVisitPlan.js`): default 12 visits per salesman. System suggestions need at least 7 days since the last visit (`MIN_SYSTEM_VISIT_GAP_DAYS`). Appointments due today bypass that gap. Score mixes sales opportunity and collection opportunity. The page reads the stored snapshot `salesman_visit_plan_snapshot_v1`. The midnight KSA cron builds it. Email is off unless `SALESMAN_VISIT_PLAN_EMAIL_ENABLED` is true.
-- WhatsApp visit text includes average days to pay (`app/lib/avgDaysWhatsapp.js`). That figure comes from the settlement rules below, not from a single stored column.
+- WhatsApp visit/collection/order text includes average days to pay and the parallel 6-month avg when available (`app/lib/avgDaysWhatsapp.js`). Figures come from the settlement rules below, not from a single stored column. Collection queue rows carry both via `enrichCollectionRecordsWithAvgDays`.
 
 ## Orders
 
 - Live statuses on `sales_orders.status`: `DRAFT`, `SUBMITTED`, `CANCELLED`.
+- New Order draft/save and submit are offline-first (`queueFirst` in `useOrder.js`). Queued orders keep a local pending id until sync assigns the server row id.
+- Order `salesman_code` / `salesman_name` are the **person making the order** (logged-in profile), not the customer master `current_salesman_code`. Shared-book or manager orders therefore show the maker on PDF, WhatsApp, and Pending Orders. Order-number series follow the maker too. Customer master salesman is still used only for pricing-region fallback (`customerSalesmanCode`).
+- Order numbers are salesman-wise and allotted on the device before sync: short prefix + sequence (e.g. `P01` for Parvez). If another salesman shares the same first letter, the prefix grows to 2+ letters (`PA01` vs `PR01`). The client sends `orderNumber` on save/submit; the API stores it and must not rewrite it after sync. PDF/WhatsApp use that permanent number immediately.
+- Never persist the bigint `sales_orders.id` as `order_number` (e.g. `641`). After a rare allotment collision the API must allot the next salesman series number, not the row id. Pending Orders runs `repair_order_numbers` for blank or id-equal numbers so the queue shows `MOI01` instead of `641`.
+- Sequence consistency: the local offline sequence cache must only advance from real series numbers (`MOI417`), never from bare numeric ids (`414`). The server rejects preferred client numbers that are not ahead of the current prefix max (so `MOI01` is not accepted when the series is already at `MOI417`) and allots the next free number instead. Existing stored numbers on edit are still kept.
+- Re-saving or re-submitting an existing order must keep its stored `order_number`, including legacy numeric values (e.g. `503`). Do not allot a new salesman series number on edit — that makes the PDF show a number the server will never adopt, so the order looks “not synced.” Explicit Pending Orders repair may replace id-equal accidental numbers only.
 - Invoice statuses (strings, in settings JSON) are listed in `ORDER_INVOICE_STATUSES` in `app/lib/orderApproval.js`. Do not invent a new label in one screen only. Pending Orders, missing-invoice email, and time-to-make all compare these strings.
 - `Pending for credit approval` is legacy and is treated like `Pending for approval`.
 - Uploading an invoice PDF moves status to `Invoice made` when a file is stored. Setting `Invoice made` without a PDF is rejected.
 - Time-to-make clock runs for `Pending for invoice creation` and stops when status leaves that queue. Show the live duration; do not freeze it at submit time.
-- Order PDFs must show a mandatory `Order No.` label (`app/lib/salesOrderNumber.js`). Placeholder numbers are not acceptable on the PDF.
+- Order PDFs must show a mandatory `Order No.` label (`app/lib/salesOrderNumber.js`). New offline orders use the permanent short salesman series (`P01` / `PA01`). Legacy queued rows without a number may still show `Order No. Pending sync` until sync; never print a raw `pending:` queue id.
 - Cash-discount breakdown is printed on pending-order PDFs. Do not drop it when editing the PDF builder.
 - Pending Orders shows both `Current outstanding` and `Outstanding >60 days` from the uploaded outstanding dataset for the customer. The >60 value is the sum of buckets `61-90`, `91-120`, and `>120`.
 - Orders created before the KSA day `2026-09-01` with no uploaded invoice are legacy and should be closed as `Rejected by management` / `Pre-September 2026 — invoice not uploaded`. Missing-invoice chase starts at `MISSING_INVOICE_CREATED_FROM = 2026-09-01`, after a 60-minute grace, and re-sends every 15 minutes while the queue remains open.
@@ -63,6 +74,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Browser prices come from `price_catalog_cache` via `/api/pricing/cache`.
 - Sync (`/api/admin/price-sync`) writes a snapshot and the cache, and appends `item_price_history` when a price changes. History UI shows at least the last five prices.
 - VAT default on `products.vat_percent` is 15. Settlement line gross-up uses `regionalPricing.js` (category-aware), not a flat 15 for every line.
+- When both cash and value discounts are active on a line, each percentage is calculated from the wholesale base rate (not compounded one on top of the other).
 - **Gloves are VAT-exempt (0%)** on orders and settlement. `isVatExemptProduct` / `vatRateForProduct` in `regionalPricing.js` match `GLOVE`, `VINYL`, or Arabic `قفاز` in category/name/code. `getPricedOrderLine` and `summarizePricedLines` must use that rate (do not hardcode 15% on New Order / order PDF / WhatsApp). Mixed carts label the VAT column as plain `VAT`; gloves-only as `VAT 0%`; taxable-only as `VAT 15%`.
 - Item master `tally_unit` / `tally_item_name` feed the Tally sales-voucher Excel export. Sources: `excel_import`, `invoice_pdf`, `manual`.
 
@@ -70,13 +82,14 @@ Constants in `app/lib/workdayActivity.js`:
 
 - Aging buckets: `0-30`, `31-60`, `61-90`, `91-120`, `>120`.
 - The uploaded sheet is the operational outstanding book once it has been stored. Column detection is heuristic (`detectOutstandingColumnIndexes` in `app/lib/outstanding.js`). Do not replace it with a fixed column index. Payment Collections ignores `public.invoices` while that workbook has rows.
+- Collection-queue **Salesman** label: prefer the uploaded Salesman cell (invoice, then aggregate row). When that cell is blank, fill invoice salesman from `active_sales` by matching `ref_no` → `voucher_number`, then resolve the row label with `resolveCollectionQueueSalesman` (prefer customer-master book owner when they appear on any open invoice — shared-book cases — else voucher-derived name, else master alone so filters still have names). Do not show the collector who saved the visit as Salesman.
 - Cash versus credit uses `ref_no` / cash markers (`invoiceHasCashRef`, `isInvoiceCashDue`).
 - Queue priority uses exposure (amount and age), due state, last outcome, and scheduled revisits (`buildCollectionPriority`). Customers with a future scheduled revisit are not treated the same as overdue cash.
 - A collection visit needs an Arabic or English remark for the outcomes/statuses listed in `collectionVisitRequiresRemark`.
 - Salesmen named in `COLLECTION_QUEUE_EXCLUDED_SALESMEN` (`Zia`, `Asrar Ahmed`) are removed from the collection queue. This is a business filter, not dead code.
 - Scheduled revisit dates are redacted for viewers who should not see another collector’s private schedule (`redactCollectionVisitScheduleForViewer`).
 - Legal transfer removes the customer from the normal queue and lists them on `/management/payment-collections/legal`.
-- Receipt copies and payment copies go to the `payment-collections` bucket. The save path must not hang when a Funds Received PDF is attached (that bug was fixed; keep the save path bounded).
+- Receipt copies and payment copies go to the `payment-collections` bucket. Collection visits (including Funds Received with PDF/photo) save on-device first (`queueFirst`) and sync in the background so flaky mobile data cannot block collectors. Sync re-resolves Android MIME for queued attachments. Photo compression is time-bounded with a fallback to the original file, bucket MIME refresh is best-effort, and Saving clears before the queue reload. Save enrichment uses the queue row’s `avg_days_to_pay` and skips the client activity-timeline fetch; the API patches previous-visit distance when the visit syncs.
 - Receipts Not in Tally (`app/lib/receiptsNotInTally.js`) matches app collection receipts to the Tally receipt upload. Amount tolerance is 0.02. Default date window is 1 day. The UI allows a window up to 30 days. Do not raise that cap without checking the page and the API together.
 - Collection report WhatsApp distance uses the same prior visits as the report. The service role recomputes distance because client RLS cannot see every previous row.
 
@@ -93,6 +106,7 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 - Average days uses paid receipts first. Open invoices are included only when they are older than that paid average. Younger FIFO residuals are excluded.
 - Partial credit notes and sales returns appear in the credit-note table, not as reversed invoices.
 - Avg days / FIFO settlement must load sales history from day 1 through today (customer-history `fullHistory=1` / `scope=settlement`). That includes Customer Audit, Payment Settlement, Order PDF, New Order payment behavior, and WhatsApp avg-days helpers. Do not use the default ~6-month BI performance window for avg days — receipts are still full-ledger, and truncated sales skew the weighted average dramatically.
+- Screens and PDFs that show avg days also show a parallel **6-month avg** (`avgDaysToPay6m`): sales + receipts + open invoices on/after the first day of the month that is `HISTORIC_PERFORMANCE_MONTHS` before the current KSA month (same span as the BI performance window). Open invoices still enter only when older than that window’s paid-only avg. Lifetime remains `avgDaysToPay`.
 - Tolerance for amount matches is 0.02.
 - Customer Audit and New Order payment-behavior summaries also show receipt amount collected in the last 10 days (date-windowed by receipt date).
 
@@ -110,13 +124,15 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 
 - Customer GPS updates record `gps_updated_at`, actor, and source: `customer_master`, `visit`, or `excel_import`.
 - History rows go to `customer_gps_history` with the previous coordinates.
-- Outstanding Without GPS lists customers who have an outstanding balance and no saved coordinates. The daily email goes to each salesman, with hierarchy bosses on CC, at 00:25 KSA, skipping the Friday holiday the same way as other salesman emails.
+- When a field visit (or order GPS capture) has coordinates and the customer master has **no** saved GPS, the visit location is **auto-promoted** onto `customers.latitude/longitude` (source `visit`) without asking. This runs on the server in `/api/visit-reports` and payment-collection saves (`promoteEntryGpsToCustomerIfMissing`), and on the client via `maybePromptCustomerLocationUpdate`. If the customer already has GPS and the salesman is farther than `CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM` (0.5 km), the app still prompts before overwriting.
+- Outstanding Without GPS lists customers who have an outstanding balance and no saved coordinates. Loading the report (and the daily email job) **backfills** customer master GPS from the latest My Day visit report or collection visit location when the visit stored coordinates but the customer row still has none (`backfillCustomerGpsFromLastVisits`, using `stored_customer_code` so dirty/name codes get the pin). Dirty master codes (`1428_Name…`, `Zahrat Ghubaira…`) are dropped when the clean canonical code already has GPS (`excludeRowsWithCanonicalGpsSibling`, case-insensitive). Rows that remain after that have no visit GPS on file (blocked/unavailable) or never had a visit with coordinates. The daily email goes to each salesman at 00:25 KSA, and hierarchy bosses get one consolidated digest for their subordinate books instead of repeated CC copies. It skips the Friday holiday the same way as other salesman emails.
+- Stale overdue collections email (00:35 KSA, skip Friday) digests due-queue customers where overdue aging exceeds the salesman threshold (Parvez/Junaid: **>30 days**; others: **>60 days**), received in the last **8 days** is zero, and the last collection visit is older than 7 days (or never visited). One HTML table per salesman. Default To `malik@pinasz.com`; default CC Soyeb and Fazlur. The same salesman table is appended to each field user’s daily visit report email so bosses see it in their team digests.
 - GPS pings are rejected when the KSA workday is already ended.
 
 ## Email and push rules
 
 - Inactivity and late-login mail go to the user and the reporting chain, on the inactivity cron.
-- Daily visit report: 00:10 KSA, one email per user, previous working day. Friday is the KSA holiday, so the workflow skips Thursday 21:10 UTC (which is Friday 00:10 KSA).
+- Daily visit report: 00:10 KSA, previous working day. Each field user still gets their own email, but bosses no longer sit on every subordinate email; each boss gets one consolidated digest for their subordinate reports. Friday is the KSA holiday, so the workflow skips Thursday 21:10 UTC (which is Friday 00:10 KSA).
 - Daily salesman resume: 00:15 KSA. Default recipients are the addresses in `.env.example` (`DAILY_SALESMAN_RESUME_TO`). Do not add new personal addresses in code; use env.
 - Daily supplier order email: 00:20 KSA, and also after a sales Excel upload. Each salesman gets their orders (all invoice statuses) with bosses on CC.
 - Missing invoice email uses India office hours: 09:00–20:00 IST, Saturday–Thursday, every 15 minutes. Primary scheduler is Supabase `pg_cron` (`20260910120000_missing_invoice_pg_cron.sql`). GitHub Actions is the backup. The first authorized cron run stores `CRON_SECRET` in Vault so Postgres can call the app. Do not log that secret.
@@ -133,3 +149,4 @@ These strings and numbers are duplicated by design. Change them in the shared mo
 - Role matrix (`moduleAccess.js`)
 - Customer code matchers (`outstanding.js`, `customerAccess.js`)
 - Table color classes for any new or edited report
+- Field write path (`offlineApi.js` defaults `queueFirst: true` for resilient JSON/form saves)

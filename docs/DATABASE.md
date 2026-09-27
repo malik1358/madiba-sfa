@@ -92,6 +92,10 @@ RLS lets a user insert and read their own rows. `logs_select_own_or_admin` also 
 
 `sales_orders`: `order_number` unique, `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `status` `DRAFT|SUBMITTED|CANCELLED`, totals, `created_by`, `submitted_at`.
 
+`salesman_code` / `salesman_name` are the order maker (authenticated profile at save/submit), not a copy of `customers.current_salesman_code`. `/api/sales-orders` overwrites both from the caller’s profile; the client still sends `customerSalesmanCode` only for pricing-region fallback.
+
+Field order numbers are allotted offline per salesman as a short letter prefix + sequence (e.g. `P01`; `PA01` when first letters collide — see `app/lib/salesmanOrderNumber.js` / `offlineOrderNumber.js`). The client sends `orderNumber` with the save payload; `/api/sales-orders` persists that value and must not replace it with the bigint `id` after sync. Legacy rows may still use the numeric id string or older `NAME-0001` values as `order_number`. Blank or id-equal accidental numbers are repaired to the salesman series via `repair_order_numbers` / `ensureStoredOrderNumber` (never write the bigint id as a new `order_number`). When re-saving such a legacy row, the client must keep that stored number (not allot a new short series value).
+
 `sales_order_items`: `order_id`, `item_code` unique per order, `item_name`, `category`, `quantity`, `rate`, `line_value`.
 
 `orders` / `order_lines`: legacy. `orders.status` includes `DRAFT`, `SUBMITTED`, `ACCEPTED`, `PROCESSING`, `DELIVERED`, `CANCELLED`. `order_lines.recommendation_type` is `NEW`, `BUY_MORE`, or `REORDER`.
@@ -199,5 +203,5 @@ Treat RLS as a backstop for browser queries with the publishable key. API author
 1. Add `supabase/migrations/<timestamp>_<name>.sql`.
 2. Prefer `ADD COLUMN IF NOT EXISTS` and `CREATE TABLE IF NOT EXISTS`.
 3. If the app can deploy before the SQL runs, read the column with a fallback, matching existing `isMissingColumnError` handling.
-4. Say in the change summary that someone must run the migration on staging and production Supabase. Git push does not migrate the database.
+4. Say in the change summary that someone must run the migration on **local/dev** (while developing) and **production** Supabase before the app depends on it. Git push does not migrate the database.
 5. Do not put production data fixes that target named people into a migration that runs on every environment. One-off data scripts such as `sql/share_ahmed_nabil_customers_with_abdalla.sql` are manual.

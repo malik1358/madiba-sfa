@@ -50,8 +50,8 @@ const TEXT = {
   showing: { en: "Showing", ar: "عرض" },
   totalOutstanding: { en: "Total outstanding", ar: "إجمالي المستحقات" },
   hint: {
-    en: "Last visit does not copy GPS onto the customer. A visit or collection can be saved (sometimes without location if GPS was blocked or the role does not require it) while the customer master still has no coordinates. Save GPS here from Customer Master.",
-    ar: "آخر زيارة لا تنسخ GPS إلى سجل العميل. يمكن حفظ زيارة أو تحصيل (وأحياناً بدون موقع إذا مُنع GPS أو الدور لا يطلبه) بينما يبقى سجل العميل بدون إحداثيات. احفظ GPS من سجل العملاء.",
+    en: "Opening this report promotes GPS from the last visit/collection onto the customer when the visit stored coordinates but the customer master did not. Rows that remain either have no visit GPS on file, or GPS was blocked when visited. Use Save GPS for those.",
+    ar: "فتح هذا التقرير ينسخ GPS من آخر زيارة/تحصيل إلى سجل العميل إذا كانت الزيارة تحتوي إحداثيات ولم يُحفظ الموقع في السجل. الصفوف المتبقية إما بلا GPS في الزيارة أو مُنع الموقع أثناء الزيارة. استخدم حفظ GPS لتلك الحالات.",
   },
 };
 

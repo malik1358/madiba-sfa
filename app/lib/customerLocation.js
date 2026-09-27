@@ -385,10 +385,10 @@ export async function evaluateCustomerLocationUpdatePrompt({
   }
 
   const updatePayload = buildLocationUpdatePayload(entryLocation, customer, geocoded);
-
-  const needsPrompt = !customerHasSavedLocation(customer)
-    || isFarFromCustomer(entryLocation, customer);
-  if (!needsPrompt) return null;
+  const hasSavedLocation = customerHasSavedLocation(customer);
+  const missingGps = !hasSavedLocation;
+  const farFromSaved = hasSavedLocation && isFarFromCustomer(entryLocation, customer);
+  if (!missingGps && !farFromSaved) return null;
 
   const distanceKm = distanceFromCustomerKm(entryLocation, customer);
 
@@ -397,11 +397,14 @@ export async function evaluateCustomerLocationUpdatePrompt({
       language,
       displayName,
       distanceKm: distanceKm ?? 0,
-      hasSavedLocation: customerHasSavedLocation(customer),
+      hasSavedLocation,
     }),
     accessToken,
     customerCode,
     updatePayload,
+    // First visit GPS is promoted onto the customer master without asking.
+    // Far-from-saved still prompts so an existing pin is not overwritten silently.
+    autoPromote: missingGps,
   };
 }
 
@@ -441,9 +444,25 @@ export async function maybePromptCustomerLocationUpdate({
   });
   if (!promptDetails) return CUSTOMER_LOCATION_UPDATE_SKIP;
 
+  const canWrite = !shouldSkipCustomerLocationWrite(customerCode, customer);
+
+  // Promote visit GPS onto the customer master when none is saved yet.
+  if (promptDetails.autoPromote) {
+    if (canWrite) {
+      try {
+        await applyCustomerLocationUpdateFromPrompt(promptDetails);
+      } catch (locationError) {
+        console.warn("Customer location auto-promote skipped", locationError);
+      }
+      applyCustomerLocation(customer, promptDetails.updatePayload);
+      return CUSTOMER_LOCATION_UPDATE_UPDATE;
+    }
+    return CUSTOMER_LOCATION_UPDATE_SKIP;
+  }
+
   const resolveChoice = promptChoice || defaultLegacyLocationUpdatePrompt;
   const choice = await resolveChoice(promptDetails);
-  if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE && !shouldSkipCustomerLocationWrite(customerCode, customer)) {
+  if (choice === CUSTOMER_LOCATION_UPDATE_UPDATE && canWrite) {
     try {
       await applyCustomerLocationUpdateFromPrompt(promptDetails);
     } catch (locationError) {

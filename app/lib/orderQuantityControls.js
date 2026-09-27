@@ -9,6 +9,7 @@ export const DEFAULT_ORDER_QUANTITY_CONTROLS = [
     name: "A004075 max 20 CTN / customer / week",
     active: true,
     itemCode: "A004075",
+    itemCodes: ["A004075"],
     maxQty: 20,
     unit: "CTN",
     period: CONTROL_PERIOD_WEEK,
@@ -31,12 +32,46 @@ function toBoolean(value, fallback = true) {
   return fallback;
 }
 
+/** Unique uppercased item codes from itemCodes[] and/or legacy itemCode. */
+export function normalizeQuantityControlItemCodes(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const codes = [];
+  const push = (value) => {
+    const code = normalizeCode(value);
+    if (code && !codes.includes(code)) codes.push(code);
+  };
+
+  if (Array.isArray(source.itemCodes)) {
+    source.itemCodes.forEach(push);
+  } else if (typeof source.itemCodes === "string") {
+    String(source.itemCodes)
+      .split(/[\s,;|]+/)
+      .forEach(push);
+  }
+
+  if (Array.isArray(source.item_codes)) {
+    source.item_codes.forEach(push);
+  }
+
+  push(source.itemCode || source.item_code);
+  return codes;
+}
+
+export function formatItemCodesLabel(itemCodes = []) {
+  const codes = (itemCodes || []).map(normalizeCode).filter(Boolean);
+  if (codes.length === 0) return "";
+  if (codes.length === 1) return codes[0];
+  if (codes.length <= 4) return codes.join(", ");
+  return `${codes.slice(0, 3).join(", ")} +${codes.length - 3} more`;
+}
+
 export function createEmptyQuantityControlDraft() {
   return {
     id: "",
     name: "",
     active: true,
     itemCode: "",
+    itemCodes: [],
     maxQty: 20,
     unit: "CTN",
     period: CONTROL_PERIOD_WEEK,
@@ -46,24 +81,28 @@ export function createEmptyQuantityControlDraft() {
 
 export function normalizeOrderQuantityControl(raw, index = 0) {
   const source = raw && typeof raw === "object" ? raw : {};
-  const itemCode = normalizeCode(source.itemCode || source.item_code);
+  const itemCodes = normalizeQuantityControlItemCodes(source);
   const maxQty = toPositiveNumber(source.maxQty ?? source.max_qty, 0);
-  if (!itemCode || !(maxQty > 0)) return null;
+  if (itemCodes.length === 0 || !(maxQty > 0)) return null;
 
+  const itemCode = itemCodes[0];
   const period = String(source.period || CONTROL_PERIOD_WEEK).trim().toLowerCase() === CONTROL_PERIOD_WEEK
     ? CONTROL_PERIOD_WEEK
     : CONTROL_PERIOD_WEEK;
   const scope = String(source.scope || CONTROL_SCOPE_CUSTOMER).trim().toLowerCase() === CONTROL_SCOPE_CUSTOMER
     ? CONTROL_SCOPE_CUSTOMER
     : CONTROL_SCOPE_CUSTOMER;
+  const unit = String(source.unit || "CTN").trim().toUpperCase() || "CTN";
+  const label = formatItemCodesLabel(itemCodes);
 
   return {
     id: String(source.id || `qty-control-${index + 1}`).trim() || `qty-control-${index + 1}`,
-    name: String(source.name || `${itemCode} max ${maxQty} ${String(source.unit || "CTN").trim() || "CTN"} / ${scope} / ${period}`).trim(),
+    name: String(source.name || `${label} max ${maxQty} ${unit} / ${scope} / ${period}`).trim(),
     active: toBoolean(source.active, true),
     itemCode,
+    itemCodes,
     maxQty,
-    unit: String(source.unit || "CTN").trim().toUpperCase() || "CTN",
+    unit,
     period,
     scope,
   };
@@ -113,6 +152,10 @@ function quantityMapFromValues(values = {}) {
     map[normalized] = Number(qty || 0);
   });
   return map;
+}
+
+function sumQtyForCodes(qtyMap, itemCodes = []) {
+  return (itemCodes || []).reduce((sum, code) => sum + Number(qtyMap[normalizeCode(code)] || 0), 0);
 }
 
 /** Monday 00:00 Asia/Riyadh → next Monday 00:00, as UTC ISO strings. */
@@ -171,10 +214,13 @@ export function evaluateOrderQuantityControls({
   const violations = [];
 
   activeOrderQuantityControls(controls).forEach((control) => {
-    const orderedQty = Number(qtyMap[control.itemCode] || 0);
+    const itemCodes = control.itemCodes?.length
+      ? control.itemCodes
+      : (control.itemCode ? [control.itemCode] : []);
+    const orderedQty = sumQtyForCodes(qtyMap, itemCodes);
     if (!(orderedQty > 0)) return;
 
-    const alreadyQty = Number(priorMap[control.itemCode] || 0);
+    const alreadyQty = sumQtyForCodes(priorMap, itemCodes);
     const totalQty = alreadyQty + orderedQty;
     if (totalQty <= control.maxQty) return;
 
@@ -182,7 +228,8 @@ export function evaluateOrderQuantityControls({
     violations.push({
       controlId: control.id,
       controlName: control.name,
-      itemCode: control.itemCode,
+      itemCode: control.itemCode || itemCodes[0] || "",
+      itemCodes,
       maxQty: control.maxQty,
       unit: control.unit,
       period: control.period,
@@ -199,22 +246,30 @@ export function evaluateOrderQuantityControls({
 
 export function formatQuantityControlViolation(violation, language = "en") {
   if (!violation) return "";
-  const item = violation.itemCode;
+  const codes = Array.isArray(violation.itemCodes) && violation.itemCodes.length
+    ? violation.itemCodes
+    : [violation.itemCode].filter(Boolean);
+  const item = formatItemCodesLabel(codes) || violation.itemCode;
   const max = violation.maxQty;
   const unit = violation.unit || "CTN";
   const already = Number(violation.alreadyQty || 0);
   const ordered = Number(violation.orderedQty || 0);
   const remaining = Number(violation.remainingQty || 0);
+  const groupNote = codes.length > 1
+    ? (language === "ar" ? " (مجموع الأصناف)" : " (combined)")
+    : "";
 
   if (language === "ar") {
-    return `حد الطلب للصنف ${item}: بحد أقصى ${max} ${unit} لكل عميل في الأسبوع. تم طلب ${already} سابقاً هذا الأسبوع، والكمية الحالية ${ordered}. المتبقي المسموح ${remaining}.`;
+    return `حد الطلب للصنف ${item}${groupNote}: بحد أقصى ${max} ${unit} لكل عميل في الأسبوع. تم طلب ${already} سابقاً هذا الأسبوع، والكمية الحالية ${ordered}. المتبقي المسموح ${remaining}.`;
   }
 
-  return `${item} is limited to ${max} ${unit} per customer per week. Already ordered this week: ${already}. This order: ${ordered}. Remaining allowed: ${remaining}.`;
+  return `${item}${groupNote} is limited to ${max} ${unit} per customer per week. Already ordered this week: ${already}. This order: ${ordered}. Remaining allowed: ${remaining}.`;
 }
 
 export function describeOrderQuantityControl(control) {
   const normalized = normalizeOrderQuantityControl(control);
   if (!normalized) return "";
-  return `${normalized.itemCode}: max ${normalized.maxQty} ${normalized.unit} per ${normalized.scope} per ${normalized.period}${normalized.active ? "" : " (disabled)"}`;
+  const label = formatItemCodesLabel(normalized.itemCodes);
+  const groupSuffix = normalized.itemCodes.length > 1 ? " combined" : "";
+  return `${label}: max ${normalized.maxQty} ${normalized.unit}${groupSuffix} per ${normalized.scope} per ${normalized.period}${normalized.active ? "" : " (disabled)"}`;
 }

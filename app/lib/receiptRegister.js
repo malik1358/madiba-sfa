@@ -105,9 +105,22 @@ export function excelDateToIso(value) {
   const text = cellText(value);
   if (!text) return "";
 
-  const dmy = text.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (dmy) {
-    return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  const slashDate = text.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (slashDate) {
+    const left = Number(slashDate[1]);
+    const right = Number(slashDate[2]);
+    const year = Number(slashDate[3]);
+    // If one side is > 12 it disambiguates MDY vs DMY (e.g. 9/20/2026 → 20 Sep).
+    if (right > 12 && left >= 1 && left <= 12) {
+      return `${year}-${String(left).padStart(2, "0")}-${String(right).padStart(2, "0")}`;
+    }
+    if (left > 12 && right >= 1 && right <= 12) {
+      return `${year}-${String(right).padStart(2, "0")}-${String(left).padStart(2, "0")}`;
+    }
+    // Ambiguous (both <= 12): prefer DMY for KSA uploads.
+    if (left >= 1 && left <= 31 && right >= 1 && right <= 12) {
+      return `${year}-${String(right).padStart(2, "0")}-${String(left).padStart(2, "0")}`;
+    }
   }
 
   const ymd = text.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);

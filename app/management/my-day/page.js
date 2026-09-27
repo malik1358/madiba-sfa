@@ -1240,16 +1240,22 @@ export default function MyDayPage({ mode = "default" } = {}) {
           scope: accessScope,
         });
         avgDaysPrefetchByCodeRef.current.set(codeKey, promise);
-        const avgDays = await promise;
-        if (!avgDays) return;
-        setVisitStatusRows((current) => current.map((row) => {
-          if (String(row.customer_code || "").trim().toUpperCase() !== codeKey) return row;
-          return {
-            ...row,
-            avg_days_to_pay: avgDays.avgDaysToPay ?? row.avg_days_to_pay ?? null,
-            avg_days_to_pay_6m: avgDays.avgDaysToPay6m ?? row.avg_days_to_pay_6m ?? null,
-          };
-        }));
+        try {
+          const avgDays = await promise;
+          if (!avgDays) return;
+          setVisitStatusRows((current) => current.map((row) => {
+            if (String(row.customer_code || "").trim().toUpperCase() !== codeKey) return row;
+            return {
+              ...row,
+              avg_days_to_pay: avgDays.avgDaysToPay ?? row.avg_days_to_pay ?? null,
+              avg_days_to_pay_6m: avgDays.avgDaysToPay6m ?? row.avg_days_to_pay_6m ?? null,
+            };
+          }));
+        } finally {
+          if (avgDaysPrefetchByCodeRef.current.get(codeKey) === promise) {
+            avgDaysPrefetchByCodeRef.current.delete(codeKey);
+          }
+        }
       } catch {
         // Avg days is optional for the visit save itself.
       }

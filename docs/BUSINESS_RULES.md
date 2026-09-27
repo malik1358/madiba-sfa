@@ -31,6 +31,7 @@ Constants in `app/lib/workdayActivity.js`:
 
 - Compare customer and salesman codes with the same normalizer the caller already uses (trim, uppercase, collapse spaces). Leading-code extraction exists because some sheets store `CODE Name` in one cell (`extractLeadingCustomerCodeAndName`).
 - A customer can remain visible to the previous salesman after transfer (`previous_salesman_code`).
+- Inactive customers stay visible in report customer pickers (for example Customer Audit, Payment Settlement, Outstanding Compare). Visit suggestions still keep inactive customers out of the active suggestion pool.
 - Mutual visibility is hardcoded in `MUTUAL_SALESMAN_GROUPS`: `JUNAID`, `PARVEZ`, `SOYEB` see each other’s books.
 - One-way book shares are hardcoded in `SHARED_CUSTOMER_BOOKS` and can also be rows in `customer_book_shares`. Examples in code: Ahmed Nabil’s book is shared to Abdalla; Mohammed Mubeen’s book is shared to Moinudin Khaja and Junaid. Do not “clean up” these names as unused data.
 - “Do not use” customers (name matches `/do\s*not\s*use/i`) are excluded from visit status.
@@ -42,9 +43,9 @@ Constants in `app/lib/workdayActivity.js`:
 - Visit outcomes on `visits.outcome` are constrained. Field reports in `system_settings` are the source Customer Audit and My Day read for the latest report (`visit_report_latest:<code>`).
 - Daily Visit Report collapses repeated `VISIT_REPORT` / `COLLECTION_VISIT` activity-log saves for the same user, customer, outcome (and collection amount) within a 2-minute window (`hideDuplicateVisitEntries`), so multi-tap saves show as one row.
 - Daily Visit Report **Distance from previous** on a customer visit/order row sums hop distances since the previous customer stop through idle GPS, lunch, and login/logout bridge rows (`resolveDistanceFromPreviousVisitKm` / `isIdleGpsPingTimelineRow`). Bridge rows still show their own single hop. Route total distance stays hop-by-hop so path is not double-counted.
-- My Day / Visit Without Order visit saves, inactive/active toggles, and prospect foreclosure are offline-first (`queueFirst`) via the resilient helpers. Save enrichment skips the activity timeline; WhatsApp avg days uses a local customer value when present.
+- My Day / Visit Without Order visit saves, inactive/active toggles, and prospect foreclosure are offline-first (`queueFirst`) via the resilient helpers. Save enrichment skips the activity timeline. Avg days for WhatsApp is prefetched when the visit form opens (`prefetchCustomerAvgDaysForVisit`) and stored on the local visit row (`avg_days_to_pay` / `avg_days_to_pay_6m`); save only reads that local value (with a short race on the in-flight prefetch) and never blocks on a fresh history fetch.
 - Visit plan (`app/lib/salesmanVisitPlan.js`): default 12 visits per salesman. System suggestions need at least 7 days since the last visit (`MIN_SYSTEM_VISIT_GAP_DAYS`). Appointments due today bypass that gap. Score mixes sales opportunity and collection opportunity. The page reads the stored snapshot `salesman_visit_plan_snapshot_v1`. The midnight KSA cron builds it. Email is off unless `SALESMAN_VISIT_PLAN_EMAIL_ENABLED` is true.
-- WhatsApp visit text includes average days to pay (`app/lib/avgDaysWhatsapp.js`). That figure comes from the settlement rules below, not from a single stored column.
+- WhatsApp visit/collection/order text includes average days to pay and the parallel 6-month avg when available (`app/lib/avgDaysWhatsapp.js`). Figures come from the settlement rules below, not from a single stored column. Collection queue rows carry both via `enrichCollectionRecordsWithAvgDays`.
 
 ## Orders
 

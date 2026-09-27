@@ -1,4 +1,4 @@
-import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
+import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "./avgDaysWhatsapp.js";
 import { formatKsaDateOnly } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 
@@ -55,6 +55,7 @@ export function buildFieldVisitWhatsappSummary({
     bucketAbove90: ">90",
     totalOutstanding: "Total",
     avgDaysToPay: "Avg days to pay",
+    avgDaysToPay6mLabel: "6-month avg",
   };
 
   const outcome = formatFieldVisitOutcome(visitForm.outcome, "en");
@@ -91,7 +92,7 @@ export function buildFieldVisitWhatsappSummary({
   }
 
   lines.push(...formatAvgDaysToPayWhatsappLines(
-    avgDaysToPay ?? customer.avgDaysToPay ?? customer.avg_days_to_pay,
+    avgDaysToPay ?? resolveLocalAvgDaysToPay(customer),
     labels,
   ));
   lines.push(...formatVisitDistanceWhatsappLines(visitDistance));

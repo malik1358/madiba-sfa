@@ -792,7 +792,7 @@ export async function buildVisibleCustomersForScope(admin, scope, options = {}) 
       mergedCustomersByCode.set(codeKey, {
         ...(existing || {}),
         ...customer,
-        is_active: false,
+        is_active: existing?.is_active ?? false,
       });
     }
     responseCustomers = dedupeCustomerMasterRows(Array.from(mergedCustomersByCode.values()));

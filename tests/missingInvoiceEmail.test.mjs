@@ -124,13 +124,14 @@ test("rejected and uploaded invoices are excluded from the overdue list", () => 
   assert.deepEqual(selected, [9, 1]);
 });
 
-test("pending approval and pending invoice creation are included; settled statuses stay excluded", () => {
+test("pending approval, waiting credit application, and pending invoice creation are included; settled statuses stay excluded", () => {
   assert.equal(isInvoiceNotUploadedStatus({}), true);
   assert.equal(isInvoiceNotUploadedStatus({ status: MISSING_INVOICE_STATUS_NOT_UPLOADED }), true);
   assert.equal(isInvoiceNotUploadedStatus({ status: "Pending for credit approval" }), false);
   assert.equal(isInvoiceNotUploadedStatus({ status: "Stock unavailable" }), false);
   assert.equal(isInvoiceNotUploadedStatus({ status: "Waiting for credit application" }), false);
   assert.equal(isMissingInvoiceOverdue(submittedOrder(31), { status: "Pending for credit approval" }, now), true);
+  assert.equal(isMissingInvoiceOverdue(submittedOrder(31.5), { status: "Waiting for credit application" }, now), true);
   assert.equal(isMissingInvoiceOverdue(submittedOrder(35), { status: "Pending for approval" }, now), true);
   assert.equal(isMissingInvoiceOverdue(submittedOrder(36), { status: "Pending for invoice creation" }, now), true);
   assert.equal(isMissingInvoiceOverdue(submittedOrder(37), { status: "Waiting for overdue collection" }, now), true);
@@ -142,6 +143,7 @@ test("pending approval and pending invoice creation are included; settled status
   const selected = selectMissingInvoiceOrders(
     [
       submittedOrder(31),
+      submittedOrder(31.5),
       submittedOrder(32),
       submittedOrder(33),
       submittedOrder(34),
@@ -153,6 +155,7 @@ test("pending approval and pending invoice creation are included; settled status
     ],
     new Map([
       ["31", { status: "Pending for credit approval" }],
+      ["31.5", { status: "Waiting for credit application" }],
       ["32", { status: "Stock unavailable" }],
       ["33", { status: MISSING_INVOICE_STATUS_NOT_UPLOADED }],
       ["34", {}],
@@ -165,10 +168,10 @@ test("pending approval and pending invoice creation are included; settled status
     now,
   ).map((order) => order.id);
 
-  assert.deepEqual(selected, [31, 33, 34, 35, 36, 37, 38, 39]);
+  assert.deepEqual(selected, [31, 31.5, 33, 34, 35, 36, 37, 38, 39]);
 });
 
-test("buildMissingInvoiceAlertEmail uses separate tables for approval, invoice creation, overdue collection, quotation, and pending with salesman", () => {
+test("buildMissingInvoiceAlertEmail uses separate tables for approval, waiting credit application, invoice creation, overdue collection, quotation, and pending with salesman", () => {
   const message = buildMissingInvoiceAlertEmail({
     now,
     orders: [
@@ -178,30 +181,35 @@ test("buildMissingInvoiceAlertEmail uses separate tables for approval, invoice c
       submittedOrder(15),
       submittedOrder(16),
       submittedOrder(17),
+      submittedOrder(18),
     ],
     metaByOrder: new Map([
       ["12", { status: MISSING_INVOICE_STATUS_NOT_UPLOADED }],
       ["13", { status: "Pending for approval" }],
-      ["14", { status: "Pending for invoice creation" }],
-      ["15", { status: "Waiting for overdue collection" }],
-      ["16", { status: "Quotation submitted waiting for the payment" }],
-      ["17", { status: "Pending with salesman" }],
+      ["14", { status: "Waiting for credit application" }],
+      ["15", { status: "Pending for invoice creation" }],
+      ["16", { status: "Waiting for overdue collection" }],
+      ["17", { status: "Quotation submitted waiting for the payment" }],
+      ["18", { status: "Pending with salesman" }],
     ]),
   });
 
-  assert.match(message.subject, /6 orders pending invoice \/ approval after 1 hour/);
+  assert.match(message.subject, /7 orders pending invoice \/ approval after 1 hour/);
   assert.match(message.html, /Pending for approval \(1\)/);
+  assert.match(message.html, /Waiting for credit application \(1\)/);
   assert.match(message.html, /Pending for invoice creation \(2\)/);
   assert.match(message.html, /Waiting for overdue collection \(1\)/);
   assert.match(message.html, /Quotation submitted waiting for the payment \(1\)/);
   assert.match(message.html, /Pending with salesman \(1\)/);
   assert.match(message.html, /SO-13/);
-  assert.match(message.html, /SO-12/);
   assert.match(message.html, /SO-14/);
+  assert.match(message.html, /SO-12/);
   assert.match(message.html, /SO-15/);
   assert.match(message.html, /SO-16/);
   assert.match(message.html, /SO-17/);
+  assert.match(message.html, /SO-18/);
   assert.match(message.html, /Pending for approval/);
+  assert.match(message.html, /Waiting for credit application/);
   assert.match(message.html, /Pending for invoice creation/);
   assert.match(message.html, /Waiting for overdue collection/);
   assert.match(message.html, /Quotation submitted waiting for the payment/);
@@ -211,10 +219,11 @@ test("buildMissingInvoiceAlertEmail uses separate tables for approval, invoice c
   assert.match(message.text, /from September 2026 onward/);
   assert.match(
     message.text,
-    /Pending for approval: 1\. Pending for invoice creation: 2\. Waiting for overdue collection: 1\. Quotation submitted waiting for the payment: 1\. Pending with salesman: 1\./,
+    /Pending for approval: 1\. Waiting for credit application: 1\. Pending for invoice creation: 2\. Waiting for overdue collection: 1\. Quotation submitted waiting for the payment: 1\. Pending with salesman: 1\./,
   );
-  assert.equal(message.orderCount, 6);
+  assert.equal(message.orderCount, 7);
   assert.equal(message.pendingApprovalCount, 1);
+  assert.equal(message.waitingCreditApplicationCount, 1);
   assert.equal(message.pendingInvoiceCreationCount, 2);
   assert.equal(message.waitingOverdueCollectionCount, 1);
   assert.equal(message.quotationWaitingPaymentCount, 1);
@@ -282,9 +291,9 @@ test("runMissingInvoiceEmailCycle skips outside India back-office hours", async 
   assert.equal(result.reason, "outside_india_back_office_hours");
 });
 
-test("recent missing-invoice sends are suppressed for 12 minutes", () => {
+test("recent missing-invoice sends are suppressed for 15 minutes", () => {
   assert.equal(wasMissingInvoiceEmailSentRecently(now.getTime(), now), true);
-  assert.equal(wasMissingInvoiceEmailSentRecently(now.getTime() - 13 * 60 * 1000, now), false);
+  assert.equal(wasMissingInvoiceEmailSentRecently(now.getTime() - 16 * 60 * 1000, now), false);
   assert.equal(wasMissingInvoiceEmailSentRecently({ lastSentAt: now.toISOString() }, now), true);
 });
 

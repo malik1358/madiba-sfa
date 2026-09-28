@@ -1,4 +1,4 @@
-import { formatAvgDaysToPayWhatsappLines } from "./avgDaysWhatsapp.js";
+import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "./avgDaysWhatsapp.js";
 import { formatKsaDateOnly } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 
@@ -54,6 +54,8 @@ export const COLLECTION_VISIT_SUMMARY_LABELS = {
   bucket61to90: "61-90",
   bucket91to120: "91-120",
   bucket120plus: ">120",
+  avgDaysToPay: "Avg days to pay",
+  avgDaysToPay6mLabel: "6-month avg",
   summaryNotSpecified: "not specified",
   gps: "GPS",
   distanceFromCustomer: "Distance from customer",
@@ -172,8 +174,11 @@ export function buildCollectionVisitSummary(row, form, options = {}, labels = CO
   lines.push(`${labels.bucket91to120}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${labels.bucket120plus}: ${formatMoney(row.outstanding_above_120)}`);
   lines.push(...formatAvgDaysToPayWhatsappLines(
-    options.avgDaysToPay ?? row.avgDaysToPay ?? row.avg_days_to_pay,
-    { avgDaysToPay: labels.avgDaysToPay },
+    options.avgDaysToPay ?? resolveLocalAvgDaysToPay(row),
+    {
+      avgDaysToPay: labels.avgDaysToPay,
+      avgDaysToPay6mLabel: labels.avgDaysToPay6mLabel,
+    },
   ));
   lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
     gps: labels.gps,

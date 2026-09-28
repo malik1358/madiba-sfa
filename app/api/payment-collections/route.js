@@ -35,6 +35,7 @@ import {
   resolveOutstandingInvoiceCustomerCode,
   toNumber,
 } from "../../lib/outstanding.js";
+import { resolveExistingCollectionCustomerCode } from "../../lib/customerCode.js";
 import { needsEnglishTranslation, translateText } from "../../lib/translateText.js";
 import { formatCollectionUserDisplayName } from "../../lib/geo.js";
 import {
@@ -323,18 +324,32 @@ function formatRouteError(error) {
   return "Unable to save collection visit";
 }
 
-async function ensureCollectionCustomerRecord(admin, customerCode, customerName) {
+export async function ensureCollectionCustomerRecord(admin, customerCode, customerName) {
   const code = canonicalCustomerCode(customerCode);
   if (!code) throw new Error("Customer code is required");
 
   const { data: existing, error: lookupError } = await admin
     .from("customers")
     .select("customer_code")
-    .eq("customer_code", code)
+    .ilike("customer_code", code)
     .maybeSingle();
 
   if (lookupError) throw lookupError;
-  if (existing) return code;
+  if (existing?.customer_code) return String(existing.customer_code).trim() || code;
+
+  const { data: fuzzyMatches, error: fuzzyLookupError } = await admin
+    .from("customers")
+    .select("customer_code")
+    .ilike("customer_code", `${code}%`)
+    .limit(25);
+
+  if (fuzzyLookupError) throw fuzzyLookupError;
+
+  const existingCode = resolveExistingCollectionCustomerCode(
+    (fuzzyMatches || []).map((row) => row?.customer_code),
+    code,
+  );
+  if (existingCode) return existingCode;
 
   const name = String(customerName || code).trim() || code;
   const { error: insertError } = await admin
@@ -1085,7 +1100,7 @@ export async function POST(request) {
       customerCode = matchedRecord.customer_code;
     }
 
-    await ensureCollectionCustomerRecord(admin, customerCode, customerName);
+    customerCode = await ensureCollectionCustomerRecord(admin, customerCode, customerName);
 
     // Handle file uploads for payment and receipt copies
     let paymentCopyUrl = null;

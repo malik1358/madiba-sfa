@@ -46,9 +46,10 @@ function scopeCacheKey(userId) {
   return `scope:v2:${String(userId || "").trim()}`;
 }
 
-function customersCacheKey(scope, enriched = false) {
+function customersCacheKey(scope, enriched = false, includeInactive = false) {
   const prefix = enriched ? "customers:visible:enriched:v8" : "customers:visible:basic:v5";
-  return `${prefix}:${buildScopeHash(scope)}`;
+  const inactiveSuffix = includeInactive ? ":with-inactive" : "";
+  return `${prefix}${inactiveSuffix}:${buildScopeHash(scope)}`;
 }
 
 function customerHistoryCacheKey(scope, customerCode, { fullHistory = false } = {}) {
@@ -209,8 +210,16 @@ async function fetchSalesScopeNetwork(accessToken) {
   return data;
 }
 
-async function fetchVisibleCustomersNetwork(accessToken, { enriched = false } = {}) {
-  const query = enriched ? "?includeRecentSales=1&includeOutstanding=1" : "";
+async function fetchVisibleCustomersNetwork(accessToken, { enriched = false, includeInactive = false } = {}) {
+  const params = new URLSearchParams();
+  if (enriched) {
+    params.set("includeRecentSales", "1");
+    params.set("includeOutstanding", "1");
+  }
+  if (includeInactive) {
+    params.set("includeInactive", "1");
+  }
+  const query = params.toString() ? `?${params.toString()}` : "";
   const response = await fetch(`/api/customers/visible${query}`, {
     cache: "no-store",
     headers: {
@@ -400,12 +409,13 @@ export async function findCachedVisibleCustomerByCode(scope, customerCode) {
 
 export async function fetchVisibleCustomersCached(accessToken, scope, options = {}) {
   const enriched = Boolean(options.enriched);
+  const includeInactive = Boolean(options.includeInactive);
   const ttlMs = enriched ? CACHE_TTL.customersEnrichedMs : CACHE_TTL.customersBasicMs;
 
   return fetchWithLocalCache(
-    customersCacheKey(scope, enriched),
+    customersCacheKey(scope, enriched, includeInactive),
     ttlMs,
-    () => fetchVisibleCustomersNetwork(accessToken, { enriched }),
+    () => fetchVisibleCustomersNetwork(accessToken, { enriched, includeInactive }),
     { onUpdate: options.onUpdate },
   );
 }

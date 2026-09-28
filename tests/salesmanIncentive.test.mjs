@@ -9,9 +9,10 @@ import {
   classifyIncentiveCategory,
   collectionIncentiveTier,
   computeGrowthIncentive,
-  incentiveHistoryStartDate,
   incentiveMonthRange,
+  isExcludedIncentiveSalesman,
   parseIncentiveMonth,
+  resolvePeakMonthlySales,
   shiftIncentiveMonth,
 } from "../app/lib/salesmanIncentive.js";
 
@@ -237,20 +238,103 @@ test("cash deals pay 0.20% on the whole invoice within 3 days and nothing after"
 test("computeGrowthIncentive pays 0.5% of a positive delta only", () => {
   assert.deepEqual(computeGrowthIncentive(1000, 800), {
     currentMonthSales: 1000,
-    previousMonthSales: 800,
+    benchmarkSales: 800,
     salesDelta: 200,
     growthIncentive: 1,
   });
   assert.equal(computeGrowthIncentive(800, 1000).growthIncentive, 0);
 });
 
-test("month helpers resolve the report window and history start", () => {
+test("resolvePeakMonthlySales takes the best earlier month, never the current one", () => {
+  const byMonth = new Map([
+    ["2026-01", 500],
+    ["2026-02", 900],
+    ["2026-03", 300],
+    ["2026-04", 5000],
+  ]);
+  assert.deepEqual(resolvePeakMonthlySales(byMonth, "2026-04"), { peakMonth: "2026-02", peakSales: 900 });
+});
+
+test("resolvePeakMonthlySales floors at zero when there is no positive history", () => {
+  assert.deepEqual(
+    resolvePeakMonthlySales(new Map([["2026-03", -200]]), "2026-04"),
+    { peakMonth: "", peakSales: 0 },
+  );
+  assert.deepEqual(resolvePeakMonthlySales(new Map(), "2026-04"), { peakMonth: "", peakSales: 0 });
+});
+
+test("growth incentive is measured against the all-time best month", () => {
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [],
+    monthlySalesBySalesman: new Map([
+      ["S01", new Map([["2025-06", 9000], ["2026-03", 1000], ["2026-04", 10000]])],
+    ]),
+  });
+
+  const [summary] = report.salesmen;
+  assert.equal(summary.peak_month, "2025-06");
+  assert.equal(summary.peak_month_sales, 9000);
+  assert.equal(summary.sales_delta, 1000);
+  assert.equal(summary.growth_incentive, 5);
+});
+
+test("beating last month but not the record pays no growth incentive", () => {
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [],
+    monthlySalesBySalesman: new Map([
+      ["S01", new Map([["2025-06", 9000], ["2026-03", 1000], ["2026-04", 2000]])],
+    ]),
+  });
+  assert.equal(report.salesmen[0].growth_incentive, 0);
+  assert.equal(report.salesmen[0].sales_delta, -7000);
+});
+
+test("TRENDYOL and NOON are excluded from the incentive report", () => {
+  assert.equal(isExcludedIncentiveSalesman({ salesman_code: "TRENDYOL" }), true);
+  assert.equal(isExcludedIncentiveSalesman({ salesman_name: "noon" }), true);
+  assert.equal(isExcludedIncentiveSalesman({ salesman_code: "S01", salesman_name: "Ali" }), false);
+  assert.equal(isExcludedIncentiveSalesman({}), false);
+
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [{
+      customerCode: "C001",
+      transactions: MIXED_INVOICE.map((row) => ({
+        ...row,
+        salesman_code: "TRENDYOL",
+        salesman_name: "TRENDYOL",
+      })),
+      receipts: [{ receipt_date: "2026-04-01", amount: 230, vch_no: "R/9" }],
+    }],
+  });
+  assert.deepEqual(report.salesmen, []);
+  assert.deepEqual(report.rows, []);
+});
+
+test("a receipt settles an old invoice regardless of how old the bill is", () => {
+  const rows = buildCustomerIncentiveRows({
+    customerCode: "C001",
+    transactions: [salesLine({ transaction_date: "2023-01-10", voucher_number: "S/9" })],
+    receipts: [{ receipt_date: "2026-04-15", amount: 115, vch_no: "R/9" }],
+    fromDate: "2026-04-01",
+    toDate: "2026-04-30",
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].invoice_date, "2023-01-10");
+  assert.equal(rows[0].office_base, 100);
+  assert.equal(rows[0].incentive, 0);
+  assert.equal(rows[0].primary_tier, "late");
+});
+
+test("month helpers resolve the report window", () => {
   assert.equal(parseIncentiveMonth("2026-04-17"), "2026-04");
   assert.equal(parseIncentiveMonth("", "2026-02-09"), "2026-02");
   assert.throws(() => parseIncentiveMonth("nope"), /Invalid month/);
   assert.equal(shiftIncentiveMonth("2026-01", -1), "2025-12");
   assert.deepEqual(incentiveMonthRange("2026-02"), { from: "2026-02-01", to: "2026-02-28" });
-  assert.equal(incentiveHistoryStartDate("2026-04", 12), "2025-04-01");
 });
 
 test("buildSalesmanIncentiveReport combines collection and growth incentive", () => {
@@ -270,7 +354,6 @@ test("buildSalesmanIncentiveReport combines collection and growth incentive", ()
   });
 
   assert.equal(report.month, "2026-04");
-  assert.equal(report.previousMonth, "2026-03");
   assert.equal(report.monthStart, "2026-04-01");
   assert.equal(report.monthEnd, "2026-04-30");
   assert.equal(report.rows.length, 1);
@@ -279,15 +362,20 @@ test("buildSalesmanIncentiveReport combines collection and growth incentive", ()
   assert.equal(summary.salesman_code, "S01");
   assert.equal(summary.collection_incentive, 1.25);
   assert.equal(summary.current_month_sales, 1000);
-  assert.equal(summary.previous_month_sales, 200);
+  assert.equal(summary.peak_month, "2026-03");
+  assert.equal(summary.peak_month_sales, 200);
   assert.equal(summary.sales_delta, 800);
   assert.equal(summary.growth_incentive, 4);
   assert.equal(summary.total_incentive, 5.25);
   assert.equal(summary.tier_base.officeSuppliesFast, 100);
   assert.equal(summary.tier_base.otherFast, 100);
+  assert.equal(summary.tier_incentive.officeSuppliesFast, 0.25);
+  assert.equal(summary.tier_incentive.otherFast, 1);
+  assert.equal(summary.tier_incentive.late, 0);
   assert.equal(summary.eligible_base, 200);
   assert.equal(summary.late_base, 0);
   assert.equal(report.totals.total_incentive, 5.25);
+  assert.equal(report.totals.tier_incentive.otherFast, 1);
 });
 
 test("buildSalesmanIncentiveReport can be scoped to one salesman", () => {

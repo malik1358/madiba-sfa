@@ -32,8 +32,8 @@ const TEXT = {
     ar: "هذه الشاشة متاحة فقط للأدمن أو المدير أو المندوب لعرض أرقامه.",
   },
   rules: {
-    en: "Scheme: office supplies 0.25% when the invoice is collected within 35 days. Electronics 0.40% within 35 days and 0.20% within 60 days. Other categories 1% within 35 days and 0.5% within 60 days. Nothing after 60 days. Cash deals (RC / DC / JC invoice numbers) are excluded from the category rates and earn only 0.20%, and only when the cash is received within 3 days. Plus 0.5% on the positive difference between this month's and last month's net sales. Collections are matched to invoices by cash FIFO per customer, then split by category using the invoice's own item mix. The incentive base is the net (ex-VAT) value collected.",
-    ar: "النظام: القرطاسية 0.25% عند التحصيل خلال 35 يوماً. الإلكترونيات 0.40% خلال 35 يوماً و0.20% خلال 60 يوماً. الفئات الأخرى 1% خلال 35 يوماً و0.5% خلال 60 يوماً. لا يوجد حافز بعد 60 يوماً. الصفقات النقدية (أرقام الفواتير RC / DC / JC) مستثناة من نسب الفئات وتستحق 0.20% فقط، وذلك فقط إذا تم استلام النقد خلال 3 أيام. بالإضافة إلى 0.5% على الفرق الموجب بين صافي مبيعات هذا الشهر والشهر الماضي. تتم مطابقة التحصيلات بالفواتير بنظام الأقدم أولاً لكل عميل، ثم تقسم حسب أصناف الفاتورة. أساس الحافز هو الصافي بدون ضريبة.",
+    en: "Scheme: office supplies 0.25% when the invoice is collected within 35 days. Electronics 0.40% within 35 days and 0.20% within 60 days. Other categories 1% within 35 days and 0.5% within 60 days. Nothing after 60 days. Cash deals (RC / DC / JC invoice numbers) are excluded from the category rates and earn only 0.20%, and only when the cash is received within 3 days. Plus 0.5% on the amount this month's net sales exceed the salesman's best month ever. Every receipt dated in the selected month counts, no matter how old the invoice it settles: collections are matched to invoices by cash FIFO per customer over the full ledger, then split by category using the invoice's own item mix. The incentive base is the net (ex-VAT) value collected. TRENDYOL and NOON are ecom channels and are not shown.",
+    ar: "النظام: القرطاسية 0.25% عند التحصيل خلال 35 يوماً. الإلكترونيات 0.40% خلال 35 يوماً و0.20% خلال 60 يوماً. الفئات الأخرى 1% خلال 35 يوماً و0.5% خلال 60 يوماً. لا يوجد حافز بعد 60 يوماً. الصفقات النقدية (RC / DC / JC) تستحق 0.20% فقط وإذا تم استلام النقد خلال 3 أيام. بالإضافة إلى 0.5% على ما تتجاوزه مبيعات هذا الشهر عن أفضل شهر للمندوب على الإطلاق. تُحتسب كل الإيصالات المؤرخة في الشهر المحدد مهما كان تاريخ الفاتورة. أساس الحافز هو الصافي بدون ضريبة. TRENDYOL وNOON قنوات إلكترونية ولا تُعرض.",
   },
   totalIncentive: { en: "Total incentive", ar: "إجمالي الحوافز" },
   collectionIncentive: { en: "Collection incentive", ar: "حافز التحصيل" },
@@ -50,7 +50,7 @@ const TEXT = {
   cashDeal: { en: "Cash deal", ar: "صفقة نقدية" },
   yes: { en: "Yes", ar: "نعم" },
   thisMonthSales: { en: "This month sales", ar: "مبيعات هذا الشهر" },
-  lastMonthSales: { en: "Last month sales", ar: "مبيعات الشهر الماضي" },
+  bestMonthSales: { en: "Best month ever", ar: "أفضل شهر على الإطلاق" },
   delta: { en: "Delta", ar: "الفرق" },
   customer: { en: "Customer", ar: "العميل" },
   invoice: { en: "Invoice", ar: "الفاتورة" },
@@ -86,6 +86,12 @@ const TIER_LABELS = {
 };
 
 const FALLBACK_TIER_KEYS = Object.keys(TIER_LABELS);
+
+function formatRate(rate) {
+  const value = Number(rate || 0) * 100;
+  if (!value) return "";
+  return `${Number(value.toFixed(2))}%`;
+}
 
 function currentMonthKey() {
   return getKsaDateString().slice(0, 7);
@@ -356,11 +362,16 @@ export default function SalesmanIncentivePage() {
                         <th>{t("code")}</th>
                         <th>{t("name")}</th>
                         {tierKeys.map((key) => (
-                          <th key={key}>{tierLabel(key)}</th>
+                          <th key={key}>
+                            {tierLabel(key)}
+                            {formatRate(report.rates?.[key]) ? (
+                              <div className="moduleCode">{formatRate(report.rates?.[key])}</div>
+                            ) : null}
+                          </th>
                         ))}
                         <th>{t("collectionIncentive")}</th>
                         <th>{t("thisMonthSales")}</th>
-                        <th>{t("lastMonthSales")}</th>
+                        <th>{t("bestMonthSales")}</th>
                         <th>{t("delta")}</th>
                         <th>{t("growthIncentive")}</th>
                         <th className="moduleBiTotalCol">{t("totalIncentive")}</th>
@@ -372,11 +383,21 @@ export default function SalesmanIncentivePage() {
                           <td>{row.salesman_code}</td>
                           <td>{row.salesman_name || "-"}</td>
                           {tierKeys.map((key) => (
-                            <td key={key}>{formatAmount(row.tier_base?.[key])}</td>
+                            <td key={key}>
+                              {formatAmount(row.tier_base?.[key])}
+                              {key !== "late" ? (
+                                <div className="moduleCode">
+                                  {t("incentive")}: {formatAmount(row.tier_incentive?.[key])}
+                                </div>
+                              ) : null}
+                            </td>
                           ))}
                           <td>{formatAmount(row.collection_incentive)}</td>
                           <td>{formatAmount(row.current_month_sales)}</td>
-                          <td>{formatAmount(row.previous_month_sales)}</td>
+                          <td>
+                            {formatAmount(row.peak_month_sales)}
+                            {row.peak_month ? <div className="moduleCode">{row.peak_month}</div> : null}
+                          </td>
                           <td className={deltaCellClass(row.sales_delta)}>{formatAmount(row.sales_delta)}</td>
                           <td>{formatAmount(row.growth_incentive)}</td>
                           <td className="moduleBiTotalCol"><strong>{formatAmount(row.total_incentive)}</strong></td>
@@ -393,11 +414,18 @@ export default function SalesmanIncentivePage() {
                         <tr>
                           <td colSpan={2}><strong>{t("total")}</strong></td>
                           {tierKeys.map((key) => (
-                            <td key={key}><strong>{formatAmount(totals.tier_base?.[key])}</strong></td>
+                            <td key={key}>
+                              <strong>{formatAmount(totals.tier_base?.[key])}</strong>
+                              {key !== "late" ? (
+                                <div className="moduleCode">
+                                  {t("incentive")}: {formatAmount(totals.tier_incentive?.[key])}
+                                </div>
+                              ) : null}
+                            </td>
                           ))}
                           <td><strong>{formatAmount(totals.collection_incentive)}</strong></td>
                           <td><strong>{formatAmount(totals.current_month_sales)}</strong></td>
-                          <td><strong>{formatAmount(totals.previous_month_sales)}</strong></td>
+                          <td><strong>{formatAmount(totals.peak_month_sales)}</strong></td>
                           <td className={deltaCellClass(totals.sales_delta)}><strong>{formatAmount(totals.sales_delta)}</strong></td>
                           <td><strong>{formatAmount(totals.growth_incentive)}</strong></td>
                           <td className="moduleBiTotalCol"><strong>{formatAmount(totals.total_incentive)}</strong></td>

@@ -4,6 +4,7 @@ import {
   matchPaymentsFifo,
 } from "./paymentBehavior.js";
 import { isOfficeSuppliesSale, normalizeSalesmanCode } from "./performanceKpis.js";
+import { ECOM_SALESMAN_TOKENS } from "./salesmanTeamMom.js";
 import { amountInclVatFromExcl, vatRateForProduct } from "./regionalPricing.js";
 import { parseOutstandingSheetDate, toNumber } from "./outstanding.js";
 import { currentMonthDateRange } from "./salesInvoices.js";
@@ -44,9 +45,6 @@ export const INCENTIVE_TIER_LABELS = {
   otherSlow: { en: "Other 36-60d", ar: "أخرى 36-60 يوم" },
   late: { en: "Late (no incentive)", ar: "متأخر (بدون حافز)" },
 };
-
-/** Months of sales + receipt history loaded so FIFO settlement is stable. */
-export const INCENTIVE_HISTORY_MONTHS = 12;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_KEY = /^\d{4}-\d{2}$/;
@@ -93,12 +91,6 @@ export function shiftIncentiveMonth(month, offset = -1) {
 export function incentiveMonthRange(month) {
   const key = parseIncentiveMonth(month);
   return currentMonthDateRange(`${key}-01`);
-}
-
-/** First date of loaded history for a report month. */
-export function incentiveHistoryStartDate(month, months = INCENTIVE_HISTORY_MONTHS) {
-  const start = shiftIncentiveMonth(month, -Math.abs(Number(months) || INCENTIVE_HISTORY_MONTHS));
-  return start ? `${start}-01` : "";
 }
 
 export function isElectronicsSale(row = {}) {
@@ -320,16 +312,45 @@ export function buildMonthlyNetSalesBySalesman(transactions = [], target = new M
   return target;
 }
 
-export function computeGrowthIncentive(currentMonthSales, previousMonthSales) {
+export function computeGrowthIncentive(currentMonthSales, benchmarkSales) {
   const current = toNumber(currentMonthSales);
-  const previous = toNumber(previousMonthSales);
-  const delta = current - previous;
+  const benchmark = toNumber(benchmarkSales);
+  const delta = current - benchmark;
   return {
     currentMonthSales: round2(current),
-    previousMonthSales: round2(previous),
+    benchmarkSales: round2(benchmark),
     salesDelta: round2(delta),
     growthIncentive: delta > 0 ? round2(delta * INCENTIVE_RATES.salesGrowth) : 0,
   };
+}
+
+/**
+ * Best net-sales month before the report month, across all loaded history.
+ * The current month is never its own benchmark.
+ */
+export function resolvePeakMonthlySales(byMonth, currentMonthKey) {
+  const entries = byMonth instanceof Map ? [...byMonth.entries()] : Object.entries(byMonth || {});
+  let peakMonth = "";
+  let peakSales = 0;
+  entries.forEach(([month, amount]) => {
+    const key = String(month || "").slice(0, 7);
+    if (!MONTH_KEY.test(key) || key >= currentMonthKey) return;
+    const value = toNumber(amount);
+    if (!peakMonth || value > peakSales) {
+      peakMonth = key;
+      peakSales = value;
+    }
+  });
+  // A salesman whose every past month was negative still gets a zero floor.
+  return { peakMonth: peakSales > 0 ? peakMonth : "", peakSales: Math.max(0, peakSales) };
+}
+
+/** TRENDYOL / NOON are ecom channels, not salesmen, so they earn no incentive. */
+export function isExcludedIncentiveSalesman({ salesman_code: code, salesman_name: name } = {}) {
+  return [code, name].some((value) => {
+    const token = String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+    return Boolean(token) && ECOM_SALESMAN_TOKENS.has(token);
+  });
 }
 
 function emptySalesmanSummary(code = "", name = "") {
@@ -343,11 +364,13 @@ function emptySalesmanSummary(code = "", name = "") {
     other_base: 0,
     base: 0,
     tier_base: emptyTierBase(),
+    tier_incentive: emptyTierBase(),
     eligible_base: 0,
     late_base: 0,
     collection_incentive: 0,
     current_month_sales: 0,
-    previous_month_sales: 0,
+    peak_month: "",
+    peak_month_sales: 0,
     sales_delta: 0,
     growth_incentive: 0,
     total_incentive: 0,
@@ -368,11 +391,19 @@ function addRowToSummary(summary, row) {
   summary.tier_base[row.office_tier] += row.office_base;
   summary.tier_base[row.electronics_tier] += row.electronics_base;
   summary.tier_base[row.other_tier] += row.other_base;
+  summary.tier_incentive[row.cash_tier] += row.cash_incentive;
+  summary.tier_incentive[row.office_tier] += row.office_incentive;
+  summary.tier_incentive[row.electronics_tier] += row.electronics_incentive;
+  summary.tier_incentive[row.other_tier] += row.other_incentive;
 }
 
 function roundSummary(summary) {
   const tierBase = INCENTIVE_TIER_KEYS.reduce((carry, key) => {
     carry[key] = round2(summary.tier_base[key]);
+    return carry;
+  }, {});
+  const tierIncentive = INCENTIVE_TIER_KEYS.reduce((carry, key) => {
+    carry[key] = round2(summary.tier_incentive[key]);
     return carry;
   }, {});
 
@@ -385,6 +416,7 @@ function roundSummary(summary) {
     other_base: round2(summary.other_base),
     base: round2(summary.base),
     tier_base: tierBase,
+    tier_incentive: tierIncentive,
     eligible_base: round2(
       INCENTIVE_TIER_KEYS
         .filter((key) => key !== "late")
@@ -392,7 +424,7 @@ function roundSummary(summary) {
     ),
     late_base: tierBase.late,
     current_month_sales: round2(summary.current_month_sales),
-    previous_month_sales: round2(summary.previous_month_sales),
+    peak_month_sales: round2(summary.peak_month_sales),
     sales_delta: round2(summary.sales_delta),
     growth_incentive: round2(summary.growth_incentive),
     collection_incentive: round2(summary.collection_incentive),
@@ -407,26 +439,28 @@ function roundSummary(summary) {
  * @param {string} options.month YYYY-MM
  * @param {Array} options.customers `{ customerCode, customerName, transactions, receipts }`
  * @param {Array<string>|null} options.salesmanCodes Restrict output to these codes.
+ * @param {Map|null} options.monthlySalesBySalesman All-history `code -> month -> net sales`.
+ *   Falls back to the (shorter) span derivable from `customers`.
  */
 export function buildSalesmanIncentiveReport({
   month,
   customers = [],
   salesmanCodes = null,
+  monthlySalesBySalesman = null,
 } = {}) {
   const monthKey = parseIncentiveMonth(month);
   const range = incentiveMonthRange(monthKey);
-  const previousMonth = shiftIncentiveMonth(monthKey, -1);
   const allowed = Array.isArray(salesmanCodes) && salesmanCodes.length
     ? new Set(salesmanCodes.map((code) => normalizeSalesmanCode(code)).filter(Boolean))
     : null;
 
-  const monthlySales = new Map();
+  const derivedMonthlySales = new Map();
   const names = new Map();
   let rows = [];
 
   (Array.isArray(customers) ? customers : []).forEach((customer) => {
     const transactions = Array.isArray(customer?.transactions) ? customer.transactions : [];
-    buildMonthlyNetSalesBySalesman(transactions, monthlySales);
+    buildMonthlyNetSalesBySalesman(transactions, derivedMonthlySales);
     transactions.forEach((row) => {
       const code = normalizeSalesmanCode(row?.salesman_code);
       const name = String(row?.salesman_name || "").trim();
@@ -443,8 +477,13 @@ export function buildSalesmanIncentiveReport({
     }));
   });
 
+  const monthlySales = monthlySalesBySalesman instanceof Map && monthlySalesBySalesman.size
+    ? monthlySalesBySalesman
+    : derivedMonthlySales;
+
   const visibleRows = rows
     .filter((row) => !allowed || allowed.has(row.salesman_code))
+    .filter((row) => !isExcludedIncentiveSalesman(row))
     .sort((left, right) => (
       left.receipt_date.localeCompare(right.receipt_date)
       || left.customer_code.localeCompare(right.customer_code)
@@ -461,13 +500,15 @@ export function buildSalesmanIncentiveReport({
 
   monthlySales.forEach((byMonth, code) => {
     if (allowed && !allowed.has(code)) return;
+    if (isExcludedIncentiveSalesman({ salesman_code: code, salesman_name: names.get(code) })) return;
     const current = toNumber(byMonth.get(monthKey));
-    const previous = toNumber(byMonth.get(previousMonth));
-    if (!current && !previous && !summaries.has(code)) return;
+    const { peakMonth, peakSales } = resolvePeakMonthlySales(byMonth, monthKey);
+    if (!current && !peakSales && !summaries.has(code)) return;
     const summary = summaryFor(code);
-    const growth = computeGrowthIncentive(current, previous);
+    const growth = computeGrowthIncentive(current, peakSales);
     summary.current_month_sales = growth.currentMonthSales;
-    summary.previous_month_sales = growth.previousMonthSales;
+    summary.peak_month = peakMonth;
+    summary.peak_month_sales = growth.benchmarkSales;
     summary.sales_delta = growth.salesDelta;
     summary.growth_incentive = growth.growthIncentive;
   });
@@ -488,19 +529,19 @@ export function buildSalesmanIncentiveReport({
     carry.base += summary.base;
     carry.collection_incentive += summary.collection_incentive;
     carry.current_month_sales += summary.current_month_sales;
-    carry.previous_month_sales += summary.previous_month_sales;
+    carry.peak_month_sales += summary.peak_month_sales;
     carry.sales_delta += summary.sales_delta;
     carry.growth_incentive += summary.growth_incentive;
     carry.receipt_count += summary.receipt_count;
     INCENTIVE_TIER_KEYS.forEach((key) => {
       carry.tier_base[key] += summary.tier_base[key];
+      carry.tier_incentive[key] += summary.tier_incentive[key];
     });
     return carry;
   }, emptySalesmanSummary());
 
   return {
     month: monthKey,
-    previousMonth,
     monthStart: range.from,
     monthEnd: range.to,
     rates: INCENTIVE_RATES,

@@ -289,6 +289,7 @@ export async function POST(request) {
       note: value.note,
       stock_checks: stockChecks,
       captured_at: value.captured_at,
+      customer_gps_update_accepted: body?.customerGpsUpdateAccepted === true,
       platform: normalizeGpsCapturePlatform(body?.platform),
     });
 

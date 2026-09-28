@@ -136,6 +136,7 @@ function transactionLabel(entry) {
   const parts = [entry?.transactionLabel || entry?.transactionType || "-"];
   if (entry?.logoutAutoClosed) parts.push("Auto-closed");
   if (entry?.isFarFromCustomer) parts.push("Far");
+  if (entry?.gpsLocationUpdateAccepted) parts.push("GPS update accepted");
   return parts.join(" · ");
 }
 

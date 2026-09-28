@@ -1055,9 +1055,10 @@ export default function MyDayPage({ mode = "default" } = {}) {
   }
 
   async function promptCustomerGpsIfFar(customer, location, accessToken) {
-    if (!location || !accessToken || !customer?.customer_code) return;
+    if (!location || !accessToken || !customer?.customer_code) return false;
+    let askedUser = false;
     try {
-      await maybePromptCustomerLocationUpdate({
+      const choice = await maybePromptCustomerLocationUpdate({
         customerCode: customer.customer_code,
         customerName: customer.customer_name,
         entryLocation: location,
@@ -1066,6 +1067,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
         customer,
         skipReverseGeocode: true,
         promptChoice: async (promptDetails) => {
+          askedUser = true;
           const choice = await showPopup({
             title: t("locationUpdateTitle"),
             message: promptDetails.message,
@@ -1078,8 +1080,10 @@ export default function MyDayPage({ mode = "default" } = {}) {
           return choice === "yes" ? CUSTOMER_LOCATION_UPDATE_UPDATE : CUSTOMER_LOCATION_UPDATE_SKIP;
         },
       });
+      return askedUser && choice === CUSTOMER_LOCATION_UPDATE_UPDATE;
     } catch (locationError) {
       console.warn("Customer location update skipped", locationError);
+      return false;
     }
   }
 
@@ -1384,7 +1388,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
       }
 
       const location = await captureLocation();
-      await promptCustomerGpsIfFar(customer, location, session.access_token);
+      const gpsLocationUpdateAccepted = await promptCustomerGpsIfFar(customer, location, session.access_token);
       const capturedAt = new Date().toISOString();
       // Prefer local customer data and skip the activity timeline so visit saves
       // stay as fast as offline-first collection entry on flaky mobile data.
@@ -1439,6 +1443,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
           capturedAt,
           location,
           platform,
+          customerGpsUpdateAccepted: gpsLocationUpdateAccepted,
         },
         headers: {
           Authorization: `Bearer ${session.access_token}`,

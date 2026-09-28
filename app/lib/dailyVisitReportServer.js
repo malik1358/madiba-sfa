@@ -25,7 +25,7 @@ import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { sumOrderLineValue } from "./collectionDaySummary.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
 import { buildDayRoutePoints } from "./dayRouteMap.js";
-import { assignOnSiteVisitNumbers, buildVisitDaySplit, hideDuplicateVisitEntries, hideSupersededOrderDrafts, loginLogoutLocationNotes } from "./dailyVisitReportStats.js";
+import { assignOnSiteVisitNumbers, attachAcceptedGpsUpdateMarkers, buildVisitDaySplit, hideDuplicateVisitEntries, hideSupersededOrderDrafts, loginLogoutLocationNotes, markVisitsWithAcceptedGpsHistory, shouldMarkVisitFarFromCustomer } from "./dailyVisitReportStats.js";
 import { filterLogsByKsaEventDate, ksaDayBounds } from "./workdayActivity.js";
 import {
   isPlaceholderProspectName,
@@ -343,11 +343,31 @@ async function loadActivityLogEntries(admin, startIso, endIso, userIdFilter, rep
         activityNote: row.note,
         autoClosed: Boolean(parsed.autoClosed),
         customerName: parsed.customer_name || parsed.customerName || "",
+        gpsLocationUpdateAccepted: parsed.customer_gps_update_accepted === true
+          || parsed.gps_location_update_accepted === true
+          || parsed.action === "CUSTOMER_GPS_UPDATE_ACCEPTED",
+        collectionVisitId: parsed.collection_visit_id || null,
       },
     });
   });
 
   return { entries, orderIds: [...new Set(orderIds.filter(Boolean))] };
+}
+
+async function loadCustomerGpsHistoryForVisits(admin, customerCodes, userIds, startIso, endIso) {
+  if (!customerCodes.length || !userIds.length) return [];
+
+  const { data, error } = await admin
+    .from("customer_gps_history")
+    .select("customer_code,latitude,longitude,previous_latitude,previous_longitude,source,updated_by,created_at")
+    .in("customer_code", customerCodes)
+    .in("updated_by", userIds)
+    .gte("created_at", startIso)
+    .lte("created_at", endIso);
+
+  if (error && (isMissingTableError(error) || isMissingColumnError(error))) return [];
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
 }
 
 async function hydrateOrderCustomers(admin, orderIds) {
@@ -407,7 +427,11 @@ function enrichEntries(entries, customerMap, profileMap) {
     const profile = profileMap.get(entry.user_id) || {};
     const entryLocation = { latitude: entry.latitude, longitude: entry.longitude };
     const distanceKm = distanceFromCustomerKm(entryLocation, customer);
-    const farFromCustomer = isFarFromCustomer(entryLocation, customer);
+    const gpsLocationUpdateAccepted = Boolean(entry.meta?.gpsLocationUpdateAccepted);
+    const farFromCustomer = shouldMarkVisitFarFromCustomer(
+      entry,
+      isFarFromCustomer(entryLocation, customer),
+    );
     const previousAnchor = findPreviousWaitingAnchorRow(timelineForWaiting, index);
     const distanceFromPreviousKm = resolveDistanceFromPreviousVisitKm(withRoute, index);
     const speedFromAt = previousAnchor?.savedAt ?? previousAnchor?.saved_at
@@ -464,6 +488,7 @@ function enrichEntries(entries, customerMap, profileMap) {
       capturePlatform,
       capturePlatformLabel: capturePlatform ? formatGpsCapturePlatformLabel(capturePlatform) : null,
       isFarFromCustomer: farFromCustomer,
+      gpsLocationUpdateAccepted,
       farThresholdKm: CUSTOMER_LOCATION_DISTANCE_THRESHOLD_KM,
     };
   });
@@ -530,7 +555,22 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
     };
   });
 
-  const rawEntries = [...collectionEntries, ...activityEntries].filter((entry) => (
+  const historyCustomerCodes = [...new Set([...collectionEntries, ...activityEntries]
+    .map((entry) => normalizeCode(entry.customer_code))
+    .filter(Boolean))];
+  const historyUserIds = [...new Set([...collectionEntries, ...activityEntries]
+    .map((entry) => entry.user_id)
+    .filter(Boolean))];
+  const acceptedGpsHistory = await loadCustomerGpsHistoryForVisits(
+    admin,
+    historyCustomerCodes,
+    historyUserIds,
+    startIso,
+    endIso,
+  );
+  const rawEntries = attachAcceptedGpsUpdateMarkers(
+    markVisitsWithAcceptedGpsHistory([...collectionEntries, ...activityEntries], acceptedGpsHistory),
+  ).filter((entry) => (
     entry.customer_code || WORKDAY_GPS_ENTRY_TYPES.has(entry.transaction_type)
   ));
   const userIds = [...new Set(rawEntries.map((entry) => entry.user_id).filter(Boolean))];

@@ -70,6 +70,7 @@ const TEXT = {
   noCustomerLocation: { en: "No customer location", ar: "لا موقع للعميل" },
   noEntryGps: { en: "No entry GPS", ar: "لا GPS للإدخال" },
   farBadge: { en: "Far", ar: "بعيد" },
+  gpsUpdateAccepted: { en: "GPS update accepted", ar: "تمت الموافقة على تحديث GPS" },
   entries: { en: "entries", ar: "إدخالات" },
   routeTotal: { en: "Route total", ar: "إجمالي المسار" },
   autoClosed: { en: "Auto-closed", ar: "إغلاق تلقائي" },
@@ -930,6 +931,9 @@ export default function DailyVisitReportPage() {
                               ) : null}
                               {entry.isFarFromCustomer ? (
                                 <div className="moduleCode">{t("farBadge")}</div>
+                              ) : null}
+                              {entry.gpsLocationUpdateAccepted ? (
+                                <div className="moduleCode">{t("gpsUpdateAccepted")}</div>
                               ) : null}
                             </td>
                             <td>{formatVisitEntryOutcome(entry, language)}</td>

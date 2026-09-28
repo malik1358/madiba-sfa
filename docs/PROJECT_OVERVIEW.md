@@ -32,6 +32,7 @@ Routes live under `app/management/`. Labels are in `MODULES` inside `app/lib/mod
 - **Payment Collections** and **Collection Report**: outstanding queues and visit capture. `/management/my-collections` still resolves for users who can open Payment Collections, but `myCollections` is not a separate enabled module.
 - **Payment Settlement** and **Outstanding Compare**: FIFO cash application versus the Tally outstanding file.
 - **Business Intelligence**: category growth, salesman month-over-month, period filters.
+- **Salesman Incentive**: monthly incentive from collection speed (35/60-day buckets for office supplies, electronics and other categories, 3-day window for cash deals) plus 0.5% on the sales increase over last month.
 - **Customer Master**, **Salesman Hierarchy**, **Customer Book Shares**, **KPI Targets**, **Schemes**, **Sales Qty Limits**, **Imports**.
 - **Stock Take**: only when `profiles.stock_take_access` is true, or the user is admin.
 - **GPS Map**, **Outstanding Without GPS**, **Daily Visit Report**, **User Activity**, **Working Hours**, **Item Price History**, **Receipts Not in Tally**.

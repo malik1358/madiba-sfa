@@ -309,6 +309,13 @@ export default function PaymentSettlementPage() {
     }
   }, [autoCode, customers, loadSettlement, selectedCustomer]);
 
+  useEffect(() => {
+    if (!ledger || typeof window === "undefined") return;
+    const hash = window.location.hash.replace(/^#/, "");
+    if (!hash) return;
+    document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [ledger]);
+
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {
     return (

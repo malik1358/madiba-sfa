@@ -1233,23 +1233,32 @@ export default function MyDayPage({ mode = "default" } = {}) {
           data: { session },
         } = await supabaseClient.auth.getSession();
         if (!session?.access_token) return;
-        const promise = prefetchCustomerAvgDaysForVisit({
+        const existingPromise = avgDaysPrefetchByCodeRef.current.get(codeKey);
+        const promise = existingPromise || prefetchCustomerAvgDaysForVisit({
           accessToken: session.access_token,
           customerCode: customer.customer_code,
           customerName: customer.customer_name || "",
           scope: accessScope,
         });
-        avgDaysPrefetchByCodeRef.current.set(codeKey, promise);
-        const avgDays = await promise;
-        if (!avgDays) return;
-        setVisitStatusRows((current) => current.map((row) => {
-          if (String(row.customer_code || "").trim().toUpperCase() !== codeKey) return row;
-          return {
-            ...row,
-            avg_days_to_pay: avgDays.avgDaysToPay ?? row.avg_days_to_pay ?? null,
-            avg_days_to_pay_6m: avgDays.avgDaysToPay6m ?? row.avg_days_to_pay_6m ?? null,
-          };
-        }));
+        if (!existingPromise) {
+          avgDaysPrefetchByCodeRef.current.set(codeKey, promise);
+        }
+        try {
+          const avgDays = await promise;
+          if (!avgDays) return;
+          setVisitStatusRows((current) => current.map((row) => {
+            if (String(row.customer_code || "").trim().toUpperCase() !== codeKey) return row;
+            return {
+              ...row,
+              avg_days_to_pay: avgDays.avgDaysToPay ?? row.avg_days_to_pay ?? null,
+              avg_days_to_pay_6m: avgDays.avgDaysToPay6m ?? row.avg_days_to_pay_6m ?? null,
+            };
+          }));
+        } finally {
+          if (avgDaysPrefetchByCodeRef.current.get(codeKey) === promise) {
+            avgDaysPrefetchByCodeRef.current.delete(codeKey);
+          }
+        }
       } catch {
         // Avg days is optional for the visit save itself.
       }

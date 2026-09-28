@@ -40,6 +40,8 @@ const TEXT = {
   noCustomers: { en: "No matching customers.", ar: "لا يوجد عملاء مطابقون." },
   deltaLoading: { en: "…", ar: "…" },
   deltaPending: { en: "—", ar: "—" },
+  differencesOnly: { en: "Show differences only", ar: "عرض الفروق فقط" },
+  noDifferences: { en: "No differences found in checked customers yet.", ar: "لا توجد فروق في العملاء الذين تم فحصهم حتى الآن." },
 };
 
 const CUSTOMER_FILTER_KEYS = ["code", "name", "salesman", "total", "computed", "diff"];
@@ -54,6 +56,12 @@ const CUSTOMER_COLUMNS = [
 ];
 
 const DIFF_LOAD_CONCURRENCY = 4;
+const DIFF_TOLERANCE = 0.02;
+
+function hasCompareDifference(row) {
+  return row.delta_status === "ready"
+    && (Math.abs(Number(row.open_delta || 0)) > DIFF_TOLERANCE || Number(row.gap_count || 0) > 0);
+}
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -108,7 +116,7 @@ async function fetchCustomerCompareTotals(customer, accessToken) {
   const name = encodeURIComponent(customer.customer_name || "");
 
   const [historyResponse, outstandingResponse] = await Promise.all([
-    fetch(`/api/customer-history?customerCode=${code}&customerName=${name}&fullHistory=1&scope=settlement`, { headers }),
+    fetch(`/api/customer-history?customerCode=${code}&customerName=${name}&fullHistory=1&scope=settlement&lite=1`, { headers }),
     fetch(`/api/outstanding?customerCode=${code}&customerName=${name}`, { headers }),
   ]);
 
@@ -151,6 +159,7 @@ export default function OutstandingComparePage() {
   const [ledger, setLedger] = useState(null);
   const [autoCode, setAutoCode] = useState("");
   const [deltaByCode, setDeltaByCode] = useState({});
+  const [differencesOnly, setDifferencesOnly] = useState(true);
   const deltaByCodeRef = useRef({});
   const deltaStartedRef = useRef(new Set());
   const diffRunIdRef = useRef(0);
@@ -175,10 +184,12 @@ export default function OutstandingComparePage() {
           salesman_name: String(row.salesman_name || row.current_salesman_code || "").trim(),
           open_delta: delta?.status === "ready" ? Number(delta.open_delta || 0) : null,
           computed_open: delta?.status === "ready" ? Number(delta.computed_open || 0) : null,
+          gap_count: delta?.status === "ready" ? Number(delta.gap_count || 0) : 0,
           delta_status: delta?.status || "pending",
         };
       })
       .filter((row) => {
+        if (differencesOnly && !hasCompareDifference(row)) return false;
         if (!needle) return true;
         const code = String(row.customer_code || "").toLowerCase();
         const name = String(row.customer_name || "").toLowerCase();
@@ -201,7 +212,7 @@ export default function OutstandingComparePage() {
         return String(a.customer_code || "").localeCompare(String(b.customer_code || ""));
       });
     return rows;
-  }, [customerSearch, customers, deltaByCode]);
+  }, [customerSearch, customers, deltaByCode, differencesOnly]);
 
   const customerFilterValue = useCallback((row, key) => {
     if (key === "code") return String(row.customer_code || "—");
@@ -236,6 +247,11 @@ export default function OutstandingComparePage() {
       diffReady: ready.length,
     };
   }, [visibleCustomers]);
+
+  const checkedCount = useMemo(
+    () => Object.values(deltaByCode).filter((entry) => entry?.status === "ready").length,
+    [deltaByCode],
+  );
 
   const loadCustomers = useCallback(async () => {
     const supabase = getSupabaseClient();
@@ -291,6 +307,7 @@ export default function OutstandingComparePage() {
           open_delta: Number(totals.open_delta || 0),
           computed_open: Number(totals.computed_open || 0),
           tally_open: Number(totals.tally_open || 0),
+          gap_count: Number(totals.discrepancy_count || 0),
         },
       }));
       const gaps = Number(totals.discrepancy_count || 0);
@@ -395,6 +412,7 @@ export default function OutstandingComparePage() {
                 open_delta: Number(totals.open_delta || 0),
                 computed_open: Number(totals.computed_open || 0),
                 tally_open: Number(totals.tally_open || 0),
+                gap_count: Number(totals.discrepancy_count || 0),
               },
             }));
           } catch {
@@ -490,8 +508,8 @@ export default function OutstandingComparePage() {
                 {loadingCustomers
                   ? "Loading customers..."
                   : `${visibleCustomers.length.toLocaleString()} of ${customers.length.toLocaleString()} visible${
-                    customerFooter.diffReady
-                      ? ` · ${customerFooter.diffReady.toLocaleString()} differences loaded`
+                    checkedCount
+                      ? ` · ${checkedCount.toLocaleString()} of ${customers.length.toLocaleString()} checked`
                       : ""
                   }`}
               </span>
@@ -503,6 +521,14 @@ export default function OutstandingComparePage() {
                 onChange={(event) => setCustomerSearch(event.target.value)}
                 placeholder={t("search")}
               />
+              <label className="moduleCollectorCheckbox">
+                <input
+                  type="checkbox"
+                  checked={differencesOnly}
+                  onChange={(event) => setDifferencesOnly(event.target.checked)}
+                />
+                {t("differencesOnly")}
+              </label>
             </div>
             <ExportableTable filename="outstanding-compare-customers" sheetName="Customers" className="moduleTableWrap moduleBiTableWrap">
               <table className="moduleTable moduleBiTable moduleStackedHeaderTable">
@@ -592,7 +618,7 @@ export default function OutstandingComparePage() {
                   })}
                   {!visibleCustomers.length && !loadingCustomers ? (
                     <tr>
-                      <td colSpan={7}>{t("noCustomers")}</td>
+                      <td colSpan={7}>{differencesOnly ? t("noDifferences") : t("noCustomers")}</td>
                     </tr>
                   ) : null}
                 </tbody>

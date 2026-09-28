@@ -1060,6 +1060,7 @@ export async function POST(request) {
     const probabilityScore = Number(formData.get("probabilityScore") || 0);
     const probabilityLabel = String(formData.get("probabilityLabel") || "").trim();
     const visitNumberForDay = Number(formData.get("visitNumberForDay") || 0);
+    const customerGpsUpdateAccepted = String(formData.get("customerGpsUpdateAccepted") || "") === "1";
 
     if (!customerCode) throw new Error("Customer code is required");
     if (!visitOutcome) throw new Error("Please select visit outcome");
@@ -1251,6 +1252,25 @@ export async function POST(request) {
         throw new Error("Collection tables are not initialized in this environment yet.");
       }
       throw new Error(formatRouteError(insertError));
+    }
+
+    if (customerGpsUpdateAccepted && insertData?.id && Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      const acceptedUpdateNote = buildGpsActivityNote(
+        "CUSTOMER_GPS_UPDATE_ACCEPTED",
+        { latitude, longitude, accuracy: Number.isFinite(gpsAccuracyMeters) ? gpsAccuracyMeters : null },
+        {
+          customer_code: customerCode,
+          collection_visit_id: insertData?.id,
+        },
+      );
+      const { error: acceptedUpdateError } = await admin.from("daily_activity_logs").insert({
+        user_id: user.id,
+        entry_type: "GPS_PING",
+        note: acceptedUpdateNote,
+      });
+      if (acceptedUpdateError && !isMissingTableError(acceptedUpdateError)) {
+        console.warn("Unable to record accepted customer GPS update for visit report:", acceptedUpdateError);
+      }
     }
 
     // Update legal transfer if needed

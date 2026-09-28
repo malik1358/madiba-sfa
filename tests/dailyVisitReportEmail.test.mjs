@@ -173,6 +173,29 @@ test("buildUserVisitReportEmail includes the user name and timeline", () => {
   assert.match(message.html, /24\.70000, 46\.70000/);
 });
 
+test("buildUserVisitReportEmail identifies a visit with an accepted GPS update", () => {
+  const message = buildUserVisitReportEmail({
+    date: "2026-09-28",
+    user: {
+      userName: "Parvez",
+      entries: [{
+        visitSequence: 8,
+        savedAt: "2026-09-28T07:24:00.000Z",
+        customerName: "Store A",
+        customerCode: "C1",
+        transactionLabel: "Collection visit",
+        transactionType: "COLLECTION_VISIT",
+        gpsLocationUpdateAccepted: true,
+        isFarFromCustomer: false,
+      }],
+    },
+  });
+
+  assert.match(message.html, /GPS update accepted/);
+  assert.match(message.text, /GPS update accepted/);
+  assert.doesNotMatch(message.text, /Collection visit · Far/);
+});
+
 test("buildUserVisitReportEmail appends working hours after the day route", () => {
   const message = buildUserVisitReportEmail({
     date: "2026-09-07",

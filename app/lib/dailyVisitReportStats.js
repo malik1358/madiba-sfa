@@ -12,6 +12,13 @@ const SUPERSEDED_ORDER_TYPES = new Set(["ORDER_DRAFT", "ORDER_EDITED"]);
 const SUBMIT_PAIR_WINDOW_MS = 2 * 60 * 1000;
 const DUPLICATE_VISIT_TYPES = new Set(["VISIT_REPORT", "COLLECTION_VISIT"]);
 const DUPLICATE_VISIT_WINDOW_MS = 2 * 60 * 1000;
+const GPS_HISTORY_VISIT_TYPES = new Set([
+  "COLLECTION_VISIT",
+  "VISIT_REPORT",
+  "ORDER_DRAFT",
+  "ORDER_EDITED",
+  "ORDER_SUBMITTED",
+]);
 
 export function visitEntryType(entry) {
   return String(entry?.transactionType || entry?.transaction_type || "").trim().toUpperCase();
@@ -122,6 +129,62 @@ export function hideDuplicateVisitEntries(entries = []) {
   });
 
   return kept;
+}
+
+export function attachAcceptedGpsUpdateMarkers(entries = []) {
+  const list = Array.isArray(entries) ? entries : [];
+  const acceptedCollectionVisitIds = new Set(
+    list
+      .filter((entry) => entry?.meta?.gpsLocationUpdateAccepted && entry?.meta?.collectionVisitId)
+      .map((entry) => String(entry.meta.collectionVisitId)),
+  );
+
+  return list
+    .filter((entry) => !(entry?.meta?.gpsLocationUpdateAccepted && entry?.meta?.collectionVisitId))
+    .map((entry) => {
+      const collectionVisitId = String(entry?.id || "").replace(/^collection-/, "");
+      if (!acceptedCollectionVisitIds.has(collectionVisitId)) return entry;
+      return {
+        ...entry,
+        meta: { ...entry.meta, gpsLocationUpdateAccepted: true },
+      };
+    });
+}
+
+export function markVisitsWithAcceptedGpsHistory(entries = [], history = []) {
+  const validUpdates = (Array.isArray(history) ? history : []).filter((update) => (
+    String(update?.source || "").trim().toLowerCase() === "visit"
+    && hasGpsCoordinates(update)
+    && hasGpsCoordinates({ latitude: update.previous_latitude, longitude: update.previous_longitude })
+  ));
+
+  return (Array.isArray(entries) ? entries : []).map((entry) => {
+    if (!entry?.customer_code || !hasGpsCoordinates(entry)) return entry;
+    if (!GPS_HISTORY_VISIT_TYPES.has(visitEntryType(entry))) return entry;
+    const entryCode = normalizeCode(entry.customer_code);
+    const entryUser = String(entry.user_id || entry.userId || "").trim();
+    const entryTime = new Date(entry.saved_at || entry.savedAt || "").getTime();
+    if (!entryCode || !entryUser || !Number.isFinite(entryTime)) return entry;
+
+    const matchingUpdate = validUpdates.some((update) => {
+      if (normalizeCode(update.customer_code) !== entryCode) return false;
+      if (String(update.updated_by || "").trim() !== entryUser) return false;
+      if (Number(update.latitude).toFixed(6) !== Number(entry.latitude).toFixed(6)) return false;
+      if (Number(update.longitude).toFixed(6) !== Number(entry.longitude).toFixed(6)) return false;
+      const updateTime = new Date(update.created_at || "").getTime();
+      return Number.isFinite(updateTime) && Math.abs(updateTime - entryTime) <= 5 * 60 * 1000;
+    });
+
+    if (!matchingUpdate) return entry;
+    return {
+      ...entry,
+      meta: { ...entry.meta, gpsLocationUpdateAccepted: true },
+    };
+  });
+}
+
+export function shouldMarkVisitFarFromCustomer(entry, isFar) {
+  return Boolean(isFar && !entry?.meta?.gpsLocationUpdateAccepted);
 }
 
 export function isOnSiteCustomerVisit(entry) {

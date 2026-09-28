@@ -2042,6 +2042,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       formData.append("probabilityScore", String(row.probability_score || 0));
       formData.append("probabilityLabel", String(row.probability_label || ""));
       formData.append("visitNumberForDay", String(visitNumberForDay));
+      formData.append("customerGpsUpdateAccepted", locationChoice === CUSTOMER_LOCATION_UPDATE_UPDATE ? "1" : "0");
       formData.append("legalNote", form.legalNote || t("defaultLegalNote"));
 
       if (gps) {

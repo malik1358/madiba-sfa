@@ -9,6 +9,57 @@ import {
   mergeProspectsIntoCustomerMap,
   resolveVisitCustomerName,
 } from "../app/lib/dailyVisitReportServer.js";
+import {
+  attachAcceptedGpsUpdateMarkers,
+  markVisitsWithAcceptedGpsHistory,
+  shouldMarkVisitFarFromCustomer,
+} from "../app/lib/dailyVisitReportStats.js";
+
+test("accepted GPS update markers attach to collection visits without becoming timeline rows", () => {
+  const visit = { id: "collection-42", transaction_type: "COLLECTION_VISIT", meta: {} };
+  const marker = {
+    id: "activity-99",
+    transaction_type: "GPS_PING",
+    meta: { gpsLocationUpdateAccepted: true, collectionVisitId: 42 },
+  };
+
+  const entries = attachAcceptedGpsUpdateMarkers([visit, marker]);
+
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].meta.gpsLocationUpdateAccepted, true);
+  assert.equal(shouldMarkVisitFarFromCustomer(entries[0], true), false);
+  assert.equal(shouldMarkVisitFarFromCustomer(visit, true), true);
+});
+
+test("daily visit history recognizes an accepted GPS overwrite for an older visit", () => {
+  const visit = {
+    id: "collection-42",
+    user_id: "salesman-1",
+    customer_code: "STORE-1",
+    transaction_type: "COLLECTION_VISIT",
+    latitude: 24.67488,
+    longitude: 46.72855,
+    saved_at: "2026-09-28T07:24:00.000Z",
+    meta: {},
+  };
+  const history = [{
+    customer_code: "store-1",
+    latitude: 24.67488,
+    longitude: 46.72855,
+    previous_latitude: 24.62,
+    previous_longitude: 46.68,
+    source: "visit",
+    updated_by: "salesman-1",
+    created_at: "2026-09-28T07:23:30.000Z",
+  }];
+
+  const [recognized] = markVisitsWithAcceptedGpsHistory([visit], history);
+
+  assert.equal(recognized.meta.gpsLocationUpdateAccepted, true);
+  assert.equal(shouldMarkVisitFarFromCustomer(recognized, true), false);
+  assert.equal(markVisitsWithAcceptedGpsHistory([visit], [{ ...history[0], previous_latitude: null }])[0]
+    .meta?.gpsLocationUpdateAccepted, undefined);
+});
 
 test("daily visit entry stats skip idle GPS pings and visit reports", () => {
   const entries = [

@@ -55,6 +55,8 @@ function median(values) {
 
 /** Same-day / next-day full CNs reverse immediately; exact item+qty mirrors reverse on any later date. */
 export const IMMEDIATE_REVERSAL_MAX_DAYS = 1;
+/** Tally bill refs may sit a day either side of the sales voucher date. */
+export const OUTSTANDING_REF_MATCH_MAX_DAYS = 1;
 const AMOUNT_TOLERANCE = 0.02;
 
 function invoiceKey(invoiceDate, voucherNumber) {
@@ -1315,6 +1317,53 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
 }
 
 /**
+ * Pairs outstanding rows whose Ref. No. matches no sales voucher to the sales invoice
+ * with the same VAT-inclusive amount on (or next to) the same day. Only unambiguous
+ * one-to-one pairs are taken, so a wrong bill is never attached to an invoice.
+ *
+ * @returns {Map<string, object>} invoiceKey → outstanding row
+ */
+export function pairOutstandingByAmountAndDate(invoices = [], outstandingRows = [], {
+  maxDayGap = OUTSTANDING_REF_MATCH_MAX_DAYS,
+} = {}) {
+  const pairs = new Map();
+  const invoiceList = Array.isArray(invoices) ? invoices : [];
+  const outstandingList = Array.isArray(outstandingRows) ? outstandingRows : [];
+  if (!invoiceList.length || !outstandingList.length) return pairs;
+
+  const outstandingRefs = new Set(outstandingList.map((row) => normalizeRef(row.ref_no)).filter(Boolean));
+  const invoiceRefs = new Set(invoiceList.map((invoice) => normalizeRef(invoice.voucher_number)).filter(Boolean));
+
+  const openInvoices = invoiceList.filter((invoice) => (
+    !outstandingRefs.has(normalizeRef(invoice.voucher_number))
+  ));
+  const openOutstanding = outstandingList.filter((row) => {
+    const ref = normalizeRef(row.ref_no);
+    return ref && !invoiceRefs.has(ref);
+  });
+  if (!openInvoices.length || !openOutstanding.length) return pairs;
+
+  const claimedInvoiceKeys = new Set();
+
+  openOutstanding.forEach((row) => {
+    const candidates = openInvoices.filter((invoice) => {
+      const key = invoiceKey(invoice.invoice_date, invoice.voucher_number);
+      if (claimedInvoiceKeys.has(key)) return false;
+      if (!amountsMatch(invoice.amount, row.pending_amount)) return false;
+      const offset = isoDayOffset(invoice.invoice_date, row.invoice_date);
+      return offset != null && Math.abs(offset) <= maxDayGap;
+    });
+
+    if (candidates.length !== 1) return;
+    const key = invoiceKey(candidates[0].invoice_date, candidates[0].voucher_number);
+    claimedInvoiceKeys.add(key);
+    pairs.set(key, row);
+  });
+
+  return pairs;
+}
+
+/**
  * Detailed customer settlement view: invoices, FIFO payment chunks, and datewise sales/collections.
  * Paid / Open / Status follow cash FIFO (+ nested credit notes for display). Outstanding upload
  * is kept on each row for Tally comparison screens — it does not rewrite Paid/Open.
@@ -1352,6 +1401,11 @@ export function buildPaymentSettlementLedger({
   });
   const hasOutstandingRows = outstanding.invoices.length > 0;
 
+  // Tally's bill reference series does not always equal the sales voucher number
+  // (e.g. bill RNFD/408 for voucher 904). Pair the leftovers one-to-one on same-day
+  // amount instead, so the bill is not listed twice as a separate open invoice.
+  const outstandingFallbackByInvoiceKey = pairOutstandingByAmountAndDate(invoices, outstanding.invoices);
+
   const settlementsByInvoice = new Map();
   allocations.forEach((row) => {
     const key = invoiceKey(row.invoice_date, row.voucher_number);
@@ -1373,9 +1427,12 @@ export function buildPaymentSettlementLedger({
     const fifoPaid = settlements.reduce((total, row) => total + toNumber(row.amount), 0);
     const fifoRemaining = toNumber(invoice.remaining);
     const amountInclVat = toNumber(invoice.amount);
-    const outstandingMatch = outstandingByRef.get(normalizeRef(invoice.voucher_number)) || null;
+    const outstandingMatch = outstandingByRef.get(normalizeRef(invoice.voucher_number))
+      || outstandingFallbackByInvoiceKey.get(key)
+      || null;
     if (outstandingMatch) {
       matchedOutstandingRefs.add(normalizeRef(invoice.voucher_number));
+      matchedOutstandingRefs.add(normalizeRef(outstandingMatch.ref_no));
     }
 
     // Paid / Open always follow FIFO cash allocation — never force to outstanding.

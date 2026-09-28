@@ -817,6 +817,74 @@ test("Tally vs computed outstanding includes credit notes in computed open", () 
   assert.ok(cashGap);
 });
 
+test("Tally bill ref on a different series pairs with the sales voucher (RNFD/408 vs 904)", () => {
+  // Customer 1572: sales voucher 904 (80,110 excl → 92,126.50 incl) is listed in
+  // Bills Receivable under ref RNFD/408, so the ref never matches.
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-09-10", voucher_number: "904", sales_amount: 8100, item_code: "A003283", quantity: 30, category: "Electronics" },
+      { transaction_date: "2026-09-10", voucher_number: "904", sales_amount: 6908, item_code: "A003284", quantity: 22, category: "Electronics" },
+      { transaction_date: "2026-09-10", voucher_number: "904", sales_amount: 12840, item_code: "A003291", quantity: 30, category: "Electronics" },
+      { transaction_date: "2026-09-10", voucher_number: "904", sales_amount: 13662, item_code: "A003942", quantity: 27, category: "Electronics" },
+      { transaction_date: "2026-09-10", voucher_number: "904", sales_amount: 25710, item_code: "A005355", quantity: 30, category: "Electronics" },
+      { transaction_date: "2026-09-10", voucher_number: "904", sales_amount: 12890, item_code: "A005356", quantity: 10, category: "Electronics" },
+    ],
+    receipts: [],
+    outstandingInvoices: [
+      { invoice_date: "2026-09-10", ref_no: "RNFD/408", pending_amount: 92126.5, invoice_day: 17 },
+    ],
+    todayIso: "2026-09-27",
+  });
+
+  assert.equal(ledger.invoices.length, 1, "the bill must not be listed twice");
+  const invoice = ledger.invoices[0];
+  assert.equal(invoice.voucher_number, "904");
+  assert.equal(Number(invoice.amount_excl_vat.toFixed(2)), 80110);
+  assert.equal(Number(invoice.amount_incl_vat.toFixed(2)), 92126.5);
+  assert.equal(Number(invoice.outstanding_pending.toFixed(2)), 92126.5);
+
+  // Tally and computed now agree, so this customer leaves the difference report.
+  assert.equal(Number(ledger.totals.sales_incl_vat.toFixed(2)), 92126.5);
+  assert.equal(Number(ledger.outstandingCompareTotals.open_delta.toFixed(2)), 0);
+  assert.equal(ledger.outstandingCompareTotals.discrepancy_count, 0);
+});
+
+test("a partly paid Tally bill is not force-paired to an unrelated invoice", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-09-10", voucher_number: "904", sales_amount: 1000, item_code: "A1", quantity: 1, category: "Electronics" },
+    ],
+    receipts: [],
+    // Pending differs from the invoice total, so no amount pair exists.
+    outstandingInvoices: [
+      { invoice_date: "2026-09-10", ref_no: "RNFD/999", pending_amount: 400, invoice_day: 17 },
+    ],
+    todayIso: "2026-09-27",
+  });
+
+  assert.equal(ledger.invoices.length, 2);
+  const carried = ledger.invoices.find((row) => row.voucher_number === "RNFD/999");
+  assert.ok(carried, "unmatched Tally bills still show as open");
+  assert.equal(carried.amount_excl_vat, 0);
+});
+
+test("an ambiguous same-day same-amount pair is left unmatched", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-09-10", voucher_number: "901", sales_amount: 1000, item_code: "A1", quantity: 1, category: "Electronics" },
+      { transaction_date: "2026-09-10", voucher_number: "902", sales_amount: 1000, item_code: "A1", quantity: 1, category: "Electronics" },
+    ],
+    receipts: [],
+    outstandingInvoices: [
+      { invoice_date: "2026-09-10", ref_no: "RNFD/500", pending_amount: 1150, invoice_day: 17 },
+    ],
+    todayIso: "2026-09-27",
+  });
+
+  assert.equal(ledger.invoices.length, 3, "two candidates means no guess");
+  assert.ok(ledger.invoices.some((row) => row.voucher_number === "RNFD/500"));
+});
+
 test("exact amount + items/qty CN reverses invoice on any later date", () => {
   const item = { item_code: "A003595", quantity: 24, category: "Body Care" };
   const ledger = buildPaymentSettlementLedger({

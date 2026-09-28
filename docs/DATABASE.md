@@ -160,6 +160,8 @@ Schemes and quantity limits are settings, not tables:
 | `active_sales_batch_id` | Live sales snapshot |
 | `outstanding_customerwise_dataset_v1` | Outstanding upload |
 | `receipt_register_dataset_v1` | Receipt register upload |
+| `outstanding_reconcile_dataset_v1` | Precomputed Tally vs SFA outstanding differences (only differing customers) |
+| `outstanding_reconcile_email_last_sent` | Difference-report email dedupe |
 | `sales_bi_cube_v1` | BI monthly cube JSON |
 | `sales_upload_file_v1` | Last sales file pointer |
 | `order_schemes` | Promotions |

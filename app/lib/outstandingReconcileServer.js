@@ -14,9 +14,13 @@ import { buildPaymentSettlementLedger } from "./paymentBehavior.js";
 import {
   OUTSTANDING_RECONCILE_KEY,
   buildOutstandingReconcileRow,
+  classifyOutstandingBillMismatch,
   emptyOutstandingReconcileDataset,
+  normalizeBillRef,
   normalizeOutstandingReconcileDataset,
+  sortOutstandingBillMismatches,
   sortOutstandingReconcileRows,
+  summarizeOutstandingBillMismatches,
   summarizeOutstandingReconcileRows,
 } from "./outstandingReconcile.js";
 
@@ -145,6 +149,9 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
 
   const rows = [];
   const seenCodes = new Set();
+  // Ref → customers that own it in sales, so a bill billed to the wrong customer is visible.
+  const voucherOwners = new Map();
+  const pendingMismatches = [];
   let scannedCount = 0;
   let failedCount = 0;
 
@@ -152,6 +159,13 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
     const outstandingCustomer = customersByCode.get(code) || null;
     const outstandingInvoices = invoicesByCode.get(code) || [];
     const receipts = receiptsByCode.get(code) || [];
+
+    transactions.forEach((entry) => {
+      const ref = normalizeBillRef(entry.voucher_number);
+      if (!ref) return;
+      if (!voucherOwners.has(ref)) voucherOwners.set(ref, new Set());
+      voucherOwners.get(ref).add(code);
+    });
 
     const ledger = buildPaymentSettlementLedger({
       transactions,
@@ -164,15 +178,42 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
       ? toNumber(outstandingCustomer.total_outstanding)
       : toNumber(totals.tally_open);
 
+    const customerName = outstandingCustomer?.customer_name
+      || transactions.find((entry) => entry.customer_name)?.customer_name
+      || "";
+    const salesmanName = outstandingCustomer?.salesman
+      || outstandingInvoices.find((invoice) => invoice.salesman)?.salesman
+      || "";
+
+    const reversedRefs = new Set(
+      (ledger.reversedInvoices || []).map((invoice) => normalizeBillRef(invoice.voucher_number)),
+    );
+    const realInvoices = (ledger.invoices || []).filter((invoice) => invoice.open_source !== "outstanding");
+
+    (ledger.invoices || [])
+      .filter((invoice) => invoice.open_source === "outstanding")
+      .forEach((invoice) => {
+        const billRef = normalizeBillRef(invoice.voucher_number);
+        pendingMismatches.push({
+          customer_code: code,
+          customer_name: customerName,
+          salesman_name: salesmanName,
+          bill_ref: String(invoice.voucher_number || ""),
+          bill_date: String(invoice.invoice_date || ""),
+          pending_amount: toNumber(invoice.amount_incl_vat),
+          invoice_days: Number(invoice.open_days || 0),
+          reversed_in_sfa: reversedRefs.has(billRef),
+          same_amount_vouchers: realInvoices
+            .filter((row) => Math.abs(toNumber(row.amount_incl_vat) - toNumber(invoice.amount_incl_vat)) <= 0.02)
+            .map((row) => `${row.voucher_number} ${row.invoice_date}`),
+        });
+      });
+
     const row = buildOutstandingReconcileRow({
       customer: {
         customer_code: code,
-        customer_name: outstandingCustomer?.customer_name
-          || transactions.find((entry) => entry.customer_name)?.customer_name
-          || "",
-        salesman_name: outstandingCustomer?.salesman
-          || outstandingInvoices.find((invoice) => invoice.salesman)?.salesman
-          || "",
+        customer_name: customerName,
+        salesman_name: salesmanName,
       },
       totals,
       tallyOutstanding,
@@ -206,6 +247,30 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
 
   const sortedRows = sortOutstandingReconcileRows(rows);
 
+  // Owners are only complete after the whole scan, so classify at the end.
+  const mismatchRows = sortOutstandingBillMismatches(pendingMismatches.map((entry) => {
+    const refOwners = [...(voucherOwners.get(normalizeBillRef(entry.bill_ref)) || [])];
+    const { mismatch_type: mismatchType, note } = classifyOutstandingBillMismatch({
+      customerCode: entry.customer_code,
+      billRef: entry.bill_ref,
+      refOwners,
+      reversedInSfa: entry.reversed_in_sfa,
+    });
+    return {
+      customer_code: entry.customer_code,
+      customer_name: entry.customer_name,
+      salesman_name: entry.salesman_name,
+      bill_ref: entry.bill_ref,
+      bill_date: entry.bill_date,
+      pending_amount: entry.pending_amount,
+      invoice_days: entry.invoice_days,
+      mismatch_type: mismatchType,
+      note,
+      ref_owners: refOwners,
+      same_amount_vouchers: entry.same_amount_vouchers,
+    };
+  }));
+
   return {
     builtAt: new Date().toISOString(),
     trigger: String(trigger || "manual"),
@@ -215,6 +280,8 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
     receiptUploadedAt: String(receiptDataset?.uploadedAt || ""),
     rows: sortedRows,
     summary: summarizeOutstandingReconcileRows(sortedRows),
+    mismatchRows,
+    mismatchSummary: summarizeOutstandingBillMismatches(mismatchRows),
   };
 }
 

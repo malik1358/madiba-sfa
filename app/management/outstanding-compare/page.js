@@ -11,6 +11,13 @@ import ExcelColumnFilter from "../../components/ExcelColumnFilter";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
+import {
+  BILL_MISMATCH_LABELS,
+  BILL_MISMATCH_MISSING,
+  BILL_MISMATCH_OTHER_CUSTOMER,
+  BILL_MISMATCH_REVERSED,
+  summarizeOutstandingBillMismatches,
+} from "../../lib/outstandingReconcile.js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { useModuleAccess } from "../../hooks/useModuleAccess";
@@ -42,7 +49,33 @@ const TEXT = {
   deltaPending: { en: "—", ar: "—" },
   differencesOnly: { en: "Show differences only", ar: "عرض الفروق فقط" },
   noDifferences: { en: "No differences found in checked customers yet.", ar: "لا توجد فروق في العملاء الذين تم فحصهم حتى الآن." },
+  mismatchTitle: { en: "Tally bills not matched to a sales invoice", ar: "فواتير تالي غير المطابقة لفاتورة مبيعات" },
+  mismatchHint: {
+    en: "Each bill below opened its own row because its Ref. No. matched no sales invoice for that customer. Grouped by cause so the source of the problem is clear.",
+    ar: "كل فاتورة أدناه ظهرت كسطر مستقل لأن رقم المرجع لم يطابق أي فاتورة مبيعات لهذا العميل. مجمعة حسب السبب.",
+  },
+  billRef: { en: "Bill ref", ar: "مرجع الفاتورة" },
+  billDate: { en: "Bill date", ar: "تاريخ الفاتورة" },
+  pending: { en: "Pending", ar: "المستحق" },
+  invoiceDays: { en: "Invoice days", ar: "عمر الفاتورة" },
+  cause: { en: "Cause", ar: "السبب" },
+  detail: { en: "Detail", ar: "التفاصيل" },
+  allCauses: { en: "All causes", ar: "كل الأسباب" },
+  noMismatches: { en: "Every Tally bill matched a sales invoice.", ar: "كل فواتير تالي طابقت فواتير المبيعات." },
+  sameAmountAs: { en: "Same amount as", ar: "نفس مبلغ" },
 };
+
+const MISMATCH_TYPES = [
+  BILL_MISMATCH_OTHER_CUSTOMER,
+  BILL_MISMATCH_REVERSED,
+  BILL_MISMATCH_MISSING,
+];
+
+function mismatchTypeClass(type) {
+  if (type === BILL_MISMATCH_OTHER_CUSTOMER) return "paymentSettleStatus paymentSettleStatus--open";
+  if (type === BILL_MISMATCH_REVERSED) return "paymentSettleStatus paymentSettleStatus--partial";
+  return "paymentSettleStatus";
+}
 
 const CUSTOMER_FILTER_KEYS = ["code", "name", "salesman", "total", "computed", "diff"];
 
@@ -161,6 +194,8 @@ export default function OutstandingComparePage() {
   const [differencesOnly, setDifferencesOnly] = useState(true);
   const [savedRowsByCode, setSavedRowsByCode] = useState(null);
   const [savedMeta, setSavedMeta] = useState(null);
+  const [mismatchRows, setMismatchRows] = useState([]);
+  const [mismatchType, setMismatchType] = useState("");
   const deltaStartedRef = useRef(new Set());
 
   const canAccess = access.canAccess("outstandingCompare")
@@ -247,6 +282,18 @@ export default function OutstandingComparePage() {
     () => Object.values(deltaByCode).filter((entry) => entry?.status === "ready").length,
     [deltaByCode],
   );
+
+  const mismatchSummary = useMemo(
+    () => summarizeOutstandingBillMismatches(mismatchRows),
+    [mismatchRows],
+  );
+
+  const visibleMismatchRows = useMemo(
+    () => (mismatchType ? mismatchRows.filter((row) => row.mismatch_type === mismatchType) : mismatchRows),
+    [mismatchRows, mismatchType],
+  );
+
+  const mismatchLabel = useMemo(() => translate(language, BILL_MISMATCH_LABELS), [language]);
 
   const loadCustomers = useCallback(async () => {
     const supabase = getSupabaseClient();
@@ -347,6 +394,7 @@ export default function OutstandingComparePage() {
       }
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
       setSavedRowsByCode(new Map(rows.map((row) => [String(row.customer_code || "").toUpperCase(), row])));
+      setMismatchRows(Array.isArray(payload.mismatchRows) ? payload.mismatchRows : []);
       setSavedMeta({
         builtAt: payload.builtAt || "",
         differenceCount: rows.length,
@@ -355,6 +403,7 @@ export default function OutstandingComparePage() {
     } catch (err) {
       setError(err.message || "Unable to load saved reconciliation.");
       setSavedRowsByCode(new Map());
+      setMismatchRows([]);
       setSavedMeta(null);
     }
   }, []);
@@ -601,6 +650,108 @@ export default function OutstandingComparePage() {
                       </strong>
                     </td>
                     <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </ExportableTable>
+          </section>
+
+          <section className="moduleSection" id="bill-mismatch">
+            <div className="moduleSectionHeader">
+              <h2>{t("mismatchTitle")}</h2>
+              <span>
+                {`${formatCount(mismatchSummary.count)} bills · ${formatMoney(mismatchSummary.pending)}`}
+              </span>
+            </div>
+            <p className="moduleHint">{t("mismatchHint")}</p>
+            <div className="auditSummaryGrid">
+              {MISMATCH_TYPES.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  className="auditSummaryCard"
+                  onClick={() => setMismatchType((current) => (current === type ? "" : type))}
+                  style={{ textAlign: "start", cursor: "pointer", borderWidth: mismatchType === type ? 2 : 1 }}
+                >
+                  <span>{mismatchLabel(type)}</span>
+                  <strong>{formatCount(mismatchSummary.byType?.[type]?.count || 0)}</strong>
+                  <em className="auditSummaryCardMeta">
+                    {formatMoney(mismatchSummary.byType?.[type]?.pending || 0)}
+                  </em>
+                </button>
+              ))}
+            </div>
+            <div className="moduleFilterRow">
+              <button
+                type="button"
+                className="moduleInlineButton moduleActionButton"
+                onClick={() => setMismatchType("")}
+                disabled={!mismatchType}
+              >
+                {t("allCauses")}
+              </button>
+            </div>
+            <ExportableTable filename="tally-bill-mismatches" sheetName="BillMismatches" className="moduleTableWrap moduleBiTableWrap">
+              <table className="moduleTable moduleBiTable">
+                <thead>
+                  <tr>
+                    <th>{t("code")}</th>
+                    <th>{t("customer")}</th>
+                    <th>{t("salesman")}</th>
+                    <th>{t("billRef")}</th>
+                    <th>{t("billDate")}</th>
+                    <th className="moduleBiTotalCol">{t("pending")}</th>
+                    <th>{t("invoiceDays")}</th>
+                    <th>{t("cause")}</th>
+                    <th>{t("detail")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleMismatchRows.map((row) => (
+                    <tr key={`mismatch-${row.customer_code}-${row.bill_ref}`}>
+                      <td>{row.customer_code || "—"}</td>
+                      <td>
+                        <Link href={settlementHref(row.customer_code)} className="moduleInlineButton">
+                          {row.customer_name || row.customer_code || "—"}
+                        </Link>
+                      </td>
+                      <td>{row.salesman_name || "—"}</td>
+                      <td>{row.bill_ref || "—"}</td>
+                      <td>{row.bill_date || "—"}</td>
+                      <td className="moduleBiTotalCol moduleBiMonthCell--down">
+                        <strong>{formatMoney(row.pending_amount)}</strong>
+                      </td>
+                      <td>{formatCount(row.invoice_days)}</td>
+                      <td>
+                        <span className={mismatchTypeClass(row.mismatch_type)}>
+                          {mismatchLabel(row.mismatch_type)}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="auditSummaryCardMeta">{row.note}</div>
+                        {row.same_amount_vouchers?.length ? (
+                          <div className="auditSummaryCardMeta">
+                            {`${t("sameAmountAs")}: ${row.same_amount_vouchers.join(", ")}`}
+                          </div>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                  {!visibleMismatchRows.length ? (
+                    <tr>
+                      <td colSpan={9}>{t("noMismatches")}</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+                <tfoot>
+                  <tr className="moduleBiTotalRow">
+                    <td colSpan={5}><strong>{t("total")}</strong></td>
+                    <td className="moduleBiTotalCol">
+                      <strong>
+                        {formatMoney(visibleMismatchRows.reduce((sum, row) => sum + Number(row.pending_amount || 0), 0))}
+                      </strong>
+                    </td>
+                    <td colSpan={3} />
                   </tr>
                 </tfoot>
               </table>

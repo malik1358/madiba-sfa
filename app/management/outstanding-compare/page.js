@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import ExportableTable from "../../components/ExportableTable";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
-import BiExcelHead, { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
+import { useBiExcelFilters } from "../business-dashboard/BiExcelHead";
+import ExcelColumnFilter from "../../components/ExcelColumnFilter";
 import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
@@ -22,7 +23,7 @@ const TEXT = {
   },
   back: { en: "← Management", ar: "← الإدارة" },
   settlement: { en: "Full Payment Settlement", ar: "تسوية المدفوعات كاملة" },
-  search: { en: "Search customer code or name", ar: "بحث بكود أو اسم العميل" },
+  search: { en: "Search customer, code, or salesman", ar: "بحث بالعميل أو الكود أو المندوب" },
   loading: { en: "Loading comparison...", ar: "جاري تحميل المقارنة..." },
   selectCustomer: {
     en: "Select a customer to compare Tally outstanding with computed open (cash + credit notes).",
@@ -30,17 +31,37 @@ const TEXT = {
   },
   code: { en: "Code", ar: "الكود" },
   customer: { en: "Customer", ar: "العميل" },
-  days0To30: { en: "0–30", ar: "0–30" },
-  days30To60: { en: "30–60", ar: "30–60" },
-  days61To90: { en: "61–90", ar: "61–90" },
-  daysAbove90: { en: ">90", ar: ">90" },
-  totalOutstanding: { en: "Total outstanding", ar: "إجمالي المستحق" },
+  salesman: { en: "Salesman", ar: "المندوب" },
+  totalOutstanding: { en: "Tally outstanding", ar: "مستحق تالي" },
+  computedOutstanding: { en: "Computed outstanding", ar: "المستحق المحسوب" },
+  difference: { en: "Difference", ar: "الفرق" },
   compare: { en: "Compare", ar: "قارن" },
   total: { en: "Total", ar: "الإجمالي" },
   noCustomers: { en: "No matching customers.", ar: "لا يوجد عملاء مطابقون." },
+  deltaLoading: { en: "…", ar: "…" },
+  deltaPending: { en: "—", ar: "—" },
+  differencesOnly: { en: "Show differences only", ar: "عرض الفروق فقط" },
+  noDifferences: { en: "No differences found in checked customers yet.", ar: "لا توجد فروق في العملاء الذين تم فحصهم حتى الآن." },
 };
 
-const CUSTOMER_FILTER_KEYS = ["code", "name", "d0", "d30", "d61", "d90", "total"];
+const CUSTOMER_FILTER_KEYS = ["code", "name", "salesman", "total", "computed", "diff"];
+
+const CUSTOMER_COLUMNS = [
+  { key: "code", labelKey: "code" },
+  { key: "name", labelKey: "customer" },
+  { key: "salesman", labelKey: "salesman" },
+  { key: "total", labelKey: "totalOutstanding" },
+  { key: "computed", labelKey: "computedOutstanding", className: "moduleBiTotalCol" },
+  { key: "diff", labelKey: "difference" },
+];
+
+const DIFF_LOAD_CONCURRENCY = 4;
+const DIFF_TOLERANCE = 0.02;
+
+function hasCompareDifference(row) {
+  return row.delta_status === "ready"
+    && (Math.abs(Number(row.open_delta || 0)) > DIFF_TOLERANCE || Number(row.gap_count || 0) > 0);
+}
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -89,9 +110,41 @@ function settlementHref(customerCode) {
   return `/management/payment-settlement?customer_code=${encodeURIComponent(customerCode || "")}#invoices-settlement`;
 }
 
+async function fetchCustomerCompareTotals(customer, accessToken) {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const code = encodeURIComponent(customer.customer_code || "");
+  const name = encodeURIComponent(customer.customer_name || "");
+
+  const [historyResponse, outstandingResponse] = await Promise.all([
+    fetch(`/api/customer-history?customerCode=${code}&customerName=${name}&fullHistory=1&scope=settlement&lite=1`, { headers }),
+    fetch(`/api/outstanding?customerCode=${code}&customerName=${name}`, { headers }),
+  ]);
+
+  const historyPayload = await historyResponse.json().catch(() => ({}));
+  const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
+
+  if (!historyResponse.ok || !historyPayload.success) {
+    throw new Error(historyPayload.error || "Unable to load sales/receipt history.");
+  }
+
+  const ledger = buildPaymentSettlementLedger({
+    transactions: Array.isArray(historyPayload.transactions) ? historyPayload.transactions : [],
+    receipts: Array.isArray(historyPayload.receipts) ? historyPayload.receipts : [],
+    outstandingCustomer: outstandingPayload?.customer || null,
+    outstandingInvoices: Array.isArray(outstandingPayload?.customerInvoices)
+      ? outstandingPayload.customerInvoices
+      : [],
+  });
+
+  return {
+    ledger,
+    totals: ledger.outstandingCompareTotals || {},
+  };
+}
+
 export default function OutstandingComparePage() {
   const { language, setLanguage, dir } = useAppLanguage();
-  const t = (key) => translate(TEXT, key, language);
+  const t = translate(language, TEXT);
   const { access, loading: loadingAccess } = useModuleAccess();
 
   const [error, setError] = useState("");
@@ -105,6 +158,15 @@ export default function OutstandingComparePage() {
   const [loadingCompare, setLoadingCompare] = useState(false);
   const [ledger, setLedger] = useState(null);
   const [autoCode, setAutoCode] = useState("");
+  const [deltaByCode, setDeltaByCode] = useState({});
+  const [differencesOnly, setDifferencesOnly] = useState(true);
+  const deltaByCodeRef = useRef({});
+  const deltaStartedRef = useRef(new Set());
+  const diffRunIdRef = useRef(0);
+
+  useEffect(() => {
+    deltaByCodeRef.current = deltaByCode;
+  }, [deltaByCode]);
 
   const canAccess = access.canAccess("outstandingCompare")
     || access.canAccess("paymentSettlement")
@@ -113,31 +175,59 @@ export default function OutstandingComparePage() {
   const customerRows = useMemo(() => {
     const needle = String(customerSearch || "").trim().toLowerCase();
     const rows = customers
-      .map((row) => ({
-        ...row,
-        outstanding_total: customerOutstandingTotal(row),
-      }))
+      .map((row) => {
+        const code = String(row.customer_code || "");
+        const delta = deltaByCode[code];
+        return {
+          ...row,
+          outstanding_total: customerOutstandingTotal(row),
+          salesman_name: String(row.salesman_name || row.current_salesman_code || "").trim(),
+          open_delta: delta?.status === "ready" ? Number(delta.open_delta || 0) : null,
+          computed_open: delta?.status === "ready" ? Number(delta.computed_open || 0) : null,
+          gap_count: delta?.status === "ready" ? Number(delta.gap_count || 0) : 0,
+          delta_status: delta?.status || "pending",
+        };
+      })
       .filter((row) => {
+        if (differencesOnly && !hasCompareDifference(row)) return false;
         if (!needle) return true;
         const code = String(row.customer_code || "").toLowerCase();
         const name = String(row.customer_name || "").toLowerCase();
-        return code.includes(needle) || name.includes(needle);
+        const salesman = String(row.salesman_name || "").toLowerCase();
+        return code.includes(needle) || name.includes(needle) || salesman.includes(needle);
       })
       .sort((a, b) => {
+        const aDelta = a.open_delta;
+        const bDelta = b.open_delta;
+        if (aDelta != null && bDelta != null) {
+          const byGap = Math.abs(bDelta) - Math.abs(aDelta);
+          if (Math.abs(byGap) > 0.009) return byGap;
+        } else if (aDelta != null && Math.abs(aDelta) > 0.02) {
+          return -1;
+        } else if (bDelta != null && Math.abs(bDelta) > 0.02) {
+          return 1;
+        }
         const byOutstanding = Number(b.outstanding_total || 0) - Number(a.outstanding_total || 0);
         if (Math.abs(byOutstanding) > 0.009) return byOutstanding;
         return String(a.customer_code || "").localeCompare(String(b.customer_code || ""));
       });
     return rows;
-  }, [customerSearch, customers]);
+  }, [customerSearch, customers, deltaByCode, differencesOnly]);
 
   const customerFilterValue = useCallback((row, key) => {
     if (key === "code") return String(row.customer_code || "—");
     if (key === "name") return String(row.customer_name || "—");
-    if (key === "d0") return formatMoney(row.outstanding_0_30);
-    if (key === "d30") return formatMoney(row.outstanding_30_60);
-    if (key === "d61") return formatMoney(row.outstanding_61_90);
-    if (key === "d90") return formatMoney(row.outstanding_above_90);
+    if (key === "salesman") return String(row.salesman_name || "—");
+    if (key === "computed") {
+      if (row.delta_status === "ready") return formatMoney(row.computed_open);
+      if (row.delta_status === "loading") return "…";
+      return "—";
+    }
+    if (key === "diff") {
+      if (row.delta_status === "ready") return formatDelta(row.open_delta);
+      if (row.delta_status === "loading") return "…";
+      return "—";
+    }
     return formatMoney(row.outstanding_total);
   }, []);
 
@@ -148,13 +238,20 @@ export default function OutstandingComparePage() {
     setFilter: setCustomerFilter,
   } = useBiExcelFilters(customerRows, CUSTOMER_FILTER_KEYS, customerFilterValue);
 
-  const customerFooter = useMemo(() => ({
-    d0: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_0_30 || 0), 0),
-    d30: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_30_60 || 0), 0),
-    d61: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_61_90 || 0), 0),
-    d90: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_above_90 || 0), 0),
-    total: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_total || 0), 0),
-  }), [visibleCustomers]);
+  const customerFooter = useMemo(() => {
+    const ready = visibleCustomers.filter((row) => row.delta_status === "ready");
+    return {
+      total: visibleCustomers.reduce((sum, row) => sum + Number(row.outstanding_total || 0), 0),
+      computed: ready.reduce((sum, row) => sum + Number(row.computed_open || 0), 0),
+      diff: ready.reduce((sum, row) => sum + Number(row.open_delta || 0), 0),
+      diffReady: ready.length,
+    };
+  }, [visibleCustomers]);
+
+  const checkedCount = useMemo(
+    () => Object.values(deltaByCode).filter((entry) => entry?.status === "ready").length,
+    [deltaByCode],
+  );
 
   const loadCustomers = useCallback(async () => {
     const supabase = getSupabaseClient();
@@ -163,7 +260,7 @@ export default function OutstandingComparePage() {
     setError("");
     try {
       const session = await resolveAuthSession(supabase);
-      const response = await fetch("/api/customers/visible?includeOutstanding=1", {
+      const response = await fetch("/api/customers/visible?includeOutstanding=1&includeInactive=1", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const payload = await response.json().catch(() => ({}));
@@ -171,6 +268,8 @@ export default function OutstandingComparePage() {
         throw new Error(payload.error || "Unable to load customers.");
       }
       setCustomers(Array.isArray(payload.customers) ? payload.customers : []);
+      setDeltaByCode({});
+      deltaStartedRef.current = new Set();
     } catch (err) {
       setError(err.message || "Unable to load customers.");
       setCustomers([]);
@@ -184,41 +283,34 @@ export default function OutstandingComparePage() {
     const supabase = getSupabaseClient();
     if (!supabase) return;
 
+    const code = String(customer.customer_code || "");
     setLoadingCompare(true);
     setError("");
     setMessage("");
     setLedger(null);
+    deltaStartedRef.current.add(code);
+    setDeltaByCode((current) => ({
+      ...current,
+      [code]: { ...(current[code] || {}), status: "loading" },
+    }));
 
     try {
       const session = await resolveAuthSession(supabase);
-      const headers = { Authorization: `Bearer ${session.access_token}` };
-      const code = encodeURIComponent(customer.customer_code || "");
-      const name = encodeURIComponent(customer.customer_name || "");
-
-      const [historyResponse, outstandingResponse] = await Promise.all([
-        fetch(`/api/customer-history?customerCode=${code}&customerName=${name}&fullHistory=1&scope=settlement`, { headers }),
-        fetch(`/api/outstanding?customerCode=${code}&customerName=${name}`, { headers }),
-      ]);
-
-      const historyPayload = await historyResponse.json().catch(() => ({}));
-      const outstandingPayload = await outstandingResponse.json().catch(() => ({}));
-
-      if (!historyResponse.ok || !historyPayload.success) {
-        throw new Error(historyPayload.error || "Unable to load sales/receipt history.");
-      }
-
-      const nextLedger = buildPaymentSettlementLedger({
-        transactions: Array.isArray(historyPayload.transactions) ? historyPayload.transactions : [],
-        receipts: Array.isArray(historyPayload.receipts) ? historyPayload.receipts : [],
-        outstandingCustomer: outstandingPayload?.customer || null,
-        outstandingInvoices: Array.isArray(outstandingPayload?.customerInvoices)
-          ? outstandingPayload.customerInvoices
-          : [],
-      });
+      const { ledger: nextLedger, totals } = await fetchCustomerCompareTotals(customer, session.access_token);
 
       setSelectedCustomer(customer);
       setLedger(nextLedger);
-      const gaps = Number(nextLedger.outstandingCompareTotals?.discrepancy_count || 0);
+      setDeltaByCode((current) => ({
+        ...current,
+        [code]: {
+          status: "ready",
+          open_delta: Number(totals.open_delta || 0),
+          computed_open: Number(totals.computed_open || 0),
+          tally_open: Number(totals.tally_open || 0),
+          gap_count: Number(totals.discrepancy_count || 0),
+        },
+      }));
+      const gaps = Number(totals.discrepancy_count || 0);
       setMessage(
         gaps
           ? `${gaps} outstanding gap(s) for ${customer.customer_code}.`
@@ -227,6 +319,10 @@ export default function OutstandingComparePage() {
     } catch (err) {
       setError(err.message || "Unable to load comparison.");
       setLedger(null);
+      setDeltaByCode((current) => ({
+        ...current,
+        [code]: { status: "error", open_delta: null },
+      }));
     } finally {
       setLoadingCompare(false);
     }
@@ -252,6 +348,99 @@ export default function OutstandingComparePage() {
       void loadCompare(match);
     }
   }, [autoCode, customers, loadCompare, selectedCustomer]);
+
+  useEffect(() => {
+    if (!customers.length || loadingCustomers) return undefined;
+    const runId = ++diffRunIdRef.current;
+    let cancelled = false;
+    const claimed = new Set();
+
+    const queue = [...customers]
+      .map((row) => ({
+        code: String(row.customer_code || "").trim(),
+        outstanding: customerOutstandingTotal(row),
+        row,
+      }))
+      .filter((item) => item.code)
+      .sort((a, b) => b.outstanding - a.outstanding);
+
+    setDeltaByCode((current) => {
+      const next = { ...current };
+      queue.forEach(({ code }) => {
+        if (next[code]?.status !== "ready") next[code] = { status: "pending" };
+      });
+      return next;
+    });
+
+    async function runQueue() {
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+      let session;
+      try {
+        session = await resolveAuthSession(supabase);
+      } catch {
+        return;
+      }
+      let cursor = 0;
+
+      async function worker() {
+        while (!cancelled && runId === diffRunIdRef.current) {
+          const index = cursor;
+          cursor += 1;
+          if (index >= queue.length) return;
+          const { code, row: customer } = queue[index];
+          if (claimed.has(code) || deltaStartedRef.current.has(code)) continue;
+          if (deltaByCodeRef.current[code]?.status === "ready") {
+            deltaStartedRef.current.add(code);
+            continue;
+          }
+          claimed.add(code);
+          deltaStartedRef.current.add(code);
+
+          setDeltaByCode((current) => {
+            if (current[code]?.status === "ready") return current;
+            return { ...current, [code]: { ...(current[code] || {}), status: "loading" } };
+          });
+
+          try {
+            const { totals } = await fetchCustomerCompareTotals(customer, session.access_token);
+            if (cancelled || runId !== diffRunIdRef.current) return;
+            setDeltaByCode((current) => ({
+              ...current,
+              [code]: {
+                status: "ready",
+                open_delta: Number(totals.open_delta || 0),
+                computed_open: Number(totals.computed_open || 0),
+                tally_open: Number(totals.tally_open || 0),
+                gap_count: Number(totals.discrepancy_count || 0),
+              },
+            }));
+          } catch {
+            if (cancelled || runId !== diffRunIdRef.current) return;
+            deltaStartedRef.current.delete(code);
+            setDeltaByCode((current) => ({
+              ...current,
+              [code]: { status: "error", open_delta: null },
+            }));
+          }
+        }
+      }
+
+      await Promise.all(
+        Array.from({ length: Math.min(DIFF_LOAD_CONCURRENCY, queue.length) }, () => worker()),
+      );
+    }
+
+    void runQueue();
+    return () => {
+      cancelled = true;
+      claimed.forEach((code) => {
+        if (deltaByCodeRef.current[code]?.status !== "ready") {
+          deltaStartedRef.current.delete(code);
+        }
+      });
+    };
+  }, [customers, loadingCustomers]);
 
   const compareRows = ledger?.outstandingCompareTotals?.has_outstanding_rows
     ? (ledger.outstandingCompareRows || [])
@@ -318,7 +507,11 @@ export default function OutstandingComparePage() {
               <span>
                 {loadingCustomers
                   ? "Loading customers..."
-                  : `${visibleCustomers.length.toLocaleString()} of ${customers.length.toLocaleString()} visible`}
+                  : `${visibleCustomers.length.toLocaleString()} of ${customers.length.toLocaleString()} visible${
+                    checkedCount
+                      ? ` · ${checkedCount.toLocaleString()} of ${customers.length.toLocaleString()} checked`
+                      : ""
+                  }`}
               </span>
             </div>
             <div className="moduleFilterRow">
@@ -328,62 +521,46 @@ export default function OutstandingComparePage() {
                 onChange={(event) => setCustomerSearch(event.target.value)}
                 placeholder={t("search")}
               />
+              <label className="moduleCollectorCheckbox">
+                <input
+                  type="checkbox"
+                  checked={differencesOnly}
+                  onChange={(event) => setDifferencesOnly(event.target.checked)}
+                />
+                {t("differencesOnly")}
+              </label>
             </div>
             <ExportableTable filename="outstanding-compare-customers" sheetName="Customers" className="moduleTableWrap moduleBiTableWrap">
-              <table className="moduleTable moduleBiTable">
+              <table className="moduleTable moduleBiTable moduleStackedHeaderTable">
                 <thead>
                   <tr>
-                    <BiExcelHead
-                      label={t("code")}
-                      filterKey="code"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("customer")}
-                      filterKey="name"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("days0To30")}
-                      filterKey="d0"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("days30To60")}
-                      filterKey="d30"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("days61To90")}
-                      filterKey="d61"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("daysAbove90")}
-                      filterKey="d90"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                    />
-                    <BiExcelHead
-                      label={t("totalOutstanding")}
-                      filterKey="total"
-                      options={customerFilterOptions}
-                      filters={customerFilters}
-                      onChange={setCustomerFilter}
-                      className="moduleBiTotalCol"
-                    />
-                    <th>{t("compare")}</th>
+                    {CUSTOMER_COLUMNS.map((column) => (
+                      <th
+                        key={`label-${column.key}`}
+                        className={column.className || undefined}
+                        data-column-filter-label={t(column.labelKey)}
+                      >
+                        {t(column.labelKey)}
+                      </th>
+                    ))}
+                    <th data-column-filter-label={t("compare")}>{t("compare")}</th>
+                  </tr>
+                  <tr className="moduleTableColumnFilterRow">
+                    {CUSTOMER_COLUMNS.map((column) => (
+                      <th
+                        key={`filter-${column.key}`}
+                        className={column.className || undefined}
+                        data-column-filter-label={t(column.labelKey)}
+                      >
+                        <ExcelColumnFilter
+                          label={t(column.labelKey)}
+                          options={customerFilterOptions[column.key] || []}
+                          selected={customerFilters[column.key]}
+                          onChange={(selected) => setCustomerFilter(column.key, selected)}
+                        />
+                      </th>
+                    ))}
+                    <th data-column-filter-label={t("compare")} />
                   </tr>
                 </thead>
                 <tbody>
@@ -402,20 +579,29 @@ export default function OutstandingComparePage() {
                             {customer.customer_name || "—"}
                           </Link>
                         </td>
-                        <td className={outstandingCellClass(customer.outstanding_0_30)}>
-                          {formatMoney(customer.outstanding_0_30)}
+                        <td>{customer.salesman_name || "—"}</td>
+                        <td className={outstandingCellClass(customer.outstanding_total)}>
+                          {formatMoney(customer.outstanding_total)}
                         </td>
-                        <td className={outstandingCellClass(customer.outstanding_30_60)}>
-                          {formatMoney(customer.outstanding_30_60)}
+                        <td className={`moduleBiTotalCol ${
+                          customer.delta_status === "ready"
+                            ? outstandingCellClass(customer.computed_open)
+                            : ""
+                        }`.trim()}>
+                          <strong>
+                            {customer.delta_status === "ready"
+                              ? formatMoney(customer.computed_open)
+                              : customer.delta_status === "loading"
+                                ? t("deltaLoading")
+                                : t("deltaPending")}
+                          </strong>
                         </td>
-                        <td className={outstandingCellClass(customer.outstanding_61_90)}>
-                          {formatMoney(customer.outstanding_61_90)}
-                        </td>
-                        <td className={outstandingCellClass(customer.outstanding_above_90)}>
-                          {formatMoney(customer.outstanding_above_90)}
-                        </td>
-                        <td className={`moduleBiTotalCol ${outstandingCellClass(customer.outstanding_total)}`.trim()}>
-                          <strong>{formatMoney(customer.outstanding_total)}</strong>
+                        <td className={customer.delta_status === "ready" ? deltaClass(customer.open_delta) : ""}>
+                          {customer.delta_status === "ready"
+                            ? formatDelta(customer.open_delta)
+                            : customer.delta_status === "loading"
+                              ? t("deltaLoading")
+                              : t("deltaPending")}
                         </td>
                         <td>
                           <button
@@ -432,19 +618,25 @@ export default function OutstandingComparePage() {
                   })}
                   {!visibleCustomers.length && !loadingCustomers ? (
                     <tr>
-                      <td colSpan={8}>{t("noCustomers")}</td>
+                      <td colSpan={7}>{differencesOnly ? t("noDifferences") : t("noCustomers")}</td>
                     </tr>
                   ) : null}
                 </tbody>
                 <tfoot>
                   <tr className="moduleBiTotalRow">
-                    <td colSpan={2}><strong>{t("total")}</strong></td>
-                    <td><strong>{formatMoney(customerFooter.d0)}</strong></td>
-                    <td><strong>{formatMoney(customerFooter.d30)}</strong></td>
-                    <td><strong>{formatMoney(customerFooter.d61)}</strong></td>
-                    <td><strong>{formatMoney(customerFooter.d90)}</strong></td>
-                    <td className="moduleBiTotalCol">
+                    <td colSpan={3}><strong>{t("total")}</strong></td>
+                    <td>
                       <strong>{formatMoney(customerFooter.total)}</strong>
+                    </td>
+                    <td className="moduleBiTotalCol">
+                      <strong>
+                        {customerFooter.diffReady ? formatMoney(customerFooter.computed) : t("deltaPending")}
+                      </strong>
+                    </td>
+                    <td className={deltaClass(customerFooter.diff)}>
+                      <strong>
+                        {customerFooter.diffReady ? formatDelta(customerFooter.diff) : t("deltaPending")}
+                      </strong>
                     </td>
                     <td />
                   </tr>

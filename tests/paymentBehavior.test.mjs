@@ -790,7 +790,8 @@ test("Tally vs computed outstanding includes credit notes in computed open", () 
         reference: "1691",
         sales_amount: 2250,
         item_code: "ITEM-B",
-        quantity: 1,
+        // Different qty than 2106 so this is not an exact mirror reverse.
+        quantity: 2,
         category: "Paper",
       },
     ],
@@ -814,4 +815,86 @@ test("Tally vs computed outstanding includes credit notes in computed open", () 
 
   const cashGap = (ledger.tallyFifoDiscrepancies || []).find((row) => row.voucher_number === "2106");
   assert.ok(cashGap);
+});
+
+test("exact amount + items/qty CN reverses invoice on any later date", () => {
+  const item = { item_code: "A003595", quantity: 24, category: "Body Care" };
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      {
+        transaction_date: "2026-06-30",
+        voucher_number: "NFD/1050",
+        sales_amount: 18888.37,
+        ...item,
+      },
+      {
+        transaction_date: "2026-07-07",
+        voucher_number: "361",
+        voucher_type: "Credit Note",
+        reference: "NFD/1050",
+        sales_amount: -18888.37,
+        ...item,
+      },
+      {
+        transaction_date: "2026-04-06",
+        voucher_number: "NFD/357",
+        sales_amount: 1000,
+        item_code: "OTHER",
+        quantity: 1,
+        category: "Paper",
+      },
+    ],
+    // Cash that previously stacked on NFD/1050 must settle elsewhere once reversed.
+    receipts: [
+      { receipt_date: "2026-07-07", amount: 5000, vch_no: "1191" },
+      { receipt_date: "2026-08-10", amount: 3400, vch_no: "1411" },
+    ],
+    outstandingInvoices: [],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 1);
+  assert.equal(ledger.reversedInvoices[0].voucher_number, "NFD/1050");
+  assert.equal(ledger.reversedInvoices[0].credit_note_voucher, "361");
+  assert.equal(ledger.reversedInvoices[0].reversal_days, 7);
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "NFD/1050"), false);
+
+  const kept = ledger.invoices.find((row) => row.voucher_number === "NFD/357");
+  assert.ok(kept);
+  assert.equal(Number(kept.paid_amount.toFixed(2)), 1150);
+  assert.ok(
+    !(kept.credit_notes || []).some((note) => String(note.voucher_number) === "361"),
+    "full mirror CN must not also attach under another invoice",
+  );
+});
+
+test("same-amount CN with different items does not reverse outside the 1-day window", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      {
+        transaction_date: "2026-06-30",
+        voucher_number: "NFD/1",
+        sales_amount: 1000,
+        item_code: "ITEM-A",
+        quantity: 10,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-07-10",
+        voucher_number: "CN-9",
+        voucher_type: "Credit Note",
+        sales_amount: -1000,
+        item_code: "ITEM-B",
+        quantity: 10,
+        category: "Paper",
+      },
+    ],
+    receipts: [],
+    outstandingInvoices: [],
+    todayIso: "2026-09-16",
+  });
+
+  assert.equal(ledger.reversedInvoices.length, 0);
+  assert.equal(ledger.invoices.some((row) => row.voucher_number === "NFD/1"), true);
+  assert.equal(ledger.creditNotes.some((row) => row.voucher_number === "CN-9"), true);
 });

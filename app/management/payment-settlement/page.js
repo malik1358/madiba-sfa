@@ -140,7 +140,7 @@ function InvoiceSettlementRow({ invoice, open, onToggle }) {
 
 export default function PaymentSettlementPage() {
   const { language, setLanguage, dir } = useAppLanguage();
-  const t = (key) => translate(TEXT, key, language);
+  const t = translate(language, TEXT);
   const { access } = useModuleAccess();
 
   const [error, setError] = useState("");
@@ -212,7 +212,7 @@ export default function PaymentSettlementPage() {
     setError("");
     try {
       const session = await resolveAuthSession(supabase);
-      const response = await fetch("/api/customers/visible", {
+      const response = await fetch("/api/customers/visible?includeInactive=1", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const payload = await response.json().catch(() => ({}));
@@ -308,6 +308,13 @@ export default function PaymentSettlementPage() {
       void loadSettlement(match);
     }
   }, [autoCode, customers, loadSettlement, selectedCustomer]);
+
+  useEffect(() => {
+    if (!ledger || typeof window === "undefined") return;
+    const hash = window.location.hash.replace(/^#/, "");
+    if (!hash) return;
+    document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [ledger]);
 
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) {

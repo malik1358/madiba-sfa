@@ -26,11 +26,16 @@ import { resolveTrustedAvgDaysToPayForCustomer } from "../../lib/customerOrderBl
 import {
   formatSalesmanOrderNumber,
   isSalesmanOrderNumberForCode,
-  maxSequenceFromOrderNumbers,
+  maxSequenceForPrefix,
   nextSalesmanOrderSequence,
   parseSalesmanOrderNumber,
   resolveSalesmanOrderPrefix,
+  shouldAcceptPreferredSalesmanOrderNumber,
 } from "../../lib/salesmanOrderNumber.js";
+import {
+  isBareNumericOrderIdFallback,
+  readStoredSalesOrderNumber,
+} from "../../lib/salesOrderNumber.js";
 import { resolveOrderMakerFromProfile } from "../../lib/orderSalesman.js";
 
 export const runtime = "nodejs";
@@ -306,10 +311,7 @@ async function resolvePersistedCustomerCode(admin, customerCode) {
 }
 
 function storedOrderNumber(order) {
-  const orderNumber = String(order?.order_number || "").trim();
-  if (orderNumber) return orderNumber;
-  if (order?.id == null || order.id === "") return "";
-  return String(order.id);
+  return readStoredSalesOrderNumber(order);
 }
 
 async function loadSalesmanPeerCodes(admin) {
@@ -326,17 +328,25 @@ async function readMaxSalesmanOrderSequence(admin, salesmanCode, peerCodes = [])
   const prefix = resolveSalesmanOrderPrefix(salesmanCode, peerCodes);
   if (!prefix || !admin) return 0;
 
-  const { data, error } = await admin
-    .from("sales_orders")
-    .select("order_number")
-    .ilike("order_number", `${prefix}%`)
-    .limit(5000);
-  if (error) throw error;
-  return maxSequenceFromOrderNumbers(
-    (data || []).map((row) => row.order_number),
-    salesmanCode,
-    peerCodes,
-  );
+  // Page through every matching row — an unordered limit(5000) can miss MOI417
+  // and then allot MOI01 again.
+  const pageSize = 1000;
+  let offset = 0;
+  let max = 0;
+  for (;;) {
+    const { data, error } = await admin
+      .from("sales_orders")
+      .select("order_number")
+      .ilike("order_number", `${prefix}%`)
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    const rows = data || [];
+    max = Math.max(max, maxSequenceForPrefix(rows.map((row) => row.order_number), prefix));
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+    if (offset > 50000) break;
+  }
+  return max;
 }
 
 async function allocateServerSalesmanOrderNumber(admin, salesmanCode, peerCodes = []) {
@@ -361,14 +371,54 @@ function normalizeClientOrderNumber(rawOrderNumber, salesmanCode) {
   return parsed.orderNumber;
 }
 
+async function resolvePreferredOrderNumber(admin, preferredOrderNumber, salesmanCode) {
+  const preferred = normalizeClientOrderNumber(preferredOrderNumber, salesmanCode);
+  if (!preferred || !salesmanCode) return "";
+
+  const peers = await loadSalesmanPeerCodes(admin);
+  const prefix = resolveSalesmanOrderPrefix(salesmanCode, peers);
+  const serverMax = await readMaxSalesmanOrderSequence(admin, salesmanCode, peers);
+
+  const { data: existingRows, error } = await admin
+    .from("sales_orders")
+    .select("order_number")
+    .eq("order_number", preferred)
+    .limit(1);
+  if (error) throw error;
+  const used = (existingRows || []).map((row) => row.order_number);
+
+  if (shouldAcceptPreferredSalesmanOrderNumber({
+    preferredOrderNumber: preferred,
+    salesmanCode,
+    serverMaxSequence: serverMax,
+    usedOrderNumbers: used,
+  })) {
+    return preferred;
+  }
+
+  // Stale offline number (MOI01 while server is at MOI417) or duplicate — allot next.
+  return formatSalesmanOrderNumber(salesmanCode, nextSalesmanOrderSequence(serverMax), {
+    prefix,
+    peerCodes: peers,
+  });
+}
+
 async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "", {
   salesmanCode = "",
   preferredOrderNumber = "",
+  repairBareNumericId = false,
 } = {}) {
-  const current = String(existingOrderNumber || "").trim();
-  if (current) return current;
+  const currentRaw = String(existingOrderNumber || "").trim();
+  // Keep any already-stored number on normal save/edit, including legacy numeric
+  // values like "503" (see ABA02 / re-submit rule). Only the explicit repair path
+  // may replace a bare id-equal number.
+  if (currentRaw && !(repairBareNumericId && isBareNumericOrderIdFallback(currentRaw, orderId))) {
+    return currentRaw;
+  }
 
-  const preferred = normalizeClientOrderNumber(preferredOrderNumber, salesmanCode);
+  const preferred = salesmanCode
+    ? await resolvePreferredOrderNumber(admin, preferredOrderNumber, salesmanCode)
+    : normalizeClientOrderNumber(preferredOrderNumber, salesmanCode);
   if (preferred) {
     const { error } = await admin
       .from("sales_orders")
@@ -381,7 +431,7 @@ async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "",
   }
 
   if (salesmanCode) {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
       const next = await allocateServerSalesmanOrderNumber(admin, salesmanCode);
       if (!next) break;
       const { error } = await admin
@@ -395,15 +445,9 @@ async function ensureStoredOrderNumber(admin, orderId, existingOrderNumber = "",
     }
   }
 
-  const fallback = String(orderId);
-  const { error } = await admin
-    .from("sales_orders")
-    .update({ order_number: fallback })
-    .eq("id", orderId);
-  if (error && !/duplicate|unique/i.test(String(error.message || ""))) {
-    throw error;
-  }
-  return fallback;
+  // Never persist the bigint row id as order_number (e.g. "641"). That made Pending
+  // Orders look numeric. Leave blank so the client can retry allotment.
+  return "";
 }
 
 async function persistDraftOrder(admin, {
@@ -422,8 +466,11 @@ async function persistDraftOrder(admin, {
   let existingLines = [];
   let resolvedOrderId = orderId ? Number(orderId) : null;
   let resolvedOrderNumber = "";
-  const preferredOrderNumber = normalizeClientOrderNumber(clientOrderNumber, salesmanCode);
   const resolvedSalesmanName = String(salesmanName || salesmanCode || "").trim();
+  // For brand-new rows, reject stale low client numbers (MOI01 while series is at MOI417).
+  const preferredOrderNumber = resolvedOrderId
+    ? normalizeClientOrderNumber(clientOrderNumber, salesmanCode)
+    : await resolvePreferredOrderNumber(admin, clientOrderNumber, salesmanCode);
 
   if (resolvedOrderId) {
     await ensureOrderAccess(admin, resolvedOrderId, userId);
@@ -489,16 +536,20 @@ async function persistDraftOrder(admin, {
     resolvedOrderNumber = storedOrderNumber(updatedOrder);
   }
 
-  // Never replace an order number that already exists on the row.
+  // Never treat a missing/invalid number as "already set" — always keep trying the
+  // client preferred series number (or allocate the next salesman number).
   resolvedOrderNumber = await ensureStoredOrderNumber(
     admin,
     resolvedOrderId,
     resolvedOrderNumber,
     {
       salesmanCode,
-      preferredOrderNumber: resolvedOrderNumber ? "" : preferredOrderNumber,
+      preferredOrderNumber,
     },
   );
+  if (!resolvedOrderNumber) {
+    throw new Error("Unable to allot a salesman order number. Please retry.");
+  }
 
   const { error: deleteError } = await admin
     .from("sales_order_items")
@@ -600,7 +651,7 @@ export async function GET(request) {
       const sinceIso = new Date(Date.now() - RECENT_ORDER_LOOKUP_MS).toISOString();
       const { data, error } = await admin
         .from("sales_orders")
-        .select("id,order_number,status,customer_code,customer_name,created_by,updated_at")
+        .select("id,order_number,status,customer_code,customer_name,created_by,salesman_code,updated_at")
         .eq("customer_code", customerCode)
         .eq("created_by", user.id)
         .gte("updated_at", sinceIso)
@@ -622,7 +673,9 @@ export async function GET(request) {
       return NextResponse.json({ success: false, error: "You do not have access to this order." }, { status: 403 });
     }
 
-    const orderNumber = await ensureStoredOrderNumber(admin, order.id, order.order_number);
+    const orderNumber = await ensureStoredOrderNumber(admin, order.id, order.order_number, {
+      salesmanCode: order.salesman_code || "",
+    });
     const liveCustomerCode = await resolvePersistedCustomerCode(admin, order.customer_code);
     if (liveCustomerCode && liveCustomerCode !== order.customer_code) {
       await admin.from("sales_orders").update({ customer_code: liveCustomerCode }).eq("id", order.id);
@@ -657,6 +710,45 @@ export async function POST(request) {
 
     const body = await request.json();
     const action = String(body?.action || "save_draft").trim().toLowerCase();
+
+    if (action === "repair_order_numbers") {
+      const admin = createClient(supabaseUrl, serviceKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const user = await getAuthUser(admin, authHeader.replace("Bearer ", ""));
+      const scope = await resolveSalesScopeForUserId(admin, user.id);
+      const requestedIds = Array.isArray(body?.orderIds)
+        ? body.orderIds.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)
+        : [];
+      const uniqueIds = [...new Set(requestedIds)].slice(0, 40);
+      if (uniqueIds.length === 0) {
+        return NextResponse.json({ success: true, repaired: [] });
+      }
+
+      const { data: orders, error: ordersError } = await admin
+        .from("sales_orders")
+        .select("id,order_number,salesman_code,created_by,status,customer_code")
+        .in("id", uniqueIds);
+      if (ordersError) throw ordersError;
+
+      const repaired = [];
+      for (const order of orders || []) {
+        if (!canAccessOrder(order, scope, user.id)) continue;
+        const nextNumber = await ensureStoredOrderNumber(admin, order.id, order.order_number, {
+          salesmanCode: order.salesman_code || "",
+          repairBareNumericId: true,
+        });
+        if (!nextNumber) continue;
+        if (nextNumber !== String(order.order_number || "").trim()) {
+          repaired.push({ orderId: order.id, orderNumber: nextNumber });
+        } else {
+          repaired.push({ orderId: order.id, orderNumber: nextNumber });
+        }
+      }
+
+      return NextResponse.json({ success: true, repaired });
+    }
+
     const customerCode = String(body?.customerCode || "").trim();
     const customerName = String(body?.customerName || "").trim();
     const customerSalesmanCode = String(body?.customerSalesmanCode || "").trim();

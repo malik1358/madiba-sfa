@@ -75,24 +75,19 @@ async function readLocalMaxSequence(prefix) {
 export async function rememberSalesmanOrderSequence(salesmanCode, sequenceOrOrderNumber, {
   peerCodes = [],
 } = {}) {
+  // Only real salesman series numbers update the local max (MOI417 → 417).
+  // Bare numeric ids like "414" / "641" used to pollute the cache and jump the
+  // series from MOI01 to MOI414 overnight.
   const parsed = parseSalesmanOrderNumber(sequenceOrOrderNumber);
-  let prefix = parsed?.prefix || "";
-  let sequence = parsed?.sequence;
-
-  if (!prefix) {
-    prefix = (await readStoredPrefix(salesmanCode))
+  if (!parsed || !isSalesmanOrderNumberForCode(parsed.orderNumber, salesmanCode)) {
+    const prefix = (await readStoredPrefix(salesmanCode))
       || resolveSalesmanOrderPrefix(salesmanCode, peerCodes);
-    sequence = Number(sequenceOrOrderNumber);
-  }
-
-  if (!prefix || !Number.isFinite(sequence) || sequence < 1) {
     return readLocalMaxSequence(prefix);
   }
 
-  if (isSalesmanOrderNumberForCode(`${prefix}${sequence}`, salesmanCode)
-    || isSalesmanOrderNumberForCode(sequenceOrOrderNumber, salesmanCode)) {
-    await writeStoredPrefix(salesmanCode, prefix);
-  }
+  const prefix = parsed.prefix;
+  const sequence = parsed.sequence;
+  await writeStoredPrefix(salesmanCode, prefix);
 
   const current = await readLocalMaxSequence(prefix);
   const nextMax = Math.max(current, Math.floor(sequence));

@@ -78,6 +78,7 @@ export function useCustomerData({ setError, setMessage }) {
         }
 
         const customersResult = await fetchVisibleCustomersCached(session.access_token, scope, {
+          includeInactive: true,
           onUpdate: (freshCustomers) => {
             setCustomers(dedupeCustomerMasterRows(Array.isArray(freshCustomers) ? freshCustomers : []));
             setRefreshing(false);

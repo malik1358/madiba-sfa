@@ -80,6 +80,11 @@ export function isPendingForApprovalStatus(status) {
     || normalized === ORDER_STATUS_PENDING_CREDIT.toLowerCase();
 }
 
+export function isWaitingForCreditApplicationStatus(status) {
+  return normalizeInvoiceStatus(status).toLowerCase()
+    === ORDER_STATUS_WAITING_CREDIT_APPLICATION.toLowerCase();
+}
+
 export function isPendingForInvoiceCreationStatus(status) {
   return normalizeInvoiceStatus(status).toLowerCase()
     === ORDER_STATUS_PENDING_INVOICE_CREATION.toLowerCase();

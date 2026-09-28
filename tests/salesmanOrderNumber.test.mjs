@@ -5,11 +5,13 @@ import {
   formatSalesmanOrderNumber,
   isSalesmanOrderNumber,
   isSalesmanOrderNumberForCode,
+  maxSequenceForPrefix,
   maxSequenceFromOrderNumbers,
   nextSalesmanOrderSequence,
   normalizeSalesmanLetters,
   parseSalesmanOrderNumber,
   resolveSalesmanOrderPrefix,
+  shouldAcceptPreferredSalesmanOrderNumber,
 } from "../app/lib/salesmanOrderNumber.js";
 
 test("normalizeSalesmanLetters strips spaces and symbols", () => {
@@ -87,5 +89,36 @@ test("next sequence and max from lists use the short prefix", () => {
       ["PARVEZ", "PRASHANT"],
     ),
     12,
+  );
+  assert.equal(maxSequenceForPrefix(["MOI01", "MOI414", "MOI417", "J01"], "MOI"), 417);
+});
+
+test("shouldAcceptPreferredSalesmanOrderNumber rejects stale low sequences", () => {
+  assert.equal(
+    shouldAcceptPreferredSalesmanOrderNumber({
+      preferredOrderNumber: "MOI01",
+      salesmanCode: "MOINUDIN KHAJA",
+      serverMaxSequence: 417,
+      usedOrderNumbers: ["MOI417"],
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAcceptPreferredSalesmanOrderNumber({
+      preferredOrderNumber: "MOI418",
+      salesmanCode: "MOINUDIN KHAJA",
+      serverMaxSequence: 417,
+      usedOrderNumbers: ["MOI417"],
+    }),
+    true,
+  );
+  assert.equal(
+    shouldAcceptPreferredSalesmanOrderNumber({
+      preferredOrderNumber: "MOI418",
+      salesmanCode: "MOINUDIN KHAJA",
+      serverMaxSequence: 417,
+      usedOrderNumbers: ["MOI418"],
+    }),
+    false,
   );
 });

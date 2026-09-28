@@ -1,3 +1,4 @@
+import { isFarFromCustomer } from "./customerLocation.js";
 import { resolveAppOrigin } from "./inactivityEmail.js";
 import { isLikelyEmail, parseEmailList } from "./mailer.js";
 import { getCollectionSalesmanLabel, sumCollectionReceivedInLastDays } from "./paymentCollections.js";
@@ -131,6 +132,46 @@ export function isCollectionVisitOlderThanDays(row = {}, {
   return visitKey < cutoff;
 }
 
+export function resolveNearVisitWithoutOrderDateKey(row = {}) {
+  const raw = row?.last_near_visit_without_order_at
+    || (
+      row?.last_visit_without_order_is_far
+        ? ""
+        : (row?.last_visit_without_order_at || row?.last_visit_without_order_date || row?.visit_without_order_at || "")
+    );
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(raw).trim())) return String(raw).trim();
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return getKsaDateString(parsed);
+}
+
+export function isVisitWithoutOrderOlderThanDays(row = {}, {
+  todayKey = "",
+  minAgeDays = COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS,
+} = {}) {
+  const today = String(todayKey || "").trim() || getKsaDateString();
+  const visitKey = resolveNearVisitWithoutOrderDateKey(row);
+  if (!visitKey) return true;
+  const cutoff = addKsaCalendarDays(today, -Math.max(1, Number(minAgeDays) || 7));
+  return visitKey < cutoff;
+}
+
+export function isCollectionVisitFar(row = {}) {
+  const visit = row?.latest_collection;
+  if (!visit) return false;
+  return isFarFromCustomer(
+    { latitude: visit.latitude, longitude: visit.longitude },
+    { latitude: row?.latitude, longitude: row?.longitude },
+  );
+}
+
+export function formatStaleVisitDateLabel(dateKey = "", isFar = false) {
+  const key = String(dateKey || "").trim();
+  if (!key) return "Never";
+  return isFar ? `${key} FAR` : key;
+}
+
 export function isCollectionStaleOverdueRow(row = {}, {
   todayKey = "",
   todayIso = "",
@@ -148,7 +189,8 @@ export function isCollectionStaleOverdueRow(row = {}, {
   if (resolveReceivedInLookbackDays(row, { todayIso: asOfIso, days: receiptLookbackDays }) > 0) {
     return false;
   }
-  return isCollectionVisitOlderThanDays(row, { todayKey: today, minAgeDays: minVisitAgeDays });
+  // FAR visits do not count; only near visit-without-order age gates the row.
+  return isVisitWithoutOrderOlderThanDays(row, { todayKey: today, minAgeDays: minVisitAgeDays });
 }
 
 export function filterCollectionStaleOverdueRows(rows = [], options = {}) {
@@ -253,6 +295,8 @@ export function buildCollectionStaleOverdueEmailRow(row = {}, {
   const customer = code && name ? `${code} — ${name}` : (code || name || "-");
   const visitKey = resolveLastCollectionVisitDateKey(row);
   const visitWithoutOrderKey = resolveLastVisitWithoutOrderDateKey(row);
+  const collectionIsFar = isCollectionVisitFar(row);
+  const visitWithoutOrderIsFar = Boolean(row?.last_visit_without_order_is_far);
   const threshold = agingThresholdDays == null
     ? resolveOverdueAgingThresholdDays(row)
     : Number(agingThresholdDays) || COLLECTION_STALE_OVERDUE_DEFAULT_AGING_DAYS;
@@ -273,8 +317,10 @@ export function buildCollectionStaleOverdueEmailRow(row = {}, {
       todayIso: asOfIso,
       days: COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS,
     }),
-    lastVisitDate: visitKey || "Never",
-    lastVisitWithoutOrderDate: visitWithoutOrderKey || "Never",
+    lastVisitDate: formatStaleVisitDateLabel(visitKey, collectionIsFar),
+    lastVisitIsFar: collectionIsFar && Boolean(visitKey),
+    lastVisitWithoutOrderDate: formatStaleVisitDateLabel(visitWithoutOrderKey, visitWithoutOrderIsFar),
+    lastVisitWithoutOrderIsFar: visitWithoutOrderIsFar && Boolean(visitWithoutOrderKey),
     lastOutcome: String(
       row?.latest_collection?.visit_outcome
       || row?.latest_collection?.payment_status
@@ -309,6 +355,15 @@ function tableHeader(agingLabel = "Over 60") {
   </tr>`;
 }
 
+function formatVisitDateHtml(label = "Never", isFar = false) {
+  const text = String(label || "Never");
+  if (!isFar || text === "Never") {
+    return `<span style="color:#475569;">${escapeHtml(text)}</span>`;
+  }
+  const datePart = text.replace(/\s*FAR\s*$/i, "").trim() || text;
+  return `<span style="color:#475569;">${escapeHtml(datePart)}</span> <span style="color:#b45309;font-weight:800;">FAR</span>`;
+}
+
 function tableRow(row, index) {
   const rowBg = index % 2 === 0 ? "#ffffff" : "#f0fdfa";
   return `<tr style="background:${rowBg};">
@@ -318,8 +373,8 @@ function tableRow(row, index) {
     <td style="text-align:right;border:1px solid #99f6e4;padding:8px;font-weight:700;color:#b91c1c;">${escapeHtml(formatCollectionMoney(row.overdueAmount))}</td>
     <td style="text-align:right;border:1px solid #99f6e4;padding:8px;">${escapeHtml(String(row.maxOverdueDays))}</td>
     <td style="text-align:right;border:1px solid #99f6e4;padding:8px;">${escapeHtml(formatCollectionMoney(row.receivedLookbackDays))}</td>
-    <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.lastVisitDate)}</td>
-    <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.lastVisitWithoutOrderDate)}</td>
+    <td style="border:1px solid #99f6e4;padding:8px;">${formatVisitDateHtml(row.lastVisitDate, row.lastVisitIsFar)}</td>
+    <td style="border:1px solid #99f6e4;padding:8px;">${formatVisitDateHtml(row.lastVisitWithoutOrderDate, row.lastVisitWithoutOrderIsFar)}</td>
     <td style="border:1px solid #99f6e4;padding:8px;color:#475569;">${escapeHtml(row.lastOutcome)}</td>
   </tr>`;
 }
@@ -400,7 +455,7 @@ export function buildCollectionStaleOverdueSalesmanSection({
   const html = `<div style="margin:18px 0 8px;">
     <h2 style="font-size:16px;margin:0 0 8px;color:#0f4c5c;">Stale overdue collections</h2>
     <p style="margin:0 0 10px;font-size:12px;color:#475569;">
-      ${escapeHtml(who)} · ${escapeHtml(agingLabel)} days · no receipt in last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days · last visit older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days
+      ${escapeHtml(who)} · ${escapeHtml(agingLabel)} days · no receipt in last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days · last near visit w/o order older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (FAR ignored)
     </p>
     <div style="margin:0 0 8px;">
       <span style="font-size:12px;font-weight:700;color:#0e7490;background:#ecfeff;border:1px solid #67e8f9;border-radius:999px;padding:4px 10px;">
@@ -412,7 +467,7 @@ export function buildCollectionStaleOverdueSalesmanSection({
 
   const text = [
     `Stale overdue collections — ${who}`,
-    `${agingLabel} days · recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d = 0 · visit > ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS}d`,
+    `${agingLabel} days · recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d = 0 · near VWO > ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS}d (FAR ignored)`,
     `Customer | City/Area | Due | ${agingLabel} | Max overdue | Recv ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS}d | Last collection | Last visit w/o order | Last outcome`,
     ...rows.map((row) => [
       row.customer,
@@ -478,7 +533,7 @@ export function buildCollectionStaleOverdueEmail({
   const totals = summarizeCollectionStaleOverdueRows(allRows);
   const subject = `Stale overdue collections ${date} — ${totals.customers} customers / ${groups.length} salesmen`;
   const link = String(reportUrl || "").trim();
-  const intro = `Customers needing credit follow-up: outstanding older than 60 days (Parvez & Junaid: older than 30 days), no receipt in the last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days, and no collection visit in the last ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (or never visited). One table per salesman.`;
+  const intro = `Customers needing credit follow-up: outstanding older than 60 days (Parvez & Junaid: older than 30 days), no receipt in the last ${COLLECTION_STALE_OVERDUE_RECEIPT_LOOKBACK_DAYS} days, and last near visit without order older than ${COLLECTION_STALE_OVERDUE_MIN_VISIT_AGE_DAYS} days (or never). FAR visits are shown in the table but do not count as a fresh visit. One table per salesman.`;
 
   const html = `<div style="font-family: Arial, Helvetica, sans-serif; color: #0f172a; line-height: 1.5; background:#f8fafc; padding:16px;">
   <div style="max-width:1100px;margin:0 auto;background:#ffffff;border:1px solid #99f6e4;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,76,92,0.12);">

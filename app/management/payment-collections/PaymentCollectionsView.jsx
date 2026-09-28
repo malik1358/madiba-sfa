@@ -64,7 +64,7 @@ import {
 } from "../../lib/collectionQueueSearch";
 import { prepareUploadFile } from "../../lib/compressUploadFile";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
-import { formatAvgDaysToPayWhatsappLines } from "../../lib/avgDaysWhatsapp";
+import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
 import { formatCollectionLastVisitWhatsappLines } from "../../lib/collectionVisitSummary";
 import { getSupabaseClient } from "../../lib/supabase";
@@ -330,6 +330,7 @@ const TEXT = {
   summaryLastVisitRemarkArabic: { en: "Last visit remark (Arabic)", ar: "ملاحظة آخر زيارة (عربي)" },
   summaryLastVisitRemarkEnglish: { en: "Last visit remark (English)", ar: "ملاحظة آخر زيارة (انجليزي)" },
   summaryAvgDaysToPay: { en: "Avg days to pay", ar: "متوسط أيام الدفع" },
+  summaryAvgDaysToPay6m: { en: "6-month avg", ar: "متوسط 6 أشهر" },
   summaryGps: { en: "GPS", ar: "GPS" },
   summaryDistanceFromCustomer: { en: "Distance from customer", ar: "المسافة من العميل" },
   summaryDistanceFromPrevious: { en: "Distance from previous", ar: "المسافة من السابق" },
@@ -509,8 +510,11 @@ function buildVisitSummary(row, form, translatedRemark, t, options = {}) {
   lines.push(`${t("bucket91to120")}: ${formatMoney(row.outstanding_91_120)}`);
   lines.push(`${t("bucket120plus")}: ${formatMoney(row.outstanding_above_120)}`);
   lines.push(...formatAvgDaysToPayWhatsappLines(
-    options.avgDaysToPay ?? row.avgDaysToPay ?? row.avg_days_to_pay,
-    { avgDaysToPay: t("summaryAvgDaysToPay") },
+    options.avgDaysToPay ?? resolveLocalAvgDaysToPay(row),
+    {
+      avgDaysToPay: t("summaryAvgDaysToPay"),
+      avgDaysToPay6mLabel: t("summaryAvgDaysToPay6m"),
+    },
   ));
   lines.push(...formatVisitDistanceWhatsappLines(options.visitDistance, {
     gps: t("summaryGps"),
@@ -539,9 +543,11 @@ function buildStoredVisitReport(row, englishRemark, t, visit = null, options = {
   const selectedVisit = visit || row?.latest_collection;
   if (!selectedVisit) return "";
 
+  // Salesman is the customer book / outstanding salesman on the queue row —
+  // never the collector who saved the visit (scheduled_by_name).
   const reportRow = {
     ...row,
-    salesman_name: selectedVisit.scheduled_by_name || row.salesman_name,
+    salesman_name: row.salesman_name,
     salesman_code: row.salesman_code,
   };
 
@@ -2002,9 +2008,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         savedAt: new Date().toISOString(),
         skipTimeline: true,
       });
-      const avgDaysToPay = row.avg_days_to_pay == null || row.avg_days_to_pay === ""
-        ? null
-        : Number(row.avg_days_to_pay);
+      const avgDaysToPay = resolveLocalAvgDaysToPay(row);
 
       const summaryText = buildVisitSummary(
         row,
@@ -2015,7 +2019,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
           visitNumberForDay,
           queuePriority: resolvedQueuePriority,
           visitDistance,
-          avgDaysToPay: Number.isFinite(avgDaysToPay) ? avgDaysToPay : null,
+          avgDaysToPay,
           lastVisit: row?.latest_collection || null,
         },
       );

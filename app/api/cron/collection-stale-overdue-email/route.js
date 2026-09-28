@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isCronAuthorized } from "../../../lib/cronAuth.js";
 import { formatSupabaseError, withJwtClockSkewRetry } from "../../../lib/dailySalesmanResumeServer.js";
-import { runCollectionStaleOverdueEmailCycle } from "../../../lib/collectionStaleOverdueEmailServer.js";
+import {
+  resolveCollectionStaleOverdueRouteTrigger,
+  runCollectionStaleOverdueEmailCycle,
+} from "../../../lib/collectionStaleOverdueEmailServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -25,11 +28,13 @@ async function readParams(request) {
   const queryDate = url.searchParams.get("date");
   const queryForce = url.searchParams.get("force");
   const queryTo = url.searchParams.get("to");
+  const queryTrigger = url.searchParams.get("trigger");
   if (String(request.method || "").toUpperCase() === "GET") {
     return {
       date: queryDate || "",
       force: queryForce,
       to: queryTo || "",
+      trigger: queryTrigger || "",
     };
   }
 
@@ -39,12 +44,14 @@ async function readParams(request) {
       date: body?.date || queryDate || "",
       force: body?.force ?? queryForce,
       to: body?.to || queryTo || "",
+      trigger: body?.trigger || queryTrigger || "",
     };
   } catch {
     return {
       date: queryDate || "",
       force: queryForce,
       to: queryTo || "",
+      trigger: queryTrigger || "",
     };
   }
 }
@@ -59,12 +66,12 @@ async function handleRequest(request) {
       return NextResponse.json({ success: false, error: "Server configuration is incomplete." }, { status: 500 });
     }
 
-    const { date, force, to } = await readParams(request);
+    const { date, force, to, trigger } = await readParams(request);
     const result = await withJwtClockSkewRetry(async () => {
       const admin = createAdminClient();
       return runCollectionStaleOverdueEmailCycle(admin, {
         date,
-        trigger: String(to || "").trim() ? "manual" : "cron",
+        trigger: resolveCollectionStaleOverdueRouteTrigger({ date, force, to, trigger }),
         env: {
           ...process.env,
           ...(String(force || "").trim() ? { COLLECTION_STALE_OVERDUE_EMAIL_FORCE: "true" } : {}),

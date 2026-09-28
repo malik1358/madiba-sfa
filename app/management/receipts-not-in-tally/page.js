@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import AppLanguageSwitch from "../../components/AppLanguageSwitch";
 import MorningAttendanceGate from "../../components/MorningAttendanceGate";
 import AccessibleHeaderLink from "../../components/AccessibleHeaderLink";
@@ -36,20 +36,21 @@ const TEXT = {
     ar: "فقط المدير أو الأدمن أو المحصل يمكنه الوصول لهذا التقرير.",
   },
   noRows: {
-    en: "All app receipts in this period match a Tally upload row (customer + amount + date).",
-    ar: "كل إيصالات التطبيق في هذه الفترة تطابق صفاً في رفع تالي (عميل + مبلغ + تاريخ).",
+    en: "All app receipts in this period match a Tally upload row (customer + amount + date), or were marked as mistakes.",
+    ar: "كل إيصالات التطبيق في هذه الفترة تطابق صفاً في رفع تالي (عميل + مبلغ + تاريخ)، أو تم تعليمها كأخطاء.",
   },
   noUpload: {
     en: "No Tally receipt register has been uploaded yet. Import a receipt file first.",
     ar: "لم يتم رفع سجل إيصالات تالي بعد. استورد ملف الإيصالات أولاً.",
   },
   hint: {
-    en: "Match rule: same customer (code or same trading name), amount within 1.00, and receipt date within the selected day window of the app visit date (KSA). Choose 0–30 days. One Tally voucher is used at most once. Same collector + customer + amount on the same day within 5 minutes is treated as a duplicate and hidden.",
-    ar: "قاعدة المطابقة: نفس العميل (الكود أو نفس الاسم التجاري)، فرق المبلغ حتى 1.00، وتاريخ إيصال تالي ضمن نافذة الأيام المحددة حول تاريخ زيارة التطبيق (توقيت السعودية). اختر من 0 إلى 30 يوماً. يُستخدم كل قسيمة تالي مرة واحدة فقط. نفس المحصل + العميل + المبلغ في نفس اليوم خلال 5 دقائق يُعتبر تكراراً ويُخفى.",
+    en: "Match rule: same customer (code or same trading name), amount within 1.00, and receipt date within the selected day window of the app visit date (KSA). Choose 0–30 days. One Tally voucher is used at most once. Same collector + customer + amount on the same day within 5 minutes is treated as a duplicate and hidden. Mark a row as mistake to hide it from this list and the daily email.",
+    ar: "قاعدة المطابقة: نفس العميل (الكود أو نفس الاسم التجاري)، فرق المبلغ حتى 1.00، وتاريخ إيصال تالي ضمن نافذة الأيام المحددة حول تاريخ زيارة التطبيق (توقيت السعودية). اختر من 0 إلى 30 يوماً. يُستخدم كل قسيمة تالي مرة واحدة فقط. نفس المحصل + العميل + المبلغ في نفس اليوم خلال 5 دقائق يُعتبر تكراراً ويُخفى. علّم الصف كخطأ لإخفائه من هذه القائمة والبريد اليومي.",
   },
   appReceipts: { en: "App receipts", ar: "إيصالات التطبيق" },
   matched: { en: "Matched to Tally", ar: "مطابق لتالي" },
   missing: { en: "Missing in Tally", ar: "غير موجود في تالي" },
+  mistakesHidden: { en: "Mistakes hidden", ar: "أخطاء مخفية" },
   duplicatesHidden: { en: "Duplicates hidden", ar: "تكرارات مخفية" },
   missingAmount: { en: "Missing amount", ar: "المبلغ الناقص" },
   appTotal: { en: "App total", ar: "إجمالي التطبيق" },
@@ -63,6 +64,10 @@ const TEXT = {
   mode: { en: "Mode", ar: "الطريقة" },
   collector: { en: "Collected by", ar: "محصّل بواسطة" },
   status: { en: "Status", ar: "الحالة" },
+  actions: { en: "Actions", ar: "إجراءات" },
+  markMistake: { en: "Mark as mistake", ar: "تعليم كخطأ" },
+  marking: { en: "Saving...", ar: "جاري الحفظ..." },
+  markedOk: { en: "Marked as mistake and removed from this list.", ar: "تم التعليم كخطأ وإزالته من هذه القائمة." },
   total: { en: "Total", ar: "الإجمالي" },
   none: { en: "None", ar: "لا يوجد" },
   shown: { en: "shown", ar: "ظاهر" },
@@ -130,9 +135,11 @@ export default function ReceiptsNotInTallyPage() {
   const [windowDays, setWindowDays] = useState(String(DEFAULT_DATE_WINDOW_DAYS));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [report, setReport] = useState(null);
+  const [markingId, setMarkingId] = useState("");
 
-  usePopupMessages({ error });
+  usePopupMessages({ error, message: info });
 
   const canAccess = access.canAccess("receiptsNotInTally");
 
@@ -153,6 +160,59 @@ export default function ReceiptsNotInTallyPage() {
     [visibleRows],
   );
 
+  const loadReport = useCallback(async ({ cancelledRef } = {}) => {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const session = await resolveAuthSession(supabase, 12000);
+      if (cancelledRef?.current) return;
+      if (!session?.access_token) {
+        throw new Error("Please login again.");
+      }
+
+      const params = new URLSearchParams({
+        from: fromDate,
+        to: toDate,
+        windowDays: String(windowDays || DEFAULT_DATE_WINDOW_DAYS),
+      });
+
+      const { response, payload } = await fetchJsonWithTimeout(
+        `/api/receipts-not-in-tally?${params.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        },
+        60000,
+      );
+
+      if (cancelledRef?.current) return;
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to load receipts not in Tally report.");
+      }
+
+      setReport(payload);
+    } catch (err) {
+      if (cancelledRef?.current) return;
+      const message = String(err.message || "");
+      if (message === "SESSION_TIMEOUT") {
+        setError("Session check timed out. Please refresh the page or login again.");
+      } else {
+        setError(err.message || "Unable to load receipts not in Tally report.");
+      }
+      setReport(null);
+    } finally {
+      if (!cancelledRef?.current) setLoading(false);
+    }
+  }, [fromDate, toDate, windowDays]);
+
   useEffect(() => {
     if (loadingAccess) return undefined;
     if (!canAccess) {
@@ -161,74 +221,89 @@ export default function ReceiptsNotInTallyPage() {
       return undefined;
     }
 
-    let cancelled = false;
+    const cancelledRef = { current: false };
     const stopSafetyTimer = startReportSafetyTimer(() => {
-      if (cancelled) return;
+      if (cancelledRef.current) return;
       setLoading(false);
       setError((current) => current || "Report load timed out. Please login and refresh the page.");
     });
 
-    async function loadReport() {
-      const supabase = getSupabaseClient();
-      if (!supabase) {
-        stopSafetyTimer();
-        setLoading(false);
-        return;
-      }
+    loadReport({ cancelledRef }).finally(() => {
+      stopSafetyTimer();
+    });
 
-      setLoading(true);
-      setError("");
-
-      try {
-        const session = await resolveAuthSession(supabase, 12000);
-        if (cancelled) return;
-        if (!session?.access_token) {
-          throw new Error("Please login again.");
-        }
-
-        const params = new URLSearchParams({
-          from: fromDate,
-          to: toDate,
-          windowDays: String(windowDays || DEFAULT_DATE_WINDOW_DAYS),
-        });
-
-        const { response, payload } = await fetchJsonWithTimeout(
-          `/api/receipts-not-in-tally?${params.toString()}`,
-          {
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          },
-          60000,
-        );
-
-        if (cancelled) return;
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.error || "Unable to load receipts not in Tally report.");
-        }
-
-        setReport(payload);
-      } catch (err) {
-        if (cancelled) return;
-        const message = String(err.message || "");
-        if (message === "SESSION_TIMEOUT") {
-          setError("Session check timed out. Please refresh the page or login again.");
-        } else {
-          setError(err.message || "Unable to load receipts not in Tally report.");
-        }
-        setReport(null);
-      } finally {
-        stopSafetyTimer();
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    loadReport();
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
       stopSafetyTimer();
     };
-  }, [canAccess, fromDate, loadingAccess, toDate, windowDays]);
+  }, [canAccess, loadingAccess, loadReport]);
+
+  async function markAsMistake(row) {
+    const visitId = String(row?.id || "").trim();
+    if (!visitId || markingId) return;
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    setMarkingId(visitId);
+    setError("");
+    setInfo("");
+
+    try {
+      const session = await resolveAuthSession(supabase, 12000);
+      if (!session?.access_token) {
+        throw new Error("Please login again.");
+      }
+
+      const { response, payload } = await fetchJsonWithTimeout(
+        "/api/receipts-not-in-tally",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            visitId,
+            action: "ignore",
+            note: "mistake",
+            visitDate: row.visitDate,
+            customerCode: row.customerCode,
+            customerName: row.customerName,
+            amountReceived: row.amountReceived,
+          }),
+        },
+        30000,
+      );
+
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to mark as mistake.");
+      }
+
+      setReport((current) => {
+        if (!current) return current;
+        const remaining = (current.missingInTally || []).filter((item) => item.id !== visitId);
+        const removed = (current.missingInTally || []).find((item) => item.id === visitId);
+        const removedAmount = Number(removed?.amountReceived || 0);
+        return {
+          ...current,
+          missingInTally: remaining,
+          summary: {
+            ...current.summary,
+            missingCount: remaining.length,
+            missingTotal: Math.max(0, Number(current.summary?.missingTotal || 0) - removedAmount),
+            ignoredCount: Number(current.summary?.ignoredCount || 0) + 1,
+            ignoredTotalCount: Number(current.summary?.ignoredTotalCount || 0) + 1,
+          },
+        };
+      });
+      setInfo(t("markedOk"));
+    } catch (err) {
+      setError(err.message || "Unable to mark as mistake.");
+    } finally {
+      setMarkingId("");
+    }
+  }
 
   if (!supabaseClient) {
     return (
@@ -369,12 +444,12 @@ export default function ReceiptsNotInTallyPage() {
                   <strong>{report.summary?.missingCount || 0}</strong>
                 </section>
                 <section className="moduleMetricCard">
-                  <span>{t("duplicatesHidden")}</span>
-                  <strong>{report.summary?.duplicateCount || 0}</strong>
+                  <span>{t("mistakesHidden")}</span>
+                  <strong>{report.summary?.ignoredCount || 0}</strong>
                 </section>
                 <section className="moduleMetricCard">
-                  <span>{t("appTotal")}</span>
-                  <strong>{formatAmount(report.summary?.appTotal)}</strong>
+                  <span>{t("duplicatesHidden")}</span>
+                  <strong>{report.summary?.duplicateCount || 0}</strong>
                 </section>
                 <section className="moduleMetricCard">
                   <span>{t("missingAmount")}</span>
@@ -407,6 +482,7 @@ export default function ReceiptsNotInTallyPage() {
                         <BiExcelHead label={t("mode")} filterKey="mode" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("status")} filterKey="status" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("collector")} filterKey="collector" options={options} filters={filters} onChange={setFilter} />
+                        <th>{t("actions")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -424,11 +500,21 @@ export default function ReceiptsNotInTallyPage() {
                           <td>{formatMode(row.receiptMode)}</td>
                           <td>{formatMode(row.paymentStatus)}</td>
                           <td>{row.collectorName || "-"}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="moduleInlineButton"
+                              disabled={Boolean(markingId)}
+                              onClick={() => markAsMistake(row)}
+                            >
+                              {markingId === row.id ? t("marking") : t("markMistake")}
+                            </button>
+                          </td>
                         </tr>
                       ))}
                       {visibleRows.length === 0 && (
                         <tr>
-                          <td colSpan={7}>{t("noRows")}</td>
+                          <td colSpan={8}>{t("noRows")}</td>
                         </tr>
                       )}
                     </tbody>
@@ -437,7 +523,7 @@ export default function ReceiptsNotInTallyPage() {
                         <tr>
                           <td colSpan={3}><strong>{t("total")}</strong></td>
                           <td className="moduleBiTotalCol"><strong>{formatAmount(missingTotal)}</strong></td>
-                          <td colSpan={3} />
+                          <td colSpan={4} />
                         </tr>
                       </tfoot>
                     ) : null}

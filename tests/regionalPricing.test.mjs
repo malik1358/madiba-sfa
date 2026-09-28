@@ -92,6 +92,24 @@ test("value discount applies when SKU value exceeds 5000 SAR", () => {
   assert.equal(Number(above.rate.toFixed(2)), 97);
 });
 
+test("value discount ignores negative or invalid quantities", () => {
+  const negative = getPricedOrderLine({
+    wholesaleRate: 100,
+    quantity: -60,
+    valueDiscountRate: 0.03,
+  });
+  const invalid = getPricedOrderLine({
+    wholesaleRate: 100,
+    quantity: Number.NaN,
+    valueDiscountRate: 0.03,
+  });
+
+  assert.equal(negative.applied.value, false);
+  assert.equal(negative.lineValue, 0);
+  assert.equal(invalid.applied.value, false);
+  assert.equal(invalid.lineValue, 0);
+});
+
 test("cash and value discounts can stack", () => {
   const priced = getPricedOrderLine({
     wholesaleRate: 114.33,

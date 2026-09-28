@@ -1,10 +1,10 @@
-name: Collection Stale Overdue Email
+name: Receipts Not in Tally Email
 
 on:
   schedule:
-    # 21:35 UTC = 00:35 KSA — stale overdue credit follow-up digest.
-    # Skips Friday holiday the same way as other collection emails.
-    - cron: "35 21 * * 0-3,5,6"
+    # 05:35 UTC = 08:35 KSA — month-to-date open list (mistakes excluded).
+    # Skips Friday holiday the same way as other daily digests (Sun–Thu + Sat).
+    - cron: "35 5 * * 0-3,5,6"
   workflow_dispatch:
     inputs:
       date:
@@ -26,25 +26,25 @@ jobs:
   email:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger collection stale overdue email endpoint
+      - name: Trigger receipts not in Tally email endpoint
         env:
-          COLLECTION_STALE_OVERDUE_EMAIL_URL: ${{ secrets.COLLECTION_STALE_OVERDUE_EMAIL_URL }}
+          RECEIPTS_NOT_IN_TALLY_EMAIL_URL: ${{ secrets.RECEIPTS_NOT_IN_TALLY_EMAIL_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           EVENT_NAME: ${{ github.event_name }}
           INPUT_DATE: ${{ github.event.inputs.date }}
           INPUT_TO: ${{ github.event.inputs.to }}
           INPUT_FORCE: ${{ github.event.inputs.force }}
         run: |
-          DEFAULT_COLLECTION_STALE_OVERDUE_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/collection-stale-overdue-email'
-          COLLECTION_STALE_OVERDUE_EMAIL_URL_TRIMMED="$(printf '%s' "$COLLECTION_STALE_OVERDUE_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-          COLLECTION_STALE_OVERDUE_EMAIL_URL_EFFECTIVE="$COLLECTION_STALE_OVERDUE_EMAIL_URL_TRIMMED"
+          DEFAULT_RECEIPTS_NOT_IN_TALLY_EMAIL_URL='https://madiba-sfa.vercel.app/api/cron/receipts-not-in-tally-email'
+          RECEIPTS_NOT_IN_TALLY_EMAIL_URL_TRIMMED="$(printf '%s' "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE="$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_TRIMMED"
 
-          if [[ -z "$COLLECTION_STALE_OVERDUE_EMAIL_URL_EFFECTIVE" ]]; then
-            echo "COLLECTION_STALE_OVERDUE_EMAIL_URL secret is missing; falling back to default endpoint."
-            COLLECTION_STALE_OVERDUE_EMAIL_URL_EFFECTIVE="$DEFAULT_COLLECTION_STALE_OVERDUE_EMAIL_URL"
-          elif [[ ! "$COLLECTION_STALE_OVERDUE_EMAIL_URL_EFFECTIVE" =~ /api/cron/collection-stale-overdue-email([/?].*)?$ ]]; then
-            echo "COLLECTION_STALE_OVERDUE_EMAIL_URL secret does not point to /api/cron/collection-stale-overdue-email; falling back to default endpoint."
-            COLLECTION_STALE_OVERDUE_EMAIL_URL_EFFECTIVE="$DEFAULT_COLLECTION_STALE_OVERDUE_EMAIL_URL"
+          if [[ -z "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE" ]]; then
+            echo "RECEIPTS_NOT_IN_TALLY_EMAIL_URL secret is missing; falling back to default endpoint."
+            RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE="$DEFAULT_RECEIPTS_NOT_IN_TALLY_EMAIL_URL"
+          elif [[ ! "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE" =~ /api/cron/receipts-not-in-tally-email([/?].*)?$ ]]; then
+            echo "RECEIPTS_NOT_IN_TALLY_EMAIL_URL secret does not point to /api/cron/receipts-not-in-tally-email; falling back to default endpoint."
+            RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE="$DEFAULT_RECEIPTS_NOT_IN_TALLY_EMAIL_URL"
           fi
 
           if [[ -z "$CRON_SECRET" ]]; then
@@ -65,14 +65,11 @@ jobs:
           force_raw = os.environ.get("FORCE_VALUE", "").strip().lower()
           if event_name == "schedule":
             force = False
-            trigger = "cron"
           elif force_raw:
             force = force_raw not in ("0", "false", "no")
-            trigger = "manual"
           else:
             force = True
-            trigger = "manual"
-          payload = {"force": force, "trigger": trigger}
+          payload = {"force": force}
           date = os.environ.get("DATE_VALUE", "").strip()
           to = os.environ.get("TO_VALUE", "").strip()
           if date:
@@ -93,19 +90,19 @@ jobs:
               --data @payload.json
           }
 
-          status_code="$(post_report "$COLLECTION_STALE_OVERDUE_EMAIL_URL_EFFECTIVE")"
+          status_code="$(post_report "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE")"
 
-          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$COLLECTION_STALE_OVERDUE_EMAIL_URL_EFFECTIVE" != "$DEFAULT_COLLECTION_STALE_OVERDUE_EMAIL_URL" ]]; then
-            echo "Primary COLLECTION_STALE_OVERDUE_EMAIL_URL failed with HTTP $status_code; retrying default endpoint."
-            COLLECTION_STALE_OVERDUE_EMAIL_URL_EFFECTIVE="$DEFAULT_COLLECTION_STALE_OVERDUE_EMAIL_URL"
-            status_code="$(post_report "$COLLECTION_STALE_OVERDUE_EMAIL_URL_EFFECTIVE")"
+          if [[ ("$status_code" -lt 200 || "$status_code" -ge 300) && "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE" != "$DEFAULT_RECEIPTS_NOT_IN_TALLY_EMAIL_URL" ]]; then
+            echo "Primary RECEIPTS_NOT_IN_TALLY_EMAIL_URL failed with HTTP $status_code; retrying default endpoint."
+            RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE="$DEFAULT_RECEIPTS_NOT_IN_TALLY_EMAIL_URL"
+            status_code="$(post_report "$RECEIPTS_NOT_IN_TALLY_EMAIL_URL_EFFECTIVE")"
           fi
 
           if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
-            echo "Collection stale overdue email failed with HTTP $status_code"
+            echo "Receipts not in Tally email failed with HTTP $status_code"
             cat response.json
             exit 1
           fi
 
-          echo "Collection stale overdue email succeeded with HTTP $status_code"
+          echo "Receipts not in Tally email succeeded with HTTP $status_code"
           cat response.json

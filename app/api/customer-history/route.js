@@ -841,6 +841,8 @@ export async function GET(request) {
     const scopeParam = String(url.searchParams.get("scope") || "").trim().toLowerCase();
     const fullHistory = String(url.searchParams.get("fullHistory") || "").trim() === "1"
       || scopeParam === "settlement";
+    // Bulk reconciliation scans: skip peer rows and cache writes.
+    const lite = String(url.searchParams.get("lite") || "").trim() === "1";
 
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer code is required." }, { status: 400 });
@@ -859,6 +861,27 @@ export async function GET(request) {
     const receipts = await loadCustomerReceipts(admin, customerCode, customerName);
 
     const isCurrentCacheVersion = Number(cached?.version || 0) === CACHE_VERSION;
+
+    if (lite) {
+      const cachedTransactions = cached && isCurrentCacheVersion && !forceRefresh && Array.isArray(cached.transactions)
+        ? cached.transactions
+        : [];
+      const useCache = cachedTransactions.length > 0;
+      const transactions = useCache
+        ? await overlayCurrentMonthTransactions(admin, customerCode, cachedTransactions, customerName)
+        : (await fetchCustomerTransactions(admin, customerCode, customerName, scope, { fullHistory })).transactions;
+
+      return NextResponse.json({
+        success: true,
+        customerCode,
+        fromDate: useCache ? cached.fromDate || "" : "",
+        fullHistory: Boolean(fullHistory),
+        source: useCache ? "cache" : "fresh",
+        transactions,
+        peerTransactions: [],
+        receipts,
+      });
+    }
 
     if (cached && isCurrentCacheVersion && !forceRefresh) {
       const stale = isStaleCache(cached.updatedAt);

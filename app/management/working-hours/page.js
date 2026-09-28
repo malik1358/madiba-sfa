@@ -26,8 +26,8 @@ const TEXT = {
   allUsers: { en: "All salesmen", ar: "كل المندوبين" },
   noEntries: { en: "No attendance or field activity found for this date.", ar: "لا يوجد حضور أو نشاط ميداني في هذا التاريخ." },
   note: {
-    en: "Working hours = first→last non-far stop before lunch out, plus first→last non-far stop after lunch in (from 08:00 KSA). Far stops are excluded. If there are not enough near stops, hours fall back to login→lunch→logout (login not before 08:00 KSA).",
-    ar: "ساعات العمل = من أول إلى آخر توقف غير بعيد قبل خروج الغداء، ومن أول إلى آخر توقف غير بعيد بعد عودة الغداء (من 08:00 بتوقيت السعودية). تُستبعد التوقفات البعيدة. إذا لم تكف التوقفات القريبة، تُحسب من الدخول→الغداء→الخروج (ولا يبدأ الدخول قبل 08:00).",
+    en: "Working hours = first→last non-far stop before lunch out, plus first→last non-far stop after lunch in (from 08:00 KSA). Far stops are excluded. Login, logout, and GPS alone count as 0h.",
+    ar: "ساعات العمل = من أول إلى آخر توقف غير بعيد قبل خروج الغداء، ومن أول إلى آخر توقف غير بعيد بعد عودة الغداء (من 08:00 بتوقيت السعودية). تُستبعد التوقفات البعيدة. تسجيل الدخول والخروج وGPS وحدها تُحسب 0 ساعة.",
   },
   usersActive: { en: "People listed", ar: "المدرجون" },
   loggedIn: { en: "Logged in", ar: "سجّلوا الدخول" },

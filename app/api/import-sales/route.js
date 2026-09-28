@@ -6,6 +6,7 @@ import { normalizeImportedItemName } from "../../lib/itemName.js";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 import { runDailySupplierOrderEmailCycle } from "../../lib/dailySupplierOrderEmailServer.js";
 import { rebuildSalesBiCube } from "../../lib/salesBiCubeServer.js";
+import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 import {
   findImportValue,
   findProfitAmount,
@@ -1191,6 +1192,15 @@ export async function POST(request) {
         }
       } catch (emailError) {
         console.error("Daily supplier order email after sales upload failed:", emailError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        await runOutstandingReconcileCycle(createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        }), { trigger: "sales-upload" });
+      } catch (reconcileError) {
+        console.error("Outstanding reconcile after sales upload failed:", reconcileError);
       }
     });
 

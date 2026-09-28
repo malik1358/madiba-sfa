@@ -55,7 +55,6 @@ const CUSTOMER_COLUMNS = [
   { key: "diff", labelKey: "difference" },
 ];
 
-const DIFF_LOAD_CONCURRENCY = 4;
 const DIFF_TOLERANCE = 0.02;
 
 function hasCompareDifference(row) {
@@ -160,13 +159,9 @@ export default function OutstandingComparePage() {
   const [autoCode, setAutoCode] = useState("");
   const [deltaByCode, setDeltaByCode] = useState({});
   const [differencesOnly, setDifferencesOnly] = useState(true);
-  const deltaByCodeRef = useRef({});
+  const [savedRowsByCode, setSavedRowsByCode] = useState(null);
+  const [savedMeta, setSavedMeta] = useState(null);
   const deltaStartedRef = useRef(new Set());
-  const diffRunIdRef = useRef(0);
-
-  useEffect(() => {
-    deltaByCodeRef.current = deltaByCode;
-  }, [deltaByCode]);
 
   const canAccess = access.canAccess("outstandingCompare")
     || access.canAccess("paymentSettlement")
@@ -260,7 +255,7 @@ export default function OutstandingComparePage() {
     setError("");
     try {
       const session = await resolveAuthSession(supabase);
-      const response = await fetch("/api/customers/visible?includeOutstanding=1", {
+      const response = await fetch("/api/customers/visible?includeOutstanding=1&includeInactive=1", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       const payload = await response.json().catch(() => ({}));
@@ -338,6 +333,36 @@ export default function OutstandingComparePage() {
     loadCustomers();
   }, [loadCustomers]);
 
+  const loadSavedReconcile = useCallback(async () => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    try {
+      const session = await resolveAuthSession(supabase);
+      const response = await fetch("/api/outstanding-reconcile", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to load saved reconciliation.");
+      }
+      const rows = Array.isArray(payload.rows) ? payload.rows : [];
+      setSavedRowsByCode(new Map(rows.map((row) => [String(row.customer_code || "").toUpperCase(), row])));
+      setSavedMeta({
+        builtAt: payload.builtAt || "",
+        differenceCount: rows.length,
+        scannedCount: Number(payload.scannedCount || 0),
+      });
+    } catch (err) {
+      setError(err.message || "Unable to load saved reconciliation.");
+      setSavedRowsByCode(new Map());
+      setSavedMeta(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSavedReconcile();
+  }, [loadSavedReconcile]);
+
   useEffect(() => {
     if (!autoCode || !customers.length || selectedCustomer) return;
     const match = customers.find(
@@ -350,97 +375,34 @@ export default function OutstandingComparePage() {
   }, [autoCode, customers, loadCompare, selectedCustomer]);
 
   useEffect(() => {
-    if (!customers.length || loadingCustomers) return undefined;
-    const runId = ++diffRunIdRef.current;
-    let cancelled = false;
-    const claimed = new Set();
-
-    const queue = [...customers]
-      .map((row) => ({
-        code: String(row.customer_code || "").trim(),
-        outstanding: customerOutstandingTotal(row),
-        row,
-      }))
-      .filter((item) => item.code)
-      .sort((a, b) => b.outstanding - a.outstanding);
-
+    if (!customers.length || loadingCustomers || !savedRowsByCode) return;
     setDeltaByCode((current) => {
       const next = { ...current };
-      queue.forEach(({ code }) => {
-        if (next[code]?.status !== "ready") next[code] = { status: "pending" };
+      customers.forEach((row) => {
+        const code = String(row.customer_code || "").trim();
+        if (!code || next[code]?.status === "ready") return;
+        const saved = savedRowsByCode.get(code.toUpperCase());
+        const tally = customerOutstandingTotal(row);
+        next[code] = saved
+          ? {
+            status: "ready",
+            open_delta: Number(saved.difference || 0),
+            computed_open: Number(saved.sfa_outstanding || 0),
+            tally_open: Number(saved.tally_outstanding || 0),
+            gap_count: Number(saved.invoice_gap_count || 0),
+          }
+          // Absent from the saved dataset means the upload reconciled with no gap.
+          : {
+            status: "ready",
+            open_delta: 0,
+            computed_open: tally,
+            tally_open: tally,
+            gap_count: 0,
+          };
       });
       return next;
     });
-
-    async function runQueue() {
-      const supabase = getSupabaseClient();
-      if (!supabase) return;
-      let session;
-      try {
-        session = await resolveAuthSession(supabase);
-      } catch {
-        return;
-      }
-      let cursor = 0;
-
-      async function worker() {
-        while (!cancelled && runId === diffRunIdRef.current) {
-          const index = cursor;
-          cursor += 1;
-          if (index >= queue.length) return;
-          const { code, row: customer } = queue[index];
-          if (claimed.has(code) || deltaStartedRef.current.has(code)) continue;
-          if (deltaByCodeRef.current[code]?.status === "ready") {
-            deltaStartedRef.current.add(code);
-            continue;
-          }
-          claimed.add(code);
-          deltaStartedRef.current.add(code);
-
-          setDeltaByCode((current) => {
-            if (current[code]?.status === "ready") return current;
-            return { ...current, [code]: { ...(current[code] || {}), status: "loading" } };
-          });
-
-          try {
-            const { totals } = await fetchCustomerCompareTotals(customer, session.access_token);
-            if (cancelled || runId !== diffRunIdRef.current) return;
-            setDeltaByCode((current) => ({
-              ...current,
-              [code]: {
-                status: "ready",
-                open_delta: Number(totals.open_delta || 0),
-                computed_open: Number(totals.computed_open || 0),
-                tally_open: Number(totals.tally_open || 0),
-                gap_count: Number(totals.discrepancy_count || 0),
-              },
-            }));
-          } catch {
-            if (cancelled || runId !== diffRunIdRef.current) return;
-            deltaStartedRef.current.delete(code);
-            setDeltaByCode((current) => ({
-              ...current,
-              [code]: { status: "error", open_delta: null },
-            }));
-          }
-        }
-      }
-
-      await Promise.all(
-        Array.from({ length: Math.min(DIFF_LOAD_CONCURRENCY, queue.length) }, () => worker()),
-      );
-    }
-
-    void runQueue();
-    return () => {
-      cancelled = true;
-      claimed.forEach((code) => {
-        if (deltaByCodeRef.current[code]?.status !== "ready") {
-          deltaStartedRef.current.delete(code);
-        }
-      });
-    };
-  }, [customers, loadingCustomers]);
+  }, [customers, loadingCustomers, savedRowsByCode]);
 
   const compareRows = ledger?.outstandingCompareTotals?.has_outstanding_rows
     ? (ledger.outstandingCompareRows || [])
@@ -511,7 +473,7 @@ export default function OutstandingComparePage() {
                     checkedCount
                       ? ` · ${checkedCount.toLocaleString()} of ${customers.length.toLocaleString()} checked`
                       : ""
-                  }`}
+                  }${savedMeta?.builtAt ? ` · saved ${savedMeta.builtAt.slice(0, 16).replace("T", " ")}` : ""}`}
               </span>
             </div>
             <div className="moduleFilterRow">

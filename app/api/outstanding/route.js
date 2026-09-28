@@ -18,6 +18,7 @@ import {
 } from "../../lib/outstanding";
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
+import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -304,6 +305,15 @@ export async function POST(request) {
         });
       } catch (rebuildError) {
         console.error("Mobile snapshot rebuild after outstanding upload failed:", rebuildError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        await runOutstandingReconcileCycle(createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        }), { trigger: "outstanding-upload" });
+      } catch (reconcileError) {
+        console.error("Outstanding reconcile after outstanding upload failed:", reconcileError);
       }
     });
 

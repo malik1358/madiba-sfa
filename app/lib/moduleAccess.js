@@ -31,6 +31,7 @@ export const MODULES = {
   userActivity: { href: "/management/user-activity", label: "User Activity" },
   workingHours: { href: "/management/working-hours", label: "Working Hours" },
   businessDashboard: { href: "/management/business-dashboard", label: "Business Intelligence" },
+  salesmanIncentive: { href: "/management/salesman-incentive", label: "Salesman Incentive" },
   customerMaster: { href: "/management/customer-master", label: "Customer Master" },
   outstandingNoGps: { href: "/management/outstanding-no-gps", label: "Outstanding Without GPS" },
   salesmanVisitPlan: { href: "/management/salesman-visit-plan", label: "Salesman Visit Plan" },
@@ -80,6 +81,7 @@ export const NAV_GROUPS = [
     modules: [
       "businessDashboard",
       "myPerformance",
+      "salesmanIncentive",
       "dailyVisitReport",
       "userActivity",
       "workingHours",
@@ -191,6 +193,7 @@ export function buildModuleAccess(context = {}) {
       userActivity: isAdmin || isManager || isCollector,
       workingHours: isAdmin || isManager || isCollector,
       businessDashboard: isAdmin || isManager,
+      salesmanIncentive: isAdmin || isManager || (isSalesman && !isCollector),
       customerMaster: isAdmin || isManager,
       outstandingNoGps: isAdmin || isManager,
       // Enabled for field sales after admin approval. Set NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS=false to lock again.
@@ -273,6 +276,7 @@ export const MODULE_LABELS = {
   userActivity: { en: "User Activity", ar: "نشاط المستخدمين" },
   workingHours: { en: "Working Hours", ar: "ساعات العمل" },
   businessDashboard: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
+  salesmanIncentive: { en: "Salesman Incentive", ar: "حوافز المندوبين" },
   customerMaster: { en: "Customer Master", ar: "سجل العملاء" },
   outstandingNoGps: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
   salesmanVisitPlan: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },

@@ -111,6 +111,25 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 - Tolerance for amount matches is 0.02.
 - Customer Audit and New Order payment-behavior summaries also show receipt amount collected in the last 10 days (date-windowed by receipt date).
 
+## Salesman incentive scheme
+
+Implemented in `app/lib/salesmanIncentive.js` (pure) and `app/lib/salesmanIncentiveServer.js` (loaders). Screen: `/management/salesman-incentive`, API `/api/salesman-incentive`. Tests: `tests/salesmanIncentive.test.mjs`.
+
+- Collection incentive, measured from invoice date to receipt date:
+  - Office supplies: **0.25%** when collected within **35 days**. Nothing after that.
+  - Electronics: **0.40%** within **35 days**, **0.20%** within **60 days**.
+  - All other categories: **1%** within **35 days**, **0.5%** within **60 days**. Nothing after 60 days.
+- **Cash deals override every category rate.** An invoice whose voucher number starts with a cash prefix (`RC`, `DC`, `JC` — `isCashSalesVoucher` in `app/lib/paymentBehavior.js`) earns **0.20% only**, and only when the cash is received within **3 days** (`INCENTIVE_CASH_DAYS`). After 3 days a cash deal earns nothing. The invoice is not split by category at all.
+- Growth incentive: **0.5%** of the positive difference between this month's and last month's net sales. A negative delta pays zero, it is never carried as a penalty.
+- Receipts are matched to invoices with the same cash FIFO as `matchPaymentsFifo`. The report never re-implements settlement.
+- A settled chunk of a non-cash invoice is split across office supplies / electronics / other using that invoice's own item mix. Office supplies wins when a line matches both classifiers. `isOfficeSuppliesSale` comes from `app/lib/performanceKpis.js` (the same classifier as KPI Targets); electronics is `isElectronicsSale`, which reads the category fields only, not the item name.
+- The incentive **base is net (ex-VAT)**. Receipts are VAT-inclusive, so each settled chunk is converted with the invoice's own `sales_amount` ÷ VAT-inclusive ratio. Net sales for the growth part are `sales_amount` minus credit notes / returns.
+- The report credits the **invoice's** `salesman_code`, not the collector and not the customer's current owner.
+- Sales and receipts are both truncated at `INCENTIVE_HISTORY_MONTHS` (12) before the report month so FIFO is not skewed by loading invoices whose receipts were cut off.
+- Collections older than 60 days (and cash deals older than 3 days) still appear in the table under the `late` tier so the figure can be audited.
+- Per-salesman bases are reported in a `tier_base` map keyed by `INCENTIVE_TIER_KEYS`. Add a new rate by extending `INCENTIVE_RATES`, `INCENTIVE_TIER_KEYS` and `INCENTIVE_TIER_LABELS` — the screen builds its columns from `tierKeys` in the API payload.
+- Admin and manager see every salesman. A salesman sees only their own code; any other `salesman` parameter is rejected with 403.
+
 ## Sales import and BI
 
 - Only the active batch is “the sales file.” Archiving is done by `activate_sales_batch`, which refuses `FAILED` batches and refuses deletion of the active batch.

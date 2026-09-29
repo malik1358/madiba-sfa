@@ -336,6 +336,7 @@ export function buildUserVisitReportEmail({
     `New-customer orders: ${activitySplit.newCustomerOrderCount} / ${formatSplitMoney(activitySplit.newCustomerOrderValue)} SAR`,
     `Repeat-customer orders: ${activitySplit.repeatCustomerOrderCount} / ${formatSplitMoney(activitySplit.repeatCustomerOrderValue)} SAR`,
     `Collections: ${activitySplit.collectionCount} / ${formatSplitMoney(activitySplit.collectionValue)} SAR`,
+    `Collection visits without payment: ${activitySplit.collectionVisitWithoutPaymentCount || 0}`,
     ...locationNotes,
     "",
     ...kpiText,
@@ -368,6 +369,7 @@ export function buildUserVisitReportEmail({
       <tr><td>New-customer orders</td><td>${activitySplit.newCustomerOrderCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.newCustomerOrderValue))} SAR</td></tr>
       <tr><td>Repeat-customer orders</td><td>${activitySplit.repeatCustomerOrderCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.repeatCustomerOrderValue))} SAR</td></tr>
       <tr><td>Collections</td><td>${activitySplit.collectionCount}</td><td>${escapeHtml(formatSplitMoney(activitySplit.collectionValue))} SAR</td></tr>
+      <tr><td>Collection visits without payment</td><td>${activitySplit.collectionVisitWithoutPaymentCount || 0}</td><td>-</td></tr>
     </tbody>
   </table>`;
 

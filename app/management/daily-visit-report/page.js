@@ -93,6 +93,7 @@ const TEXT = {
   newCustomerOrders: { en: "New-customer orders", ar: "طلبات عملاء جدد" },
   repeatCustomerOrders: { en: "Repeat-customer orders", ar: "طلبات عملاء متكررين" },
   collectionsSplit: { en: "Collections", ar: "تحصيلات" },
+  collectionVisitsWithoutPayment: { en: "Collection visits without payment", ar: "زيارات تحصيل بدون دفع" },
   splitCount: { en: "Count", ar: "العدد" },
   splitValue: { en: "Value", ar: "القيمة" },
   idleBubblesTitle: { en: "Unlogged idle circles", ar: "دوائر التوقف غير المسجل" },
@@ -854,6 +855,11 @@ export default function DailyVisitReportPage() {
                           <td>{t("collectionsSplit")}</td>
                           <td>{entryUser.activitySplit.collectionCount}</td>
                           <td>{formatSplitMoney(entryUser.activitySplit.collectionValue)} SAR</td>
+                        </tr>
+                        <tr>
+                          <td>{t("collectionVisitsWithoutPayment")}</td>
+                          <td>{entryUser.activitySplit.collectionVisitWithoutPaymentCount || 0}</td>
+                          <td>-</td>
                         </tr>
                       </tbody>
                     </table>

@@ -66,6 +66,18 @@ test("day split counts visit without order separately from collections", () => {
   assert.equal(split.repeatCustomerOrderCount, 2);
 });
 
+test("day split counts collection visits without payment on their own line", () => {
+  const split = buildVisitDaySplit([
+    { transactionType: "COLLECTION_VISIT", customerCode: "C1", amountReceived: 2000 },
+    { transactionType: "COLLECTION_VISIT", customerCode: "C2", amountReceived: 0, visitOutcome: "COME_BACK_LATER" },
+    { transactionType: "COLLECTION_VISIT", customerCode: "C3", visitOutcome: "RESPONSIBLE_NOT_AVAILABLE" },
+  ]);
+
+  assert.equal(split.collectionCount, 1);
+  assert.equal(split.collectionValue, 2000);
+  assert.equal(split.collectionVisitWithoutPaymentCount, 2);
+});
+
 test("buildVisitDaySplit uses posted order totals when new/repeat fields are missing", () => {
   const split = buildVisitDaySplit(
     [

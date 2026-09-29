@@ -294,6 +294,12 @@ export default function Home() {
       const supabase = getSupabaseClient();
       if (!supabase) return;
 
+      // Collectors punch morning attendance on the Collections screen.
+      if (isCollectionOnlyAccess) {
+        router.replace("/management/payment-collections");
+        return;
+      }
+
       if (isMorningAttendanceRequiredForRole(profile.role)) {
         const attendanceComplete = await hasMorningAttendanceToday(supabase, user.id);
         if (cancelled) return;
@@ -301,10 +307,6 @@ export default function Home() {
           router.replace("/management/my-day");
           return;
         }
-      }
-
-      if (isCollectionOnlyAccess) {
-        router.replace("/management/payment-collections");
       }
     }
 

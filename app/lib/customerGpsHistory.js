@@ -1,4 +1,5 @@
 import { coordinateCacheKey } from "./geo.js";
+import { HOME_LOCATION_BLOCK_RADIUS_METERS, isAtHomeLocation } from "./homeLocation.js";
 import { formatKsaDateTime } from "./workdayActivity.js";
 
 export const CUSTOMER_GPS_SOURCE = {
@@ -55,6 +56,7 @@ export function gpsSourceLabel(source) {
   if (value === CUSTOMER_GPS_SOURCE.customerMaster) return "Customer Master";
   if (value === CUSTOMER_GPS_SOURCE.visit) return "Visit GPS";
   if (value === CUSTOMER_GPS_SOURCE.excelImport) return "Excel import";
+  if (value === "home_location_cleanup") return "Home location cleanup";
   return value || "Unknown";
 }
 
@@ -103,6 +105,22 @@ export async function applyCustomerGpsUpdate(admin, {
 } = {}) {
   const code = String(customerCode || "").trim();
   if (!code) throw new Error("Customer code is required");
+
+  if (latitude != null && longitude != null && actorUserId(actor)) {
+    const { data: actorProfile, error: actorProfileError } = await admin
+      .from("profiles")
+      .select("home_latitude,home_longitude")
+      .eq("id", actorUserId(actor))
+      .maybeSingle();
+    if (actorProfileError && !isMissingGpsAuditError(actorProfileError)) throw actorProfileError;
+    if (actorProfile && isAtHomeLocation(
+      { latitude, longitude },
+      { latitude: actorProfile.home_latitude, longitude: actorProfile.home_longitude },
+      HOME_LOCATION_BLOCK_RADIUS_METERS,
+    )) {
+      throw new Error("Customer location cannot be updated from within 500 m of your saved home location.");
+    }
+  }
 
   let previousLat = previousLatitude;
   let previousLng = previousLongitude;

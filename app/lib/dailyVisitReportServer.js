@@ -551,6 +551,13 @@ function emptyUserReport(userId, profile) {
   return {
     userId,
     userName: formatCollectorDisplayName(profile || {}),
+    homeLocation: hasGpsCoordinates({
+      latitude: profile?.home_latitude,
+      longitude: profile?.home_longitude,
+    }) ? {
+      latitude: Number(profile.home_latitude),
+      longitude: Number(profile.home_longitude),
+    } : null,
     email: String(profile?.report_email || profile?.email || "").trim(),
     reportEmail: String(profile?.report_email || "").trim(),
     visitCount: 0,
@@ -568,10 +575,13 @@ async function loadProfilesById(admin, userIds, { includeActive = false } = {}) 
   if (!ids.length) return [];
 
   const extra = includeActive ? ",is_active" : "";
-  const full = `id,salesman_code,salesman_name,role,email,report_email${extra}`;
+  const full = `id,salesman_code,salesman_name,role,email,report_email,home_latitude,home_longitude${extra}`;
   const fallback = `id,salesman_code,salesman_name,role,email${extra}`;
 
   let result = await admin.from("profiles").select(full).in("id", ids);
+  if (result.error && isMissingSchemaColumn(result.error)) {
+    result = await admin.from("profiles").select(`id,salesman_code,salesman_name,role,email,report_email${extra}`).in("id", ids);
+  }
   if (result.error && isMissingSchemaColumn(result.error)) {
     result = await admin.from("profiles").select(fallback).in("id", ids);
   }
@@ -666,6 +676,13 @@ export async function buildDailyVisitReport(admin, { date, userIdFilter = "" } =
     return {
       userId: entryUserId,
       userName: formatCollectorDisplayName(profile),
+      homeLocation: hasGpsCoordinates({
+        latitude: profile.home_latitude,
+        longitude: profile.home_longitude,
+      }) ? {
+        latitude: Number(profile.home_latitude),
+        longitude: Number(profile.home_longitude),
+      } : null,
       email: String(profile.email || "").trim(),
       reportEmail: String(profile.report_email || "").trim(),
       visitCount: countDailyVisitEntries(enrichedEntries),

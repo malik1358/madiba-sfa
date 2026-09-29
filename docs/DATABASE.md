@@ -19,6 +19,7 @@ This file lists objects found in the repo. It is not a live dump of production. 
 | `report_email` | Added in `20260904180000_profile_report_email.sql`. |
 | `activity_reminders_enabled` | Boolean, default true. `20260907120000_profile_activity_reminders.sql`. |
 | `stock_take_access` | Boolean, default false. `20260908140000_stock_take.sql`. |
+| `home_latitude`, `home_longitude` | Optional saved salesperson home point. Added by `20260929120000_salesman_home_locations.sql`; both coordinates must be set or null. |
 
 **Not in migrations:** `sql/fix_profiles_role_check_collector.sql` adds `collector` to `profiles_role_check`. The baseline migration does not include `collector`. Assigning that role fails until the script is applied.
 
@@ -207,3 +208,5 @@ Treat RLS as a backstop for browser queries with the publishable key. API author
 3. If the app can deploy before the SQL runs, read the column with a fallback, matching existing `isMissingColumnError` handling.
 4. Say in the change summary that someone must run the migration on **local/dev** (while developing) and **production** Supabase before the app depends on it. Git push does not migrate the database.
 5. Do not put production data fixes that target named people into a migration that runs on every environment. One-off data scripts such as `sql/share_ahmed_nabil_customers_with_abdalla.sql` are manual.
+
+`20260929120000_salesman_home_locations.sql` adds the home-coordinate columns and database guards: attendance punches cannot be recorded within 500 m of that user's saved home, and customer GPS cannot be set within 25 m of any saved home point. Apply on local/dev before testing and on production through the approved release process. Saving a home point in Salesman Hierarchy clears matching customer pins through the GPS-audited API.

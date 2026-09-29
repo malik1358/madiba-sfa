@@ -357,9 +357,17 @@ async function loadSalesmen(admin) {
   const roleFilter = ["salesman", "manager", "admin", "invoice-maker", "invoice_maker", "product-promoter", "product_promoter", "collector"];
   let profilesRes = await admin
     .from("profiles")
-    .select("id,salesman_code,salesman_name,role,is_active,report_email,activity_reminders_enabled,stock_take_access")
+    .select("id,salesman_code,salesman_name,role,is_active,report_email,activity_reminders_enabled,stock_take_access,home_latitude,home_longitude")
     .in("role", roleFilter)
     .order("salesman_name");
+
+  if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
+    profilesRes = await admin
+      .from("profiles")
+      .select("id,salesman_code,salesman_name,role,is_active,report_email,activity_reminders_enabled,stock_take_access")
+      .in("role", roleFilter)
+      .order("salesman_name");
+  }
 
   if (profilesRes.error && isMissingSchemaColumn(profilesRes.error)) {
     profilesRes = await admin
@@ -397,6 +405,12 @@ async function loadSalesmen(admin) {
       is_active: profile.is_active !== false,
       activity_reminders_enabled: profile.activity_reminders_enabled !== false,
       stock_take_access: profile.stock_take_access === true,
+      home_latitude: profile.home_latitude != null && Number.isFinite(Number(profile.home_latitude))
+        ? Number(profile.home_latitude)
+        : null,
+      home_longitude: profile.home_longitude != null && Number.isFinite(Number(profile.home_longitude))
+        ? Number(profile.home_longitude)
+        : null,
       email: authUser?.email || "",
       report_email: String(profile.report_email || "").trim(),
       login_name: displayLoginName(authUser?.email || ""),
@@ -791,6 +805,69 @@ export async function POST(request) {
           ? `Stock Take access is on for ${target.salesman_name || target.salesman_code || salesmanId}.`
           : `Stock Take access is off for ${target.salesman_name || target.salesman_code || salesmanId}.`,
         stockTakeAccess,
+      });
+    }
+
+    if (mode === "set-home-location") {
+      const salesmanId = String(body?.salesmanId || "").trim();
+      const latitudeRaw = body?.latitude;
+      const longitudeRaw = body?.longitude;
+      const clearing = (latitudeRaw === "" || latitudeRaw == null)
+        && (longitudeRaw === "" || longitudeRaw == null);
+      const latitudeProvided = latitudeRaw != null && String(latitudeRaw).trim() !== "";
+      const longitudeProvided = longitudeRaw != null && String(longitudeRaw).trim() !== "";
+      const latitude = clearing ? null : Number(latitudeRaw);
+      const longitude = clearing ? null : Number(longitudeRaw);
+
+      if (!salesmanId) {
+        return NextResponse.json({ success: false, error: "Missing salesman id." }, { status: 400 });
+      }
+      if (!clearing && (!latitudeProvided || !longitudeProvided
+        || !Number.isFinite(latitude) || !Number.isFinite(longitude)
+        || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180)) {
+        return NextResponse.json({ success: false, error: "Enter a valid latitude and longitude, or clear both fields." }, { status: 400 });
+      }
+
+      const { data: target, error: targetError } = await admin
+        .from("profiles")
+        .select("id,salesman_code,salesman_name")
+        .eq("id", salesmanId)
+        .single();
+      if (targetError) throw targetError;
+
+      const { error: updateError } = await admin
+        .from("profiles")
+        .update({ home_latitude: latitude, home_longitude: longitude })
+        .eq("id", salesmanId);
+      if (updateError) {
+        if (isMissingSchemaColumn(updateError)) {
+          return NextResponse.json({
+            success: false,
+            error: "Apply supabase/migrations/20260929120000_salesman_home_locations.sql before saving home locations.",
+          }, { status: 400 });
+        }
+        throw updateError;
+      }
+
+      let cleanup = { removed: 0, customerCodes: [] };
+      if (!clearing) {
+        const { clearCustomerPinsAtHomeLocation } = await import("../../../lib/homeLocationServer.js");
+        cleanup = await clearCustomerPinsAtHomeLocation(admin, {
+          latitude,
+          longitude,
+          actor: {
+            id: access.user.id,
+            email: access.user.email,
+            role: "management",
+          },
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `${target.salesman_name || target.salesman_code || salesmanId} home location saved. Cleared ${cleanup.removed} customer pin(s) within 25 m.`,
+        homeLocation: clearing ? null : { latitude, longitude },
+        removedCustomerPins: cleanup.removed,
       });
     }
 

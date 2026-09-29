@@ -12,6 +12,7 @@ import { hasMorningAttendanceToday, isMorningAttendanceRequiredForRole } from ".
 import { useAppPopup } from "./components/AppPopupProvider";
 import { isAndroidBatteryRestricted } from "./lib/androidBatteryOptimization";
 import { probeGpsLocationWithRetries } from "./lib/geo";
+import { isAtHomeLocation } from "./lib/homeLocation";
 import { evaluateNativeAndroidApkVersion } from "./lib/androidAppVersion";
 import AndroidApkUpdateRequired from "./components/AndroidApkUpdateRequired";
 import { useLogoutWithDaySummary } from "./hooks/useLogoutWithDaySummary";
@@ -249,7 +250,23 @@ export default function Home() {
         }
 
         try {
-          await probeGpsLocationWithRetries({ attempts: 3 });
+          const location = await probeGpsLocationWithRetries({ attempts: 3 });
+          if (isAtHomeLocation(location, {
+            latitude: profileData.home_latitude,
+            longitude: profileData.home_longitude,
+          })) {
+            await supabase.auth.signOut();
+            setUser(null);
+            setProfile(null);
+            showPopup({
+              message: ar
+                ? "لا يمكن تسجيل الدخول من موقع المنزل المحفوظ. انتقل إلى موقع آخر وحاول مرة أخرى."
+                : "Login is not allowed within 500 m of your saved home location. Move elsewhere and try again.",
+              variant: "warning",
+            });
+            setLoginLoading(false);
+            return;
+          }
         } catch {
           await supabase.auth.signOut();
           setUser(null);

@@ -88,6 +88,7 @@ const TEXT = {
   workingHours: { en: "Working hours", ar: "ساعات العمل" },
   visitNumber: { en: "Visit #", ar: "رقم الزيارة" },
   coordinates: { en: "Coordinates", ar: "الإحداثيات" },
+  homeLocation: { en: "Home location", ar: "موقع المنزل" },
   daySplitTitle: { en: "Day split", ar: "تفصيل اليوم" },
   visitWithoutOrder: { en: "Visit without order", ar: "زيارة بدون طلب" },
   newCustomerOrders: { en: "New-customer orders", ar: "طلبات عملاء جدد" },
@@ -825,6 +826,19 @@ export default function DailyVisitReportPage() {
                       {t("waitingTotalShort")}: {formatDurationMinutes(userWaitingMinutes)}
                     </span>
                   </div>
+                  {entryUser.homeLocation ? (
+                    <p className="moduleHint">
+                      <strong>{t("homeLocation")}:</strong>{" "}
+                      {Number(entryUser.homeLocation.latitude).toFixed(5)}, {Number(entryUser.homeLocation.longitude).toFixed(5)}{" "}
+                      <a
+                        href={buildGoogleMapsPointUrl(entryUser.homeLocation.latitude, entryUser.homeLocation.longitude)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {t("openMap")}
+                      </a>
+                    </p>
+                  ) : null}
 
                   {entryUser.activitySplit ? (
                     <table className="moduleTable visitDaySplitTable">

@@ -173,6 +173,21 @@ test("buildUserVisitReportEmail includes the user name and timeline", () => {
   assert.match(message.html, /24\.70000, 46\.70000/);
 });
 
+test("buildUserVisitReportEmail includes the saved home point and map link", () => {
+  const message = buildUserVisitReportEmail({
+    date: "2026-09-29",
+    user: {
+      userName: "Osama (SM001)",
+      homeLocation: { latitude: 24.63063, longitude: 46.69947 },
+      entries: [],
+    },
+  });
+
+  assert.match(message.text, /Home location: 24\.63063, 46\.69947/);
+  assert.match(message.html, /Home location:<\/strong> 24\.63063, 46\.69947/);
+  assert.match(message.html, /google\.com\/maps/);
+});
+
 test("buildUserVisitReportEmail identifies a visit with an accepted GPS update", () => {
   const message = buildUserVisitReportEmail({
     date: "2026-09-28",

@@ -71,6 +71,13 @@ const TEXT = {
     en: "Tick to let this user open Stock Take and the scan report. Admins always have access even if this is off.",
     ar: "حدد للسماح لهذا المستخدم بفتح الجرد وتقرير المسح. المديرون العامون يصلون دائماً حتى لو كان هذا متوقفاً.",
   },
+  homeLocation: { en: "Home location", ar: "موقع المنزل" },
+  homeLatitude: { en: "Latitude", ar: "خط العرض" },
+  homeLongitude: { en: "Longitude", ar: "خط الطول" },
+  homeLocationHint: {
+    en: "Login and logout attendance punches are blocked within 500 m. Customer GPS pins within 25 m are cleared when saved and cannot be added again.",
+    ar: "يُمنع تسجيل الحضور والانصراف ضمن 500 متر. تُحذف مواقع العملاء ضمن 25 متراً عند الحفظ ولا يمكن إضافتها مجدداً.",
+  },
   saveAll: { en: "Save all", ar: "حفظ الكل" },
   savingAll: { en: "Saving all...", ar: "جاري حفظ الكل..." },
   noChanges: { en: "No changes to save.", ar: "لا توجد تغييرات للحفظ." },
@@ -152,6 +159,7 @@ export default function SalesmanHierarchyPage() {
   const [reportEmailSelections, setReportEmailSelections] = useState({});
   const [activityReminderSelections, setActivityReminderSelections] = useState({});
   const [stockTakeAccessSelections, setStockTakeAccessSelections] = useState({});
+  const [homeLocationSelections, setHomeLocationSelections] = useState({});
   const [newSalesman, setNewSalesman] = useState({
     salesmanName: "",
     salesmanCode: "",
@@ -219,6 +227,12 @@ export default function SalesmanHierarchyPage() {
       setStockTakeAccessSelections(
         Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, salesman.stock_take_access === true]))
       );
+      setHomeLocationSelections(
+        Object.fromEntries((data.salesmen || []).map((salesman) => [salesman.id, {
+          latitude: salesman.home_latitude == null ? "" : String(salesman.home_latitude),
+          longitude: salesman.home_longitude == null ? "" : String(salesman.home_longitude),
+        }]))
+      );
     } catch (err) {
       setError(err.message || "Unable to load salesman hierarchy.");
     } finally {
@@ -284,6 +298,9 @@ export default function SalesmanHierarchyPage() {
     const nextReportEmail = String(reportEmailSelections[salesman.id] || "").trim();
     const nextActivityReminders = activityReminderSelections[salesman.id] !== false;
     const nextStockTakeAccess = stockTakeAccessSelections[salesman.id] === true;
+    const nextHomeLocation = homeLocationSelections[salesman.id] || { latitude: "", longitude: "" };
+    const currentHomeLatitude = salesman.home_latitude == null ? "" : String(salesman.home_latitude);
+    const currentHomeLongitude = salesman.home_longitude == null ? "" : String(salesman.home_longitude);
 
     return {
       nextRole,
@@ -292,12 +309,15 @@ export default function SalesmanHierarchyPage() {
       nextReportEmail,
       nextActivityReminders,
       nextStockTakeAccess,
+      nextHomeLocation,
       roleChanged: nextRole !== normalizeRoleValue(salesman.role),
       headChanged: nextHead !== String(salesman.head_salesman_code || ""),
       regionChanged: !samePricingRegions(nextRegions, salesman.pricing_regions || salesman.pricing_region),
       reportEmailChanged: nextReportEmail !== String(salesman.report_email || "").trim(),
       remindersChanged: nextActivityReminders !== (salesman.activity_reminders_enabled !== false),
       stockTakeChanged: nextStockTakeAccess !== (salesman.stock_take_access === true),
+      homeLocationChanged: nextHomeLocation.latitude.trim() !== currentHomeLatitude
+        || nextHomeLocation.longitude.trim() !== currentHomeLongitude,
     };
   }
 
@@ -308,7 +328,8 @@ export default function SalesmanHierarchyPage() {
       || pending.regionChanged
       || pending.reportEmailChanged
       || pending.remindersChanged
-      || pending.stockTakeChanged;
+      || pending.stockTakeChanged
+      || pending.homeLocationChanged;
   }
 
   async function persistSalesmanChanges(salesman) {
@@ -359,6 +380,16 @@ export default function SalesmanHierarchyPage() {
         stockTakeAccess: pending.nextStockTakeAccess,
       });
       messages.push(stockTakeResult.message || "Stock take access updated.");
+    }
+
+    if (pending.homeLocationChanged) {
+      const homeResult = await postAction({
+        mode: "set-home-location",
+        salesmanId: salesman.id,
+        latitude: pending.nextHomeLocation.latitude,
+        longitude: pending.nextHomeLocation.longitude,
+      });
+      messages.push(homeResult.message || "Home location saved.");
     }
 
     return messages;
@@ -664,6 +695,7 @@ export default function SalesmanHierarchyPage() {
           <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("inactiveHint")}</div>
           <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("activityRemindersHint")}</div>
           <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("stockTakeHint")}</div>
+          <div className="moduleHint" style={{ marginBottom: "10px" }}>{t("homeLocationHint")}</div>
 
           <ExportableTable filename="salesman-hierarchy" sheetName="Hierarchy" className="moduleTableWrap">
             <table className="moduleTable">
@@ -677,6 +709,7 @@ export default function SalesmanHierarchyPage() {
                   <th title="This person's inbox. Heads above them also receive the daily visit report.">Report email</th>
                   <th title={t("activityRemindersHint")}>{t("activityReminders")}</th>
                   <th title={t("stockTakeHint")}>{t("stockTake")}</th>
+                  <th title={t("homeLocationHint")}>{t("homeLocation")}</th>
                   <th>Current Head</th>
                   <th>Assign Head</th>
                   <th>Default Password</th>
@@ -758,6 +791,40 @@ export default function SalesmanHierarchyPage() {
                           <span>{stockTakeAccessSelections[salesman.id] === true ? t("stockTakeOn") : t("stockTakeOff")}</span>
                         </label>
                       </td>
+                      <td>
+                        <div style={{ display: "grid", gridTemplateColumns: "minmax(92px, 1fr) minmax(92px, 1fr)", gap: "4px", minWidth: "200px" }}>
+                          <input
+                            className="moduleInput"
+                            type="number"
+                            step="any"
+                            value={homeLocationSelections[salesman.id]?.latitude ?? ""}
+                            aria-label={`${t("homeLatitude")} ${salesman.salesman_name}`}
+                            placeholder={t("homeLatitude")}
+                            onChange={(event) => setHomeLocationSelections((current) => ({
+                              ...current,
+                              [salesman.id]: {
+                                ...(current[salesman.id] || { latitude: "", longitude: "" }),
+                                latitude: event.target.value,
+                              },
+                            }))}
+                          />
+                          <input
+                            className="moduleInput"
+                            type="number"
+                            step="any"
+                            value={homeLocationSelections[salesman.id]?.longitude ?? ""}
+                            aria-label={`${t("homeLongitude")} ${salesman.salesman_name}`}
+                            placeholder={t("homeLongitude")}
+                            onChange={(event) => setHomeLocationSelections((current) => ({
+                              ...current,
+                              [salesman.id]: {
+                                ...(current[salesman.id] || { latitude: "", longitude: "" }),
+                                longitude: event.target.value,
+                              },
+                            }))}
+                          />
+                        </div>
+                      </td>
                       <td>{currentHead ? headOptionLabel(currentHead) : "-"}</td>
                       <td>
                         <select
@@ -813,7 +880,7 @@ export default function SalesmanHierarchyPage() {
 
                 {salesmen.length === 0 && (
                   <tr>
-                    <td colSpan={12}>No users found.</td>
+                    <td colSpan={13}>No users found.</td>
                   </tr>
                 )}
               </tbody>

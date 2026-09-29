@@ -3,6 +3,71 @@ import { toNumber } from "./outstanding.js";
 export const OUTSTANDING_RECONCILE_KEY = "outstanding_reconcile_dataset_v1";
 export const OUTSTANDING_RECONCILE_TOLERANCE = 0.02;
 
+/** Why a Tally bill could not be attached to a sales invoice. */
+export const BILL_MISMATCH_OTHER_CUSTOMER = "ref_other_customer";
+export const BILL_MISMATCH_REVERSED = "ref_reversed";
+export const BILL_MISMATCH_MISSING = "ref_missing";
+
+export const BILL_MISMATCH_LABELS = {
+  [BILL_MISMATCH_OTHER_CUSTOMER]: {
+    en: "Ref belongs to another customer",
+    ar: "المرجع يخص عميلاً آخر",
+  },
+  [BILL_MISMATCH_REVERSED]: {
+    en: "Invoice reversed in SFA",
+    ar: "الفاتورة معكوسة في النظام",
+  },
+  [BILL_MISMATCH_MISSING]: {
+    en: "Ref not in sales data",
+    ar: "المرجع غير موجود في بيانات المبيعات",
+  },
+};
+
+export function normalizeBillRef(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+/**
+ * Classifies a Tally bill that produced its own open row because its Ref. No.
+ * matched no sales invoice for that customer.
+ *
+ * @param {object} input
+ * @param {string} input.customerCode Customer the bill is billed to.
+ * @param {string} input.billRef Tally `Ref. No.`.
+ * @param {string[]} input.refOwners Customer codes that own this voucher in sales.
+ * @param {boolean} input.reversedInSfa The customer's own voucher was credit-note reversed.
+ */
+export function classifyOutstandingBillMismatch({
+  customerCode = "",
+  billRef = "",
+  refOwners = [],
+  reversedInSfa = false,
+} = {}) {
+  const code = String(customerCode || "").trim().toUpperCase();
+  const owners = [...new Set((Array.isArray(refOwners) ? refOwners : []).map((value) => String(value || "").trim().toUpperCase()).filter(Boolean))];
+  const ownedBySelf = owners.includes(code);
+
+  if (reversedInSfa && ownedBySelf) {
+    return {
+      mismatch_type: BILL_MISMATCH_REVERSED,
+      note: "Sales history has this voucher but SFA treated it as reversed by a credit note, while Tally still shows it pending.",
+    };
+  }
+
+  const otherOwners = owners.filter((owner) => owner !== code);
+  if (otherOwners.length) {
+    return {
+      mismatch_type: BILL_MISMATCH_OTHER_CUSTOMER,
+      note: `Sales data has ${normalizeBillRef(billRef)} under customer ${otherOwners.join(", ")}, not this customer. Check the Ref. No. column alignment on the Bills Receivable export.`,
+    };
+  }
+
+  return {
+    mismatch_type: BILL_MISMATCH_MISSING,
+    note: "This reference does not appear anywhere in the sales data.",
+  };
+}
+
 /**
  * Customer-level Tally vs SFA outstanding row for the precomputed difference report.
  * Tally = customer total on the outstanding upload; SFA = computed open (cash FIFO + credit notes).
@@ -56,6 +121,30 @@ export function summarizeOutstandingReconcileRows(rows = []) {
   };
 }
 
+export function summarizeOutstandingBillMismatches(rows = []) {
+  const list = Array.isArray(rows) ? rows : [];
+  const byType = {};
+  [BILL_MISMATCH_OTHER_CUSTOMER, BILL_MISMATCH_REVERSED, BILL_MISMATCH_MISSING].forEach((type) => {
+    const typeRows = list.filter((row) => row.mismatch_type === type);
+    byType[type] = {
+      count: typeRows.length,
+      pending: typeRows.reduce((sum, row) => sum + toNumber(row.pending_amount), 0),
+    };
+  });
+  return {
+    count: list.length,
+    pending: list.reduce((sum, row) => sum + toNumber(row.pending_amount), 0),
+    byType,
+  };
+}
+
+export function sortOutstandingBillMismatches(rows = []) {
+  return [...(Array.isArray(rows) ? rows : [])].sort((left, right) => (
+    toNumber(right.pending_amount) - toNumber(left.pending_amount)
+    || String(left.customer_code || "").localeCompare(String(right.customer_code || ""))
+  ));
+}
+
 export function emptyOutstandingReconcileDataset() {
   return {
     builtAt: "",
@@ -66,6 +155,8 @@ export function emptyOutstandingReconcileDataset() {
     receiptUploadedAt: "",
     rows: [],
     summary: summarizeOutstandingReconcileRows([]),
+    mismatchRows: [],
+    mismatchSummary: summarizeOutstandingBillMismatches([]),
   };
 }
 
@@ -86,6 +177,24 @@ export function normalizeOutstandingReconcileDataset(raw) {
     })),
   );
 
+  const mismatchRows = sortOutstandingBillMismatches(
+    (Array.isArray(raw.mismatchRows) ? raw.mismatchRows : []).map((row) => ({
+      customer_code: String(row?.customer_code || "").trim().toUpperCase(),
+      customer_name: String(row?.customer_name || "").trim(),
+      salesman_name: String(row?.salesman_name || "").trim(),
+      bill_ref: String(row?.bill_ref || "").trim(),
+      bill_date: String(row?.bill_date || "").trim(),
+      pending_amount: toNumber(row?.pending_amount),
+      invoice_days: Number(row?.invoice_days || 0),
+      mismatch_type: String(row?.mismatch_type || BILL_MISMATCH_MISSING),
+      note: String(row?.note || ""),
+      ref_owners: Array.isArray(row?.ref_owners) ? row.ref_owners.map((value) => String(value || "")) : [],
+      same_amount_vouchers: Array.isArray(row?.same_amount_vouchers)
+        ? row.same_amount_vouchers.map((value) => String(value || ""))
+        : [],
+    })),
+  );
+
   return {
     builtAt: String(raw.builtAt || ""),
     trigger: String(raw.trigger || ""),
@@ -97,5 +206,7 @@ export function normalizeOutstandingReconcileDataset(raw) {
     summary: raw.summary && typeof raw.summary === "object"
       ? raw.summary
       : summarizeOutstandingReconcileRows(rows),
+    mismatchRows,
+    mismatchSummary: summarizeOutstandingBillMismatches(mismatchRows),
   };
 }

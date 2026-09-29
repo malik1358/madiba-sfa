@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { salesmanValueMatchesScope } from "../../lib/mutualSalesmanGroups.js";
-import { summarizeOutstandingReconcileRows } from "../../lib/outstandingReconcile.js";
+import { summarizeOutstandingBillMismatches, summarizeOutstandingReconcileRows } from "../../lib/outstandingReconcile.js";
 import {
   readOutstandingReconcileDataset,
   rebuildOutstandingReconcileDataset,
@@ -66,9 +66,11 @@ export async function GET(request) {
     const dataset = await readOutstandingReconcileDataset(admin);
 
     let rows = dataset.rows;
+    let mismatchRows = dataset.mismatchRows;
     const scope = await resolveScopeForUserId(admin, profile.id).catch(() => null);
     if (scope && !scope.hasAllAccess) {
       rows = rows.filter((row) => salesmanValueMatchesScope(row.salesman_name, scope.scopeMatchers));
+      mismatchRows = mismatchRows.filter((row) => salesmanValueMatchesScope(row.salesman_name, scope.scopeMatchers));
     }
 
     return NextResponse.json({
@@ -81,6 +83,10 @@ export async function GET(request) {
       receiptUploadedAt: dataset.receiptUploadedAt,
       rows,
       summary: rows === dataset.rows ? dataset.summary : summarizeOutstandingReconcileRows(rows),
+      mismatchRows,
+      mismatchSummary: mismatchRows === dataset.mismatchRows
+        ? dataset.mismatchSummary
+        : summarizeOutstandingBillMismatches(mismatchRows),
     });
   } catch (error) {
     const status = Number(error?.status) || 500;

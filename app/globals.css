@@ -8003,3 +8003,21 @@ button.moduleBiDashKpi:focus-visible {
     max-width: none;
   }
 }
+
+.moduleIncentiveDrill {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #0b6173;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.moduleIncentiveDrill:hover,
+.moduleIncentiveDrill:focus-visible {
+  color: #0f4c5c;
+  text-decoration-thickness: 2px;
+}

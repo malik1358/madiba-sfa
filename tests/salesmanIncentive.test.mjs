@@ -252,15 +252,62 @@ test("resolvePeakMonthlySales takes the best earlier month, never the current on
     ["2026-03", 300],
     ["2026-04", 5000],
   ]);
-  assert.deepEqual(resolvePeakMonthlySales(byMonth, "2026-04"), { peakMonth: "2026-02", peakSales: 900 });
+  assert.deepEqual(
+    resolvePeakMonthlySales(byMonth, "2026-04"),
+    { peakMonth: "2026-02", peakSales: 900, hasHistory: true },
+  );
 });
 
 test("resolvePeakMonthlySales floors at zero when there is no positive history", () => {
   assert.deepEqual(
     resolvePeakMonthlySales(new Map([["2026-03", -200]]), "2026-04"),
-    { peakMonth: "", peakSales: 0 },
+    { peakMonth: "", peakSales: 0, hasHistory: true },
   );
-  assert.deepEqual(resolvePeakMonthlySales(new Map(), "2026-04"), { peakMonth: "", peakSales: 0 });
+  assert.deepEqual(
+    resolvePeakMonthlySales(new Map(), "2026-04"),
+    { peakMonth: "", peakSales: 0, hasHistory: false },
+  );
+});
+
+test("a salesman's first month earns no growth incentive", () => {
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [],
+    monthlySalesBySalesman: new Map([["S99", new Map([["2026-04", 400000]])]]),
+  });
+
+  const [summary] = report.salesmen;
+  assert.equal(summary.salesman_code, "S99");
+  assert.equal(summary.has_sales_history, false);
+  assert.equal(summary.current_month_sales, 400000);
+  assert.equal(summary.peak_month_sales, 0);
+  assert.equal(summary.sales_delta, 0);
+  assert.equal(summary.growth_incentive, 0);
+});
+
+test("the month after the first one is measured against that first month", () => {
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-05",
+    customers: [],
+    monthlySalesBySalesman: new Map([
+      ["S99", new Map([["2026-04", 400000], ["2026-05", 450000]])],
+    ]),
+  });
+
+  const [summary] = report.salesmen;
+  assert.equal(summary.has_sales_history, true);
+  assert.equal(summary.peak_month, "2026-04");
+  assert.equal(summary.sales_delta, 50000);
+  assert.equal(summary.growth_incentive, 250);
+});
+
+test("computeGrowthIncentive pays nothing without history", () => {
+  assert.deepEqual(computeGrowthIncentive(1000, 0, { hasHistory: false }), {
+    currentMonthSales: 1000,
+    benchmarkSales: 0,
+    salesDelta: 0,
+    growthIncentive: 0,
+  });
 });
 
 test("growth incentive is measured against the all-time best month", () => {
@@ -402,5 +449,7 @@ test("buildSalesmanIncentiveReport can be scoped to one salesman", () => {
   const scoped = buildSalesmanIncentiveReport({ month: "2026-04", customers, salesmanCodes: ["S02"] });
   assert.deepEqual(scoped.salesmen.map((row) => row.salesman_code), ["S02"]);
   assert.equal(scoped.rows.length, 0);
-  assert.equal(scoped.salesmen[0].growth_incentive, 2.5);
+  // S02 only sells in the report month, so it is a first month and earns no growth.
+  assert.equal(scoped.salesmen[0].has_sales_history, false);
+  assert.equal(scoped.salesmen[0].growth_incentive, 0);
 });

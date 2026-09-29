@@ -312,29 +312,32 @@ export function buildMonthlyNetSalesBySalesman(transactions = [], target = new M
   return target;
 }
 
-export function computeGrowthIncentive(currentMonthSales, benchmarkSales) {
+export function computeGrowthIncentive(currentMonthSales, benchmarkSales, { hasHistory = true } = {}) {
   const current = toNumber(currentMonthSales);
   const benchmark = toNumber(benchmarkSales);
   const delta = current - benchmark;
   return {
     currentMonthSales: round2(current),
     benchmarkSales: round2(benchmark),
-    salesDelta: round2(delta),
-    growthIncentive: delta > 0 ? round2(delta * INCENTIVE_RATES.salesGrowth) : 0,
+    salesDelta: hasHistory ? round2(delta) : 0,
+    growthIncentive: hasHistory && delta > 0 ? round2(delta * INCENTIVE_RATES.salesGrowth) : 0,
   };
 }
 
 /**
  * Best net-sales month before the report month, across all loaded history.
- * The current month is never its own benchmark.
+ * The current month is never its own benchmark. `hasHistory` is false in a
+ * salesman's very first month, when there is nothing to compare against.
  */
 export function resolvePeakMonthlySales(byMonth, currentMonthKey) {
   const entries = byMonth instanceof Map ? [...byMonth.entries()] : Object.entries(byMonth || {});
   let peakMonth = "";
   let peakSales = 0;
+  let hasHistory = false;
   entries.forEach(([month, amount]) => {
     const key = String(month || "").slice(0, 7);
     if (!MONTH_KEY.test(key) || key >= currentMonthKey) return;
+    hasHistory = true;
     const value = toNumber(amount);
     if (!peakMonth || value > peakSales) {
       peakMonth = key;
@@ -342,7 +345,11 @@ export function resolvePeakMonthlySales(byMonth, currentMonthKey) {
     }
   });
   // A salesman whose every past month was negative still gets a zero floor.
-  return { peakMonth: peakSales > 0 ? peakMonth : "", peakSales: Math.max(0, peakSales) };
+  return {
+    peakMonth: peakSales > 0 ? peakMonth : "",
+    peakSales: Math.max(0, peakSales),
+    hasHistory,
+  };
 }
 
 /** TRENDYOL / NOON are ecom channels, not salesmen, so they earn no incentive. */
@@ -369,6 +376,7 @@ function emptySalesmanSummary(code = "", name = "") {
     late_base: 0,
     collection_incentive: 0,
     current_month_sales: 0,
+    has_sales_history: false,
     peak_month: "",
     peak_month_sales: 0,
     sales_delta: 0,
@@ -502,10 +510,11 @@ export function buildSalesmanIncentiveReport({
     if (allowed && !allowed.has(code)) return;
     if (isExcludedIncentiveSalesman({ salesman_code: code, salesman_name: names.get(code) })) return;
     const current = toNumber(byMonth.get(monthKey));
-    const { peakMonth, peakSales } = resolvePeakMonthlySales(byMonth, monthKey);
+    const { peakMonth, peakSales, hasHistory } = resolvePeakMonthlySales(byMonth, monthKey);
     if (!current && !peakSales && !summaries.has(code)) return;
     const summary = summaryFor(code);
-    const growth = computeGrowthIncentive(current, peakSales);
+    const growth = computeGrowthIncentive(current, peakSales, { hasHistory });
+    summary.has_sales_history = hasHistory;
     summary.current_month_sales = growth.currentMonthSales;
     summary.peak_month = peakMonth;
     summary.peak_month_sales = growth.benchmarkSales;

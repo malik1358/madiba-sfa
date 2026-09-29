@@ -20,7 +20,7 @@ import {
   blockedByAvgDaysMessage,
   orderBlockOverrideKey,
   parseOrderBlockOverride,
-  resolveOrderBlockStatus,
+  resolveOrderSubmissionBlockStatus,
 } from "../../lib/customerOrderBlock.js";
 import { resolveTrustedAvgDaysToPayForCustomer } from "../../lib/customerOrderBlockServer.js";
 import {
@@ -762,7 +762,6 @@ export async function POST(request) {
     const requestedOrderId = body?.orderId ? Number(body.orderId) : null;
     const clientOrderNumber = String(body?.orderNumber || body?.order_number || "").trim();
     const creditApprovalRequired = Boolean(body?.creditApprovalRequired);
-    const orderBlockThreshold = body?.orderBlockSnapshot?.threshold ?? null;
 
     if (!customerCode) {
       return NextResponse.json({ success: false, error: "Customer is required." }, { status: 400 });
@@ -789,16 +788,15 @@ export async function POST(request) {
       .maybeSingle();
     if (blockOverrideError) throw blockOverrideError;
 
-    if (action === "submit" && !scope.hasAllAccess) {
+    if (action === "submit") {
       const avgDays = await resolveTrustedAvgDaysToPayForCustomer({
         request,
         authHeader,
         customerCode,
         customerName,
       });
-      const blockStatus = resolveOrderBlockStatus({
+      const blockStatus = resolveOrderSubmissionBlockStatus({
         ...avgDays,
-        threshold: orderBlockThreshold,
         override: parseOrderBlockOverride(blockOverrideRow?.setting_value),
       });
       if (blockStatus.blocked) {

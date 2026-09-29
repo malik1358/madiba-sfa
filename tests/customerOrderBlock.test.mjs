@@ -5,6 +5,7 @@ import {
   blockedByAvgDaysMessage,
   parseOrderBlockOverride,
   resolveOrderBlockStatus,
+  resolveOrderSubmissionBlockStatus,
 } from "../app/lib/customerOrderBlock.js";
 
 test("blocks when avg days reaches threshold and no override", () => {
@@ -12,6 +13,15 @@ test("blocks when avg days reaches threshold and no override", () => {
   assert.equal(status.blocked, true);
   assert.equal(status.isOverThreshold, true);
   assert.equal(status.isAdminUnblocked, false);
+});
+
+test("order submissions use the fixed 120-day threshold", () => {
+  const status = resolveOrderSubmissionBlockStatus({
+    avgDaysToPay: 127,
+    threshold: 999,
+  });
+  assert.equal(status.threshold, ORDER_BLOCK_AVG_DAYS_THRESHOLD);
+  assert.equal(status.blocked, true);
 });
 
 test("does not block when admin override is active", () => {

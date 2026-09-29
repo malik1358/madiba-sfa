@@ -68,7 +68,7 @@ Constants in `app/lib/workdayActivity.js`:
 - Pending Orders shows both `Current outstanding` and `Outstanding >60 days` from the uploaded outstanding dataset for the customer. The >60 value is the sum of buckets `61-90`, `91-120`, and `>120`.
 - Orders created before the KSA day `2026-09-01` with no uploaded invoice are legacy and should be closed as `Rejected by management` / `Pre-September 2026 — invoice not uploaded`. Missing-invoice chase starts at `MISSING_INVOICE_CREATED_FROM = 2026-09-01`, after a 60-minute grace, and re-sends every 15 minutes while the queue remains open.
 - Credit approval (`app/lib/creditApproval.js`): cash orders skip it. Otherwise approval is required when outstanding over 60 days is greater than zero (buckets `61-90`, `91-120`, `>120`), or when order value plus total outstanding is over 10,000 and the credit application is missing or expired. Expired means expiry date is before today, or issue date plus one year is before today.
-- Sales-order submission is blocked when `Avg Days to Pay >= 120` for the selected customer. Salesmen can still view the customer and build the order, but submit gets a blocking error. Admin can apply a per-customer unblock override from Customer Audit; removing that override re-enables the automatic block rule.
+- Sales-order submission is blocked when `Avg Days to Pay >= 120` for the selected customer. The server recalculates the average and applies the fixed threshold for every submit, regardless of all-access scope; only an explicit admin per-customer unblock override from Customer Audit permits submission. Removing that override re-enables the automatic block rule.
 - Quantity caps live in `order_quantity_controls` (week window in Riyadh, customer scope). Defaults are in `DEFAULT_ORDER_QUANTITY_CONTROLS`. Enforcement is `assertOrderQuantityControls`.
 - Schemes live in the `order_schemes` setting.
 
@@ -101,7 +101,7 @@ Constants in `app/lib/workdayActivity.js`:
 
 Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and Customer Audit.
 
-- Machine Open is FIFO: sales minus cash applied to that invoice, then credit notes allocated to that invoice.
+- Machine Open (FIFO) is sales minus cash applied to that invoice, then credit notes allocated to that invoice. It can differ from Tally Open (the uploaded outstanding book); Customer Audit shows the difference rather than forcing either total to match.
 - Tally Open is the pending amount on the outstanding upload for that invoice. They are allowed to differ. Outstanding Compare and the Open delta exist to show the gap.
 - A Tally bill whose `Ref. No.` matches no sales voucher for that customer keeps its own open row (Sales excl VAT 0, amount = pending). That is intended — it is never guessed onto another invoice. Outstanding Compare's **Tally bills not matched to a sales invoice** section classifies why, via `classifyOutstandingBillMismatch`: `ref_other_customer` (the voucher exists in sales under a different customer — usually a Ref. No. column misalignment on the Bills Receivable export), `ref_reversed` (the customer's own voucher was dropped as a credit-note reversal while Tally still shows it pending), `ref_missing` (the reference is nowhere in sales).
 - Outstanding Compare “Show differences only” (default on) lists a customer when |computed − Tally| > 0.02 or any invoice has an open gap. The customer name opens Payment Settlement → Invoices & Settlement.

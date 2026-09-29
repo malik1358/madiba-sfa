@@ -203,6 +203,8 @@ export default function InvoiceSettlement({
   );
   const collected = Number(totals.collected_amount || 0);
   const openAmount = Number(totals.open_sales_amount || 0);
+  const outstandingAmount = Number(totals.outstanding_unpaid || 0);
+  const openOutstandingDelta = openAmount - outstandingAmount;
   const salesMinusCollected = Number(
     totals.sales_minus_collected != null ? totals.sales_minus_collected : salesInclVat - collected,
   );
@@ -285,11 +287,11 @@ export default function InvoiceSettlement({
             <strong>{formatMoney(collected)}</strong>
           </div>
           <div className="auditSummaryCard">
-            <span>Open / Outstanding</span>
+            <span>FIFO Open (SFA)</span>
             <strong>{formatMoney(openAmount)}</strong>
             {openMatchesOutstanding === false ? (
               <em className="auditSummaryCardMeta">
-                Does not match outstanding upload {formatMoney(totals.outstanding_unpaid)}
+                Tally outstanding {formatMoney(outstandingAmount)} · FIFO {openOutstandingDelta > 0 ? "higher" : "lower"} by {formatMoney(Math.abs(openOutstandingDelta))}
               </em>
             ) : balanceMatches === false ? (
               <em className="auditSummaryCardMeta">

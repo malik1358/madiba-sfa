@@ -130,6 +130,20 @@ test("Parvez and Junaid use over-30 outstanding while others use over-60", () =>
     salesman_name: "Junaid",
     salesman_code: "JUNAID",
   }, { todayKey }), true);
+
+  const reassignedCustomer = {
+    outstanding_30_60: 800,
+    outstanding_61_90: 0,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+    collection_history: [],
+    latest_collection: null,
+    salesman_name: "Abdullah Salmeen Awad Al-Awathani",
+    salesman_code: "ABADALLA",
+    current_salesman_code: "PARVEZ",
+  };
+  assert.equal(isSoftAgingSalesman(reassignedCustomer), false);
+  assert.equal(isCollectionStaleOverdueRow(reassignedCustomer, { todayKey }), false);
 });
 
 test("groupCollectionStaleOverdueBySalesman builds separate salesman buckets", () => {

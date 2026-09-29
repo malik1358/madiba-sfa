@@ -41,24 +41,6 @@ function customerCodeAliases(value) {
   return [...new Set([raw, canonical].filter(Boolean))];
 }
 
-function collectionVisitQueryFilter(rows = []) {
-  const exactCodes = new Set();
-  const numericBases = new Set();
-  (rows || []).forEach((row) => {
-    customerCodeAliases(row?.customer_code).forEach((alias) => {
-      if (/^[A-Z0-9]+$/.test(alias)) exactCodes.add(alias);
-    });
-    const accountCode = normalizeCustomerCode(resolveCustomerAccountCode(row?.customer_code));
-    const numericAccount = accountCode.match(/^(\d{3,6})[A-Z]?$/);
-    if (!numericAccount) return;
-    numericBases.add(numericAccount[1]);
-  });
-  return [
-    ...[...exactCodes].map((code) => `customer_code.eq.${code}`),
-    ...[...numericBases].map((base) => `customer_code.like.${base}_`),
-  ].join(",");
-}
-
 function chunk(values, size = 80) {
   const list = Array.isArray(values) ? values : [];
   const batches = [];
@@ -330,45 +312,40 @@ export async function loadLastNearCollectionVisitByCustomer(admin, rows = [], to
   const { endIso } = ksaDayBounds(todayKey);
   const pageSize = 1000;
 
-  for (const batch of chunk(rows, 80)) {
-    const queryFilter = collectionVisitQueryFilter(batch);
-    if (!queryFilter) continue;
-    let offset = 0;
-    while (true) {
-      const { data, error } = await admin
-        .from("collection_visits")
-        .select("customer_code,saved_at,latitude,longitude")
-        .or(queryFilter)
-        .gte("saved_at", startIso)
-        .lte("saved_at", endIso)
-        .order("saved_at", { ascending: false })
-        .range(offset, offset + pageSize - 1);
-      if (error) {
-        const message = String(error?.message || error?.details || "").toLowerCase();
-        if (error?.code === "42P01" || message.includes("does not exist")) return latestNearByCode;
-        throw error;
-      }
+  let offset = 0;
+  while (true) {
+    const { data, error } = await admin
+      .from("collection_visits")
+      .select("customer_code,saved_at,latitude,longitude")
+      .gte("saved_at", startIso)
+      .lte("saved_at", endIso)
+      .order("saved_at", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+    if (error) {
+      const message = String(error?.message || error?.details || "").toLowerCase();
+      if (error?.code === "42P01" || message.includes("does not exist")) return latestNearByCode;
+      throw error;
+    }
 
-      const visits = Array.isArray(data) ? data : [];
-      visits.forEach((visit) => {
-        const customerCode = normalizeCustomerCode(visit?.customer_code);
-        const visitAt = String(visit?.saved_at || "").trim();
-        if (!customerCode || !visitAt || !isKsaOrderDay(getKsaDateString(new Date(visitAt)))) return;
-        (rows || []).forEach((row) => {
-          if (!customerAccountCodesMatch(row?.customer_code, customerCode)) return;
-          if (isFarFromCustomer(
-            { latitude: visit?.latitude, longitude: visit?.longitude },
-            { latitude: row?.latitude, longitude: row?.longitude },
-          )) return;
-          customerCodeAliases(row?.customer_code).forEach((alias) => {
-            latestNearByCode.set(alias, laterIso(latestNearByCode.get(alias), visitAt));
-          });
+    const visits = Array.isArray(data) ? data : [];
+    visits.forEach((visit) => {
+      const customerCode = normalizeCustomerCode(visit?.customer_code);
+      const visitAt = String(visit?.saved_at || "").trim();
+      if (!customerCode || !visitAt || !isKsaOrderDay(getKsaDateString(new Date(visitAt)))) return;
+      (rows || []).forEach((row) => {
+        if (!customerAccountCodesMatch(row?.customer_code, customerCode)) return;
+        if (isFarFromCustomer(
+          { latitude: visit?.latitude, longitude: visit?.longitude },
+          { latitude: row?.latitude, longitude: row?.longitude },
+        )) return;
+        customerCodeAliases(row?.customer_code).forEach((alias) => {
+          latestNearByCode.set(alias, laterIso(latestNearByCode.get(alias), visitAt));
         });
       });
+    });
 
-      if (visits.length < pageSize) break;
-      offset += pageSize;
-    }
+    if (visits.length < pageSize) break;
+    offset += pageSize;
   }
 
   return latestNearByCode;

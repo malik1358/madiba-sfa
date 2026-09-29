@@ -77,7 +77,8 @@ export function formatOrderPdfOrderNumberLabel(source = {}) {
   if (!orderNumber) {
     throw new Error("Order number is required to generate the order PDF.");
   }
-  return `Order No. ${orderNumber}`;
+  const pendingSync = isQueuedPendingOrderId(source.id ?? source.orderId ?? "");
+  return `Order No. ${orderNumber}${pendingSync && orderNumber !== PENDING_SYNC_ORDER_NUMBER_LABEL ? " (Pending sync)" : ""}`;
 }
 
 export function salesOrderNumberNeedsLiveLookup(source = {}) {

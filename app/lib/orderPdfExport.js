@@ -108,10 +108,10 @@ export async function saveOrShareOrderPdf(doc, fileName, options = {}) {
   return { method: "download", fileName: safeName };
 }
 
-export function buildOrderPdfFileName({ orderId, customerCode, savedAtIso }) {
+export function buildOrderPdfFileName({ orderId, customerCode, savedAtIso, pendingSync = false }) {
   const safeCustomer = String(customerCode || "customer").replace(/[^a-zA-Z0-9_-]/g, "_");
   const safeDate = String(savedAtIso || new Date().toISOString())
     .slice(0, 19)
     .replace(/[:T]/g, "-");
-  return `order-${orderId}-${safeCustomer}-${safeDate}.pdf`;
+  return `order-${orderId}${pendingSync ? "-pending-sync" : ""}-${safeCustomer}-${safeDate}.pdf`;
 }

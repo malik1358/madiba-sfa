@@ -12,6 +12,7 @@ import {
   requireSalesOrderNumber,
   salesOrderNumberNeedsLiveLookup,
 } from "../app/lib/salesOrderNumber.js";
+import { buildOrderPdfFileName } from "../app/lib/orderPdfExport.js";
 
 test("formatSalesOrderNumber prefers stored order_number over id", () => {
   assert.equal(formatSalesOrderNumber({ id: 55, order_number: "SO-1001" }), "SO-1001");
@@ -51,6 +52,10 @@ test("formatOrderPdfOrderNumberLabel prints a provisional label for queued order
     "Order No. Pending sync",
   );
   assert.equal(
+    formatOrderPdfOrderNumberLabel({ orderId: "pending:8981a846-ca3", orderNumber: "O596" }),
+    "Order No. O596 (Pending sync)",
+  );
+  assert.equal(
     formatSalesOrderNumberForDisplay({ orderId: "pending:8981a846-ca3" }),
     "Pending sync",
   );
@@ -61,4 +66,10 @@ test("formatOrderPdfOrderNumberLabel prints a provisional label for queued order
   assert.throws(() => requireSalesOrderNumber({ id: "pending:8981a846-ca3" }), /Order number is required/);
   assert.throws(() => requireSalesOrderNumber({}), /Order number is required/);
   assert.throws(() => formatOrderPdfOrderNumberLabel({}), /Order number is required/);
+});
+
+test("queued PDFs are named as provisional files", () => {
+  const fields = { orderId: "O596", customerCode: "1251", savedAtIso: "2026-09-29T06:00:00Z" };
+  assert.equal(buildOrderPdfFileName(fields), "order-O596-1251-2026-09-29-06-00-00.pdf");
+  assert.equal(buildOrderPdfFileName({ ...fields, pendingSync: true }), "order-O596-pending-sync-1251-2026-09-29-06-00-00.pdf");
 });

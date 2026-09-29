@@ -6,7 +6,7 @@ export function parsePartyName(partyRaw) {
     return { customer_code: "", customer_name: "" };
   }
 
-  const match = text.match(/^([A-Za-z0-9]+)\s*[_\-\s]+(.*)$/);
+  const match = text.match(/^([A-Za-z0-9]*\d[A-Za-z0-9]*)\s*[_\-\s]+(.*)$/);
   if (match) {
     return {
       customer_code: normalizeCode(match[1]),
@@ -36,7 +36,9 @@ export function canonicalCustomerCode(value) {
   if (parsed.customer_code) return parsed.customer_code;
 
   const extracted = normalizeCode(extractLeadingCustomerCodeAndName(raw).customer_code);
-  return extracted || raw.split(/\s+/)[0] || raw;
+  if (extracted) return extracted;
+  const firstWord = raw.split(/\s+/)[0] || raw;
+  return firstWord.includes("-") ? raw : firstWord;
 }
 
 export function resolveExistingCollectionCustomerCode(candidates, targetCode) {
@@ -144,7 +146,13 @@ export function resolveCustomerMasterExportFields(row) {
   if (rawName) {
     const nameParsed = splitPartyByLeadingCode(rawName);
     const nameCode = canonicalCustomerCode(nameParsed.customer_code || rawName);
-    if (nameCode && customer_code && nameCode === customer_code) {
+    const rawCodeLooksLikeName = /\s/.test(rawCode)
+      && !/^\d{3,6}[A-Za-z]?[\s_-]/.test(rawCode);
+    const rawNameKey = normalizeCustomerNameKey(rawName);
+    const rawCodeKey = normalizeCustomerNameKey(rawCode);
+    if (rawCodeLooksLikeName && rawNameKey && rawCodeKey.startsWith(rawNameKey)) {
+      customer_name = rawCode;
+    } else if (nameCode && customer_code && nameCode === customer_code) {
       customer_name = nameParsed.customer_name || "";
     } else if (!nameCode || nameCode !== customer_code) {
       customer_name = rawName;

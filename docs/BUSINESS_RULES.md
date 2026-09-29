@@ -29,7 +29,7 @@ Constants in `app/lib/workdayActivity.js`:
 
 ## Customer identity and who can see them
 
-- Compare customer and salesman codes with the same normalizer the caller already uses (trim, uppercase, collapse spaces). Leading-code extraction exists because some sheets store `CODE Name` in one cell (`extractLeadingCustomerCodeAndName`).
+- Compare customer and salesman codes with the same normalizer the caller already uses (trim, uppercase, collapse spaces). Leading-code extraction exists because some sheets store `CODE Name` in one cell (`extractLeadingCustomerCodeAndName`). Name-only customer identities such as `Al-muntaj Al-Raqi trading company` must remain intact; do not interpret a hyphenated name prefix as an account code.
 - A customer can remain visible to the previous salesman after transfer (`previous_salesman_code`).
 - Inactive customers stay visible in report customer pickers (for example Customer Audit, Payment Settlement, Outstanding Compare). Visit suggestions still keep inactive customers out of the active suggestion pool.
 - Mutual visibility is hardcoded in `MUTUAL_SALESMAN_GROUPS`: `JUNAID`, `PARVEZ`, `SOYEB` see each other’s books.

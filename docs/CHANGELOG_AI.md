@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-29** — Customer Audit search/display was truncating the name-only identity `Al-muntaj Al-Raqi trading company` to code `AL`. Party parsing now requires a digit in separated account-code prefixes and preserves hyphenated name-only identities; exact-name search regression covered. No migration.
 - **2026-09-29** — Daily Visit Report (page + email) now includes New Customer prospect follow-ups (“Order not received”, `PROSPECT_FOLLOW_UP` logs) as **Prospect visit** rows; previously they were skipped because the report only read `VISIT_REPORT` and the note had no customer code (offline prospects had `prospect_id: null`). The follow-up note now stores `customer_code`, `customer_name`, `offline_id`, `outcome`. Older codeless logs are matched by creator + `follow_up_date`. No migration.
 - **2026-09-29** — Sales-order submission now enforces the server-calculated 120-day average-payable block for every role; only the explicit admin customer unblock override bypasses it. Customer Audit labels FIFO Open separately from Tally outstanding and shows the gap. No migration.
 - **2026-09-29** — An offline Madarat PDF printed provisional `O596` on 28 Sep; sync assigned the saved order `O691`, while server `O596` belongs to Saqr. Queued order PDFs now mark their header and filename as pending sync. Older downloaded PDFs are not changed; regenerate from the synced order for its confirmed number. No migration.

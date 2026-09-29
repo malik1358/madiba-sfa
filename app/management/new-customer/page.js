@@ -787,6 +787,11 @@ export default function NewCustomerPage() {
         try {
           await insertGpsActivityLog(supabase, session.user.id, "PROSPECT_FOLLOW_UP", location, {
             prospect_id: savedProspect.id,
+            offline_id: savedProspect.offlineId || null,
+            customer_code: customerCode,
+            customer_name: customerName,
+            outcome: "Order not received",
+            captured_at: capturedAt,
             follow_up_date: followUpDate,
           });
         } catch {

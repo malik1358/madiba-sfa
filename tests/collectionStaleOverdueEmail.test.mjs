@@ -176,7 +176,7 @@ test("recent collection enrichment skips FAR visits and Friday", async () => {
   const query = {
     rangeStart: 0,
     select() { return this; },
-    in() { return this; },
+    or() { return this; },
     gte() { return this; },
     lte() { return this; },
     order() { return this; },
@@ -195,6 +195,47 @@ test("recent collection enrichment skips FAR visits and Friday", async () => {
 
   assert.equal(first.last_near_collection_visit_at, "2026-09-24T08:00:00.000Z");
   assert.equal(second.last_near_collection_visit_at, "");
+});
+
+test("recent Sep 27 collection under a C-suffixed account code excludes the numeric due code", async () => {
+  const queryFilters = [];
+  const query = {
+    select() { return this; },
+    or(filter) { queryFilters.push(filter); return this; },
+    gte() { return this; },
+    lte() { return this; },
+    order() { return this; },
+    range() { return this; },
+    then(resolve, reject) {
+      return Promise.resolve({
+        data: [{
+          customer_code: "1316C",
+          saved_at: "2026-09-27T08:00:00Z",
+          latitude: 24.7,
+          longitude: 46.7,
+        }],
+        error: null,
+      }).then(resolve, reject);
+    },
+  };
+  const row = {
+    customer_code: "1316",
+    customer_name: "Abdullah Salmeen Awad Al-Awathani Company",
+    latitude: 24.7,
+    longitude: 46.7,
+    outstanding_61_90: 100,
+    last_visit_without_order_at: "2026-09-01T08:00:00Z",
+  };
+  const visits = await loadLastNearCollectionVisitByCustomer(
+    { from: () => query },
+    [row],
+    "2026-09-29",
+  );
+  const [enriched] = attachLastNearCollectionVisit([row], visits);
+
+  assert.match(queryFilters[0], /customer_code\.like\.1316_/);
+  assert.equal(enriched.last_near_collection_visit_at, "2026-09-27T08:00:00.000Z");
+  assert.equal(isCollectionStaleOverdueRow(enriched, { todayKey: "2026-09-29" }), false);
 });
 
 test("buildCollectionStaleOverdueEmail marks FAR visits in the table", () => {

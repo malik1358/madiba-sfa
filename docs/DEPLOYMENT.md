@@ -114,6 +114,14 @@ node --test tests/moduleAccess.test.mjs
 node --test tests/*.test.mjs
 ```
 
+Historical salesperson home-location review (read-only, local/dev Supabase only):
+
+```bash
+node scripts/audit-salesman-home-locations.mjs
+```
+
+The script refuses the production Supabase project, reports candidate clusters on six or more distinct KSA dates, and does not change data. Review candidates before assigning inferred home points.
+
 There is no `npm test` script.
 
 ## Android

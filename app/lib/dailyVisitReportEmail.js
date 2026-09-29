@@ -325,10 +325,18 @@ export function buildUserVisitReportEmail({
   const locationNotes = Array.isArray(user?.locationNotes) && user.locationNotes.length
     ? user.locationNotes
     : loginLogoutLocationNotes(entries, thresholdKm);
+  const homeLocation = user?.homeLocation || null;
+  const homeLocationCoordinates = homeLocation
+    ? `${Number(homeLocation.latitude).toFixed(5)}, ${Number(homeLocation.longitude).toFixed(5)}`
+    : "";
+  const homeLocationMapUrl = homeLocation
+    ? buildGoogleMapsPointUrl(homeLocation.latitude, homeLocation.longitude)
+    : "";
 
   const summaryText = [
     `Daily visit report for ${userName}`,
     `Date: ${date} (KSA)`,
+    ...(homeLocationCoordinates ? [`Home location: ${homeLocationCoordinates}`] : []),
     `Entries: ${user?.visitCount || 0}`,
     `Far from customer: ${user?.farFromCustomerCount || 0}`,
     `Route total: ${formatKm(user?.totalRouteDistanceKm)}`,
@@ -435,6 +443,7 @@ export function buildUserVisitReportEmail({
 <body style="font-family: Arial, sans-serif; color: #12263f; line-height: 1.4;">
   <h1 style="font-size: 20px; margin-bottom: 8px;">Daily Visit Report</h1>
   <p style="margin: 0 0 16px;">${escapeHtml(userName)} · ${escapeHtml(date)} (KSA)</p>
+  ${homeLocationCoordinates ? `<p><strong>Home location:</strong> ${escapeHtml(homeLocationCoordinates)} · <a href="${escapeHtml(homeLocationMapUrl)}">Open map</a></p>` : ""}
   <p>
     Entries: <strong>${Number(user?.visitCount || 0)}</strong>
     · Far from customer: <strong>${Number(user?.farFromCustomerCount || 0)}</strong>

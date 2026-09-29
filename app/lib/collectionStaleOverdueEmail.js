@@ -72,8 +72,9 @@ export function collectSalesmanIdentities(source = {}) {
 }
 
 export function isSoftAgingSalesman(source = {}) {
-  const identities = collectSalesmanIdentities(source);
-  return COLLECTION_STALE_OVERDUE_SOFT_AGING_SALESMEN.some((name) => identities.has(name));
+  const displayedSalesman = comparableSalesmanIdentity(getCollectionSalesmanLabel(source));
+  const displayedTokens = displayedSalesman.split(/\s+/);
+  return COLLECTION_STALE_OVERDUE_SOFT_AGING_SALESMEN.some((name) => displayedTokens.includes(name));
 }
 
 export function resolveOverdueAgingThresholdDays(source = {}) {

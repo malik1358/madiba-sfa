@@ -172,6 +172,12 @@ export function isCollectionVisitFar(row = {}) {
 }
 
 export function resolveLastNearCollectionVisitDateKey(row = {}) {
+  if (row?.recent_collection_visits_checked) {
+    const savedAt = row?.last_near_collection_visit_at;
+    if (!savedAt) return "";
+    const parsed = new Date(savedAt);
+    return Number.isNaN(parsed.getTime()) ? "" : getKsaDateString(parsed);
+  }
   const history = Array.isArray(row?.collection_history) ? row.collection_history : [];
   const visits = history.length ? history : [row?.latest_collection].filter(Boolean);
   const savedAt = row?.last_near_collection_visit_at

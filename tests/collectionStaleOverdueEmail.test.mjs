@@ -198,12 +198,11 @@ test("recent collection enrichment skips FAR visits and Friday", async () => {
 });
 
 test("recent Sep 27 collection under a C-suffixed account code excludes the numeric due code", async () => {
-  const queryFilters = [];
+  const queryCalls = [];
   const query = {
     select() { return this; },
-    or(filter) { queryFilters.push(filter); return this; },
-    gte() { return this; },
-    lte() { return this; },
+    gte(column, value) { queryCalls.push(["gte", column, value]); return this; },
+    lte(column, value) { queryCalls.push(["lte", column, value]); return this; },
     order() { return this; },
     range() { return this; },
     then(resolve, reject) {
@@ -233,9 +232,9 @@ test("recent Sep 27 collection under a C-suffixed account code excludes the nume
   );
   const [enriched] = attachLastNearCollectionVisit([row], visits);
 
-  assert.match(queryFilters[0], /customer_code\.like\.1316_/);
   assert.equal(enriched.last_near_collection_visit_at, "2026-09-27T08:00:00.000Z");
   assert.equal(isCollectionStaleOverdueRow(enriched, { todayKey: "2026-09-29" }), false);
+  assert.equal(queryCalls.find(([method]) => method === "gte")[2], "2026-09-26T21:00:00.000Z");
 });
 
 test("buildCollectionStaleOverdueEmail marks FAR visits in the table", () => {
@@ -339,6 +338,7 @@ test("buildCollectionStaleOverdueEmail renders one table section per salesman", 
 
   assert.match(message.subject, /2 customers/);
   assert.match(message.html, /Stale overdue collections/);
+  assert.match(message.html, /no near collection visit in the last 3 working days/);
   assert.match(message.html, /Parvez \(S01\)/);
   assert.match(message.html, /Sara \(S02\)/);
   assert.match(message.html, /Recv 8d/);

@@ -123,6 +123,19 @@ test("resolveCustomerMasterExportFields keeps name-only customers without a code
   assert.equal(display.customer_name, "SADA AL KHALEEJ TRADING COMPANY");
 });
 
+test("resolveCustomerMasterExportFields preserves a hyphenated name-only customer", () => {
+  const customer = {
+    customer_code: "Al-muntaj Al-Raqi trading company",
+    customer_name: "Al-muntaj",
+  };
+  const display = resolveCustomerMasterExportFields(customer);
+  const [deduped] = dedupeCustomerMasterRows([customer]);
+
+  assert.equal(display.customer_code, "AL-MUNTAJ AL-RAQI TRADING COMPANY");
+  assert.equal(display.customer_name, "Al-muntaj Al-Raqi trading company");
+  assert.equal(customerMatchesMasterSearch(deduped, "Al-muntaj Al-Raqi trading company"), true);
+});
+
 test("customerMasterExportRows writes cleaned code and name columns", () => {
   const [row] = customerMasterExportRows([
     {

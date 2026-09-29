@@ -237,6 +237,58 @@ test("recent Sep 27 collection under a C-suffixed account code excludes the nume
   assert.equal(queryCalls.find(([method]) => method === "gte")[2], "2026-09-26T21:00:00.000Z");
 });
 
+test("recent FAR Sep 27 collection remains in the digest and is labelled FAR", async () => {
+  const query = {
+    select() { return this; },
+    gte() { return this; },
+    lte() { return this; },
+    order() { return this; },
+    range() { return this; },
+    then(resolve, reject) {
+      return Promise.resolve({
+        data: [{
+          customer_code: "1316C",
+          saved_at: "2026-09-27T08:00:00Z",
+          latitude: 25.5,
+          longitude: 47.5,
+        }],
+        error: null,
+      }).then(resolve, reject);
+    },
+  };
+  const sourceRow = {
+    customer_code: "1316",
+    customer_name: "Customer 1316",
+    latitude: 24.7,
+    longitude: 46.7,
+    outstanding_61_90: 100,
+    last_visit_without_order_at: "2026-09-01T08:00:00Z",
+    latest_collection: { saved_at: "2026-09-27T08:00:00Z" },
+  };
+  const visitMetadata = await loadLastNearCollectionVisitByCustomer(
+    { from: () => query },
+    [sourceRow],
+    "2026-09-29",
+  );
+  assert.deepEqual([...visitMetadata.latestVisitByCustomer], [["1316", {
+    saved_at: "2026-09-27T08:00:00Z",
+    latitude: 25.5,
+    longitude: 47.5,
+  }]]);
+  const [dueRow] = attachLastNearCollectionVisit([sourceRow], visitMetadata);
+
+  assert.equal(dueRow.last_near_collection_visit_at, "");
+  assert.equal(isCollectionStaleOverdueRow(dueRow, { todayKey: "2026-09-29" }), true);
+  assert.equal(dueRow.latest_collection.latitude, 25.5);
+
+  const email = buildCollectionStaleOverdueEmail({
+    date: "2026-09-29",
+    groups: [{ salesmanName: "Test", rows: [dueRow] }],
+  });
+  assert.match(email.html, /2026-09-27/);
+  assert.match(email.html, /FAR/);
+});
+
 test("buildCollectionStaleOverdueEmail marks FAR visits in the table", () => {
   const message = buildCollectionStaleOverdueEmail({
     date: "2026-09-26",

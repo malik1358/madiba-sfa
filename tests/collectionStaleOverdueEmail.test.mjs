@@ -65,6 +65,13 @@ test("isCollectionStaleOverdueRow requires overdue, zero 8d receipts, and stale 
 
   assert.equal(isCollectionStaleOverdueRow({
     ...match,
+    recent_collection_visits_checked: true,
+    last_near_collection_visit_at: "",
+    collection_history: [{ saved_at: "2026-09-25T10:00:00Z" }],
+  }, { todayKey }), true);
+
+  assert.equal(isCollectionStaleOverdueRow({
+    ...match,
     latest_collection: { saved_at: "2026-09-22T10:00:00Z" },
   }, { todayKey }), true);
 

@@ -297,6 +297,7 @@ export function attachLastNearCollectionVisit(rows = [], visitByCustomer = new M
     });
     return {
       ...row,
+      recent_collection_visits_checked: true,
       last_near_collection_visit_at: laterIso(row?.last_near_collection_visit_at, visitAt),
     };
   });

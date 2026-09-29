@@ -6,7 +6,7 @@ export function parsePartyName(partyRaw) {
     return { customer_code: "", customer_name: "" };
   }
 
-  const match = text.match(/^([A-Za-z0-9]*\d[A-Za-z0-9]*)\s*[_\-\s]+(.*)$/);
+  const match = text.match(/^([A-Za-z0-9]*\d[A-Za-z0-9]*)[ _-]+(.+)$/);
   if (match) {
     return {
       customer_code: normalizeCode(match[1]),

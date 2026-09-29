@@ -24,7 +24,10 @@ import {
   filterCollectionStaleOverdueRowsForProfile,
   resolveOverdueAgingThresholdDays,
 } from "./collectionStaleOverdueEmail.js";
-import { enrichDueCustomersWithVisitWithoutOrder } from "./collectionStaleOverdueEmailServer.js";
+import {
+  enrichDueCustomersWithRecentCollectionVisits,
+  enrichDueCustomersWithVisitWithoutOrder,
+} from "./collectionStaleOverdueEmailServer.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
 import {
   addKsaCalendarDays,
@@ -373,7 +376,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
     let loader = loadDueCollectionCustomers;
     if (!loader) {
       const { fetchOutstandingAndCollectionRecords } = await import("../api/payment-collections/route.js");
-      loader = async (client) => {
+      loader = async (client, { todayKey = staleAsOfKey } = {}) => {
         const records = await fetchOutstandingAndCollectionRecords(client, {
           hasAllAccess: true,
           visibleSalesmanCodes: [],
@@ -385,10 +388,11 @@ export async function runDailyVisitReportEmailCycle(admin, {
         });
         const queues = buildCollectionQueues(records, staleAsOfIso);
         const dueCustomers = Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
-        return enrichDueCustomersWithVisitWithoutOrder(client, dueCustomers);
+        const withVisitReports = await enrichDueCustomersWithVisitWithoutOrder(client, dueCustomers);
+        return enrichDueCustomersWithRecentCollectionVisits(client, withVisitReports, todayKey);
       };
     }
-    dueCollectionCustomers = await loader(admin);
+    dueCollectionCustomers = await loader(admin, { todayKey: staleAsOfKey, todayIso: staleAsOfIso });
   } catch (error) {
     console.error("Unable to load stale overdue rows for visit report emails:", error);
     dueCollectionCustomers = [];

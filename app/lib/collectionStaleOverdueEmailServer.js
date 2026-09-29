@@ -12,7 +12,7 @@ import {
 import { isFarFromCustomer } from "./customerLocation.js";
 import { extractGpsFromVisitLocation } from "./outstandingNoGps.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
-import { resolveCustomerAccountCode } from "./outstanding.js";
+import { customerAccountCodesMatch, resolveCustomerAccountCode } from "./outstanding.js";
 import {
   getKsaDateString,
   getKsaWeekdayIndex,
@@ -39,6 +39,24 @@ function customerCodeAliases(value) {
   const raw = normalizeCustomerCode(value);
   const canonical = normalizeCustomerCode(resolveCustomerAccountCode(value));
   return [...new Set([raw, canonical].filter(Boolean))];
+}
+
+function collectionVisitQueryFilter(rows = []) {
+  const exactCodes = new Set();
+  const numericBases = new Set();
+  (rows || []).forEach((row) => {
+    customerCodeAliases(row?.customer_code).forEach((alias) => {
+      if (/^[A-Z0-9]+$/.test(alias)) exactCodes.add(alias);
+    });
+    const accountCode = normalizeCustomerCode(resolveCustomerAccountCode(row?.customer_code));
+    const numericAccount = accountCode.match(/^(\d{3,6})[A-Z]?$/);
+    if (!numericAccount) return;
+    numericBases.add(numericAccount[1]);
+  });
+  return [
+    ...[...exactCodes].map((code) => `customer_code.eq.${code}`),
+    ...[...numericBases].map((base) => `customer_code.like.${base}_`),
+  ].join(",");
 }
 
 function chunk(values, size = 80) {
@@ -305,27 +323,22 @@ export function attachLastNearCollectionVisit(rows = [], visitByCustomer = new M
 
 export async function loadLastNearCollectionVisitByCustomer(admin, rows = [], todayKey = getKsaDateString()) {
   const latestNearByCode = new Map();
-  const customerGpsByCode = new Map();
-  const codes = [...new Set((rows || []).flatMap((row) => {
-    const aliases = customerCodeAliases(row?.customer_code);
-    const gps = { latitude: row?.latitude, longitude: row?.longitude };
-    aliases.forEach((alias) => customerGpsByCode.set(alias, gps));
-    return aliases;
-  }).filter(Boolean))];
-  if (!codes.length || typeof admin?.from !== "function") return latestNearByCode;
+  if (!rows.length || typeof admin?.from !== "function") return latestNearByCode;
 
   const startKey = recentCollectionVisitWindowStart(todayKey);
   const { startIso } = ksaDayBounds(startKey);
   const { endIso } = ksaDayBounds(todayKey);
   const pageSize = 1000;
 
-  for (const batch of chunk(codes, 80)) {
+  for (const batch of chunk(rows, 80)) {
+    const queryFilter = collectionVisitQueryFilter(batch);
+    if (!queryFilter) continue;
     let offset = 0;
     while (true) {
       const { data, error } = await admin
         .from("collection_visits")
         .select("customer_code,saved_at,latitude,longitude")
-        .in("customer_code", batch)
+        .or(queryFilter)
         .gte("saved_at", startIso)
         .lte("saved_at", endIso)
         .order("saved_at", { ascending: false })
@@ -341,12 +354,15 @@ export async function loadLastNearCollectionVisitByCustomer(admin, rows = [], to
         const customerCode = normalizeCustomerCode(visit?.customer_code);
         const visitAt = String(visit?.saved_at || "").trim();
         if (!customerCode || !visitAt || !isKsaOrderDay(getKsaDateString(new Date(visitAt)))) return;
-        if (isFarFromCustomer(
-          { latitude: visit?.latitude, longitude: visit?.longitude },
-          customerGpsByCode.get(customerCode) || null,
-        )) return;
-        customerCodeAliases(customerCode).forEach((alias) => {
-          latestNearByCode.set(alias, laterIso(latestNearByCode.get(alias), visitAt));
+        (rows || []).forEach((row) => {
+          if (!customerAccountCodesMatch(row?.customer_code, customerCode)) return;
+          if (isFarFromCustomer(
+            { latitude: visit?.latitude, longitude: visit?.longitude },
+            { latitude: row?.latitude, longitude: row?.longitude },
+          )) return;
+          customerCodeAliases(row?.customer_code).forEach((alias) => {
+            latestNearByCode.set(alias, laterIso(latestNearByCode.get(alias), visitAt));
+          });
         });
       });
 

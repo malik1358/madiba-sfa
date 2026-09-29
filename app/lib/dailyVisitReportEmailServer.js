@@ -16,6 +16,8 @@ import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js
 import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from "./performanceKpisServer.js";
 import { getMailerConfig, isEmailConfigured, parseEmailList, sendEmail } from "./mailer.js";
 import { consolidatePerformanceSnapshots, isMissingSchemaColumn, normalizeSalesmanCode } from "./performanceKpis.js";
+import { buildSalesmanIncentiveEmailSection } from "./salesmanIncentiveEmail.js";
+import { buildSalesmanIncentiveReportFromDb } from "./salesmanIncentiveServer.js";
 import { isCollectionOnlyAccess } from "./moduleAccess.js";
 import {
   buildCollectionStaleOverdueSalesmanSection,
@@ -171,6 +173,44 @@ export function resolveVisitReportChainEmails(chain = []) {
 
 function snapshotHasKpis(snapshot) {
   return Array.isArray(snapshot?.kpis) && snapshot.kpis.length > 0;
+}
+
+/**
+ * Month-to-date incentive for every salesman, loaded once per cycle because the
+ * report scans the whole sales ledger. Best effort: a failure here must never
+ * stop the daily visit report going out.
+ */
+async function loadIncentiveBySalesmanCode(admin, reportDate) {
+  const byCode = new Map();
+  const month = String(reportDate || "").slice(0, 7);
+  if (!admin || !/^\d{4}-\d{2}$/.test(month)) return byCode;
+
+  try {
+    const report = await buildSalesmanIncentiveReportFromDb(admin, { month });
+    (report?.salesmen || []).forEach((summary) => {
+      const code = normalizeSalesmanCode(summary?.salesman_code);
+      if (!code) return;
+      byCode.set(code, {
+        summary,
+        month: report.month,
+        rates: report.rates,
+        tierKeys: report.tierKeys,
+      });
+    });
+  } catch (error) {
+    console.error("Unable to load salesman incentive for the daily visit report email:", error);
+  }
+  return byCode;
+}
+
+function resolveIncentiveSection(incentiveByCode, profile) {
+  const entry = incentiveByCode.get(normalizeSalesmanCode(profile?.salesman_code));
+  if (!entry) return null;
+  return buildSalesmanIncentiveEmailSection(entry.summary, {
+    month: entry.month,
+    rates: entry.rates,
+    tierKeys: entry.tierKeys,
+  });
 }
 
 function leaderTeamTargetCodes(bossCode) {
@@ -503,6 +543,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   }
 
   const reportMessageByUserId = new Map();
+  const incentiveByCode = await loadIncentiveBySalesmanCode(admin, reportDate);
   for (const { profile, user } of recipients) {
     let userReport = {
       ...user,
@@ -545,6 +586,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
       team: teamPayload?.team || null,
       teamMembers: teamPayload?.members || [],
       staleOverdueSection: staleOverdueSection.customerCount ? staleOverdueSection : null,
+      incentiveSection: resolveIncentiveSection(incentiveByCode, profile),
     });
     reportMessageByUserId.set(userReport.userId, {
       userId: userReport.userId,

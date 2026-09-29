@@ -1,4 +1,4 @@
-import { normalizeAccessRole, shouldRequireTransactionGps } from "./moduleAccess.js";
+import { normalizeAccessRole } from "./moduleAccess.js";
 import { getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
 export const MORNING_ATTENDANCE_COMPLETE_EVENT = "madiba-morning-attendance-complete";
@@ -6,23 +6,30 @@ export const WORKDAY_TIMES_UPDATED_EVENT = "madiba-workday-times-updated";
 export const WORKDAY_GATE_READY_EVENT = WORKDAY_TIMES_UPDATED_EVENT;
 
 export function isMorningAttendanceRequiredForRole(role) {
-  return normalizeAccessRole(role) !== "admin" && shouldRequireTransactionGps(role);
+  return normalizeAccessRole(role) !== "admin";
 }
 
 export function isMorningAttendanceRoute(pathname) {
   return String(pathname || "").trim() === "/management/my-day";
 }
 
+const INLINE_MORNING_ATTENDANCE_PATHS = new Set([
+  "/management/payment-collections",
+  "/management/payment-collections/legal",
+  "/management/my-collections",
+]);
+
+// Collectors land on Collections as home, so attendance is punched there instead of redirecting to My Day.
+export function isInlineMorningAttendancePath(pathname) {
+  const path = String(pathname || "").trim().split("?")[0];
+  return INLINE_MORNING_ATTENDANCE_PATHS.has(path);
+}
+
 export function canAccessWithoutMorningAttendance(pathname) {
   const path = String(pathname || "").trim().split("?")[0];
   return path === "/"
     || path === "/management/my-day"
-    || path === "/management/visit-without-order"
-    // Collections intentionally skips the morning-attendance gate (collectors
-    // land here as their home screen). Do not bounce them to My Day in a loop.
-    || path === "/management/payment-collections"
-    || path === "/management/payment-collections/legal"
-    || path === "/management/my-collections";
+    || isInlineMorningAttendancePath(path);
 }
 
 export function todayAttendanceBounds(referenceDate = new Date()) {

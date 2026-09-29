@@ -13,13 +13,13 @@ Roles are stored on `public.profiles.role` and normalized in `app/lib/moduleAcce
 | `admin` | Full setup, imports, BI, all customers. No morning-attendance or background-GPS gate. |
 | `manager` | Same management modules as admin for most screens. Not `is_admin()` in SQL. |
 | `salesman` | Own book: My Day, customers, orders, collections, performance. |
-| `invoice-maker` or `invoice_maker` | Office invoicing. Can manage invoice status. GPS is not required. |
+| `invoice-maker` or `invoice_maker` | Office invoicing. Can manage invoice status. GPS is not required, but morning attendance is. |
 | `product-promoter` or `product_promoter` | Field selling plus GPS map. |
 | `collector` | Collections-focused. Also inferred when `user_metadata.collection_only` is set or `salesman_code` matches `CL` plus digits. |
 
 `is_management()` in SQL is only `admin` and `manager`. Invoice makers are not management in row-level security even though the app gives them several admin screens.
 
-Screen access is `buildModuleAccess`. Pinned home shortcuts are `PINNED_MODULE_KEYS`. Collectors are not sent through the morning-attendance redirect on collection routes (`app/lib/morningAttendance.js`).
+Screen access is `buildModuleAccess`. Pinned home shortcuts are `PINNED_MODULE_KEYS`. Collectors punch morning attendance through a blocking overlay on collection routes instead of being redirected to My Day (`app/lib/morningAttendance.js`, `app/components/MorningAttendanceRedirect.jsx`).
 
 ## Main screens
 
@@ -55,7 +55,7 @@ UI strings are English and Arabic through `app/lib/appLanguage.js`. `profiles.pr
 ## How a field day works
 
 1. User signs in with Supabase Auth.
-2. Non-admin field roles must record `MORNING_ATTENDANCE` in `daily_activity_logs` for the current KSA date before most routes. Collection routes are exempt so collectors are not bounced to My Day.
+2. Every non-admin role must record `MORNING_ATTENDANCE` in `daily_activity_logs` for the current KSA date before using the app. Other routes redirect to My Day; collection routes show a blocking Morning Attendance overlay so collectors punch in there.
 3. Visits, orders, prospects, and collections write activity rows. Those rows reset the 45-minute inactivity warning.
 4. GPS pings during an open work session are stored as `GPS_PING` notes. Customer coordinates are updated through the location API and `customer_gps_history`.
 5. Lunch is `LUNCH_BREAK_OUT` / `LUNCH_BREAK_IN`. End of day is `END_OF_DAY`. A cron auto-closes workdays that were left open.

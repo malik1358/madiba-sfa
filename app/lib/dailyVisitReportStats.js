@@ -219,6 +219,7 @@ export function buildVisitDaySplit(entries = [], orderStats = {}) {
   const orderCodes = new Set();
   let collectionCount = 0;
   let collectionValue = 0;
+  let collectionVisitWithoutPaymentCount = 0;
 
   (entries || []).forEach((entry) => {
     const type = visitEntryType(entry);
@@ -228,6 +229,8 @@ export function buildVisitDaySplit(entries = [], orderStats = {}) {
     if (type === "COLLECTION_VISIT" && isSuccessfulCollection(entry)) {
       collectionCount += 1;
       collectionValue += Number(entry?.amountReceived ?? entry?.amount_received ?? 0);
+    } else if (type === "COLLECTION_VISIT") {
+      collectionVisitWithoutPaymentCount += 1;
     }
   });
 
@@ -257,6 +260,7 @@ export function buildVisitDaySplit(entries = [], orderStats = {}) {
     orderValue,
     collectionCount,
     collectionValue,
+    collectionVisitWithoutPaymentCount,
   };
 }
 

@@ -366,6 +366,19 @@ test("renderOrderPdfDocument allows queued orders with a provisional Order No. l
   assert.equal(doc.texts.some((text) => text.includes("pending:")), false);
 });
 
+test("renderOrderPdfDocument marks allotted offline numbers as pending sync", () => {
+  const doc = createMockDoc();
+  renderOrderPdfDocument(doc, {
+    orderId: "pending:80baeec4399f",
+    orderNumber: "O596",
+    customerCode: "PROSPECT-OFF-80baeec4399f4d08",
+    customerName: "Madarat Al-Ajhiza Trading Company",
+    totals: {},
+    lines: [],
+  });
+  assert.ok(doc.texts.includes("Order No. O596 (Pending sync)"));
+});
+
 test("renderOrderPdfDocument hides cash and value percents when they are not applied", () => {
   const doc = createMockDoc();
   renderOrderPdfDocument(doc, {

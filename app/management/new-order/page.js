@@ -1111,6 +1111,7 @@ export default function NewOrderPage() {
             orderId: orderNumber,
             customerCode: snapshot.customerCode,
             savedAtIso: new Date().toISOString(),
+            pendingSync: isQueuedPendingOrderId(snapshot.orderId),
           });
           const summaryText = buildOrderWhatsappSummary(snapshot, language, {
             analytics: analytics || null,
@@ -1142,6 +1143,7 @@ export default function NewOrderPage() {
           orderId: orderNumber,
           customerCode: liveSnapshot.customerCode || snapshot.customerCode,
           savedAtIso: new Date().toISOString(),
+          pendingSync: isQueuedPendingOrderId(liveSnapshot.orderId),
         });
         const summaryText = buildOrderWhatsappSummary(liveSnapshot, language, {
           analytics: monthlyAnalytics || analytics || null,

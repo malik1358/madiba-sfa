@@ -6,12 +6,18 @@ export function parsePartyName(partyRaw) {
     return { customer_code: "", customer_name: "" };
   }
 
-  const match = text.match(/^([A-Za-z0-9]*\d[A-Za-z0-9]*)[ _-]+(.+)$/);
-  if (match) {
-    return {
-      customer_code: normalizeCode(match[1]),
-      customer_name: String(match[2] || "").trim(),
-    };
+  const separatorMatch = text.match(/[ _-]+/);
+  if (separatorMatch && Number.isInteger(separatorMatch.index) && separatorMatch.index > 0) {
+    const codePart = text.slice(0, separatorMatch.index);
+    const namePart = text.slice(separatorMatch.index + separatorMatch[0].length).trim();
+    const hasDigits = /\d/.test(codePart);
+    const isCodeLike = /^[A-Za-z0-9]+$/.test(codePart);
+    if (hasDigits && isCodeLike && namePart) {
+      return {
+        customer_code: normalizeCode(codePart),
+        customer_name: namePart,
+      };
+    }
   }
 
   const leading = extractLeadingCustomerCodeAndName(text);

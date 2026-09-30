@@ -89,6 +89,45 @@ test("buildOutstandingNoGpsEmail asks salesman to visit and update GPS with tota
   assert.equal(message.totals.outstanding, 13000);
 });
 
+test("buildOutstandingNoGpsEmail renders one table per salesman in consolidated digests", () => {
+  const message = buildOutstandingNoGpsEmail({
+    date: "2026-09-30",
+    includeSalesman: true,
+    audience: "boss",
+    rows: [
+      {
+        customer: "C1 — Shop One",
+        salesman: "Parvez (S01)",
+        city: "Riyadh",
+        area: "Olaya",
+        outstanding: 100,
+        lastInvoiceDate: "2026-09-01",
+        lastVisitDate: "-",
+      },
+      {
+        customer: "C2 — Shop Two",
+        salesman: "Sara (S02)",
+        city: "Jeddah",
+        area: "Balad",
+        outstanding: 250,
+        lastInvoiceDate: "2026-09-02",
+        lastVisitDate: "-",
+      },
+    ],
+  });
+
+  assert.equal((message.html.match(/<thead>/g) || []).length, 2);
+  assert.match(message.html, /<h3[^>]*>Parvez \(S01\)<\/h3>/);
+  assert.match(message.html, /<h3[^>]*>Sara \(S02\)<\/h3>/);
+  assert.doesNotMatch(message.html, /<th[^>]*>Salesman<\/th>/);
+  assert.match(message.html, /Total \(1 customer\)/);
+  assert.match(message.html, /100\.00/);
+  assert.match(message.html, /250\.00/);
+  assert.match(message.text, /Parvez \(S01\)[\s\S]*C1 — Shop One[\s\S]*Sara \(S02\)[\s\S]*C2 — Shop Two/);
+  assert.equal(message.totals.customers, 2);
+  assert.equal(message.totals.outstanding, 350);
+});
+
 test("salesmanOutstandingNoGpsRecipients puts salesman on To and bosses on CC", () => {
   const recipients = salesmanOutstandingNoGpsRecipients({
     reportEmail: "parvez.report@madiba.com",

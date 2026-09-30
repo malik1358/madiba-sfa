@@ -49,6 +49,8 @@ const TEXT = {
   deltaPending: { en: "—", ar: "—" },
   differencesOnly: { en: "Show differences only", ar: "عرض الفروق فقط" },
   noDifferences: { en: "No differences found in checked customers yet.", ar: "لا توجد فروق في العملاء الذين تم فحصهم حتى الآن." },
+  recalculate: { en: "Recalculate", ar: "إعادة الحساب" },
+  recalculating: { en: "Recalculating…", ar: "جاري إعادة الحساب…" },
   mismatchTitle: { en: "Tally bills not matched to a sales invoice", ar: "فواتير تالي غير المطابقة لفاتورة مبيعات" },
   mismatchHint: {
     en: "Each bill below opened its own row because its Ref. No. matched no sales invoice for that customer. Grouped by cause so the source of the problem is clear.",
@@ -194,6 +196,7 @@ export default function OutstandingComparePage() {
   const [differencesOnly, setDifferencesOnly] = useState(true);
   const [savedRowsByCode, setSavedRowsByCode] = useState(null);
   const [savedMeta, setSavedMeta] = useState(null);
+  const [recalculating, setRecalculating] = useState(false);
   const [mismatchRows, setMismatchRows] = useState([]);
   const [mismatchType, setMismatchType] = useState("");
   const deltaStartedRef = useRef(new Set());
@@ -408,6 +411,35 @@ export default function OutstandingComparePage() {
     }
   }, []);
 
+  const recalculateOutstanding = useCallback(async () => {
+    const supabase = getSupabaseClient();
+    if (!supabase || recalculating) return;
+
+    setRecalculating(true);
+    setError("");
+    setMessage("");
+    try {
+      const session = await resolveAuthSession(supabase);
+      const response = await fetch("/api/outstanding-reconcile", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || "Unable to recalculate outstanding differences.");
+      }
+
+      await loadSavedReconcile();
+      setMessage(
+        `Recalculated ${formatCount(payload.scannedCount)} customers; ${formatCount(payload.differenceCount)} with differences.`,
+      );
+    } catch (err) {
+      setError(err.message || "Unable to recalculate outstanding differences.");
+    } finally {
+      setRecalculating(false);
+    }
+  }, [loadSavedReconcile, recalculating]);
+
   useEffect(() => {
     loadSavedReconcile();
   }, [loadSavedReconcile]);
@@ -515,15 +547,27 @@ export default function OutstandingComparePage() {
           <section className="moduleSection">
             <div className="moduleSectionHeader">
               <h2>{t("customer")}</h2>
-              <span>
-                {loadingCustomers
-                  ? "Loading customers..."
-                  : `${visibleCustomers.length.toLocaleString()} of ${customers.length.toLocaleString()} visible${
-                    checkedCount
-                      ? ` · ${checkedCount.toLocaleString()} of ${customers.length.toLocaleString()} checked`
-                      : ""
-                  }${savedMeta?.builtAt ? ` · saved ${savedMeta.builtAt.slice(0, 16).replace("T", " ")}` : ""}`}
-              </span>
+              <div className="moduleHeaderMeta">
+                <span>
+                  {loadingCustomers
+                    ? "Loading customers..."
+                    : `${visibleCustomers.length.toLocaleString()} of ${customers.length.toLocaleString()} visible${
+                      checkedCount
+                        ? ` · ${checkedCount.toLocaleString()} of ${customers.length.toLocaleString()} checked`
+                        : ""
+                    }${savedMeta?.builtAt ? ` · saved ${savedMeta.builtAt.slice(0, 16).replace("T", " ")}` : ""}`}
+                </span>
+                {access.canAccess("upload") ? (
+                  <button
+                    type="button"
+                    className="moduleInlineButton moduleActionButton"
+                    onClick={() => void recalculateOutstanding()}
+                    disabled={recalculating}
+                  >
+                    {recalculating ? t("recalculating") : t("recalculate")}
+                  </button>
+                ) : null}
+              </div>
             </div>
             <div className="moduleFilterRow">
               <input

@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-30** — Missing-invoice email now repeats every 15 minutes only while Pending for approval or Pending for invoice creation (including Invoice not uploaded) has overdue orders. When both queues are empty it sends one summary during KSA midnight (00:00–00:14); GitHub backup runs five minutes after pg_cron. No migration.
 - **2026-09-30** — Outstanding Compare now has an authorized **Recalculate** button beside its saved/check status. It calls `POST /api/outstanding-reconcile`, waits for the scan to finish, reloads saved customer differences and A/B/C mismatch rows, and reports scanned/difference counts. Only roles already allowed by the endpoint's rebuild guard (admin, manager, invoice-maker) see it. It does not send email. No migration.
 - **2026-09-30** — Outstanding Without GPS consolidated management emails now render one customer table per salesman, each with its own subtotal; the overall summary totals remain unchanged. Delivery, filters, and recipients are unchanged. No migration.
 - **2026-09-30** — FIFO skipped receipts dated before an invoice. They are now treated as customer prepayments and applied FIFO to the oldest open invoice (including later-dated sales); payment days clamp to zero for an advance. Credit notes dated before a sale are still barred from reducing it. Example: customer 1412 receipt 537 (99,316.88) on 1 Apr now settles NFD/334 on 2 Apr (99,316.88). No migration.

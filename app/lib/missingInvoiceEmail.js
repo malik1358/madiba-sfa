@@ -30,10 +30,7 @@ export const MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION = ORDER_STATUS_PEND
 export const MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION = ORDER_STATUS_WAITING_OVERDUE_COLLECTION;
 export const MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT = ORDER_STATUS_QUOTATION_WAITING_PAYMENT;
 export const MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN = ORDER_STATUS_PENDING_WITH_SALESMAN;
-export const IST_TIMEZONE = "Asia/Kolkata";
-export const MISSING_INVOICE_EMAIL_START_MINUTES = 9 * 60;
-export const MISSING_INVOICE_EMAIL_END_MINUTES = 20 * 60;
-export const MISSING_INVOICE_EMAIL_FRIDAY = 5;
+export const MISSING_INVOICE_EMAIL_TIMEZONE = "Asia/Riyadh";
 export const DEFAULT_MISSING_INVOICE_EMAIL_TO = [
   "shreyansh.sharma@noorshukran.com",
   "vinit.kulkarni@noorshukran.com",
@@ -55,45 +52,27 @@ const EXCLUDED_INVOICE_STATUSES = new Set([
   "invoice made",
 ]);
 
-const IST_WEEKDAY_INDEX = {
-  Sun: 0,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
-};
-
-export function getIstDateTimeParts(date = new Date()) {
+export function getMissingInvoiceEmailKsaDateTimeParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: IST_TIMEZONE,
-    weekday: "short",
+    timeZone: MISSING_INVOICE_EMAIL_TIMEZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
+    hourCycle: "h23",
   });
   const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
   return {
-    weekday: IST_WEEKDAY_INDEX[parts.weekday] ?? 0,
-    year: Number(parts.year),
-    month: Number(parts.month),
-    day: Number(parts.day),
-    hour: Number(parts.hour),
-    minute: Number(parts.minute),
-    second: Number(parts.second),
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    hour: parts.hour,
+    minute: parts.minute,
   };
 }
 
-export function isWithinMissingInvoiceEmailWindow(date = new Date()) {
-  const parts = getIstDateTimeParts(date);
-  if (parts.weekday === MISSING_INVOICE_EMAIL_FRIDAY) return false;
-  const minutes = parts.hour * 60 + parts.minute;
-  return minutes >= MISSING_INVOICE_EMAIL_START_MINUTES && minutes <= MISSING_INVOICE_EMAIL_END_MINUTES;
+export function getMissingInvoiceEmailMidnightKsaDate(date = new Date()) {
+  const parts = getMissingInvoiceEmailKsaDateTimeParts(date);
+  return parts.hour === "00" && Number(parts.minute) < 15 ? parts.date : null;
 }
 
 export function parseLastSentAt(value) {
@@ -102,6 +81,27 @@ export function parseLastSentAt(value) {
     : String(value || "");
   const ts = Date.parse(raw.trim());
   return Number.isFinite(ts) ? ts : null;
+}
+
+export function parseMissingInvoiceEmailState(value) {
+  let payload = value;
+  if (typeof payload === "string") {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      payload = null;
+    }
+  }
+  const state = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+  const midnightDate = String(state.lastMidnightKsaDate || "").trim();
+  return {
+    lastSentAt: typeof state.lastSentAt === "number"
+      ? state.lastSentAt
+      : typeof value === "number"
+        ? value
+        : parseLastSentAt(state) ?? parseLastSentAt(value),
+    lastMidnightKsaDate: /^\d{4}-\d{2}-\d{2}$/.test(midnightDate) ? midnightDate : null,
+  };
 }
 
 export function wasMissingInvoiceEmailSentRecently(lastSentAt, now = new Date(), minIntervalMs = MISSING_INVOICE_EMAIL_MIN_INTERVAL_MS) {
@@ -462,7 +462,7 @@ ${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_INVOICE_CREATION, invoiceR
 ${renderOrderTableHtml(MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION, overdueCollectionRows)}
 ${renderOrderTableHtml(MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT, quotationRows)}
 ${renderOrderTableHtml(MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN, pendingWithSalesmanRows)}
-<p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">This reminder is sent every 15 minutes during India back-office hours (Saturday–Thursday, 9:00 AM–8:00 PM IST) while any qualifying order remains. Friday is a holiday.</p>
+<p style="margin: 16px 0 0; color: #52616b; font-size: 13px;">This reminder is sent every 15 minutes while Pending for approval or Pending for invoice creation has orders. When both queues are empty, one summary is sent at midnight KSA.</p>
 </div>`;
 
 return {

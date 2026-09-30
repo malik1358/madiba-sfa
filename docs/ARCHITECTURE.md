@@ -197,7 +197,7 @@ The collections UI was split so a background queue refresh does not remount the 
 
 `/api/order-invoice` reads and writes `order_invoice_meta:<id>`. Status strings are constants in `app/lib/orderApproval.js` (for example `Pending for invoice creation`, `Invoice made`). Uploading a PDF sets status to `Invoice made` when the upload exists. Time-to-make runs only while status is still the pending-invoice queue (`app/lib/pendingOrderTimeToMake.js`).
 
-`/api/cron/missing-invoice-email` chases submitted orders created on or after `2026-09-01` that still have no invoice one hour after creation. Orders created before that KSA cutoff are legacy and can be auto-rejected as `Rejected by management` with reason `Pre-September 2026 — invoice not uploaded`.
+`/api/cron/missing-invoice-email` checks submitted orders created on or after `2026-09-01` that still have no invoice one hour after creation. It emails every 15 minutes while Pending for approval or Pending for invoice creation orders remain; otherwise it sends one summary at KSA midnight. Orders created before that KSA cutoff are legacy and can be auto-rejected as `Rejected by management` with reason `Pre-September 2026 — invoice not uploaded`.
 
 ## Scheduled work
 

@@ -537,6 +537,36 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   assert.equal(Number(inv1.outstanding_pending.toFixed(2)), 420);
 });
 
+test("Outstanding Compare uses FIFO open when CN display attachment differs", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-01-01", voucher_number: "A-PAID", sales_amount: 100, item_code: "ITEM-A", quantity: 1, category: "Paper" },
+      { transaction_date: "2026-01-01", voucher_number: "B-OPEN", sales_amount: 100, item_code: "ITEM-B", quantity: 1, category: "Paper" },
+      {
+        transaction_date: "2026-01-03",
+        voucher_number: "CN-ORPHAN",
+        voucher_type: "Credit Note",
+        sales_amount: -50,
+        item_code: "ITEM-A",
+        quantity: 1,
+        category: "Paper",
+      },
+    ],
+    receipts: [{ receipt_date: "2026-01-02", amount: 115, vch_no: "R1" }],
+    outstandingInvoices: [
+      { invoice_date: "2026-01-01", ref_no: "A-PAID", pending_amount: 0 },
+      { invoice_date: "2026-01-01", ref_no: "B-OPEN", pending_amount: 57.5 },
+    ],
+    todayIso: "2026-01-10",
+  });
+
+  const openInvoice = ledger.invoices.find((row) => row.voucher_number === "B-OPEN");
+  assert.equal(Number(openInvoice.remaining.toFixed(2)), 57.5);
+  assert.equal(Number(ledger.outstandingCompareTotals.computed_open.toFixed(2)), 57.5);
+  assert.equal(Number(Math.abs(ledger.outstandingCompareTotals.open_delta).toFixed(2)), 0);
+  assert.equal(ledger.outstandingCompareTotals.discrepancy_count, 0);
+});
+
 test("partial credit note and sales return appear in creditNotes table, not reversed", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
@@ -764,7 +794,7 @@ test("CN/ and SR/ voucher codes with positive amounts are sales returns not invo
   assert.ok(Number(ledger.totals.net_sales_incl_vat) < Number(ledger.totals.sales_incl_vat));
 });
 
-test("Tally vs computed outstanding includes credit notes in computed open", () => {
+test("Tally vs computed outstanding follows FIFO credit-note allocation", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [
       {
@@ -808,10 +838,18 @@ test("Tally vs computed outstanding includes credit notes in computed open", () 
 
   const row2106 = (ledger.outstandingCompareAllRows || []).find((row) => row.voucher_number === "2106");
   assert.ok(row2106);
-  assert.ok(row2106.credit_note_settled > 0);
-  assert.equal(Number(row2106.computed_open.toFixed(2)), 0);
+  assert.equal(row2106.credit_note_settled, 0);
+  assert.equal(Number(row2106.computed_open.toFixed(2)), 2587.5);
   assert.equal(Number(row2106.tally_open.toFixed(2)), 0);
-  assert.equal(row2106.has_gap, false);
+  assert.equal(row2106.has_gap, true);
+
+  const row1691 = (ledger.outstandingCompareAllRows || []).find((row) => row.voucher_number === "1691");
+  assert.ok(row1691);
+  assert.equal(Number(row1691.credit_note_settled.toFixed(2)), 2587.5);
+  assert.equal(Number(row1691.computed_open.toFixed(2)), 38.52);
+  assert.equal(Number(row1691.tally_open.toFixed(2)), 2626.02);
+  assert.equal(Number(ledger.outstandingCompareTotals.computed_open.toFixed(2)), 2626.02);
+  assert.equal(Number(ledger.outstandingCompareTotals.tally_open.toFixed(2)), 2626.02);
 
   const cashGap = (ledger.tallyFifoDiscrepancies || []).find((row) => row.voucher_number === "2106");
   assert.ok(cashGap);

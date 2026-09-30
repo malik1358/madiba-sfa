@@ -659,6 +659,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
       kind: "credit_note",
       date: dateOnly(note.credit_date),
       amount: toNumber(note.amount),
+      voucher_number: note.voucher_number || "",
     })),
     ...buildSortedReceipts(receipts).map((row) => ({
       kind: "receipt",
@@ -676,6 +677,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
     });
 
   const allocations = [];
+  const creditNoteAllocations = [];
   let unmatchedReceiptAmount = 0;
 
   function applyToInvoice(event, invoice, remaining) {
@@ -694,6 +696,14 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
           days,
         });
       }
+    } else if (event.kind === "credit_note" && applied > 0) {
+      creditNoteAllocations.push({
+        invoice_date: invoice.invoice_date,
+        voucher_number: invoice.voucher_number,
+        credit_date: event.date,
+        credit_voucher: event.voucher_number || "",
+        amount: applied,
+      });
     }
     invoice.remaining = Math.max(0, invoice.remaining - applied);
     return Math.max(0, remaining - applied);
@@ -728,6 +738,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
   return {
     invoices,
     allocations,
+    creditNoteAllocations,
     unmatchedReceiptAmount,
     reversedInvoices: reversals,
   };
@@ -1223,14 +1234,18 @@ export function buildTallyVsComputedOutstanding(invoiceRows = [], {
   const allRows = (Array.isArray(invoiceRows) ? invoiceRows : []).map((row) => {
     const salesIncl = toNumber(row.amount_incl_vat);
     const cashSettled = toNumber(row.fifo_paid);
-    const creditChunks = (Array.isArray(row.credit_notes) ? row.credit_notes : []).map((chunk) => ({
+    const creditChunks = (Array.isArray(row.fifo_credit_notes)
+      ? row.fifo_credit_notes
+      : Array.isArray(row.credit_notes) ? row.credit_notes : []).map((chunk) => ({
       credit_date: chunk.credit_date,
       voucher_number: chunk.voucher_number || "",
       amount: toNumber(chunk.amount),
     }));
     const creditNoteSettled = creditChunks.reduce((total, chunk) => total + toNumber(chunk.amount), 0);
     const computedSettled = cashSettled + creditNoteSettled;
-    const computedOpen = Math.max(0, salesIncl - computedSettled);
+    const computedOpen = row.fifo_remaining == null
+      ? Math.max(0, salesIncl - computedSettled)
+      : Math.max(0, toNumber(row.fifo_remaining));
     const tallyOpen = hasOutstandingRows && row.outstanding_pending != null
       ? toNumber(row.outstanding_pending)
       : computedOpen;
@@ -1333,6 +1348,7 @@ export function buildPaymentSettlementLedger({
   const {
     invoices,
     allocations,
+    creditNoteAllocations,
     unmatchedReceiptAmount,
     reversedInvoices = [],
   } = matchPaymentsFifo(transactions, receipts);
@@ -1358,6 +1374,20 @@ export function buildPaymentSettlementLedger({
     const list = settlementsByInvoice.get(key) || [];
     list.push({ ...row });
     settlementsByInvoice.set(key, list);
+  });
+
+  const fifoCreditNotesByInvoice = new Map();
+  creditNoteAllocations.forEach((row) => {
+    const key = invoiceKey(row.invoice_date, row.voucher_number);
+    const list = fifoCreditNotesByInvoice.get(key) || [];
+    list.push({
+      type: "credit_note",
+      credit_date: row.credit_date,
+      voucher_number: row.credit_voucher,
+      amount: toNumber(row.amount),
+      days: null,
+    });
+    fifoCreditNotesByInvoice.set(key, list);
   });
 
   const matchedOutstandingRefs = new Set();
@@ -1425,6 +1455,7 @@ export function buildPaymentSettlementLedger({
       item_codes: Array.isArray(invoice.item_codes) ? [...invoice.item_codes] : [],
       settlements,
       credit_notes: [],
+      fifo_credit_notes: fifoCreditNotesByInvoice.get(key) || [],
     };
   });
 

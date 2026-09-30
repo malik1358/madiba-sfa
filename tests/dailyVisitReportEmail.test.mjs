@@ -633,6 +633,39 @@ test("runDailyVisitReportEmailCycle skips Fazlur Rahman", async () => {
   );
 });
 
+test("runDailyVisitReportEmailCycle digestOnlyTo sends only the all-teams digest to that inbox", async () => {
+  const sent = [];
+  const result = await runDailyVisitReportEmailCycle({}, {
+    date: "2026-09-13",
+    digestOnlyTo: "boss@madiba.com",
+    env: {
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "sfa@madiba.com",
+      DAILY_VISIT_REPORT_TO: "manager@madiba.com",
+    },
+    send: async (message) => {
+      sent.push(message);
+      return { provider: "test" };
+    },
+    loadReport: async () => ({ date: "2026-09-13", thresholdKm: 0.5, users: [] }),
+    loadProfiles: async () => ([
+      { id: "belal", role: "salesman", salesman_code: "BELAL", salesman_name: "Belal", email: "belal@madiba-sfa.local", report_email: "belal@company.com", is_active: true },
+      { id: "soyeb", role: "manager", salesman_code: "SOYEB", salesman_name: "Soyeb", email: "soyeb@madiba-sfa.local", report_email: "soyeb@company.com", is_active: true },
+    ]),
+    loadAuthUsers: async () => ([
+      { id: "belal", user_metadata: { head_salesman_code: "SOYEB" } },
+      { id: "soyeb", user_metadata: {} },
+    ]),
+    loadSummary: async () => ({ daySummary: { lines: ["No visits today."] } }),
+  });
+
+  assert.equal(result.sentCount, 1);
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].to, ["boss@madiba.com"]);
+  assert.match(sent[0].subject, /All teams/);
+  assert.match(sent[0].html, /Belal/);
+});
+
 test("runDailyVisitReportEmailCycle skips when email is not configured", async () => {
   const result = await runDailyVisitReportEmailCycle({}, {
     date: "2026-09-02",

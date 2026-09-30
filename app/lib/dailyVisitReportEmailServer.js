@@ -14,7 +14,7 @@ import {
 import { formatCollectorDisplayName } from "./geo.js";
 import { loadCollectionDaySummaryForUser } from "./collectionDaySummaryServer.js";
 import { loadKpiTargetsBySalesman, loadPerformanceSnapshotsForSalesmen } from "./performanceKpisServer.js";
-import { getMailerConfig, isEmailConfigured, parseEmailList, sendEmail } from "./mailer.js";
+import { getMailerConfig, isEmailConfigured, normalizeDeliverableEmail, parseEmailList, sendEmail } from "./mailer.js";
 import { consolidatePerformanceSnapshots, isMissingSchemaColumn, normalizeSalesmanCode } from "./performanceKpis.js";
 import { buildSalesmanIncentiveEmailSection } from "./salesmanIncentiveEmail.js";
 import { buildSalesmanIncentiveReportFromDb } from "./salesmanIncentiveServer.js";
@@ -321,6 +321,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   date,
   userIds,
   reportEmails,
+  digestOnlyTo = "",
   now = new Date(),
   env = process.env,
   send = sendEmail,
@@ -360,7 +361,8 @@ export async function runDailyVisitReportEmailCycle(admin, {
     };
   }
 
-  const managerEmails = parseEmailList(env.DAILY_VISIT_REPORT_TO);
+  const digestOnlyInbox = normalizeDeliverableEmail(digestOnlyTo);
+  const managerEmails = digestOnlyInbox ? [digestOnlyInbox] : parseEmailList(env.DAILY_VISIT_REPORT_TO);
   const sendToUser = envFlagEnabled(env.DAILY_VISIT_REPORT_SEND_TO_USERS, true);
 
   const [report, profiles, authUsers] = await Promise.all([
@@ -597,6 +599,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
       userName: userReport.userName,
       message,
     });
+    if (digestOnlyInbox) continue;
 
     if (!to.length) {
       results.push({
@@ -669,7 +672,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   const usedDigestEmails = new Set();
   const allKpiSnapshots = [...kpiByUserId.values()].filter(snapshotHasKpis);
 
-  for (const leader of leaders) {
+  for (const leader of digestOnlyInbox ? [] : leaders) {
     const payload = teamPayloadByLeaderId.get(leader.id) || null;
     const subordinateIds = resolveSubordinateUserIds(authUsers, leader, profiles);
     const reports = [...subordinateIds]

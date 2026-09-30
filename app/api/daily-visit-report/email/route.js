@@ -61,8 +61,23 @@ export async function POST(request) {
     if (access.error) return access.error;
 
     const body = await request.json().catch(() => ({}));
+    const digestOnly = body?.digestOnly === true;
+    if (digestOnly && String(access.profile?.role || "").toLowerCase() !== "admin") {
+      return NextResponse.json(
+        { success: false, error: "Only admin can send the digest-only report." },
+        { status: 403 },
+      );
+    }
+    // Digest-only goes to the caller's own login inbox, never an arbitrary address.
+    const digestOnlyTo = digestOnly ? String(access.user?.email || "").trim() : "";
+    if (digestOnly && !digestOnlyTo) {
+      return NextResponse.json(
+        { success: false, error: "Your login has no email address." },
+        { status: 400 },
+      );
+    }
     const midnight = body?.midnight === true || body?.mode === "midnight";
-    const allUsers = midnight || body?.allUsers === true || body?.scope === "all";
+    const allUsers = digestOnly || midnight || body?.allUsers === true || body?.scope === "all";
     const userIds = allUsers ? [] : normalizeVisitReportEmailUserIds(body?.userIds || body?.userId);
     if (!allUsers && !userIds.length) {
       return NextResponse.json(
@@ -93,7 +108,8 @@ export async function POST(request) {
     const result = await runDailyVisitReportEmailCycle(admin, {
       date,
       userIds,
-      reportEmails: body?.reportEmails,
+      reportEmails: digestOnly ? undefined : body?.reportEmails,
+      digestOnlyTo,
     });
     if (result.skipped) {
       if (result.reason === "email_not_configured") {

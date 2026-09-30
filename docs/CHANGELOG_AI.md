@@ -7,6 +7,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 ## Recent agent notes
 
 - **2026-09-30** — Day-route Working hours now show the counted time ranges next to the total (`resolveDayRouteWorkingHours` returns `ranges`) in the Daily Visit Report page and the visit-report / team digest email (HTML and text). Calculation unchanged. No migration.
+- **2026-09-30** — `/api/daily-visit-report/email` accepts `digestOnly: true` (admin only): runs the cycle for `date` but sends only the all-teams digest to the caller's own login email, skipping salesman and team-leader emails and not persisting report-email overrides. Used to preview a day's digest without re-sending to the field. No migration.
 - **2026-09-30** — Outstanding Compare now has an authorized **Recalculate** button beside its saved/check status. It calls `POST /api/outstanding-reconcile`, waits for the scan to finish, reloads saved customer differences and A/B/C mismatch rows, and reports scanned/difference counts. Only roles already allowed by the endpoint's rebuild guard (admin, manager, invoice-maker) see it. It does not send email. No migration.
 - **2026-09-30** — Outstanding Without GPS consolidated management emails now render one customer table per salesman, each with its own subtotal; the overall summary totals remain unchanged. Delivery, filters, and recipients are unchanged. No migration.
 >>>>>>> origin/main

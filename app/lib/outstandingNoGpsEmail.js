@@ -158,6 +158,23 @@ function renderTable(rows, { includeSalesman = false } = {}) {
   </table>`;
 }
 
+function groupEmailRowsBySalesman(rows = []) {
+  const groups = new Map();
+  (rows || []).forEach((row) => {
+    const salesman = String(row?.salesman || "").trim() || "Unknown salesman";
+    const key = salesman.toUpperCase();
+    if (!groups.has(key)) groups.set(key, { salesman, rows: [] });
+    groups.get(key).rows.push(row);
+  });
+  return [...groups.values()].sort((left, right) => left.salesman.localeCompare(right.salesman));
+}
+
+function renderSalesmanTables(rows) {
+  return groupEmailRowsBySalesman(rows).map(({ salesman, rows: salesmanRows }) => `
+    <h3 style="margin:20px 0 8px;color:#0f4c5c;font-size:16px;">${escapeHtml(salesman)}</h3>
+    ${renderTable(salesmanRows)}`.trim()).join("");
+}
+
 function summaryCards(totals) {
   return `<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:0 0;margin:0 0 16px;">
   <tr>
@@ -195,6 +212,12 @@ function textTable(rows, includeSalesman) {
     ].join(" | ")),
     `Total | ${totals.customers} customers | ${formatOutstandingMoney(totals.outstanding)}`,
   ].join("\n");
+}
+
+function textSalesmanTables(rows) {
+  return groupEmailRowsBySalesman(rows)
+    .map(({ salesman, rows: salesmanRows }) => `${salesman}\n${textTable(salesmanRows, false)}`)
+    .join("\n\n");
 }
 
 export function buildOutstandingNoGpsReportUrl(env = process.env) {
@@ -240,7 +263,7 @@ export function buildOutstandingNoGpsEmail({
       <p style="margin:0 0 14px;color:#334155;">${escapeHtml(intro)}</p>
       ${who ? `<p style="margin:0 0 16px;"><span style="display:inline-block;padding:6px 12px;border-radius:999px;background:#ecfeff;border:1px solid #67e8f9;color:#0e7490;font-weight:800;">${escapeHtml(who)}</span></p>` : ""}
       ${summaryCards(totals)}
-      ${renderTable(rows, { includeSalesman })}
+      ${includeSalesman ? renderSalesmanTables(rows) : renderTable(rows)}
       ${link ? `<p style="margin:16px 0 0;"><a href="${escapeHtml(link)}" style="color:#0f766e;font-weight:700;">Open Outstanding Without GPS report</a></p>` : ""}
       <p style="margin:16px 0 0; color: #64748b; font-size: 12px;">${escapeHtml(footer)}</p>
     </div>
@@ -252,7 +275,7 @@ export function buildOutstandingNoGpsEmail({
     intro,
     who,
     "",
-    textTable(rows, includeSalesman),
+    includeSalesman ? textSalesmanTables(rows) : textTable(rows, false),
     link ? `Report: ${link}` : "",
   ].filter(Boolean).join("\n");
 

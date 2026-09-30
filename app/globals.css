@@ -6374,6 +6374,65 @@ th:has(.moduleTableColumnFilterInput) {
   border-color: #cde5d7;
 }
 
+.partialDatesBox {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #e6cfa4;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #7a5417;
+}
+
+.partialDatesBox strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.partialDatesBox p {
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.partialDatesTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+.partialDatesTable th,
+.partialDatesTable td {
+  border: 1px solid #e6cfa4;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.partialDatesTable th {
+  background: #0f4c5c;
+  color: #ffffff;
+}
+
+.partialDatesActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.partialDatesForce {
+  padding: 8px 14px;
+  border: 1px solid #a42c2c;
+  border-radius: 6px;
+  background: #a42c2c;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.partialDatesForce:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .successTitle {
   display: grid;
   grid-template-columns: auto 1fr;

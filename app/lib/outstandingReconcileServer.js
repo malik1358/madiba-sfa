@@ -12,6 +12,12 @@ import {
 import { mergeSalesSnapshots } from "./salesHistory.js";
 import { buildPaymentSettlementLedger } from "./paymentBehavior.js";
 import {
+  createSalesCoverageCollector,
+  detectSalesCoverageGaps,
+  isSalesCoverageGapDate,
+  summarizeSalesCoverageGaps,
+} from "./salesCoverage.js";
+import {
   OUTSTANDING_RECONCILE_KEY,
   buildOutstandingReconcileRow,
   classifyOutstandingBillMismatch,
@@ -25,7 +31,7 @@ import {
 } from "./outstandingReconcile.js";
 
 const SALES_PAGE_SIZE = 1000;
-const SALES_SELECT = "id,transaction_date,voucher_number,voucher_type,reference,customer_code,customer_name,category,item_code,item_name,quantity,sales_amount";
+const SALES_SELECT = "id,transaction_date,voucher_number,voucher_type,reference,customer_code,customer_name,salesman_name,category,item_code,item_name,quantity,sales_amount";
 
 function parseJson(value) {
   try {
@@ -152,6 +158,8 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
   // Ref → customers that own it in sales, so a bill billed to the wrong customer is visible.
   const voucherOwners = new Map();
   const pendingMismatches = [];
+  // Per-day salesman counts, so a date wiped by a partial upload is visible.
+  const coverage = createSalesCoverageCollector();
   let scannedCount = 0;
   let failedCount = 0;
 
@@ -226,7 +234,9 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
     seenCodes.add(code);
     scannedCount += 1;
     try {
-      evaluate(code, mergeSalesSnapshots(salesRows));
+      const merged = mergeSalesSnapshots(salesRows);
+      merged.forEach((row) => coverage.add(row));
+      evaluate(code, merged);
     } catch (error) {
       failedCount += 1;
       console.error(`Outstanding reconcile failed for ${code}:`, error);
@@ -246,6 +256,7 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
   }
 
   const sortedRows = sortOutstandingReconcileRows(rows);
+  const coverageGaps = detectSalesCoverageGaps(coverage.days());
 
   // Owners are only complete after the whole scan, so classify at the end.
   const mismatchRows = sortOutstandingBillMismatches(pendingMismatches.map((entry) => {
@@ -255,6 +266,7 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
       billRef: entry.bill_ref,
       refOwners,
       reversedInSfa: entry.reversed_in_sfa,
+      salesDayIncomplete: isSalesCoverageGapDate(coverageGaps, entry.bill_date),
     });
     return {
       customer_code: entry.customer_code,
@@ -282,6 +294,8 @@ export async function buildOutstandingReconcileDataset(admin, { trigger = "manua
     summary: summarizeOutstandingReconcileRows(sortedRows),
     mismatchRows,
     mismatchSummary: summarizeOutstandingBillMismatches(mismatchRows),
+    coverageGaps,
+    coverageSummary: summarizeSalesCoverageGaps(coverageGaps),
   };
 }
 

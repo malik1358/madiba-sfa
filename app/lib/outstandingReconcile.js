@@ -1,4 +1,5 @@
 import { toNumber } from "./outstanding.js";
+import { summarizeSalesCoverageGaps } from "./salesCoverage.js";
 
 export const OUTSTANDING_RECONCILE_KEY = "outstanding_reconcile_dataset_v1";
 export const OUTSTANDING_RECONCILE_TOLERANCE = 0.02;
@@ -6,6 +7,7 @@ export const OUTSTANDING_RECONCILE_TOLERANCE = 0.02;
 /** Why a Tally bill could not be attached to a sales invoice. */
 export const BILL_MISMATCH_OTHER_CUSTOMER = "ref_other_customer";
 export const BILL_MISMATCH_REVERSED = "ref_reversed";
+export const BILL_MISMATCH_DAY_INCOMPLETE = "ref_day_incomplete";
 export const BILL_MISMATCH_MISSING = "ref_missing";
 
 export const BILL_MISMATCH_LABELS = {
@@ -16,6 +18,10 @@ export const BILL_MISMATCH_LABELS = {
   [BILL_MISMATCH_REVERSED]: {
     en: "Invoice reversed in SFA",
     ar: "الفاتورة معكوسة في النظام",
+  },
+  [BILL_MISMATCH_DAY_INCOMPLETE]: {
+    en: "Sales data for this day is incomplete",
+    ar: "بيانات المبيعات لهذا اليوم غير مكتملة",
   },
   [BILL_MISMATCH_MISSING]: {
     en: "Ref not in sales data",
@@ -36,12 +42,14 @@ export function normalizeBillRef(value) {
  * @param {string} input.billRef Tally `Ref. No.`.
  * @param {string[]} input.refOwners Customer codes that own this voucher in sales.
  * @param {boolean} input.reversedInSfa The customer's own voucher was credit-note reversed.
+ * @param {boolean} input.salesDayIncomplete The bill date lost most of its sales rows to a partial upload.
  */
 export function classifyOutstandingBillMismatch({
   customerCode = "",
   billRef = "",
   refOwners = [],
   reversedInSfa = false,
+  salesDayIncomplete = false,
 } = {}) {
   const code = String(customerCode || "").trim().toUpperCase();
   const owners = [...new Set((Array.isArray(refOwners) ? refOwners : []).map((value) => String(value || "").trim().toUpperCase()).filter(Boolean))];
@@ -63,8 +71,10 @@ export function classifyOutstandingBillMismatch({
   }
 
   return {
-    mismatch_type: BILL_MISMATCH_MISSING,
-    note: "This reference does not appear anywhere in the sales data.",
+    mismatch_type: salesDayIncomplete ? BILL_MISMATCH_DAY_INCOMPLETE : BILL_MISMATCH_MISSING,
+    note: salesDayIncomplete
+      ? "The sales upload for this date kept only part of the day, so this invoice was deleted. Re-upload a full sales export for this date."
+      : "This reference does not appear anywhere in the sales data.",
   };
 }
 
@@ -124,7 +134,7 @@ export function summarizeOutstandingReconcileRows(rows = []) {
 export function summarizeOutstandingBillMismatches(rows = []) {
   const list = Array.isArray(rows) ? rows : [];
   const byType = {};
-  [BILL_MISMATCH_OTHER_CUSTOMER, BILL_MISMATCH_REVERSED, BILL_MISMATCH_MISSING].forEach((type) => {
+  [BILL_MISMATCH_OTHER_CUSTOMER, BILL_MISMATCH_REVERSED, BILL_MISMATCH_DAY_INCOMPLETE, BILL_MISMATCH_MISSING].forEach((type) => {
     const typeRows = list.filter((row) => row.mismatch_type === type);
     byType[type] = {
       count: typeRows.length,
@@ -157,6 +167,8 @@ export function emptyOutstandingReconcileDataset() {
     summary: summarizeOutstandingReconcileRows([]),
     mismatchRows: [],
     mismatchSummary: summarizeOutstandingBillMismatches([]),
+    coverageGaps: [],
+    coverageSummary: summarizeSalesCoverageGaps([]),
   };
 }
 
@@ -195,6 +207,16 @@ export function normalizeOutstandingReconcileDataset(raw) {
     })),
   );
 
+  const coverageGaps = (Array.isArray(raw.coverageGaps) ? raw.coverageGaps : []).map((gap) => ({
+    date: String(gap?.date || "").slice(0, 10),
+    lines: Number(gap?.lines || 0),
+    vouchers: Number(gap?.vouchers || 0),
+    salesmen: Number(gap?.salesmen || 0),
+    expected_salesmen: Number(gap?.expected_salesmen || 0),
+    salesman_names: Array.isArray(gap?.salesman_names) ? gap.salesman_names.map((value) => String(value || "")) : [],
+    missing_salesmen: Array.isArray(gap?.missing_salesmen) ? gap.missing_salesmen.map((value) => String(value || "")) : [],
+  })).filter((gap) => gap.date);
+
   return {
     builtAt: String(raw.builtAt || ""),
     trigger: String(raw.trigger || ""),
@@ -208,5 +230,7 @@ export function normalizeOutstandingReconcileDataset(raw) {
       : summarizeOutstandingReconcileRows(rows),
     mismatchRows,
     mismatchSummary: summarizeOutstandingBillMismatches(mismatchRows),
+    coverageGaps,
+    coverageSummary: summarizeSalesCoverageGaps(coverageGaps),
   };
 }

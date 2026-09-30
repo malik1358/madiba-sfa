@@ -3,11 +3,11 @@ import {
   MISSING_INVOICE_EMAIL_LAST_SENT_KEY,
   MISSING_INVOICE_GRACE_MS,
   buildMissingInvoiceAlertEmail,
+  getMissingInvoiceEmailMidnightKsaDate,
   invoiceMetaKey,
   missingInvoiceCreatedFromIso,
-  isWithinMissingInvoiceEmailWindow,
   parseInvoiceMeta,
-  parseLastSentAt,
+  parseMissingInvoiceEmailState,
   resolveMissingInvoiceEmailCc,
   resolveMissingInvoiceEmailRecipients,
   selectMissingInvoiceOrders,
@@ -83,13 +83,18 @@ export async function loadLastMissingInvoiceEmailSentAt(admin) {
     .eq("setting_key", MISSING_INVOICE_EMAIL_LAST_SENT_KEY)
     .maybeSingle();
   if (error) throw error;
-  return parseLastSentAt(data?.setting_value);
+  return parseMissingInvoiceEmailState(data?.setting_value);
 }
 
-export async function saveLastMissingInvoiceEmailSentAt(admin, now = new Date()) {
+export async function saveLastMissingInvoiceEmailSentAt(admin, now = new Date(), previousState = {}) {
+  const state = parseMissingInvoiceEmailState(previousState);
+  const midnightDate = getMissingInvoiceEmailMidnightKsaDate(now);
   const { error } = await admin.from("system_settings").upsert({
     setting_key: MISSING_INVOICE_EMAIL_LAST_SENT_KEY,
-    setting_value: JSON.stringify({ lastSentAt: now.toISOString() }),
+    setting_value: JSON.stringify({
+      lastSentAt: now.toISOString(),
+      lastMidnightKsaDate: midnightDate || state.lastMidnightKsaDate,
+    }),
   }, { onConflict: "setting_key" });
   if (error) throw error;
 }
@@ -133,15 +138,6 @@ export async function runMissingInvoiceEmailCycle(admin, {
     }
   }
 
-  if (!isWithinMissingInvoiceEmailWindow(now)) {
-    return {
-      skipped: true,
-      reason: "outside_india_back_office_hours",
-      sentCount: 0,
-      orderCount: 0,
-    };
-  }
-
   if (!isEmailConfigured(getMailerConfig(env))) {
     return {
       skipped: true,
@@ -166,34 +162,46 @@ export async function runMissingInvoiceEmailCycle(admin, {
   const orders = loaded?.orders || [];
   const metaByOrder = loaded?.metaByOrder || new Map();
 
-  if (!orders.length) {
+  const message = buildMissingInvoiceAlertEmail({ now, orders, metaByOrder });
+  const hasFrequentReminderOrders = message.pendingApprovalCount > 0 || message.pendingInvoiceCreationCount > 0;
+  const midnightKsaDate = getMissingInvoiceEmailMidnightKsaDate(now);
+  if (!hasFrequentReminderOrders && !midnightKsaDate) {
     return {
       skipped: true,
-      reason: "no_overdue_orders",
+      reason: "no_pending_approval_or_invoice_creation",
       sentCount: 0,
-      orderCount: 0,
+      orderCount: message.orderCount,
       to,
       cc,
     };
   }
 
-  const lastSentAt = await loadLastSentAt(admin);
-  if (wasMissingInvoiceEmailSentRecently(lastSentAt, now)) {
+  const sendState = parseMissingInvoiceEmailState(await loadLastSentAt(admin));
+  if (!hasFrequentReminderOrders && sendState.lastMidnightKsaDate === midnightKsaDate) {
+    return {
+      skipped: true,
+      reason: "midnight_digest_already_sent",
+      sentCount: 0,
+      orderCount: message.orderCount,
+      to,
+      cc,
+    };
+  }
+
+  if (hasFrequentReminderOrders && wasMissingInvoiceEmailSentRecently(sendState.lastSentAt, now)) {
     return {
       skipped: true,
       reason: "sent_recently",
       sentCount: 0,
-      orderCount: orders.length,
+      orderCount: message.orderCount,
       to,
       cc,
     };
   }
 
-  const message = buildMissingInvoiceAlertEmail({ now, orders, metaByOrder });
-
   try {
     const sent = await send({ ...message, to, cc }, env);
-    await saveLastSentAt(admin, now);
+    await saveLastSentAt(admin, now, sendState);
     return {
       skipped: false,
       sentCount: 1,

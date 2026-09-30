@@ -90,7 +90,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `collection-stale-overdue-email.yml` | `35 21 * * 0-3,5,6` | 00:35 KSA, skip Friday | `/api/cron/collection-stale-overdue-email` |
 | `price-sync.yml` | `0 */8 * * *` | Every 8 hours | `/api/admin/price-sync` |
 | `mobile-snapshot.yml` | `0 */4 * * *` | Every 4 hours, batched | `/api/cron/mobile-snapshot` |
-| `missing-invoice-email.yml` | Every 15 min, 03:30–14:30 UTC, days `0-4,6` | 09:00–20:00 IST, Saturday–Thursday. Backup for pg_cron | `/api/cron/missing-invoice-email` |
+| `missing-invoice-email.yml` | Every 15 min at :05/:20/:35/:50 UTC | Five-minute-offset backup for pg_cron; supports the 00:05 KSA midnight fallback | `/api/cron/missing-invoice-email` |
 
 Cron requests send header `x-cron-secret`. Price sync is the same header, not a user session.
 

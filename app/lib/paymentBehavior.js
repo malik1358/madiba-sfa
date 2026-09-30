@@ -660,6 +660,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
       date: dateOnly(note.credit_date),
       amount: toNumber(note.amount),
       voucher_number: note.voucher_number || "",
+      reference: note.reference || "",
     })),
     ...buildSortedReceipts(receipts).map((row) => ({
       kind: "receipt",
@@ -711,6 +712,17 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
 
   for (const event of events) {
     let remaining = event.amount;
+
+    if (event.kind === "credit_note") {
+      const referencedVoucher = normalizeRef(event.reference);
+      if (referencedVoucher) {
+        for (const invoice of invoices) {
+          if (remaining <= 0.009) break;
+          if (normalizeRef(invoice.voucher_number) !== referencedVoucher) continue;
+          remaining = applyToInvoice(event, invoice, remaining);
+        }
+      }
+    }
 
     // Receipts: first receipt after each cash invoice settles that cash bill first.
     if (event.kind === "receipt") {

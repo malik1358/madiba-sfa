@@ -560,6 +560,51 @@ test("unpaired credit notes reduce net Sales used in the Open check", () => {
   assert.equal(Number(inv1.outstanding_pending.toFixed(2)), 420);
 });
 
+test("credit notes settle their referenced invoice before falling back to FIFO", () => {
+  const ledger = buildPaymentSettlementLedger({
+    transactions: [
+      { transaction_date: "2026-03-07", voucher_number: "NFD/211", sales_amount: 3765, item_code: "ITEM-A", quantity: 10, category: "Paper" },
+      { transaction_date: "2026-03-07", voucher_number: "NFD/212", sales_amount: 4609, item_code: "ITEM-B", quantity: 10, category: "Paper" },
+      {
+        transaction_date: "2026-08-03",
+        voucher_number: "429",
+        voucher_type: "Credit Note",
+        reference: "NFD/211",
+        sales_amount: -1080,
+        item_code: "ITEM-A",
+        quantity: -4,
+        category: "Paper",
+      },
+      {
+        transaction_date: "2026-08-03",
+        voucher_number: "430",
+        voucher_type: "Credit Note",
+        reference: "NFD/212",
+        sales_amount: -2488.86,
+        item_code: "ITEM-B",
+        quantity: -8,
+        category: "Paper",
+      },
+    ],
+    receipts: [{ receipt_date: "2026-07-05", amount: 1500, vch_no: "1180" }],
+    outstandingInvoices: [
+      { invoice_date: "2026-03-07", ref_no: "NFD/211", pending_amount: 1587.75 },
+      { invoice_date: "2026-03-07", ref_no: "NFD/212", pending_amount: 2438.16 },
+    ],
+    todayIso: "2026-09-30",
+  });
+
+  const invoice211 = ledger.invoices.find((row) => row.voucher_number === "NFD/211");
+  const invoice212 = ledger.invoices.find((row) => row.voucher_number === "NFD/212");
+  assert.equal(Number(invoice211.remaining.toFixed(2)), 1587.75);
+  assert.equal(Number(invoice212.remaining.toFixed(2)), 2438.16);
+  assert.equal(Number(ledger.outstandingCompareTotals.computed_open.toFixed(2)), 4025.91);
+  assert.equal(Number(ledger.outstandingCompareTotals.tally_open.toFixed(2)), 4025.91);
+  assert.equal(ledger.outstandingCompareTotals.discrepancy_count, 0);
+  assert.deepEqual(invoice211.fifo_credit_notes.map((row) => row.voucher_number), ["429"]);
+  assert.deepEqual(invoice212.fifo_credit_notes.map((row) => row.voucher_number), ["430"]);
+});
+
 test("Outstanding Compare uses FIFO open when CN display attachment differs", () => {
   const ledger = buildPaymentSettlementLedger({
     transactions: [

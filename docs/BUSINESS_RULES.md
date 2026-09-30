@@ -110,6 +110,7 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 - Admin, manager, and invoice-maker can manually rebuild the saved reconciliation from Outstanding Compare with **Recalculate**; the synchronous `POST /api/outstanding-reconcile` response refreshes both saved customer differences and unmatched-bill categories. This manual action does not send email.
 - Do not force FIFO open or paid to equal the outstanding file. Tests in `tests/paymentBehavior.test.mjs` lock this (including the case “open is FIFO residual, not outstanding 610”).
 - Cash is applied oldest invoice first.
+- Unpaired credit notes with an explicit reference to a sales voucher apply to that referenced invoice first (provided the credit-note date is not before the invoice); any excess then follows oldest-open FIFO. Credit notes without a matching reference apply oldest-open FIFO.
 - Receipts posted before an invoice are customer prepayments and apply to the oldest open invoice in FIFO order, including a later-dated invoice; their payment-days contribution is zero. Credit notes dated before an invoice never reduce that later sale.
 - Same-day or next-day credit notes (`IMMEDIATE_REVERSAL_MAX_DAYS = 1`) that match the invoice (amount and line fingerprint) are immediate reversals. They stay inside sales but are excluded from average days. They are not “payments”.
 - A next-day **reissue** is not a reversal. Orphan credit notes that do not match an invoice reduce open balance rather than being dropped.

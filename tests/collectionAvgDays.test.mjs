@@ -60,3 +60,24 @@ test("attachAvgDaysToPayToRecords fills avg_days_to_pay and last_receipt_date", 
   assert.equal(typeof row.avg_days_to_pay_6m, "number");
   assert.ok(row.avg_days_to_pay_6m > 0);
 });
+
+test("attachAvgDaysToPayToRecords derives avg days from open outstanding buckets when never paid", () => {
+  const [row] = attachAvgDaysToPayToRecords([{
+    customer_code: "1009",
+    customer_name: "ABRAJ AL RISALA",
+    invoices: [],
+    outstanding_0_30: 12714.52,
+    outstanding_30_60: 2664.76,
+    outstanding_61_90: 0,
+    outstanding_91_120: 0,
+    outstanding_above_120: 0,
+  }], {
+    salesByCustomer: new Map(),
+    receiptsByCustomer: new Map(),
+    todayIso: "2026-09-28",
+  });
+
+  assert.equal(row.last_receipt_date, "");
+  assert.equal(row.avg_days_to_pay, 20);
+  assert.equal(row.avg_days_to_pay_6m, 20);
+});

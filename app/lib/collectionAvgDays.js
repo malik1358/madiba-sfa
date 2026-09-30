@@ -157,6 +157,36 @@ export function resolveLastReceiptDate(receipts = []) {
   return latest;
 }
 
+function shiftIsoDays(isoDate, daysBack = 0) {
+  const base = String(isoDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return "";
+  const parsed = Date.parse(`${base}T00:00:00Z`);
+  if (!Number.isFinite(parsed)) return "";
+  return new Date(parsed - (Math.max(0, Number(daysBack) || 0) * 86400000)).toISOString().slice(0, 10);
+}
+
+function synthesizeInvoicesFromOutstandingBuckets(record, todayIso = new Date().toISOString()) {
+  const bucketAges = [
+    { key: "outstanding_0_30", days: 15 },
+    { key: "outstanding_30_60", days: 45 },
+    { key: "outstanding_61_90", days: 75 },
+    { key: "outstanding_91_120", days: 105 },
+    { key: "outstanding_above_120", days: 135 },
+  ];
+
+  return bucketAges
+    .map(({ key, days }) => {
+      const pendingAmount = toNumber(record?.[key]);
+      if (pendingAmount <= 0) return null;
+      return {
+        pending_amount: pendingAmount,
+        invoice_day: days,
+        invoice_date: shiftIsoDays(todayIso, days),
+      };
+    })
+    .filter(Boolean);
+}
+
 /** Attach avg_days_to_pay and last_receipt_date using preloaded sales + receipt maps. */
 export function attachAvgDaysToPayToRecords(records, {
   salesByCustomer = new Map(),
@@ -166,7 +196,10 @@ export function attachAvgDaysToPayToRecords(records, {
   return (records || []).map((record) => {
     const code = record?.customer_code;
     const invoices = Array.isArray(record?.invoices) ? record.invoices : [];
-    const totalOutstanding = invoices.reduce(
+    const effectiveInvoices = invoices.length > 0
+      ? invoices
+      : synthesizeInvoicesFromOutstandingBuckets(record, todayIso);
+    const totalOutstanding = effectiveInvoices.reduce(
       (sum, invoice) => sum + toNumber(invoice?.pending_amount),
       0,
     );
@@ -174,7 +207,7 @@ export function attachAvgDaysToPayToRecords(records, {
     const behavior = resolveCollectionAvgDaysBehavior({
       transactions: lookupByCustomerCode(salesByCustomer, code),
       receipts,
-      invoices,
+      invoices: effectiveInvoices,
       totalOutstanding,
       todayIso,
     });

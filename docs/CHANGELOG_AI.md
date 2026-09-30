@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-30** — Added the authorized **Recalculate** button directly to the **Tally bills not matched to a sales invoice** A/B/C section as well as the customer list. It uses the same synchronous rebuild action, then reloads the saved report. No migration.
 - **2026-09-30** — Outstanding Compare's customer-list action is now **Branch issue**, shown only when customer-level SFA−Tally is within 0.02 but one or more invoice gaps remain. It opens that customer's invoice comparison for review of requested invoice-specific settlement; the unconditional Compare button is removed. No migration.
 - **2026-09-30** — Missing-invoice email now repeats every 15 minutes only while Pending for approval or Pending for invoice creation (including Invoice not uploaded) has overdue orders. When both queues are empty it sends one summary during KSA midnight (00:00–00:14); GitHub backup runs five minutes after pg_cron. No migration.
 - **2026-09-30** — Unpaired credit notes now apply to an exact referenced sales voucher before any remainder falls back to oldest-open FIFO. This prevents CN 430 referencing NFD/212 from clearing NFD/211 (customer 1309C), which created a false zero Machine Open despite Tally showing 1,587.75 still open. Regression verifies CN 429 → NFD/211 and CN 430 → NFD/212. Credit notes dated before an invoice still cannot affect it. No migration.

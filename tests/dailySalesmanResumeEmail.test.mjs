@@ -21,6 +21,7 @@ import {
   buildSalesmanResumeRows,
   isJwtClockSkewError,
   runDailySalesmanResumeEmailCycle,
+  workdaysFromDailyWorkingHoursReport,
   withJwtClockSkewRetry,
 } from "../app/lib/dailySalesmanResumeServer.js";
 
@@ -347,6 +348,28 @@ test("buildSalesmanResumeRows aggregates metrics by user", () => {
   );
   assert.equal(ahmed.bossUserId, "boss");
   assert.equal(ahmed.bossName, "Soyeb");
+});
+
+test("resume uses the canonical daily working-hours report value", () => {
+  const workdays = workdaysFromDailyWorkingHoursReport({
+    users: [{
+      userId: "u1",
+      loginAt: "2026-09-07T06:00:00.000Z",
+      lunchOutAt: "2026-09-07T10:47:00.000Z",
+      lunchInAt: "2026-09-07T12:14:00.000Z",
+      logoutAt: "2026-09-07T16:10:00.000Z",
+      logoutAutoClosed: true,
+      workingHoursMinutes: 206,
+    }],
+  });
+  const rows = buildSalesmanResumeRows({
+    profiles: [{ id: "u1", role: "salesman", salesman_name: "Osama", salesman_code: "OSAMA" }],
+    workdays,
+  });
+
+  assert.equal(rows[0].workingMinutes, 206);
+  assert.equal(rows[0].loginAt, "2026-09-07T06:00:00.000Z");
+  assert.equal(rows[0].logoutAutoClosed, true);
 });
 
 test("hidden resume names are dropped even with invoices", () => {

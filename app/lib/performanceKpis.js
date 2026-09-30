@@ -1,4 +1,5 @@
 import { currentMonthDateRange } from "./salesInvoices.js";
+import { isCreditNoteTransaction } from "./paymentBehavior.js";
 import { KSA_TIMEZONE } from "./workdayActivity.js";
 
 export function isMissingSchemaColumn(error) {
@@ -70,10 +71,16 @@ export function isOfficeSuppliesSale(row = {}) {
   );
 }
 
+function netKpiSalesAmount(row = {}) {
+  const amount = Number(row?.sales_amount || 0);
+  if (!Number.isFinite(amount)) return 0;
+  return isCreditNoteTransaction(row) ? -Math.abs(amount) : amount;
+}
+
 export function splitSalesActuals(rows = []) {
   return (rows || []).reduce((totals, row) => {
-    const amount = Number(row?.sales_amount || 0);
-    if (!(amount > 0)) return totals;
+    const amount = netKpiSalesAmount(row);
+    if (amount === 0) return totals;
     if (isOfficeSuppliesSale(row)) totals.officeSupplies += amount;
     else totals.otherSales += amount;
     return totals;
@@ -140,8 +147,8 @@ export function averageCumulativeDayShares(salesRows = []) {
   (salesRows || []).forEach((row) => {
     const date = String(row?.transaction_date || "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-    const amount = Number(row?.sales_amount || 0);
-    if (!(amount > 0)) return;
+    const amount = netKpiSalesAmount(row);
+    if (amount === 0) return;
     const month = date.slice(0, 7);
     const day = Number(date.slice(8, 10));
     let bucket = months.get(month);
@@ -351,7 +358,7 @@ export function classifyBuyingCustomers(monthCustomerCodes = [], priorCustomerCo
 export function buyingCustomerCodesFromSales(rows = []) {
   const codes = [];
   (rows || []).forEach((row) => {
-    if (Number(row?.sales_amount || 0) <= 0) return;
+    if (netKpiSalesAmount(row) <= 0 || isCreditNoteTransaction(row)) return;
     const code = normalizeSalesmanCode(row.customer_code);
     if (code) codes.push(code);
   });

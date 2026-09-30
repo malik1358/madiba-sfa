@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   achievementPercent,
   averageCumulativeDayShares,
+  buyingCustomerCodesFromSales,
   buildPerformanceSnapshot,
   expectedPacePercent,
   ksaWorkdayProgressRatio,
@@ -114,7 +115,7 @@ test("pace shares use that salesman only, not the company average", () => {
   assert.equal(expectedPacePercent("2026-09-09", pickSalesmanPaceShares(pace, "NEWGUY")), ksaWorkdayProgressRatio("2026-09-09") * 100);
 });
 
-test("splits office supplies sales from other sales", () => {
+test("nets signed sales and positive or negative credit notes by category", () => {
   assert.equal(isOfficeSuppliesSale({ category: "Office" }), true);
   assert.equal(isOfficeSuppliesSale({ category: "Stationery" }), true);
   assert.equal(isOfficeSuppliesSale({ category: "Electronics" }), false);
@@ -123,8 +124,22 @@ test("splits office supplies sales from other sales", () => {
       { category: "Office Supplies", sales_amount: 80 },
       { category: "Fridge", sales_amount: 20 },
       { item_name: "A4 paper", category: "Stationery", sales_amount: 10 },
+      { category: "Office Supplies", sales_amount: -5 },
+      { category: "Office Supplies", voucher_type: "Credit Note", sales_amount: 12 },
+      { category: "Fridge", voucher_type: "Sales Return", sales_amount: -4 },
     ]),
-    { officeSupplies: 90, otherSales: 20 },
+    { officeSupplies: 73, otherSales: 16 },
+  );
+});
+
+test("credit notes do not count as buying customers", () => {
+  assert.deepEqual(
+    buyingCustomerCodesFromSales([
+      { customer_code: "SALE", sales_amount: 100 },
+      { customer_code: "RETURN", voucher_type: "Credit Note", sales_amount: 20 },
+      { customer_code: "NEGATIVE", sales_amount: -5 },
+    ]),
+    ["SALE"],
   );
 });
 

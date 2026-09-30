@@ -82,7 +82,7 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
     monthRows = await fetchPagedRows(
       admin,
       "active_sales",
-      "customer_code,sales_amount,category,item_name",
+      "customer_code,sales_amount,category,item_name,voucher_type,voucher_number,reference,quantity",
       (query) => query
         .eq("salesman_code", code)
         .gte("transaction_date", from)
@@ -93,7 +93,7 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
     monthRows = await fetchPagedRows(
       admin,
       "active_sales",
-      "customer_code,sales_amount",
+      "customer_code,sales_amount,voucher_type,voucher_number,reference,quantity",
       (query) => query
         .eq("salesman_code", code)
         .gte("transaction_date", from)

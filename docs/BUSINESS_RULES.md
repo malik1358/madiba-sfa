@@ -109,6 +109,7 @@ Implemented in `app/lib/paymentBehavior.js` and shown on Payment Settlement and 
 - Those customer-level differences are computed once per upload, not per page view. Tally = the customer total on the outstanding upload; SFA = `outstandingCompareTotals.computed_open`. Only differing customers are stored, so a customer missing from the saved dataset reconciled cleanly at the last upload. The same rows are emailed after each sales / receipt / outstanding upload, and a repeat upload with an identical set of differences does not re-send.
 - Do not force FIFO open or paid to equal the outstanding file. Tests in `tests/paymentBehavior.test.mjs` lock this (including the case “open is FIFO residual, not outstanding 610”).
 - Cash is applied oldest invoice first.
+- Receipts posted before an invoice are customer prepayments and apply to the oldest open invoice in FIFO order, including a later-dated invoice; their payment-days contribution is zero. Credit notes dated before an invoice never reduce that later sale.
 - Same-day or next-day credit notes (`IMMEDIATE_REVERSAL_MAX_DAYS = 1`) that match the invoice (amount and line fingerprint) are immediate reversals. They stay inside sales but are excluded from average days. They are not “payments”.
 - A next-day **reissue** is not a reversal. Orphan credit notes that do not match an invoice reduce open balance rather than being dropped.
 - Average days uses paid receipts first. Open invoices are included only when they are older than that paid average. Younger FIFO residuals are excluded.

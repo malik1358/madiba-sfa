@@ -43,6 +43,29 @@ test("matchPaymentsFifo measures days from sales date to receipt date", () => {
   assert.equal(invoices.every((row) => row.remaining === 0), true);
 });
 
+test("matchPaymentsFifo applies an advance receipt to the next customer invoice", () => {
+  const { allocations, invoices, unmatchedReceiptAmount } = matchPaymentsFifo(
+    [
+      {
+        transaction_date: "2026-04-02",
+        voucher_number: "NFD/334",
+        sales_amount: 86362.5,
+        category: "Building Material",
+      },
+    ],
+    [{ receipt_date: "2026-04-01", amount: 99316.88, vch_no: "537" }],
+  );
+
+  assert.equal(invoices.length, 1);
+  assert.equal(invoices[0].voucher_number, "NFD/334");
+  assert.ok(invoices[0].remaining <= 0.009);
+  assert.equal(allocations.length, 1);
+  assert.equal(allocations[0].receipt_date, "2026-04-01");
+  assert.equal(allocations[0].vch_no, "537");
+  assert.equal(allocations[0].days, 0);
+  assert.ok(unmatchedReceiptAmount <= 0.01);
+});
+
 test("buildPaymentBehavior blends only open invoices older than paid-only avg", () => {
   const behavior = buildPaymentBehavior({
     transactions: [

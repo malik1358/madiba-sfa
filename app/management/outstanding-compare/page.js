@@ -12,6 +12,7 @@ import { translate, useAppLanguage } from "../../lib/appLanguage";
 import { resolveAuthSession } from "../../lib/authSession";
 import { buildPaymentSettlementLedger } from "../../lib/paymentBehavior.js";
 import {
+  BILL_MISMATCH_DAY_INCOMPLETE,
   BILL_MISMATCH_LABELS,
   BILL_MISMATCH_MISSING,
   BILL_MISMATCH_OTHER_CUSTOMER,
@@ -69,17 +70,31 @@ const TEXT = {
   allCauses: { en: "All causes", ar: "كل الأسباب" },
   noMismatches: { en: "Every Tally bill matched a sales invoice.", ar: "كل فواتير تالي طابقت فواتير المبيعات." },
   sameAmountAs: { en: "Same amount as", ar: "نفس مبلغ" },
+  coverageTitle: { en: "Sales days that look incomplete", ar: "أيام مبيعات تبدو غير مكتملة" },
+  coverageHint: {
+    en: "A sales upload replaces every stored row for the dates in the file, so a partial export deletes the rest of that day. These dates kept far fewer salesmen than the days around them. Re-upload a full sales export for them, then press Recalculate.",
+    ar: "رفع المبيعات يستبدل كل سطور التواريخ الموجودة في الملف، لذلك الملف الجزئي يحذف باقي اليوم. أعد رفع ملف مبيعات كامل لهذه التواريخ ثم اضغط إعادة الحساب.",
+  },
+  coverageDate: { en: "Date", ar: "التاريخ" },
+  coverageSalesmen: { en: "Salesmen kept", ar: "المندوبون المتبقون" },
+  coverageExpected: { en: "Usual salesmen", ar: "المعتاد" },
+  coverageLines: { en: "Sales lines", ar: "سطور المبيعات" },
+  coverageVouchers: { en: "Vouchers", ar: "الفواتير" },
+  coverageMissing: { en: "Salesmen missing that day", ar: "المندوبون المفقودون" },
+  coverageNone: { en: "Every sales day looks complete.", ar: "كل أيام المبيعات تبدو مكتملة." },
 };
 
 const MISMATCH_TYPES = [
   BILL_MISMATCH_OTHER_CUSTOMER,
   BILL_MISMATCH_REVERSED,
+  BILL_MISMATCH_DAY_INCOMPLETE,
   BILL_MISMATCH_MISSING,
 ];
 
 function mismatchTypeClass(type) {
   if (type === BILL_MISMATCH_OTHER_CUSTOMER) return "paymentSettleStatus paymentSettleStatus--open";
   if (type === BILL_MISMATCH_REVERSED) return "paymentSettleStatus paymentSettleStatus--partial";
+  if (type === BILL_MISMATCH_DAY_INCOMPLETE) return "paymentSettleStatus paymentSettleStatus--open";
   return "paymentSettleStatus";
 }
 
@@ -202,6 +217,7 @@ export default function OutstandingComparePage() {
   const [savedMeta, setSavedMeta] = useState(null);
   const [recalculating, setRecalculating] = useState(false);
   const [mismatchRows, setMismatchRows] = useState([]);
+  const [coverageGaps, setCoverageGaps] = useState([]);
   const [mismatchType, setMismatchType] = useState("");
   const deltaStartedRef = useRef(new Set());
 
@@ -402,6 +418,7 @@ export default function OutstandingComparePage() {
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
       setSavedRowsByCode(new Map(rows.map((row) => [String(row.customer_code || "").toUpperCase(), row])));
       setMismatchRows(Array.isArray(payload.mismatchRows) ? payload.mismatchRows : []);
+      setCoverageGaps(Array.isArray(payload.coverageGaps) ? payload.coverageGaps : []);
       setSavedMeta({
         builtAt: payload.builtAt || "",
         differenceCount: rows.length,
@@ -411,6 +428,7 @@ export default function OutstandingComparePage() {
       setError(err.message || "Unable to load saved reconciliation.");
       setSavedRowsByCode(new Map());
       setMismatchRows([]);
+      setCoverageGaps([]);
       setSavedMeta(null);
     }
   }, []);
@@ -706,6 +724,63 @@ export default function OutstandingComparePage() {
                     <td />
                   </tr>
                 </tfoot>
+              </table>
+            </ExportableTable>
+          </section>
+
+          <section className="moduleSection" id="sales-coverage">
+            <div className="moduleSectionHeader">
+              <h2>{t("coverageTitle")}</h2>
+              <div className="moduleHeaderMeta">
+                <span>{`${formatCount(coverageGaps.length)} ${t("coverageDate").toLowerCase()}(s)`}</span>
+                {access.canAccess("upload") ? (
+                  <button
+                    type="button"
+                    className="moduleInlineButton moduleActionButton"
+                    onClick={() => void recalculateOutstanding()}
+                    disabled={recalculating}
+                  >
+                    {recalculating ? t("recalculating") : t("recalculate")}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <p className="moduleHint">{t("coverageHint")}</p>
+            <ExportableTable filename="sales-coverage-gaps" sheetName="CoverageGaps" className="moduleTableWrap moduleBiTableWrap">
+              <table className="moduleTable moduleBiTable">
+                <thead>
+                  <tr>
+                    <th>{t("coverageDate")}</th>
+                    <th>{t("coverageSalesmen")}</th>
+                    <th>{t("coverageExpected")}</th>
+                    <th>{t("coverageLines")}</th>
+                    <th>{t("coverageVouchers")}</th>
+                    <th>{t("coverageMissing")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coverageGaps.map((gap) => (
+                    <tr key={`coverage-${gap.date}`}>
+                      <td>{gap.date}</td>
+                      <td className="moduleBiMonthCell--down">
+                        <strong>{formatCount(gap.salesmen)}</strong>
+                      </td>
+                      <td>{formatCount(gap.expected_salesmen)}</td>
+                      <td>{formatCount(gap.lines)}</td>
+                      <td>{formatCount(gap.vouchers)}</td>
+                      <td>
+                        <div className="auditSummaryCardMeta">
+                          {gap.missing_salesmen?.length ? gap.missing_salesmen.join(", ") : "—"}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!coverageGaps.length ? (
+                    <tr>
+                      <td colSpan={6}>{t("coverageNone")}</td>
+                    </tr>
+                  ) : null}
+                </tbody>
               </table>
             </ExportableTable>
           </section>

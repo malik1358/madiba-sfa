@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  BILL_MISMATCH_DAY_INCOMPLETE,
   BILL_MISMATCH_MISSING,
   BILL_MISMATCH_OTHER_CUSTOMER,
   BILL_MISMATCH_REVERSED,
@@ -183,6 +184,18 @@ test("a reversed flag without the customer owning the ref is still an owner mism
     reversedInSfa: true,
   });
   assert.equal(result.mismatch_type, BILL_MISMATCH_OTHER_CUSTOMER);
+});
+
+test("a missing ref on an incomplete sales day points at the partial upload", () => {
+  // 1027C bill RNFD/346: 2026-08-31 kept only one salesman after a partial sales upload.
+  const result = classifyOutstandingBillMismatch({
+    customerCode: "1027C",
+    billRef: "RNFD/346",
+    refOwners: [],
+    salesDayIncomplete: true,
+  });
+  assert.equal(result.mismatch_type, BILL_MISMATCH_DAY_INCOMPLETE);
+  assert.match(result.note, /Re-upload a full sales export/);
 });
 
 test("summarizeOutstandingBillMismatches totals each cause", () => {

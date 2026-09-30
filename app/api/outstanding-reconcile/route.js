@@ -87,6 +87,8 @@ export async function GET(request) {
       mismatchSummary: mismatchRows === dataset.mismatchRows
         ? dataset.mismatchSummary
         : summarizeOutstandingBillMismatches(mismatchRows),
+      coverageGaps: dataset.coverageGaps,
+      coverageSummary: dataset.coverageSummary,
     });
   } catch (error) {
     const status = Number(error?.status) || 500;

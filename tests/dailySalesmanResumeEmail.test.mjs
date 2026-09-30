@@ -20,6 +20,7 @@ import {
 import {
   buildSalesmanResumeRows,
   isJwtClockSkewError,
+  loadSalesmanResumeProfiles,
   runDailySalesmanResumeEmailCycle,
   workdaysFromDailyWorkingHoursReport,
   withJwtClockSkewRetry,
@@ -370,6 +371,33 @@ test("resume uses the canonical daily working-hours report value", () => {
   assert.equal(rows[0].workingMinutes, 206);
   assert.equal(rows[0].loginAt, "2026-09-07T06:00:00.000Z");
   assert.equal(rows[0].logoutAutoClosed, true);
+});
+
+test("product promoters remain in the resume even with no transactions", () => {
+  const rows = buildSalesmanResumeRows({
+    profiles: [{ id: "promoter", role: "product_promoter", salesman_name: "Promoter", salesman_code: "PP001" }],
+    workdays: new Map([["promoter", { loginAt: "2026-09-29T06:00:00.000Z", workingMinutes: 0 }]]),
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].salesmanName, "Promoter");
+  assert.match(buildDailySalesmanResumeEmail({ date: "2026-09-29", rows }).html, /Promoter \(PP001\)/);
+});
+
+test("resume profile loader includes active field roles but not office or inactive users", async () => {
+  const admin = {
+    from: () => ({ select: async () => ({ data: [
+      { id: "belal", role: "salesman", is_active: true },
+      { id: "collector", role: "collector", is_active: true },
+      { id: "promoter", role: "product_promoter", is_active: true },
+      { id: "invoice", role: "invoice-maker", is_active: true },
+      { id: "former", role: "salesman", is_active: false },
+    ], error: null }) }),
+  };
+
+  assert.deepEqual((await loadSalesmanResumeProfiles(admin)).map((row) => row.id), [
+    "belal", "collector", "promoter",
+  ]);
 });
 
 test("hidden resume names are dropped even with invoices", () => {

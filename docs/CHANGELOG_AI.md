@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-30** — Daily salesman resume now includes active product promoters (including zero-transaction rows). The 29-Sep Working Hours report showed the named field users logged in, while the resume excluded the promoter role; salesmen and collectors were already eligible. Added a regression; no migration.
 - **2026-09-30** — KPI Targets sales actuals now net all signed active-upload rows and deduct typed/code-detected credit notes and sales returns even when imported amounts are positive. Credit-note rows no longer count as buying customers; historical KPI pace uses net signed sales too. Added KPI regressions; no migration.
 - **2026-09-30** — Added the authorized **Recalculate** button directly to the **Tally bills not matched to a sales invoice** A/B/C section as well as the customer list. It uses the same synchronous rebuild action, then reloads the saved report. No migration.
 - **2026-09-30** — Outstanding Compare's customer-list action is now **Branch issue**, shown only when customer-level SFA−Tally is within 0.02 but one or more invoice gaps remain. It opens that customer's invoice comparison for review of requested invoice-specific settlement; the unconditional Compare button is removed. No migration.

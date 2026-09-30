@@ -20,7 +20,7 @@ import {
   ksaDayBounds,
 } from "./workdayActivity.js";
 
-const SALESMAN_ROLES = new Set(["salesman", "collector"]);
+const SALESMAN_ROLES = new Set(["salesman", "collector", "product-promoter"]);
 
 function isMissingTableError(error) {
   const message = String(error?.message || error?.details || "").toLowerCase();

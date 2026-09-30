@@ -630,7 +630,8 @@ export function buildSortedReceipts(receipts = []) {
  * FIFO-match receipts onto sales invoices to estimate days-to-pay.
  * Cash sales vouchers (RC / DC / JC — C in the voucher prefix) take the first
  * receipt on/after the invoice before older credit bills; any leftover then
- * follows normal oldest-open FIFO across remaining invoices.
+ * follows normal oldest-open FIFO across remaining invoices. A receipt dated
+ * before the cash invoice only takes that slot when no older bill is still open.
  * Invoices reversed immediately by credit notes are excluded from matching.
  * Unpaired credit notes (orphans) also reduce open remaining in date order,
  * so Tally blank CNs that wipe older bills are reflected in Machine Open.
@@ -681,6 +682,13 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
   const creditNoteAllocations = [];
   let unmatchedReceiptAmount = 0;
 
+  function hasOlderOpenInvoice(list, cashInvoice) {
+    return list.some((other) => other !== cashInvoice
+      && other.remaining > 0.009
+      && other.invoice_date
+      && other.invoice_date < cashInvoice.invoice_date);
+  }
+
   function applyToInvoice(event, invoice, remaining) {
     if (remaining <= 0.009 || invoice.remaining <= 0.009) return remaining;
     if (event.kind === "credit_note" && event.date < invoice.invoice_date) return remaining;
@@ -730,6 +738,8 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
         if (remaining <= 0.009) break;
         if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;
         if (invoice.remaining <= 0.009) continue;
+        // Money taken before the cash sale only belongs to it once every older bill is settled.
+        if (event.date < invoice.invoice_date && hasOlderOpenInvoice(invoices, invoice)) continue;
         remaining = applyToInvoice(event, invoice, remaining);
         invoice.cash_first_receipt_used = true;
       }

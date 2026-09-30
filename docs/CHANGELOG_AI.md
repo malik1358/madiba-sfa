@@ -6,6 +6,8 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-30** — A receipt dated before a cash sales voucher (RC / DC / JC) no longer jumps the cash-priority queue while an older bill is still open. Customer 1224 showed cash `DC/0024` (2026-09-19) marked "Paid on 2026-04-20 · Rcpt 675" even though earlier credit invoices were still pending. The cash slot now requires either a receipt on/after the invoice date, or no older open invoice; otherwise the money follows oldest-open FIFO. Two regressions in `tests/paymentBehavior.test.mjs`; no migration.
+
 - **2026-09-30** — Sales coverage gaps now baseline each day against the **same weekday** (median over ±4 same-weekday sales days) instead of the calendar days around it. The first production run flagged 35 dates, most of them Fridays where a single salesman legitimately works. Gaps are returned newest first. No migration.
 - **2026-09-30** — Outstanding Compare **Recalculate** no longer depends on the long POST response. The synchronous rebuild takes over a minute, so a dropped response left the page showing the previous saved dataset (507 customers, saved 11:38) while the server had already stored a newer one. The button now falls back to polling the saved `builtAt` for up to 5 minutes and refreshes when it changes, and the saved timestamp renders in `Asia/Riyadh` instead of raw UTC. No migration.
 

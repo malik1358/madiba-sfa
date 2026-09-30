@@ -225,6 +225,43 @@ test("cash receipt leftover after RC goes to credit invoices on FIFO", () => {
   assert.equal(Number(nfd2.remaining.toFixed(2)), 575);
 });
 
+test("a receipt older than a cash invoice waits while older bills are still open", () => {
+  // Customer 1224 style: Rcpt 675 on 2026-04-20 must not jump to cash DC/0024 on 2026-09-19.
+  const { allocations, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-03-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-09-19", voucher_number: "DC/0024", sales_amount: 2000, category: "Paper" },
+    ],
+    [{ receipt_date: "2026-04-20", amount: 800 }],
+  );
+
+  assert.equal(allocations.length, 1);
+  assert.equal(allocations[0].voucher_number, "NFD/1");
+  assert.equal(Number(allocations[0].amount.toFixed(2)), 800);
+  const cash = invoices.find((row) => row.voucher_number === "DC/0024");
+  assert.equal(Number(cash.remaining.toFixed(2)), 2300);
+});
+
+test("a receipt older than a cash invoice settles it when nothing older is pending", () => {
+  const { allocations, invoices } = matchPaymentsFifo(
+    [
+      { transaction_date: "2026-03-01", voucher_number: "NFD/1", sales_amount: 1000, category: "Paper" },
+      { transaction_date: "2026-09-19", voucher_number: "DC/0024", sales_amount: 2000, category: "Paper" },
+    ],
+    [
+      { receipt_date: "2026-03-05", amount: 1150 },
+      { receipt_date: "2026-04-20", amount: 800 },
+    ],
+  );
+
+  // First receipt clears the older credit bill, so the April receipt can reach the cash sale.
+  assert.equal(allocations[0].voucher_number, "NFD/1");
+  assert.equal(allocations[1].voucher_number, "DC/0024");
+  assert.equal(Number(allocations[1].amount.toFixed(2)), 800);
+  const cash = invoices.find((row) => row.voucher_number === "DC/0024");
+  assert.equal(Number(cash.remaining.toFixed(2)), 1500);
+});
+
 test("second receipt after cash uses normal FIFO including unfinished cash", () => {
   // First receipt after RC is tiny — marks cash priority used; second receipt is plain FIFO.
   const { allocations } = matchPaymentsFifo(

@@ -277,7 +277,11 @@ function workingMinutesFromNearLunchSegments(near, lunchOutAt, lunchInAt) {
   if (!Number.isFinite(lunchOut)) {
     if (near.length < 2) return { applied: true, minutes: null };
     const mins = spanMinutesBetween(near[0].at, near[near.length - 1].at);
-    return { applied: true, minutes: mins > 0 ? mins : null };
+    return {
+      applied: true,
+      minutes: mins > 0 ? mins : null,
+      ranges: mins > 0 ? [{ fromAt: near[0].at, toAt: near[near.length - 1].at }] : [],
+    };
   }
 
   const beforeLunch = near.filter((item) => item.ts < lunchOut);
@@ -290,13 +294,20 @@ function workingMinutesFromNearLunchSegments(near, lunchOutAt, lunchInAt) {
   }
 
   let total = 0;
+  const ranges = [];
   if (beforeLunch.length >= 2) {
-    total += spanMinutesBetween(beforeLunch[0].at, beforeLunch[beforeLunch.length - 1].at);
+    const fromAt = beforeLunch[0].at;
+    const toAt = beforeLunch[beforeLunch.length - 1].at;
+    total += spanMinutesBetween(fromAt, toAt);
+    ranges.push({ fromAt, toAt });
   }
   if (afterLunch.length >= 2) {
-    total += spanMinutesBetween(afterLunch[0].at, afterLunch[afterLunch.length - 1].at);
+    const fromAt = afterLunch[0].at;
+    const toAt = afterLunch[afterLunch.length - 1].at;
+    total += spanMinutesBetween(fromAt, toAt);
+    ranges.push({ fromAt, toAt });
   }
-  return { applied: true, minutes: total > 0 ? total : null };
+  return { applied: true, minutes: total > 0 ? total : null, ranges };
 }
 
 function formatDayRouteWorkingHoursValue(minutes) {
@@ -315,12 +326,13 @@ export function resolveDayRouteWorkingHours(source = []) {
       return {
         minutes: minutes > 0 ? minutes : 0,
         value: formatDayRouteWorkingHoursValue(minutes),
+        ranges: nearResult.ranges || [],
       };
     }
   }
 
   // No non-far customer stops after 08:00 KSA → zero (login/logout/GPS alone do not count).
-  return { minutes: 0, value: "0h" };
+  return { minutes: 0, value: "0h", ranges: [] };
 }
 
 export function buildNamedRouteStops(points = [], idleGaps = []) {

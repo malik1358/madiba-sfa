@@ -300,7 +300,8 @@ test("buildUserVisitReportEmail appends working hours after the day route", () =
 
   assert.match(message.html, /Day route/);
   // Morning 07:34→09:00 + afternoon 13:00→15:00 = 3h 26m
-  assert.match(message.html, /Working hours:<\/strong> 3h 26m/);
+  assert.match(message.html, /Working hours:<\/strong> 3h 26m \(10:34[^-]*- 12:00[^;]*; 16:00[^-]*- 18:00[^)]*\)/);
+  assert.match(message.text, /Working hours: 3h 26m \(10:34/);
 });
 
 test("buildUserVisitReportEmail shows collection outcome when nothing was collected", () => {

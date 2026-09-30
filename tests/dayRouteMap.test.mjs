@@ -193,6 +193,22 @@ test("resolveDayRouteWorkingHours ignores pre-8am KSA near stops and far stops",
   assert.equal(hours.value, "7h 24m");
 });
 
+test("resolveDayRouteWorkingHours exposes counted from and to ranges", () => {
+  const hours = resolveDayRouteWorkingHours([
+    { savedAt: "2026-09-07T07:34:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T09:00:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T10:47:00.000Z", transactionType: "LUNCH_BREAK_OUT" },
+    { savedAt: "2026-09-07T12:14:00.000Z", transactionType: "LUNCH_BREAK_IN" },
+    { savedAt: "2026-09-07T13:00:00.000Z", transactionType: "VISIT_REPORT", isFarFromCustomer: false },
+    { savedAt: "2026-09-07T15:00:00.000Z", transactionType: "COLLECTION_VISIT", isFarFromCustomer: false },
+  ]);
+
+  assert.deepEqual(hours.ranges, [
+    { fromAt: "2026-09-07T07:34:00.000Z", toAt: "2026-09-07T09:00:00.000Z" },
+    { fromAt: "2026-09-07T13:00:00.000Z", toAt: "2026-09-07T15:00:00.000Z" },
+  ]);
+});
+
 test("resolveDayRouteWorkingHours is zero when only pre-8am or far stops exist", () => {
   const hours = resolveDayRouteWorkingHours([
     { savedAt: "2026-09-06T21:24:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },

@@ -319,7 +319,13 @@ export function buildUserVisitReportEmail({
     : buildDayRoutePoints(entries, idleGaps);
   const routeSvg = buildDayRouteSvg(routePoints, { idleGaps, showIdleLabels: false });
   const workdayStops = buildWorkdayRouteStops(routePoints, idleGaps);
-  const workingHoursValue = resolveDayRouteWorkingHours(entries.length ? entries : routePoints).value;
+  const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : routePoints);
+  const workingHoursRanges = (workingHours.ranges || [])
+    .map((range) => `${formatReportTime(range.fromAt)} - ${formatReportTime(range.toAt)}`)
+    .join("; ");
+  const workingHoursValue = workingHoursRanges
+    ? `${workingHours.value} (${workingHoursRanges})`
+    : workingHours.value;
   const workingHoursHtml = `<p style="font-size: 12px; margin: 8px 0 0;"><strong>Working hours:</strong> ${escapeHtml(workingHoursValue)}</p>`;
   const activitySplit = user?.activitySplit || buildVisitDaySplit(entries, user?.daySummary?.stats || {});
   const locationNotes = Array.isArray(user?.locationNotes) && user.locationNotes.length
@@ -340,6 +346,7 @@ export function buildUserVisitReportEmail({
     `Entries: ${user?.visitCount || 0}`,
     `Far from customer: ${user?.farFromCustomerCount || 0}`,
     `Route total: ${formatKm(user?.totalRouteDistanceKm)}`,
+    `Working hours: ${workingHoursValue}`,
     `Visit without order: ${activitySplit.visitWithoutOrderCount}`,
     `New-customer orders: ${activitySplit.newCustomerOrderCount} / ${formatSplitMoney(activitySplit.newCustomerOrderValue)} SAR`,
     `Repeat-customer orders: ${activitySplit.repeatCustomerOrderCount} / ${formatSplitMoney(activitySplit.repeatCustomerOrderValue)} SAR`,

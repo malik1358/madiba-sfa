@@ -1,10 +1,5 @@
 import { sumOrderLineValue } from "./collectionDaySummary.js";
 import {
-  extractWorkdayTimesFromTimelineRows,
-  loadLoggedActivityTimesByUser,
-  loadWorkdayEventsByUser,
-} from "./collectionDaySummaryServer.js";
-import {
   attachResumeRowBosses,
   buildDailySalesmanResumeEmail,
   classifyResumeTeamLeaders,
@@ -14,6 +9,7 @@ import {
   shouldIncludeSalesmanResumeRow,
   sortSalesmanResumeRows,
 } from "./dailySalesmanResume.js";
+import { buildDailyWorkingHoursReport } from "./dailyWorkingHoursReportServer.js";
 import { groupSalesRowsIntoInvoices } from "./salesInvoices.js";
 import { formatCollectorDisplayName } from "./geo.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
@@ -339,56 +335,15 @@ async function loadInvoiceMetricsBySalesman(admin, reportDate) {
   return metrics;
 }
 
-async function loadLastActivityByUser(admin, userIds, reportDate, extras = new Map()) {
-  const ids = [...new Set((userIds || []).filter(Boolean))];
-  const { startIso, endIso } = ksaDayBounds(reportDate);
-  const lastAt = new Map();
-
-  extras.forEach((iso, userId) => {
-    lastAt.set(userId, laterIso(lastAt.get(userId), iso));
-  });
-
-  for (const chunk of chunkList(ids, 100)) {
-    const activities = await loadLoggedActivityTimesByUser(admin, chunk, startIso, endIso, reportDate);
-    activities.forEach((rows, userId) => {
-      (rows || []).forEach((row) => {
-        lastAt.set(userId, laterIso(lastAt.get(userId), row.saved_at || row.savedAt));
-      });
-    });
-  }
-
-  return lastAt;
-}
-
-async function loadWorkdaysByUser(admin, userIds, lastActivityByUser, reportDate) {
-  const ids = [...new Set((userIds || []).filter(Boolean))];
-  const { startIso, endIso } = ksaDayBounds(reportDate);
-  const eventsByUser = new Map();
-
-  for (const chunk of chunkList(ids, 100)) {
-    const part = await loadWorkdayEventsByUser(admin, chunk, startIso, endIso, reportDate);
-    part.forEach((rows, userId) => eventsByUser.set(userId, rows));
-  }
-
-  const workdays = new Map();
-  ids.forEach((userId) => {
-    const times = extractWorkdayTimesFromTimelineRows(eventsByUser.get(userId) || []);
-    const lastActivityAt = lastActivityByUser.get(userId) || "";
-    const workingEndAt = resolveResumeWorkingEndAt({
-      logoutAt: times.logoutAt,
-      logoutAutoClosed: times.logoutAutoClosed,
-      lastActivityAt,
-    });
-    workdays.set(userId, {
-      ...times,
-      lastActivityAt,
-      workingMinutes: calculateWorkingHoursMinutes({
-        ...times,
-        logoutAt: workingEndAt,
-      }),
-    });
-  });
-  return workdays;
+export function workdaysFromDailyWorkingHoursReport(report = {}) {
+  return new Map((report.users || []).map((row) => [row.userId, {
+    loginAt: row.loginAt || "",
+    lunchOutAt: row.lunchOutAt || "",
+    lunchInAt: row.lunchInAt || "",
+    logoutAt: row.logoutAt || "",
+    logoutAutoClosed: Boolean(row.logoutAutoClosed),
+    workingMinutes: Number(row.workingHoursMinutes || 0),
+  }]));
 }
 
 export function buildSalesmanResumeRows({
@@ -502,6 +457,7 @@ export function buildSalesmanResumeRows({
 
 export async function buildDailySalesmanResume(admin, { date, now = new Date() } = {}) {
   const reportDate = parseResumeDateParam(date, now);
+  const workingHoursReport = await buildDailyWorkingHoursReport(admin, { date: reportDate });
   const [profiles, hierarchyProfiles, authUsers, visitCounts, collectionMetrics, orderMetrics, invoiceMetrics] = await Promise.all([
     loadSalesmanResumeProfiles(admin),
     loadResumeHierarchyProfiles(admin).catch(() => []),
@@ -511,25 +467,7 @@ export async function buildDailySalesmanResume(admin, { date, now = new Date() }
     loadOrderMetricsByUser(admin, reportDate),
     loadInvoiceMetricsBySalesman(admin, reportDate),
   ]);
-
-  const { firstLevelIds } = classifyResumeTeamLeaders({
-    profiles: hierarchyProfiles,
-    authUsers,
-  });
-  const userIds = [
-    ...new Set([
-      ...profiles.map((profile) => profile.id),
-      ...[...firstLevelIds],
-      ...visitCounts.keys(),
-      ...collectionMetrics.keys(),
-      ...orderMetrics.keys(),
-    ].filter(Boolean)),
-  ];
-  const extraLastActivity = new Map();
-  collectionMetrics.forEach((metric, userId) => extraLastActivity.set(userId, laterIso(extraLastActivity.get(userId), metric.lastAt)));
-  orderMetrics.forEach((metric, userId) => extraLastActivity.set(userId, laterIso(extraLastActivity.get(userId), metric.lastAt)));
-  const lastActivityByUser = await loadLastActivityByUser(admin, userIds, reportDate, extraLastActivity);
-  const workdays = await loadWorkdaysByUser(admin, userIds, lastActivityByUser, reportDate);
+  const workdays = workdaysFromDailyWorkingHoursReport(workingHoursReport);
 
   const rows = buildSalesmanResumeRows({
     profiles,

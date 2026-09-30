@@ -713,9 +713,21 @@ export default function OutstandingComparePage() {
           <section className="moduleSection" id="bill-mismatch">
             <div className="moduleSectionHeader">
               <h2>{t("mismatchTitle")}</h2>
-              <span>
-                {`${formatCount(mismatchSummary.count)} bills · ${formatMoney(mismatchSummary.pending)}`}
-              </span>
+              <div className="moduleHeaderMeta">
+                <span>
+                  {`${formatCount(mismatchSummary.count)} bills · ${formatMoney(mismatchSummary.pending)}`}
+                </span>
+                {access.canAccess("upload") ? (
+                  <button
+                    type="button"
+                    className="moduleInlineButton moduleActionButton"
+                    onClick={() => void recalculateOutstanding()}
+                    disabled={recalculating}
+                  >
+                    {recalculating ? t("recalculating") : t("recalculate")}
+                  </button>
+                ) : null}
+              </div>
             </div>
             <p className="moduleHint">{t("mismatchHint")}</p>
             <div className="auditSummaryGrid">

@@ -100,6 +100,31 @@ function mismatchTypeClass(type) {
 
 const CUSTOMER_FILTER_KEYS = ["code", "name", "salesman", "total", "computed", "diff"];
 
+/** The rebuild runs well past a minute, so the browser may never see its response. */
+const RECALCULATE_POLL_MS = 5000;
+const RECALCULATE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+const SAVED_AT_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Riyadh",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+function formatSavedAt(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 16).replace("T", " ");
+  return SAVED_AT_FORMAT.format(parsed).replace(",", "");
+}
+
+function wait(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
 const CUSTOMER_COLUMNS = [
   { key: "code", labelKey: "code" },
   { key: "name", labelKey: "customer" },
@@ -215,6 +240,7 @@ export default function OutstandingComparePage() {
   const [differencesOnly, setDifferencesOnly] = useState(true);
   const [savedRowsByCode, setSavedRowsByCode] = useState(null);
   const [savedMeta, setSavedMeta] = useState(null);
+  const savedMetaRef = useRef(null);
   const [recalculating, setRecalculating] = useState(false);
   const [mismatchRows, setMismatchRows] = useState([]);
   const [coverageGaps, setCoverageGaps] = useState([]);
@@ -403,13 +429,14 @@ export default function OutstandingComparePage() {
     loadCustomers();
   }, [loadCustomers]);
 
-  const loadSavedReconcile = useCallback(async () => {
+  const loadSavedReconcile = useCallback(async ({ silent = false } = {}) => {
     const supabase = getSupabaseClient();
-    if (!supabase) return;
+    if (!supabase) return null;
     try {
       const session = await resolveAuthSession(supabase);
       const response = await fetch("/api/outstanding-reconcile", {
         headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success) {
@@ -419,17 +446,23 @@ export default function OutstandingComparePage() {
       setSavedRowsByCode(new Map(rows.map((row) => [String(row.customer_code || "").toUpperCase(), row])));
       setMismatchRows(Array.isArray(payload.mismatchRows) ? payload.mismatchRows : []);
       setCoverageGaps(Array.isArray(payload.coverageGaps) ? payload.coverageGaps : []);
-      setSavedMeta({
+      const meta = {
         builtAt: payload.builtAt || "",
         differenceCount: rows.length,
         scannedCount: Number(payload.scannedCount || 0),
-      });
+      };
+      setSavedMeta(meta);
+      savedMetaRef.current = meta;
+      return meta;
     } catch (err) {
+      if (silent) return null;
       setError(err.message || "Unable to load saved reconciliation.");
       setSavedRowsByCode(new Map());
       setMismatchRows([]);
       setCoverageGaps([]);
       setSavedMeta(null);
+      savedMetaRef.current = null;
+      return null;
     }
   }, []);
 
@@ -440,20 +473,43 @@ export default function OutstandingComparePage() {
     setRecalculating(true);
     setError("");
     setMessage("");
+    const previousBuiltAt = savedMetaRef.current?.builtAt || "";
+
     try {
       const session = await resolveAuthSession(supabase);
-      const response = await fetch("/api/outstanding-reconcile", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to recalculate outstanding differences.");
+      let payload = null;
+      let postError = null;
+
+      try {
+        const response = await fetch("/api/outstanding-reconcile", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !body.success) {
+          throw new Error(body.error || "Unable to recalculate outstanding differences.");
+        }
+        payload = body;
+      } catch (err) {
+        // The rebuild keeps running on the server even when this response is lost.
+        postError = err;
       }
 
-      await loadSavedReconcile();
+      let meta = await loadSavedReconcile({ silent: Boolean(postError) });
+      const deadline = Date.now() + RECALCULATE_POLL_TIMEOUT_MS;
+      while (postError && (!meta || meta.builtAt === previousBuiltAt) && Date.now() < deadline) {
+        await wait(RECALCULATE_POLL_MS);
+        meta = await loadSavedReconcile({ silent: true });
+      }
+
+      if (postError && (!meta || meta.builtAt === previousBuiltAt)) {
+        throw postError;
+      }
+
       setMessage(
-        `Recalculated ${formatCount(payload.scannedCount)} customers; ${formatCount(payload.differenceCount)} with differences.`,
+        `Recalculated ${formatCount(payload?.scannedCount ?? meta?.scannedCount ?? 0)} customers; `
+        + `${formatCount(payload?.differenceCount ?? meta?.differenceCount ?? 0)} with differences.`,
       );
     } catch (err) {
       setError(err.message || "Unable to recalculate outstanding differences.");
@@ -577,7 +633,7 @@ export default function OutstandingComparePage() {
                       checkedCount
                         ? ` · ${checkedCount.toLocaleString()} of ${customers.length.toLocaleString()} checked`
                         : ""
-                    }${savedMeta?.builtAt ? ` · saved ${savedMeta.builtAt.slice(0, 16).replace("T", " ")}` : ""}`}
+                    }${savedMeta?.builtAt ? ` · saved ${formatSavedAt(savedMeta.builtAt)}` : ""}`}
                 </span>
                 {access.canAccess("upload") ? (
                   <button

@@ -682,7 +682,7 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
 
   function applyToInvoice(event, invoice, remaining) {
     if (remaining <= 0.009 || invoice.remaining <= 0.009) return remaining;
-    if (event.date < invoice.invoice_date) return remaining;
+    if (event.kind === "credit_note" && event.date < invoice.invoice_date) return remaining;
     const applied = Math.min(remaining, invoice.remaining);
     if (event.kind === "receipt" && applied > 0) {
       const days = isoDaysBetween(event.date, invoice.invoice_date);
@@ -718,7 +718,6 @@ export function matchPaymentsFifo(transactions = [], receipts = []) {
         if (remaining <= 0.009) break;
         if (!invoice.is_cash || invoice.cash_first_receipt_used) continue;
         if (invoice.remaining <= 0.009) continue;
-        if (event.date < invoice.invoice_date) continue;
         remaining = applyToInvoice(event, invoice, remaining);
         invoice.cash_first_receipt_used = true;
       }

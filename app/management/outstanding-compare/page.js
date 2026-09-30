@@ -42,7 +42,11 @@ const TEXT = {
   totalOutstanding: { en: "Tally outstanding", ar: "مستحق تالي" },
   computedOutstanding: { en: "Computed outstanding", ar: "المستحق المحسوب" },
   difference: { en: "Difference", ar: "الفرق" },
-  compare: { en: "Compare", ar: "قارن" },
+  branchIssue: { en: "Branch issue", ar: "مشكلة تخصيص الفاتورة" },
+  branchIssueTitle: {
+    en: "Customer total matches, but invoice balances differ. Review the invoice allocation with the customer’s requested adjustment.",
+    ar: "إجمالي العميل متطابق لكن أرصدة الفواتير مختلفة. راجع تخصيص الفاتورة حسب طلب العميل.",
+  },
   total: { en: "Total", ar: "الإجمالي" },
   noCustomers: { en: "No matching customers.", ar: "لا يوجد عملاء مطابقون." },
   deltaLoading: { en: "…", ar: "…" },
@@ -598,7 +602,7 @@ export default function OutstandingComparePage() {
                         {t(column.labelKey)}
                       </th>
                     ))}
-                    <th data-column-filter-label={t("compare")}>{t("compare")}</th>
+                    <th data-column-filter-label={t("branchIssue")}>{t("branchIssue")}</th>
                   </tr>
                   <tr className="moduleTableColumnFilterRow">
                     {CUSTOMER_COLUMNS.map((column) => (
@@ -615,12 +619,15 @@ export default function OutstandingComparePage() {
                         />
                       </th>
                     ))}
-                    <th data-column-filter-label={t("compare")} />
+                    <th data-column-filter-label={t("branchIssue")} />
                   </tr>
                 </thead>
                 <tbody>
                   {visibleCustomers.map((customer) => {
                     const active = selectedCustomer?.customer_code === customer.customer_code;
+                    const hasBranchIssue = customer.delta_status === "ready"
+                      && Math.abs(Number(customer.open_delta || 0)) <= DIFF_TOLERANCE
+                      && Number(customer.gap_count || 0) > 0;
                     return (
                       <tr key={customer.customer_code}>
                         <td>
@@ -659,14 +666,17 @@ export default function OutstandingComparePage() {
                               : t("deltaPending")}
                         </td>
                         <td>
-                          <button
-                            type="button"
-                            className="moduleInlineButton moduleActionButton"
-                            onClick={() => void loadCompare(customer)}
-                            disabled={loadingCompare && active}
-                          >
-                            {t("compare")}
-                          </button>
+                          {hasBranchIssue ? (
+                            <button
+                              type="button"
+                              className="moduleInlineButton moduleActionButton"
+                              onClick={() => void loadCompare(customer)}
+                              disabled={loadingCompare}
+                              title={t("branchIssueTitle")}
+                            >
+                              {t("branchIssue")}
+                            </button>
+                          ) : null}
                         </td>
                       </tr>
                     );

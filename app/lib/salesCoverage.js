@@ -10,8 +10,8 @@
 
 /** A date is only worth comparing when the neighbouring days have this many salesmen. */
 export const SALES_COVERAGE_MIN_BASELINE = 3;
-/** Neighbouring sales days inspected on each side when building the baseline. */
-export const SALES_COVERAGE_WINDOW = 7;
+/** Same-weekday sales days inspected on each side when building the baseline. */
+export const SALES_COVERAGE_WINDOW = 4;
 /** A day is suspect when it keeps this share or less of the baseline salesmen. */
 export const SALES_COVERAGE_DROP_RATIO = 0.5;
 /** An upload is suspect when it keeps this share or less of the stored lines for a date. */
@@ -32,6 +32,12 @@ function median(values) {
   if (!list.length) return 0;
   const middle = Math.floor(list.length / 2);
   return list.length % 2 ? list[middle] : (list[middle - 1] + list[middle]) / 2;
+}
+
+/** Weekends and holidays run on a skeleton crew, so a day is only compared to the same weekday. */
+function weekdayOf(date) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? -1 : parsed.getUTCDay();
 }
 
 /**
@@ -77,8 +83,9 @@ export function summarizeSalesDays(rows = []) {
 }
 
 /**
- * Flags sales days that kept far fewer salesmen than the days around them, which is
- * what a partial-day upload leaves behind.
+ * Flags sales days that kept far fewer salesmen than the same weekday around them, which is
+ * what a partial-day upload leaves behind. Comparing like weekdays keeps the quiet Friday /
+ * Saturday roster out of the report.
  *
  * @param {Array<{date: string, lines: number, vouchers: number, salesmen: number, salesman_names: string[]}>} days
  */
@@ -98,45 +105,57 @@ export function detectSalesCoverageGaps(days = [], options = {}) {
     }))
     .sort((left, right) => left.date.localeCompare(right.date));
 
+  const byWeekday = new Map();
+  list.forEach((day) => {
+    const weekday = weekdayOf(day.date);
+    if (weekday < 0) return;
+    if (!byWeekday.has(weekday)) byWeekday.set(weekday, []);
+    byWeekday.get(weekday).push(day);
+  });
+
   const gaps = [];
 
-  list.forEach((day, index) => {
-    const neighbours = [
-      ...list.slice(Math.max(0, index - window), index),
-      ...list.slice(index + 1, index + 1 + window),
-    ];
-    if (!neighbours.length) return;
+  byWeekday.forEach((group) => {
+    group.forEach((day, index) => {
+      const neighbours = [
+        ...group.slice(Math.max(0, index - window), index),
+        ...group.slice(index + 1, index + 1 + window),
+      ];
+      if (!neighbours.length) return;
 
-    const baseline = median(neighbours.map((entry) => entry.salesmen));
-    if (baseline < minBaseline) return;
-    if (day.salesmen > baseline * dropRatio) return;
+      const baseline = median(neighbours.map((entry) => entry.salesmen));
+      if (baseline < minBaseline) return;
+      if (day.salesmen > baseline * dropRatio) return;
 
-    const present = new Set(day.salesman_names);
-    const missing = [...new Set(neighbours.flatMap((entry) => entry.salesman_names))]
-      .filter((name) => !present.has(name))
-      .sort();
+      const present = new Set(day.salesman_names);
+      const missing = [...new Set(neighbours.flatMap((entry) => entry.salesman_names))]
+        .filter((name) => !present.has(name))
+        .sort();
 
-    gaps.push({
-      date: day.date,
-      lines: day.lines,
-      vouchers: day.vouchers,
-      salesmen: day.salesmen,
-      expected_salesmen: baseline,
-      salesman_names: [...day.salesman_names].sort(),
-      missing_salesmen: missing,
+      gaps.push({
+        date: day.date,
+        lines: day.lines,
+        vouchers: day.vouchers,
+        salesmen: day.salesmen,
+        expected_salesmen: baseline,
+        salesman_names: [...day.salesman_names].sort(),
+        missing_salesmen: missing,
+      });
     });
   });
 
-  return gaps;
+  // Newest first: a day lost by today's upload matters more than one from last year.
+  return gaps.sort((left, right) => right.date.localeCompare(left.date));
 }
 
 export function summarizeSalesCoverageGaps(gaps = []) {
   const list = Array.isArray(gaps) ? gaps : [];
+  const dates = list.map((gap) => gap.date).sort();
   return {
     count: list.length,
-    dates: list.map((gap) => gap.date),
-    first_date: list.length ? list[0].date : "",
-    last_date: list.length ? list[list.length - 1].date : "",
+    dates,
+    first_date: dates.length ? dates[0] : "",
+    last_date: dates.length ? dates[dates.length - 1] : "",
   };
 }
 

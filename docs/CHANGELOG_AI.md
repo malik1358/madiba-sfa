@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-09-30** — Unpaired credit notes now apply to an exact referenced sales voucher before any remainder falls back to oldest-open FIFO. This prevents CN 430 referencing NFD/212 from clearing NFD/211 (customer 1309C), which created a false zero Machine Open despite Tally showing 1,587.75 still open. Regression verifies CN 429 → NFD/211 and CN 430 → NFD/212. Credit notes dated before an invoice still cannot affect it. No migration.
 - **2026-09-30** — Daily salesman resume Working hours now comes from the same canonical Working Hours report calculation (`resolveDayRouteWorkingHours` via `buildDailyWorkingHoursReport`): non-far customer-stop segments from 08:00 KSA around lunch. It no longer uses login→lunch→logout attendance duration, so the digest, Daily Visit Report, and Working Hours screen match. No migration.
 - **2026-09-30** — Day-route Working hours now show the counted time ranges next to the total (`resolveDayRouteWorkingHours` returns `ranges`) in the Daily Visit Report page and the visit-report / team digest email (HTML and text). Calculation unchanged. No migration.
 - **2026-09-30** — `/api/daily-visit-report/email` accepts `digestOnly: true` (admin only): runs the cycle for `date` but sends only the all-teams digest to the caller's own login email, skipping salesman and team-leader emails and not persisting report-email overrides. Used to preview a day's digest without re-sending to the field. No migration.

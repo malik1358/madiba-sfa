@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { canViewManagementReports } from "../../lib/moduleAccess.js";
 import { buildBusinessAlerts, buildBusinessKpis, daysSinceIso, summarizeOutstandingRows } from "../../lib/businessDashboard.js";
 import { buildOutstandingRow } from "../../lib/outstanding.js";
 import { getKsaDateString, ksaDayBounds } from "../../lib/workdayActivity.js";
@@ -61,8 +62,7 @@ async function getProfile(admin, userId) {
 }
 
 function canViewDashboard(profile) {
-  const role = String(profile?.role || "").trim().toLowerCase();
-  return role === "admin" || role === "manager";
+  return canViewManagementReports(profile?.role);
 }
 
 function monthStartDate(reportDate) {

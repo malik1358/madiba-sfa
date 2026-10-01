@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
+import { canViewManagementReports } from "../../../lib/moduleAccess.js";
 import { normalizeCustomerMasterSearch } from "../../../lib/customerMasterQuery.js";
 import {
   customerMatchesSalesmanFilter,
@@ -34,8 +35,8 @@ async function requireAdminAccess(admin, request) {
     .single();
 
   const role = String(profile?.role || "").toLowerCase();
-  if (profileError || !profile || !["admin", "manager"].includes(role)) {
-    return { error: NextResponse.json({ success: false, error: "Only admin or manager can access this report." }, { status: 403 }) };
+  if (profileError || !profile || !canViewManagementReports(role)) {
+    return { error: NextResponse.json({ success: false, error: "You do not have access to this report." }, { status: 403 }) };
   }
 
   return { user, role };

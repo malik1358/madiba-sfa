@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { canViewManagementReports } from "../../lib/moduleAccess.js";
 import { runAutoCloseWorkdaysCycle } from "../../lib/autoCloseWorkdaysServer.js";
 import {
   formatCollectorDisplayName,
@@ -75,7 +76,7 @@ async function getProfile(admin, userId) {
 
 function canViewAllUsers(profile) {
   const role = normalizeRole(profile?.role);
-  return role === "admin" || role === "manager" || role === "collector";
+  return canViewManagementReports(role) || role === "collector";
 }
 
 function parseReportDate(value) {

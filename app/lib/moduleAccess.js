@@ -118,6 +118,11 @@ export function isInvoiceMakerRole(role) {
   return normalized === "invoice-maker";
 }
 
+export function canViewManagementReports(role) {
+  const normalized = normalizeAccessRole(role);
+  return normalized === "admin" || normalized === "manager" || isInvoiceMakerRole(normalized);
+}
+
 export function canManageOrderInvoice(role) {
   const normalized = normalizeAccessRole(role);
   return isInvoiceMakerRole(normalized) || normalized === "admin" || normalized === "manager";
@@ -164,6 +169,7 @@ export function buildModuleAccess(context = {}) {
   const isInvoiceMaker = isInvoiceMakerRole(role);
   const isProductPromoter = isProductPromoterRole(role);
   const isCollector = collectionOnly;
+  const hasManagementReportAccess = canViewManagementReports(role);
   const isFieldSales = isSalesman || isManager || isAdmin || isInvoiceMaker || isProductPromoter;
   const stockTakeAccess = isAdmin || Boolean(context.stockTakeAccess);
 
@@ -187,15 +193,15 @@ export function buildModuleAccess(context = {}) {
       // Legacy /management/my-collections path stays available via canAccessPath.
       myCollections: false,
       paymentCollections: isAdmin || isManager || isCollector || isInvoiceMaker || (isSalesman && !isCollector),
-      collectionReport: isAdmin || isManager || isCollector,
-      receiptsNotInTally: isAdmin || isManager || isCollector,
-      dailyVisitReport: isAdmin || isManager || isCollector || isSalesman,
-      userActivity: isAdmin || isManager || isCollector,
-      workingHours: isAdmin || isManager || isCollector,
-      businessDashboard: isAdmin || isManager,
-      salesmanIncentive: isAdmin || isManager || (isSalesman && !isCollector),
+      collectionReport: hasManagementReportAccess || isCollector,
+      receiptsNotInTally: hasManagementReportAccess || isCollector,
+      dailyVisitReport: hasManagementReportAccess || isCollector || isSalesman,
+      userActivity: hasManagementReportAccess || isCollector,
+      workingHours: hasManagementReportAccess || isCollector,
+      businessDashboard: hasManagementReportAccess,
+      salesmanIncentive: hasManagementReportAccess || (isSalesman && !isCollector),
       customerMaster: isAdmin || isManager,
-      outstandingNoGps: isAdmin || isManager,
+      outstandingNoGps: hasManagementReportAccess,
       // Enabled for field sales after admin approval. Set NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS=false to lock again.
       salesmanVisitPlan: isAdmin || (
         isSalesmanVisitPlanSalesmanAccessApproved()

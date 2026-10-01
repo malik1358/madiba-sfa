@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { canViewManagementReports } from "../../../lib/moduleAccess.js";
 import { loadCategoryGrowthReport, rebuildSalesBiCube } from "../../../lib/categoryGrowthServer.js";
 import { getKsaDateString } from "../../../lib/workdayActivity.js";
 
@@ -39,8 +40,7 @@ async function getProfile(admin, userId) {
 }
 
 function canViewDashboard(profile) {
-  const role = String(profile?.role || "").trim().toLowerCase();
-  return role === "admin" || role === "manager";
+  return canViewManagementReports(profile?.role);
 }
 
 async function buildResponse(request, filters) {

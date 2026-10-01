@@ -13,7 +13,7 @@ Roles are stored on `public.profiles.role` and normalized in `app/lib/moduleAcce
 | `admin` | Full setup, imports, BI, all customers. No morning-attendance or background-GPS gate. |
 | `manager` | Same management modules as admin for most screens. Not `is_admin()` in SQL. |
 | `salesman` | Own book: My Day, customers, orders, collections, performance. |
-| `invoice-maker` or `invoice_maker` | Office invoicing. Can manage invoice status. GPS is not required, but morning attendance is. |
+| `invoice-maker` or `invoice_maker` | Office invoicing. Can manage invoice status and view all management reports. GPS is not required, but morning attendance is. Setup/configuration and report email sending remain separately gated. |
 | `product-promoter` or `product_promoter` | Field selling plus GPS map. |
 | `collector` | Collections-focused. Also inferred when `user_metadata.collection_only` is set or `salesman_code` matches `CL` plus digits. |
 

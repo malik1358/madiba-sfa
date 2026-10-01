@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { canViewManagementReports } from "../../lib/moduleAccess.js";
 import {
   buildReceiptsNotInTallyReport,
   defaultReceiptsNotInTallyFromDate,
@@ -22,6 +23,11 @@ function parseIsoDateParam(value, label) {
 }
 
 function canAccessReport(role) {
+  const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
+  return canViewManagementReports(normalized) || normalized === "collector";
+}
+
+function canMarkReceiptMistakes(role) {
   const normalized = String(role || "").trim().toLowerCase().replace(/_/g, "-");
   return normalized === "admin" || normalized === "manager" || normalized === "collector";
 }
@@ -117,7 +123,7 @@ export async function POST(request) {
     });
 
     const profile = await getProfile(admin, user.id);
-    if (!canAccessReport(profile.role)) {
+    if (!canMarkReceiptMistakes(profile.role)) {
       return Response.json(
         { success: false, error: "You do not have access to this report." },
         { status: 403 },

@@ -32,8 +32,8 @@ const TEXT = {
   windowDays: { en: "Date window (± days)", ar: "نافذة التاريخ (± أيام)" },
   refresh: { en: "Refresh", ar: "تحديث" },
   accessDenied: {
-    en: "Only admin, manager, or collector can access this report.",
-    ar: "فقط المدير أو الأدمن أو المحصل يمكنه الوصول لهذا التقرير.",
+    en: "Only management or collector profiles can access this report.",
+    ar: "يمكن لملفات الإدارة أو المحصلين الوصول إلى هذا التقرير فقط.",
   },
   noRows: {
     en: "All app receipts in this period match a Tally upload row (customer + amount + date), or were marked as mistakes.",
@@ -142,6 +142,7 @@ export default function ReceiptsNotInTallyPage() {
   usePopupMessages({ error, message: info });
 
   const canAccess = access.canAccess("receiptsNotInTally");
+  const canMarkMistakes = ["admin", "manager", "collector"].includes(access.role);
 
   const missingRows = useMemo(
     () => (Array.isArray(report?.missingInTally) ? report.missingInTally : []),
@@ -482,7 +483,7 @@ export default function ReceiptsNotInTallyPage() {
                         <BiExcelHead label={t("mode")} filterKey="mode" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("status")} filterKey="status" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("collector")} filterKey="collector" options={options} filters={filters} onChange={setFilter} />
-                        <th>{t("actions")}</th>
+                        {canMarkMistakes ? <th>{t("actions")}</th> : null}
                       </tr>
                     </thead>
                     <tbody>
@@ -500,16 +501,18 @@ export default function ReceiptsNotInTallyPage() {
                           <td>{formatMode(row.receiptMode)}</td>
                           <td>{formatMode(row.paymentStatus)}</td>
                           <td>{row.collectorName || "-"}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="moduleInlineButton"
-                              disabled={Boolean(markingId)}
-                              onClick={() => markAsMistake(row)}
-                            >
-                              {markingId === row.id ? t("marking") : t("markMistake")}
-                            </button>
-                          </td>
+                          {canMarkMistakes ? (
+                            <td>
+                              <button
+                                type="button"
+                                className="moduleInlineButton"
+                                disabled={Boolean(markingId)}
+                                onClick={() => markAsMistake(row)}
+                              >
+                                {markingId === row.id ? t("marking") : t("markMistake")}
+                              </button>
+                            </td>
+                          ) : null}
                         </tr>
                       ))}
                       {visibleRows.length === 0 && (

@@ -67,6 +67,7 @@ import {
   shouldShowPendingApprovalActions,
 } from "../../lib/orderApproval";
 import { matchesExcelColumnFilter, pruneExcelFilterSelection, rowMatchesOtherExcelFilters } from "../../lib/excelColumnFilter";
+import { uniqueExcelFilterOptions } from "../../lib/biExcelFilters";
 import {
   formatPendingDuration,
   pendingOrderTimeToMakeBucket,
@@ -133,7 +134,7 @@ function uniqueColumnValues(values) {
     seen.add(key);
     unique.push(text);
   });
-  return unique.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  return uniqueExcelFilterOptions(unique);
 }
 
 function matchesColumnFilter(value, filter) {

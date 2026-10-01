@@ -37,6 +37,8 @@ The service role is server-only. Losing the scope checks in an API route would e
 - `BuildUpdateWatcher`, PWA shell, native field tracking, morning-attendance redirect, workday time bar, main nav, back button, logout.
 - `AppLanguageProvider` and `AppPopupProvider`.
 
+The global and dashboard logout controls share `useLogoutWithDaySummary` (`app/hooks/useLogoutWithDaySummary.js`). Its dialog lets users stay logged in; a missing session token must not trigger sign-out without an explicit logout choice.
+
 Navigation groups are Home, Field Sales, Collections, Reports, Warehouse, and Setup & Admin (`NAV_GROUPS` in `app/lib/moduleAccess.js`).
 
 ## Role system and `moduleAccess.js`

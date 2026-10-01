@@ -39,7 +39,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const HISTORY_LIMIT = 30000;
 const PEER_LIMIT = 30000;
-const CACHE_VERSION = 13;
+const CACHE_VERSION = 14;
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -225,7 +225,7 @@ async function fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate, c
 
   for (const codeCandidate of codeCandidates) {
     const { data, error } = await admin
-      .from("sales_raw")
+      .from("active_sales")
       .select(HISTORY_ROW_SELECT)
       .eq("customer_code", codeCandidate)
       .gte("transaction_date", fromDate)
@@ -242,7 +242,7 @@ async function fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate, c
   if (primaryTarget) {
     const targetNoZeros = primaryTarget.replace(/^0+/, "");
     const { data, error } = await admin
-      .from("sales_raw")
+      .from("active_sales")
       .select(HISTORY_ROW_SELECT)
       .ilike("customer_code", `%${targetNoZeros || primaryTarget}%`)
       .gte("transaction_date", fromDate)
@@ -262,7 +262,7 @@ async function fetchCurrentMonthRows(admin, customerCode, fromDate, untilDate, c
     const looseNameLike = flexibleNameLikePattern(resolvedName);
     if (looseNameLike) {
       const { data, error } = await admin
-        .from("sales_raw")
+        .from("active_sales")
         .select(HISTORY_ROW_SELECT)
         .ilike("customer_name", looseNameLike)
         .gte("transaction_date", fromDate)
@@ -651,7 +651,7 @@ async function fetchCustomerTransactions(admin, customerCode, customerName, scop
 
   function customerQuery(matchValue) {
     return admin
-      .from("sales_raw")
+      .from("active_sales")
       .select(HISTORY_ROW_SELECT)
       .eq("customer_code", matchValue)
       .order("transaction_date", { ascending: false })
@@ -668,7 +668,7 @@ async function fetchCustomerTransactions(admin, customerCode, customerName, scop
     // Fallback for dirty imported codes (different case/spacing/leading zeros or code+suffix text).
     const looseLike = `%${targetNoZeros || primaryTarget}%`;
     const fallbackData = await fetchHistoryPages(() => admin
-      .from("sales_raw")
+      .from("active_sales")
       .select(HISTORY_ROW_SELECT)
       .ilike("customer_code", looseLike)
       .order("transaction_date", { ascending: false })
@@ -683,7 +683,7 @@ async function fetchCustomerTransactions(admin, customerCode, customerName, scop
     const looseNameLike = flexibleNameLikePattern(normalizedCustomerName);
     if (looseNameLike) {
       const fallbackData = await fetchHistoryPages(() => admin
-        .from("sales_raw")
+        .from("active_sales")
         .select(HISTORY_ROW_SELECT)
         .ilike("customer_name", looseNameLike)
         .order("transaction_date", { ascending: false })

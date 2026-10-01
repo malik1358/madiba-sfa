@@ -102,6 +102,7 @@ test("buildCollectionVisitSummary includes last visit date, outcome, remarks, an
     {
       visitNumberForDay: 33,
       probabilityLabel: "Medium",
+      visitAt: "2026-09-14T08:15:00.000Z",
       lastVisit: {
         saved_at: "2026-09-10T10:00:00.000Z",
         visit_outcome: "FUNDS_RECEIVED",
@@ -118,7 +119,8 @@ test("buildCollectionVisitSummary includes last visit date, outcome, remarks, an
   assert.match(summary, /Last visit remark \(Arabic\): تم التحصيل جزئياً/);
   assert.match(summary, /Last visit remark \(English\): Partial collection completed/);
   assert.match(summary, /Visit number today: 33\./);
-  assert.match(summary, /Est\. waiting: -\n\nLast visit date:/);
+  assert.match(summary, /Visit date\/time: 14\/09\/2026, 11:15/);
+  assert.match(summary, /Est\. waiting: -\n\nLast visit date: 10\/09\/2026, 13:00\./);
   assert.doesNotMatch(summary, /Visit number today: 33\.\nLast visit date:/);
   assert.doesNotMatch(summary, /Last visit date:[\s\S]*Outstanding:/);
 });
@@ -169,7 +171,7 @@ test("buildCollectionVisitSummary places last visit after GPS as a separate trai
   assert.ok(outstandingIndex > visitNumberIndex);
   assert.ok(gpsIndex > outstandingIndex);
   assert.ok(lastVisitIndex > gpsIndex);
-  assert.match(summary, /Est\. waiting: 1 min\n\nLast visit date: 13\/09\/2026\./);
+  assert.match(summary, /Est\. waiting: 1 min\n\nLast visit date: 13\/09\/2026, 13:00\./);
 });
 
 test("buildCollectionVisitSummary omits last visit amount when zero and skips empty last visit", () => {

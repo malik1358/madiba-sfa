@@ -1,5 +1,5 @@
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "./avgDaysWhatsapp.js";
-import { formatKsaDateOnly } from "./workdayActivity.js";
+import { formatKsaDateOnly, formatKsaDateTime } from "./workdayActivity.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 
 function formatDateOnly(value) {
@@ -44,6 +44,7 @@ export function buildFieldVisitWhatsappSummary({
     customer: "Customer",
     code: "Code",
     salesman: "Salesman",
+    visitDateTime: "Visit date/time",
     outcome: "Outcome",
     nextVisit: "Next visit",
     notes: "Notes",
@@ -59,6 +60,7 @@ export function buildFieldVisitWhatsappSummary({
   };
 
   const outcome = formatFieldVisitOutcome(visitForm.outcome, "en");
+  const visitDateTime = formatKsaDateTime(visitForm.visitAt || new Date().toISOString());
   const nextVisit = formatDateOnly(visitForm.nextVisitAt);
   const note = String(visitForm.note || "").trim();
   const salesman = String(salesmanName || salesmanCode || "-").trim() || "-";
@@ -68,6 +70,7 @@ export function buildFieldVisitWhatsappSummary({
     `${labels.customer}: ${customer.customer_name || customer.customer_code || "-"}`,
     `${labels.code}: ${customer.customer_code || "-"}`,
     `${labels.salesman}: ${salesman}`,
+    `${labels.visitDateTime}: ${visitDateTime}`,
     `${labels.outcome}: ${outcome || labels.notSpecified}`,
     `${labels.nextVisit}: ${nextVisit || labels.notSpecified}`,
   ];

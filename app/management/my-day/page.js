@@ -1423,6 +1423,7 @@ export default function MyDayPage({ mode = "default" } = {}) {
         salesmanName: formatCollectorDisplayName(profile || {}),
         salesmanCode: profile?.salesman_code || "",
         visitDistance,
+        visitAt: capturedAt,
         avgDaysToPay,
       });
       void copyTextToClipboard(summaryText);

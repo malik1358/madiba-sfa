@@ -53,6 +53,7 @@ const KPI_LABELS = {
   otherSales: { en: "Others", ar: "أخرى" },
   totalSales: { en: "Total sales", ar: "إجمالي المبيعات" },
   collection: { en: "Collection", ar: "التحصيل" },
+  cashCollection: { en: "Cash collection (info)", ar: "تحصيل النقد (معلومات)" },
   newCustomers: { en: "New customers", ar: "عملاء جدد" },
   repeatCustomers: { en: "Repeat customers", ar: "عملاء متكررون" },
 };

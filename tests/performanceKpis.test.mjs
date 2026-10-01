@@ -18,6 +18,7 @@ import {
   performanceUpdatedStatusLabel,
   pickSalesmanPaceShares,
   resolveKpiPaceDate,
+  splitCollectionActualsByInvoice,
   splitSalesActuals,
   TEAM_PERFORMANCE_VIEW,
 } from "../app/lib/performanceKpis.js";
@@ -143,6 +144,30 @@ test("credit notes do not count as buying customers", () => {
   );
 });
 
+test("splits monthly collection visits between FIFO credit and cash invoices", () => {
+  const actuals = splitCollectionActualsByInvoice([
+    {
+      transaction_date: "2026-09-01",
+      voucher_number: "RC/100",
+      sales_amount: 100,
+      quantity: 1,
+      rate: 100,
+    },
+    {
+      transaction_date: "2026-09-02",
+      voucher_number: "NFD/200",
+      sales_amount: 200,
+      quantity: 1,
+      rate: 200,
+    },
+  ], [
+    { id: 1, saved_at: "2026-09-03T10:00:00Z", amount_received: 115 },
+    { id: 2, saved_at: "2026-09-04T10:00:00Z", amount_received: 230 },
+  ], { fromDate: "2026-09-01", toDate: "2026-09-30" });
+
+  assert.deepEqual(actuals, { collection: 230, cashCollection: 115 });
+});
+
 test("does not move Others target into office supplies after save", () => {
   const saved = normalizePerformanceTargets({
     salesmanCode: "SM001",
@@ -187,12 +212,16 @@ test("updated status explains when admin last saved targets", () => {
     updatedByName: "Admin User",
   });
 
-  assert.equal(snapshot.kpis.length, 6);
+  assert.equal(snapshot.kpis.length, 7);
   assert.equal(snapshot.kpis[0].label, "Sales of office supplies");
   assert.equal(snapshot.kpis[1].label, "Others");
   assert.equal(snapshot.kpis[2].label, "Total sales");
   assert.equal(snapshot.kpis[2].actual, 55);
   assert.equal(snapshot.kpis[2].target, 150);
+  const cashCollection = snapshot.kpis.find((kpi) => kpi.key === "cashCollection");
+  assert.equal(cashCollection.actual, 0);
+  assert.equal(cashCollection.target, 0);
+  assert.equal(cashCollection.achievement, null);
   assert.match(performanceUpdatedStatusLabel(snapshot), /Admin User/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /Sales of office supplies:/);
   assert.match(formatPerformanceKpiLine(snapshot.kpis[0]), /40\.0%/);
@@ -226,7 +255,7 @@ test("daily visit email includes monthly KPI status", () => {
   const snapshot = buildPerformanceSnapshot({
     reportDate: "2026-09-02",
     salesmanCode: "SM001",
-    actuals: { officeSupplies: 25000, otherSales: 5000, collection: 8000, newCustomers: 1, repeatCustomers: 3 },
+    actuals: { officeSupplies: 25000, otherSales: 5000, collection: 8000, cashCollection: 2500, newCustomers: 1, repeatCustomers: 3 },
     targets: { officeSupplies: 50000, otherSales: 10000, collection: 10000, newCustomers: 2, repeatCustomers: 6 },
     updatedAt: "2026-09-01T08:00:00.000Z",
     updatedByName: "Boss",
@@ -249,9 +278,11 @@ test("daily visit email includes monthly KPI status", () => {
   assert.match(message.text, /Others:/);
   assert.match(message.text, /Total sales:/);
   assert.match(message.text, /Collection:/);
+  assert.match(message.text, /Cash collection \(info\): 2,500/);
   assert.match(message.text, /New customers:/);
   assert.match(message.text, /Repeat customers:/);
   assert.match(message.html, /Monthly KPI status/);
   assert.match(message.html, /Achievement/);
+  assert.match(message.html, /Cash collection \(info\)/);
   assert.match(message.text, /Boss/);
 });

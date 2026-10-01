@@ -10,8 +10,8 @@ import {
   normalizeSalesmanCode,
   averageCumulativeDayShares,
   pickSalesmanPaceShares,
+  splitCollectionActualsByInvoice,
   splitSalesActuals,
-  sumCollectionAmount,
 } from "./performanceKpis.js";
 import { getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
@@ -188,9 +188,9 @@ export function paceSharesForSalesman(pace, salesmanCode) {
 
 export async function loadCollectionActual(admin, { salesmanCode, reportDate }) {
   const code = normalizeSalesmanCode(salesmanCode);
-  if (!code) return 0;
+  if (!code) return { collection: 0, cashCollection: 0 };
 
-  const { startIso, endIso } = monthWindow(reportDate);
+  const { from, to, endIso } = monthWindow(reportDate);
   const customers = await fetchPagedRows(
     admin,
     "customers",
@@ -200,23 +200,57 @@ export async function loadCollectionActual(admin, { salesmanCode, reportDate }) 
   const customerCodes = [...new Set(
     (customers || []).map((row) => normalizeSalesmanCode(row.customer_code)).filter(Boolean),
   )];
-  if (!customerCodes.length) return 0;
+  if (!customerCodes.length) return { collection: 0, cashCollection: 0 };
 
   const visits = [];
   for (const chunk of chunkList(customerCodes, 200)) {
     const rows = await fetchPagedRows(
       admin,
       "collection_visits",
-      "amount_received,customer_code",
+      "id,amount_received,customer_code,saved_at",
       (query) => query
         .in("customer_code", chunk)
-        .gte("saved_at", startIso)
         .lte("saved_at", endIso),
     );
     visits.push(...rows);
   }
 
-  return sumCollectionAmount(visits);
+  const salesByCustomer = new Map();
+  for (const chunk of chunkList(customerCodes, 200)) {
+    const rows = await fetchPagedRows(
+      admin,
+      "active_sales",
+      "transaction_date,voucher_number,voucher_type,reference,customer_code,sales_amount,item_code,item_name,category,quantity,rate",
+      (query) => query
+        .in("customer_code", chunk)
+        .lte("transaction_date", to),
+    );
+    rows.forEach((row) => {
+      const customerCode = normalizeSalesmanCode(row.customer_code);
+      const customerRows = salesByCustomer.get(customerCode) || [];
+      customerRows.push(row);
+      salesByCustomer.set(customerCode, customerRows);
+    });
+  }
+
+  const visitsByCustomer = new Map();
+  visits.forEach((visit) => {
+    const customerCode = normalizeSalesmanCode(visit.customer_code);
+    const customerVisits = visitsByCustomer.get(customerCode) || [];
+    customerVisits.push(visit);
+    visitsByCustomer.set(customerCode, customerVisits);
+  });
+
+  return customerCodes.reduce((totals, customerCode) => {
+    const split = splitCollectionActualsByInvoice(
+      salesByCustomer.get(customerCode) || [],
+      visitsByCustomer.get(customerCode) || [],
+      { fromDate: from, toDate: to },
+    );
+    totals.collection += split.collection;
+    totals.cashCollection += split.cashCollection;
+    return totals;
+  }, { collection: 0, cashCollection: 0 });
 }
 
 export async function loadKpiTargetsBySalesman(admin, { salesmanCodes, reportDate }) {
@@ -277,7 +311,7 @@ export async function loadPerformanceSnapshot(admin, {
   paceShares = null,
 } = {}) {
   const code = normalizeSalesmanCode(salesmanCode);
-  const [salesActuals, collection, loadedPace] = await Promise.all([
+  const [salesActuals, collectionActuals, loadedPace] = await Promise.all([
     loadSalesActuals(admin, { salesmanCode: code, reportDate }),
     loadCollectionActual(admin, { salesmanCode: code, reportDate }),
     paceShares ? Promise.resolve(null) : loadSalesPaceShares(admin, { reportDate }),
@@ -290,7 +324,8 @@ export async function loadPerformanceSnapshot(admin, {
     ...emptyPerformanceActuals(),
     officeSupplies: salesActuals.officeSupplies,
     otherSales: salesActuals.otherSales,
-    collection,
+    collection: collectionActuals.collection,
+    cashCollection: collectionActuals.cashCollection,
     newCustomers: classified.newCustomers,
     repeatCustomers: classified.repeatCustomers,
   };

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSessionWithTimeout, withTimeout } from '../../../lib/authSession';
 import { getSupabaseClient } from '../../../lib/supabase';
 import {
@@ -7,6 +7,7 @@ import {
   fetchSalesScopeCached,
   fetchVisibleCustomersCached,
   hydrateFoundationFromCache,
+  subscribeCustomerHistoryCacheCleared,
 } from '../../../lib/mobileDataCache';
 import { dedupeCustomerMasterRows } from '../../../lib/customerMasterQuery';
 
@@ -31,6 +32,11 @@ export function useCustomerData({ setError, setMessage }) {
 
   const LOAD_TIMEOUT_MS = 45000;
   const SESSION_TIMEOUT_MS = 10000;
+
+  const selectedCustomerRef = useRef(null);
+  useEffect(() => {
+    selectedCustomerRef.current = selectedCustomer;
+  }, [selectedCustomer]);
 
   const loadFoundation = useCallback(async () => {
     const supabase = getSupabaseClient();
@@ -200,6 +206,40 @@ export function useCustomerData({ setError, setMessage }) {
       [category]: !current[category],
     }));
   }, []);
+
+  // Re-fetches the open customer's sales/receipt history in the background (no loading
+  // screen) after an upload invalidates the shared history cache, so FIFO settlement
+  // numbers recalculate without the customer appearing to reload from scratch.
+  const refreshSelectedCustomerHistory = useCallback(async () => {
+    const customer = selectedCustomerRef.current;
+    if (!customer?.customer_code) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      const session = await getSessionWithTimeout(supabase, SESSION_TIMEOUT_MS);
+      if (!session?.access_token) return;
+
+      const scope = accessScope || (await fetchSalesScopeCached()).scope;
+      const historyResult = await fetchCustomerHistoryCached(
+        session.access_token,
+        scope,
+        customer.customer_code,
+        { customerName: customer.customer_name || "", forceRefresh: true },
+      );
+
+      if (selectedCustomerRef.current?.customer_code !== customer.customer_code) return;
+      setTransactions(historyResult.data.transactions || []);
+      setPeerTransactions(historyResult.data.peerTransactions || []);
+      setReceipts(historyResult.data.receipts || []);
+    } catch {
+      // Keep showing the previous data if the background recalculation fails.
+    }
+  }, [accessScope]);
+
+  useEffect(() => subscribeCustomerHistoryCacheCleared(() => {
+    refreshSelectedCustomerHistory();
+  }), [refreshSelectedCustomerHistory]);
 
   const closeCustomer = useCallback(() => {
     setSelectedCustomer(null);

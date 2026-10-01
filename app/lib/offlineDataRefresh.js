@@ -1,6 +1,11 @@
 import { PRICE_CACHE_KEY } from "./priceApiConfig.js";
 import { loadPricePayload } from "./pricePayload.js";
-import { fetchAndHydrateMobileSnapshot, invalidateOutstandingCache } from "./mobileDataCache.js";
+import {
+  fetchAndHydrateMobileSnapshot,
+  invalidateCollectionQueuesForUser,
+  invalidateCustomerHistoryCache,
+  invalidateOutstandingCache,
+} from "./mobileDataCache.js";
 import {
   finishDataRefreshJob,
   markDataRefreshStep,
@@ -80,6 +85,10 @@ export async function refreshOfflineDeviceData(detail = {}) {
       if (needsSnapshot) {
         if (kinds.length === 0 || kinds.includes("outstanding")) {
           await invalidateOutstandingCache();
+        }
+        if (kinds.length === 0 || kinds.includes("outstanding") || kinds.includes("transactions")) {
+          await invalidateCustomerHistoryCache();
+          await invalidateCollectionQueuesForUser();
         }
         await fetchAndHydrateMobileSnapshot({ manageJob: false });
       }

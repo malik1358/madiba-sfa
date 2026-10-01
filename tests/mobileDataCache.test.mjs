@@ -45,6 +45,42 @@ test("outstanding cache is dropped after an outstanding upload refresh", async (
   assert.match(refreshSource, /await invalidateOutstandingCache\(\)/);
 });
 
+test("every upload (sales, outstanding, receipt) recalculates customer history and collection queue caches", async () => {
+  const uploadSource = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/management/upload/page.js", import.meta.url), "utf8")
+  ));
+  const refreshSource = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/lib/offlineDataRefresh.js", import.meta.url), "utf8")
+  ));
+  const receiptsRouteSource = await import("node:fs").then((fs) => (
+    fs.readFileSync(new URL("../app/api/receipts/route.js", import.meta.url), "utf8")
+  ));
+
+  // Sales, outstanding, and receipt uploads must each invalidate every collection-dependent cache.
+  const uploadFunctions = uploadSource.split(/async function upload/).slice(1);
+  assert.equal(uploadFunctions.length, 4); // Sales, Outstanding, Receipt, Item Unit
+  for (const fn of uploadFunctions.slice(0, 3)) {
+    assert.match(fn, /await invalidateOutstandingCache\(\)/);
+    assert.match(fn, /await invalidateCustomerHistoryCache\(\)/);
+    assert.match(fn, /await invalidateCollectionQueuesForUser\(\)/);
+  }
+
+  assert.match(refreshSource, /await invalidateCustomerHistoryCache\(\)/);
+  assert.match(refreshSource, /await invalidateCollectionQueuesForUser\(\)/);
+
+  // Receipt uploads must also broadcast so other already-open sessions recalculate.
+  assert.match(receiptsRouteSource, /publishOfflineDataUpdate/);
+  assert.match(receiptsRouteSource, /trigger: "receipt-upload"/);
+});
+
+test("customer-history cache is exposed with invalidate/subscribe helpers", async () => {
+  const mobileDataCache = await import("../app/lib/mobileDataCache.js");
+  assert.equal(typeof mobileDataCache.invalidateCustomerHistoryCache, "function");
+  assert.equal(typeof mobileDataCache.subscribeCustomerHistoryCacheCleared, "function");
+  assert.equal(typeof mobileDataCache.invalidateCollectionQueuesForUser, "function");
+  assert.equal(mobileDataCache.CUSTOMER_HISTORY_CACHE_PREFIX, "history:v5");
+});
+
 test("collection queue cache keeps v6 current and still reads legacy v5/v4 offline queues", async () => {
   const source = await import("node:fs").then((fs) => (
     fs.readFileSync(new URL("../app/lib/mobileDataCache.js", import.meta.url), "utf8")

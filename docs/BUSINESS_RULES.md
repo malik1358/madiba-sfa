@@ -156,6 +156,7 @@ Implemented in `app/lib/salesmanIncentive.js` (pure) and `app/lib/salesmanIncent
 
 - Only the active batch is “the sales file.” Archiving is done by `activate_sales_batch`, which refuses `FAILED` batches and refuses deletion of the active batch.
 - KPI Targets actual sales come from the selected month in `active_sales` (the active uploaded sales batch). Actuals are net: ordinary transaction amounts retain their sign, and rows identified as credit notes or sales returns by `isCreditNoteTransaction` are deducted by absolute amount, including when the upload stores them as positive. Deductions stay in the row's office-supplies / other category. Credit-note rows do not count as buying customers; historical KPI pace uses the same net signed sales amounts.
+- KPI collection actuals allocate saved collection visits to the customer's active-sales invoices using the shared cash-first FIFO matcher. Only amounts allocated to credit invoices count against Collection target; cash-invoice allocations are shown separately as **Cash collection (info)** and have no target or achievement.
 - `profit_amount` is gross-profit amount for BI only. Do not surface cost or margin percent from the Excel file.
 - BI periods: all time, this month, last month, this quarter, last 3/6/12 months, this year, last year, custom (`app/lib/biReportPeriod.js`).
 - Month-over-month charts skip the in-progress month when they need a closed month (`resolveMomComparisonMonths`).

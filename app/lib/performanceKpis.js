@@ -1,5 +1,5 @@
 import { currentMonthDateRange } from "./salesInvoices.js";
-import { isCreditNoteTransaction } from "./paymentBehavior.js";
+import { isCashSalesVoucher, isCreditNoteTransaction, matchPaymentsFifo } from "./paymentBehavior.js";
 import { KSA_TIMEZONE } from "./workdayActivity.js";
 
 export function isMissingSchemaColumn(error) {
@@ -16,6 +16,7 @@ export const PERFORMANCE_KPI_KEYS = [
   "officeSupplies",
   "otherSales",
   "collection",
+  "cashCollection",
   "newCustomers",
   "repeatCustomers",
 ];
@@ -25,6 +26,7 @@ export const PERFORMANCE_DISPLAY_KPI_KEYS = [
   "otherSales",
   "totalSales",
   "collection",
+  "cashCollection",
   "newCustomers",
   "repeatCustomers",
 ];
@@ -34,11 +36,12 @@ export const PERFORMANCE_KPI_LABELS = {
   otherSales: "Others",
   totalSales: "Total sales",
   collection: "Collection",
+  cashCollection: "Cash collection (info)",
   newCustomers: "New customers",
   repeatCustomers: "Repeat customers",
 };
 
-const MONEY_KPI_KEYS = new Set(["officeSupplies", "otherSales", "totalSales", "collection", "sales"]);
+const MONEY_KPI_KEYS = new Set(["officeSupplies", "otherSales", "totalSales", "collection", "cashCollection", "sales"]);
 const TARGET_FIELD_ALIASES = {
   officeSupplies: ["officeSupplies", "office_supplies_sales_target", "office_supplies_target"],
   otherSales: ["otherSales", "other_sales_target"],
@@ -287,6 +290,7 @@ export function emptyPerformanceActuals() {
     otherSales: 0,
     totalSales: 0,
     collection: 0,
+    cashCollection: 0,
     newCustomers: 0,
     repeatCustomers: 0,
   };
@@ -298,6 +302,7 @@ export function emptyPerformanceTargets() {
     otherSales: 0,
     totalSales: 0,
     collection: 0,
+    cashCollection: 0,
     newCustomers: 0,
     repeatCustomers: 0,
   };
@@ -371,6 +376,30 @@ export function sumSalesAmount(rows = []) {
 
 export function sumCollectionAmount(rows = []) {
   return (rows || []).reduce((sum, row) => sum + Number(row?.amount_received || 0), 0);
+}
+
+export function splitCollectionActualsByInvoice(transactions = [], collectionVisits = [], {
+  fromDate = "",
+  toDate = "",
+} = {}) {
+  const receipts = (collectionVisits || []).map((visit) => ({
+    receipt_date: String(visit?.saved_at || "").slice(0, 10),
+    amount: Number(visit?.amount_received || 0),
+    vch_no: String(visit?.id || ""),
+  }));
+  const { allocations } = matchPaymentsFifo(transactions, receipts);
+
+  const totals = allocations.reduce((result, allocation) => {
+    const receiptDate = String(allocation?.receipt_date || "").slice(0, 10);
+    if ((fromDate && receiptDate < fromDate) || (toDate && receiptDate > toDate)) return result;
+    if (isCashSalesVoucher(allocation?.voucher_number)) result.cashCollection += Number(allocation.amount || 0);
+    else result.collection += Number(allocation.amount || 0);
+    return result;
+  }, { collection: 0, cashCollection: 0 });
+  return {
+    collection: Math.round(totals.collection * 100) / 100,
+    cashCollection: Math.round(totals.cashCollection * 100) / 100,
+  };
 }
 
 export function buildPerformanceKpi(key, {

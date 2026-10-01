@@ -209,6 +209,33 @@ test("resolveDayRouteWorkingHours exposes counted from and to ranges", () => {
   ]);
 });
 
+test("resolveDayRouteWorkingHours excludes idle breaks longer than two hours", () => {
+  const entries = [
+    { savedAt: "2026-09-07T06:40:00.000Z", transactionType: "VISIT_REPORT" },
+    { savedAt: "2026-09-07T08:43:00.000Z", transactionType: "ORDER_SUBMITTED" },
+    { savedAt: "2026-09-07T14:18:00.000Z", transactionType: "COLLECTION_VISIT" },
+    { savedAt: "2026-09-07T15:46:00.000Z", transactionType: "VISIT_REPORT" },
+  ];
+  const longGap = {
+    fromAt: "2026-09-07T08:43:00.000Z",
+    toAt: "2026-09-07T14:18:00.000Z",
+    minutes: 335,
+  };
+  const hours = resolveDayRouteWorkingHours(entries, [longGap]);
+
+  assert.equal(hours.minutes, 211);
+  assert.equal(hours.value, "3h 31m");
+  assert.deepEqual(hours.ranges, [
+    { fromAt: "2026-09-07T06:40:00.000Z", toAt: "2026-09-07T08:43:00.000Z" },
+    { fromAt: "2026-09-07T14:18:00.000Z", toAt: "2026-09-07T15:46:00.000Z" },
+  ]);
+  assert.equal(resolveDayRouteWorkingHours(entries, [{
+    ...longGap,
+    toAt: "2026-09-07T10:43:00.000Z",
+    minutes: 120,
+  }]).minutes, 546);
+});
+
 test("resolveDayRouteWorkingHours is zero when only pre-8am or far stops exist", () => {
   const hours = resolveDayRouteWorkingHours([
     { savedAt: "2026-09-06T21:24:00.000Z", transactionType: "ORDER_SUBMITTED", isFarFromCustomer: false },

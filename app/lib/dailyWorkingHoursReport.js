@@ -32,7 +32,7 @@ function countByType(entries, type) {
 export function buildDailyWorkingHoursRow(user = {}) {
   const entries = Array.isArray(user?.entries) ? user.entries : [];
   const times = extractWorkdayTimesFromRoute(entries);
-  const hours = resolveDayRouteWorkingHours(entries);
+  const hours = resolveDayRouteWorkingHours(entries, user.idleGaps);
   const nearStops = entries.filter(isNearCustomerEntry).length;
   const farStops = entries.filter((entry) => (
     NEAR_CUSTOMER_TRANSACTION_TYPES.has(entryType(entry)) && Boolean(entry?.isFarFromCustomer)

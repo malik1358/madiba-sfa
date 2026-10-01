@@ -4,6 +4,7 @@ import { formatWorkingHours, getKsaDateTimeParts } from "./workdayActivity.js";
 
 /** Day-route working hours count only non-far customer stops from this KSA hour onward. */
 export const DAY_ROUTE_WORKING_HOURS_START_HOUR = 8;
+export const DAY_ROUTE_LONG_IDLE_BREAK_THRESHOLD_MINUTES = 120;
 
 const NEAR_CUSTOMER_TRANSACTION_TYPES = new Set([
   "VISIT_REPORT",
@@ -261,6 +262,34 @@ function spanMinutesBetween(startAt, endAt) {
   return Math.round((end - start) / 60000);
 }
 
+function excludeLongIdleBreaks(ranges = [], idleGaps = []) {
+  const longBreaks = (idleGaps || [])
+    .map((gap) => ({ start: Date.parse(gap?.fromAt), end: Date.parse(gap?.toAt) }))
+    .filter(({ start, end }) => (
+      Number.isFinite(start)
+      && Number.isFinite(end)
+      && end - start > DAY_ROUTE_LONG_IDLE_BREAK_THRESHOLD_MINUTES * 60000
+    ))
+    .sort((left, right) => left.start - right.start);
+
+  return ranges.flatMap((range) => {
+    let segments = [{ start: Date.parse(range.fromAt), end: Date.parse(range.toAt) }];
+    longBreaks.forEach((breakRange) => {
+      segments = segments.flatMap((segment) => {
+        if (breakRange.end <= segment.start || breakRange.start >= segment.end) return [segment];
+        return [
+          { start: segment.start, end: Math.min(segment.end, breakRange.start) },
+          { start: Math.max(segment.start, breakRange.end), end: segment.end },
+        ].filter((part) => part.end > part.start);
+      });
+    });
+    return segments.map((segment) => ({
+      fromAt: new Date(segment.start).toISOString(),
+      toAt: new Date(segment.end).toISOString(),
+    }));
+  });
+}
+
 /**
  * Prefer non-far customer stops around lunch:
  * - morning: first near → last near strictly before lunch out
@@ -315,18 +344,21 @@ function formatDayRouteWorkingHoursValue(minutes) {
   return formatWorkingHours(minutes);
 }
 
-export function resolveDayRouteWorkingHours(source = []) {
+export function resolveDayRouteWorkingHours(source = [], idleGaps = []) {
   const near = nearCustomerTransactions(source);
   const { lunchOutAt, lunchInAt } = extractWorkdayTimesFromRoute(source);
 
   if (near.length) {
     const nearResult = workingMinutesFromNearLunchSegments(near, lunchOutAt, lunchInAt);
     if (nearResult.applied) {
-      const minutes = Number(nearResult.minutes || 0);
+      const ranges = excludeLongIdleBreaks(nearResult.ranges || [], idleGaps);
+      const minutes = ranges.reduce((total, range) => (
+        total + spanMinutesBetween(range.fromAt, range.toAt)
+      ), 0);
       return {
         minutes: minutes > 0 ? minutes : 0,
         value: formatDayRouteWorkingHoursValue(minutes),
-        ranges: nearResult.ranges || [],
+        ranges,
       };
     }
   }

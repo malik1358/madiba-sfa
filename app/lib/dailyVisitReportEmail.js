@@ -319,7 +319,7 @@ export function buildUserVisitReportEmail({
     : buildDayRoutePoints(entries, idleGaps);
   const routeSvg = buildDayRouteSvg(routePoints, { idleGaps, showIdleLabels: false });
   const workdayStops = buildWorkdayRouteStops(routePoints, idleGaps);
-  const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : routePoints);
+  const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : routePoints, idleGaps);
   const workingHoursRanges = (workingHours.ranges || [])
     .map((range) => `${formatReportTime(range.fromAt)} - ${formatReportTime(range.toAt)}`)
     .join("; ");

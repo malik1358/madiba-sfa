@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getSupabaseClient } from '../../../lib/supabase';
 import {
   captureGpsLocationWithFallbackConfirm,
@@ -47,6 +47,7 @@ function buildOrderPayload({
   creditApprovalRequired = false,
   orderBlock = null,
   orderNumber = "",
+  requestId = "",
 }) {
   const pricedLines = priceOrderLines(
     orderItems.map((item) => ({
@@ -69,6 +70,7 @@ function buildOrderPayload({
     action,
     orderId: draftOrderId && !isPendingOrderId(draftOrderId) ? Number(draftOrderId) : null,
     orderNumber: String(orderNumber || "").trim() || undefined,
+    requestId: requestId || undefined,
     customerCode: selectedCustomer.customer_code,
     customerName: selectedCustomer.customer_name,
     salesmanCode: orderMaker?.salesmanCode || "",
@@ -118,6 +120,8 @@ export function useOrder({
   const [orderQuantities, setOrderQuantities] = useState({});
   const [savingOrder, setSavingOrder] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
+  const submitInFlight = useRef(false);
+  const orderRequestId = useRef(null);
   const [showOrderReview, setShowOrderReview] = useState(false);
   const [orderHistory, setOrderHistory] = useState([]);
   const [loadedOrderStatus, setLoadedOrderStatus] = useState('DRAFT');
@@ -126,6 +130,10 @@ export function useOrder({
     () => Object.values(orderQuantities || {}).filter((qty) => Number(qty) > 0).length,
     [orderQuantities]
   );
+
+  useEffect(() => {
+    orderRequestId.current = null;
+  }, [selectedCustomer?.customer_code, editOrderId]);
 
   useEffect(() => {
     const orderEntryOpen = selectedQuantityCount > 0 || showOrderReview || savingOrder || submittingOrder;
@@ -343,6 +351,7 @@ export function useOrder({
         },
       );
       setDraftOrderNumber(allottedOrderNumber);
+      orderRequestId.current ||= crypto.randomUUID();
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -365,6 +374,7 @@ export function useOrder({
           capturedAt,
           platform,
           orderNumber: allottedOrderNumber,
+          requestId: orderRequestId.current,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -446,6 +456,7 @@ export function useOrder({
   }, [accessScope, cashDiscountMap, draftOrderId, draftOrderNumber, language, loadedOrderStatus, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);
 
   const submitOrder = useCallback(async (options = {}) => {
+    if (submitInFlight.current) return null;
     if (orderItems.length === 0) {
       if (selectedQuantityCount > 0) {
         setError('Selected items are not allowed for ordering. Please choose active items and try again.');
@@ -461,6 +472,7 @@ export function useOrder({
       return null;
     }
 
+    submitInFlight.current = true;
     setSubmittingOrder(true);
     setError('');
     setMessage('');
@@ -516,6 +528,7 @@ export function useOrder({
         },
       );
       setDraftOrderNumber(allottedOrderNumber);
+      orderRequestId.current ||= crypto.randomUUID();
 
       const saveResult = await postJsonResilient({
         url: '/api/sales-orders',
@@ -540,6 +553,7 @@ export function useOrder({
           creditApprovalRequired: Boolean(options.creditApprovalRequired ?? creditApprovalRequired),
           orderBlock,
           orderNumber: allottedOrderNumber,
+          requestId: orderRequestId.current,
         }),
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -619,6 +633,7 @@ export function useOrder({
       setError(friendlyErrorMessage(err, 'Unable to submit order.'));
       return null;
     } finally {
+      submitInFlight.current = false;
       setSubmittingOrder(false);
     }
   }, [accessScope, cashDiscountMap, creditApprovalRequired, draftOrderId, draftOrderNumber, language, loadedOrderStatus, orderBlock, orderItems, paymentType, priceList, pricingRegion, schemes, selectedCustomer, selectedQuantityCount, setError, setMessage, userRole, valueDiscountMap]);

@@ -91,7 +91,7 @@ RLS lets a user insert and read their own rows. `logs_select_own_or_admin` also 
 
 ## Orders
 
-`sales_orders`: `order_number` unique, `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `status` `DRAFT|SUBMITTED|CANCELLED`, totals, `created_by`, `submitted_at`.
+`sales_orders`: `order_number` unique, nullable unique `request_id` (UUID; offline order replay key), `customer_code`, `customer_name`, `salesman_code`, `salesman_name`, `status` `DRAFT|SUBMITTED|CANCELLED`, totals, `created_by`, `submitted_at`. Apply `20260930190000_sales_order_request_id.sql` in Supabase before deploying the API that reads this column.
 
 `salesman_code` / `salesman_name` are the order maker (authenticated profile at save/submit), not a copy of `customers.current_salesman_code`. `/api/sales-orders` overwrites both from the caller’s profile; the client still sends `customerSalesmanCode` only for pricing-region fallback.
 

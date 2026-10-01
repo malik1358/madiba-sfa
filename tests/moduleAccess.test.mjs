@@ -47,19 +47,19 @@ test("salesmen see field modules and payment collections", () => {
   assert.equal(access.canAccess("mySalesInvoices"), true);
   assert.equal(access.canAccess("dailyVisitReport"), true);
   assert.equal(access.canAccess("gpsMap"), false);
-  assert.equal(access.canAccess("promoterCoverage"), false);
+  assert.equal(access.canAccess("promoterCoverage"), true);
   assert.equal(access.canAccess("salesmanHierarchy"), false);
   assert.equal(access.canAccess("upload"), false);
 });
 
-test("promoter coverage is limited to product promoters", () => {
-  const promoter = buildModuleAccess({ role: "product_promoter" });
-  const manager = buildModuleAccess({ role: "manager" });
+test("promoter coverage is available to all app roles", () => {
+  const roles = ["admin", "manager", "salesman", "collector", "invoice-maker", "product_promoter"];
 
-  assert.equal(promoter.canAccess("promoterCoverage"), true);
-  assert.equal(manager.canAccess("promoterCoverage"), false);
+  roles.forEach((role) => {
+    assert.equal(buildModuleAccess({ role }).canAccess("promoterCoverage"), true, role);
+  });
   assert.equal(moduleLabelForPath("/management/promoter-coverage", "en"), "Promoter Coverage");
-  assert.ok(pinnedModuleKeysForAccess(promoter).includes("promoterCoverage"));
+  assert.ok(pinnedModuleKeysForAccess(buildModuleAccess({ role: "product_promoter" })).includes("promoterCoverage"));
 });
 
 test("collectors cannot open item price history", () => {

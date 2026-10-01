@@ -153,14 +153,8 @@ export async function GET(request) {
       .eq("id", user.id)
       .maybeSingle();
     if (profileError) throw profileError;
-    if (!profile || !isPromoter(profile.role)) {
-      return Response.json({ success: false, error: "This report is available to product promoters only." }, { status: 403 });
-    }
-
-    const metadata = user.user_metadata || user.app_metadata || {};
-    const headCode = normalizeCode(metadata.head_salesman_code);
-    if (!headCode) {
-      return Response.json({ success: false, error: "Your account is not assigned to a head salesman." }, { status: 403 });
+    if (!profile) {
+      return Response.json({ success: false, error: "No profile found for this account." }, { status: 403 });
     }
 
     const [profilesResult, usersResult] = await Promise.all([
@@ -174,11 +168,44 @@ export async function GET(request) {
     if (usersResult.error) throw usersResult.error;
 
     const profiles = profilesResult.data || [];
+    const authUsers = usersResult.data?.users || [];
+    const promoterProfiles = profiles.filter((candidate) => isPromoter(candidate.role));
+    const promoterOptions = promoterProfiles.map((candidate) => ({
+      userId: candidate.id,
+      salesmanCode: String(candidate.salesman_code || "").trim(),
+      salesmanName: String(candidate.salesman_name || "").trim(),
+    }));
+    const requestedPromoterId = String(new URL(request.url).searchParams.get("promoterId") || "").trim();
+    const selectedPromoterId = requestedPromoterId || (isPromoter(profile.role) ? user.id : "");
+    if (!selectedPromoterId) {
+      return Response.json({
+        success: true,
+        reportDate: getKsaDateString(),
+        promoterOptions,
+        promoter: null,
+        requiresPromoterSelection: true,
+      });
+    }
+
+    const promoterProfile = promoterProfiles.find((candidate) => candidate.id === selectedPromoterId);
+    if (!promoterProfile) {
+      return Response.json({ success: false, error: "Select a valid product promoter." }, { status: 400 });
+    }
+    const promoterAuthUser = authUsers.find((candidate) => candidate.id === selectedPromoterId);
+    if (!promoterAuthUser) {
+      return Response.json({ success: false, error: "Unable to load the selected promoter account." }, { status: 404 });
+    }
+
+    const metadata = promoterAuthUser.user_metadata || promoterAuthUser.app_metadata || {};
+    const headCode = normalizeCode(metadata.head_salesman_code);
+    if (!headCode) {
+      return Response.json({ success: false, error: "Your account is not assigned to a head salesman." }, { status: 403 });
+    }
     const headProfile = profiles.find((member) => normalizeCode(member.salesman_code) === headCode) || {
       salesman_code: headCode,
       salesman_name: metadata.head_salesman_name || headCode,
     };
-    const peers = resolvePeersUnderSameHeadUserIds(usersResult.data?.users || [], headProfile);
+    const peers = resolvePeersUnderSameHeadUserIds(authUsers, headProfile);
     const teamMembers = profiles
       .filter((member) => normalizeCode(member.salesman_code) === headCode || peers.has(member.id))
       .filter((member) => !isPromoter(member.role));
@@ -205,7 +232,7 @@ export async function GET(request) {
       loadCustomersForSalesmen(admin, teamSalesmanValues),
       loadSalesMembership(admin, teamSalesmanValues),
       loadSalesTrendRows(admin, teamSalesmanValues, monthKeys[0], currentMonth),
-      loadPromoterVisits(admin, user.id, firstVisitDate),
+      loadPromoterVisits(admin, promoterProfile.id, firstVisitDate),
       loadOutstandingCustomerCodes(admin, teamProfiles),
     ]);
 
@@ -240,6 +267,13 @@ export async function GET(request) {
       success: true,
       reportDate: getKsaDateString(),
       visitStartDate: firstVisitDate,
+      promoterOptions,
+      promoter: {
+        userId: promoterProfile.id,
+        salesmanCode: String(promoterProfile.salesman_code || "").trim(),
+        salesmanName: String(promoterProfile.salesman_name || "").trim(),
+      },
+      requiresPromoterSelection: false,
       headSalesman: {
         code: headCode,
         name: String(metadata.head_salesman_name || headCode).trim(),

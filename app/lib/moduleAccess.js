@@ -202,7 +202,7 @@ export function buildModuleAccess(context = {}) {
       workingHours: hasManagementReportAccess || isCollector,
       businessDashboard: hasManagementReportAccess,
       salesmanIncentive: hasManagementReportAccess || (isSalesman && !isCollector),
-      promoterCoverage: isProductPromoter,
+      promoterCoverage: true,
       customerMaster: isAdmin || isManager,
       outstandingNoGps: hasManagementReportAccess,
       // Enabled for field sales after admin approval. Set NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS=false to lock again.

@@ -16,8 +16,8 @@ import { useModuleAccess } from "../../hooks/useModuleAccess";
 const TEXT = {
   title: { en: "Promoter Coverage", ar: "تغطية مروج المنتجات" },
   subtitle: {
-    en: "Your visits across your head salesman's customer book, alongside each customer's sales trend.",
-    ar: "زياراتك لعملاء فريق مديرك مع اتجاه مبيعات كل عميل.",
+    en: "Review a product promoter's visits across their head salesman's customer book and each customer's sales trend.",
+    ar: "راجع زيارات مروج المنتجات لعملاء فريق مديره واتجاه مبيعات كل عميل.",
   },
   back: { en: "My Day", ar: "يومي" },
   customers: { en: "Team customers", ar: "عملاء الفريق" },
@@ -28,6 +28,8 @@ const TEXT = {
   salesDecreasing: { en: "Sales decreasing", ar: "المبيعات تنخفض" },
   coverage: { en: "Coverage", ar: "التغطية" },
   customerCoverage: { en: "Customer coverage", ar: "تغطية العملاء" },
+  selectPromoter: { en: "Product promoter", ar: "مروج المنتجات" },
+  choosePromoter: { en: "Select a promoter", ar: "اختر مروجًا" },
   allCustomers: { en: "All customers", ar: "كل العملاء" },
   repeatOnly: { en: "Repeated visits", ar: "الزيارات المتكررة" },
   notVisitedOnly: { en: "Not visited", ar: "لم تتم زيارتهم" },
@@ -53,7 +55,7 @@ const TEXT = {
     ar: "عدد الزيارات لآخر 12 شهرًا. أعمدة المبيعات تعرض آخر ستة أشهر مكتملة؛ ويقارن الاتجاه آخر ثلاثة أشهر بالثلاثة السابقة بعد خصم الإشعارات الدائنة.",
   },
   noRows: { en: "No customers match this filter.", ar: "لا يوجد عملاء يطابقون هذا التصفية." },
-  accessDenied: { en: "This report is only available to product promoters.", ar: "هذا التقرير متاح لمروجي المنتجات فقط." },
+  choosePromoterHint: { en: "Select a product promoter to view their team coverage.", ar: "اختر مروج منتجات لعرض تغطية فريقه." },
   loginAgain: { en: "Please login again.", ar: "يرجى تسجيل الدخول مرة أخرى." },
 };
 
@@ -112,6 +114,7 @@ export default function PromoterCoveragePage() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedPromoterId, setSelectedPromoterId] = useState("");
   const canAccess = access.canAccess("promoterCoverage");
 
   usePopupMessages({ error });
@@ -139,8 +142,11 @@ export default function PromoterCoveragePage() {
         const session = await resolveAuthSession(getSupabaseClient(), 12000);
         if (cancelled) return;
         if (!session?.access_token) throw new Error(t("loginAgain"));
+        const params = new URLSearchParams();
+        if (selectedPromoterId) params.set("promoterId", selectedPromoterId);
+        const query = params.toString();
         const { response, payload } = await fetchJsonWithTimeout(
-          "/api/promoter-coverage",
+          `/api/promoter-coverage${query ? `?${query}` : ""}`,
           { headers: { Authorization: `Bearer ${session.access_token}` } },
           120000,
         );
@@ -159,29 +165,10 @@ export default function PromoterCoveragePage() {
       cancelled = true;
       stopSafetyTimer();
     };
-  }, [canAccess, loadingAccess, refreshKey, language]);
+  }, [canAccess, loadingAccess, refreshKey, language, selectedPromoterId]);
 
   if (!supabaseClient) {
     return <SupabaseUnavailable title={t("title")} message="This report needs Supabase credentials." />;
-  }
-
-  if (!loadingAccess && !canAccess) {
-    return (
-      <MorningAttendanceGate requireMorningAttendance={false}>
-        <main className="modulePage" dir={dir}>
-          <div className="moduleShell">
-            <div className="moduleHeader">
-              <div><p className="moduleEyebrow">MADIBA SFA</p><h1>{t("title")}</h1></div>
-              <div className="moduleHeaderMeta">
-                <AppLanguageSwitch language={language} setLanguage={setLanguage} />
-                <Link href="/management" className="moduleBackLink">{t("back")}</Link>
-              </div>
-            </div>
-            <div className="moduleHint">{t("accessDenied")}</div>
-          </div>
-        </main>
-      </MorningAttendanceGate>
-    );
   }
 
   const rows = (report?.rows || []).filter((row) => {
@@ -213,15 +200,36 @@ export default function PromoterCoveragePage() {
 
           <section className="moduleSection">
             <div className="moduleSectionHeader">
-              <h2>{report?.headSalesman?.name || report?.headSalesman?.code || t("customerCoverage")}</h2>
-              <span>{(report?.teamSalesmen || []).length} {t("teamOwner")}</span>
+              <h2>{report?.promoter?.salesmanName || report?.promoter?.salesmanCode || t("customerCoverage")}</h2>
+              {report?.headSalesman ? <span>{(report?.teamSalesmen || []).length} {t("teamOwner")}</span> : null}
             </div>
+            {!loading && (report?.promoterOptions || []).length > 0 ? (
+              <label className="moduleField" style={{ maxWidth: "360px", marginTop: "12px" }}>
+                {t("selectPromoter")}
+                <select
+                  className="moduleInput"
+                  value={selectedPromoterId || report?.promoter?.userId || ""}
+                  onChange={(event) => setSelectedPromoterId(event.target.value)}
+                >
+                  <option value="">{t("choosePromoter")}</option>
+                  {(report.promoterOptions || []).map((option) => (
+                    <option key={option.userId} value={option.userId}>
+                      {[option.salesmanName, option.salesmanCode].filter(Boolean).join(" · ") || option.userId}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
           </section>
 
           {loading && <div className="moduleLoading">{t("loading")}</div>}
           {error ? <div className="moduleHint">{error}</div> : null}
 
-          {!loading && report ? (
+          {!loading && report?.requiresPromoterSelection ? (
+            <div className="moduleHint">{t("choosePromoterHint")}</div>
+          ) : null}
+
+          {!loading && report && !report.requiresPromoterSelection ? (
             <>
               <div className="moduleMetricGrid moduleMetricGridCols6">
                 <section className="moduleMetricCard"><span>{t("customers")}</span><strong>{report.customerCount}</strong></section>

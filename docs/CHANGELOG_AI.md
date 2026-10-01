@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-10-01** — Pending Orders showed `Outstanding >60 days` as 0 because its lightweight outstanding summary included the customer total but omitted aging buckets. The summary now includes only `61-90`, `91-120`, and `>120` amounts; regression verifies a displayed total of 2,310 for the screenshot bucket values. No migration.
 - **2026-10-01** — Excel-style column filter dropdowns now sort numeric options by value. They compared the formatted text with `localeCompare({ numeric: true })`, so the thousands comma ranked before the decimal point and `+4,749.34` listed above `+4.11`. `uniqueExcelFilterOptions` parses money/count labels (sign, thousands separators, `%`) and sorts numbers first, then text; Pending Orders reuses the shared helper instead of its own sort. Regressions in `tests/biExcelFilters.test.mjs`; no migration.
 
 - **2026-09-30** — Invoice-maker profiles can now view all management reports, including cross-user report data and collection/receipt reports. Report email sending and setup/configuration permissions are unchanged. Added role/access regressions; no migration.

@@ -160,7 +160,7 @@ Schemes and quantity limits are settings, not tables:
 | --- | --- |
 | `active_sales_batch_id` | Live sales snapshot |
 | `outstanding_customerwise_dataset_v1` | Outstanding upload |
-| `receipt_register_dataset_v1` | Receipt register upload |
+| `receipt_register_dataset_v1` | Receipt register upload (every row with a date and a positive Dr/Cr amount is kept regardless of voucher type — Receipt, JV-Collection, NSTC JV reclass entries, etc. — so uploads never silently drop a collection) |
 | `outstanding_reconcile_dataset_v1` | Precomputed Tally vs SFA outstanding differences (only differing customers) |
 | `outstanding_reconcile_email_last_sent` | Difference-report email dedupe |
 | `sales_bi_cube_v1` | BI monthly cube JSON |

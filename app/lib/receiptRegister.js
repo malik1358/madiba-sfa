@@ -209,16 +209,6 @@ function isTotalRow(particulars, dateValue) {
   return text === "TOTAL" || text.startsWith("TOTAL:") || text === "GRAND TOTAL";
 }
 
-function looksLikeReceiptType(value) {
-  const text = normalizeName(value);
-  if (!text) return true;
-  return text.includes("RECEIPT")
-    || text.includes("COLLECTION")
-    || text === "JV"
-    || text.startsWith("JV ")
-    || text.startsWith("JV-");
-}
-
 export function buildCustomerLookup(customers = []) {
   const byCode = new Map();
   const byName = new Map();
@@ -331,8 +321,9 @@ export function parseReceiptRegisterRows(sheetRows, headerInfo, customerLookup =
     if (isTotalRow(particulars, receiptDate)) continue;
     if (!receiptDate && !particulars) continue;
 
+    // Keep every voucher type (Receipt, JV-Collection, NSTC JV, etc.) — any row with a
+    // date and a positive amount is a real collection; no upload row should be skipped.
     const vchType = columns.vchType >= 0 ? cellText(row[columns.vchType]) : "Receipt";
-    if (vchType && !looksLikeReceiptType(vchType)) continue;
 
     const credit = columns.credit >= 0 ? toNumber(row[columns.credit]) : 0;
     const debit = columns.debit >= 0 ? toNumber(row[columns.debit]) : 0;

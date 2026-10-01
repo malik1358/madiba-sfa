@@ -101,6 +101,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/import-sales`, `/api/upload-files`, `/api/pricing/cache`, `/api/admin/price-sync`
 - `/api/business-dashboard`, `/api/business-dashboard/category-growth`
 - `/api/salesman-incentive` — monthly salesman incentive (collection speed + sales growth)
+- `/api/promoter-coverage` — promoter-only team customer coverage, own visit history, and monthly customer sales trend
 - `/api/admin/customers`, `.../export`, `.../locations`, `.../gps-history`
 - `/api/admin/salesmen-hierarchy`, `/api/admin/customer-book-shares`, `/api/admin/kpi-targets`
 - `/api/admin/schemes`, `/api/admin/order-quantity-controls`, `/api/admin/item-price-history`

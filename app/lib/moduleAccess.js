@@ -32,6 +32,7 @@ export const MODULES = {
   workingHours: { href: "/management/working-hours", label: "Working Hours" },
   businessDashboard: { href: "/management/business-dashboard", label: "Business Intelligence" },
   salesmanIncentive: { href: "/management/salesman-incentive", label: "Salesman Incentive" },
+  promoterCoverage: { href: "/management/promoter-coverage", label: "Promoter Coverage" },
   customerMaster: { href: "/management/customer-master", label: "Customer Master" },
   outstandingNoGps: { href: "/management/outstanding-no-gps", label: "Outstanding Without GPS" },
   salesmanVisitPlan: { href: "/management/salesman-visit-plan", label: "Salesman Visit Plan" },
@@ -82,6 +83,7 @@ export const NAV_GROUPS = [
       "businessDashboard",
       "myPerformance",
       "salesmanIncentive",
+      "promoterCoverage",
       "dailyVisitReport",
       "userActivity",
       "workingHours",
@@ -200,6 +202,7 @@ export function buildModuleAccess(context = {}) {
       workingHours: hasManagementReportAccess || isCollector,
       businessDashboard: hasManagementReportAccess,
       salesmanIncentive: hasManagementReportAccess || (isSalesman && !isCollector),
+      promoterCoverage: isProductPromoter,
       customerMaster: isAdmin || isManager,
       outstandingNoGps: hasManagementReportAccess,
       // Enabled for field sales after admin approval. Set NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS=false to lock again.
@@ -283,6 +286,7 @@ export const MODULE_LABELS = {
   workingHours: { en: "Working Hours", ar: "ساعات العمل" },
   businessDashboard: { en: "Business Intelligence", ar: "ذكاء الأعمال" },
   salesmanIncentive: { en: "Salesman Incentive", ar: "حوافز المندوبين" },
+  promoterCoverage: { en: "Promoter Coverage", ar: "تغطية مروج المنتجات" },
   customerMaster: { en: "Customer Master", ar: "سجل العملاء" },
   outstandingNoGps: { en: "Outstanding Without GPS", ar: "مستحقات بدون GPS" },
   salesmanVisitPlan: { en: "Salesman Visit Plan", ar: "خطة زيارات المندوب" },
@@ -322,7 +326,7 @@ export const PINNED_MODULE_KEYS = {
   salesman: ["myDay", "customerAudit", "newOrder", "paymentCollections"],
   collector: ["paymentCollections", "collectionReport", "receiptsNotInTally", "dailyVisitReport", "userActivity"],
   "invoice-maker": ["customerAudit", "pendingOrders", "upload", "paymentCollections"],
-  "product-promoter": ["myDay", "customerAudit", "newOrder", "gpsMap"],
+  "product-promoter": ["myDay", "customerAudit", "newOrder", "gpsMap", "promoterCoverage"],
 };
 
 export function pinnedModuleKeysForAccess(access) {

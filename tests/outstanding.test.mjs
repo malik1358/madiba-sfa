@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildSalesmanScopeMatchers } from "../app/lib/mutualSalesmanGroups.js";
+import { outstandingAmountOverSixtyDays } from "../app/lib/creditApproval.js";
 import {
   combineOutstandingHeaderRows,
   customerAccountCodesMatch,
@@ -42,6 +43,7 @@ import {
   resolveOverdueDaysFromDueDate,
   sanitizeStoredOverdueDays,
   buildOutstandingPdfBucketRows,
+  buildOutstandingSummaryCustomer,
   summarizeOutstandingBuckets,
   summarizeOutstandingBucketsForVisitStatus,
   visibleOutstandingBucketLabels,
@@ -1197,4 +1199,27 @@ test("Bills Receivable parse is preferred over Customer wise totals", () => {
   assert.equal(chosen[0].invoices.length, 2);
   assert.equal(Number(chosen[0].rows[0].buckets["31-60"].toFixed(2)), 12878.85);
   assert.equal(chosen[0].rows[0].buckets["61-90"], 0);
+});
+
+test("outstanding summary keeps the >60-day buckets used by Pending Orders", () => {
+  const summaryCustomer = buildOutstandingSummaryCustomer({
+    customer_code: "1045",
+    customer_name: "Almakhazin alaqtisadia Trading company",
+    buckets: {
+      "0-30": 0,
+      "31-60": 3235,
+      "61-90": 1160,
+      "91-120": 0,
+      ">120": 1150,
+    },
+    total_outstanding: 5545,
+  });
+
+  assert.deepEqual(summaryCustomer, {
+    customer_code: "1045",
+    customer_name: "Almakhazin alaqtisadia Trading company",
+    total_outstanding: 5545,
+    buckets: { "61-90": 1160, "91-120": 0, ">120": 1150 },
+  });
+  assert.equal(outstandingAmountOverSixtyDays(summaryCustomer), 2310);
 });

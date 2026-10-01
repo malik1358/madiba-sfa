@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import {
   OUTSTANDING_DATASET_KEY,
   buildOutstandingRow,
+  buildOutstandingSummaryCustomer,
   findOutstandingForCustomer,
   findOutstandingHeaderRow,
   hydrateOutstandingInvoices,
@@ -122,13 +123,9 @@ export async function GET(request) {
       String(url.searchParams.get("summary") || "").trim().toLowerCase(),
     );
 
-    // Lightweight customer list for queue columns (code / name / total only).
+    // Keep only fields needed by the queue, including its >60-day total.
     if (wantSummary && !customerCode && !customerName) {
-      const customers = (dataset.rows || []).map((row) => ({
-        customer_code: String(row?.customer_code || "").trim(),
-        customer_name: String(row?.customer_name || "").trim(),
-        total_outstanding: Number(row?.total_outstanding || 0),
-      }));
+      const customers = (dataset.rows || []).map(buildOutstandingSummaryCustomer);
 
       return NextResponse.json({
         success: true,

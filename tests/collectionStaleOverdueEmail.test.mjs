@@ -171,6 +171,31 @@ test("groupCollectionStaleOverdueBySalesman builds separate salesman buckets", (
   assert.equal(groups.reduce((sum, group) => sum + group.rows.length, 0), 2);
 });
 
+test("groupCollectionStaleOverdueBySalesman merges names with different placeholder codes", () => {
+  const groups = groupCollectionStaleOverdueBySalesman([
+    {
+      customer_code: "C1",
+      customer_name: "Shop One",
+      salesman_name: "Moinudin Khaja",
+      salesman_code: "N/A",
+      outstanding_above_120: 4000,
+      total_due_amount: 4000,
+    },
+    {
+      customer_code: "C2",
+      customer_name: "Shop Two",
+      salesman_name: "Moinudin Khaja",
+      salesman_code: "NA",
+      outstanding_above_120: 17000,
+      total_due_amount: 17000,
+    },
+  ]);
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].salesmanName, "Moinudin Khaja");
+  assert.equal(groups[0].rows.length, 2);
+});
+
 test("attachLastVisitWithoutOrder maps visit_report_latest dates onto due rows", () => {
   const visitByCustomer = new Map([
     ["C1", { visitAt: "2026-09-05T09:00:00.000Z", isFar: true, nearVisitAt: "2026-08-01T09:00:00.000Z" }],

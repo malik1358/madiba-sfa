@@ -276,10 +276,10 @@ export function filterCollectionStaleOverdueRowsForProfile(rows = [], profile = 
 }
 
 export function collectionStaleOverdueGroupKey(row = {}) {
-  const code = String(row?.salesman_code || row?.current_salesman_code || "").trim().toUpperCase();
-  if (code) return `code:${code}`;
   const name = String(getCollectionSalesmanLabel(row) || "").trim().toUpperCase();
   if (name) return `name:${name}`;
+  const code = String(row?.salesman_code || row?.current_salesman_code || "").trim().toUpperCase();
+  if (code) return `code:${code}`;
   return "unknown";
 }
 

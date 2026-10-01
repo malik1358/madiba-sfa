@@ -647,11 +647,25 @@ export async function GET(request) {
     const requestedOrderId = String(url.searchParams.get("orderId") || "").trim();
     const customerCode = String(url.searchParams.get("customerCode") || "").trim();
     const latest = String(url.searchParams.get("latest") || "") === "1";
+    const nextNumber = String(url.searchParams.get("nextNumber") || "") === "1";
 
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
     const user = await getAuthUser(admin, authHeader.replace("Bearer ", ""));
+
+    if (nextNumber) {
+      const salesmanCode = normalizeCode(url.searchParams.get("salesmanCode"));
+      if (!salesmanCode) {
+        return NextResponse.json({ success: false, error: "Salesman code is required." }, { status: 400 });
+      }
+      const scope = await resolveSalesScopeForUserId(admin, user.id);
+      if (!scope?.hasAllAccess && !(scope?.visibleSalesmanCodes || []).includes(salesmanCode)) {
+        return NextResponse.json({ success: false, error: "You do not have access to this salesman." }, { status: 403 });
+      }
+      const orderNumber = await allocateServerSalesmanOrderNumber(admin, salesmanCode);
+      return NextResponse.json({ success: true, orderNumber });
+    }
 
     let order = null;
 

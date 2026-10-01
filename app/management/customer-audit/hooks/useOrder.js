@@ -348,6 +348,7 @@ export function useOrder({
         {
           existingOrderNumber: draftOrderNumber,
           peerCodes,
+          accessToken: session.access_token,
         },
       );
       setDraftOrderNumber(allottedOrderNumber);
@@ -525,6 +526,7 @@ export function useOrder({
         {
           existingOrderNumber: draftOrderNumber,
           peerCodes,
+          accessToken: session.access_token,
         },
       );
       setDraftOrderNumber(allottedOrderNumber);

@@ -40,6 +40,25 @@ test("buildDailyWorkingHoursRow uses near-visit lunch segments for hours", () =>
   assert.ok(row.logoutAt);
 });
 
+test("buildDailyWorkingHoursRow excludes idle breaks longer than two hours", () => {
+  const row = buildDailyWorkingHoursRow({
+    entries: [
+      { savedAt: "2026-09-07T06:40:00.000Z", transactionType: "VISIT_REPORT" },
+      { savedAt: "2026-09-07T08:43:00.000Z", transactionType: "ORDER_SUBMITTED" },
+      { savedAt: "2026-09-07T14:18:00.000Z", transactionType: "COLLECTION_VISIT" },
+      { savedAt: "2026-09-07T15:46:00.000Z", transactionType: "VISIT_REPORT" },
+    ],
+    idleGaps: [{
+      fromAt: "2026-09-07T08:43:00.000Z",
+      toAt: "2026-09-07T14:18:00.000Z",
+      minutes: 335,
+    }],
+  });
+
+  assert.equal(row.workingHoursMinutes, 211);
+  assert.equal(row.workingHoursLabel, "3h 31m");
+});
+
 test("buildDailyWorkingHoursRows sorts by name and summarize totals", () => {
   const rows = buildDailyWorkingHoursRows([
     {

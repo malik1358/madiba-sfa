@@ -35,7 +35,7 @@ export default function DayRouteMap({
   const longestIdle = longestIdlePlace(points, idleGaps);
   const stops = buildWorkdayRouteStops(points, idleGaps);
   const idleBubbles = buildIdleBubbles(points, idleGaps);
-  const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : points);
+  const workingHours = resolveDayRouteWorkingHours(entries.length ? entries : points, idleGaps);
   const workingHoursRanges = (workingHours.ranges || [])
     .map((range) => `${formatKsaTime(range.fromAt)} - ${formatKsaTime(range.toAt)}`)
     .join("; ");

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { canViewManagementReports } from "../../lib/moduleAccess.js";
 import { buildDailyVisitReport } from "../../lib/dailyVisitReportServer.js";
 import { getKsaDateString } from "../../lib/workdayActivity.js";
 
@@ -38,7 +39,7 @@ async function getProfile(admin, userId) {
 
 function canViewAllUsers(profile) {
   const role = String(profile?.role || "").toLowerCase();
-  return role === "admin" || role === "manager" || role === "collector";
+  return canViewManagementReports(role) || role === "collector";
 }
 
 function canSendVisitReportEmail(profile) {

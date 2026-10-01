@@ -48,6 +48,7 @@ Source of truth: `app/lib/moduleAccess.js` (covered by `tests/moduleAccess.test.
 - `isFieldSales` for module flags: salesman, manager, admin, invoice-maker, or product-promoter (collectors are then excluded from field modules).
 - GPS helpers: `shouldRequireTransactionGps` (false for invoice makers), `shouldRequireGpsAccessGate` (false for admin/manager), `shouldEnableBackgroundGps` (false for admin and invoice makers).
 - Invoice management: `canManageOrderInvoice` for invoice-maker, admin, manager.
+- Management report viewing: invoice makers can view the Reports group and collection reports, including cross-user data where the report API grants that scope. Report email sending and setup/configuration remain separately gated.
 - Stock take: admin or `profiles.stock_take_access`.
 - Salesman visit plan for field roles depends on `NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS` (default enabled).
 - `myCollections` module flag is always `false`; `/management/my-collections` remains reachable via `canAccessPath` when payment collections are allowed.
@@ -61,9 +62,10 @@ Module access summary from `buildModuleAccess` (Y = true for that role group; co
 | management | Y | Y | | Y | Y | |
 | myDay, customerAudit, newOrder, visitWithoutOrder, pendingOrders, newCustomer, myPerformance, mySalesInvoices, paymentSettlement, outstandingCompare | Y | Y | Y | | Y | Y |
 | paymentCollections | Y | Y | Y | Y | Y | |
-| collectionReport, receiptsNotInTally, userActivity | Y | Y | | Y | | |
-| dailyVisitReport | Y | Y | Y | Y | | |
-| businessDashboard, customerMaster, outstandingNoGps, customerBookShares, kpiTargets, schemes, orderQuantityControls | Y | Y | | | | |
+| collectionReport, receiptsNotInTally, userActivity, workingHours | Y | Y | | Y | Y | |
+| dailyVisitReport | Y | Y | Y | Y | Y | |
+| businessDashboard, outstandingNoGps | Y | Y | | | Y | |
+| customerMaster, customerBookShares, kpiTargets, schemes, orderQuantityControls | Y | Y | | | | |
 | salesmanHierarchy, upload | Y | Y | | | Y | |
 | salesmanVisitPlan | Y | Y* | Y* | | Y* | Y* |
 | itemPriceHistory | Y | Y | Y | | Y | Y |

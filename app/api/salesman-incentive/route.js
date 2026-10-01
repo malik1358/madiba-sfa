@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { normalizeAccessRole } from "../../lib/moduleAccess.js";
+import { canViewManagementReports, normalizeAccessRole } from "../../lib/moduleAccess.js";
 import { normalizeSalesmanCode } from "../../lib/performanceKpis.js";
 import { parseIncentiveMonth } from "../../lib/salesmanIncentive.js";
 import {
@@ -49,7 +49,7 @@ function resolveIncentiveScope(profile, requestedCode) {
   const ownCode = normalizeSalesmanCode(profile?.salesman_code);
   const requested = normalizeSalesmanCode(requestedCode);
 
-  if (role === "admin" || role === "manager") {
+  if (canViewManagementReports(role)) {
     return { hasAllAccess: true, salesmanCodes: requested ? [requested] : [] };
   }
   if (role === "salesman" && ownCode) {

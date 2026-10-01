@@ -3,6 +3,7 @@ import { formatSalesOrderNumberForDisplay } from "./salesOrderNumber.js";
 import { formatVisitDistanceWhatsappLines } from "./visitDistanceWhatsapp.js";
 import { formatOrderVatLabel, VAT_RATE } from "./regionalPricing.js";
 import { formatOrderSalesmanLabel } from "./orderSalesman.js";
+import { formatKsaDateTime } from "./workdayActivity.js";
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -28,6 +29,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     customer: isAr ? "العميل" : "Customer",
     code: isAr ? "الرمز" : "Code",
     salesman: isAr ? "رجل البيع" : "Salesman",
+    visitDateTime: isAr ? "تاريخ ووقت الزيارة" : "Visit date/time",
     status: isAr ? "الحالة" : "Status",
     payment: isAr ? "الدفع" : "Payment",
     region: isAr ? "المنطقة" : "Region",
@@ -63,6 +65,7 @@ export function buildOrderWhatsappSummary(snapshot, language = "en", options = {
     `${labels.customer}: ${snapshot.customerName || snapshot.customerCode || "-"}`,
     `${labels.code}: ${snapshot.customerCode || "-"}`,
     `${labels.salesman}: ${formatOrderSalesmanLabel(snapshot)}`,
+    `${labels.visitDateTime}: ${formatKsaDateTime(snapshot.savedAtIso || new Date().toISOString())}`,
     `${labels.status}: ${snapshot.statusLabel || "-"}`,
     `${labels.payment}: ${String(snapshot.paymentType || "credit").toUpperCase()}`,
     `${labels.region}: ${snapshot.pricingRegion || "riyadh"}`,

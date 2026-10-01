@@ -115,8 +115,9 @@ test("buildCollectionVisitSummary includes avg days to pay with blank lines arou
       receiptMode: "CASH",
       nextVisitAt: "2026-08-30",
     },
-    { queuePriority: 3, visitNumberForDay: 2 },
+    { queuePriority: 3, visitNumberForDay: 2, visitAt: "2026-08-30T08:15:00.000Z" },
   );
 
+  assert.match(summary, /Visit date\/time: 30\/08\/2026, 11:15/);
   assert.match(summary, />120: 0\n\nAvg days to pay: 80\n6-month avg: 55\n\nGPS:/);
 });

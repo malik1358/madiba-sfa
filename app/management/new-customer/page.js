@@ -825,6 +825,7 @@ export default function NewCustomerPage() {
         salesmanName,
         salesmanCode,
         visitDistance,
+        visitAt: capturedAt,
       });
 
       setRecent((current) => current.map((row) => (

@@ -21,9 +21,13 @@ const TEXT = {
   },
   shareWhatsapp: { en: "Share on WhatsApp", ar: "مشاركة على واتساب" },
   logoutAnyway: { en: "Logout without sharing", ar: "تسجيل الخروج بدون مشاركة" },
-  cancel: { en: "Cancel", ar: "إلغاء" },
+  stayLoggedIn: { en: "Stay logged in", ar: "البقاء مسجلاً الدخول" },
   sharing: { en: "Opening WhatsApp...", ar: "جاري فتح واتساب..." },
   loggingOut: { en: "Logging out...", ar: "جاري تسجيل الخروج..." },
+  sessionUnavailable: {
+    en: "Your session could not be confirmed. You can stay logged in or choose logout below.",
+    ar: "تعذر تأكيد جلستك. يمكنك البقاء مسجلاً أو اختيار تسجيل الخروج أدناه.",
+  },
   summaryTitle: { en: "Daily visit summary", ar: "ملخص الزيارات اليومي" },
   loadFailed: {
     en: "Could not load today's summary. You can still log out.",
@@ -102,7 +106,7 @@ export function useLogoutWithDaySummary() {
     try {
       const session = await resolveAuthSession(supabase, 10000);
       if (!session?.access_token) {
-        await performLogout();
+        setError(t("sessionUnavailable"));
         return;
       }
 
@@ -113,7 +117,7 @@ export function useLogoutWithDaySummary() {
     } finally {
       setLoading(false);
     }
-  }, [performLogout, t]);
+  }, [t]);
 
   const closeDialog = useCallback(() => {
     if (busyAction) return;
@@ -173,6 +177,14 @@ export function useLogoutWithDaySummary() {
           <button
             type="button"
             className="modulePrimaryButton"
+            onClick={closeDialog}
+            disabled={Boolean(busyAction)}
+          >
+            {t("stayLoggedIn")}
+          </button>
+          <button
+            type="button"
+            className="moduleInlineButton"
             onClick={shareOnWhatsapp}
             disabled={loading || Boolean(busyAction) || !summaryText}
           >
@@ -185,14 +197,6 @@ export function useLogoutWithDaySummary() {
             disabled={loading || Boolean(busyAction)}
           >
             {busyAction === "logout" ? t("loggingOut") : t("logoutAnyway")}
-          </button>
-          <button
-            type="button"
-            className="moduleInlineButton"
-            onClick={closeDialog}
-            disabled={Boolean(busyAction)}
-          >
-            {t("cancel")}
           </button>
         </div>
       </div>

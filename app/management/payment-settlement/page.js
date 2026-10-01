@@ -572,7 +572,7 @@ export default function PaymentSettlementPage() {
                   <a href="#outstanding-compare">Tally vs Computed Outstanding</a> below for the full gap report.
                 </p>
                 <ExportableTable filename="payment-settlement-invoices" sheetName="Invoices" className="moduleTableWrap">
-                  <table className="moduleTable moduleBiTable paymentSettleTable">
+                  <table className="moduleTable moduleBiTable paymentSettleTable paymentSettleInvoiceTable">
                     <thead>
                       <tr>
                         <th>Sales Date</th>

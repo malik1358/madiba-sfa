@@ -4350,6 +4350,10 @@ th:has(.moduleTableColumnFilterInput) {
   vertical-align: top;
 }
 
+.paymentSettleInvoiceTable thead th {
+  top: calc(var(--sticky-table-top) + 24px);
+}
+
 .moduleTable tbody tr:nth-child(even) td {
   background: #f3fbfb;
 }
@@ -6146,6 +6150,10 @@ th:has(.moduleTableColumnFilterInput) {
 
   .moduleBiTable th,
   .moduleBiTable.moduleStackedHeaderTable thead tr:first-child th {
+    top: 0;
+  }
+
+  .paymentSettleInvoiceTable thead th {
     top: 0;
   }
 

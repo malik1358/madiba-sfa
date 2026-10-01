@@ -6,6 +6,8 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-10-01** — Excel-style column filter dropdowns now sort numeric options by value. They compared the formatted text with `localeCompare({ numeric: true })`, so the thousands comma ranked before the decimal point and `+4,749.34` listed above `+4.11`. `uniqueExcelFilterOptions` parses money/count labels (sign, thousands separators, `%`) and sorts numbers first, then text; Pending Orders reuses the shared helper instead of its own sort. Regressions in `tests/biExcelFilters.test.mjs`; no migration.
+
 - **2026-09-30** — Invoice-maker profiles can now view all management reports, including cross-user report data and collection/receipt reports. Report email sending and setup/configuration permissions are unchanged. Added role/access regressions; no migration.
 - **2026-09-30** — A receipt dated before a cash sales voucher (RC / DC / JC) no longer jumps the cash-priority queue while an older bill is still open. Customer 1224 showed cash `DC/0024` (2026-09-19) marked "Paid on 2026-04-20 · Rcpt 675" even though earlier credit invoices were still pending. The cash slot now requires either a receipt on/after the invoice date, or no older open invoice; otherwise the money follows oldest-open FIFO. Two regressions in `tests/paymentBehavior.test.mjs`; no migration.
 

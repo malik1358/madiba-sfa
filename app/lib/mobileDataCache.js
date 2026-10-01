@@ -116,6 +116,58 @@ export function subscribeOutstandingCacheCleared(handler) {
   };
 }
 
+export const CUSTOMER_HISTORY_CACHE_PREFIX = "history:v5";
+export const CUSTOMER_HISTORY_CACHE_CLEARED_EVENT = "madiba-customer-history-cache-cleared";
+const CUSTOMER_HISTORY_CACHE_CHANNEL = "madiba-customer-history-cache";
+
+function notifyCustomerHistoryCacheCleared() {
+  if (typeof window === "undefined") return;
+
+  window.dispatchEvent(new CustomEvent(CUSTOMER_HISTORY_CACHE_CLEARED_EVENT));
+  try {
+    const channel = new BroadcastChannel(CUSTOMER_HISTORY_CACHE_CHANNEL);
+    channel.postMessage({ type: "cleared" });
+    channel.close();
+  } catch {
+    // BroadcastChannel is optional; same-tab listeners still get the window event.
+  }
+}
+
+// Sales/outstanding/receipt uploads change every customer's FIFO settlement math, so the
+// per-customer history cache (used by Customer Audit / Payment Settlement) must be wiped
+// whenever any of those files is uploaded — otherwise a 24h-old snapshot keeps showing.
+export async function invalidateCustomerHistoryCache() {
+  const removed = await removeCacheEntriesByPrefix(CUSTOMER_HISTORY_CACHE_PREFIX);
+  notifyCustomerHistoryCacheCleared();
+  return removed;
+}
+
+export function subscribeCustomerHistoryCacheCleared(handler) {
+  if (typeof window === "undefined" || typeof handler !== "function") {
+    return () => {};
+  }
+
+  const onEvent = () => handler();
+  window.addEventListener(CUSTOMER_HISTORY_CACHE_CLEARED_EVENT, onEvent);
+
+  let channel = null;
+  try {
+    channel = new BroadcastChannel(CUSTOMER_HISTORY_CACHE_CHANNEL);
+    channel.onmessage = onEvent;
+  } catch {
+    channel = null;
+  }
+
+  return () => {
+    window.removeEventListener(CUSTOMER_HISTORY_CACHE_CLEARED_EVENT, onEvent);
+    try {
+      channel?.close();
+    } catch {
+      // Ignore channel close failures.
+    }
+  };
+}
+
 const COLLECTION_QUEUE_CACHE_VERSION = 6;
 // Keep reading older queue caches so an app update does not blank the offline list.
 const LEGACY_COLLECTION_QUEUE_CACHE_VERSIONS = [5, 4];

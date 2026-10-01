@@ -13,6 +13,7 @@ import {
   parseReceiptRegisterRows,
   prioritizeReceiptSheets,
 } from "../../lib/receiptRegister.js";
+import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
 
@@ -246,6 +247,23 @@ export async function POST(request) {
     if (upsertError) throw upsertError;
 
     after(async () => {
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        await publishOfflineDataUpdate(createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        }), {
+          trigger: "receipt-upload",
+          kinds: ["outstanding"],
+          contentHash: hashOfflineDataContent({
+            fileName,
+            rowsCount: payload.rowsCount,
+            datesUpdated: payload.datesUpdated,
+          }),
+        });
+      } catch (broadcastError) {
+        console.error("Offline data broadcast after receipt upload failed:", broadcastError);
+      }
+
       try {
         if (!supabaseUrl || !serviceKey) return;
         await runOutstandingReconcileCycle(createClient(supabaseUrl, serviceKey, {

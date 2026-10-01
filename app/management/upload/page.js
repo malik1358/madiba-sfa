@@ -8,7 +8,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import SupabaseUnavailable from "../../components/SupabaseUnavailable";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import { formatKsaDateTime } from "../../lib/workdayActivity";
-import { invalidateOutstandingCache } from "../../lib/mobileDataCache";
+import { invalidateCollectionQueuesForUser, invalidateCustomerHistoryCache, invalidateOutstandingCache } from "../../lib/mobileDataCache";
 
 const TEXT = {
   title: { en: "Upload Sales Data", ar: "رفع بيانات المبيعات" },
@@ -323,6 +323,9 @@ export default function UploadSalesPage() {
 
       setPartialDates(null);
       setResult(data);
+      await invalidateOutstandingCache();
+      await invalidateCustomerHistoryCache();
+      await invalidateCollectionQueuesForUser();
       await loadLastUploadInfo();
     } catch (err) {
       setError(err.message);
@@ -374,6 +377,8 @@ export default function UploadSalesPage() {
 
       setOutstandingResult(data);
       await invalidateOutstandingCache();
+      await invalidateCustomerHistoryCache();
+      await invalidateCollectionQueuesForUser();
       await loadLastUploadInfo();
     } catch (err) {
       setOutstandingError(err.message || "Outstanding upload failed.");
@@ -424,6 +429,9 @@ export default function UploadSalesPage() {
       }
 
       setReceiptResult(data);
+      await invalidateOutstandingCache();
+      await invalidateCustomerHistoryCache();
+      await invalidateCollectionQueuesForUser();
       await loadLastUploadInfo();
     } catch (err) {
       setReceiptError(err.message || "Receipt register upload failed.");

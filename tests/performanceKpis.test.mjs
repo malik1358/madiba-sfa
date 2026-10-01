@@ -63,6 +63,23 @@ test("KPI status compares actual/target with expected pace by today", () => {
     kpiStatus({ actual: 40, target: 100, reportDate: "2026-09-30", todayIso: "2026-09-30" }).label,
     /behind pace/,
   );
+  const completedMonthStatus = kpiStatus({
+    actual: 89.8,
+    target: 100,
+    reportDate: "2026-09-30",
+    todayIso: "2026-10-01",
+    paceShares: { 30: 0.694 },
+  });
+  assert.equal(completedMonthStatus.key, "behind");
+  assert.equal(completedMonthStatus.expected, 100);
+  assert.match(completedMonthStatus.label, /10\.2% behind pace/);
+  assert.equal(kpiStatus({
+    actual: 100,
+    target: 100,
+    reportDate: "2026-09-30",
+    todayIso: "2026-10-01",
+    paceShares: { 30: 0.694 },
+  }).key, "achieved");
   assert.equal(kpiStatus({ actual: 10, target: 0, reportDate: "2026-09-06" }).key, "no_target");
 });
 

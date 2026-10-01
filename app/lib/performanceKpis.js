@@ -244,8 +244,11 @@ export function kpiStatus({
     };
   }
 
-  const paceDate = resolveKpiPaceDate(reportDate, todayIso || reportDate);
-  const expected = expectedPacePercent(paceDate, paceShares);
+  const monthEnd = currentMonthDateRange(reportDate).to;
+  const today = String(todayIso || reportDate || "").slice(0, 10);
+  const monthIsComplete = /^\d{4}-\d{2}-\d{2}$/.test(today) && today > monthEnd;
+  const paceDate = resolveKpiPaceDate(reportDate, today || reportDate);
+  const expected = monthIsComplete ? 100 : expectedPacePercent(paceDate, paceShares);
   const gap = achievement - expected;
 
   if (achievement >= 100) {

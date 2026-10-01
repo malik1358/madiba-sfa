@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-10-01** — New online orders now request a server-aware next salesman order number before using the offline cache. This prevents a stale local sequence from producing a provisional PDF such as SM03 that collides with an older online order; offline-first fallback remains unchanged. No migration.
 - **2026-10-01** — KPI status for a completed month now compares achievement with 100% of target instead of reusing the last historical within-month pace share. Incomplete closed-month results can no longer display as ahead of pace; active months retain historical pacing. Added September viewed on October 1 regression. No migration.
 - **2026-10-01** — Stale overdue collections could repeat a salesman section when the same displayed salesman name had rows assigned to different current-owner codes. Grouping now keys on the displayed salesman label first, combining those rows into one section; a regression covers the duplicate-name case. No migration.
 - **2026-10-01** — KPI Collection actual now counts collection visits allocated to credit invoices only, using the shared cash-first FIFO matcher; cash-invoice allocations appear separately as **Cash collection (info)** with no target. No migration.

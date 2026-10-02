@@ -1,15 +1,22 @@
 "use client";
 
 import { translate } from "../../lib/appLanguage";
-import { formatMoneyAmount, previousMonthKey } from "../../lib/categoryGrowth";
+import {
+  formatMoneyAmount,
+  previousMonthKey,
+  previousQuarterKey,
+  quarterKeyFromMonthKey,
+  quarterLabel,
+} from "../../lib/categoryGrowth";
+import ExportableTable from "../../components/ExportableTable";
 import { GrowthChartPanel, GrowthTrendChart } from "./GrowthCharts";
 import GrowthPeriodGrid from "./GrowthPeriodGrid";
 
 const TEXT = {
   title: { en: "Cash, credit, local and import sales", ar: "مبيعات النقدي والآجل والمحلي والمستورد" },
   hint: {
-    en: "Monthly invoice sales for the selected period. Credit notes and sales returns are excluded. Origin values other than Local or Import appear as Other / unspecified.",
-    ar: "مبيعات الفواتير الشهرية للفترة المحددة. تُستثنى الإشعارات الدائنة والمرتجعات. تظهر قيم المصدر غير المحلي أو المستورد ضمن أخرى / غير محدد.",
+    en: "Cash/credit and origin amounts are gross invoice sales. Credit notes and returns are shown separately and deducted to calculate net sales. Origin percentages include Other / unspecified.",
+    ar: "مبالغ النقدي والآجل والمصدر هي إجمالي مبيعات الفواتير. تظهر الإشعارات الدائنة والمرتجعات منفصلة وتُخصم لحساب صافي المبيعات. تشمل نسب المصدر أخرى / غير محدد.",
   },
   loading: { en: "Loading sales mix...", ar: "جاري تحميل مزيج المبيعات..." },
   empty: { en: "No sales match this period.", ar: "لا توجد مبيعات تطابق هذه الفترة." },
@@ -21,8 +28,17 @@ const TEXT = {
   import: { en: "Import sales", ar: "مبيعات مستوردة" },
   other: { en: "Other / unspecified origin", ar: "مصدر آخر / غير محدد" },
   monthly: { en: "Monthly sales", ar: "المبيعات الشهرية" },
+  quarterly: { en: "Quarterly sales", ar: "المبيعات ربع السنوية" },
+  monthlyRatio: { en: "Monthly share movement", ar: "حركة الحصة الشهرية" },
+  quarterlyRatio: { en: "Quarterly share movement", ar: "حركة الحصة ربع السنوية" },
+  grossInvoiceSales: { en: "Gross invoice sales", ar: "إجمالي مبيعات الفواتير" },
+  netSales: { en: "Net sales", ar: "صافي المبيعات" },
+  adjustments: { en: "Credit notes / returns", ar: "إشعارات دائنة / مرتجعات" },
+  movementHint: { en: "Shares are calculated from summed amounts in each period. Change is shown in percentage points (pp).", ar: "تُحسب الحصص من مجموع مبالغ كل فترة. ويظهر التغير بالنقاط المئوية (pp)." },
+  shareOfSales: { en: "of sales", ar: "من المبيعات" },
+  movement: { en: "Share movement", ar: "حركة الحصة" },
   total: { en: "Total", ar: "الإجمالي" },
-  share: { en: "of classified sales", ar: "من المبيعات المصنفة" },
+  share: { en: "of sales", ar: "من المبيعات" },
 };
 
 const PAYMENT_SERIES = [
@@ -49,20 +65,20 @@ function shareLabel(amount, total, language) {
   return `${Math.round((amount / total) * 100)}% ${t("share")}`;
 }
 
-function MixSection({ language, title, entries, monthly, periods, currentMonth, filename, sheetName }) {
+function MixSection({ language, title, entries, valuesByPeriod, periods, currentPeriod, periodLabel, previousKeyOf, filename, sheetName }) {
   const t = translate(language, TEXT);
   const chartSeries = entries.map(([field, label, color]) => ({
     key: field,
     label: t(label),
     color,
-    values: periods.map((month) => Number(monthly?.[month]?.[field] || 0)),
+    values: periods.map((period) => Number(valuesByPeriod?.[period]?.[field] || 0)),
   }));
   const rows = entries.map(([field, label]) => ({
     label: t(label),
     monthValues: Object.fromEntries(
-      [...(periods.length ? [previousMonthKey(periods[0])] : []), ...periods]
+      [...(periods.length ? [previousKeyOf(periods[0], 0, periods)] : []), ...periods]
         .filter(Boolean)
-        .map((month) => [month, Number(monthly?.[month]?.[field] || 0)]),
+        .map((period) => [period, Number(valuesByPeriod?.[period]?.[field] || 0)]),
     ),
   }));
 
@@ -74,7 +90,7 @@ function MixSection({ language, title, entries, monthly, periods, currentMonth, 
           <GrowthTrendChart
             periods={periods}
             series={chartSeries}
-            periodLabel={(month) => monthLabel(month, currentMonth, language)}
+            periodLabel={periodLabel}
             formatValue={formatMoneyAmount}
           />
         </GrowthChartPanel>
@@ -85,12 +101,77 @@ function MixSection({ language, title, entries, monthly, periods, currentMonth, 
         rowHeader={t("monthly")}
         rows={rows}
         periods={periods}
-        currentPeriod={currentMonth}
-        periodLabel={(month) => monthLabel(month, currentMonth, language)}
-        previousKeyOf={(month, index, allPeriods) => (index > 0 ? allPeriods[index - 1] : previousMonthKey(month))}
+        currentPeriod={currentPeriod}
+        periodLabel={periodLabel}
+        previousKeyOf={previousKeyOf}
         totalLabel={t("total")}
         rowKeyOf={(row) => row.label}
       />
+    </section>
+  );
+}
+
+function formatShare(value) {
+  return value == null || !Number.isFinite(Number(value)) ? "—" : `${Number(value).toFixed(1)}%`;
+}
+
+function formatPointMovement(current, previous) {
+  if (current == null || previous == null || !Number.isFinite(Number(current)) || !Number.isFinite(Number(previous))) return "";
+  const change = Number(current) - Number(previous);
+  if (!change) return "0.0 pp";
+  return `${change > 0 ? "+" : "−"}${Math.abs(change).toFixed(1)} pp`;
+}
+
+function RatioMovementSection({ language, title, entries, periods, currentPeriod, valuesByPeriod, filename, sheetName, periodLabel, previousKeyOf }) {
+  const t = translate(language, TEXT);
+  const series = entries.map(([field, label, color]) => ({
+    key: field,
+    label: t(label),
+    color,
+    values: periods.map((period) => Number(valuesByPeriod?.[period]?.[field] ?? 0)),
+  }));
+
+  return (
+    <section className="moduleSection">
+      <div className="moduleSectionHeader"><h2>{title}</h2></div>
+      <p className="moduleHint">{t("movementHint")}</p>
+      <div className="moduleBiChartGrid">
+        <GrowthChartPanel title={t("movement")}>
+          <GrowthTrendChart periods={periods} series={series} periodLabel={periodLabel} formatValue={formatShare} />
+        </GrowthChartPanel>
+      </div>
+      <ExportableTable filename={filename} sheetName={sheetName} className="moduleTableWrap moduleBiTableWrap">
+        <table className="moduleTable moduleBiTable">
+          <thead>
+            <tr>
+              <th>{t("movement")}</th>
+              {periods.map((period) => <th key={period} className={period === currentPeriod ? "moduleBiMonthHead--current" : ""}>{periodLabel(period)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map(([field, label]) => (
+              <tr key={field}>
+                <td>{t(label)}</td>
+                {periods.map((period, index) => {
+                  const value = valuesByPeriod?.[period]?.[field];
+                  const previousKey = previousKeyOf(period, index, periods);
+                  const previous = previousKey ? valuesByPeriod?.[previousKey]?.[field] : null;
+                  const change = value == null || previous == null ? null : Number(value) - Number(previous);
+                  const tone = change > 0 ? "up" : change < 0 ? "down" : "";
+                  return (
+                    <td key={period} className={[tone ? `moduleBiMonthCell--${tone}` : "", period === currentPeriod ? "moduleBiMonthCell--current" : ""].filter(Boolean).join(" ")}>
+                      <span className="moduleBiAmountDelta">
+                        <strong>{formatShare(value)}</strong>
+                        {index > 0 || previousKey ? <em>{formatPointMovement(value, previous)}</em> : null}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ExportableTable>
     </section>
   );
 }
@@ -107,6 +188,8 @@ function MixCards({ language, mix }) {
     ["local_sales_amount", t("local"), originTotal, "moduleBusinessKpi--green"],
     ["import_sales_amount", t("import"), originTotal, "moduleBusinessKpi--orange"],
     ["unclassified_origin_sales_amount", t("other"), originTotal, ""],
+    ["sales_adjustments_amount", t("adjustments"), null, "moduleBusinessKpi--red"],
+    ["net_sales", t("netSales"), null, "moduleBusinessKpi--green"],
   ];
 
   return (
@@ -115,7 +198,7 @@ function MixCards({ language, mix }) {
         <section key={field} className={`moduleMetricCard ${tone}`}>
           <span>{label}</span>
           <strong>{formatMoneyAmount(mix?.totals?.[field] || 0)}</strong>
-          <small>{shareLabel(Number(mix?.totals?.[field] || 0), total, language)}</small>
+          {total ? <small>{shareLabel(Number(mix?.totals?.[field] || 0), total, language)}</small> : null}
         </section>
       ))}
     </div>
@@ -126,6 +209,12 @@ export default function SalesMixReport({ language = "en", loading = false, repor
   const t = translate(language, TEXT);
   const mix = report || {};
   const periods = (mix.months || []).slice(-12);
+  const quarters = (mix.quarters || []).slice(-8);
+  const currentQuarter = quarterKeyFromMonthKey(currentMonth);
+  const monthPeriodLabel = (month) => monthLabel(month, currentMonth, language);
+  const quarterPeriodLabel = (quarter) => quarterLabel(quarter, currentQuarter);
+  const previousMonth = (month, index, allPeriods) => (index > 0 ? allPeriods[index - 1] : previousMonthKey(month));
+  const previousQuarter = (quarter, index, allPeriods) => (index > 0 ? allPeriods[index - 1] : previousQuarterKey(quarter));
 
   if (loading) return <div className="moduleLoading">{t("loading")}</div>;
   if (!periods.length) return <div className="moduleHint">{t("empty")}</div>;
@@ -141,9 +230,11 @@ export default function SalesMixReport({ language = "en", loading = false, repor
         language={language}
         title={t("cashCredit")}
         entries={PAYMENT_SERIES}
-        monthly={mix.monthly}
+        valuesByPeriod={mix.monthly}
         periods={periods}
-        currentMonth={currentMonth}
+        currentPeriod={currentMonth}
+        periodLabel={monthPeriodLabel}
+        previousKeyOf={previousMonth}
         filename="cash-vs-credit-sales"
         sheetName="Cash vs Credit"
       />
@@ -151,11 +242,85 @@ export default function SalesMixReport({ language = "en", loading = false, repor
         language={language}
         title={t("localImport")}
         entries={ORIGIN_SERIES}
-        monthly={mix.monthly}
+        valuesByPeriod={mix.monthly}
         periods={periods}
-        currentMonth={currentMonth}
+        currentPeriod={currentMonth}
+        periodLabel={monthPeriodLabel}
+        previousKeyOf={previousMonth}
         filename="local-vs-import-sales"
         sheetName="Local vs Import"
+      />
+      <MixSection
+        language={language}
+        title={`${t("quarterly")} · ${t("cashCredit")}`}
+        entries={PAYMENT_SERIES}
+        valuesByPeriod={mix.quarterly}
+        periods={quarters}
+        currentPeriod={currentQuarter}
+        periodLabel={quarterPeriodLabel}
+        previousKeyOf={previousQuarter}
+        filename="quarterly-cash-vs-credit-sales"
+        sheetName="Quarterly Cash Credit"
+      />
+      <MixSection
+        language={language}
+        title={`${t("quarterly")} · ${t("localImport")}`}
+        entries={ORIGIN_SERIES}
+        valuesByPeriod={mix.quarterly}
+        periods={quarters}
+        currentPeriod={currentQuarter}
+        periodLabel={quarterPeriodLabel}
+        previousKeyOf={previousQuarter}
+        filename="quarterly-local-vs-import-sales"
+        sheetName="Quarterly Local Import"
+      />
+      <RatioMovementSection
+        language={language}
+        title={`${t("monthlyRatio")} · ${t("cashCredit")}`}
+        entries={PAYMENT_SERIES}
+        periods={periods}
+        currentPeriod={currentMonth}
+        valuesByPeriod={mix.monthlyShares?.payment}
+        filename="monthly-cash-credit-share-movement"
+        sheetName="Monthly Payment Ratios"
+        periodLabel={monthPeriodLabel}
+        previousKeyOf={previousMonth}
+      />
+      <RatioMovementSection
+        language={language}
+        title={`${t("monthlyRatio")} · ${t("localImport")}`}
+        entries={ORIGIN_SERIES}
+        periods={periods}
+        currentPeriod={currentMonth}
+        valuesByPeriod={mix.monthlyShares?.origin}
+        filename="monthly-local-import-share-movement"
+        sheetName="Monthly Origin Ratios"
+        periodLabel={monthPeriodLabel}
+        previousKeyOf={previousMonth}
+      />
+      <RatioMovementSection
+        language={language}
+        title={`${t("quarterlyRatio")} · ${t("cashCredit")}`}
+        entries={PAYMENT_SERIES}
+        periods={quarters}
+        currentPeriod={currentQuarter}
+        valuesByPeriod={mix.quarterlyShares?.payment}
+        filename="quarterly-cash-credit-share-movement"
+        sheetName="Quarterly Payment Ratios"
+        periodLabel={quarterPeriodLabel}
+        previousKeyOf={previousQuarter}
+      />
+      <RatioMovementSection
+        language={language}
+        title={`${t("quarterlyRatio")} · ${t("localImport")}`}
+        entries={ORIGIN_SERIES}
+        periods={quarters}
+        currentPeriod={currentQuarter}
+        valuesByPeriod={mix.quarterlyShares?.origin}
+        filename="quarterly-local-import-share-movement"
+        sheetName="Quarterly Origin Ratios"
+        periodLabel={quarterPeriodLabel}
+        previousKeyOf={previousQuarter}
       />
     </>
   );

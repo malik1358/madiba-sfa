@@ -13,6 +13,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import BiOverviewDashboard from "./BiOverviewDashboard";
 import CategoryGrowthReport from "./CategoryGrowthReport";
+import CustomerCohortReport from "./CustomerCohortReport";
 import SalesMixReport from "./SalesMixReport";
 import SalesmanMomReport, { emptySalesmanMomFilters } from "./SalesmanMomReport";
 import {
@@ -819,6 +820,8 @@ export default function BusinessDashboardPage() {
           ) : null}
 
           {view === "customer-growth" ? (
+            <>
+            <CustomerCohortReport report={customerReport} loading={customerLoading} language={language} />
             <CategoryGrowthReport
               language={language}
               loading={customerLoading}
@@ -843,6 +846,7 @@ export default function BusinessDashboardPage() {
                 setCustomerStatusFilter([]);
               }}
             />
+            </>
           ) : null}
 
           {view === "item-growth" ? (

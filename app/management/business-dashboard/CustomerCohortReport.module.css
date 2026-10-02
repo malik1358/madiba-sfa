@@ -1,0 +1,65 @@
+.header {
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.header h2 {
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.table {
+  table-layout: fixed;
+}
+
+.table th,
+.table td {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.table th:first-child,
+.table td:first-child {
+  min-width: 0;
+  width: 140px;
+  left: 0;
+  right: auto;
+}
+
+.table tbody th {
+  top: auto;
+  background: #ffffff;
+  color: #0f4c5c;
+  vertical-align: middle;
+}
+
+.table tbody tr:nth-child(even) th {
+  background: #f3fbfb;
+}
+
+.table tfoot th {
+  top: auto;
+  bottom: 0;
+  z-index: 5;
+}
+
+.table th:last-child,
+.table td:last-child {
+  position: static;
+}
+
+.table thead th:last-child {
+  position: sticky;
+  right: auto;
+}
+
+.table tfoot td:last-child {
+  position: sticky;
+  right: auto;
+}
+
+[dir="rtl"] .table th:first-child,
+[dir="rtl"] .table td:first-child {
+  right: 0;
+  left: auto;
+}

@@ -489,17 +489,17 @@ test("runDailyVisitReportEmailCycle sends personal emails plus one company diges
   assert.deepEqual(sent.find((message) => /Team digest — All teams/.test(message.subject)).to, ["manager@madiba.com"]);
 });
 
-test("resolveDailyVisitReportEmailSchedule sends Thursday at Friday midnight and Saturday on Sunday", () => {
+test("resolveDailyVisitReportEmailSchedule sends Thursday Saturday morning and Saturday on Sunday", () => {
   const fridayStartKsa = new Date("2026-09-03T21:10:00.000Z");
   const fridayStart = resolveDailyVisitReportEmailSchedule("", fridayStartKsa);
   assert.equal(fridayStart.skipped, true);
   assert.equal(fridayStart.reason, "friday_holiday");
   assert.equal(fridayStart.date, "2026-09-03");
 
-  const fridayMidnightKsa = new Date("2026-09-04T21:10:00.000Z");
-  const fridayMidnight = resolveDailyVisitReportEmailSchedule("", fridayMidnightKsa);
-  assert.equal(fridayMidnight.skipped, false);
-  assert.equal(fridayMidnight.date, "2026-09-03");
+  const saturdayMorningKsa = new Date("2026-09-05T03:10:00.000Z");
+  const saturdayMorning = resolveDailyVisitReportEmailSchedule("", saturdayMorningKsa);
+  assert.equal(saturdayMorning.skipped, false);
+  assert.equal(saturdayMorning.date, "2026-09-03");
 
   const mondayMidnightKsa = new Date("2026-09-06T21:10:00.000Z");
   const mondaySchedule = resolveDailyVisitReportEmailSchedule("", mondayMidnightKsa);

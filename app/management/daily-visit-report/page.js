@@ -128,8 +128,8 @@ const TEXT = {
     ar: "إرسال تقرير الزيارات اليومي لجميع المستخدمين لتاريخ {date}؟",
   },
   emailConfirmMidnight: {
-    en: "Run the midnight visit-report send now? Thursday goes out Friday midnight, Saturday goes out Sunday 00:10.",
-    ar: "تشغيل إرسال تقرير الزيارات لمنتصف الليل الآن؟ يُرسل الخميس منتصف ليل الجمعة والسبت الأحد 00:10.",
+    en: "Run the scheduled visit-report send now? Thursday goes out Saturday 06:00, and Saturday goes out Sunday 00:10 KSA.",
+    ar: "تشغيل إرسال تقرير الزيارات المجدول الآن؟ يُرسل تقرير الخميس السبت 06:00، وتقرير السبت الأحد 00:10 بتوقيت السعودية.",
   },
   emailSent: {
     en: "Sent {sent} of {total} report emails for {date}.",

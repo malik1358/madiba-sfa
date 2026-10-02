@@ -83,8 +83,8 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `inactivity-push.yml` | Manual only | Backup trigger | same |
 | `auto-close-workdays.yml` | `59 20 * * *` and `5 21 * * *` | 23:59 and 00:05 KSA | `/api/cron/auto-close-workdays` |
 | `salesman-visit-plan-email.yml` | `0 21 * * *` | 00:00 KSA, build snapshot then maybe email | `/api/cron/salesman-visit-plan-email` |
-| `daily-visit-report-email.yml` | `10 21 * * 0-3,5,6` | 00:10 KSA, skip Friday | `/api/cron/daily-visit-report-email` |
-| `daily-salesman-resume-email.yml` | `15 21 * * *` | 00:15 KSA previous day | `/api/cron/daily-salesman-resume-email` |
+| `daily-visit-report-email.yml` | `10 21 * * 0-3,6`; `0 3 * * 6` | 00:10 KSA Mon–Thu and Sunday; Thursday report Saturday 06:00 KSA | `/api/cron/daily-visit-report-email` |
+| `daily-salesman-resume-email.yml` | `15 21 * * 0-3,6`; `0 3 * * 6` | 00:15 KSA Mon–Thu and Sunday; Thursday report Saturday 06:00 KSA | `/api/cron/daily-salesman-resume-email` |
 | `daily-supplier-order-email.yml` | `20 21 * * 0-3,5,6` | 00:20 KSA, skip Friday | `/api/cron/daily-supplier-order-email` |
 | `outstanding-no-gps-email.yml` | `25 21 * * 0-3,5,6` | 00:25 KSA, skip Friday | `/api/cron/outstanding-no-gps-email` |
 | `collection-stale-overdue-email.yml` | `35 21 * * 0-3,5,6` | 00:35 KSA, skip Friday | `/api/cron/collection-stale-overdue-email` |

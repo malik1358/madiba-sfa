@@ -21,6 +21,7 @@ import {
   buildSalesmanResumeRows,
   isJwtClockSkewError,
   loadSalesmanResumeProfiles,
+  parseResumeDateParam,
   runDailySalesmanResumeEmailCycle,
   workdaysFromDailyWorkingHoursReport,
   withJwtClockSkewRetry,
@@ -496,6 +497,12 @@ test("summarizeSalesmanResumeRows totals columns", () => {
     ]),
     { orders: 6, orderValue: 30, invoiceCount: 3, invoiceAmount: 30, collections: 8, collectionValue: 40, visits: 10, skuSoldCount: 12, workingMinutes: 150 },
   );
+});
+
+test("parseResumeDateParam skips Friday when choosing the previous KSA date", () => {
+  const saturdayMorningKsa = new Date("2026-09-05T03:15:00.000Z");
+  assert.equal(parseResumeDateParam("", saturdayMorningKsa), "2026-09-03");
+  assert.equal(parseResumeDateParam("2026-09-04", saturdayMorningKsa), "2026-09-04");
 });
 
 test("runDailySalesmanResumeEmailCycle sends one table email", async () => {

@@ -186,6 +186,7 @@ Do not assume a page always has a live network read. Several screens render from
 BI pages call `/api/business-dashboard` and `/api/business-dashboard/category-growth`.
 
 - Facts come from `active_sales` (including `profit_amount` when the column exists).
+- The Business Intelligence Sales mix tab compares monthly cash/credit and local/import invoice sales from additional measures in `sales_bi_cube_v1`; it uses the current BI date filters, excludes credit notes/returns, and has no new endpoint or database schema requirement. The cube version is bumped so an older prepared model rebuilds with the new measures.
 - The Business Intelligence MADIBA tab uses the existing category-growth API with an item-name filter on the monthly cube (or its live-sales fallback). It presents category and matching item trends using the shared period and sales/profit controls; no new table or endpoint is required.
 - `app/lib/salesBiCube.js` aggregates monthly facts. The compact cube is stored at `sales_bi_cube_v1`. Version constant is `SALES_BI_CUBE_VERSION` (currently 4). A rebuild is required when profit data appears or the import time changes.
 - Optional table `sales_bi_monthly` is created only by `sql/setup_sales_bi_monthly.sql`. The app is written to keep working from the settings blob if the table is absent.

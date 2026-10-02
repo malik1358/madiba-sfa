@@ -13,6 +13,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { usePopupMessages } from "../../hooks/usePopupMessages";
 import BiOverviewDashboard from "./BiOverviewDashboard";
 import CategoryGrowthReport from "./CategoryGrowthReport";
+import SalesMixReport from "./SalesMixReport";
 import SalesmanMomReport, { emptySalesmanMomFilters } from "./SalesmanMomReport";
 import {
   applyBiReportPeriod,
@@ -34,6 +35,7 @@ const TEXT = {
   back: { en: "← Management", ar: "← الإدارة" },
   loading: { en: "Loading business dashboard...", ar: "جاري تحميل لوحة الأعمال..." },
   overview: { en: "Dashboard", ar: "اللوحة" },
+  salesMix: { en: "Sales mix", ar: "مزيج المبيعات" },
   categoryGrowth: { en: "Category growth", ar: "نمو الفئات" },
   madiba: { en: "MADIBA brand", ar: "علامة مديبا" },
   madibaCategories: { en: "Categories", ar: "الفئات" },
@@ -132,6 +134,10 @@ export default function BusinessDashboardPage() {
     [customPeriodFrom, customPeriodTo, reportPeriod],
   );
   const periodRangeLabel = formatBiReportPeriodRange(periodRange);
+  const salesMixApplied = useMemo(
+    () => applyBiReportPeriod(emptyGrowthFilters(), periodRange),
+    [periodRange],
+  );
   const visibleGrowthReport = useMemo(
     () => pickBiMeasure(growthReport, amountMeasure),
     [growthReport, amountMeasure],
@@ -158,6 +164,7 @@ export default function BusinessDashboardPage() {
     if (view === "customer-growth" && customerLoading) return;
     if (view === "item-growth" && itemLoading) return;
     if (view === "salesman-mom" && salesmanLoading) return;
+    if (view === "sales-mix" && growthLoading) return;
     if (view === "operations" && loading) return;
     const node = document.getElementById(reportFocus);
     if (!node) return;
@@ -277,7 +284,11 @@ export default function BusinessDashboardPage() {
               Authorization: `Bearer ${session.access_token}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ filters: view === "madiba" ? { ...brandApplied, itemNameContains: "MADIBA" } : growthApplied }),
+            body: JSON.stringify({
+              filters: view === "madiba"
+                ? { ...brandApplied, itemNameContains: "MADIBA" }
+                : view === "sales-mix" ? salesMixApplied : growthApplied,
+            }),
           },
           60000,
         );
@@ -299,7 +310,7 @@ export default function BusinessDashboardPage() {
       }
     }
 
-    if (view !== "category-growth" && view !== "madiba" && view !== "overview") {
+    if (view !== "category-growth" && view !== "madiba" && view !== "sales-mix" && view !== "overview") {
       stopSafetyTimer();
       setGrowthLoading(false);
       return () => {
@@ -314,7 +325,7 @@ export default function BusinessDashboardPage() {
       cancelled = true;
       stopSafetyTimer();
     };
-  }, [view, growthApplied, brandApplied]);
+  }, [view, growthApplied, brandApplied, salesMixApplied]);
 
   useEffect(() => {
     let cancelled = false;
@@ -586,6 +597,15 @@ export default function BusinessDashboardPage() {
               <button
                 type="button"
                 role="tab"
+                aria-selected={view === "sales-mix"}
+                className={`moduleBiTab${view === "sales-mix" ? " isActive" : ""}`}
+                onClick={() => setView("sales-mix")}
+              >
+                {t("salesMix")}
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={view === "category-growth"}
                 className={`moduleBiTab${view === "category-growth" ? " isActive" : ""}`}
                 onClick={() => setView("category-growth")}
@@ -634,7 +654,7 @@ export default function BusinessDashboardPage() {
             </div>
           </section>
 
-          {view === "overview" || view === "category-growth" || view === "madiba" || view === "customer-growth" || view === "item-growth" || view === "salesman-mom" ? (
+          {view === "overview" || view === "sales-mix" || view === "category-growth" || view === "madiba" || view === "customer-growth" || view === "item-growth" || view === "salesman-mom" ? (
             <section className="moduleSection">
               <div className="moduleBiMeasureBar">
                 <span>{t("period")}</span>
@@ -675,25 +695,29 @@ export default function BusinessDashboardPage() {
                   </>
                 ) : null}
                 {periodRangeLabel ? <em className="moduleBiPeriodRange">{periodRangeLabel}</em> : null}
-                <span>{t("measure")}</span>
-                <div className="moduleBiTabs" role="group" aria-label={t("measure")}>
-                  <button
-                    type="button"
-                    className={`moduleBiTab${amountMeasure === "sales" ? " isActive" : ""}`}
-                    onClick={() => setAmountMeasure("sales")}
-                  >
-                    {t("sales")}
-                  </button>
-                  <button
-                    type="button"
-                    className={`moduleBiTab${amountMeasure === "profit" ? " isActive" : ""}`}
-                    onClick={() => setAmountMeasure("profit")}
-                  >
-                    {t("profit")}
-                  </button>
-                </div>
+                {view !== "sales-mix" ? (
+                  <>
+                    <span>{t("measure")}</span>
+                    <div className="moduleBiTabs" role="group" aria-label={t("measure")}>
+                      <button
+                        type="button"
+                        className={`moduleBiTab${amountMeasure === "sales" ? " isActive" : ""}`}
+                        onClick={() => setAmountMeasure("sales")}
+                      >
+                        {t("sales")}
+                      </button>
+                      <button
+                        type="button"
+                        className={`moduleBiTab${amountMeasure === "profit" ? " isActive" : ""}`}
+                        onClick={() => setAmountMeasure("profit")}
+                      >
+                        {t("profit")}
+                      </button>
+                    </div>
+                  </>
+                ) : null}
               </div>
-              {amountMeasure === "profit" ? <p className="moduleHint">{t("profitHint")}</p> : null}
+              {view !== "sales-mix" && amountMeasure === "profit" ? <p className="moduleHint">{t("profitHint")}</p> : null}
             </section>
           ) : null}
 
@@ -742,6 +766,15 @@ export default function BusinessDashboardPage() {
                 setGrowthSearch("");
                 setGrowthStatusFilter([]);
               }}
+            />
+          ) : null}
+
+          {view === "sales-mix" ? (
+            <SalesMixReport
+              language={language}
+              loading={growthLoading}
+              report={growthReport?.salesMix}
+              currentMonth={growthReport?.currentMonth}
             />
           ) : null}
 

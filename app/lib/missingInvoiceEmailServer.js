@@ -4,6 +4,7 @@ import {
   MISSING_INVOICE_GRACE_MS,
   buildMissingInvoiceAlertEmail,
   getMissingInvoiceEmailMidnightKsaDate,
+  isMissingInvoiceEmailOfficeHoliday,
   invoiceMetaKey,
   missingInvoiceCreatedFromIso,
   parseInvoiceMeta,
@@ -130,6 +131,15 @@ export async function runMissingInvoiceEmailCycle(admin, {
   saveLastSentAt = saveLastMissingInvoiceEmailSentAt,
   syncVault = syncMissingInvoiceCronVault,
 } = {}) {
+  if (isMissingInvoiceEmailOfficeHoliday(now)) {
+    return {
+      skipped: true,
+      reason: "office_holiday",
+      sentCount: 0,
+      orderCount: 0,
+    };
+  }
+
   if (typeof syncVault === "function") {
     try {
       await syncVault(admin, env);

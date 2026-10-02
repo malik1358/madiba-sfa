@@ -31,6 +31,7 @@ export const MISSING_INVOICE_STATUS_WAITING_OVERDUE_COLLECTION = ORDER_STATUS_WA
 export const MISSING_INVOICE_STATUS_QUOTATION_WAITING_PAYMENT = ORDER_STATUS_QUOTATION_WAITING_PAYMENT;
 export const MISSING_INVOICE_STATUS_PENDING_WITH_SALESMAN = ORDER_STATUS_PENDING_WITH_SALESMAN;
 export const MISSING_INVOICE_EMAIL_TIMEZONE = "Asia/Riyadh";
+export const MISSING_INVOICE_EMAIL_OFFICE_TIMEZONE = "Asia/Kolkata";
 export const DEFAULT_MISSING_INVOICE_EMAIL_TO = [
   "shreyansh.sharma@noorshukran.com",
   "vinit.kulkarni@noorshukran.com",
@@ -68,6 +69,13 @@ export function getMissingInvoiceEmailKsaDateTimeParts(date = new Date()) {
     hour: parts.hour,
     minute: parts.minute,
   };
+}
+
+export function isMissingInvoiceEmailOfficeHoliday(date = new Date()) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: MISSING_INVOICE_EMAIL_OFFICE_TIMEZONE,
+    weekday: "short",
+  }).format(date) === "Fri";
 }
 
 export function getMissingInvoiceEmailMidnightKsaDate(date = new Date()) {

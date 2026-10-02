@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 - **2026-10-02** — Business Intelligence adds a Sales mix tab and overview launcher with monthly cash-vs-credit and local-vs-import trends. Cash uses the shared voucher-number classifier; credit notes/returns are excluded, and unknown origin labels remain visible as Other / unspecified. New measures are stored in the versioned BI settings cube; no migration.
+- **2026-10-02** — MADIBA brand category BI now includes last-eight-quarter and last-twelve-month GP % grids with per-category and weighted filtered totals, sourced from the paired prepared sales/profit measures. Zero net sales displays no percentage; no migration.
 - **2026-10-02** — Added a MADIBA brand tab to Business Intelligence: case-insensitive item-name matching filters the existing active-sales BI cube before category/item growth aggregation. Both sales and gross-profit reports inherit period controls and list matching items; no migration.
 - **2026-10-02** — Missing-invoice approval/invoice reminders now skip all Friday runs using India office time (`Asia/Kolkata`), including the Supabase pg_cron and GitHub Actions paths. Other days retain the 15-minute cadence and KSA midnight summary. Added a focused holiday regression; no migration.
 - **2026-10-02** — Daily Salesman Resume now skips the Friday KSA holiday and sends Thursday's report Saturday at 06:00 KSA. Other scheduled runs remain at 00:15 KSA; explicit report dates are unchanged. No migration.

@@ -2,8 +2,10 @@ name: Daily Salesman Resume Email
 
 on:
   schedule:
-    # 21:15 UTC = 00:15 KSA — previous KSA day's salesman resume table.
-    - cron: "15 21 * * *"
+    # 21:15 UTC = 00:15 KSA: Mon–Thu and Sunday resume reports.
+    # Skip the Friday KSA holiday; Thursday's report runs Saturday at 06:00 KSA.
+    - cron: "15 21 * * 0-3,6"
+    - cron: "0 3 * * 6"
   workflow_dispatch:
 
 jobs:

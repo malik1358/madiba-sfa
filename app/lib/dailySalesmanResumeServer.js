@@ -14,9 +14,11 @@ import { groupSalesRowsIntoInvoices } from "./salesInvoices.js";
 import { formatCollectorDisplayName } from "./geo.js";
 import { getMailerConfig, isEmailConfigured, sendEmail } from "./mailer.js";
 import {
+  addKsaCalendarDays,
   calculateWorkingHoursMinutes,
   filterLogsByKsaEventDate,
   getPreviousKsaDateString,
+  getKsaWeekdayIndexForDateString,
   ksaDayBounds,
 } from "./workdayActivity.js";
 
@@ -82,7 +84,12 @@ function chunkList(items, size) {
 
 export function parseResumeDateParam(value, now = new Date()) {
   const date = String(value || "").trim();
-  if (!date) return getPreviousKsaDateString(now);
+  if (!date) {
+    const previousDate = getPreviousKsaDateString(now);
+    return getKsaWeekdayIndexForDateString(previousDate) === 5
+      ? addKsaCalendarDays(previousDate, -1)
+      : previousDate;
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new Error("Invalid report date. Use YYYY-MM-DD.");
   }

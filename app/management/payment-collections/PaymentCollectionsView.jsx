@@ -62,7 +62,7 @@ import {
   matchesCollectionCustomerQuery,
   mergeLegalMatchesIntoDueRows,
 } from "../../lib/collectionQueueSearch";
-import { prepareUploadFile } from "../../lib/compressUploadFile";
+import { prepareReceiptUploadFile, prepareUploadFile } from "../../lib/compressUploadFile";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
@@ -2067,7 +2067,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
       }
 
       if (form.receiptCopy) {
-        const preparedReceipt = await prepareUploadFile(form.receiptCopy);
+        const preparedReceipt = await prepareReceiptUploadFile(form.receiptCopy);
         const receiptFallback = String(preparedReceipt?.type || "").includes("pdf")
           ? "receipt-copy.pdf"
           : "receipt-copy.jpg";

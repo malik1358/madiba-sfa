@@ -37,6 +37,12 @@ export function buildOptimisticLatestCollection(row, {
 }) {
   return {
     ...(row?.latest_collection || {}),
+    // A queued visit has no server id or stored attachments yet; never show the previous visit's files.
+    id: null,
+    receipt_attachment_id: null,
+    payment_attachment_id: null,
+    has_receipt_copy: false,
+    has_payment_copy: false,
     saved_at: new Date().toISOString(),
     visit_outcome: visitOutcome,
     payment_status: paymentStatus,

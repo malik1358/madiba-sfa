@@ -69,7 +69,9 @@ Confirmed field prompt overwrites additionally use text sources `salesman_accept
 
 `system_settings` keys `customer_gps_change_email:<YYYY-MM-DD>` atomically claim each GPS digest day using the unique `setting_key`. JSON values have `status: sending`, a claim token and `claimedAt`, then `status: sent`, `sentAt` and `changeCount`. Failed pre-delivery attempts release their own claim; post-delivery marker failures retain it to avoid duplicate mail. An interrupted `sending` claim requires operator review of provider delivery before clearing it; never delete a delivered day's claim just to rerun cron.
 
-`customer_documents`: `customer_code` or `prospect_id`, `document_type`, `file_path`, `expiry_date`, `uploaded_by_salesman_code`, plus compliance columns `extracted_json`, `parsed_cr_number`, `parsed_vat_number`, `issue_date`, `link_status`, `link_message`, `original_file_name`.
+`customer_documents`: `customer_code` or `prospect_id`, `document_type`, `file_path`, `expiry_date`, `uploaded_by_salesman_code`, plus compliance columns `extracted_json`, `parsed_cr_number`, `parsed_vat_number`, `issue_date`, `link_status`, `link_message`, `original_file_name`. Nullable `attachment_id` → `attachments.id` for documents uploaded after `20261002130000_attachments.sql`; `file_path` stays populated (NOT NULL).
+
+`attachments` (migration `20261002130000_attachments.sql`): uuid `id`, `category` `receipt_copy|payment_copy|order_invoice|customer_document`, `storage_provider` `supabase|r2` (only `supabase` is written today), `object_key` = `<bucket>/<path>` (unique per provider), `content_type`, `size_bytes`, `sha256`, `md5`, `original_file_name`, `customer_code`, `entity_type` (`collection_visit|sales_order|customer_document`), `entity_id`, `uploaded_by`, `legacy_bucket`, `legacy_path`, `verified_at`, `created_at`. RLS on with no policies: service role only. Signed URLs are never stored.
 
 `prospects`: `prospect_code` unique, `salesman_code`, company and contact fields, lat/long, `potential` `SMALL|MEDIUM|LARGE`, `status` `PROSPECT|FOLLOW_UP|PENDING_APPROVAL|APPROVED|CONVERTED|REJECTED`, `converted_customer_code`, `created_by`.
 
@@ -118,7 +120,7 @@ Created in `20260816000000_add_collection_tables.sql`. A second migration `20260
 
 `invoices`: bigint identity `id` (not uuid), unique `invoice_number`, `customer_code` FK, `salesman_code`, `due_date`, `pending_amount`, `ref_no`.
 
-`collection_visits`: bigint identity `id`, `customer_code`, `visit_outcome`, `payment_status`, `amount_received`, `receipt_mode`, `next_visit_at`, `remark_arabic`, `remark_english`, `non_payment_reason`, `payment_copy_url`, `receipt_copy_url`, `created_by`, `saved_at`. Later columns: `latitude`, `longitude`, `gps_accuracy_meters`, `summary_text`, `queue_priority`, `probability_score`, `probability_label`, `visit_number_for_day`, nullable unique `client_submission_id` (UUID; offline replay key, partial unique index `collection_visits_client_submission_id_key`, migration `20261002120000_collection_visit_client_submission_id.sql`).
+`collection_visits`: bigint identity `id`, `customer_code`, `visit_outcome`, `payment_status`, `amount_received`, `receipt_mode`, `next_visit_at`, `remark_arabic`, `remark_english`, `non_payment_reason`, `payment_copy_url`, `receipt_copy_url`, `created_by`, `saved_at`. Later columns: `latitude`, `longitude`, `gps_accuracy_meters`, `summary_text`, `queue_priority`, `probability_score`, `probability_label`, `visit_number_for_day`, nullable unique `client_submission_id` (UUID; offline replay key, partial unique index `collection_visits_client_submission_id_key`, migration `20261002120000_collection_visit_client_submission_id.sql`), nullable `receipt_attachment_id` / `payment_attachment_id` → `attachments.id`.
 
 `legal_transfers`: PK `customer_code`, `is_transferred`, `transferred_at`, `transferred_by`, `note`.
 
@@ -200,6 +202,16 @@ Scripts in `sql/`:
 - Upload-files bucket — `sql/setup_upload_files_storage.sql`
 
 These inserts are not in `supabase/migrations/`. A new environment needs the SQL scripts or the buckets created in the Supabase dashboard.
+
+Attachment references (Phase 1 of the R2 plan, files still in Supabase Storage):
+
+| Attachment | New uploads | Historical (untouched) |
+| --- | --- | --- |
+| Receipt / payment copy | `collection_visits.receipt_attachment_id` / `payment_attachment_id`; `*_copy_url` left NULL | `*_copy_url` public URL |
+| Order invoice | `order_invoice_meta:<id>` JSON `invoiceAttachmentId` **and** `invoiceFilePath` (business logic depends on its presence) | `invoiceFilePath` only |
+| Customer document | `customer_documents.attachment_id` **and** `file_path` | `file_path` only |
+
+If the attachments migration is not applied, uploads still succeed and write the legacy fields only. `upload-files` is unchanged.
 
 ## Row level security
 

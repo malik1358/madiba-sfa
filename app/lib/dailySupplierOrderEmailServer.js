@@ -22,7 +22,7 @@ import {
   parseInvoiceMeta,
 } from "./missingInvoiceEmail.js";
 import { loadInvoiceMetaMap } from "./missingInvoiceEmailServer.js";
-import { INVOICE_BUCKET } from "./orderInvoiceComparison.js";
+import { readOrderInvoiceFile } from "./storage/attachmentRecords.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { resolveReportingChainFromAuth } from "./salesHierarchy.js";
 import {
@@ -186,9 +186,7 @@ async function extractAmountFromStoredInvoice(admin, meta, orderLines) {
   const path = String(meta?.invoiceFilePath || "").trim();
   if (!path) return null;
   try {
-    const { data, error } = await admin.storage.from(INVOICE_BUCKET).download(path);
-    if (error) throw error;
-    const pdfText = await extractPdfText(await data.arrayBuffer());
+    const pdfText = await extractPdfText(await readOrderInvoiceFile(admin, meta));
     const diffs = compareOrderLinesWithInvoiceText(orderLines, pdfText);
     return resolveInvoiceAmountExclVat({ pdfText, orderLines, diffs });
   } catch {

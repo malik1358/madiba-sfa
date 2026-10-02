@@ -209,6 +209,17 @@ BI pages call `/api/business-dashboard` and `/api/business-dashboard/category-gr
 - Month-over-month coloring is `app/lib/salesmanMom.js` and `categoryGrowth.js`. Current incomplete month is not treated as a closed comparison month.
 - Tables must keep the colored header, zebra rows, up/down/current cell classes, and a total column or footer.
 
+## Attachment storage
+
+Business routes never call Supabase Storage for attachment files. Server-only modules in `app/lib/storage/`:
+
+- `attachmentKeys.js` — object keys `<bucket>/<path>` (existing Supabase layouts kept), legacy URL/path parsing.
+- `attachmentStorage.js` — facade `putObject` (no overwrite, returns size/sha256/md5), `getObject`, `headObject`, `getSignedReadUrl` (default 300 s, max 900 s); `deleteObject` throws. Only `providers/supabaseProvider.js` is registered.
+- `attachmentRecords.js` — `storeAttachment` (upload + `attachments` row), owner linking, queue-safe visit summaries, `readOrderInvoiceFile` (prefers `invoiceAttachmentId`, falls back to `invoiceFilePath`) used by invoice comparison, prospect linking and the supplier email.
+- `attachmentAccess.js` — resolves the owner and authorizes reads (collection scope / `canSeeOrder` / sales customer scope).
+
+`GET /api/attachments/<uuid>/url` and `GET /api/attachments/legacy/url?kind=receipt_copy|payment_copy|order_invoice|customer_document&ref=<owner id>` authenticate the bearer token, authorize, then return a short-lived signed URL (`Cache-Control: private, no-store`). Clients use `app/lib/openAttachment.js`, which opens a placeholder tab synchronously (iOS popup rules) or an anchor in the Capacitor shell. Bucket creation/`public` flags still live in the routes and are unchanged until Phase 2.
+
 ## Collections architecture
 
 `/api/payment-collections` builds queues from the outstanding dataset, customer master, and `collection_visits`. Priority scoring is `buildCollectionPriority` in `app/lib/paymentCollections.js`. Legal escalation is `legal_transfers`. Files go to the `payment-collections` storage bucket. Visit saves (including Funds Received attachments) are offline-first (`queueFirst`): files serialize into IndexedDB only for the local queue, then sync uploads multipart with MIME re-resolved for Android. Client photo prep (`prepareUploadFile`) is time-bounded so Android camera HEIC/JPEG cannot leave Saving stuck. Client save enrichment uses cached queue `avg_days_to_pay` and skips the activity timeline (`skipTimeline`); the API recomputes visit-distance lines with the service role on sync.

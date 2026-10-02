@@ -59,6 +59,18 @@ import {
   isUniqueViolationError,
   parseClientSubmissionId,
 } from "../../lib/collectionSubmission.js";
+import {
+  ATTACHMENT_CATEGORIES,
+  buildCollectionCopyKey,
+  legacySupabasePublicUrl,
+} from "../../lib/storage/attachmentKeys.js";
+import {
+  ATTACHMENT_ENTITY_TYPES,
+  collectionVisitAttachmentSummary,
+  isMissingAttachmentSchemaError,
+  linkAttachmentsToEntity,
+  storeAttachment,
+} from "../../lib/storage/attachmentRecords.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -107,7 +119,7 @@ function preferMatchingCustomerKey(candidates, targetCode) {
   return bestMatch || normalizedTarget;
 }
 
-function findScopedCollectionRecord(records, customerCode) {
+export function findScopedCollectionRecord(records, customerCode) {
   const target = canonicalCustomerCode(customerCode);
   if (!target) return null;
 
@@ -564,6 +576,23 @@ export async function getSalesScope(admin, userId) {
   };
 }
 
+const QUEUE_VISIT_SELECT = "id,customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,created_by,receipt_copy_url,payment_copy_url";
+
+// Copy URLs are read only to derive has_*_copy flags; collectionVisitAttachmentSummary drops them.
+async function loadQueueCollectionVisits(admin) {
+  const query = (columns) => admin
+    .from("collection_visits")
+    .select(columns)
+    .order("saved_at", { ascending: false })
+    .limit(3000);
+
+  const result = await query(`${QUEUE_VISIT_SELECT},receipt_attachment_id,payment_attachment_id`);
+  if (result.error && isMissingAttachmentSchemaError(result.error)) {
+    return query(QUEUE_VISIT_SELECT);
+  }
+  return result;
+}
+
 const CUSTOMER_PAGE_SIZE = 1000;
 const CUSTOMER_LOOKUP_BATCH_SIZE = 200;
 const CUSTOMER_COLLECTION_SELECT = "customer_code,customer_name,current_salesman_code,previous_salesman_code,city,area,mobile,latitude,longitude";
@@ -677,11 +706,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     .from("profiles")
     .select("salesman_code,salesman_name");
 
-  const visitsQuery = admin
-    .from("collection_visits")
-    .select("customer_code,visit_outcome,payment_status,amount_received,receipt_mode,next_visit_at,remark_arabic,remark_english,saved_at,created_by")
-    .order("saved_at", { ascending: false })
-    .limit(3000);
+  const visitsQuery = loadQueueCollectionVisits(admin);
 
   const legalQuery = admin
     .from("legal_transfers")
@@ -711,7 +736,7 @@ export async function fetchOutstandingAndCollectionRecords(admin, scope) {
     salesmanByVoucher,
   );
 
-  const visits = Array.isArray(visitsData) ? visitsData : [];
+  const visits = (Array.isArray(visitsData) ? visitsData : []).map(collectionVisitAttachmentSummary);
   const legalTransfers = Array.isArray(legalData) ? legalData : [];
 
   const creatorIds = [...new Set(visits.map((visit) => visit.created_by).filter(Boolean))];
@@ -1139,9 +1164,6 @@ export async function POST(request) {
     customerCode = await ensureCollectionCustomerRecord(admin, customerCode, customerName);
 
     // Handle file uploads for payment and receipt copies
-    let paymentCopyUrl = null;
-    let receiptCopyUrl = null;
-
     const paymentCopyFile = formData.get("paymentCopy");
     const receiptCopyFile = formData.get("receiptCopy");
     const hasFileUpload = (paymentCopyFile && paymentCopyFile.size > 0)
@@ -1151,35 +1173,32 @@ export async function POST(request) {
       await ensureCollectionFilesBucket(admin);
     }
 
-    if (paymentCopyFile && paymentCopyFile.size > 0) {
-      const paymentHeader = await sniffUploadHeader(paymentCopyFile);
-      const ext = storageExtension(paymentCopyFile, paymentHeader);
-      const paymentCopyPath = `payment-copies/${customerCode}-${Date.now()}-payment.${ext}`;
-      const { data: paymentData, error: paymentError } = await admin.storage
-        .from(COLLECTION_FILES_BUCKET)
-        .upload(paymentCopyPath, paymentCopyFile, {
-          upsert: true,
-          contentType: uploadContentType(paymentCopyFile, paymentHeader),
+    async function storeCollectionCopy(kind, file) {
+      if (!file || !(file.size > 0)) return null;
+      const header = await sniffUploadHeader(file);
+      try {
+        const { stored, attachmentId } = await storeAttachment(admin, {
+          category: kind === "receipt" ? ATTACHMENT_CATEGORIES.receiptCopy : ATTACHMENT_CATEGORIES.paymentCopy,
+          key: buildCollectionCopyKey({ kind, customerCode, extension: storageExtension(file, header) }),
+          body: file,
+          contentType: uploadContentType(file, header),
+          originalFileName: file.name || "",
+          customerCode,
+          uploadedBy: user.id,
         });
-
-      if (paymentError) throw normalizeStorageError(paymentError);
-      paymentCopyUrl = `${supabaseUrl}/storage/v1/object/public/${COLLECTION_FILES_BUCKET}/${paymentData.path}`;
+        return { attachmentId, key: stored.key };
+      } catch (storageError) {
+        throw normalizeStorageError(storageError);
+      }
     }
 
-    if (receiptCopyFile && receiptCopyFile.size > 0) {
-      const receiptHeader = await sniffUploadHeader(receiptCopyFile);
-      const ext = storageExtension(receiptCopyFile, receiptHeader);
-      const receiptCopyPath = `receipt-copies/${customerCode}-${Date.now()}-receipt.${ext}`;
-      const { data: receiptData, error: receiptError } = await admin.storage
-        .from(COLLECTION_FILES_BUCKET)
-        .upload(receiptCopyPath, receiptCopyFile, {
-          upsert: true,
-          contentType: uploadContentType(receiptCopyFile, receiptHeader),
-        });
-
-      if (receiptError) throw normalizeStorageError(receiptError);
-      receiptCopyUrl = `${supabaseUrl}/storage/v1/object/public/${COLLECTION_FILES_BUCKET}/${receiptData.path}`;
-    }
+    const paymentCopy = await storeCollectionCopy("payment", paymentCopyFile);
+    const receiptCopy = await storeCollectionCopy("receipt", receiptCopyFile);
+    // New rows reference attachments by id; the legacy URL is only written before the attachments migration.
+    const legacyCopyUrl = (copy) => (copy && !copy.attachmentId ? legacySupabasePublicUrl(supabaseUrl, copy.key) : null);
+    const paymentCopyUrl = legacyCopyUrl(paymentCopy);
+    const receiptCopyUrl = legacyCopyUrl(receiptCopy);
+    const copyAttachmentIds = [paymentCopy?.attachmentId, receiptCopy?.attachmentId].filter(Boolean);
 
     // Insert new collection visit
     const existingVisitCount = await countCollectionVisitsForUserDay(admin, user.id);
@@ -1229,6 +1248,8 @@ export async function POST(request) {
       non_payment_reason: nonPaymentReason,
       payment_copy_url: paymentCopyUrl,
       receipt_copy_url: receiptCopyUrl,
+      ...(paymentCopy?.attachmentId ? { payment_attachment_id: paymentCopy.attachmentId } : {}),
+      ...(receiptCopy?.attachmentId ? { receipt_attachment_id: receiptCopy.attachmentId } : {}),
       summary_text: finalSummaryText || null,
       queue_priority: queuePriority > 0 ? queuePriority : null,
       probability_score: probabilityScore > 0 ? probabilityScore : null,
@@ -1263,6 +1284,27 @@ export async function POST(request) {
 
     if (insertError && submissionIdSupported && isMissingClientSubmissionColumnError(insertError)) {
       visitInsertRow = visitInsertWithGps;
+      ({
+        data: insertData,
+        error: insertError,
+      } = await admin
+        .from("collection_visits")
+        .insert(visitInsertRow)
+        .select("id")
+        .maybeSingle());
+    }
+
+    if (insertError && copyAttachmentIds.length > 0 && isMissingAttachmentSchemaError(insertError)) {
+      const {
+        payment_attachment_id: _paymentAttachmentId,
+        receipt_attachment_id: _receiptAttachmentId,
+        ...withoutAttachmentIds
+      } = visitInsertRow;
+      visitInsertRow = {
+        ...withoutAttachmentIds,
+        payment_copy_url: paymentCopy ? legacySupabasePublicUrl(supabaseUrl, paymentCopy.key) : null,
+        receipt_copy_url: receiptCopy ? legacySupabasePublicUrl(supabaseUrl, receiptCopy.key) : null,
+      };
       ({
         data: insertData,
         error: insertError,
@@ -1311,6 +1353,13 @@ export async function POST(request) {
         throw new Error("Collection tables are not initialized in this environment yet.");
       }
       throw new Error(formatRouteError(insertError));
+    }
+
+    if (insertData?.id && (visitInsertRow.payment_attachment_id || visitInsertRow.receipt_attachment_id)) {
+      await linkAttachmentsToEntity(admin, copyAttachmentIds, {
+        entityType: ATTACHMENT_ENTITY_TYPES.collectionVisit,
+        entityId: insertData.id,
+      });
     }
 
     if (customerGpsUpdateAccepted && insertData?.id && Number.isFinite(latitude) && Number.isFinite(longitude)) {

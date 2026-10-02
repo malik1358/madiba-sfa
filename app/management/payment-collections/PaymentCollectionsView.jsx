@@ -64,6 +64,7 @@ import {
 } from "../../lib/collectionQueueSearch";
 import { prepareReceiptUploadFile, prepareUploadFile } from "../../lib/compressUploadFile";
 import { createClientSubmissionId } from "../../lib/collectionSubmission";
+import { openAttachment } from "../../lib/openAttachment";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
@@ -2197,6 +2198,43 @@ export default function PaymentCollectionsView({ view = "due" }) {
     recognition.start();
   }
 
+  function openCollectionCopy(collection, kind) {
+    openAttachment({
+      getAccessToken: async () => (await resolveAuthSession(getSupabaseClient(), 8000))?.access_token,
+      attachmentId: collection?.[`${kind}_attachment_id`] || "",
+      legacyKind: `${kind}_copy`,
+      legacyRef: collection?.id ?? "",
+    }).catch((err) => {
+      showPopup({ message: localizeApiMessage(err?.message || "Unable to open attachment."), variant: "error" });
+    });
+  }
+
+  function renderCollectionCopyLinks(collection) {
+    if (!collection || collection.pending_sync) return null;
+    const canOpen = (kind) => Boolean(
+      collection[`${kind}_attachment_id`] || (collection.id && collection[`has_${kind}_copy`]),
+    );
+    const link = (kind, label) => (
+      <div>
+        <a
+          href="#"
+          onClick={(event) => {
+            event.preventDefault();
+            openCollectionCopy(collection, kind);
+          }}
+        >
+          {t(label)}
+        </a>
+      </div>
+    );
+    return (
+      <>
+        {canOpen("payment") ? link("payment", "viewPaymentCopy") : null}
+        {canOpen("receipt") ? link("receipt", "viewReceiptCopy") : null}
+      </>
+    );
+  }
+
   async function copySummaryText() {
     const summaryText = String(summaryForWhatsApp || "").trim();
     if (!summaryText) return;
@@ -3245,14 +3283,12 @@ export default function PaymentCollectionsView({ view = "due" }) {
                                         {formatVisitHistoryItem(visit, t)}
                                       </div>
                                     ))}
-                                    {row.latest_collection?.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
-                                    {row.latest_collection?.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
+                                    {renderCollectionCopyLinks(row.latest_collection)}
                                   </div>
                                 ) : row.latest_collection ? (
                                   <div className="moduleHint" style={{ marginBottom: "12px" }}>
                                     {formatVisitHistoryItem(row.latest_collection, t)}
-                                    {row.latest_collection.payment_copy_url ? <div><a href={row.latest_collection.payment_copy_url} target="_blank" rel="noreferrer">{t("viewPaymentCopy")}</a></div> : null}
-                                    {row.latest_collection.receipt_copy_url ? <div><a href={row.latest_collection.receipt_copy_url} target="_blank" rel="noreferrer">{t("viewReceiptCopy")}</a></div> : null}
+                                    {renderCollectionCopyLinks(row.latest_collection)}
                                   </div>
                                 ) : <div className="moduleHint" style={{ marginBottom: "12px" }}>{t("noLatestVisit")}</div>}
 

@@ -10,6 +10,7 @@ import {
 import { applyCustomerSalesmanOwnershipToRows } from "./customerSalesmanOwnership.js";
 import { loadCustomerSalesmanOwnershipMap } from "./customerSalesmanOwnershipServer.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
+import { buildSalesMixReport } from "./salesMix.js";
 import { cubeSupportsFilters, monthAlignGrowthFilters, salesBiFactToGrowthRow } from "./salesBiCube.js";
 import { loadSalesBiCube, pageActiveSales, rebuildSalesBiCube } from "./salesBiCubeServer.js";
 import { rollupTeamGrowthFromRows, rollupTeamGrowthGroups } from "./salesmanTeamMom.js";
@@ -85,6 +86,7 @@ function reportFromRows(rows, { asOfDate, filters, extraMeta = {}, alignDates = 
   const profit = build("profit");
   return {
     ...sales,
+    salesMix: buildSalesMixReport(rows, applied),
     measures: {
       sales: measureSlice(sales),
       profit: measureSlice(profit),

@@ -187,6 +187,7 @@ BI pages call `/api/business-dashboard` and `/api/business-dashboard/category-gr
 
 - Facts come from `active_sales` (including `profit_amount` when the column exists).
 - The Business Intelligence MADIBA tab uses the existing category-growth API with an item-name filter on the monthly cube (or its live-sales fallback). It presents category and matching item trends using the shared period and sales/profit controls; no new table or endpoint is required.
+- MADIBA category GP % grids pair the prepared sales and profit measure groups by category in `app/lib/madibaBrandGp.js`; they keep the existing quarterly/monthly windows and table filters without another API request.
 - `app/lib/salesBiCube.js` aggregates monthly facts. The compact cube is stored at `sales_bi_cube_v1`. Version constant is `SALES_BI_CUBE_VERSION` (currently 4). A rebuild is required when profit data appears or the import time changes.
 - Optional table `sales_bi_monthly` is created only by `sql/setup_sales_bi_monthly.sql`. The app is written to keep working from the settings blob if the table is absent.
 - Period presets are `app/lib/biReportPeriod.js` (`mtd`, `qtd`, `ytd`, last month, last 3/6/12 months, custom).

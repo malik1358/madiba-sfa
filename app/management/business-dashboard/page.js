@@ -761,6 +761,7 @@ export default function BusinessDashboardPage() {
                 measure={amountMeasure}
                 title={`${t("madiba")} · ${brandApplied.groupBy === "item" ? t("madibaItems") : t("madibaCategories")} · ${amountMeasure === "profit" ? t("profit") : t("sales")}`}
                 emptyMessage={t("madibaEmpty")}
+                showGpPercent={brandApplied.groupBy === "category"}
                 report={visibleGrowthReport}
                 draft={brandDraft}
                 catalogs={growthCatalogs}

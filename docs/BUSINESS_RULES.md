@@ -161,6 +161,7 @@ Implemented in `app/lib/salesmanIncentive.js` (pure) and `app/lib/salesmanIncent
 - KPI pace status uses historical daily pace only while the report month is open. After month-end, expected pace is 100%: results below target are behind pace and results at or above target are achieved.
 - `profit_amount` is gross-profit amount for BI only. Do not surface cost or margin percent from the Excel file.
 - MADIBA brand BI matches `MADIBA` case-insensitively anywhere in the imported sales `item_name` before aggregating by imported category or item. The brand filter stays active when other report filters are cleared; empty/missing item names do not match. Sales and profit use the active sales batch and selected BI period.
+- MADIBA category growth shows quarterly and monthly GP % tables: sum imported `profit_amount` and net `sales_amount` by category and period, then divide profit by sales. Zero net sales has no percentage. Row Total and filtered footer Total are weighted ratios over the displayed period window, not averages of percentages. The active quarter/month is QTD/MTD.
 - BI periods: all time, this month, last month, this quarter, last 3/6/12 months, this year, last year, custom (`app/lib/biReportPeriod.js`).
 - Month-over-month charts skip the in-progress month when they need a closed month (`resolveMomComparisonMonths`).
 - Up/down colors compare to the previous period. The current MTD/QTD/YTD column uses `moduleBiMonthCell--current`.

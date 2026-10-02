@@ -11,7 +11,6 @@ import {
   buildCollectionCopyKey,
   buildCustomerDocumentKey,
   buildOrderInvoiceKey,
-  legacySupabasePublicUrl,
   parseLegacySupabaseUrl,
   splitObjectKey,
 } from "../app/lib/storage/attachmentKeys.js";
@@ -65,7 +64,7 @@ test("invoice and customer document keys keep their legacy bucket-relative paths
   assert.throws(() => bucketRelativePath(documentKey, ATTACHMENT_BUCKETS.orderInvoices), /order-invoices/);
 });
 
-test("object keys split into bucket and path and round-trip legacy public URLs", () => {
+test("object keys split into bucket and path and parse historical public URLs", () => {
   assert.deepEqual(splitObjectKey("payment-collections/receipt-copies/a.jpg"), {
     bucket: "payment-collections",
     path: "receipt-copies/a.jpg",
@@ -73,8 +72,7 @@ test("object keys split into bucket and path and round-trip legacy public URLs",
   assert.throws(() => splitObjectKey("no-path"), /bucket and a path/);
 
   const key = "payment-collections/receipt-copies/1114C-1-receipt.jpg";
-  const url = legacySupabasePublicUrl(SUPABASE_URL, key);
-  assert.equal(url, `${SUPABASE_URL}/storage/v1/object/public/${key}`);
+  const url = `${SUPABASE_URL}/storage/v1/object/public/${key}`;
   assert.equal(parseLegacySupabaseUrl(url).key, key);
   assert.deepEqual(
     parseLegacySupabaseUrl("http://127.0.0.1:54321/storage/v1/object/public/payment-collections/receipt-copies/A%20B-1-receipt.jpg?x=1"),
@@ -562,15 +560,15 @@ test("business modules no longer call Supabase Storage directly for attachment f
     assert.doesNotMatch(source, /storage\s*\.from\(/, file);
     assert.doesNotMatch(source, /createSignedUrl|\.download\(|\/storage\/v1\/object\/public/, file);
   }
-  // Bucket provisioning (public flag unchanged until Phase 2) stays in the routes.
-  assert.match(read("../app/api/payment-collections/route.js"), /public: true/);
+  // Bucket provisioning lives in the provider (private only); upload-files is unchanged.
+  assert.doesNotMatch(read("../app/api/payment-collections/route.js"), /public: true/);
   assert.match(read("../app/lib/uploadFilesStorage.js"), /storage\.from\(UPLOAD_FILES_BUCKET\)/);
 });
 
 test("collection uploads record attachment ids and leave copy URLs null when the migration exists", () => {
   const source = read("../app/api/payment-collections/route.js");
   assert.match(source, /storeAttachment\(admin, \{\s*category: kind === "receipt" \? ATTACHMENT_CATEGORIES\.receiptCopy : ATTACHMENT_CATEGORIES\.paymentCopy/);
-  assert.match(source, /copy && !copy\.attachmentId \? legacySupabasePublicUrl/);
+  assert.match(source, /copy && !copy\.attachmentId \? copy\.key : null/);
   assert.match(source, /payment_attachment_id: paymentCopy\.attachmentId/);
   assert.match(source, /receipt_attachment_id: receiptCopy\.attachmentId/);
   assert.match(source, /isMissingAttachmentSchemaError\(insertError\)/);

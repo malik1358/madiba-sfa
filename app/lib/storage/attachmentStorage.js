@@ -59,6 +59,10 @@ export async function getSignedReadUrl(admin, {
   return { url, expiresAt: new Date(Date.now() + ttl * 1000).toISOString(), expiresIn: ttl };
 }
 
+export async function ensureAttachmentBucket(admin, bucket, provider = ACTIVE_STORAGE_PROVIDER) {
+  return resolveStorageProvider(provider).ensureBucket(admin, bucket);
+}
+
 export async function deleteObject() {
   throw new Error("Attachment deletion is not enabled.");
 }

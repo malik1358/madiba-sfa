@@ -197,9 +197,12 @@ Do not create a new table for a small flag if the surrounding feature already us
 
 Scripts in `sql/`:
 
-- `payment-collections` — payment and receipt photos (`sql/setup_payment_collections_storage.sql`)
-- `customer-documents` — `sql/setup_customer_documents_storage.sql`
-- Upload-files bucket — `sql/setup_upload_files_storage.sql`
+- `payment-collections` — payment and receipt photos (`sql/setup_payment_collections_storage.sql`), **private**
+- `customer-documents` — `sql/setup_customer_documents_storage.sql`, **private**
+- `order-invoices` — created private by the app, **private**
+- Upload-files bucket — `sql/setup_upload_files_storage.sql`, private, unchanged
+
+Attachment buckets have no `storage.objects` policies for `anon`/`authenticated`: the server writes with the service role and serves reads as short-lived signed URLs after an app access check. Existing projects are converted with `sql/attachment_storage_phase2_step1_drop_browser_policies.sql` (safe any time) and then `sql/attachment_storage_phase2_step2_private_buckets.sql` (only after the Phase 2 app is live; older builds re-publicized `payment-collections` on every upload). Neither is a migration.
 
 These inserts are not in `supabase/migrations/`. A new environment needs the SQL scripts or the buckets created in the Supabase dashboard.
 
@@ -207,7 +210,7 @@ Attachment references (Phase 1 of the R2 plan, files still in Supabase Storage):
 
 | Attachment | New uploads | Historical (untouched) |
 | --- | --- | --- |
-| Receipt / payment copy | `collection_visits.receipt_attachment_id` / `payment_attachment_id`; `*_copy_url` left NULL | `*_copy_url` public URL |
+| Receipt / payment copy | `collection_visits.receipt_attachment_id` / `payment_attachment_id`; `*_copy_url` left NULL (before the attachments migration: the object key, never a URL) | `*_copy_url` public URL (parsed, then signed privately) |
 | Order invoice | `order_invoice_meta:<id>` JSON `invoiceAttachmentId` **and** `invoiceFilePath` (business logic depends on its presence) | `invoiceFilePath` only |
 | Customer document | `customer_documents.attachment_id` **and** `file_path` | `file_path` only |
 

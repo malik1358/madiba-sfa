@@ -81,12 +81,7 @@ export function bucketRelativePath(key, expectedBucket) {
   return path;
 }
 
-export function legacySupabasePublicUrl(supabaseUrl, key) {
-  const base = String(supabaseUrl || "").trim().replace(/\/+$/, "");
-  const { bucket, path } = splitObjectKey(key);
-  return `${base}${PUBLIC_URL_MARKER}${bucket}/${path}`;
-}
-
+// Historical rows hold public URLs; they are only parsed into bucket/path and then signed privately.
 export function parseLegacySupabaseUrl(url) {
   const text = String(url || "").trim();
   const markerAt = text.indexOf(PUBLIC_URL_MARKER);
@@ -108,4 +103,24 @@ export function legacyObjectKey(bucket, path) {
   const cleanPath = String(path || "").trim();
   if (!cleanPath) return "";
   return joinObjectKey(bucket, cleanPath);
+}
+
+// Legacy copy columns hold either a historical public URL or (pre-migration fallback) a bare object key.
+export function parseStoredObjectReference(value, expectedBucket) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const parsed = text.includes(PUBLIC_URL_MARKER)
+    ? parseLegacySupabaseUrl(text)
+    : /^[a-z][a-z0-9+.-]*:/i.test(text)
+      ? null
+      : (() => {
+        try {
+          return { ...splitObjectKey(text), key: text.replace(/^\/+/, "") };
+        } catch {
+          return null;
+        }
+      })();
+  if (!parsed || (expectedBucket && parsed.bucket !== expectedBucket)) return null;
+  if (parsed.path.split("/").some((segment) => segment === "..")) return null;
+  return parsed;
 }

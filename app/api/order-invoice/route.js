@@ -7,6 +7,7 @@ import {
   INVOICE_BUCKET,
 } from "../../lib/orderInvoiceComparison.js";
 import { attachProspectLinkToMeta, backfillProspectInvoiceLinks } from "../../lib/prospectInvoiceLink.js";
+import { ensureAttachmentBucket } from "../../lib/storage/attachmentStorage.js";
 import { ATTACHMENT_CATEGORIES, bucketRelativePath, buildOrderInvoiceKey } from "../../lib/storage/attachmentKeys.js";
 import { ATTACHMENT_ENTITY_TYPES, storeAttachment } from "../../lib/storage/attachmentRecords.js";
 import { isProspectCustomerCode } from "../../lib/customerCode.js";
@@ -184,21 +185,6 @@ async function ensureOrderVisible(admin, orderId, scope) {
   if (!canSeeOrder(order, scope)) throw new Error("You do not have access to this order.");
 
   return order;
-}
-
-async function ensureBucket(admin) {
-  const { data: bucket, error: bucketError } = await admin.storage.getBucket(INVOICE_BUCKET);
-  if (!bucketError && bucket) return;
-
-  const { error: createError } = await admin.storage.createBucket(INVOICE_BUCKET, {
-    public: false,
-    fileSizeLimit: 20 * 1024 * 1024,
-    allowedMimeTypes: ["application/pdf"],
-  });
-
-  if (createError && !String(createError.message || "").toLowerCase().includes("already exists")) {
-    throw createError;
-  }
 }
 
 async function readMetaMap(admin, orderIds) {
@@ -383,7 +369,7 @@ export async function POST(request) {
       }
 
       const order = await ensureOrderVisible(admin, orderId, scope);
-      await ensureBucket(admin);
+      await ensureAttachmentBucket(admin, INVOICE_BUCKET);
 
       const now = new Date();
       const nowIso = now.toISOString();

@@ -39,6 +39,8 @@ local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  V
 
 Pushing the git repo does **not** apply SQL. Schema changes need a person to run `supabase/migrations` or the matching `sql/` script on that environment’s Supabase project.
 
+Attachment storage privacy is order-sensitive: run `sql/attachment_storage_phase2_step1_drop_browser_policies.sql` any time, but run `sql/attachment_storage_phase2_step2_private_buckets.sql` only after the Phase 2 build is live. Do not promote (Instant Rollback) a pre-Phase-2 Vercel deployment afterwards: those builds call `updateBucket(public: true)` on every collection upload.
+
 ## Environment variable names
 
 Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is gitignored. Names from `.env.example`:

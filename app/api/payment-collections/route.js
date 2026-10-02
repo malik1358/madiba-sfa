@@ -59,10 +59,11 @@ import {
   isUniqueViolationError,
   parseClientSubmissionId,
 } from "../../lib/collectionSubmission.js";
+import { ensureAttachmentBucket } from "../../lib/storage/attachmentStorage.js";
 import {
+  ATTACHMENT_BUCKETS,
   ATTACHMENT_CATEGORIES,
   buildCollectionCopyKey,
-  legacySupabasePublicUrl,
 } from "../../lib/storage/attachmentKeys.js";
 import {
   ATTACHMENT_ENTITY_TYPES,
@@ -74,17 +75,6 @@ import {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const COLLECTION_FILES_BUCKET = "payment-collections";
-const COLLECTION_FILE_MIME_TYPES = [
-  "image/jpeg",
-  "image/jpg",
-  "image/pjpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "application/pdf",
-];
 
 export const maxDuration = 60;
 
@@ -287,38 +277,6 @@ async function sniffUploadHeader(file) {
     return new Uint8Array(await file.slice(0, 16).arrayBuffer());
   } catch {
     return null;
-  }
-}
-
-async function ensureCollectionFilesBucket(admin) {
-  const bucketConfig = {
-    public: true,
-    fileSizeLimit: 20 * 1024 * 1024,
-    allowedMimeTypes: COLLECTION_FILE_MIME_TYPES,
-  };
-
-  const { data: bucket, error: bucketError } = await admin.storage.getBucket(COLLECTION_FILES_BUCKET);
-  if (bucketError && !String(bucketError.message || "").toLowerCase().includes("not found")) {
-    throw bucketError;
-  }
-
-  if (!bucket) {
-    const { error: createError } = await admin.storage.createBucket(COLLECTION_FILES_BUCKET, bucketConfig);
-    if (createError && !String(createError.message || "").toLowerCase().includes("already exists")) {
-      throw createError;
-    }
-    return;
-  }
-
-  // Best-effort MIME refresh only. Never block attachment saves if updateBucket
-  // is slow, permission-denied, or unsupported on this project.
-  try {
-    const { error: updateError } = await admin.storage.updateBucket(COLLECTION_FILES_BUCKET, bucketConfig);
-    if (updateError) {
-      console.warn("Unable to refresh payment-collections bucket settings:", updateError);
-    }
-  } catch (updateError) {
-    console.warn("Unable to refresh payment-collections bucket settings:", updateError);
   }
 }
 
@@ -1170,7 +1128,7 @@ export async function POST(request) {
       || (receiptCopyFile && receiptCopyFile.size > 0);
 
     if (hasFileUpload) {
-      await ensureCollectionFilesBucket(admin);
+      await ensureAttachmentBucket(admin, ATTACHMENT_BUCKETS.collections);
     }
 
     async function storeCollectionCopy(kind, file) {
@@ -1194,10 +1152,10 @@ export async function POST(request) {
 
     const paymentCopy = await storeCollectionCopy("payment", paymentCopyFile);
     const receiptCopy = await storeCollectionCopy("receipt", receiptCopyFile);
-    // New rows reference attachments by id; the legacy URL is only written before the attachments migration.
-    const legacyCopyUrl = (copy) => (copy && !copy.attachmentId ? legacySupabasePublicUrl(supabaseUrl, copy.key) : null);
-    const paymentCopyUrl = legacyCopyUrl(paymentCopy);
-    const receiptCopyUrl = legacyCopyUrl(receiptCopy);
+    // Before the attachments migration, keep the object key (never a public URL) in the legacy column.
+    const legacyCopyRef = (copy) => (copy && !copy.attachmentId ? copy.key : null);
+    const paymentCopyUrl = legacyCopyRef(paymentCopy);
+    const receiptCopyUrl = legacyCopyRef(receiptCopy);
     const copyAttachmentIds = [paymentCopy?.attachmentId, receiptCopy?.attachmentId].filter(Boolean);
 
     // Insert new collection visit
@@ -1302,8 +1260,8 @@ export async function POST(request) {
       } = visitInsertRow;
       visitInsertRow = {
         ...withoutAttachmentIds,
-        payment_copy_url: paymentCopy ? legacySupabasePublicUrl(supabaseUrl, paymentCopy.key) : null,
-        receipt_copy_url: receiptCopy ? legacySupabasePublicUrl(supabaseUrl, receiptCopy.key) : null,
+        payment_copy_url: paymentCopy?.key || null,
+        receipt_copy_url: receiptCopy?.key || null,
       };
       ({
         data: insertData,

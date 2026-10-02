@@ -218,7 +218,7 @@ Business routes never call Supabase Storage for attachment files. Server-only mo
 - `attachmentRecords.js` — `storeAttachment` (upload + `attachments` row), owner linking, queue-safe visit summaries, `readOrderInvoiceFile` (prefers `invoiceAttachmentId`, falls back to `invoiceFilePath`) used by invoice comparison, prospect linking and the supplier email.
 - `attachmentAccess.js` — resolves the owner and authorizes reads (collection scope / `canSeeOrder` / sales customer scope).
 
-`GET /api/attachments/<uuid>/url` and `GET /api/attachments/legacy/url?kind=receipt_copy|payment_copy|order_invoice|customer_document&ref=<owner id>` authenticate the bearer token, authorize, then return a short-lived signed URL (`Cache-Control: private, no-store`). Clients use `app/lib/openAttachment.js`, which opens a placeholder tab synchronously (iOS popup rules) or an anchor in the Capacitor shell. Bucket creation/`public` flags still live in the routes and are unchanged until Phase 2.
+`GET /api/attachments/<uuid>/url` and `GET /api/attachments/legacy/url?kind=receipt_copy|payment_copy|order_invoice|customer_document&ref=<owner id>` authenticate the bearer token, authorize, then return a short-lived signed URL (`Cache-Control: private, no-store`). Clients use `app/lib/openAttachment.js`, which opens a placeholder tab synchronously (iOS popup rules) or an anchor in the Capacitor shell. Bucket provisioning is `ensureAttachmentBucket` → `supabaseProvider.ensureBucket`: a missing bucket is created **private**; an existing bucket is never updated, so no upload can change its privacy. No app code builds `/storage/v1/object/public/...` URLs; historical public URLs are only parsed into bucket/path and signed.
 
 ## Collections architecture
 

@@ -7,10 +7,12 @@ export function createFakeAdmin({
   missingColumns = {},
   users = {},
   objects = {},
+  buckets = {},
 } = {}) {
   const data = Object.fromEntries(Object.entries(tables).map(([name, rows]) => [name, rows.map((row) => ({ ...row }))]));
   const storage = new Map(Object.entries(objects));
-  const calls = { uploads: [], signed: [], downloads: [], inserts: [], updates: [] };
+  const bucketState = new Map(Object.entries(buckets).map(([name, settings]) => [name, { ...settings }]));
+  const calls = { uploads: [], signed: [], downloads: [], inserts: [], updates: [], bucketCreates: [], bucketUpdates: [] };
   let nextId = 1000;
 
   function missingColumnError(table, column, insert = false) {
@@ -118,6 +120,22 @@ export function createFakeAdmin({
     calls,
     storage: {
       objects: storage,
+      buckets: bucketState,
+      async getBucket(name) {
+        const bucket = bucketState.get(name);
+        return bucket ? { data: { id: name, ...bucket }, error: null } : { data: null, error: { message: "Bucket not found" } };
+      },
+      async createBucket(name, settings) {
+        calls.bucketCreates.push({ name, settings });
+        if (bucketState.has(name)) return { data: null, error: { message: "The resource already exists" } };
+        bucketState.set(name, { ...settings });
+        return { data: { name }, error: null };
+      },
+      async updateBucket(name, settings) {
+        calls.bucketUpdates.push({ name, settings });
+        bucketState.set(name, { ...bucketState.get(name), ...settings });
+        return { data: { message: "Successfully updated" }, error: null };
+      },
       from(bucket) {
         return {
           async upload(path, body, options = {}) {

@@ -14,6 +14,7 @@ import {
   validateDocumentDates,
 } from "../../lib/customerDocumentParse.js";
 import { isMissingRelationError } from "../../lib/schemaGuards.js";
+import { ensureAttachmentBucket } from "../../lib/storage/attachmentStorage.js";
 import {
   ATTACHMENT_BUCKETS,
   ATTACHMENT_CATEGORIES,
@@ -35,14 +36,6 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 export const CUSTOMER_DOCUMENTS_BUCKET = ATTACHMENT_BUCKETS.customerDocuments;
 const DOCUMENT_SELECT = "id,customer_code,document_type,file_path,expiry_date,uploaded_by_salesman_code,created_at,extracted_json,parsed_cr_number,parsed_vat_number,issue_date,link_status,link_message,original_file_name";
 const DOCUMENT_SELECT_WITH_ATTACHMENT = `${DOCUMENT_SELECT},attachment_id`;
-const DOCUMENT_MIME_TYPES = [
-  "application/pdf",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-];
 
 function adminClient() {
   return createClient(supabaseUrl, serviceKey, {
@@ -84,21 +77,6 @@ async function requireUser(admin, request) {
 
 function isManagerRole(role) {
   return ["admin", "manager"].includes(String(role || "").toLowerCase());
-}
-
-async function ensureBucket(admin) {
-  const { data: bucket, error: bucketError } = await admin.storage.getBucket(CUSTOMER_DOCUMENTS_BUCKET);
-  if (!bucketError && bucket) return;
-
-  const { error: createError } = await admin.storage.createBucket(CUSTOMER_DOCUMENTS_BUCKET, {
-    public: true,
-    fileSizeLimit: 20 * 1024 * 1024,
-    allowedMimeTypes: DOCUMENT_MIME_TYPES,
-  });
-
-  if (createError && !String(createError.message || "").toLowerCase().includes("already exists")) {
-    throw createError;
-  }
 }
 
 // Files open via /api/attachments/[id]/url; responses never carry storage paths or public URLs.
@@ -290,7 +268,7 @@ export async function POST(request) {
     }
 
     const customer = await loadCustomer(admin, customerCode);
-    await ensureBucket(admin);
+    await ensureAttachmentBucket(admin, CUSTOMER_DOCUMENTS_BUCKET);
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const mime = String(file.type || "").toLowerCase();

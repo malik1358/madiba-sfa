@@ -43,11 +43,13 @@ test("photo prepare path bounds image load and canvas compression", () => {
   assert.match(source, /Fall back to the original bytes/);
 });
 
-test("payment-collections bucket MIME refresh must not block uploads", () => {
+test("payment-collections bucket provisioning never changes bucket settings on upload", () => {
   const source = fs.readFileSync(new URL("../app/api/payment-collections/route.js", import.meta.url), "utf8");
-  assert.match(source, /Never block attachment saves if updateBucket/);
+  const provider = fs.readFileSync(new URL("../app/lib/storage/providers/supabaseProvider.js", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /updateBucket/);
+  assert.match(source, /ensureAttachmentBucket\(admin, ATTACHMENT_BUCKETS\.collections\)/);
   assert.match(source, /sniffUploadHeader/);
-  assert.match(source, /image\/jpg/);
+  assert.match(provider, /image\/jpg/);
 });
 
 test("legal remove uses a long PATCH timeout and skips office GPS", () => {

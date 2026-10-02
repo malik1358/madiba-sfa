@@ -1,6 +1,51 @@
-import { joinObjectKey, splitObjectKey } from "../attachmentKeys.js";
+import { ATTACHMENT_BUCKETS, joinObjectKey, splitObjectKey } from "../attachmentKeys.js";
 
 export const SUPABASE_PROVIDER = "supabase";
+
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+// Attachment buckets are always private; reads go through signed URLs after an app access check.
+export const ATTACHMENT_BUCKET_SETTINGS = Object.freeze({
+  [ATTACHMENT_BUCKETS.collections]: {
+    public: false,
+    fileSizeLimit: MAX_ATTACHMENT_BYTES,
+    allowedMimeTypes: [
+      "image/jpeg",
+      "image/jpg",
+      "image/pjpeg",
+      "image/png",
+      "image/webp",
+      "image/heic",
+      "image/heif",
+      "application/pdf",
+    ],
+  },
+  [ATTACHMENT_BUCKETS.customerDocuments]: {
+    public: false,
+    fileSizeLimit: MAX_ATTACHMENT_BYTES,
+    allowedMimeTypes: ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"],
+  },
+  [ATTACHMENT_BUCKETS.orderInvoices]: {
+    public: false,
+    fileSizeLimit: MAX_ATTACHMENT_BYTES,
+    allowedMimeTypes: ["application/pdf"],
+  },
+});
+
+// Creates a missing bucket as private. Never updates an existing bucket, so an upload cannot change privacy.
+export async function ensureBucket(admin, bucket) {
+  const settings = ATTACHMENT_BUCKET_SETTINGS[bucket];
+  if (!settings) throw new Error(`Unknown attachment bucket "${bucket}".`);
+
+  const { data, error } = await admin.storage.getBucket(bucket);
+  if (data && !error) return;
+  if (error && !/not.?found/i.test(String(error.message || ""))) throw storageError(error, "Unable to read storage bucket.");
+
+  const { error: createError } = await admin.storage.createBucket(bucket, { ...settings, public: false });
+  if (createError && !/already exists/i.test(String(createError.message || ""))) {
+    throw storageError(createError, "Unable to create storage bucket.");
+  }
+}
 
 function storageError(error, fallback) {
   if (error instanceof Error) return error;

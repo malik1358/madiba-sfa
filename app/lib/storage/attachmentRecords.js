@@ -3,7 +3,7 @@ import {
   ATTACHMENT_BUCKETS,
   ATTACHMENT_CATEGORIES,
   legacyObjectKey,
-  parseLegacySupabaseUrl,
+  parseStoredObjectReference,
 } from "./attachmentKeys.js";
 
 const RECORD_SELECT = "id,category,storage_provider,object_key,content_type,size_bytes,original_file_name,customer_code,entity_type,entity_id,uploaded_by,created_at";
@@ -144,10 +144,9 @@ export function collectionVisitAttachmentSummary(visit) {
 }
 
 export function legacyCollectionCopyRef(visit, kind) {
-  const url = kind === "payment" ? visit?.payment_copy_url : visit?.receipt_copy_url;
-  const parsed = parseLegacySupabaseUrl(url);
-  if (!parsed || parsed.bucket !== ATTACHMENT_BUCKETS.collections) return null;
-  return { provider: "supabase", key: parsed.key };
+  const value = kind === "payment" ? visit?.payment_copy_url : visit?.receipt_copy_url;
+  const parsed = parseStoredObjectReference(value, ATTACHMENT_BUCKETS.collections);
+  return parsed ? { provider: "supabase", key: parsed.key } : null;
 }
 
 export function legacyCustomerDocumentRef(document) {

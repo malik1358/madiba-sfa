@@ -63,7 +63,6 @@ import { ensureAttachmentBucket } from "../../lib/storage/attachmentStorage.js";
 import {
   ATTACHMENT_BUCKETS,
   ATTACHMENT_CATEGORIES,
-  buildCollectionCopyKey,
 } from "../../lib/storage/attachmentKeys.js";
 import {
   ATTACHMENT_ENTITY_TYPES,
@@ -1137,7 +1136,7 @@ export async function POST(request) {
       try {
         const { stored, attachmentId } = await storeAttachment(admin, {
           category: kind === "receipt" ? ATTACHMENT_CATEGORIES.receiptCopy : ATTACHMENT_CATEGORIES.paymentCopy,
-          key: buildCollectionCopyKey({ kind, customerCode, extension: storageExtension(file, header) }),
+          keyInput: { customerCode, extension: storageExtension(file, header) },
           body: file,
           contentType: uploadContentType(file, header),
           originalFileName: file.name || "",

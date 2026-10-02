@@ -19,8 +19,8 @@ import {
   ATTACHMENT_BUCKETS,
   ATTACHMENT_CATEGORIES,
   bucketRelativePath,
-  buildCustomerDocumentKey,
 } from "../../lib/storage/attachmentKeys.js";
+import { resolveUploadContentType } from "../../lib/collectionUploadFile.js";
 import {
   ATTACHMENT_ENTITY_TYPES,
   isMissingAttachmentSchemaError,
@@ -324,13 +324,13 @@ export async function POST(request) {
     const fileName = safeFileName(file.name);
     const { stored, attachmentId: documentAttachmentId } = await storeAttachment(admin, {
       category: ATTACHMENT_CATEGORIES.customerDocument,
-      key: buildCustomerDocumentKey({
+      keyInput: {
         customerCode: customer.customer_code,
         documentType: parsed.documentType,
         fileName,
-      }),
+      },
       body: buffer,
-      contentType: mime || "application/pdf",
+      contentType: resolveUploadContentType({ name: file.name, type: mime }, buffer.subarray(0, 16)),
       originalFileName: file.name || fileName,
       customerCode: customer.customer_code,
       uploadedBy: auth.user.id,

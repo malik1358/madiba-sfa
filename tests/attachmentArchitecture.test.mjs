@@ -82,13 +82,13 @@ test("object keys split into bucket and path and parse historical public URLs", 
 });
 
 // ---------- storage facade ----------
-test("only the Supabase provider is active in Phase 1", async () => {
+test("Supabase stays the default provider; unknown providers are rejected", async () => {
   assert.equal(ACTIVE_STORAGE_PROVIDER, "supabase");
   assert.ok(resolveStorageProvider("supabase"));
-  assert.throws(() => resolveStorageProvider("r2"), /not available/);
+  assert.ok(resolveStorageProvider("r2"));
+  assert.throws(() => resolveStorageProvider("s3"), /not available/);
   await assert.rejects(deleteObject(), /not enabled/);
-  const source = read("../app/lib/storage/attachmentStorage.js") + read("../app/lib/storage/providers/supabaseProvider.js");
-  assert.doesNotMatch(source, /aws4fetch|R2_|r2Provider/);
+  assert.doesNotMatch(read("../app/lib/storage/providers/supabaseProvider.js"), /aws4fetch|R2_/);
 });
 
 test("putObject uploads without overwrite and returns size and checksums", async () => {

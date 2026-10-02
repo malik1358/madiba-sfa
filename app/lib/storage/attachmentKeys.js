@@ -72,6 +72,88 @@ export function buildCustomerDocumentKey({ customerCode, documentType, fileName,
   return joinObjectKey(ATTACHMENT_BUCKETS.customerDocuments, `${code}/${type}/${nowMs(now)}-${safeName}`);
 }
 
+// "legacy" keeps the historical Supabase paths; "immutable" is used for R2-primary writes.
+export const KEY_LAYOUTS = Object.freeze({ legacy: "legacy", immutable: "immutable" });
+
+function keySegment(value, fallback) {
+  const text = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9._-]+/g, "_").replace(/^[_.]+|_+$/g, "");
+  return text || fallback;
+}
+
+function riyadhDateParts(now) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(nowMs(now))).map((part) => [part.type, part.value]));
+  return { yyyy: parts.year, mm: parts.month, dd: parts.day };
+}
+
+function newUuid(uuid) {
+  const value = String(uuid || globalThis.crypto.randomUUID()).toLowerCase();
+  if (!/^[0-9a-f-]{36}$/.test(value)) throw new Error("Invalid attachment uuid.");
+  return value;
+}
+
+export function buildImmutableCollectionCopyKey({ kind, customerCode, extension, now, uuid } = {}) {
+  const folder = COLLECTION_COPY_FOLDERS[kind];
+  if (!folder) throw new Error("Collection copy kind must be receipt or payment.");
+  if (!String(customerCode || "").trim()) throw new Error("Customer code is required for collection attachments.");
+  const ext = String(extension || "jpg").replace(/^\./, "").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const { yyyy, mm, dd } = riyadhDateParts(now);
+  return joinObjectKey(
+    ATTACHMENT_BUCKETS.collections,
+    `${folder}/${yyyy}/${mm}/${keySegment(customerCode, "UNKNOWN")}/${yyyy}${mm}${dd}-${newUuid(uuid)}.${ext}`,
+  );
+}
+
+export function buildImmutableOrderInvoiceKey({ customerCode, orderId, fileName, now, uuid } = {}) {
+  const order = String(orderId || "").trim();
+  if (!/^\d+$/.test(order)) throw new Error("Order id is required for invoice attachments.");
+  const safeName = safeObjectFileName(fileName, "invoice.pdf");
+  return joinObjectKey(
+    ATTACHMENT_BUCKETS.orderInvoices,
+    `${keySegment(customerCode, "UNKNOWN")}/${order}/${nowMs(now)}-${newUuid(uuid)}-${safeName}`,
+  );
+}
+
+export function buildImmutableCustomerDocumentKey({ customerCode, documentType, fileName, now, uuid } = {}) {
+  if (!String(customerCode || "").trim() || !String(documentType || "").trim()) {
+    throw new Error("Customer code and document type are required.");
+  }
+  const safeName = safeObjectFileName(fileName, "document.pdf");
+  return joinObjectKey(
+    ATTACHMENT_BUCKETS.customerDocuments,
+    `${keySegment(customerCode, "UNKNOWN")}/${keySegment(documentType, "OTHER")}/${nowMs(now)}-${newUuid(uuid)}-${safeName}`,
+  );
+}
+
+const KEY_BUILDERS = {
+  [ATTACHMENT_CATEGORIES.receiptCopy]: {
+    legacy: (input) => buildCollectionCopyKey({ ...input, kind: "receipt" }),
+    immutable: (input) => buildImmutableCollectionCopyKey({ ...input, kind: "receipt" }),
+  },
+  [ATTACHMENT_CATEGORIES.paymentCopy]: {
+    legacy: (input) => buildCollectionCopyKey({ ...input, kind: "payment" }),
+    immutable: (input) => buildImmutableCollectionCopyKey({ ...input, kind: "payment" }),
+  },
+  [ATTACHMENT_CATEGORIES.orderInvoice]: {
+    legacy: buildOrderInvoiceKey,
+    immutable: buildImmutableOrderInvoiceKey,
+  },
+  [ATTACHMENT_CATEGORIES.customerDocument]: {
+    legacy: buildCustomerDocumentKey,
+    immutable: buildImmutableCustomerDocumentKey,
+  },
+};
+
+export function buildAttachmentKey(category, input = {}, layout = KEY_LAYOUTS.legacy) {
+  const builders = KEY_BUILDERS[category];
+  if (!builders) throw new Error(`Unknown attachment category "${category}".`);
+  return (layout === KEY_LAYOUTS.immutable ? builders.immutable : builders.legacy)(input);
+}
+
 // Legacy business fields keep bucket-relative paths (invoiceFilePath, customer_documents.file_path).
 export function bucketRelativePath(key, expectedBucket) {
   const { bucket, path } = splitObjectKey(key);

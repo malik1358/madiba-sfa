@@ -1,7 +1,14 @@
-import { getObject, putObject } from "./attachmentStorage.js";
+import {
+  STORAGE_PROVIDERS,
+  getObject,
+  readAttachmentStorageConfig,
+  writeAttachmentObject,
+} from "./attachmentStorage.js";
 import {
   ATTACHMENT_BUCKETS,
   ATTACHMENT_CATEGORIES,
+  KEY_LAYOUTS,
+  buildAttachmentKey,
   legacyObjectKey,
   parseStoredObjectReference,
 } from "./attachmentKeys.js";
@@ -70,10 +77,24 @@ export async function createAttachmentRecord(admin, {
   return { record: data, supported: true };
 }
 
-// Upload + metadata row in one step; attachmentId is null until the attachments migration is applied.
+async function attachmentsSchemaReady(admin) {
+  const { error } = await admin.from("attachments").select("id").limit(1);
+  if (error) {
+    if (isMissingAttachmentSchemaError(error)) return false;
+    throw error;
+  }
+  return true;
+}
+
+/**
+ * Upload + metadata row in one step. The row always describes the PRIMARY usable copy.
+ * Pass `keyInput` so the key layout follows the provider (legacy paths for Supabase, immutable keys for R2);
+ * `key` forces an explicit key. attachmentId is null until the attachments migration is applied.
+ */
 export async function storeAttachment(admin, {
   category,
-  key,
+  key = "",
+  keyInput = null,
   body,
   contentType,
   originalFileName = "",
@@ -81,8 +102,26 @@ export async function storeAttachment(admin, {
   entityType = "",
   entityId = "",
   uploadedBy = null,
+  config = readAttachmentStorageConfig(),
 }) {
-  const stored = await putObject(admin, { key, body, contentType });
+  let effectiveConfig = config;
+  if (config.writeProvider === STORAGE_PROVIDERS.r2 && !(await attachmentsSchemaReady(admin))) {
+    // Without an attachments row an R2 object would be unreachable, so stay on Supabase.
+    console.warn("Attachments migration missing; writing attachment to Supabase instead of R2.");
+    effectiveConfig = { ...config, writeProvider: STORAGE_PROVIDERS.supabase, dualWrite: false };
+  }
+
+  const layout = effectiveConfig.writeProvider === STORAGE_PROVIDERS.r2 ? KEY_LAYOUTS.immutable : KEY_LAYOUTS.legacy;
+  const objectKey = key || buildAttachmentKey(category, keyInput || {}, layout);
+  const write = await writeAttachmentObject(admin, {
+    key: objectKey,
+    body,
+    contentType,
+    metadata: { category, "entity-type": entityType || "" },
+    config: effectiveConfig,
+  });
+  const stored = write.primary;
+
   const { record, supported } = await createAttachmentRecord(admin, {
     category,
     stored,
@@ -92,7 +131,14 @@ export async function storeAttachment(admin, {
     entityId,
     uploadedBy,
   });
-  return { stored, record, supported, attachmentId: record?.id || null };
+  return {
+    stored,
+    record,
+    supported,
+    attachmentId: record?.id || null,
+    secondary: write.secondary,
+    fallbackError: write.fallbackError,
+  };
 }
 
 export async function getAttachmentById(admin, id) {

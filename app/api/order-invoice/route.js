@@ -8,7 +8,7 @@ import {
 } from "../../lib/orderInvoiceComparison.js";
 import { attachProspectLinkToMeta, backfillProspectInvoiceLinks } from "../../lib/prospectInvoiceLink.js";
 import { ensureAttachmentBucket } from "../../lib/storage/attachmentStorage.js";
-import { ATTACHMENT_CATEGORIES, bucketRelativePath, buildOrderInvoiceKey } from "../../lib/storage/attachmentKeys.js";
+import { ATTACHMENT_CATEGORIES, bucketRelativePath } from "../../lib/storage/attachmentKeys.js";
 import { ATTACHMENT_ENTITY_TYPES, storeAttachment } from "../../lib/storage/attachmentRecords.js";
 import { isProspectCustomerCode } from "../../lib/customerCode.js";
 import { expandMutualGroupScopeIdentities } from "../../lib/mutualSalesmanGroups.js";
@@ -374,17 +374,11 @@ export async function POST(request) {
       const now = new Date();
       const nowIso = now.toISOString();
       const customerCode = normalizeCode(order.customer_code) || "UNKNOWN";
-      const objectKey = buildOrderInvoiceKey({
-        customerCode,
-        orderId,
-        fileName: file.name || "invoice.pdf",
-        now,
-      });
 
       const arrayBuffer = await file.arrayBuffer();
       const { stored, attachmentId: invoiceAttachmentId } = await storeAttachment(admin, {
         category: ATTACHMENT_CATEGORIES.orderInvoice,
-        key: objectKey,
+        keyInput: { customerCode, orderId, fileName: file.name || "invoice.pdf", now },
         body: arrayBuffer,
         contentType: "application/pdf",
         originalFileName: file.name || "",

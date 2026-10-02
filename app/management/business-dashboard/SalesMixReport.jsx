@@ -29,6 +29,11 @@ const TEXT = {
   other: { en: "Other / unspecified origin", ar: "مصدر آخر / غير محدد" },
   monthly: { en: "Monthly sales", ar: "المبيعات الشهرية" },
   quarterly: { en: "Quarterly sales", ar: "المبيعات ربع السنوية" },
+  monthlyReconciliation: { en: "Monthly gross-to-net sales", ar: "تسوية إجمالي وصافي المبيعات شهرياً" },
+  quarterlyReconciliation: { en: "Quarterly gross-to-net sales", ar: "تسوية إجمالي وصافي المبيعات ربع سنوياً" },
+  grossSales: { en: "Gross invoice sales", ar: "إجمالي مبيعات الفواتير" },
+  adjustments: { en: "Credit notes / returns", ar: "إشعارات دائنة / مرتجعات" },
+  netSales: { en: "Net sales", ar: "صافي المبيعات" },
   monthlyRatio: { en: "Monthly share movement", ar: "حركة الحصة الشهرية" },
   quarterlyRatio: { en: "Quarterly share movement", ar: "حركة الحصة ربع السنوية" },
   grossInvoiceSales: { en: "Gross invoice sales", ar: "إجمالي مبيعات الفواتير" },
@@ -176,6 +181,45 @@ function RatioMovementSection({ language, title, entries, periods, currentPeriod
   );
 }
 
+function SalesReconciliationSection({ language, title, periodHeading, periods, valuesByPeriod, periodLabel, filename, sheetName }) {
+  const t = translate(language, TEXT);
+  const fields = [
+    ["gross_invoice_sales", t("grossSales")],
+    ["sales_adjustments_amount", t("adjustments")],
+    ["net_sales", t("netSales")],
+  ];
+  const valuesForPeriod = (period) => {
+    const row = valuesByPeriod?.[period] || {};
+    const gross = Number(row.cash_sales_amount || 0) + Number(row.credit_sales_amount || 0);
+    const adjustments = Number(row.sales_adjustments_amount || 0);
+    return { gross_invoice_sales: gross, sales_adjustments_amount: adjustments, net_sales: gross + adjustments };
+  };
+
+  return (
+    <section className="moduleSection">
+      <div className="moduleSectionHeader"><h2>{title}</h2></div>
+      <ExportableTable filename={filename} sheetName={sheetName} className="moduleTableWrap moduleBiTableWrap">
+        <table className="moduleTable moduleBiTable">
+          <thead>
+            <tr>
+              <th>{periodHeading}</th>
+              {periods.map((period) => <th key={period}>{periodLabel(period)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {fields.map(([field, label]) => (
+              <tr key={field}>
+                <td>{label}</td>
+                {periods.map((period) => <td key={period}>{formatMoneyAmount(valuesForPeriod(period)[field])}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ExportableTable>
+    </section>
+  );
+}
+
 function MixCards({ language, mix }) {
   const t = translate(language, TEXT);
   const paymentTotal = Number(mix?.totals?.cash_sales_amount || 0) + Number(mix?.totals?.credit_sales_amount || 0);
@@ -226,6 +270,26 @@ export default function SalesMixReport({ language = "en", loading = false, repor
         <p className="moduleHint">{t("hint")}</p>
         <MixCards language={language} mix={mix} />
       </section>
+      <SalesReconciliationSection
+        language={language}
+        title={t("monthlyReconciliation")}
+        periodHeading={t("monthly")}
+        periods={periods}
+        valuesByPeriod={mix.monthly}
+        periodLabel={monthPeriodLabel}
+        filename="monthly-gross-to-net-sales"
+        sheetName="Monthly Net Sales"
+      />
+      <SalesReconciliationSection
+        language={language}
+        title={t("quarterlyReconciliation")}
+        periodHeading={t("quarterly")}
+        periods={quarters}
+        valuesByPeriod={mix.quarterly}
+        periodLabel={quarterPeriodLabel}
+        filename="quarterly-gross-to-net-sales"
+        sheetName="Quarterly Net Sales"
+      />
       <MixSection
         language={language}
         title={t("cashCredit")}

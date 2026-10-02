@@ -65,6 +65,18 @@ test("September net sales reconcile positive and negative credit-note rows", () 
   assert.equal(report.totals.net_sales, 165);
 });
 
+test("September gross invoice sales reconcile to the net category total", () => {
+  const report = buildSalesMixReport([
+    { transaction_date: "2026-09-03", voucher_number: "RC/1001", local_import: "Local", sales_amount: 1127814 },
+    { transaction_date: "2026-09-20", voucher_number: "NFD/1002", local_import: "Import", sales_amount: 1901586 },
+    { transaction_date: "2026-09-24", voucher_number: "CN/1003", voucher_type: "Credit Note", local_import: "Import", sales_amount: 488453 },
+  ], emptyGrowthFilters());
+
+  assert.equal(report.monthly["2026-09"].cash_sales_amount + report.monthly["2026-09"].credit_sales_amount, 3029400);
+  assert.equal(report.monthly["2026-09"].sales_adjustments_amount, -488453);
+  assert.equal(report.monthly["2026-09"].cash_sales_amount + report.monthly["2026-09"].credit_sales_amount + report.monthly["2026-09"].sales_adjustments_amount, 2540947);
+});
+
 test("sales mix reads precomputed measures from prepared monthly cube facts", () => {
   const cube = createSalesBiCube();
   ingestSalesRowsIntoCube(cube, rows);

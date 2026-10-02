@@ -52,6 +52,13 @@ import {
   resolveUploadContentType,
   storageExtensionFromUpload,
 } from "../../lib/collectionUploadFile.js";
+import {
+  buildCollectionVisitReplayResponse,
+  findCollectionVisitBySubmissionId,
+  isMissingClientSubmissionColumnError,
+  isUniqueViolationError,
+  parseClientSubmissionId,
+} from "../../lib/collectionSubmission.js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -1013,6 +1020,36 @@ export async function POST(request) {
     const customerCodeRaw = String(formData.get("customerCode") || "");
     const customerName = String(formData.get("customerName") || "").trim();
     let customerCode = canonicalCustomerCode(customerCodeRaw);
+
+    const submission = parseClientSubmissionId(formData.get("clientSubmissionId"));
+    if (!submission.valid) {
+      return Response.json(
+        { success: false, error: "Invalid collection submission id." },
+        { status: 400 },
+      );
+    }
+    const clientSubmissionId = submission.id;
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    // Replay before validation/uploads so a retry days later (e.g. next visit now in the past)
+    // still resolves to the visit that was already saved.
+    let submissionIdSupported = Boolean(clientSubmissionId);
+    if (clientSubmissionId) {
+      const replay = await findCollectionVisitBySubmissionId(admin, clientSubmissionId, user.id);
+      submissionIdSupported = replay.supported;
+      if (replay.row) {
+        if (customerCode && !customerAccountCodesMatch(replay.row.customer_code, customerCode)) {
+          return Response.json(
+            { success: false, error: "This collection submission belongs to another customer." },
+            { status: 409 },
+          );
+        }
+        return Response.json(buildCollectionVisitReplayResponse(replay.row));
+      }
+    }
     const visitOutcome = String(formData.get("visitOutcome") || "").trim();
     const paymentStatus = String(formData.get("paymentStatus") || "").trim();
     const amountReceived = Number(formData.get("amountReceived") || 0);
@@ -1066,10 +1103,6 @@ export async function POST(request) {
 
     if (!customerCode) throw new Error("Customer code is required");
     if (!visitOutcome) throw new Error("Please select visit outcome");
-
-    const admin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
 
     const scope = await getSalesScope(admin, user.id);
     const requireGps = shouldRequireTransactionGps(scope.userRole);
@@ -1212,6 +1245,10 @@ export async function POST(request) {
       gps_accuracy_meters: Number.isFinite(gpsAccuracyMeters) ? gpsAccuracyMeters : null,
     };
 
+    let visitInsertRow = submissionIdSupported
+      ? { ...visitInsertWithGps, client_submission_id: clientSubmissionId }
+      : visitInsertWithGps;
+
     let insertData = null;
     let insertError = null;
 
@@ -1220,9 +1257,29 @@ export async function POST(request) {
       error: insertError,
     } = await admin
       .from("collection_visits")
-      .insert(visitInsertWithGps)
+      .insert(visitInsertRow)
       .select("id")
       .maybeSingle());
+
+    if (insertError && submissionIdSupported && isMissingClientSubmissionColumnError(insertError)) {
+      visitInsertRow = visitInsertWithGps;
+      ({
+        data: insertData,
+        error: insertError,
+      } = await admin
+        .from("collection_visits")
+        .insert(visitInsertRow)
+        .select("id")
+        .maybeSingle());
+    }
+
+    // Concurrent retry won the race: return its result instead of a second visit.
+    if (insertError && submissionIdSupported && isUniqueViolationError(insertError)) {
+      const replay = await findCollectionVisitBySubmissionId(admin, clientSubmissionId, user.id);
+      if (replay.row) {
+        return Response.json(buildCollectionVisitReplayResponse(replay.row));
+      }
+    }
 
     if (insertError) {
       if (isMissingColumnError(insertError)) {
@@ -1233,7 +1290,7 @@ export async function POST(request) {
           probability_label: _probabilityLabel,
           visit_number_for_day: _visitNumberForDay,
           ...visitInsertWithoutMeta
-        } = visitInsertWithGps;
+        } = visitInsertRow;
 
         ({
           data: insertData,

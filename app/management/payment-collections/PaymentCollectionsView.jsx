@@ -63,6 +63,7 @@ import {
   mergeLegalMatchesIntoDueRows,
 } from "../../lib/collectionQueueSearch";
 import { prepareReceiptUploadFile, prepareUploadFile } from "../../lib/compressUploadFile";
+import { createClientSubmissionId } from "../../lib/collectionSubmission";
 import { isNativeMobilePlatform, shareTextAndFilesOnWhatsapp, shareTextOnWhatsapp, toWhatsappShareFile } from "../../lib/whatsappShare";
 import { formatAvgDaysToPayWhatsappLines, resolveLocalAvgDaysToPay } from "../../lib/avgDaysWhatsapp";
 import { formatVisitDistanceWhatsappLines, loadVisitDistanceMetrics } from "../../lib/visitDistanceWhatsapp";
@@ -2028,7 +2029,9 @@ export default function PaymentCollectionsView({ view = "due" }) {
         },
       );
 
+      const clientSubmissionId = createClientSubmissionId();
       const formData = new FormData();
+      formData.append("clientSubmissionId", clientSubmissionId);
       formData.append("customerCode", row.customer_code);
       formData.append("customerName", row.customer_name || "");
       formData.append("paymentStatus", paymentStatus);
@@ -2085,6 +2088,7 @@ export default function PaymentCollectionsView({ view = "due" }) {
         metadata: {
           type: "collection_visit",
           customerCode: row.customer_code,
+          clientSubmissionId,
         },
         // Always save on-device first (including Funds Received PDF/photo). Sync
         // re-resolves Android MIME on upload so queued attachments do not stick.

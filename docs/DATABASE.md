@@ -118,7 +118,7 @@ Created in `20260816000000_add_collection_tables.sql`. A second migration `20260
 
 `invoices`: bigint identity `id` (not uuid), unique `invoice_number`, `customer_code` FK, `salesman_code`, `due_date`, `pending_amount`, `ref_no`.
 
-`collection_visits`: bigint identity `id`, `customer_code`, `visit_outcome`, `payment_status`, `amount_received`, `receipt_mode`, `next_visit_at`, `remark_arabic`, `remark_english`, `non_payment_reason`, `payment_copy_url`, `receipt_copy_url`, `created_by`, `saved_at`. Later columns: `latitude`, `longitude`, `gps_accuracy_meters`, `summary_text`, `queue_priority`, `probability_score`, `probability_label`, `visit_number_for_day`.
+`collection_visits`: bigint identity `id`, `customer_code`, `visit_outcome`, `payment_status`, `amount_received`, `receipt_mode`, `next_visit_at`, `remark_arabic`, `remark_english`, `non_payment_reason`, `payment_copy_url`, `receipt_copy_url`, `created_by`, `saved_at`. Later columns: `latitude`, `longitude`, `gps_accuracy_meters`, `summary_text`, `queue_priority`, `probability_score`, `probability_label`, `visit_number_for_day`, nullable unique `client_submission_id` (UUID; offline replay key, partial unique index `collection_visits_client_submission_id_key`, migration `20261002120000_collection_visit_client_submission_id.sql`).
 
 `legal_transfers`: PK `customer_code`, `is_transferred`, `transferred_at`, `transferred_by`, `note`.
 

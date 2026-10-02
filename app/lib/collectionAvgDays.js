@@ -2,6 +2,7 @@ import { buildPaymentBehavior } from "./paymentBehavior.js";
 import {
   customerAccountCodesMatch,
   resolveCustomerAccountCode,
+  resolveInvoiceDays,
   toNumber,
 } from "./outstanding.js";
 
@@ -195,7 +196,10 @@ export function attachAvgDaysToPayToRecords(records, {
   return (records || []).map((record) => {
     const code = record?.customer_code;
     const invoices = Array.isArray(record?.invoices) ? record.invoices : [];
-    const effectiveInvoices = invoices.length > 0
+    const hasUsableInvoiceAge = invoices.some(
+      (invoice) => resolveInvoiceDays(invoice, todayIso) > 0,
+    );
+    const effectiveInvoices = hasUsableInvoiceAge
       ? invoices
       : synthesizeInvoicesFromOutstandingBuckets(record, todayIso);
     const totalOutstanding = effectiveInvoices.reduce(

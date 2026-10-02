@@ -61,6 +61,19 @@ test("attachAvgDaysToPayToRecords fills avg_days_to_pay and last_receipt_date", 
   assert.ok(row.avg_days_to_pay_6m > 0);
 });
 
+test("attachAvgDaysToPayToRecords falls back to aging buckets when invoice age is missing", () => {
+  const [row] = attachAvgDaysToPayToRecords([{
+    customer_code: "1163C",
+    invoices: [{ pending_amount: 853.7 }],
+    outstanding_above_120: 853.7,
+  }], {
+    todayIso: "2026-10-01",
+  });
+
+  assert.equal(row.avg_days_to_pay, 135);
+  assert.equal(row.avg_days_to_pay_6m, 135);
+});
+
 test("attachAvgDaysToPayToRecords derives avg days from open outstanding buckets when never paid", () => {
   const [row] = attachAvgDaysToPayToRecords([{
     customer_code: "1009",

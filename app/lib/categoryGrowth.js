@@ -86,6 +86,7 @@ export function emptyItemGrowthFilters() {
 export function emptyGrowthFilters() {
   return {
     groupBy: DEFAULT_GROWTH_GROUP_BY,
+    itemNameContains: "",
     dateFrom: "",
     dateTo: "",
     amountMin: "",
@@ -109,6 +110,7 @@ export function normalizeGrowthFilters(input = {}) {
 
   return {
     groupBy,
+    itemNameContains: String(source.itemNameContains || "").trim().toLowerCase(),
     dateFrom: salesDateKey(source.dateFrom),
     dateTo: salesDateKey(source.dateTo),
     amountMin: optionalNumber(source.amountMin),
@@ -121,6 +123,7 @@ export function normalizeGrowthFilters(input = {}) {
 
 export function hasActiveGrowthFilters(input = {}) {
   const filters = normalizeGrowthFilters(input);
+  if (filters.itemNameContains) return true;
   if (filters.dateFrom || filters.dateTo) return true;
   if (filters.amountMin != null || filters.amountMax != null) return true;
   if (filters.quantityMin != null || filters.quantityMax != null) return true;
@@ -133,6 +136,7 @@ function selectedValueSet(values) {
 
 export function rowMatchesGrowthFilters(row = {}, input = {}) {
   const filters = input?.values ? input : normalizeGrowthFilters(input);
+  if (filters.itemNameContains && !String(row.item_name || "").toLowerCase().includes(filters.itemNameContains)) return false;
   const dateKey = salesDateKey(row.transaction_date);
   if (filters.dateFrom && (!dateKey || dateKey < filters.dateFrom)) return false;
   if (filters.dateTo && (!dateKey || dateKey > filters.dateTo)) return false;

@@ -35,6 +35,11 @@ const TEXT = {
   loading: { en: "Loading business dashboard...", ar: "جاري تحميل لوحة الأعمال..." },
   overview: { en: "Dashboard", ar: "اللوحة" },
   categoryGrowth: { en: "Category growth", ar: "نمو الفئات" },
+  madiba: { en: "MADIBA brand", ar: "علامة مديبا" },
+  madibaCategories: { en: "Categories", ar: "الفئات" },
+  madibaItems: { en: "MADIBA items", ar: "أصناف مديبا" },
+  madibaHint: { en: "Items with MADIBA in their sales item name, grouped by their imported category. Sales and gross profit follow the selected period.", ar: "الأصناف التي تحتوي أسماؤها على MADIBA في ملف المبيعات، مجمعة حسب الفئة المستوردة. المبيعات والربح حسب الفترة المختارة." },
+  madibaEmpty: { en: "No MADIBA item sales match this period and filters.", ar: "لا توجد مبيعات لأصناف مديبا تطابق الفترة والتصفية." },
   customerGrowth: { en: "Customer growth", ar: "نمو العملاء" },
   itemGrowth: { en: "Item growth", ar: "نمو الأصناف" },
   salesmanMom: { en: "Salesman MoM", ar: "المندوب شهرياً" },
@@ -92,6 +97,10 @@ export default function BusinessDashboardPage() {
   const [growthCatalogs, setGrowthCatalogs] = useState({});
   const [growthSearch, setGrowthSearch] = useState("");
   const [growthStatusFilter, setGrowthStatusFilter] = useState([]);
+  const [brandDraft, setBrandDraft] = useState(() => ({ ...emptyGrowthFilters(), itemNameContains: "MADIBA" }));
+  const [brandApplied, setBrandApplied] = useState(() => ({ ...emptyGrowthFilters(), itemNameContains: "MADIBA" }));
+  const [brandSearch, setBrandSearch] = useState("");
+  const [brandStatusFilter, setBrandStatusFilter] = useState([]);
   const [customerLoading, setCustomerLoading] = useState(true);
   const [customerReport, setCustomerReport] = useState(null);
   const [customerDraft, setCustomerDraft] = useState(() => emptyCustomerGrowthFilters());
@@ -145,6 +154,7 @@ export default function BusinessDashboardPage() {
   useEffect(() => {
     if (!reportFocus || view === "overview") return;
     if (view === "category-growth" && growthLoading) return;
+    if (view === "madiba" && growthLoading) return;
     if (view === "customer-growth" && customerLoading) return;
     if (view === "item-growth" && itemLoading) return;
     if (view === "salesman-mom" && salesmanLoading) return;
@@ -159,6 +169,8 @@ export default function BusinessDashboardPage() {
     if (reportPeriod === "custom" && (!periodRange.dateFrom || !periodRange.dateTo)) return;
     setGrowthDraft((current) => applyBiReportPeriod(current, periodRange));
     setGrowthApplied((current) => applyBiReportPeriod(current, periodRange));
+    setBrandDraft((current) => applyBiReportPeriod(current, periodRange));
+    setBrandApplied((current) => applyBiReportPeriod(current, periodRange));
     setCustomerDraft((current) => applyBiReportPeriod(current, periodRange));
     setCustomerApplied((current) => applyBiReportPeriod({ ...current, groupBy: "customer" }, periodRange));
     setItemDraft((current) => applyBiReportPeriod(current, periodRange));
@@ -265,7 +277,7 @@ export default function BusinessDashboardPage() {
               Authorization: `Bearer ${session.access_token}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ filters: growthApplied }),
+            body: JSON.stringify({ filters: view === "madiba" ? { ...brandApplied, itemNameContains: "MADIBA" } : growthApplied }),
           },
           60000,
         );
@@ -287,7 +299,7 @@ export default function BusinessDashboardPage() {
       }
     }
 
-    if (view !== "category-growth" && view !== "overview") {
+    if (view !== "category-growth" && view !== "madiba" && view !== "overview") {
       stopSafetyTimer();
       setGrowthLoading(false);
       return () => {
@@ -302,7 +314,7 @@ export default function BusinessDashboardPage() {
       cancelled = true;
       stopSafetyTimer();
     };
-  }, [view, growthApplied]);
+  }, [view, growthApplied, brandApplied]);
 
   useEffect(() => {
     let cancelled = false;
@@ -580,6 +592,9 @@ export default function BusinessDashboardPage() {
               >
                 {t("categoryGrowth")}
               </button>
+              <button type="button" role="tab" aria-selected={view === "madiba"} className={`moduleBiTab${view === "madiba" ? " isActive" : ""}`} onClick={() => setView("madiba")}>
+                {t("madiba")}
+              </button>
               <button
                 type="button"
                 role="tab"
@@ -619,7 +634,7 @@ export default function BusinessDashboardPage() {
             </div>
           </section>
 
-          {view === "overview" || view === "category-growth" || view === "customer-growth" || view === "item-growth" || view === "salesman-mom" ? (
+          {view === "overview" || view === "category-growth" || view === "madiba" || view === "customer-growth" || view === "item-growth" || view === "salesman-mom" ? (
             <section className="moduleSection">
               <div className="moduleBiMeasureBar">
                 <span>{t("period")}</span>
@@ -728,6 +743,45 @@ export default function BusinessDashboardPage() {
                 setGrowthStatusFilter([]);
               }}
             />
+          ) : null}
+
+          {view === "madiba" ? (
+            <>
+              <section className="moduleSection">
+                <div className="moduleSectionHeader"><h2>{t("madiba")}</h2></div>
+                <p className="moduleHint">{t("madibaHint")}</p>
+                <div className="moduleBiTabs" role="group" aria-label={t("madiba")}>
+                  <button type="button" className={`moduleBiTab${brandDraft.groupBy === "category" ? " isActive" : ""}`} onClick={() => { setBrandDraft((current) => ({ ...current, groupBy: "category" })); setBrandApplied((current) => ({ ...current, groupBy: "category" })); }}>{t("madibaCategories")}</button>
+                  <button type="button" className={`moduleBiTab${brandDraft.groupBy === "item" ? " isActive" : ""}`} onClick={() => { setBrandDraft((current) => ({ ...current, groupBy: "item" })); setBrandApplied((current) => ({ ...current, groupBy: "item" })); }}>{t("madibaItems")}</button>
+                </div>
+              </section>
+              <CategoryGrowthReport
+                language={language}
+                loading={growthLoading}
+                measure={amountMeasure}
+                title={`${t("madiba")} · ${brandApplied.groupBy === "item" ? t("madibaItems") : t("madibaCategories")} · ${amountMeasure === "profit" ? t("profit") : t("sales")}`}
+                emptyMessage={t("madibaEmpty")}
+                report={visibleGrowthReport}
+                draft={brandDraft}
+                catalogs={growthCatalogs}
+                applied={brandApplied}
+                search={brandSearch}
+                statusFilter={brandStatusFilter}
+                lockGroupBy={brandApplied.groupBy}
+                onSearchChange={setBrandSearch}
+                onStatusFilterChange={setBrandStatusFilter}
+                onDraftChange={setBrandDraft}
+                onGroupByChange={() => {}}
+                onApply={() => setBrandApplied({ ...brandDraft, itemNameContains: "MADIBA" })}
+                onClear={() => {
+                  const empty = { ...applyBiReportPeriod(emptyGrowthFilters(), periodRange), groupBy: brandApplied.groupBy, itemNameContains: "MADIBA" };
+                  setBrandDraft(empty);
+                  setBrandApplied(empty);
+                  setBrandSearch("");
+                  setBrandStatusFilter([]);
+                }}
+              />
+            </>
           ) : null}
 
           {view === "customer-growth" ? (

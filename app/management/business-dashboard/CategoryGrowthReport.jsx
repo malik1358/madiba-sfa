@@ -345,6 +345,8 @@ export default function CategoryGrowthReport({
   onApply,
   onClear,
   lockGroupBy = "",
+  title = "",
+  emptyMessage = "",
 }) {
   const amountMeasure = measure === "profit" || report?.measure === "profit" ? "profit" : "sales";
   const t = translateForMeasure(language, TEXT, amountMeasure);
@@ -447,7 +449,7 @@ export default function CategoryGrowthReport({
     return (
       <>
         {filters}
-        <div className="moduleHint">{t("empty")}</div>
+        <div className="moduleHint">{emptyMessage || t("empty")}</div>
       </>
     );
   }
@@ -457,7 +459,7 @@ export default function CategoryGrowthReport({
       {filters}
       <section id={reportAnchor} className="moduleSection">
         <div className="moduleSectionHeader">
-          <h2>{heading("summary")}</h2>
+          <h2>{title || heading("summary")}</h2>
         </div>
         <p className="moduleHint">{t("summaryHint")}</p>
         {report.meta?.preparedAt ? (

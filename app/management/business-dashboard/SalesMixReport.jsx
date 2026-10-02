@@ -1,7 +1,7 @@
 "use client";
 
 import { translate } from "../../lib/appLanguage";
-import { formatMoneyAmount } from "../../lib/categoryGrowth";
+import { formatMoneyAmount, previousMonthKey } from "../../lib/categoryGrowth";
 import { GrowthChartPanel, GrowthTrendChart } from "./GrowthCharts";
 import GrowthPeriodGrid from "./GrowthPeriodGrid";
 
@@ -59,7 +59,11 @@ function MixSection({ language, title, entries, monthly, periods, currentMonth, 
   }));
   const rows = entries.map(([field, label]) => ({
     label: t(label),
-    monthValues: Object.fromEntries(periods.map((month) => [month, Number(monthly?.[month]?.[field] || 0)])),
+    monthValues: Object.fromEntries(
+      [...(periods.length ? [previousMonthKey(periods[0])] : []), ...periods]
+        .filter(Boolean)
+        .map((month) => [month, Number(monthly?.[month]?.[field] || 0)]),
+    ),
   }));
 
   return (
@@ -83,6 +87,7 @@ function MixSection({ language, title, entries, monthly, periods, currentMonth, 
         periods={periods}
         currentPeriod={currentMonth}
         periodLabel={(month) => monthLabel(month, currentMonth, language)}
+        previousKeyOf={(month, index, allPeriods) => (index > 0 ? allPeriods[index - 1] : previousMonthKey(month))}
         totalLabel={t("total")}
         rowKeyOf={(row) => row.label}
       />

@@ -97,6 +97,7 @@ test("serialized cube round-trips compact keys", () => {
   assert.equal(restored.facts.reduce((sum, row) => sum + row.local_sales_amount, 0), 40);
   assert.equal(restored.facts.reduce((sum, row) => sum + row.import_sales_amount, 0), 60);
   assert.equal(restored.facts.reduce((sum, row) => sum + row.unclassified_origin_sales_amount, 0), 0);
+  assert.equal(restored.facts.reduce((sum, row) => sum + row.sales_adjustments_amount, 0), -15);
 });
 
 test("cube facts produce the same yearly totals as raw invoice lines", () => {
@@ -154,6 +155,7 @@ test("cube rebuilds when it is older than the last sales upload or missing live 
       local_sales_amount: 0,
       import_sales_amount: 0,
       unclassified_origin_sales_amount: 100,
+      sales_adjustments_amount: 0,
     }],
   }, { liveHasProfit: true, lastImportAt: "2026-09-12T08:04:27.376Z" }), false);
 });

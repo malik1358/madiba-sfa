@@ -154,6 +154,7 @@ async function writeCubeToTable(admin, facts) {
       local_sales_amount,
       import_sales_amount,
       unclassified_origin_sales_amount,
+      sales_adjustments_amount,
       ...fact
     }) => fact);
     const { error } = await admin.from(SALES_BI_TABLE).insert(tableChunk);

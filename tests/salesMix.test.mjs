@@ -27,6 +27,16 @@ test("sales mix groups cash, credit, local, and import invoices while excluding 
   assert.equal(report.totals.local_sales_amount, 100);
   assert.equal(report.totals.import_sales_amount, 280);
   assert.equal(report.totals.unclassified_origin_sales_amount, 50);
+  assert.equal(report.totals.sales_adjustments_amount, -30);
+  assert.equal(report.totals.gross_invoice_sales, 430);
+  assert.equal(report.totals.net_sales, 400);
+  assert.equal(report.quarters[0], "2026-Q1");
+  assert.equal(report.quarterly["2026-Q1"].cash_sales_amount, 180);
+  assert.equal(report.quarterly["2026-Q1"].credit_sales_amount, 250);
+  assert.equal(report.quarterly["2026-Q1"].sales_adjustments_amount, -30);
+  assert.equal(report.quarterlyShares.payment["2026-Q1"].cash_sales_amount, (180 / 430) * 100);
+  assert.equal(report.monthlyShares.payment["2026-01"].cash_sales_amount, (100 / 350) * 100);
+  assert.equal(report.monthlyShares.origin["2026-01"].unclassified_origin_sales_amount, (50 / 350) * 100);
 });
 
 test("sales mix respects the selected BI date range", () => {
@@ -39,6 +49,20 @@ test("sales mix respects the selected BI date range", () => {
   assert.deepEqual(report.months, ["2026-02"]);
   assert.equal(report.totals.cash_sales_amount, 80);
   assert.equal(report.totals.import_sales_amount, 80);
+});
+
+test("September net sales reconcile positive and negative credit-note rows", () => {
+  const report = buildSalesMixReport([
+    { transaction_date: "2026-09-02", voucher_number: "RC/900", local_import: "Local", sales_amount: 120 },
+    { transaction_date: "2026-09-12", voucher_number: "NFD/901", local_import: "Import", sales_amount: 80 },
+    { transaction_date: "2026-09-15", voucher_number: "CN/902", voucher_type: "Credit Note", local_import: "Local", sales_amount: 25 },
+    { transaction_date: "2026-09-19", voucher_number: "SR/903", sales_amount: -10 },
+  ], emptyGrowthFilters());
+
+  assert.equal(report.monthly["2026-09"].cash_sales_amount, 120);
+  assert.equal(report.monthly["2026-09"].credit_sales_amount, 80);
+  assert.equal(report.monthly["2026-09"].sales_adjustments_amount, -35);
+  assert.equal(report.totals.net_sales, 165);
 });
 
 test("sales mix reads precomputed measures from prepared monthly cube facts", () => {
@@ -54,4 +78,6 @@ test("sales mix reads precomputed measures from prepared monthly cube facts", ()
   assert.equal(report.totals.local_sales_amount, 100);
   assert.equal(report.totals.import_sales_amount, 280);
   assert.equal(report.totals.unclassified_origin_sales_amount, 50);
+  assert.equal(report.totals.sales_adjustments_amount, -30);
+  assert.equal(report.totals.net_sales, 400);
 });

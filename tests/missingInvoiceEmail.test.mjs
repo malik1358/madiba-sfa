@@ -16,6 +16,7 @@ import {
   isTestCustomerName,
   isTestCustomerOrder,
   getMissingInvoiceEmailMidnightKsaDate,
+  isMissingInvoiceEmailOfficeHoliday,
   missingInvoiceCreatedFromIso,
   wasMissingInvoiceEmailSentRecently,
   resolveMissingInvoiceEmailCc,
@@ -67,6 +68,29 @@ test("missing invoice midnight digest is scheduled by KSA calendar date", () => 
   assert.equal(getMissingInvoiceEmailMidnightKsaDate(new Date("2026-09-29T21:00:00.000Z")), "2026-09-30");
   assert.equal(getMissingInvoiceEmailMidnightKsaDate(new Date("2026-09-29T21:14:00.000Z")), "2026-09-30");
   assert.equal(getMissingInvoiceEmailMidnightKsaDate(new Date("2026-09-29T21:15:00.000Z")), null);
+});
+
+test("missing invoice email is suppressed for the India Friday holiday", async () => {
+  const friday = new Date("2026-10-02T10:00:00.000Z");
+  assert.equal(isMissingInvoiceEmailOfficeHoliday(friday), true);
+  assert.equal(isMissingInvoiceEmailOfficeHoliday(new Date("2026-10-03T10:00:00.000Z")), false);
+
+  const result = await runMissingInvoiceEmailCycle({}, {
+    now: friday,
+    env: { SMTP_HOST: "smtp.example.com", SMTP_FROM: "sfa@madiba.com" },
+    syncVault: async () => {
+      throw new Error("should not sync on the holiday");
+    },
+    loadOrders: async () => {
+      throw new Error("should not load orders on the holiday");
+    },
+    send: async () => {
+      throw new Error("should not send on the holiday");
+    },
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "office_holiday");
 });
 
 test("saveLastMissingInvoiceEmailSentAt persists the KSA midnight date", async () => {

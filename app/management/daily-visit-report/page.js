@@ -858,17 +858,17 @@ export default function DailyVisitReportPage() {
                         <tr>
                           <td>{t("newCustomerOrders")}</td>
                           <td>{entryUser.activitySplit.newCustomerOrderCount}</td>
-                          <td>{formatSplitMoney(entryUser.activitySplit.newCustomerOrderValue)} SAR</td>
+                          <td>{formatSplitMoney(entryUser.activitySplit.newCustomerOrderValue)} ﷼</td>
                         </tr>
                         <tr>
                           <td>{t("repeatCustomerOrders")}</td>
                           <td>{entryUser.activitySplit.repeatCustomerOrderCount}</td>
-                          <td>{formatSplitMoney(entryUser.activitySplit.repeatCustomerOrderValue)} SAR</td>
+                          <td>{formatSplitMoney(entryUser.activitySplit.repeatCustomerOrderValue)} ﷼</td>
                         </tr>
                         <tr>
                           <td>{t("collectionsSplit")}</td>
                           <td>{entryUser.activitySplit.collectionCount}</td>
-                          <td>{formatSplitMoney(entryUser.activitySplit.collectionValue)} SAR</td>
+                          <td>{formatSplitMoney(entryUser.activitySplit.collectionValue)} ﷼</td>
                         </tr>
                         <tr>
                           <td>{t("collectionVisitsWithoutPayment")}</td>

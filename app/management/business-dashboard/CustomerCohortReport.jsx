@@ -16,6 +16,7 @@ const TEXT = {
   period: { en: "Cohort period", ar: "فترة اكتساب العملاء" },
   firstInvoiceMonth: { en: "First invoice month", ar: "شهر أول فاتورة" },
   firstInvoiceBimonth: { en: "First invoice bimonth", ar: "فترة أول فاتورة لشهرين" },
+  twoMonthPeriod: { en: "2-month period", ar: "فترة شهرين" },
   firstInvoice: { en: "First invoice quarter", ar: "ربع أول فاتورة" },
   cohortSize: { en: "Customers acquired", ar: "العملاء المكتسبون" },
   total: { en: "Total customers", ar: "إجمالي العملاء" },
@@ -55,7 +56,7 @@ export default function CustomerCohortReport({ report, loading, language }) {
   function valueDisplay(count, value) {
     const customers = Number(count || 0).toLocaleString("en-SA");
     const amount = Number(value || 0).toLocaleString(language === "ar" ? "ar-SA" : "en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    return `${customers} · SAR ${amount}`;
+    return `${customers} · ${amount} ﷼`;
   }
 
   function periodLabel(value, current = "") {
@@ -64,7 +65,7 @@ export default function CustomerCohortReport({ report, loading, language }) {
       if (!match) return value;
       const startMonth = (Number(match[2]) - 1) * 2 + 1;
       const formatMonth = (month) => new Date(Date.UTC(Number(match[1]), month - 1, 1)).toLocaleDateString(language === "ar" ? "ar-SA" : "en-GB", { month: "short", calendar: "gregory", timeZone: "Asia/Riyadh" });
-      return `${formatMonth(startMonth)}-${formatMonth(startMonth + 1)} ${match[1]}${value === current ? ` ${t("toDate")}` : ""}`;
+      return `${formatMonth(startMonth)}-${formatMonth(startMonth + 1)} ${match[1]} (${t("twoMonthPeriod")}${value === current ? `, ${t("toDate")}` : ""})`;
     }
     if (!monthly) return quarterLabel(value, current);
     const label = new Date(`${value}-01T00:00:00Z`).toLocaleDateString(language === "ar" ? "ar-SA" : "en-GB", { month: "short", year: "numeric", calendar: "gregory", timeZone: "Asia/Riyadh" });
@@ -110,7 +111,7 @@ export default function CustomerCohortReport({ report, loading, language }) {
                   const tone = count == null ? "" : count === 0 ? "moduleBiMonthCell--down" : previous == null || count >= previous ? "moduleBiMonthCell--up" : "moduleBiMonthCell--down";
                   const isNew = quarter === row.quarter;
                   const cellValue = mode === "values"
-                    ? count == null ? "-" : `${Number(count || 0).toLocaleString("en-SA")} · SAR ${Number(row.salesValues[quarter] || 0).toLocaleString(language === "ar" ? "ar-SA" : "en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    ? count == null ? "-" : `${Number(count || 0).toLocaleString("en-SA")} · ${Number(row.salesValues[quarter] || 0).toLocaleString(language === "ar" ? "ar-SA" : "en-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ﷼`
                     : formatCustomerCohortCell(count, row.customerCount, mode, { isNew, newLabel: t("new") });
                   const cellTitle = count == null ? undefined : isNew ? t("acquiredInPeriod") : `${count} / ${row.customerCount} (${(count / row.customerCount * 100).toFixed(1)}%)`;
                   return <td key={quarter} className={`${tone}${quarter === model.currentQuarter ? " moduleBiMonthCell--current" : ""}`} title={cellTitle}>{cellValue}</td>;

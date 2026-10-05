@@ -262,17 +262,17 @@ export const COLLECTION_DAY_SUMMARY_LABELS = {
   cameBack: "Came back to {city} and visited {count} customer(s){collections}",
   wentTo: " and then went to {city}",
   withoutCollection: " without any collection",
-  withCollectionSingle: " with collection only from 1 customer of {amount} SAR",
-  withCollectionMultiple: " with collection from {count} customers totalling {amount} SAR",
-  collectedAmount: " and collected {amount} SAR",
-  totalFooter: "Total {visits} visit(s), {collections} successful collection(s), {amount} SAR collected.",
-  totalFooterWithOrders: "Total {visits} visit(s), {collections} successful collection(s), {amount} SAR collected, {orders} order(s) totalling {orderAmount} SAR.",
+  withCollectionSingle: " with collection only from 1 customer of {amount} ﷼",
+  withCollectionMultiple: " with collection from {count} customers totalling {amount} ﷼",
+  collectedAmount: " and collected {amount} ﷼",
+  totalFooter: "Total {visits} visit(s), {collections} successful collection(s), {amount} ﷼ collected.",
+  totalFooterWithOrders: "Total {visits} visit(s), {collections} successful collection(s), {amount} ﷼ collected, {orders} order(s) totalling {orderAmount} ﷼.",
   noVisits: "No collection visits recorded for this day.",
-  ordersPosted: "Posted {count} order(s) totalling {amount} SAR.",
+  ordersPosted: "Posted {count} order(s) totalling {amount} ﷼.",
   noOrdersPosted: "No orders posted for this day.",
-  aggregateHeader: "{count} active user(s): {visits} visit(s), {collections} successful collection(s), {amount} SAR collected.",
+  aggregateHeader: "{count} active user(s): {visits} visit(s), {collections} successful collection(s), {amount} ﷼ collected.",
   visitedUniqueCustomers: "Visited {count} unique customer(s).",
-  collectionByCustomer: "{customer}: {amount} SAR collected.",
+  collectionByCustomer: "{customer}: {amount} ﷼ collected.",
   collectionByCustomerNone: "{customer}: no collection.",
 };
 
@@ -576,7 +576,7 @@ function describeOrders(orderStats, labels) {
   if (!orderStats.orderCount) {
     return labels.noOrdersPosted || "No orders posted for this day.";
   }
-  return fill(labels.ordersPosted || "Posted {count} order(s) totalling {amount} SAR.", {
+  return fill(labels.ordersPosted || "Posted {count} order(s) totalling {amount} ﷼.", {
     count: orderStats.orderCount,
     amount: formatMoney(orderStats.orderValue),
   });
@@ -601,7 +601,7 @@ function customerDisplayName(customer) {
 function describeCustomerCollection(customer, labels) {
   const amount = Number(customer?.amountCollected || 0);
   if (Number.isFinite(amount) && amount > 0) {
-    return fill(labels.collectionByCustomer || "{customer}: {amount} SAR collected.", {
+    return fill(labels.collectionByCustomer || "{customer}: {amount} ﷼ collected.", {
       customer: customerDisplayName(customer),
       amount: formatMoney(amount),
     });
@@ -730,7 +730,7 @@ export function buildAggregateCollectionDaySummary(collectorSummaries, labels = 
   });
 
   const lines = [
-    fill(labels.aggregateHeader || "{count} active user(s): {visits} visit(s), {collections} successful collection(s), {amount} SAR collected.", {
+    fill(labels.aggregateHeader || "{count} active user(s): {visits} visit(s), {collections} successful collection(s), {amount} ﷼ collected.", {
       count: stats.collectorCount,
       visits: stats.totalVisits,
       collections: stats.successfulCollections,

@@ -355,7 +355,7 @@ test("buildUserVisitReportEmail shows posted order values", () => {
 
   assert.match(message.html, /New-customer orders<\/td><td>3<\/td><td>15,380\.6/);
   assert.match(message.html, /<th>Outcome<\/th>/);
-  assert.match(message.html, /Order submitted<\/td>\s*<td>Order 5,380\.6 SAR/);
+  assert.match(message.html, /Order submitted<\/td>\s*<td>Order 5,380\.6 ﷼/);
 });
 
 test("buildTeamVisitReportEmail consolidates team target vs achievement", () => {

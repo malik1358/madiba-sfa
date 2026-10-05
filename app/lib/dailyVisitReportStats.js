@@ -352,8 +352,8 @@ export function formatVisitEntryOutcome(entry, language = "en") {
   if (type === "COLLECTION_VISIT") {
     if (Number.isFinite(collected) && collected > 0) {
       return isAr
-        ? `تم التحصيل ${formatSplitMoney(collected)} ر.س`
-        : `Collected ${formatSplitMoney(collected)} SAR`;
+        ? `تم التحصيل ${formatSplitMoney(collected)} ﷼`
+        : `Collected ${formatSplitMoney(collected)} ﷼`;
     }
     return collectionOutcomeLabel(outcome, language) || "-";
   }
@@ -361,8 +361,8 @@ export function formatVisitEntryOutcome(entry, language = "en") {
   if (type === "ORDER_SUBMITTED") {
     if (Number.isFinite(order) && order > 0) {
       return isAr
-        ? `طلب ${formatSplitMoney(order)} ر.س`
-        : `Order ${formatSplitMoney(order)} SAR`;
+        ? `طلب ${formatSplitMoney(order)} ﷼`
+        : `Order ${formatSplitMoney(order)} ﷼`;
     }
     return isAr ? "طلب مقدّم" : "Order submitted";
   }

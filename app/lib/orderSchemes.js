@@ -215,7 +215,7 @@ export function formatSchemeDetail(application) {
   if (!(amount > 0)) return "—";
   const names = (application?.schemeNames || []).filter(Boolean);
   const prefix = names.length ? `${names.join(", ")} · ` : "";
-  return `${prefix}${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SAR`;
+  return `${prefix}${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ﷼`;
 }
 
 export function describeOrderScheme(scheme) {
@@ -230,5 +230,5 @@ export function describeOrderScheme(scheme) {
   const cashRule = normalized.excludeCashDiscount
     ? " Does not combine with cash discount."
     : "";
-  return `On ${applyLabel}, if the order includes ${qualifier}, take ${normalized.unitDiscountSar} SAR off each discounted carton.${cashRule}`;
+  return `On ${applyLabel}, if the order includes ${qualifier}, take ${normalized.unitDiscountSar} ﷼ off each discounted carton.${cashRule}`;
 }

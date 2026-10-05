@@ -94,7 +94,10 @@ function reportFromRows(rows, { asOfDate, filters, extraMeta = {}, alignDates = 
   const profit = build("profit");
   return {
     ...sales,
-    ...(filters.groupBy === "customer" ? { customerCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate }) } : {}),
+    ...(filters.groupBy === "customer" ? {
+      customerCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate }),
+      customerMonthlyCohorts: buildCustomerCohortReport(rows, { filters: applied, asOfDate, period: "month" }),
+    } : {}),
     salesMix: buildSalesMixReport(rows, applied),
     measures: {
       sales: measureSlice(sales),

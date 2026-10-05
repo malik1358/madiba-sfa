@@ -8,6 +8,11 @@ import styles from "./CustomerCohortReport.module.css";
 
 const TEXT = {
   title: { en: "Quarterly customer retention", ar: "احتفاظ العملاء حسب الربع" },
+  monthlyTitle: { en: "Monthly customer retention", ar: "احتفاظ العملاء حسب الشهر" },
+  quarter: { en: "Quarter", ar: "الربع" },
+  month: { en: "Month", ar: "الشهر" },
+  period: { en: "Cohort period", ar: "فترة اكتساب العملاء" },
+  firstInvoiceMonth: { en: "First invoice month", ar: "شهر أول فاتورة" },
   firstInvoice: { en: "First invoice quarter", ar: "ربع أول فاتورة" },
   cohortSize: { en: "Customers acquired", ar: "العملاء المكتسبون" },
   total: { en: "Total customers", ar: "إجمالي العملاء" },
@@ -25,8 +30,10 @@ function quarterLabel(quarter, currentQuarter = "") {
 
 export default function CustomerCohortReport({ report, loading, language }) {
   const [mode, setMode] = useState("count");
+  const [period, setPeriod] = useState("quarter");
   const t = translate(language, TEXT);
-  const model = report?.customerCohorts;
+  const monthly = period === "month";
+  const model = monthly ? report?.customerMonthlyCohorts : report?.customerCohorts;
   if (loading) return <div className="moduleLoading">{t("loading")}</div>;
   if (!model) return <div className="moduleHint">{t("unavailable")}</div>;
   if (!model.rows.length || !model.quarters.length) return <div className="moduleHint">{t("empty")}</div>;
@@ -35,17 +42,28 @@ export default function CustomerCohortReport({ report, loading, language }) {
     return formatCustomerCohortCell(count, size, mode);
   }
 
+  function periodLabel(value, current = "") {
+    if (!monthly) return quarterLabel(value, current);
+    const label = new Date(`${value}-01T00:00:00Z`).toLocaleDateString(language === "ar" ? "ar-SA" : "en-GB", { month: "short", year: "numeric", calendar: "gregory", timeZone: "Asia/Riyadh" });
+    return `${label}${value === current ? " MTD" : ""}`;
+  }
+
   return (
     <section id="bi-customer-cohorts" className="moduleSection">
       <div className={`moduleSectionHeader ${styles.header}`}>
-        <h2>{t("title")}</h2>
+        <h2>{t(monthly ? "monthlyTitle" : "title")}</h2>
+        <div className="moduleBiTabs" role="group" aria-label={t("period")}>
+          {["quarter", "month"].map((value) => (
+            <button key={value} type="button" className={`moduleBiTab${period === value ? " isActive" : ""}`} aria-pressed={period === value} onClick={() => setPeriod(value)}>{t(value)}</button>
+          ))}
+        </div>
         <div className="moduleBiTabs" role="group" aria-label={t("title")}>
           {["count", "retention"].map((value) => (
             <button key={value} type="button" className={`moduleBiTab${mode === value ? " isActive" : ""}`} aria-pressed={mode === value} onClick={() => setMode(value)}>{t(value)}</button>
           ))}
         </div>
       </div>
-      <ExportableTable filename={`customer-quarterly-${mode}`} sheetName="Customer retention" className="moduleTableWrap moduleBiTableWrap" enableColumnFilters={false}>
+      <ExportableTable filename={`customer-${period}-${mode}`} sheetName={monthly ? "Monthly retention" : "Quarterly retention"} className="moduleTableWrap moduleBiTableWrap" enableColumnFilters={false}>
         <table className={`moduleTable moduleBiTable ${styles.table}`} style={{ minWidth: 260 + model.quarters.length * 104 }}>
           <colgroup>
             <col style={{ width: 140 }} />
@@ -54,15 +72,15 @@ export default function CustomerCohortReport({ report, loading, language }) {
           </colgroup>
           <thead>
             <tr>
-              <th scope="col">{t("firstInvoice")}</th>
-              {model.quarters.map((quarter) => <th scope="col" key={quarter} className={quarter === model.currentQuarter ? "moduleBiMonthHead--current" : ""}>{quarterLabel(quarter, model.currentQuarter)}</th>)}
+              <th scope="col">{t(monthly ? "firstInvoiceMonth" : "firstInvoice")}</th>
+              {model.quarters.map((quarter) => <th scope="col" key={quarter} className={quarter === model.currentQuarter ? "moduleBiMonthHead--current" : ""}>{periodLabel(quarter, model.currentQuarter)}</th>)}
               <th scope="col" className="moduleBiTotalCol">{t("cohortSize")}</th>
             </tr>
           </thead>
           <tbody>
             {model.rows.map((row) => (
               <tr key={row.quarter}>
-                <th scope="row">{quarterLabel(row.quarter)}</th>
+                <th scope="row">{periodLabel(row.quarter)}</th>
                 {model.quarters.map((quarter, index) => {
                   const count = row.counts[quarter];
                   const previous = index > 0 ? row.counts[model.quarters[index - 1]] : null;

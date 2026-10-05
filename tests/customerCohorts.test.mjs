@@ -78,4 +78,26 @@ test("protected report loader attaches cohorts from live sales with full history
   assert.ok(selections.every((select) => select.includes("customer_code") && select.includes("voucher_number")));
   assert.equal(report.customerCohorts.rows[0].quarter, "2025-Q3");
   assert.equal(report.customerCohorts.rows[0].counts["2026-Q1"], 1);
+  assert.equal(report.customerMonthlyCohorts.rows[0].quarter, "2025-07");
+  assert.equal(report.customerMonthlyCohorts.rows[0].counts["2026-01"], 1);
+});
+
+test("partial-quarter date filters count the full displayed acquisition quarter", () => {
+  const report = buildCustomerCohortReport([
+    sale("A", "2025-04-02"), sale("B", "2025-05-02"), sale("A", "2026-01-02"),
+  ], { filters: { dateFrom: "2025-06-15", dateTo: "2026-01-15" }, asOfDate: "2026-02-01" });
+  assert.equal(report.rows[0].customerCount, 2);
+  assert.equal(report.rows[0].counts["2025-Q2"], 2);
+  assert.equal(report.rows[0].counts["2026-Q1"], 1);
+});
+
+test("monthly cohorts deduplicate buyers and keep acquisition months before date filtering", () => {
+  const report = buildCustomerCohortReport([
+    sale("A", "2025-07-02"), sale("A", "2025-07-03"), sale("A", "2025-09-02"),
+    sale("B", "2025-08-02"), sale("B", "2025-09-02", { voucher_type: "Credit Note" }),
+  ], { period: "month", filters: { dateFrom: "2025-07-15", dateTo: "2025-09-15" }, asOfDate: "2025-09-20" });
+  assert.deepEqual(report.quarters, ["2025-07", "2025-08", "2025-09"]);
+  assert.deepEqual(report.rows[0], { quarter: "2025-07", customerCount: 1, counts: { "2025-07": 1, "2025-08": 0, "2025-09": 1 } });
+  assert.deepEqual(report.rows[1].counts, { "2025-07": null, "2025-08": 1, "2025-09": 0 });
+  assert.equal(report.currentQuarter, "2025-09");
 });

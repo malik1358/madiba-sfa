@@ -347,7 +347,7 @@ export function buildBusinessAlerts(input = {}) {
       severity: "red",
       code: "HIGH_OVERDUE",
       title: "High overdue exposure",
-      detail: `Outstanding above 90 days is SAR ${formatMoney(outstandingAbove90)}. Prioritize collection follow-up.`,
+      detail: `Outstanding above 90 days is ﷼ ${formatMoney(outstandingAbove90)}. Prioritize collection follow-up.`,
       count: 1,
       actionHref: "/management/payment-collections",
       actionLabel: "Open collections",

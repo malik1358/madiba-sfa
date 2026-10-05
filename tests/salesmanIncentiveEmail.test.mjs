@@ -51,9 +51,9 @@ test("rows are label/value pairs laid out vertically", () => {
     assert.equal(typeof row.value, "string");
   });
 
-  assert.equal(valueFor(rows, "Collection incentive"), "112.50 SAR");
-  assert.equal(valueFor(rows, "Growth incentive"), "50.00 SAR");
-  assert.equal(valueFor(rows, "Total incentive"), "162.50 SAR");
+  assert.equal(valueFor(rows, "Collection incentive"), "112.50 ﷼");
+  assert.equal(valueFor(rows, "Growth incentive"), "50.00 ﷼");
+  assert.equal(valueFor(rows, "Total incentive"), "162.50 ﷼");
   assert.equal(rows.at(-1).total, true);
 });
 
@@ -67,7 +67,7 @@ test("only tiers that actually earned are listed, with their rate", () => {
   assert.ok(!shown.some((label) => label.startsWith("Electronics")));
 
   const office = rows.find((row) => row.label.startsWith("Office"));
-  assert.equal(office.value, "12.50 SAR");
+  assert.equal(office.value, "12.50 ﷼");
   assert.equal(office.note, "on 5,000.00 collected");
 });
 
@@ -77,7 +77,7 @@ test("late collections are called out as earning nothing", () => {
     OPTIONS,
   );
   const late = rows.find((row) => row.label === "Collected too late to earn");
-  assert.equal(late.value, "7,500.00 SAR");
+  assert.equal(late.value, "7,500.00 ﷼");
   assert.equal(late.warn, true);
 });
 
@@ -88,7 +88,7 @@ test("a first month says so instead of showing a best month", () => {
   );
   assert.equal(valueFor(rows, "Best month ever"), "First month — no growth incentive");
   assert.ok(!labels(rows).includes("Above best month"));
-  assert.equal(valueFor(rows, "Growth incentive"), "0.00 SAR");
+  assert.equal(valueFor(rows, "Growth incentive"), "0.00 ﷼");
 });
 
 test("a salesman with no settled collections still gets a readable section", () => {
@@ -108,10 +108,10 @@ test("section renders escaped html and a matching plain-text block", () => {
 
   assert.ok(section.html.includes("Your incentive"));
   assert.ok(section.html.includes("All amounts exclude VAT"));
-  assert.ok(section.html.includes("162.50 SAR"));
+  assert.ok(section.html.includes("162.50 ﷼"));
   assert.ok(!section.html.includes("<script>"));
   assert.ok(section.text.startsWith("Your incentive:"));
-  assert.ok(section.text.includes("- Total incentive: 162.50 SAR"));
+  assert.ok(section.text.includes("- Total incentive: 162.50 ﷼"));
 });
 
 test("no summary means no section", () => {

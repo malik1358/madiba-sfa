@@ -996,7 +996,7 @@ export function renderOrderPdfDocument(doc, snapshot, { analytics = null } = {})
   if (hasAnyDiscount) {
     const discountNotes = [
       discountVisibility.cash ? "Cash Disc is the sheet cash scheme." : "",
-      discountVisibility.value ? "Value Disc applies when the SKU value exceeds 5,000 SAR." : "",
+      discountVisibility.value ? "Value Disc applies when the SKU value exceeds 5,000 ﷼." : "",
       discountVisibility.scheme ? "Scheme is the mix carton offer on that line." : "",
     ].filter(Boolean);
     doc.text(discountNotes.join(" "), marginX, pageHeight - 24);

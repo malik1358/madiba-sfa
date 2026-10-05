@@ -9,7 +9,7 @@ export function excelFilterCellText(value) {
   return normalizeExcelFilterValue(value) || "-";
 }
 
-// "1,234.56", "+2,880", "-1,380.04", "12%", "SAR 900" — the formatted money/count cells.
+// "1,234.56", "+2,880", "-1,380.04", "12%", "900 ﷼" — the formatted money/count cells.
 const NUMERIC_OPTION = /^[^\d+-]*([+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|[+-]?\d+(?:\.\d+)?)\s*%?$/;
 
 /** Formatted amounts must sort by value; "4,749.34" is not text-greater than "4.11". */

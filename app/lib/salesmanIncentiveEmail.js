@@ -57,7 +57,7 @@ export function buildSalesmanIncentiveEmailRows(summary, { month = "", rates = {
       const rate = formatRate(rates?.[key]);
       rows.push({
         label: `${tierLabel(key)}${rate ? ` @ ${rate}` : ""}`,
-        value: `${formatMoney(summary.tier_incentive?.[key])} SAR`,
+        value: `${formatMoney(summary.tier_incentive?.[key])} ﷼`,
         note: `on ${formatMoney(summary.tier_base?.[key])} collected`,
       });
     });
@@ -68,7 +68,7 @@ export function buildSalesmanIncentiveEmailRows(summary, { month = "", rates = {
   if (Number(summary.tier_base?.late || 0) > 0) {
     rows.push({
       label: "Collected too late to earn",
-      value: `${formatMoney(summary.tier_base.late)} SAR`,
+      value: `${formatMoney(summary.tier_base.late)} ﷼`,
       note: "no incentive",
       warn: true,
     });
@@ -76,21 +76,21 @@ export function buildSalesmanIncentiveEmailRows(summary, { month = "", rates = {
 
   rows.push({
     label: "Collection incentive",
-    value: `${formatMoney(summary.collection_incentive)} SAR`,
+    value: `${formatMoney(summary.collection_incentive)} ﷼`,
     strong: true,
   });
 
-  rows.push({ label: "This month sales", value: `${formatMoney(summary.current_month_sales)} SAR` });
+  rows.push({ label: "This month sales", value: `${formatMoney(summary.current_month_sales)} ﷼` });
 
   if (summary.has_sales_history) {
     rows.push({
       label: "Best month ever",
-      value: `${formatMoney(summary.peak_month_sales)} SAR`,
+      value: `${formatMoney(summary.peak_month_sales)} ﷼`,
       note: summary.peak_month ? formatIncentiveMonthLabel(summary.peak_month) : "",
     });
     rows.push({
       label: "Above best month",
-      value: `${formatMoney(summary.sales_delta)} SAR`,
+      value: `${formatMoney(summary.sales_delta)} ﷼`,
       warn: Number(summary.sales_delta || 0) <= 0,
     });
   } else {
@@ -99,13 +99,13 @@ export function buildSalesmanIncentiveEmailRows(summary, { month = "", rates = {
 
   rows.push({
     label: "Growth incentive",
-    value: `${formatMoney(summary.growth_incentive)} SAR`,
+    value: `${formatMoney(summary.growth_incentive)} ﷼`,
     strong: true,
   });
 
   rows.push({
     label: "Total incentive",
-    value: `${formatMoney(summary.total_incentive)} SAR`,
+    value: `${formatMoney(summary.total_incentive)} ﷼`,
     total: true,
   });
 

@@ -207,7 +207,7 @@ test("entryDisplayAmount uses order value when collection amount is empty", () =
 test("formatVisitEntryOutcome shows collected amount, non-pay reason, or order value", () => {
   assert.equal(
     formatVisitEntryOutcome({ transactionType: "COLLECTION_VISIT", amountReceived: 11000, visitOutcome: "FUNDS_RECEIVED" }),
-    "Collected 11,000 SAR",
+    "Collected 11,000 ﷼",
   );
   assert.equal(
     formatVisitEntryOutcome({ transactionType: "COLLECTION_VISIT", amountReceived: 0, visitOutcome: "ASKED_COME_LATER" }),
@@ -215,7 +215,7 @@ test("formatVisitEntryOutcome shows collected amount, non-pay reason, or order v
   );
   assert.equal(
     formatVisitEntryOutcome({ transactionType: "ORDER_SUBMITTED", orderValue: 5380.6 }),
-    "Order 5,380.6 SAR",
+    "Order 5,380.6 ﷼",
   );
   assert.equal(
     formatVisitEntryOutcome({ transactionType: "VISIT_REPORT", visitOutcome: "STOCKS_AVAILABLE" }),

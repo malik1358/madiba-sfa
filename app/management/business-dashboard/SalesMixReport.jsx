@@ -24,6 +24,7 @@ const TEXT = {
   localImport: { en: "Local vs import", ar: "محلي مقابل مستورد" },
   cash: { en: "Cash sales", ar: "مبيعات نقدية" },
   credit: { en: "Credit sales", ar: "مبيعات آجلة" },
+  adjustmentsDeducted: { en: "Credit notes / returns (deducted)", ar: "إشعارات دائنة / مرتجعات (مخصومة)" },
   local: { en: "Local sales", ar: "مبيعات محلية" },
   import: { en: "Import sales", ar: "مبيعات مستوردة" },
   other: { en: "Other / unspecified origin", ar: "مصدر آخر / غير محدد" },
@@ -70,7 +71,7 @@ function shareLabel(amount, total, language) {
   return `${Math.round((amount / total) * 100)}% ${t("share")}`;
 }
 
-function MixSection({ language, title, entries, valuesByPeriod, periods, currentPeriod, periodLabel, previousKeyOf, filename, sheetName }) {
+function MixSection({ language, title, entries, adjustmentEntry, valuesByPeriod, periods, currentPeriod, periodLabel, previousKeyOf, filename, sheetName }) {
   const t = translate(language, TEXT);
   const chartSeries = entries.map(([field, label, color]) => ({
     key: field,
@@ -78,7 +79,8 @@ function MixSection({ language, title, entries, valuesByPeriod, periods, current
     color,
     values: periods.map((period) => Number(valuesByPeriod?.[period]?.[field] || 0)),
   }));
-  const rows = entries.map(([field, label]) => ({
+  const tableEntries = adjustmentEntry ? [...entries, adjustmentEntry] : entries;
+  const rows = tableEntries.map(([field, label]) => ({
     label: t(label),
     monthValues: Object.fromEntries(
       [...(periods.length ? [previousKeyOf(periods[0], 0, periods)] : []), ...periods]
@@ -293,6 +295,7 @@ export default function SalesMixReport({ language = "en", loading = false, repor
         language={language}
         title={t("cashCredit")}
         entries={PAYMENT_SERIES}
+        adjustmentEntry={["sales_adjustments_amount", "adjustmentsDeducted"]}
         valuesByPeriod={mix.monthly}
         periods={periods}
         currentPeriod={currentMonth}
@@ -305,6 +308,7 @@ export default function SalesMixReport({ language = "en", loading = false, repor
         language={language}
         title={t("localImport")}
         entries={ORIGIN_SERIES}
+        adjustmentEntry={["sales_adjustments_amount", "adjustmentsDeducted"]}
         valuesByPeriod={mix.monthly}
         periods={periods}
         currentPeriod={currentMonth}
@@ -317,6 +321,7 @@ export default function SalesMixReport({ language = "en", loading = false, repor
         language={language}
         title={`${t("quarterly")} · ${t("cashCredit")}`}
         entries={PAYMENT_SERIES}
+        adjustmentEntry={["sales_adjustments_amount", "adjustmentsDeducted"]}
         valuesByPeriod={mix.quarterly}
         periods={quarters}
         currentPeriod={currentQuarter}
@@ -329,6 +334,7 @@ export default function SalesMixReport({ language = "en", loading = false, repor
         language={language}
         title={`${t("quarterly")} · ${t("localImport")}`}
         entries={ORIGIN_SERIES}
+        adjustmentEntry={["sales_adjustments_amount", "adjustmentsDeducted"]}
         valuesByPeriod={mix.quarterly}
         periods={quarters}
         currentPeriod={currentQuarter}

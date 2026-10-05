@@ -9,13 +9,19 @@ export function formatCustomerCohortCell(count, size, mode = "count", { isNew = 
   return size > 0 ? `${customers} (${(count / size * 100).toFixed(1)}%)` : `${customers} (N/A)`;
 }
 
-export function customerCohortRetentionTotal(cohorts = [], period = "") {
+export function customerCohortPeriodSummary(cohorts = [], period = "") {
   return (cohorts || []).reduce((total, cohort) => {
-    if (!(cohort.quarter < period)) return total;
-    total.count += Number(cohort.counts?.[period] || 0);
-    total.eligible += Number(cohort.customerCount || 0);
+    const buyers = Number(cohort.counts?.[period] || 0);
+    if (cohort.quarter < period) {
+      total.retained += buyers;
+      total.retainedEligible += Number(cohort.customerCount || 0);
+      total.total += buyers;
+    } else if (cohort.quarter === period) {
+      total.new += buyers;
+      total.total += buyers;
+    }
     return total;
-  }, { count: 0, eligible: 0 });
+  }, { retained: 0, retainedEligible: 0, new: 0, total: 0 });
 }
 
 function purchaseAmount(row) {

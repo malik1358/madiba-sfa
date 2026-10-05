@@ -3,7 +3,7 @@
 import { useState } from "react";
 import ExportableTable from "../../components/ExportableTable";
 import { translate } from "../../lib/appLanguage";
-import { customerCohortRetentionTotal, formatCustomerCohortCell } from "../../lib/customerCohorts";
+import { customerCohortPeriodSummary, formatCustomerCohortCell } from "../../lib/customerCohorts";
 import styles from "./CustomerCohortReport.module.css";
 
 const TEXT = {
@@ -24,7 +24,8 @@ const TEXT = {
   retention: { en: "Count + retention %", ar: "العدد + نسبة الاحتفاظ" },
   values: { en: "Count + sales value", ar: "العدد + قيمة المبيعات" },
   retainedCustomers: { en: "Retained customers", ar: "العملاء المستمرون" },
-  totalCustomersAndSales: { en: "Total customers / sales", ar: "إجمالي العملاء / المبيعات" },
+  totalCustomers: { en: "Total customers", ar: "إجمالي العملاء" },
+  customersAndSalesValue: { en: "Customers / sales value", ar: "العملاء / قيمة المبيعات" },
   new: { en: "New", ar: "جديد" },
   acquiredInPeriod: { en: "Customers acquired in this period", ar: "العملاء المكتسبون في هذه الفترة" },
   toDate: { en: "to date", ar: "حتى تاريخه" },
@@ -122,14 +123,21 @@ export default function CustomerCohortReport({ report, loading, language }) {
           </tbody>
           <tfoot>
             <tr className="moduleBiTotalRow">
-              <th scope="row">{t(mode === "values" ? "totalCustomersAndSales" : "retainedCustomers")}</th>
+              <th scope="row">{t(mode === "values" ? "customersAndSalesValue" : "retainedCustomers")}</th>
               {model.quarters.map((quarter) => {
-                const retained = customerCohortRetentionTotal(model.rows, quarter);
+                const summary = customerCohortPeriodSummary(model.rows, quarter);
                 const cellValue = mode === "values"
                   ? valueDisplay(model.totals[quarter], model.valueTotals[quarter])
-                  : display(retained.count, retained.eligible);
+                  : display(summary.retained, summary.retainedEligible);
                 return <td key={quarter} className={quarter === model.currentQuarter ? "moduleBiMonthCell--current" : ""}>{cellValue}</td>;
               })}
+              <td className="moduleBiTotalCol">{mode === "values" ? valueDisplay(model.customerCount, Object.values(model.valueTotals).reduce((sum, value) => sum + Number(value || 0), 0)) : "-"}</td>
+            </tr>
+            <tr className="moduleBiTotalRow">
+              <th scope="row">{t("totalCustomers")}</th>
+              {model.quarters.map((quarter) => (
+                <td key={quarter} className={quarter === model.currentQuarter ? "moduleBiMonthCell--current" : ""}>{customerCohortPeriodSummary(model.rows, quarter).total.toLocaleString("en-SA")}</td>
+              ))}
               <td className="moduleBiTotalCol">{model.customerCount.toLocaleString("en-SA")}</td>
             </tr>
           </tfoot>

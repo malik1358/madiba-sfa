@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCustomerCohortReport, customerCohortRetentionTotal, formatCustomerCohortCell } from "../app/lib/customerCohorts.js";
+import { buildCustomerCohortReport, customerCohortPeriodSummary, formatCustomerCohortCell } from "../app/lib/customerCohorts.js";
 import { loadCategoryGrowthReport } from "../app/lib/categoryGrowthServer.js";
 
 const sale = (code, date, extra = {}) => ({ customer_code: code, transaction_date: date, sales_amount: 100, ...extra });
@@ -21,8 +21,9 @@ test("retention footer excludes customers acquired in the current period", () =>
     { quarter: "2025-Q4", customerCount: 40, counts: { "2025-Q3": null, "2025-Q4": 40, "2026-Q1": 20 } },
     { quarter: "2026-Q1", customerCount: 30, counts: { "2025-Q3": null, "2025-Q4": null, "2026-Q1": 30 } },
   ];
-  assert.deepEqual(customerCohortRetentionTotal(cohorts, "2025-Q3"), { count: 0, eligible: 0 });
-  assert.deepEqual(customerCohortRetentionTotal(cohorts, "2026-Q1"), { count: 70, eligible: 140 });
+  assert.deepEqual(customerCohortPeriodSummary(cohorts, "2025-Q3"), { retained: 0, retainedEligible: 0, new: 100, total: 100 });
+  assert.deepEqual(customerCohortPeriodSummary(cohorts, "2026-Q1"), { retained: 70, retainedEligible: 140, new: 30, total: 100 });
+  assert.deepEqual(customerCohortPeriodSummary(cohorts, "2025-Q4"), { retained: 70, retainedEligible: 100, new: 40, total: 110 });
 });
 
 test("first invoice cohorts count distinct customers per purchase quarter, including gaps and returns", () => {
@@ -145,4 +146,6 @@ test("bimonthly cohorts aggregate Jan-Feb, Mar-Apr, and sales values", () => {
   });
   assert.deepEqual(report.rows[1].counts, { "2025-B1": null, "2025-B2": null, "2025-B3": 1 });
   assert.deepEqual(report.valueTotals, { "2025-B1": 350, "2025-B2": 105, "2025-B3": 300 });
+  assert.equal(customerCohortPeriodSummary(report.rows, "2025-B1").total, 2);
+  assert.equal(customerCohortPeriodSummary(report.rows, "2025-B3").total, 1);
 });

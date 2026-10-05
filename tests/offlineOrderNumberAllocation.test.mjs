@@ -64,3 +64,15 @@ test("online new orders request a server-aware next number before offline fallba
   assert.match(allocatorSource, /nextNumber=1/);
   assert.match(hookSource, /accessToken: session\.access_token/);
 });
+
+test("useOrder cannot reuse a stale draft across customers", () => {
+  const source = fs.readFileSync(
+    new URL("../app/management/customer-audit/hooks/useOrder.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /function orderContextKey\(selectedCustomer, editOrderId\)/);
+  assert.match(source, /draftContextKey === requestContextKey/);
+  assert.match(source, /let cancelled = false/);
+  assert.match(source, /cancelled = true/);
+  assert.match(source, /draftContextRef\.current === requestContextKey/);
+});

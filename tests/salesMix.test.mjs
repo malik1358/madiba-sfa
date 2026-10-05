@@ -76,7 +76,6 @@ test("September gross invoice sales reconcile to the net category total", () => 
   assert.equal(report.monthly["2026-09"].sales_adjustments_amount, -488453);
   assert.equal(report.monthly["2026-09"].cash_sales_amount + report.monthly["2026-09"].credit_sales_amount + report.monthly["2026-09"].sales_adjustments_amount, 2540947);
 });
-
 test("sales mix reads precomputed measures from prepared monthly cube facts", () => {
   const cube = createSalesBiCube();
   ingestSalesRowsIntoCube(cube, rows);

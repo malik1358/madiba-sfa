@@ -219,7 +219,6 @@ function SalesReconciliationSection({ language, title, periodHeading, periods, v
     </section>
   );
 }
-
 function MixCards({ language, mix }) {
   const t = translate(language, TEXT);
   const paymentTotal = Number(mix?.totals?.cash_sales_amount || 0) + Number(mix?.totals?.credit_sales_amount || 0);

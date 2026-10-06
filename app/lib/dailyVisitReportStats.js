@@ -153,7 +153,7 @@ export function attachAcceptedGpsUpdateMarkers(entries = []) {
 
 export function markVisitsWithAcceptedGpsHistory(entries = [], history = []) {
   const validUpdates = (Array.isArray(history) ? history : []).filter((update) => (
-    String(update?.source || "").trim().toLowerCase() === "visit"
+    ["visit", "salesman_accepted", "visit_accepted"].includes(String(update?.source || "").trim().toLowerCase())
     && hasGpsCoordinates(update)
     && hasGpsCoordinates({ latitude: update.previous_latitude, longitude: update.previous_longitude })
   ));

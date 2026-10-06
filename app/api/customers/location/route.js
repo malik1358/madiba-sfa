@@ -151,7 +151,11 @@ export async function PATCH(request) {
         salesman_name: profile.salesman_name,
         role: profile.role,
       },
-      source: CUSTOMER_GPS_SOURCE.visit,
+      source: body.locationUpdateAccepted === true
+        ? (String(profile.role || "").toLowerCase() === "salesman"
+          ? CUSTOMER_GPS_SOURCE.salesmanAccepted
+          : CUSTOMER_GPS_SOURCE.visitAccepted)
+        : CUSTOMER_GPS_SOURCE.visit,
       extraUpdate,
       selectColumns: CUSTOMER_LOCATION_SELECT,
     });

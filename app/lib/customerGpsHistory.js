@@ -6,6 +6,8 @@ export const CUSTOMER_GPS_SOURCE = {
   customerMaster: "customer_master",
   visit: "visit",
   excelImport: "excel_import",
+  salesmanAccepted: "salesman_accepted",
+  visitAccepted: "visit_accepted",
 };
 
 export const CUSTOMER_GPS_AUDIT_SELECT = "gps_updated_at,gps_updated_by,gps_updated_by_name,gps_update_source";
@@ -56,6 +58,8 @@ export function gpsSourceLabel(source) {
   if (value === CUSTOMER_GPS_SOURCE.customerMaster) return "Customer Master";
   if (value === CUSTOMER_GPS_SOURCE.visit) return "Visit GPS";
   if (value === CUSTOMER_GPS_SOURCE.excelImport) return "Excel import";
+  if (value === CUSTOMER_GPS_SOURCE.salesmanAccepted) return "Salesman accepted";
+  if (value === CUSTOMER_GPS_SOURCE.visitAccepted) return "GPS update accepted";
   if (value === "home_location_cleanup") return "Home location cleanup";
   return value || "Unknown";
 }

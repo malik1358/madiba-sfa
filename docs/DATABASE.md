@@ -65,6 +65,8 @@ RLS `customers_select` allows management, the current salesman, or the previous 
 
 `customer_gps_history`: `customer_code`, lat/long, previous lat/long, `source`, `updated_by`, `updated_by_name`, `created_at`.
 
+The GPS report/digest uses this existing history schema; no new migration is required. If absent, apply `supabase/migrations/20260831153000_customer_gps_history.sql` or the matching `sql/setup_customer_gps_history.sql` separately in Supabase. Explicit approval is stored in `source`: `salesman_accepted` for an authenticated salesman accepting a prompt, `visit_accepted` for other roles; automatic promotions remain `visit`. Legacy sources do not prove approval. Displacement and approval labels are computed, not new columns; KSA report/digest dates use server `created_at`, including offline sync.
+
 `customer_documents`: `customer_code` or `prospect_id`, `document_type`, `file_path`, `expiry_date`, `uploaded_by_salesman_code`, plus compliance columns `extracted_json`, `parsed_cr_number`, `parsed_vat_number`, `issue_date`, `link_status`, `link_message`, `original_file_name`.
 
 `prospects`: `prospect_code` unique, `salesman_code`, company and contact fields, lat/long, `potential` `SMALL|MEDIUM|LARGE`, `status` `PROSPECT|FOLLOW_UP|PENDING_APPROVAL|APPROVED|CONVERTED|REJECTED`, `converted_customer_code`, `created_by`.
@@ -182,6 +184,9 @@ Schemes and quantity limits are settings, not tables:
 | `missing_invoice_email_last_sent_at` | Email dedupe |
 | `daily_supplier_order_email_last_sent` | Email dedupe |
 | `outstanding_no_gps_email_last_sent` | Email dedupe |
+| `customer_gps_change_email:<date>` | Atomic daily GPS-digest claim: `sending` with `token`/`claimedAt`, then `sent` with `sentAt`/`changeCount` |
+
+GPS-digest claims are inserted atomically under the unique setting key; an existing claim or sent marker skips delivery. Completion and release compare both key and the owning claim value. Provider failure releases only that cycle's own claim; interruption or post-send marker failure leaves `sending` in place. Inspect provider delivery before any manual recovery; there is no force-send bypass. See `docs/DEPLOYMENT.md`.
 
 Do not create a new table for a small flag if the surrounding feature already uses one of these keys. Do not rename a key; clients and cron jobs compare the string exactly.
 

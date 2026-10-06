@@ -51,6 +51,7 @@ Source of truth: `app/lib/moduleAccess.js` (covered by `tests/moduleAccess.test.
 - GPS helpers: `shouldRequireTransactionGps` (false for invoice makers), `shouldRequireGpsAccessGate` (false for admin/manager), `shouldEnableBackgroundGps` (false for admin and invoice makers).
 - Invoice management: `canManageOrderInvoice` for invoice-maker, admin, manager.
 - Management report viewing: invoice makers can view the Reports group and collection reports, including cross-user data where the report API grants that scope. Report email sending and setup/configuration remain separately gated.
+- Exception: `customerGpsHistory` (`/management/customer-gps-history`) is admin/manager only, enforced by both module access and the GPS-history API.
 - Stock take: admin or `profiles.stock_take_access`.
 - Salesman visit plan for field roles depends on `NEXT_PUBLIC_SALESMAN_VISIT_PLAN_SALESMAN_ACCESS` (default enabled).
 - `myCollections` module flag is always `false`; `/management/my-collections` remains reachable via `canAccessPath` when payment collections are allowed.
@@ -67,6 +68,7 @@ Module access summary from `buildModuleAccess` (Y = true for that role group; co
 | collectionReport, receiptsNotInTally, userActivity, workingHours | Y | Y | | Y | Y | |
 | dailyVisitReport | Y | Y | Y | Y | Y | |
 | businessDashboard, outstandingNoGps | Y | Y | | | Y | |
+| customerGpsHistory | Y | Y | | | | |
 | customerMaster, customerBookShares, kpiTargets, schemes, orderQuantityControls | Y | Y | | | | |
 | salesmanHierarchy, upload | Y | Y | | | Y | |
 | salesmanVisitPlan | Y | Y* | Y* | | Y* | Y* |
@@ -105,6 +107,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/salesman-incentive` — monthly salesman incentive (collection speed + sales growth)
 - `/api/promoter-coverage` — authenticated report access; validates the selected product promoter and loads that promoter's team coverage, visit history, and monthly customer sales trend
 - `/api/admin/customers`, `.../export`, `.../locations`, `.../gps-history`
+- `/api/admin/customers/gps-history` retains the existing per-customer latest-50 history response; report mode adds `from`/`to` KSA date bounds, `page` (50 rows), optional exact normalized `customerCode`, and `acceptedOnly=true` (source `salesman_accepted`). Report dates default to the current KSA month through today. `app/lib/customerGpsReport.js` hydrates names and computes displacement/maps/explicit approval; exports use only the displayed page.
 - `/api/admin/salesmen-hierarchy`, `/api/admin/customer-book-shares`, `/api/admin/kpi-targets`
 - `/api/admin/schemes`, `/api/admin/order-quantity-controls`, `/api/admin/item-price-history`
 - `/api/admin/salesman-visit-plan`, `/api/admin/outstanding-no-gps`, `/api/admin/clean-dirty-customers`
@@ -122,6 +125,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `inactivity-push`, `auto-close-workdays`, `daily-visit-report-email`, `daily-salesman-resume-email`
 - `daily-supplier-order-email`, `outstanding-no-gps-email`, `missing-invoice-email`
 - `salesman-visit-plan-email`, `mobile-snapshot`
+- `customer-gps-change-email` - `app/lib/customerGpsChangeEmailServer.js` loads salesman-accepted changes for the previous completed KSA calendar day, sends via the existing mailer, and atomically claims each date in `system_settings` before delivery. See deployment recovery rules before clearing a claim.
 
 ## Authentication
 

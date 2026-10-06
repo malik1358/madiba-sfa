@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isMissingGpsAuditError } from "../../../../lib/customerGpsHistory.js";
+import { gpsHistoryQuery, hydrateGpsHistory } from "../../../../lib/customerGpsReport.js";
+import { getKsaDateString } from "../../../../lib/workdayActivity.js";
 
 export const runtime = "nodejs";
 
@@ -48,6 +50,24 @@ export async function GET(request) {
 
     const url = new URL(request.url);
     const customerCode = String(url.searchParams.get("customerCode") || "").trim().toUpperCase();
+    if (url.searchParams.has("from") || url.searchParams.has("to") || !customerCode) {
+      const today = getKsaDateString();
+      const from = url.searchParams.get("from") || `${today.slice(0, 7)}-01`;
+      const to = url.searchParams.get("to") || today;
+      const rawPage = Number(url.searchParams.get("page") || 1);
+      const page = Number.isSafeInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+      const limit = 50;
+      const result = await gpsHistoryQuery(admin, {
+        from, to, customerCode, count: true,
+        acceptedOnly: url.searchParams.get("acceptedOnly") === "true",
+      }).range((page - 1) * limit, page * limit - 1);
+      if (result.error && isMissingGpsAuditError(result.error)) {
+        return NextResponse.json({ success: true, history: [], pagination: { page: 1, limit, total: 0, totalPages: 1 }, migrationHint: "Apply sql/setup_customer_gps_history.sql in Supabase before GPS history can be recorded or reported." });
+      }
+      if (result.error) throw result.error;
+      const history = await hydrateGpsHistory(admin, result.data || []);
+      return NextResponse.json({ success: true, history, pagination: { page, limit, total: result.count || 0, totalPages: Math.max(1, Math.ceil((result.count || 0) / limit)) } });
+    }
     if (!customerCode) throw new Error("Customer code is required");
 
     const { data, error } = await admin

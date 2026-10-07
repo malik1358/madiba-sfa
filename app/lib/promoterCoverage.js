@@ -2,9 +2,29 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
-export function promoterCoverageSalesmanMatches(value, salesmanValues = []) {
-  const code = normalizeCode(value);
-  return Boolean(code) && salesmanValues.some((salesmanValue) => normalizeCode(salesmanValue) === code);
+export function promoterCoverageMonthKeys(fromMonth, toMonth) {
+  const from = String(fromMonth || "");
+  const to = String(toMonth || "");
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(from) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(to) || from > to) return [];
+
+  const [fromYear, fromNumber] = from.split("-").map(Number);
+  const [toYear, toNumber] = to.split("-").map(Number);
+  const count = (toYear - fromYear) * 12 + toNumber - fromNumber + 1;
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(Date.UTC(fromYear, fromNumber - 1 + index, 1));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
+export function promoterCoverageCustomerCodeVariants(value) {
+  const raw = String(value || "").trim();
+  const normalized = normalizeCode(raw);
+  return [...new Set([raw, normalized, normalized.toLowerCase()].filter(Boolean))];
+}
+
+export function filterPromoterCoverageSalesRows(salesRows = [], customerCodes = []) {
+  const teamCustomerCodes = new Set(customerCodes.map(normalizeCode).filter(Boolean));
+  return salesRows.filter((sale) => teamCustomerCodes.has(normalizeCode(sale.customer_code)));
 }
 
 function monthOf(value) {
@@ -71,6 +91,8 @@ export function buildPromoterCoverageReport({
         customerName: String(fallback.customer_name || fallback.customerName || "").trim(),
         teamSalesmanCode: String(fallback.current_salesman_code || fallback.salesman_code || fallback.teamSalesmanCode || "").trim(),
         monthSales: Object.fromEntries(months.map((month) => [month, 0])),
+        monthQuantity: Object.fromEntries(months.map((month) => [month, 0])),
+        monthSkuCodes: Object.fromEntries(months.map((month) => [month, new Set()])),
         visits: [],
       });
     }
@@ -88,6 +110,11 @@ export function buildPromoterCoverageReport({
     const month = monthOf(sale.transaction_date);
     if (!customer || !Object.hasOwn(customer.monthSales, month)) return;
     customer.monthSales[month] += Number(sale.net_sales_amount ?? sale.sales_amount ?? 0) || 0;
+    customer.monthQuantity[month] += Number(sale.net_quantity ?? sale.quantity ?? 0) || 0;
+    const itemCode = String(sale.item_code || "").trim().toUpperCase();
+    if (!sale.is_credit_note && Number(sale.quantity || 0) > 0 && itemCode) {
+      customer.monthSkuCodes[month].add(itemCode);
+    }
   });
 
   dedupeVisits(visits).forEach((visit) => {
@@ -97,11 +124,16 @@ export function buildPromoterCoverageReport({
 
   const rows = [...byCode.values()].map((customer) => {
     const orderedVisits = customer.visits.sort((left, right) => visitTimestamp(left.savedAt) - visitTimestamp(right.savedAt));
+    const quantityTrend = resolveSalesTrend(customer.monthQuantity, months);
+    const { monthSkuCodes, ...reportCustomer } = customer;
     return {
-      ...customer,
+      ...reportCustomer,
+      monthSkuCount: Object.fromEntries(months.map((month) => [month, monthSkuCodes[month].size])),
       visitCount: orderedVisits.length,
       lastVisitAt: orderedVisits.at(-1)?.savedAt || "",
       visitStatus: orderedVisits.length === 0 ? "not_visited" : orderedVisits.length > 1 ? "repeated" : "visited_once",
+      quantityTrend: quantityTrend.trend,
+      quantityChangePercent: quantityTrend.changePercent,
       ...resolveSalesTrend(customer.monthSales, months),
     };
   }).sort((left, right) => {
@@ -121,4 +153,9 @@ export function buildPromoterCoverageReport({
     decreasingCustomerCount: rows.filter((row) => row.trend === "decreasing").length,
     rows,
   };
+}
+
+export function promoterCoverageSalesmanMatches(value, salesmanValues = []) {
+  const code = normalizeCode(value);
+  return Boolean(code) && salesmanValues.some((salesmanValue) => normalizeCode(salesmanValue) === code);
 }

@@ -1,5 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildPromoterCoverageReport, promoterCoverageSalesmanMatches } from "../../lib/promoterCoverage.js";
+import {
+  buildPromoterCoverageReport,
+  filterPromoterCoverageSalesRows,
+  promoterCoverageCustomerCodeVariants,
+  promoterCoverageMonthKeys,
+  promoterCoverageSalesmanMatches,
+} from "../../lib/promoterCoverage.js";
 import { isCreditNoteTransaction } from "../../lib/paymentBehavior.js";
 import { OUTSTANDING_DATASET_KEY, resolveOutstandingCustomerOwnership } from "../../lib/outstanding.js";
 import { buildSalesmanScopeMatchers } from "../../lib/mutualSalesmanGroups.js";
@@ -60,12 +66,14 @@ async function loadCustomersForSalesmen(admin, salesmanCodes) {
 }
 
 async function loadSalesMembership(admin, salesmanCodes) {
-  return loadAllRows(
+  const identities = [...new Set(salesmanCodes.map((value) => String(value || "").trim()).filter(Boolean))];
+  const rowGroups = await Promise.all(identities.map((identity) => loadAllRows(
     () => admin.from("active_sales")
       .select("customer_code,customer_name,salesman_code,transaction_date")
-      .in("salesman_code", salesmanCodes),
+      .ilike("salesman_code", escapeIlikePattern(identity)),
     "transaction_date",
-  );
+  )));
+  return rowGroups.flat().filter((row) => promoterCoverageSalesmanMatches(row.salesman_code, identities));
 }
 
 async function loadOutstandingCustomerCodes(admin, teamProfiles) {
@@ -90,22 +98,30 @@ async function loadOutstandingCustomerCodes(admin, teamProfiles) {
   }
 }
 
-async function loadSalesTrendRows(admin, salesmanValues, firstMonth, currentMonth) {
-  const identities = [...new Set(salesmanValues.map((value) => String(value || "").trim()).filter(Boolean))];
-  const rowGroups = await Promise.all(identities.map((identity) => loadAllRows(
+async function loadSalesTrendRows(admin, customerCodes, fromMonth, toMonth) {
+  const queryCodes = [...new Set(customerCodes.flatMap(promoterCoverageCustomerCodeVariants))];
+  const codeBatches = [];
+  for (let index = 0; index < queryCodes.length; index += 200) {
+    codeBatches.push(queryCodes.slice(index, index + 200));
+  }
+  const rowGroups = await Promise.all(codeBatches.map((codes) => loadAllRows(
     () => admin.from("active_sales")
-      .select("customer_code,customer_name,salesman_code,transaction_date,voucher_number,voucher_type,reference,sales_amount,quantity")
-      .ilike("salesman_code", escapeIlikePattern(identity))
-      .gte("transaction_date", `${firstMonth}-01`)
-      .lt("transaction_date", `${currentMonth}-01`),
+      .select("customer_code,customer_name,salesman_code,transaction_date,voucher_number,voucher_type,reference,item_code,sales_amount,quantity")
+      .in("customer_code", codes)
+      .gte("transaction_date", `${fromMonth}-01`)
+      .lt("transaction_date", `${shiftMonth(toMonth, 1)}-01`),
     "transaction_date",
   )));
-  const rows = rowGroups.flat().filter((row) => promoterCoverageSalesmanMatches(row.salesman_code, identities));
+  const rows = filterPromoterCoverageSalesRows(rowGroups.flat(), customerCodes);
   return rows.map((row) => ({
     ...row,
+    is_credit_note: isCreditNoteTransaction(row),
     net_sales_amount: isCreditNoteTransaction(row)
       ? -Math.abs(Number(row.sales_amount || 0))
       : Number(row.sales_amount || 0),
+    net_quantity: isCreditNoteTransaction(row)
+      ? -Math.abs(Number(row.quantity || 0))
+      : Number(row.quantity || 0),
   }));
 }
 
@@ -232,12 +248,17 @@ export async function GET(request) {
     }
 
     const currentMonth = getKsaDateString().slice(0, 7);
-    const monthKeys = Array.from({ length: 6 }, (_, index) => shiftMonth(currentMonth, index - 6));
+    const params = new URL(request.url).searchParams;
+    const fromMonth = params.get("fromMonth") || shiftMonth(currentMonth, -6);
+    const toMonth = params.get("toMonth") || shiftMonth(currentMonth, -1);
+    const monthKeys = promoterCoverageMonthKeys(fromMonth, toMonth);
+    if (!monthKeys.length) {
+      return Response.json({ success: false, error: "Select a valid month range." }, { status: 400 });
+    }
     const firstVisitDate = `${shiftMonth(currentMonth, -12)}-01`;
-    const [customers, membershipRows, salesRows, visits, outstandingCustomerCodes] = await Promise.all([
+    const [customers, membershipRows, visits, outstandingCustomerCodes] = await Promise.all([
       loadCustomersForSalesmen(admin, teamSalesmanValues),
       loadSalesMembership(admin, teamSalesmanValues),
-      loadSalesTrendRows(admin, teamSalesmanValues, monthKeys[0], currentMonth),
       loadPromoterVisits(admin, promoterProfile.id, firstVisitDate),
       loadOutstandingCustomerCodes(admin, teamProfiles),
     ]);
@@ -262,6 +283,13 @@ export async function GET(request) {
       if (!knownCustomers.has(code)) knownCustomers.set(code, { customer_code: code });
     });
 
+    const salesCustomerCodes = [
+      ...customers.map((customer) => customer.customer_code),
+      ...membershipRows.map((sale) => sale.customer_code),
+      ...outstandingCustomerCodes,
+    ];
+    const salesRows = await loadSalesTrendRows(admin, salesCustomerCodes, fromMonth, toMonth);
+
     const report = buildPromoterCoverageReport({
       customers: [...knownCustomers.values()],
       salesRows,
@@ -272,6 +300,8 @@ export async function GET(request) {
     return Response.json({
       success: true,
       reportDate: getKsaDateString(),
+      fromMonth,
+      toMonth,
       visitStartDate: firstVisitDate,
       promoterOptions,
       promoter: {

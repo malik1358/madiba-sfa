@@ -35,6 +35,11 @@ const TEXT = {
   notVisitedOnly: { en: "Not visited", ar: "لم تتم زيارتهم" },
   decreasingOnly: { en: "Sales decreasing", ar: "المبيعات تنخفض" },
   refresh: { en: "Refresh", ar: "تحديث" },
+  fromMonth: { en: "From month", ar: "من شهر" },
+  toMonth: { en: "To month", ar: "إلى شهر" },
+  applyPeriod: { en: "Apply period", ar: "تطبيق الفترة" },
+  quantityTrend: { en: "Quantity trend", ar: "اتجاه الكمية" },
+  invalidPeriod: { en: "Choose a valid month range.", ar: "اختر نطاق أشهر صحيحًا." },
   loading: { en: "Loading team coverage...", ar: "جاري تحميل تغطية الفريق..." },
   customer: { en: "Customer", ar: "العميل" },
   teamOwner: { en: "Team salesman", ar: "مندوب الفريق" },
@@ -51,8 +56,8 @@ const TEXT = {
   visitedOnce: { en: "Once", ar: "مرة واحدة" },
   repeatedStatus: { en: "Repeated", ar: "متكرر" },
   salesNote: {
-    en: "Visit counts cover the last 12 months. Sales columns show the last six completed months; trend compares the latest three with the previous three and deducts credit notes.",
-    ar: "عدد الزيارات لآخر 12 شهرًا. أعمدة المبيعات تعرض آخر ستة أشهر مكتملة؛ ويقارن الاتجاه آخر ثلاثة أشهر بالثلاثة السابقة بعد خصم الإشعارات الدائنة.",
+    en: "Visits cover the last 12 months. Monthly sales, quantity, and distinct SKUs cover the selected period for team-book customers, regardless of invoice salesman; credit notes are deducted from sales and quantity.",
+    ar: "تغطي الزيارات آخر 12 شهرًا. تعرض المبيعات والكمية وعدد الأصناف الفريدة شهريًا للفترة المحددة لعملاء دفتر الفريق بغض النظر عن مندوب الفاتورة، مع خصم الإشعارات الدائنة من المبيعات والكمية.",
   },
   noRows: { en: "No customers match this filter.", ar: "لا يوجد عملاء يطابقون هذا التصفية." },
   choosePromoterHint: { en: "Select a product promoter to view their team coverage.", ar: "اختر مروج منتجات لعرض تغطية فريقه." },
@@ -115,6 +120,10 @@ export default function PromoterCoveragePage() {
   const [filter, setFilter] = useState("all");
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedPromoterId, setSelectedPromoterId] = useState("");
+  const [fromMonth, setFromMonth] = useState("");
+  const [toMonth, setToMonth] = useState("");
+  const [appliedPeriod, setAppliedPeriod] = useState(null);
+  const [periodError, setPeriodError] = useState("");
   const canAccess = access.canAccess("promoterCoverage");
 
   usePopupMessages({ error });
@@ -144,6 +153,10 @@ export default function PromoterCoveragePage() {
         if (!session?.access_token) throw new Error(t("loginAgain"));
         const params = new URLSearchParams();
         if (selectedPromoterId) params.set("promoterId", selectedPromoterId);
+        if (appliedPeriod) {
+          params.set("fromMonth", appliedPeriod.fromMonth);
+          params.set("toMonth", appliedPeriod.toMonth);
+        }
         const query = params.toString();
         const { response, payload } = await fetchJsonWithTimeout(
           `/api/promoter-coverage${query ? `?${query}` : ""}`,
@@ -153,6 +166,10 @@ export default function PromoterCoveragePage() {
         if (cancelled) return;
         if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to load promoter coverage.");
         setReport(payload);
+        if (!appliedPeriod && payload.monthKeys?.length) {
+          setFromMonth(payload.monthKeys[0]);
+          setToMonth(payload.monthKeys.at(-1));
+        }
       } catch (loadError) {
         if (!cancelled) setError(loadError.message || "Unable to load promoter coverage.");
       } finally {
@@ -165,7 +182,7 @@ export default function PromoterCoveragePage() {
       cancelled = true;
       stopSafetyTimer();
     };
-  }, [canAccess, loadingAccess, refreshKey, language, selectedPromoterId]);
+  }, [canAccess, loadingAccess, refreshKey, language, selectedPromoterId, appliedPeriod]);
 
   if (!supabaseClient) {
     return <SupabaseUnavailable title={t("title")} message="This report needs Supabase credentials." />;
@@ -246,6 +263,30 @@ export default function PromoterCoveragePage() {
                   <span>{rows.length} / {report.customerCount}</span>
                 </div>
                 <div className="moduleActionRow" style={{ justifyContent: "space-between", marginBottom: "12px" }}>
+                  <div className="moduleActionRow" style={{ margin: 0 }}>
+                    <label className="moduleField">
+                      {t("fromMonth")}
+                      <input className="moduleInput" type="month" value={fromMonth} onChange={(event) => setFromMonth(event.target.value)} />
+                    </label>
+                    <label className="moduleField">
+                      {t("toMonth")}
+                      <input className="moduleInput" type="month" value={toMonth} onChange={(event) => setToMonth(event.target.value)} />
+                    </label>
+                    <button
+                      type="button"
+                      className="moduleInlineButton"
+                      onClick={() => {
+                        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(fromMonth) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(toMonth) || fromMonth > toMonth) {
+                          setPeriodError(t("invalidPeriod"));
+                          return;
+                        }
+                        setPeriodError("");
+                        setAppliedPeriod({ fromMonth, toMonth });
+                      }}
+                    >
+                      {t("applyPeriod")}
+                    </button>
+                  </div>
                   <label className="moduleField">
                     {t("customerCoverage")}
                     <select className="moduleInput" value={filter} onChange={(event) => setFilter(event.target.value)}>
@@ -259,8 +300,9 @@ export default function PromoterCoveragePage() {
                     {t("refresh")}
                   </button>
                 </div>
+                {periodError ? <div className="moduleHint">{periodError}</div> : null}
                 <p className="moduleHint">{t("salesNote")}</p>
-                <ExportableTable filename={`promoter-coverage-${report.reportDate}`} sheetName="Promoter Coverage" className="moduleTableWrap">
+                <ExportableTable filename={`promoter-coverage-${fromMonth}-${toMonth}`} sheetName="Promoter Coverage" className="moduleTableWrap">
                   <table className="moduleTable moduleBiTable">
                     <thead>
                       <tr>
@@ -269,6 +311,7 @@ export default function PromoterCoveragePage() {
                         <th>{t("visitCount")}</th>
                         <th>{t("lastVisit")}</th>
                         <th>{t("salesTrend")}</th>
+                        <th>{t("quantityTrend")}</th>
                         {report.monthKeys.map((month) => <th key={month}>{monthLabel(month, language)}</th>)}
                       </tr>
                     </thead>
@@ -288,10 +331,19 @@ export default function PromoterCoveragePage() {
                             {trendLabel(row.trend, t)}
                             {row.changePercent == null ? "" : ` ${row.changePercent > 0 ? "+" : ""}${row.changePercent.toFixed(1)}%`}
                           </td>
-                          {report.monthKeys.map((month) => <td key={month}>{formatAmount(row.monthSales?.[month])}</td>)}
+                          <td className={trendClass(row.quantityTrend)}>
+                            {trendLabel(row.quantityTrend, t)}
+                            {row.quantityChangePercent == null ? "" : ` ${row.quantityChangePercent > 0 ? "+" : ""}${row.quantityChangePercent.toFixed(1)}%`}
+                          </td>
+                          {report.monthKeys.map((month) => (
+                            <td key={month}>
+                              <strong>{formatAmount(row.monthSales?.[month])}</strong>
+                              <div className="moduleCode">Qty {formatAmount(row.monthQuantity?.[month])} / SKUs {formatAmount(row.monthSkuCount?.[month])}</div>
+                            </td>
+                          ))}
                         </tr>
                       ))}
-                      {rows.length === 0 ? <tr><td colSpan={5 + report.monthKeys.length}>{t("noRows")}</td></tr> : null}
+                      {rows.length === 0 ? <tr><td colSpan={6 + report.monthKeys.length}>{t("noRows")}</td></tr> : null}
                     </tbody>
                   </table>
                 </ExportableTable>

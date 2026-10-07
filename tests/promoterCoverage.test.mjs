@@ -1,9 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildPromoterCoverageReport } from "../app/lib/promoterCoverage.js";
+import { buildPromoterCoverageReport, promoterCoverageSalesmanMatches } from "../app/lib/promoterCoverage.js";
 
 const months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"];
+
+test("salesman identity matching ignores case and repeated whitespace", () => {
+  assert.equal(promoterCoverageSalesmanMatches(" sm001 ", ["SM001"]), true);
+  assert.equal(promoterCoverageSalesmanMatches("Team   Sales", ["team sales"]), true);
+  assert.equal(promoterCoverageSalesmanMatches("SM002", ["SM001"]), false);
+});
 
 test("coverage includes unvisited team customers and separates repeat visits", () => {
   const report = buildPromoterCoverageReport({

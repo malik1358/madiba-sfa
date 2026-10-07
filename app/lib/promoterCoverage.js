@@ -2,6 +2,11 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
+export function promoterCoverageSalesmanMatches(value, salesmanValues = []) {
+  const code = normalizeCode(value);
+  return Boolean(code) && salesmanValues.some((salesmanValue) => normalizeCode(salesmanValue) === code);
+}
+
 function monthOf(value) {
   return String(value || "").slice(0, 7);
 }

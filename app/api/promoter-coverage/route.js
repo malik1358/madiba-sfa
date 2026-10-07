@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { buildPromoterCoverageReport } from "../../lib/promoterCoverage.js";
+import { buildPromoterCoverageReport, promoterCoverageSalesmanMatches } from "../../lib/promoterCoverage.js";
 import { isCreditNoteTransaction } from "../../lib/paymentBehavior.js";
 import { OUTSTANDING_DATASET_KEY, resolveOutstandingCustomerOwnership } from "../../lib/outstanding.js";
 import { buildSalesmanScopeMatchers } from "../../lib/mutualSalesmanGroups.js";
@@ -15,6 +15,10 @@ const PAGE_SIZE = 2000;
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function escapeIlikePattern(value) {
+  return String(value || "").replace(/[\\%_]/g, "\\$&");
 }
 
 function isPromoter(role) {
@@ -86,15 +90,17 @@ async function loadOutstandingCustomerCodes(admin, teamProfiles) {
   }
 }
 
-async function loadSalesTrendRows(admin, salesmanCodes, firstMonth, currentMonth) {
-  const rows = await loadAllRows(
+async function loadSalesTrendRows(admin, salesmanValues, firstMonth, currentMonth) {
+  const identities = [...new Set(salesmanValues.map((value) => String(value || "").trim()).filter(Boolean))];
+  const rowGroups = await Promise.all(identities.map((identity) => loadAllRows(
     () => admin.from("active_sales")
       .select("customer_code,customer_name,salesman_code,transaction_date,voucher_number,voucher_type,reference,sales_amount,quantity")
-      .in("salesman_code", salesmanCodes)
+      .ilike("salesman_code", escapeIlikePattern(identity))
       .gte("transaction_date", `${firstMonth}-01`)
       .lt("transaction_date", `${currentMonth}-01`),
     "transaction_date",
-  );
+  )));
+  const rows = rowGroups.flat().filter((row) => promoterCoverageSalesmanMatches(row.salesman_code, identities));
   return rows.map((row) => ({
     ...row,
     net_sales_amount: isCreditNoteTransaction(row)

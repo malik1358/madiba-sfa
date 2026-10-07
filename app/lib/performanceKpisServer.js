@@ -13,6 +13,10 @@ import {
   splitCollectionActualsByInvoice,
   splitSalesActuals,
 } from "./performanceKpis.js";
+import {
+  normalizeReportSalesmanCode,
+  reportSalesmanCodeAliases,
+} from "./salesmanReportIdentity.js";
 import { getKsaDateString, ksaDayBounds } from "./workdayActivity.js";
 
 const TARGET_SELECTS = [
@@ -84,7 +88,7 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
       "active_sales",
       "customer_code,sales_amount,category,item_name,voucher_type,voucher_number,reference,quantity",
       (query) => query
-        .eq("salesman_code", code)
+        .in("salesman_code", reportSalesmanCodeAliases(code))
         .gte("transaction_date", from)
         .lte("transaction_date", to),
     );
@@ -95,7 +99,7 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
       "active_sales",
       "customer_code,sales_amount,voucher_type,voucher_number,reference,quantity",
       (query) => query
-        .eq("salesman_code", code)
+        .in("salesman_code", reportSalesmanCodeAliases(code))
         .gte("transaction_date", from)
         .lte("transaction_date", to),
     );
@@ -165,7 +169,7 @@ export async function loadSalesPaceShares(admin, { reportDate } = {}) {
   const bySalesman = new Map();
   const grouped = new Map();
   (rows || []).forEach((row) => {
-    const code = normalizeSalesmanCode(row.salesman_code);
+    const code = normalizeReportSalesmanCode(row.salesman_code);
     if (!code) return;
     const list = grouped.get(code) || [];
     list.push(row);

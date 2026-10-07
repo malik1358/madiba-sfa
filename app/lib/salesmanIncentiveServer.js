@@ -1,8 +1,12 @@
 import { loadReceiptRowsByCustomer } from "./collectionAvgDays.js";
 import { customerAccountCodesMatch, resolveCustomerAccountCode, toNumber } from "./outstanding.js";
-import { normalizeSalesmanCode } from "./performanceKpis.js";
 import { salesBiCubeFacts } from "./salesBiCube.js";
 import { loadSalesBiCube } from "./salesBiCubeServer.js";
+import {
+  normalizeReportSalesmanCode,
+  normalizeReportSalesmanName,
+  reportSalesmanCodeAliases,
+} from "./salesmanReportIdentity.js";
 import {
   buildSalesmanIncentiveReport,
   incentiveMonthRange,
@@ -64,7 +68,7 @@ async function loadCustomerCodesForSalesmen(admin, salesmanCodes) {
   const rows = await pageThrough(() => admin
     .from("active_sales")
     .select("transaction_date,customer_code")
-    .in("salesman_code", salesmanCodes));
+    .in("salesman_code", salesmanCodes.flatMap(reportSalesmanCodeAliases)));
   return [...new Set(rows.map((row) => String(row.customer_code || "").trim()).filter(Boolean))];
 }
 
@@ -99,7 +103,7 @@ export async function loadMonthlyNetSalesBySalesman(admin) {
   try {
     const cube = await loadSalesBiCube(admin, { allowStale: true });
     salesBiCubeFacts(cube).forEach((fact) => {
-      const code = normalizeSalesmanCode(fact?.salesman_code);
+      const code = normalizeReportSalesmanCode(fact?.salesman_code);
       const month = String(fact?.month || "").slice(0, 7);
       if (!code || !/^\d{4}-\d{2}$/.test(month)) return;
       const byMonth = byCode.get(code) || new Map();
@@ -122,7 +126,7 @@ export async function buildSalesmanIncentiveReportFromDb(admin, {
   salesmanCodes = [],
 } = {}) {
   const monthKey = parseIncentiveMonth(month);
-  const requested = [...new Set((salesmanCodes || []).map((code) => normalizeSalesmanCode(code)).filter(Boolean))];
+  const requested = [...new Set((salesmanCodes || []).map((code) => normalizeReportSalesmanCode(code)).filter(Boolean))];
 
   const customerCodes = requested.length
     ? await loadCustomerCodesForSalesmen(admin, requested)
@@ -182,9 +186,10 @@ export async function listIncentiveSalesmen(admin, { month } = {}) {
 
   const names = new Map();
   rows.forEach((row) => {
-    const code = normalizeSalesmanCode(row.salesman_code);
+    const code = normalizeReportSalesmanCode(row.salesman_code);
     if (!code) return;
-    const name = String(row.salesman_name || "").trim();
+    const name = normalizeReportSalesmanName(row.salesman_name)
+      || normalizeReportSalesmanName(row.salesman_code);
     if (!names.has(code) || (!names.get(code) && name)) names.set(code, name);
   });
 

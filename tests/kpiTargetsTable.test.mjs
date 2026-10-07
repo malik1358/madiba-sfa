@@ -5,6 +5,7 @@ import {
   bossCodeFromTeamTarget,
   filterKpiTargetRows,
   hasExplicitTargets,
+  isKpiTargetProfile,
   isTeamTargetSalesmanCode,
   rowMatchesKpiFilters,
   sumFilteredKpiColumns,
@@ -14,6 +15,26 @@ import {
   uniqueBossesFromRows,
 } from "../app/lib/kpiTargetsTable.js";
 import { consolidatePerformanceSnapshots, buildPerformanceSnapshot } from "../app/lib/performanceKpis.js";
+import { isCollectionOnlyAccess } from "../app/lib/moduleAccess.js";
+
+test("KPI roster includes Zia and Asrar without changing collection-only access", () => {
+  for (const profile of [
+    { salesman_code: "CL01", salesman_name: " Zia ", role: "collector" },
+    { salesman_code: "CL02", salesman_name: "asrar   ahmed", role: "collector" },
+    { salesman_code: "CL03", salesman_name: "Asrar", role: "salesman" },
+  ]) {
+    assert.equal(isKpiTargetProfile(profile), true);
+    assert.equal(isCollectionOnlyAccess({ role: profile.role, salesmanCode: profile.salesman_code }), true);
+  }
+});
+
+test("KPI roster still excludes other collectors and profiles without a code", () => {
+  assert.equal(isKpiTargetProfile({ salesman_code: "SM01", salesman_name: "Ali", role: "salesman" }), true);
+  assert.equal(isKpiTargetProfile({ salesman_code: "SM02", salesman_name: "Other collector", role: "collector" }), false);
+  assert.equal(isKpiTargetProfile({ salesman_code: "CL04", salesman_name: "Other collector", role: "salesman" }), false);
+  assert.equal(isKpiTargetProfile({ salesman_code: " ", salesman_name: "Zia", role: "collector" }), false);
+  assert.equal(isKpiTargetProfile(null), false);
+});
 
 const ahmed = {
   salesmanCode: "AHMED",

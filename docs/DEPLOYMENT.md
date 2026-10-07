@@ -59,6 +59,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `DAILY_SUPPLIER_ORDER_EMAIL_TO`, `DAILY_SUPPLIER_ORDER_EMAIL_CC` | Extra order digest |
 | `DAILY_SUPPLIER_ORDER_EMAIL_SEND_TO_USERS` | `false` sends only the combined digest |
 | `OUTSTANDING_NO_GPS_EMAIL_TO`, `OUTSTANDING_NO_GPS_EMAIL_CC` | Optional management digest |
+| `CUSTOMER_GPS_CHANGE_EMAIL_TO` | Optional GPS-change digest override; defaults to `malik@pinasz.com`, no recipient configuration required |
 | `OUTSTANDING_RECONCILE_EMAIL_TO`, `OUTSTANDING_RECONCILE_EMAIL_CC` | Extra Tally vs SFA difference recipients (added to the built-in list) |
 | `OUTSTANDING_RECONCILE_EMAIL_TEST_TO` | Send the difference report only to these addresses and skip the dedupe marker |
 | `OUTSTANDING_NO_GPS_EMAIL_SEND_TO_USERS` | `false` skips per-salesman mail |
@@ -88,11 +89,20 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `daily-supplier-order-email.yml` | `20 21 * * 0-3,5,6` | 00:20 KSA, skip Friday | `/api/cron/daily-supplier-order-email` |
 | `outstanding-no-gps-email.yml` | `25 21 * * 0-3,5,6` | 00:25 KSA, skip Friday | `/api/cron/outstanding-no-gps-email` |
 | `collection-stale-overdue-email.yml` | `35 21 * * 0-3,5,6` | 00:35 KSA, skip Friday | `/api/cron/collection-stale-overdue-email` |
+| `customer-gps-change-email.yml` | `40 21 * * *` | 00:40 KSA every day, including Friday; previous completed KSA calendar day | `/api/cron/customer-gps-change-email` |
 | `price-sync.yml` | `0 */8 * * *` | Every 8 hours | `/api/admin/price-sync` |
 | `mobile-snapshot.yml` | `0 */4 * * *` | Every 4 hours, batched | `/api/cron/mobile-snapshot` |
 | `missing-invoice-email.yml` | Every 15 min at :05/:20/:35/:50 UTC | Five-minute-offset backup for pg_cron; supports the 00:05 KSA midnight fallback | `/api/cron/missing-invoice-email` |
 
 Cron requests send header `x-cron-secret`. Price sync is the same header, not a user session.
+
+### Customer GPS digest activation and recovery
+
+Production release preparation is dated **2026-10-06**, pending PR CI and merge; it is not yet a confirmed production deployment. Activation requires the approved merge to `main` and successful Vercel deployment, the existing configured SMTP or Resend transport (including `SMTP_FROM`), and the existing GitHub `CRON_SECRET` for the workflow's POST to `/api/cron/customer-gps-change-email`. No new recipient setting or enable flag is needed; `CUSTOMER_GPS_CHANGE_EMAIL_TO` is optional. The workflow also supports manual dispatch. It sends zero-change summaries and does not skip Friday.
+
+No new schema migration is required. Verify the existing `customer_gps_history` schema is present; if absent, apply `supabase/migrations/20260831153000_customer_gps_history.sql` or `sql/setup_customer_gps_history.sql` separately in Supabase before using history/report/digest. Git deployment does not apply SQL.
+
+Each report date is protected by an atomic `system_settings` key `customer_gps_change_email:<date>`: `sending` with a claim `token` and `claimedAt`, followed after delivery by `sent` with `sentAt` and `changeCount`. Duplicate runs skip existing keys. Provider failure releases only the caller's own claim. An interrupted `sending` claim requires inspection of provider delivery before manual recovery; do not clear it blindly. If email sends but saving the sent marker fails, keep the claim to prevent duplicate delivery. There is no force-send bypass.
 
 ## Local development
 

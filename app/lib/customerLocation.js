@@ -208,6 +208,7 @@ export async function updateCustomerLocation(accessToken, customerCode, location
     customerCode,
     latitude: location.latitude,
     longitude: location.longitude,
+    locationUpdateAccepted: location.locationUpdateAccepted === true,
   };
 
   if (location.area !== undefined) {
@@ -413,7 +414,7 @@ export async function applyCustomerLocationUpdateFromPrompt(promptDetails) {
   return updateCustomerLocation(
     promptDetails.accessToken,
     promptDetails.customerCode,
-    promptDetails.updatePayload,
+    { ...promptDetails.updatePayload, locationUpdateAccepted: promptDetails.autoPromote !== true },
   );
 }
 

@@ -1,3 +1,9 @@
+import {
+  normalizeReportSalesmanCode,
+  normalizeReportSalesmanName,
+  reportSalesmanLabel,
+} from "./salesmanReportIdentity.js";
+
 export const UNCLASSIFIED_CATEGORY = "Unclassified";
 export const DEFAULT_GROWTH_GROUP_BY = "category";
 
@@ -54,7 +60,11 @@ export function dimensionValue(row = {}, key) {
     case "category":
       return normalizeCategoryName(row.category);
     case "salesman":
-      return joinNameCode(row.salesman_name, row.salesman_code);
+      return reportSalesmanLabel(row);
+    case "salesman_code":
+      return normalizeReportSalesmanCode(row.salesman_code) || UNCLASSIFIED_CATEGORY;
+    case "salesman_name":
+      return normalizeReportSalesmanName(row.salesman_name) || UNCLASSIFIED_CATEGORY;
     case "customer":
       return joinNameCode(row.customer_name, row.customer_code);
     case "item":
@@ -130,8 +140,19 @@ export function hasActiveGrowthFilters(input = {}) {
   return GROWTH_DIMENSION_KEYS.some((key) => (filters.values[key] || []).length > 0);
 }
 
-function selectedValueSet(values) {
-  return new Set((values || []).map((item) => String(item).trim().toLowerCase()));
+function selectedValueSet(values, key) {
+  return new Set((values || []).map((item) => {
+    const value = String(item).trim();
+    if (key === "salesman_code") return normalizeReportSalesmanCode(value).toLowerCase();
+    if (key === "salesman_name") return normalizeReportSalesmanName(value).toLowerCase();
+    if (key === "salesman") {
+      const parts = value.split(/\s*·\s*/);
+      return reportSalesmanLabel(parts.length > 1
+        ? { salesman_name: parts[0], salesman_code: parts.slice(1).join(" · ") }
+        : { salesman_name: value }).toLowerCase();
+    }
+    return value.toLowerCase();
+  }));
 }
 
 export function rowMatchesGrowthFilters(row = {}, input = {}) {
@@ -150,7 +171,7 @@ export function rowMatchesGrowthFilters(row = {}, input = {}) {
   if (filters.quantityMax != null && (!(quantity <= filters.quantityMax))) return false;
 
   return GROWTH_DIMENSION_KEYS.every((key) => {
-    const selected = selectedValueSet(filters.values?.[key]);
+    const selected = selectedValueSet(filters.values?.[key], key);
     if (selected.size === 0) return true;
     return selected.has(String(dimensionValue(row, key)).trim().toLowerCase());
   });

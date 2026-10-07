@@ -453,3 +453,32 @@ test("buildSalesmanIncentiveReport can be scoped to one salesman", () => {
   assert.equal(scoped.salesmen[0].has_sales_history, false);
   assert.equal(scoped.salesmen[0].growth_incentive, 0);
 });
+
+test("incentive report merges Thamer aliases from the cube and invoice rows", () => {
+  const invoice = salesLine({
+    transaction_date: "2026-03-02",
+    salesman_code: "THAMER",
+    salesman_name: "THAMER",
+  });
+  const report = buildSalesmanIncentiveReport({
+    month: "2026-04",
+    customers: [{
+      customerCode: "C001",
+      customerName: "Alpha Trading",
+      transactions: [invoice],
+      receipts: [{ receipt_date: "2026-04-01", amount: 115, vch_no: "R/9" }],
+    }],
+    monthlySalesBySalesman: new Map([
+      ["THAMER", new Map([["2026-03", 100], ["2026-04", 200]])],
+      ["THAMER MOHAMMAD AHMED QASEM", new Map([["2026-03", 150], ["2026-04", 300]])],
+      ["SM002", new Map([["2026-03", 50], ["2026-04", 100]])],
+    ]),
+  });
+
+  assert.equal(report.salesmen.length, 1);
+  assert.equal(report.salesmen[0].salesman_code, "SM002");
+  assert.equal(report.salesmen[0].salesman_name, "Thamer");
+  assert.equal(report.salesmen[0].current_month_sales, 600);
+  assert.equal(report.salesmen[0].peak_month_sales, 300);
+  assert.equal(report.rows[0].salesman_code, "SM002");
+});

@@ -23,6 +23,26 @@ import {
   TEAM_PERFORMANCE_VIEW,
 } from "../app/lib/performanceKpis.js";
 import { buildUserVisitReportEmail } from "../app/lib/dailyVisitReportEmail.js";
+import { loadSalesActuals, loadSalesPaceShares } from "../app/lib/performanceKpisServer.js";
+
+function activeSalesAdmin(rows) {
+  return {
+    from: () => ({
+      select: () => {
+        const filters = [];
+        const query = {
+          range: () => query,
+          in: (column, values) => { filters.push((row) => values.includes(row[column])); return query; },
+          gte: (column, value) => { filters.push((row) => row[column] >= value); return query; },
+          lte: (column, value) => { filters.push((row) => row[column] <= value); return query; },
+          lt: (column, value) => { filters.push((row) => row[column] < value); return query; },
+          then: (resolve) => resolve({ data: rows.filter((row) => filters.every((filter) => filter(row))), error: null }),
+        };
+        return query;
+      },
+    }),
+  };
+}
 
 test("detects PostgREST schema-cache missing column errors", () => {
   assert.equal(isMissingSchemaColumn({
@@ -159,6 +179,30 @@ test("credit notes do not count as buying customers", () => {
     ]),
     ["SALE"],
   );
+});
+
+test("KPI actuals and pace merge Thamer's legacy sales codes", async () => {
+  const actualRows = [
+    { transaction_date: "2026-09-02", salesman_code: "SM002", customer_code: "A", category: "Office Supplies", sales_amount: 100 },
+    { transaction_date: "2026-09-03", salesman_code: "THAMER", customer_code: "B", category: "Office Supplies", sales_amount: 200 },
+    { transaction_date: "2026-09-04", salesman_code: "THAMER MOHAMMAD AHMED QASEM", customer_code: "C", category: "Office Supplies", sales_amount: 300 },
+  ];
+  const actuals = await loadSalesActuals(activeSalesAdmin(actualRows), {
+    salesmanCode: "SM002",
+    reportDate: "2026-09-01",
+  });
+  assert.equal(actuals.officeSupplies, 600);
+
+  const paceRows = [
+    { transaction_date: "2026-08-01", salesman_code: "SM002", sales_amount: 100 },
+    { transaction_date: "2026-08-08", salesman_code: "THAMER", sales_amount: 100 },
+    { transaction_date: "2026-08-15", salesman_code: "THAMER MOHAMMAD AHMED QASEM", sales_amount: 100 },
+  ];
+  const pace = await loadSalesPaceShares(activeSalesAdmin(paceRows), { reportDate: "2026-09-01" });
+  assert.equal(pace.bySalesman.get("SM002")[1], 1 / 3);
+  assert.equal(pace.bySalesman.get("SM002")[8], 2 / 3);
+  assert.equal(pace.bySalesman.get("SM002")[15], 1);
+  assert.equal(pace.bySalesman.has("THAMER"), false);
 });
 
 test("splits monthly collection visits between FIFO credit and cash invoices", () => {

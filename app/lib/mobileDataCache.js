@@ -47,7 +47,7 @@ function scopeCacheKey(userId) {
 }
 
 function customersCacheKey(scope, enriched = false, includeInactive = false) {
-  const prefix = enriched ? "customers:visible:enriched:v8" : "customers:visible:basic:v5";
+  const prefix = enriched ? "customers:visible:enriched:v9" : "customers:visible:basic:v5";
   const inactiveSuffix = includeInactive ? ":with-inactive" : "";
   return `${prefix}${inactiveSuffix}:${buildScopeHash(scope)}`;
 }
@@ -262,7 +262,11 @@ async function fetchSalesScopeNetwork(accessToken) {
   return data;
 }
 
-async function fetchVisibleCustomersNetwork(accessToken, { enriched = false, includeInactive = false } = {}) {
+async function fetchVisibleCustomersNetwork(accessToken, {
+  enriched = false,
+  includeInactive = false,
+  includeLatestNearVisit = false,
+} = {}) {
   const params = new URLSearchParams();
   if (enriched) {
     params.set("includeRecentSales", "1");
@@ -270,6 +274,9 @@ async function fetchVisibleCustomersNetwork(accessToken, { enriched = false, inc
   }
   if (includeInactive) {
     params.set("includeInactive", "1");
+  }
+  if (includeLatestNearVisit) {
+    params.set("includeLatestNearVisit", "1");
   }
   const query = params.toString() ? `?${params.toString()}` : "";
   const response = await fetch(`/api/customers/visible${query}`, {
@@ -462,13 +469,18 @@ export async function findCachedVisibleCustomerByCode(scope, customerCode) {
 export async function fetchVisibleCustomersCached(accessToken, scope, options = {}) {
   const enriched = Boolean(options.enriched);
   const includeInactive = Boolean(options.includeInactive);
+  const includeLatestNearVisit = Boolean(options.includeLatestNearVisit);
   const ttlMs = enriched ? CACHE_TTL.customersEnrichedMs : CACHE_TTL.customersBasicMs;
 
   return fetchWithLocalCache(
     customersCacheKey(scope, enriched, includeInactive),
     ttlMs,
-    () => fetchVisibleCustomersNetwork(accessToken, { enriched, includeInactive }),
-    { onUpdate: options.onUpdate },
+    () => fetchVisibleCustomersNetwork(accessToken, { enriched, includeInactive, includeLatestNearVisit }),
+    {
+      onUpdate: options.onUpdate,
+      forceRefresh: Boolean(options.forceRefresh),
+      revalidate: Boolean(options.revalidate),
+    },
   );
 }
 

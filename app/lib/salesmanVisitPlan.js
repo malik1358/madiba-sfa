@@ -4,6 +4,7 @@ import { escapeHtml } from "./dailyVisitReportEmail.js";
 import { resolveAppOrigin } from "./inactivityEmail.js";
 import { activeScheduledVisitDate, visitCalendarDateKey } from "./nextVisitDate.js";
 import { getKsaDateString } from "./workdayActivity.js";
+import { daysSinceKsaDate } from "./latestCustomerVisits.js";
 
 export const DEFAULT_VISITS_PER_SALESMAN = 12;
 /** System suggestions prefer customers not visited for at least this many days. */
@@ -140,12 +141,7 @@ function probabilityLabel(score) {
 }
 
 export function daysSinceDate(value, todayIso = new Date().toISOString()) {
-  const today = String(todayIso || "").slice(0, 10);
-  const date = String(value || "").trim().slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(today) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const ms = Date.parse(`${today}T00:00:00Z`) - Date.parse(`${date}T00:00:00Z`);
-  if (!Number.isFinite(ms)) return null;
-  return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
+  return daysSinceKsaDate(value, getKsaDateString(new Date(todayIso)));
 }
 
 /** Lower sales upside when the customer was visited too recently (prefer ≥7 day gap). */

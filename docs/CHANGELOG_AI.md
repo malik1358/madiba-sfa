@@ -6,6 +6,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 
 ## Recent agent notes
 
+- **2026-10-08** - My Day and Salesman Visit Plan now use the same latest-visit-by-anyone date for their visit-day columns, across field visit reports and collection visits. FAR visits are ignored using the shared customer-distance rule; accepted GPS pin updates remain qualifying visits. Both count KSA calendar days. My Day requests a fresh scoped customer payload; visit plan reflects its stored snapshot until rebuild. Added focused regressions; no migration.
 - **2026-10-07** - KPI target additions/edits now send each affected salesperson the full current-month KPI snapshot and CC every reporting-chain boss; unchanged saves do not send. Added a manual month-send workflow (October 2026 default), protected by the existing cron secret, for initial/monthly resend. No migration or new environment variable.
 - **2026-10-07** - KPI Targets now includes active Zia and Asrar/Asrar Ahmed profiles despite collection-only roles/codes. Other collector exclusions, caller permissions and collection-queue rules remain unchanged. Added roster regressions; no migration.
 - **2026-10-07** - Merged Thamer's imported sales identities (`SM002`, `THAMER`, `THAMER MOHAMMAD AHMED QASEM`) in BI salesman dimensions/filters, KPI sales actuals/pace, and Salesman Incentive cube and collection rows. Profile identity, access, targets, and customer ownership remain unchanged. Added focused alias regressions; no migration.

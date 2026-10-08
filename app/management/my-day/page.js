@@ -34,6 +34,7 @@ import {
   visitReportsSinceIso,
 } from "../../lib/myDayPlannerLoad";
 import { isVisitStatusCustomer } from "./customerEligibility";
+import { daysSinceKsaDate } from "../../lib/latestCustomerVisits.js";
 import { buildProspectScheduleRows, filterAndRankVisitCustomers, mergePlannedVisitRows, splitVisitCustomersByOutstanding, visitScheduleSalesmanKey } from "./visitPriority";
 import { resolveVisitLastInvoiceDate, customerHasOutstandingBalance, CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR } from "../../lib/outstanding";
 import {
@@ -678,7 +679,11 @@ export default function MyDayPage({ mode = "default" } = {}) {
           pendingOrdersQuery,
           submittedOrdersQuery,
           todayOrdersQuery,
-          fetchVisibleCustomersCached(session.access_token, scope, { enriched: true }).then((result) => result.data),
+          fetchVisibleCustomersCached(session.access_token, scope, {
+            enriched: true,
+            includeLatestNearVisit: true,
+            forceRefresh: true,
+          }).then((result) => result.data),
           routeQuery,
           loadOpenProspectCustomers(session.access_token).catch(() => []),
         ]);
@@ -945,8 +950,8 @@ export default function MyDayPage({ mode = "default" } = {}) {
             last_invoice_date: row.latest_transaction_date || null,
             latest_transaction_date: row.latest_transaction_date || null,
             mobile: row.mobile || "",
-            last_visit_date: latestVisitByCustomer.get(customerCode) || null,
-            days_since_last_visit: daysBetweenNullable(latestVisitByCustomer.get(customerCode) || null),
+            last_visit_date: row.latest_near_visit_date || null,
+            days_since_last_visit: daysSinceKsaDate(row.latest_near_visit_date),
             next_visit_at: activeScheduledVisitDate(
               nextVisitByCustomer.get(customerCode),
               latestVisitByCustomer.get(customerCode),

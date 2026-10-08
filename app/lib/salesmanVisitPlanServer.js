@@ -21,6 +21,7 @@ import {
 } from "./myDayPlannerLoad.js";
 import { activeScheduledVisitDate } from "./nextVisitDate.js";
 import { getKsaDateString } from "./workdayActivity.js";
+import { loadLatestNearVisitDatesByCustomer } from "./latestCustomerVisits.js";
 
 function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -83,8 +84,9 @@ function rememberLatestVisit(map, customerCode, visitAt) {
   }
 }
 
-/** Fast last-visit + next-appointment lookup: collection visits + a capped field-visit sample. */
+/** Last-visit + next-appointment lookup across users; visit dates exclude FAR visits. */
 export async function loadLatestVisitDatesByCustomer(admin, {
+  customers = [],
   lookbackDays = 90,
   maxFieldVisitRows = 3000,
 } = {}) {
@@ -134,6 +136,7 @@ export async function loadLatestVisitDatesByCustomer(admin, {
   let from = 0;
   const maxRows = Math.max(pageSize, Number(maxFieldVisitRows) || 3000);
 
+  const activityLogs = [];
   while (from < maxRows) {
     const end = Math.min(from + pageSize, maxRows) - 1;
     const { data, error } = await admin
@@ -150,6 +153,7 @@ export async function loadLatestVisitDatesByCustomer(admin, {
     }
 
     const rows = data || [];
+    activityLogs.push(...rows);
     rows.forEach((row) => {
       applyLatestVisitFromLogRow(latestVisitByCustomer, nextVisitByCustomer, row, sortTimestamp);
     });
@@ -158,7 +162,8 @@ export async function loadLatestVisitDatesByCustomer(admin, {
     from += pageSize;
   }
 
-  return { latestVisitByCustomer, nextVisitByCustomer };
+  const latestNearVisitDates = await loadLatestNearVisitDatesByCustomer(admin, customers);
+  return { latestVisitByCustomer: latestNearVisitDates, nextVisitByCustomer };
 }
 
 export async function readVisitPlanRebuildStatus(admin) {
@@ -261,8 +266,7 @@ export function mergeVisitPlanCustomerCandidates(
     if (!code) return;
     const due = dueByCode.get(code);
     const existing = byCode.get(code) || {};
-    const collectionVisit = due?.latest_collection?.saved_at || record.latest_collection?.saved_at || null;
-    const lastVisitDate = visitMap.get(code) || existing.last_visit_date || collectionVisit || null;
+    const lastVisitDate = visitMap.get(code) || null;
     const merged = {
       ...existing,
       ...record,
@@ -305,7 +309,7 @@ export function mergeVisitPlanCustomerCandidates(
 
   dueByCode.forEach((due, code) => {
     if (byCode.has(code)) return;
-    const lastVisitDate = visitMap.get(code) || due?.latest_collection?.saved_at || null;
+    const lastVisitDate = visitMap.get(code) || null;
     const row = {
       ...due,
       customer_code: code,
@@ -448,7 +452,7 @@ export async function buildAndStoreSalesmanVisitPlanSnapshot(admin, {
     outstandingSalesmanIdentities: scope.outstandingSalesmanIdentities || [],
   };
 
-  const [visibleResult, collectionRecords, visitLookup] = await Promise.all([
+  const [visibleResult, collectionRecords] = await Promise.all([
     buildVisibleCustomersForScope(admin, visibleScope, {
       includeRecentSales: true,
       // Outstanding aging already comes from collection records — skip duplicate attach.
@@ -456,8 +460,11 @@ export async function buildAndStoreSalesmanVisitPlanSnapshot(admin, {
       excludeBuildingMaterial: true,
     }),
     fetchOutstandingAndCollectionRecords(admin, scope),
-    loadLatestVisitDatesByCustomer(admin),
   ]);
+
+  const visitLookup = await loadLatestVisitDatesByCustomer(admin, {
+    customers: visibleResult?.customers || [],
+  });
 
   const payload = buildSalesmanVisitPlanPayload({
     visibleCustomers: visibleResult?.customers || [],

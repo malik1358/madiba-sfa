@@ -109,6 +109,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 - `/api/admin/customers`, `.../export`, `.../locations`, `.../gps-history`
 - `/api/admin/customers/gps-history` retains the existing per-customer latest-50 history response; report mode adds `from`/`to` KSA date bounds, `page` (50 rows), optional exact normalized `customerCode`, and `acceptedOnly=true` (source `salesman_accepted`). Report dates default to the current KSA month through today. `app/lib/customerGpsReport.js` hydrates names and computes displacement/maps/explicit approval; exports use only the displayed page.
 - `/api/admin/salesmen-hierarchy`, `/api/admin/customer-book-shares`, `/api/admin/kpi-targets`
+- `/api/cron/kpi-targets-email` — manually dispatches a selected month’s complete KPI snapshot to each active KPI-eligible salesperson, with all reporting-chain bosses on CC; authorized by `CRON_SECRET`.
 - `/api/admin/schemes`, `/api/admin/order-quantity-controls`, `/api/admin/item-price-history`
 - `/api/admin/salesman-visit-plan`, `/api/admin/outstanding-no-gps`, `/api/admin/clean-dirty-customers`
 - `/api/admin/push-notifications`, `/api/tally-item-units`, `/api/stock-take`

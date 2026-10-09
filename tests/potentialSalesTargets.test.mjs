@@ -247,3 +247,30 @@ test("standalone targets exclude visits today through eight days ago by the same
     last_visit_by_salesman: { SM001: "2026-10-09" },
   }, { todayKey: "2026-10-09", salesmanCode: "SM002" }), false);
 });
+
+test("standalone target last visits ignore GPS-confirmed FAR visits and retain near visits", () => {
+  const dates = buildPotentialSalesTargetLastVisitMap({
+    customers: [
+      { customer_code: "2001", latitude: 24, longitude: 46 },
+      { customer_code: "2002", latitude: 24, longitude: 46 },
+      { customer_code: "2003", latitude: 24, longitude: 46 },
+    ],
+    profiles: [{ id: "u1", salesman_code: "SM001" }],
+    collectionVisits: [
+      { customer_code: "2001", created_by: "u1", saved_at: "2026-10-02T09:00:00+03:00", latitude: 25, longitude: 46 },
+      { customer_code: "2002", created_by: "u1", saved_at: "2026-10-03T09:00:00+03:00", latitude: 24.001, longitude: 46 },
+      { customer_code: "2003", created_by: "u1", saved_at: "2026-10-04T09:00:00+03:00" },
+    ],
+    activityLogs: [
+      {
+        user_id: "u1",
+        entry_type: "VISIT_REPORT",
+        created_at: "2026-10-01T09:00:00+03:00",
+        note: JSON.stringify({ customer_code: "2001", location: { latitude: 26, longitude: 46 } }),
+      },
+    ],
+  });
+  assert.equal(dates.has("2001::SM001"), false);
+  assert.equal(dates.get("2002::SM001"), "2026-10-03");
+  assert.equal(dates.get("2003::SM001"), "2026-10-04");
+});

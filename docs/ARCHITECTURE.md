@@ -45,6 +45,8 @@ The global and dashboard logout controls share `useLogoutWithDaySummary` (`app/h
 
 Navigation groups are Home, Field Sales, Collections, Reports, Warehouse, and Setup & Admin (`NAV_GROUPS` in `app/lib/moduleAccess.js`).
 
+Product Catalogue (`/management/product-catalogue`, module `productCatalogue` in Field Sales) wraps the existing New Order page. Catalogue mode adds `ProductCatalogue.jsx` cards, 24-per-page filtering, carousels and cart controls without copying the order hooks. Customer scope, region/payment selection, draft restoration, offline order persistence, submission, PDF and WhatsApp remain in the original workspace. The page checks module access; GET `/api/product-catalogue` independently verifies the JWT, active profile and collection-only exclusions, and reads only existing unit/packing sources. There are no image write endpoints, photo tables, buckets, signed URLs or migration. Image storage is deferred to the separate receipt/image-storage project. Admin/manager can select temporary JPEG/PNG/WebP previews (up to 3 MB), held only in React state with blob URLs revoked on removal/unmount. Reloading/leaving loses previews, which are explicitly labelled not uploaded/saved/shared. All products initially use no-photo placeholders.
+
 ## Role system and `moduleAccess.js`
 
 Source of truth: `app/lib/moduleAccess.js` (covered by `tests/moduleAccess.test.mjs`).

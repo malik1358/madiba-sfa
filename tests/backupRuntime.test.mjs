@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { BackupDiagnosticError, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, runBackup, safeBackupConfigError } from "../scripts/backup/run-backup.mjs";
+import { BackupDiagnosticError, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, runBackup, safeBackupConfigError, validateDatabaseArchiveCoverage } from "../scripts/backup/run-backup.mjs";
 import { verifyBackup } from "../scripts/backup/verify-backup.mjs";
 
 test("database command captures all schemas and passes passwords only through environment", () => {
@@ -112,7 +112,9 @@ test("failed checksum and missing Auth data never trigger retention cleanup", as
   for (const options of [{ badChecksum: true }, { badToc: true }]) {
     const fixture = await databaseFixture(options);
     try {
-      await assert.rejects(runBackup(fixture.config, { run: fixture.fakeRun, tempRoot: fixture.root, prune: true }), /verification failed|required/);
+      await assert.rejects(runBackup(fixture.config, { run: fixture.fakeRun, tempRoot: fixture.root, prune: true }), options.badToc
+        ? /missing required sections: Supabase Auth user data, Supabase Storage metadata\. No backup was uploaded/
+        : /verification failed/);
       assert.ok(!fixture.calls.some((call) => call.args[0] === "deletefile"));
       assert.deepEqual(await readdir(fixture.root), []);
     } finally { await rm(fixture.root, { recursive: true, force: true }); }
@@ -213,4 +215,14 @@ test("configuration validation reports fixed safe reasons but hides arbitrary in
     "Missing required setting: BACKUP_DATABASE_URL");
   assert.equal(safeBackupConfigError(new Error("Invalid URL containing private-password")), null);
   assert.equal(safeBackupConfigError(new Error("BACKUP_DATABASE_URL=private-password")), null);
+});
+
+test("database coverage failure reports safe section categories only", () => {
+  assert.throws(() => validateDatabaseArchiveCoverage("TABLE DATA public"), (error) => {
+    assert.ok(error instanceof BackupDiagnosticError);
+    assert.match(error.message, /Supabase Auth user data, Supabase Storage metadata/);
+    assert.ok(!error.message.includes("private-table"));
+    return true;
+  });
+  assert.doesNotThrow(() => validateDatabaseArchiveCoverage("TABLE DATA public\nTABLE DATA auth users\nTABLE DATA storage objects"));
 });

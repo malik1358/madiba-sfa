@@ -5,6 +5,7 @@ Rules below are implemented in code. If a screen disagrees with this file, trust
 ## Roles and gates
 
 - `buildModuleAccess` in `app/lib/moduleAccess.js` decides every management screen. Do not hide a page only with CSS.
+- An active admin can switch to an active user's real Supabase session from the global **Login as** control. The selected user's modules, sales scope, and API permissions apply; changes are attributed to that user, not to the admin, and there is no separate impersonation audit record. The confirmation warns about this and **Return to admin** restores the admin session for the current tab.
 - Collector access is true when role is `collector`, or `user_metadata.collection_only` is set, or salesman code matches `/^CL\d+$/i`.
 - Invoice-maker profiles can view all management reports, including cross-user activity, working-hours, visit, collection, BI, incentive, and outstanding-without-GPS reports. This does not grant setup/configuration permissions or visit-report email sending.
 - Customer GPS History is an exception: module `customerGpsHistory`, path `/management/customer-gps-history`, and its API are restricted to admin/manager only.

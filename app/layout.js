@@ -3,6 +3,7 @@ import BuildUpdateWatcher from "./components/BuildUpdateWatcher";
 import GlobalAppStatus from "./components/GlobalAppStatus";
 import WorkdayTimesBar from "./components/WorkdayTimesBar";
 import GlobalLogoutButton from "./components/GlobalLogoutButton";
+import AdminLoginAsControl from "./components/AdminLoginAsControl";
 import AppBackButton from "./components/AppBackButton";
 import AppMainNav from "./components/AppMainNav";
 import ReportTableSorter from "./components/ReportTableSorter";
@@ -67,6 +68,7 @@ export default function RootLayout({ children }) {
             <AppMainNav />
             <ReportTableSorter />
             <AppBackButton />
+            <AdminLoginAsControl />
             <GlobalLogoutButton />
             {children}
           </AppPopupProvider>

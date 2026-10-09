@@ -29,6 +29,9 @@ import {
   enrichDueCustomersWithVisitWithoutOrder,
 } from "./collectionStaleOverdueEmailServer.js";
 import { buildCollectionQueues } from "./paymentCollections.js";
+import { buildPotentialSalesTargetsSection } from "./potentialSalesTargets.js";
+import { loadPotentialSalesTargetCustomers } from "./potentialSalesTargetsServer.js";
+import { buildSalesmanScopeMatchers, salesmanValueMatchesScope } from "./mutualSalesmanGroups.js";
 import {
   addKsaCalendarDays,
   getKsaDateString,
@@ -331,6 +334,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   loadKpis = loadPerformanceSnapshotsForSalesmen,
   loadTeamTargets = loadKpiTargetsBySalesman,
   loadDueCollectionCustomers = null,
+  loadPotentialSalesTargets = loadPotentialSalesTargetCustomers,
 } = {}) {
   const schedule = resolveDailyVisitReportEmailSchedule(date, now);
   const reportDate = schedule.date;
@@ -373,6 +377,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
   const staleAsOfKey = getKsaDateString(now instanceof Date ? now : new Date(now));
   const staleAsOfIso = (now instanceof Date ? now : new Date(now)).toISOString();
   let dueCollectionCustomers = [];
+  let collectionRecords = null;
   try {
     let loader = loadDueCollectionCustomers;
     if (!loader) {
@@ -387,6 +392,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
           canSeeAllSchedulers: true,
           visibleSchedulerUserIds: null,
         });
+        collectionRecords = records;
         const queues = buildCollectionQueues(records, staleAsOfIso);
         const dueCustomers = Array.isArray(queues?.dueCustomers) ? queues.dueCustomers : [];
         const withVisitReports = await enrichDueCustomersWithVisitWithoutOrder(client, dueCustomers);
@@ -397,6 +403,18 @@ export async function runDailyVisitReportEmailCycle(admin, {
   } catch (error) {
     console.error("Unable to load stale overdue rows for visit report emails:", error);
     dueCollectionCustomers = [];
+  }
+
+  let potentialSalesTargets = null;
+  try {
+    if (collectionRecords !== null || loadPotentialSalesTargets !== loadPotentialSalesTargetCustomers) {
+      potentialSalesTargets = await loadPotentialSalesTargets(admin, {
+        records: collectionRecords || [],
+        todayKey: staleAsOfKey,
+      });
+    }
+  } catch (error) {
+    console.error("Unable to load potential sales targets for visit report emails:", error);
   }
 
   const reportByUserId = new Map((report.users || []).map((user) => [user.userId, user]));
@@ -584,6 +602,16 @@ export async function runDailyVisitReportEmailCycle(admin, {
       todayIso: staleAsOfIso,
       agingThresholdDays: resolveOverdueAgingThresholdDays(profile),
     });
+    const scopeMatchers = buildSalesmanScopeMatchers([profile]);
+    const profileCode = normalizeSalesmanCode(profile.salesman_code);
+    const potentialSalesTargetsSection = potentialSalesTargets ? buildPotentialSalesTargetsSection({
+      todayKey: staleAsOfKey,
+      rows: potentialSalesTargets.filter((row) => (
+        Boolean(profileCode) && [row.current_salesman_code, row.previous_salesman_code]
+          .some((code) => normalizeSalesmanCode(code) === profileCode)
+        || salesmanValueMatchesScope(row.salesman_name || row.salesman_code, scopeMatchers)
+      )),
+    }) : null;
     const message = buildUserVisitReportEmail({
       date: reportDate,
       user: userReport,
@@ -592,6 +620,7 @@ export async function runDailyVisitReportEmailCycle(admin, {
       teamMembers: teamPayload?.members || [],
       staleOverdueSection: staleOverdueSection.customerCount ? staleOverdueSection : null,
       incentiveSection: resolveIncentiveSection(incentiveByCode, profile),
+      potentialSalesTargetsSection,
     });
     reportMessageByUserId.set(userReport.userId, {
       userId: userReport.userId,

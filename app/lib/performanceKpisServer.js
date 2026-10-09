@@ -114,15 +114,12 @@ export async function loadSalesActuals(admin, { salesmanCode, reportDate }) {
     const priorRows = await fetchPagedRows(
       admin,
       "active_sales",
-      "customer_code",
+      "customer_code,sales_amount,voucher_type,voucher_number,reference,quantity",
       (query) => query
         .in("customer_code", chunk)
         .lt("transaction_date", from),
     );
-    priorRows.forEach((row) => {
-      const customerCode = normalizeSalesmanCode(row.customer_code);
-      if (customerCode) priorCustomerCodes.push(customerCode);
-    });
+    priorCustomerCodes.push(...buyingCustomerCodesFromSales(priorRows));
   }
 
   const split = splitSalesActuals(monthRows);

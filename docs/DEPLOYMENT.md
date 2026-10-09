@@ -39,6 +39,26 @@ local/dev  →  feature or AI branch  →  PR + CI validation  →  main  →  V
 
 Pushing the git repo does **not** apply SQL. Schema changes need a person to run `supabase/migrations` or the matching `sql/` script on that environment’s Supabase project.
 
+### Production database migration workflow
+
+`.github/workflows/production-db-migrations.yml` is a manually dispatched, audited path for exactly these existing migrations: `20260930190000_sales_order_request_id.sql`, `20261002120000_collection_visit_client_submission_id.sql`, and `20261002130000_attachments.sql`. It does not run on push, pull request, or a schedule. The default `preflight` mode is read-only. This workflow does not use `db push` or `migration up`, and it does not change Storage buckets or policies. The workflow and its runner are committed to the feature branch only until separately reviewed and merged; **no production SQL, GitHub environment, secret, or variable was changed as part of their implementation**.
+
+Before anyone dispatches it, a repository administrator must create the protected GitHub environment `production-db` and configure:
+
+- Required reviewers, prevent self-review, and disable administrator bypass. Restrict deployment branches to `main`; do not allow feature branches.
+- Environment secrets `PRODUCTION_DB_READONLY_URL` and `PRODUCTION_DB_MIGRATION_URL`. Use separate least-privilege PostgreSQL credentials and direct TLS URLs for `db.ynmtlzyqvmurpmfretji.supabase.co:5432/postgres?sslmode=require`. Never put either URL in the repository, local environment files, logs, or summaries.
+- The read-only role must not be a superuser and must have no effective `CREATE` on `public` or `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE` on the migration ledger or inspected application tables. It needs ledger `SELECT`, catalog visibility, and `SELECT` for the inspected columns and duplicate/orphan checks on existing target tables.
+- The migration role must not be a superuser. It needs `CREATE` on `public`, owner-level DDL rights for existing `sales_orders`, `collection_visits`, and `customer_documents` tables (and `attachments` if it already exists), and `SELECT`/`INSERT`/`UPDATE` on `supabase_migrations.schema_migrations` for `migration repair`. Grant no broader access than required.
+- Environment variable `PRODUCTION_DB_MIGRATIONS_ENABLED` should remain unset or `false` until a separately approved apply. Apply requires setting it to exactly `true`; `PRODUCTION_DB_PROJECT_REF` may be omitted because the runner pins and checks the production ref, or set to `ynmtlzyqvmurpmfretji`.
+
+Operator sequence after the environment is approved and configured:
+
+1. From **Actions → Production DB migrations → Run workflow**, dispatch from `main`, choose `preflight`, and enter the full 40-character current `main` SHA under review. The job verifies the event, checkout, reviewed SHA, and fetched `main` all match before connecting. Read-only credential checks, migration ledger/catalog checks, duplicate/orphan checks, and unrelated-pending-migration checks must all pass.
+2. Review the sanitized job summary and migration files at that exact SHA. A blocked preflight is a stop condition; resolve the reported schema/history issue through the normal database change review, then run a new preflight. Do not treat an empty ledger or a successful connection alone as approval.
+3. Only with separate explicit authorization to apply, dispatch the same workflow at the same current `main` SHA in `apply` mode. Supply the successful matching preflight run ID and type `APPLY ` followed by the exact SHA. The environment approval, enabled repository variable, SHA checks, allowlist, SQL safety checks, and migration-role checks are independent gates. Apply executes each exact allowlisted file in its own transaction, records its version, then repeats read-only schema and ledger verification.
+
+The job summary records the actor, SHA, project ref, allowlisted versions, preflight, execution and post-verification status, without database URLs or raw CLI output. If execution fails, stop and inspect the sanitized summary and database schema/ledger before another attempt. A migration that committed but whose history record failed is reported as schema-present/history-missing; rerunning a reviewed apply can record that verified schema in the ledger. Conflicts, partial schema, unrelated pending migrations, and untracked applied versions block execution and require separate investigation. Never use `db push`, `migration up`, or manually mark a version applied to bypass a blocker.
+
 Attachment storage privacy is order-sensitive: run `sql/attachment_storage_phase2_step1_drop_browser_policies.sql` any time, but run `sql/attachment_storage_phase2_step2_private_buckets.sql` only after the Phase 2 build is live. Do not promote (Instant Rollback) a pre-Phase-2 Vercel deployment afterwards: those builds call `updateBucket(public: true)` on every collection upload.
 
 ## Environment variable names

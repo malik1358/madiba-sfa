@@ -21,7 +21,7 @@ const options = { todayKey: "2026-10-07" };
 const customer = {
   customer_code: "C1", customer_name: "Shop <One>", is_active: true,
   total_outstanding: 14999.99, outstanding_0_30: 14999.99,
-  last_invoice_date: "2026-09-21", invoices: [{ pending_amount: 14999.99, invoice_day: 16 }],
+  last_invoice_date: "2026-09-21", invoices: [{ pending_amount: 14999.99, invoice_day: 16, invoice_date: "2026-09-21" }],
 };
 const potentialSalesTargetsRoute = readFileSync(
   new URL("../app/api/potential-sales-targets/route.js", import.meta.url),
@@ -55,11 +55,21 @@ test("potential sales targets exclude inactive customers and recent or missing i
   }
 });
 
-test("all outstanding must be under 60 days including the strict day-60 boundary", () => {
-  assert.equal(isPotentialSalesTarget({ ...customer, invoices: [{ pending_amount: 100, invoice_day: 59 }] }, options), true);
-  for (const invoice_day of [60, 61, 120]) {
-    assert.equal(isPotentialSalesTarget({ ...customer, invoices: [...customer.invoices, { pending_amount: 1, invoice_day }] }, options), false);
+test("all open invoices must be under 60 days from invoice date regardless of uploaded aging fields", () => {
+  assert.equal(isPotentialSalesTarget({
+    ...customer,
+    invoices: [{ pending_amount: 100, invoice_date: "2026-08-09", invoice_day: 120, overdue_days: 120, due_date: "2026-06-01" }],
+  }, options), true);
+  for (const invoice_date of ["2026-08-08", "2026-08-07"]) {
+    assert.equal(isPotentialSalesTarget({
+      ...customer,
+      invoices: [{ pending_amount: 1, invoice_date, invoice_day: 1, overdue_days: 1, due_date: "2026-10-01" }],
+    }, options), false);
   }
+  assert.equal(isPotentialSalesTarget({
+    ...customer,
+    invoices: [{ pending_amount: 100, invoice_day: 1, overdue_days: 1 }],
+  }, options), false);
   for (const bucket of ["outstanding_61_90", "outstanding_91_120", "outstanding_above_120"]) {
     assert.equal(isPotentialSalesTarget({ ...customer, [bucket]: 1 }, options), false);
   }

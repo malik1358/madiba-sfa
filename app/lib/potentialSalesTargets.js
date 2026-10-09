@@ -2,7 +2,7 @@ import { escapeHtml } from "./dailyVisitReportEmail.js";
 import { isFarFromCustomer } from "./customerLocation.js";
 import { parseGpsFromActivityNote } from "./geo.js";
 import { isCreditNoteTransaction } from "./paymentBehavior.js";
-import { normalizeCode, parseOutstandingSheetDate, resolveCustomerAccountCode, resolveInvoiceAgingDays } from "./outstanding.js";
+import { normalizeCode, parseOutstandingSheetDate, resolveCustomerAccountCode } from "./outstanding.js";
 import { addKsaCalendarDays, getKsaDateString } from "./workdayActivity.js";
 
 function normalizeSalesmanIdentity(value) {
@@ -13,6 +13,13 @@ export function potentialTargetAccountCode(value) {
   const code = normalizeCode(resolveCustomerAccountCode(value));
   const match = code.match(/^0*(\d{3,6})[A-Z]?$/);
   return match ? String(Number(match[1])) : code;
+}
+
+function potentialTargetInvoiceAgeDays(invoice, todayKey) {
+  const invoiceDate = parseOutstandingSheetDate(invoice?.invoice_date);
+  if (!invoiceDate) return null;
+  const age = Math.round((Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${invoiceDate}T00:00:00Z`)) / 86400000);
+  return age >= 0 ? age : null;
 }
 
 function matchesSalesmanProfile(value, identitySet) {
@@ -36,7 +43,10 @@ export function isPotentialSalesTarget(row = {}, { todayKey = getKsaDateString()
   if (olderBuckets.some((amount) => Number(amount) > 0)) return false;
   const invoices = (row.invoices || []).filter((invoice) => Number(invoice.pending_amount) > 0);
   if (!invoices.length) return false;
-  if (invoices.some((invoice) => resolveInvoiceAgingDays(invoice, `${todayKey}T12:00:00+03:00`) >= 60)) return false;
+  if (invoices.some((invoice) => {
+    const age = potentialTargetInvoiceAgeDays(invoice, todayKey);
+    return age === null || age >= 60;
+  })) return false;
   const lastInvoiceDate = parseOutstandingSheetDate(row.last_invoice_date || row.latest_transaction_date);
   return Boolean(lastInvoiceDate && lastInvoiceDate < addKsaCalendarDays(todayKey, -15));
 }

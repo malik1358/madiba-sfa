@@ -59,6 +59,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `DAILY_VISIT_REPORT_TO` | Extra visit-report inbox |
 | `DAILY_VISIT_REPORT_SEND_TO_USERS` | `false` sends only the extra inbox |
 | `DAILY_SALESMAN_RESUME_TO` | Resume digest recipients |
+| `MATCHED_RECEIPT_EMAIL_ENABLED` | Must be `true` to send normal matched-receipt mail to salesmen; leave false until Malik approves the preview |
 | `MISSING_INVOICE_EMAIL_TO`, `MISSING_INVOICE_EMAIL_CC` | Extra invoice-chase addresses |
 | `DAILY_SUPPLIER_ORDER_EMAIL_TO`, `DAILY_SUPPLIER_ORDER_EMAIL_CC` | Extra order digest |
 | `DAILY_SUPPLIER_ORDER_EMAIL_SEND_TO_USERS` | `false` sends only the combined digest |
@@ -76,7 +77,7 @@ Values belong in Vercel, GitHub Actions secrets, or a local `.env.local` that is
 | `ANDROID_APK_DOWNLOAD_URL` | Where the update prompt sends the user |
 | `CAPACITOR_SERVER_URL` | Optional. Android shell target. Default is production Vercel |
 
-GitHub Actions secrets used by workflows (names only): `CRON_SECRET`, `PRICE_SYNC_URL`, `INACTIVITY_PUSH_URL`, `AUTO_CLOSE_WORKDAYS_URL`, `DAILY_VISIT_REPORT_EMAIL_URL`, `DAILY_SALESMAN_RESUME_EMAIL_URL`, `DAILY_SUPPLIER_ORDER_EMAIL_URL`, `MISSING_INVOICE_EMAIL_URL`, `OUTSTANDING_NO_GPS_EMAIL_URL`, `SALESMAN_VISIT_PLAN_EMAIL_URL`, `MOBILE_SNAPSHOT_URL`. Each workflow falls back to `https://madiba-sfa.vercel.app` plus the matching path if the URL secret is empty or points at the wrong path.
+GitHub Actions secrets used by workflows (names only): `CRON_SECRET`, `PRICE_SYNC_URL`, `INACTIVITY_PUSH_URL`, `AUTO_CLOSE_WORKDAYS_URL`, `DAILY_VISIT_REPORT_EMAIL_URL`, `DAILY_SALESMAN_RESUME_EMAIL_URL`, `MATCHED_RECEIPT_EMAIL_URL`, `DAILY_SUPPLIER_ORDER_EMAIL_URL`, `MISSING_INVOICE_EMAIL_URL`, `OUTSTANDING_NO_GPS_EMAIL_URL`, `SALESMAN_VISIT_PLAN_EMAIL_URL`, `MOBILE_SNAPSHOT_URL`. Each workflow falls back to `https://madiba-sfa.vercel.app` plus the matching path if the URL secret is empty or points at the wrong path.
 
 ## Schedules
 
@@ -90,6 +91,7 @@ Times below are the intent written in the workflow comments. GitHub cron is UTC.
 | `salesman-visit-plan-email.yml` | `0 21 * * *` | 00:00 KSA, build snapshot then maybe email | `/api/cron/salesman-visit-plan-email` |
 | `daily-visit-report-email.yml` | `10 21 * * 0-3,6`; `0 3 * * 6` | 00:10 KSA Mon–Thu and Sunday; Thursday report Saturday 06:00 KSA | `/api/cron/daily-visit-report-email` |
 | `daily-salesman-resume-email.yml` | `15 21 * * 0-3,6`; `0 3 * * 6` | 00:15 KSA Mon–Thu and Sunday; Thursday report Saturday 06:00 KSA | `/api/cron/daily-salesman-resume-email` |
+| `matched-receipt-email.yml` | `35 21 * * *` | 00:35 KSA daily, catch up yesterday's matched app receipts | `/api/cron/matched-receipt-email` |
 | `daily-supplier-order-email.yml` | `20 21 * * 0-3,5,6` | 00:20 KSA, skip Friday | `/api/cron/daily-supplier-order-email` |
 | `outstanding-no-gps-email.yml` | `25 21 * * 0-3,5,6` | 00:25 KSA, skip Friday | `/api/cron/outstanding-no-gps-email` |
 | `collection-stale-overdue-email.yml` | `35 21 * * 0-3,5,6` | 00:35 KSA, skip Friday | `/api/cron/collection-stale-overdue-email` |

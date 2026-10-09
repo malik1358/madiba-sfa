@@ -16,6 +16,7 @@ import {
 import { hashOfflineDataContent, publishOfflineDataUpdate } from "../../lib/offlineDataBroadcast.js";
 import { storeUploadedExcel } from "../../lib/uploadFilesStorage.js";
 import { runOutstandingReconcileCycle } from "../../lib/outstandingReconcileEmailServer.js";
+import { runMatchedReceiptEmailCycle } from "../../lib/matchedReceiptEmailServer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -271,6 +272,18 @@ export async function POST(request) {
         }), { trigger: "receipt-upload" });
       } catch (reconcileError) {
         console.error("Outstanding reconcile after receipt upload failed:", reconcileError);
+      }
+
+      try {
+        if (!supabaseUrl || !serviceKey) return;
+        await runMatchedReceiptEmailCycle(createClient(supabaseUrl, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        }), {
+          uploadDates: parsed.dates,
+          env: process.env,
+        });
+      } catch (matchedReceiptEmailError) {
+        console.error("Matched receipt email after receipt upload failed:", matchedReceiptEmailError);
       }
     });
 

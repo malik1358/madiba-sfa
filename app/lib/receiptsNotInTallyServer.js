@@ -119,7 +119,7 @@ async function loadCustomerNames(admin, customerCodes) {
 
   const { data, error } = await admin
     .from("customers")
-    .select("customer_code,customer_name")
+    .select("customer_code,customer_name,current_salesman_code")
     .in("customer_code", codes);
 
   if (error && !isMissingTableError(error)) throw error;
@@ -127,7 +127,10 @@ async function loadCustomerNames(admin, customerCodes) {
   return new Map(
     (data || []).map((row) => [
       String(row.customer_code || "").trim().toUpperCase(),
-      String(row.customer_name || "").trim(),
+      {
+        customerName: String(row.customer_name || "").trim(),
+        salesmanCode: String(row.current_salesman_code || "").trim(),
+      },
     ]),
   );
 }
@@ -160,6 +163,7 @@ function mapMissingRow(visit) {
     paymentStatus: visit.payment_status,
     collectorName: visit.collector_name,
     createdBy: visit.created_by,
+    salesmanCode: visit.salesman_code || "",
   };
 }
 
@@ -170,6 +174,7 @@ export async function buildReceiptsNotInTallyReport(admin, {
   fromDate,
   toDate,
   windowDays = DEFAULT_DATE_WINDOW_DAYS,
+  includeMatched = false,
 } = {}) {
   const from = String(fromDate || "").trim();
   const to = String(toDate || "").trim();
@@ -201,7 +206,8 @@ export async function buildReceiptsNotInTallyReport(admin, {
     const code = String(visit.customer_code || "").trim().toUpperCase();
     return {
       ...visit,
-      customer_name: customerNames.get(code) || visit.customer_code || "",
+      customer_name: customerNames.get(code)?.customerName || visit.customer_code || "",
+      salesman_code: customerNames.get(code)?.salesmanCode || "",
       collector_name: collectorNames.get(visit.created_by) || "",
       visit_date: getKsaDateString(new Date(visit.saved_at)),
     };
@@ -220,9 +226,15 @@ export async function buildReceiptsNotInTallyReport(admin, {
     windowDays: resolvedWindow,
   });
 
-  const openMissing = filterIgnoredMissing(reconciliation.missingInTally, ignored);
-  const ignoredInRange = reconciliation.missingInTally.filter((visit) => (
+  const ignoredInRange = [
+    ...reconciliation.missingInTally,
+    ...reconciliation.matched.map((row) => row.visit),
+  ].filter((visit) => (
     Boolean(ignored.byVisitId?.[String(visit.id || "").trim()])
+  ));
+  const openMissing = filterIgnoredMissing(reconciliation.missingInTally, ignored);
+  const matchedForEmail = reconciliation.matched.filter((row) => (
+    !ignored.byVisitId?.[String(row.visit?.id || "").trim()]
   ));
   const openMissingTotal = openMissing.reduce((sum, visit) => sum + Number(visit.amount_received || 0), 0);
 
@@ -241,18 +253,34 @@ export async function buildReceiptsNotInTallyReport(admin, {
     },
     summary: {
       appCount: reconciliation.appCount,
-      matchedCount: reconciliation.matchedCount,
+      matchedCount: matchedForEmail.length,
       missingCount: openMissing.length,
       ignoredCount: ignoredInRange.length,
       ignoredTotalCount: ignoredMistakeCount(ignored),
       duplicateCount: reconciliation.duplicateCount,
       appTotal: reconciliation.appTotal,
-      matchedTotal: reconciliation.matchedTotal,
+      matchedTotal: matchedForEmail.reduce((sum, row) => sum + Number(row.visit.amount_received || 0), 0),
       missingTotal: openMissingTotal,
       tallyCandidateCount: tallyInRange.length,
     },
     missingInTally: openMissing.map(mapMissingRow),
-    ignoredInTally: ignoredInRange.map(mapMissingRow),
+    ignoredInTally: ignoredInRange.map((visit) => ({
+      ...mapMissingRow(visit),
+      resolution: ignored.byVisitId?.[String(visit.id || "").trim()]?.note || "error",
+    })),
+    duplicatesInApp: reconciliation.duplicatesDropped.map((visit) => ({
+      id: visit.id,
+      visitDate: visit.visit_date,
+      savedAt: visit.saved_at,
+      customerCode: visit.customer_code,
+      customerName: visit.customer_name || visit.customer_code,
+      amountReceived: visit.amount_received,
+      collectorName: visit.collector_name || "",
+      resolution: "duplicate",
+      duplicateOf: visit.duplicateOf,
+    })),
+    ...(includeMatched ? { matched: matchedForEmail } : {}),
+    ...(includeMatched ? { duplicatesDropped: reconciliation.duplicatesDropped } : {}),
   };
 }
 
@@ -268,6 +296,9 @@ export async function markReceiptAsMistake(admin, {
 
   const current = await loadIgnoredMistakes(admin);
   const normalizedAction = String(action || "ignore").trim().toLowerCase();
+  const resolution = ["error", "duplicate"].includes(String(note || "").trim().toLowerCase())
+    ? String(note).trim().toLowerCase()
+    : "error";
   let next = current;
 
   if (normalizedAction === "restore" || normalizedAction === "unignore") {
@@ -277,7 +308,7 @@ export async function markReceiptAsMistake(admin, {
       ignoredAt: new Date().toISOString(),
       ignoredBy: String(actor.id || actor.userId || "").trim(),
       ignoredByName: String(actor.name || actor.salesman_name || actor.email || "").trim(),
-      note: String(note || "mistake").trim() || "mistake",
+      note: resolution,
       visitDate: String(snapshot.visitDate || snapshot.visit_date || "").trim(),
       customerCode: String(snapshot.customerCode || snapshot.customer_code || "").trim(),
       customerName: String(snapshot.customerName || snapshot.customer_name || "").trim(),

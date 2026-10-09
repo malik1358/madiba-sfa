@@ -5,6 +5,7 @@ Decisions and hazards recorded from the repository (code, SQL, and git history t
 **Living doc for Cursor and Copilot.** Both tools develop this app. At the start of a task, read this file with the other `docs/` files. When a later change alters a rule in `docs/BUSINESS_RULES.md`, architecture in `docs/ARCHITECTURE.md`, schema in `docs/DATABASE.md`, or deploy in `docs/DEPLOYMENT.md`, add a short dated note at the top of the “Recent agent notes” section below and update the matching doc in the same change.
 
 ## Recent agent notes
+- **2026-10-09** - Fixed Repeat Customer KPI classification: prior history now uses the same positive qualifying-sale rule as current-month buyers, so credit notes, returns and negative-only sales do not make a customer repeat. Added a loader regression; no migration.
 - **2026-10-09** — Promoter Coverage now shows monthly sales value and distinct SKUs sold without quantity. Completed-month sales/SKU changes are green/red; current-month data is excluded from comparisons. Added app-wide sortable headers to report tables while preserving expanded row groups and totals. Added focused regressions and a persistent rule to enumerate every change in production promotion summaries. No migration.
 
 - **2026-10-09** - Salesman Incentive sales queries now use `id` as a stable pagination tie-breaker after transaction date. Date-only pagination could omit or repeat same-date invoice lines and make email and screen totals disagree. Added a 1,005-row page-boundary regression; no migration.

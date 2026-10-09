@@ -50,9 +50,23 @@ test("outstanding at or above SAR 15000 qualifies only below highest completed-m
 
 test("potential sales targets exclude inactive customers and recent or missing invoices", () => {
   assert.equal(isPotentialSalesTarget({ ...customer, is_active: false }, options), false);
+  assert.equal(isPotentialSalesTarget({ ...customer, last_order_invoice_date: "2026-10-07" }, options), false);
   for (const last_invoice_date of ["2026-09-22", "2026-10-07", "2026-10-08", "", "bad"]) {
     assert.equal(isPotentialSalesTarget({ ...customer, last_invoice_date }, options), false);
   }
+});
+
+test("potential target recent-date cutoff uses the same last order or invoice date displayed", () => {
+  assert.equal(isPotentialSalesTarget({
+    ...customer,
+    last_invoice_date: "2026-09-21",
+    last_order_invoice_date: "2026-10-07",
+  }, options), false);
+  assert.equal(isPotentialSalesTarget({
+    ...customer,
+    last_invoice_date: "2026-09-21",
+    last_order_invoice_date: "2026-09-21",
+  }, options), true);
 });
 
 test("all open invoices must be under 60 days from invoice date regardless of uploaded aging fields", () => {
@@ -230,7 +244,7 @@ test("browser target loader returns order date, salesperson visit, three complet
   assert.equal(rows[0].last_visit_by_salesman.SM001, "2026-10-03");
   assert.deepEqual(rows[0].sales_by_month, { "2026-07": 90, "2026-08": 200, "2026-09": 0, "2026-10": 0 });
   assert.equal(rows[0].potential_sale_expected, 200);
-  assert.equal(isPotentialSalesTarget(rows[0], { todayKey: "2026-10-09" }), true);
+  assert.equal(isPotentialSalesTarget(rows[0], { todayKey: "2026-10-09" }), false);
 });
 
 test("daily emails carry salesman-specific potential targets into the company digest", async () => {

@@ -93,13 +93,20 @@ test("all open invoices must be under 60 days from invoice date regardless of up
 
 test("potential target section renders escaped customer details and totals in both email formats", () => {
   const section = buildPotentialSalesTargetsSection({
-    rows: [{ ...customer, potential_sale_expected: 20000 }, { ...customer, is_active: false }],
+    rows: [{
+      ...customer,
+      potential_sale_expected: 20000,
+      salesman_code: "SM001",
+      last_visit_by_salesman: { SM001: "2026-10-03" },
+    }, { ...customer, is_active: false }],
     ...options,
   });
   assert.equal(section.customerCount, 1);
   assert.equal(section.totalOutstanding, 14999.99);
   assert.match(section.html, /Shop &lt;One&gt;/);
   assert.match(section.html, /#0f4c5c/);
+  assert.match(section.text, /Last Visit Date/);
+  assert.match(section.text, /Shop <One> \| - \| 2026-10-03 \| 2026-09-21/);
   assert.match(section.text, /Potential Sale Expected \(SAR\)/);
   assert.match(section.text, /2026-09-21 \| 16 \| 14,999\.99 \| 20,000\.00/);
   assert.match(section.text, /Potential Sale Expected 20,000\.00 SAR/);
@@ -152,6 +159,42 @@ test("loader uses active customers and latest actual invoice, not credit notes o
   assert.equal(rows[0].total_outstanding, total_outstanding);
   assert.equal(rows[0].last_invoice_date, "2026-09-25");
   assert.equal(isPotentialSalesTarget(rows[0], options), false);
+});
+
+test("target loader collapses dirty customer-master twins and retains the canonical row and visit", async () => {
+  const dataByTable = {
+    customers: [
+      { customer_code: "1457", customer_name: "Hayat Al Shabab Trading company", current_salesman_code: "SM001", is_active: true, latest_transaction_date: "2026-09-17" },
+      { customer_code: "1457_Hayat Al Shabab Trading company", customer_name: "1457_Hayat Al Shabab Trading company", current_salesman_code: "SM001", is_active: true, latest_transaction_date: "2026-09-17" },
+    ],
+    active_sales: [],
+    collection_visits: [{ customer_code: "1457", created_by: "u1", saved_at: "2026-10-02T08:00:00+03:00" }],
+    daily_activity_logs: [],
+  };
+  const admin = { from(table) {
+    const query = {
+      select() { return this; }, eq() { return this; }, gt() { return this; }, lte() { return this; },
+      in() { return this; }, order() { return this; }, gte() { return this; }, lt() { return this; },
+      async range() { return { data: dataByTable[table] || [], error: null }; },
+    };
+    return query;
+  } };
+  const invoice = { pending_amount: 13014.78, invoice_date: "2026-09-17" };
+  const rows = await loadPotentialSalesTargetCustomers(admin, {
+    records: [
+      { customer_code: "1457", salesman_code: "SM001", invoices: [invoice] },
+      { customer_code: "1457_Hayat Al Shabab Trading company", salesman_code: "SM001", invoices: [invoice] },
+    ],
+    includeVisitDetails: true,
+    profiles: [{ id: "u1", salesman_code: "SM001" }],
+    ...options,
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].customer_code, "1457");
+  assert.equal(rows[0].customer_name, "Hayat Al Shabab Trading company");
+  assert.equal(rows[0].total_outstanding, 13014.78);
+  assert.equal(rows[0].last_visit_by_salesman.SM001, "2026-10-02");
 });
 
 test("email target loader uses net sales from the three completed months for higher balances", async () => {

@@ -9,7 +9,7 @@ import {
 } from "./potentialSalesTargets.js";
 import { promoterCoverageCustomerCodeVariants } from "./promoterCoverage.js";
 import { isMissingSchemaColumn } from "./performanceKpis.js";
-import { parseOutstandingSheetDate } from "./outstanding.js";
+import { normalizeCode, parseOutstandingSheetDate, resolveCustomerAccountCode } from "./outstanding.js";
 
 const PAGE_SIZE = 1000;
 
@@ -114,6 +114,7 @@ export async function loadPotentialSalesTargetCustomers(admin, {
   records = [],
   todayKey,
   includeBrowserDetails = false,
+  includeVisitDetails = false,
   profiles = [],
 } = {}) {
   if (!records.length) return [];
@@ -129,7 +130,20 @@ export async function loadPotentialSalesTargetCustomers(admin, {
     if ((data || []).length < 1000) break;
   }
   const recordByCode = new Map(records.map((row) => [potentialTargetAccountCode(row.customer_code), row]));
-  const candidates = customers.filter((row) => recordByCode.has(potentialTargetAccountCode(row.customer_code)));
+  const candidateByCode = new Map();
+  customers.forEach((row) => {
+    const code = potentialTargetAccountCode(row.customer_code);
+    if (!recordByCode.has(code)) return;
+    const current = candidateByCode.get(code);
+    const rowCode = normalizeCode(row.customer_code);
+    const resolvedRowCode = normalizeCode(resolveCustomerAccountCode(row.customer_code));
+    const currentCode = normalizeCode(current?.customer_code);
+    const resolvedCurrentCode = normalizeCode(resolveCustomerAccountCode(current?.customer_code));
+    if (!current || (rowCode === resolvedRowCode && currentCode !== resolvedCurrentCode)) {
+      candidateByCode.set(code, row);
+    }
+  });
+  const candidates = [...candidateByCode.values()];
   const codes = [...new Set(candidates.map((row) => row.customer_code))];
   const browserMonthKeys = potentialSalesTargetMonthKeys(todayKey);
   const expectedSaleMonthKeys = potentialSalesTargetSalesMonthKeys(todayKey);
@@ -163,7 +177,9 @@ export async function loadPotentialSalesTargetCustomers(admin, {
     ? sumPotentialSalesByCustomerAndMonth(salesRows, expectedSaleMonthKeys)
     : await loadPotentialTargetMonthlySales(admin, codes, expectedSaleMonthKeys);
   const submittedOrderDates = includeBrowserDetails ? await loadSubmittedOrderDates(admin, codes) : new Map();
-  const lastVisitDates = includeBrowserDetails ? await loadBrowserVisitData(admin, candidates, profiles) : new Map();
+  const lastVisitDates = includeBrowserDetails || includeVisitDetails
+    ? await loadBrowserVisitData(admin, candidates, profiles)
+    : new Map();
 
   return candidates.map((customer) => {
     const code = potentialTargetAccountCode(customer.customer_code);
@@ -198,7 +214,7 @@ export async function loadPotentialSalesTargetCustomers(admin, {
         salesByMonth,
         todayKey,
       ),
-      ...(includeBrowserDetails ? {
+      ...(includeBrowserDetails || includeVisitDetails ? {
         last_visit_by_salesman: visitBySalesman,
       } : {}),
     };

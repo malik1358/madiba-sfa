@@ -86,11 +86,17 @@ function resolveSalesTrend(monthSales, monthKeys, currentMonth) {
   const recentMonth = completedMonths.at(-1);
   const previousSales = monthSales[previousMonth] || 0;
   const recentSales = monthSales[recentMonth] || 0;
+  const priorHistory = completedMonths.slice(0, -2).some((month) => (monthSales[month] || 0) > 0);
   if (previousSales <= 0 && recentSales > 0) {
-    return { trend: "new_sales", recentSales, previousSales, changePercent: null };
+    return { trend: priorHistory ? "increasing" : "new_sales", recentSales, previousSales, changePercent: null };
   }
   if (previousSales <= 0) {
-    return { trend: "no_sales", recentSales, previousSales, changePercent: null };
+    return {
+      trend: recentSales > 0 ? "increasing" : "no_sales",
+      recentSales,
+      previousSales,
+      changePercent: null,
+    };
   }
 
   const changePercent = ((recentSales - previousSales) / previousSales) * 100;
@@ -168,14 +174,20 @@ export function buildPromoterCoverageReport({
       const currentSales = customer.monthSales[month] || 0;
       const priorSkus = monthSkuCount[previousMonth] || 0;
       const currentSkus = monthSkuCount[month] || 0;
+      const priorSalesHistory = months.slice(0, index - 1).some((priorMonth) => (customer.monthSales[priorMonth] || 0) > 0);
+      const priorSkuHistory = months.slice(0, index - 1).some((priorMonth) => (monthSkuCount[priorMonth] || 0) > 0);
       monthSalesChange[month] = priorSales === 0
-        ? (currentSales > 0 ? { trend: "new_sales", changePercent: null } : { trend: "stable", changePercent: 0 })
+        ? (currentSales > 0
+          ? { trend: priorSalesHistory ? "increasing" : "new_sales", changePercent: null }
+          : { trend: priorSalesHistory ? "decreasing" : "stable", changePercent: null })
         : {
           trend: currentSales > priorSales ? "increasing" : currentSales < priorSales ? "decreasing" : "stable",
           changePercent: ((currentSales - priorSales) / Math.abs(priorSales)) * 100,
         };
       monthSkuChange[month] = priorSkus === 0
-        ? (currentSkus > 0 ? { trend: "new_sales", changePercent: null } : { trend: "stable", changePercent: 0 })
+        ? (currentSkus > 0
+          ? { trend: priorSkuHistory ? "increasing" : "new_sales", changePercent: null }
+          : { trend: priorSkuHistory ? "decreasing" : "stable", changePercent: null })
         : {
           trend: currentSkus > priorSkus ? "increasing" : currentSkus < priorSkus ? "decreasing" : "stable",
           changePercent: ((currentSkus - priorSkus) / priorSkus) * 100,

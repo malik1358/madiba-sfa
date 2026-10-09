@@ -112,6 +112,18 @@ export function potentialSalesTargetMatchesSalesman(row = {}, salesmanCode = "")
     .some((code) => String(code || "").trim().toUpperCase().replace(/\s+/g, " ") === selected);
 }
 
+export function potentialSalesTargetVisitedWithinDays(row = {}, {
+  todayKey = getKsaDateString(),
+  days = 8,
+  salesmanCode = potentialSalesTargetSalesmanCode(row),
+} = {}) {
+  const selected = String(salesmanCode || "").trim().toUpperCase().replace(/\s+/g, " ");
+  const lastVisitDate = parseOutstandingSheetDate(row.last_visit_by_salesman?.[selected]);
+  if (!selected || !lastVisitDate) return false;
+  const cutoff = addKsaCalendarDays(todayKey, -Math.max(0, Number(days) || 0));
+  return lastVisitDate >= cutoff && lastVisitDate <= todayKey;
+}
+
 export function sumPotentialSalesByCustomerAndMonth(rows = [], monthKeys = []) {
   const months = new Set(monthKeys || []);
   const byCustomer = new Map();

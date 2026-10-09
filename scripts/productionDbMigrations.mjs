@@ -21,7 +21,26 @@ const SQL = {
     current_setting('server_version') AS server_version,
     COALESCE((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false) AS tls,
     COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname = current_user), false) AS is_superuser,
-    to_regclass('supabase_migrations.schema_migrations') IS NOT NULL AS ledger_exists;`,
+    to_regclass('supabase_migrations.schema_migrations') IS NOT NULL AS ledger_exists,
+    COALESCE((SELECT relkind IN ('r', 'p') FROM pg_class WHERE oid = to_regclass('supabase_migrations.schema_migrations')), false) AS ledger_is_table,
+    COALESCE((SELECT NOT relrowsecurity FROM pg_class WHERE oid = to_regclass('supabase_migrations.schema_migrations')), false) AS ledger_rls_disabled,
+    (SELECT count(*) = 3
+        AND count(*) FILTER (WHERE column_name = 'version' AND data_type = 'text' AND is_nullable = 'NO') = 1
+        AND count(*) FILTER (WHERE column_name = 'name' AND data_type = 'text') = 1
+        AND count(*) FILTER (WHERE column_name = 'statements' AND data_type = 'ARRAY' AND udt_name = '_text') = 1
+      FROM information_schema.columns
+      WHERE table_schema = 'supabase_migrations' AND table_name = 'schema_migrations') AS ledger_columns_ready,
+    (SELECT count(*) = 1 FROM pg_constraint
+      WHERE conrelid = to_regclass('supabase_migrations.schema_migrations')) AS ledger_constraints_exact,
+    NOT EXISTS (SELECT 1 FROM pg_trigger
+      WHERE tgrelid = to_regclass('supabase_migrations.schema_migrations') AND NOT tgisinternal) AS ledger_triggers_absent,
+    EXISTS (SELECT 1 FROM pg_constraint AS constraint_row
+      JOIN pg_attribute AS attribute ON attribute.attrelid = constraint_row.conrelid
+        AND attribute.attname = 'version' AND NOT attribute.attisdropped
+      WHERE constraint_row.conrelid = to_regclass('supabase_migrations.schema_migrations')
+        AND constraint_row.contype = 'p' AND constraint_row.convalidated
+        AND NOT constraint_row.condeferrable AND array_length(constraint_row.conkey, 1) = 1
+        AND constraint_row.conkey[1] = attribute.attnum) AS ledger_version_unique;`,
   ledger: `SELECT version::text AS version FROM supabase_migrations.schema_migrations ORDER BY version;`,
   tables: `SELECT expected.table_name, relation.oid IS NOT NULL AS exists,
     COALESCE(relation.relrowsecurity, false) AS rls_enabled,
@@ -76,13 +95,27 @@ export function validateProductionDatabaseUrl(raw) {
   if (url.port && url.port !== "5432") return { ok: false, reason: "must use direct PostgreSQL port 5432" };
   if (url.pathname !== "/postgres") return { ok: false, reason: "database name must be postgres" };
   if (!url.username || !url.password) return { ok: false, reason: "database URL must include credentials" };
-  if (!new Set(["require", "verify-ca", "verify-full"]).has(url.searchParams.get("sslmode"))) return { ok: false, reason: "database URL must require TLS" };
+  const sslModes = url.searchParams.getAll("sslmode");
+  if (sslModes.length !== 1 || sslModes[0] !== "verify-full") return { ok: false, reason: "database URL must use sslmode=verify-full" };
   return { ok: true, host: url.hostname, database: url.pathname.slice(1) };
+}
+
+export function migrationLedgerRepairIssues(identity = {}) {
+  const issues = [];
+  if (!bool(identity.ledger_exists)) issues.push("migration ledger is missing");
+  if (!bool(identity.ledger_is_table)) issues.push("migration ledger is not a table");
+  if (!bool(identity.ledger_rls_disabled)) issues.push("migration ledger RLS is enabled");
+  if (!bool(identity.ledger_columns_ready)) issues.push("migration ledger columns are not repair-ready");
+  if (!bool(identity.ledger_constraints_exact)) issues.push("migration ledger has unexpected constraints");
+  if (!bool(identity.ledger_triggers_absent)) issues.push("migration ledger has user triggers");
+  if (!bool(identity.ledger_version_unique)) issues.push("migration ledger version lacks a non-deferrable primary key");
+  return issues;
 }
 
 export function readonlyPrivilegeIssues(privileges = {}) {
   const writeCapabilities = [
-    "is_superuser", "can_create_public", "ledger_insert", "ledger_update", "ledger_delete",
+    "is_superuser", "can_create_public", "can_create_migration_schema",
+    "ledger_insert", "ledger_update", "ledger_delete", "ledger_truncate",
     ...TARGET_TABLES.flatMap((table) => [`${table}_insert`, `${table}_update`, `${table}_delete`, `${table}_truncate`]),
   ];
   return writeCapabilities.filter((name) => bool(privileges[name]));
@@ -214,6 +247,29 @@ function runCli(args, stage, parseRows = true) {
   throw new Error(`${stage} returned no result rows`);
 }
 
+function runPsql(args, stage) {
+  const result = spawnSync("psql", args, {
+    cwd: ROOT,
+    encoding: "utf8",
+    maxBuffer: 20 * 1024 * 1024,
+    env: { ...process.env },
+  });
+  if (result.error || result.status !== 0) throw new Error(`${stage} failed (exit ${result.status ?? "unavailable"}); raw psql output suppressed`);
+}
+
+function queryPsql(dbUrl, sql, stage) {
+  const result = spawnSync("psql", ["--no-psqlrc", "--set=ON_ERROR_STOP=1", "--no-align", "--tuples-only", "--field-separator=,", "--command", sql, dbUrl], {
+    cwd: ROOT,
+    encoding: "utf8",
+    maxBuffer: 20 * 1024 * 1024,
+    env: { ...process.env },
+  });
+  if (result.error || result.status !== 0) throw new Error(`${stage} failed (exit ${result.status ?? "unavailable"}); raw psql output suppressed`);
+  const values = String(result.stdout || "").trim().split(",");
+  if (!values.length) throw new Error(`${stage} returned no result row`);
+  return values;
+}
+
 function query(dbUrl, sql, stage) {
   return runCli(["db", "query", "--db-url", dbUrl, "--agent", "no", "--output", "json", sql], stage);
 }
@@ -228,13 +284,16 @@ function collectPreflight(dbUrl) {
   if (identity.database !== "postgres") throw new Error("connected database is not postgres");
   if (!bool(identity.tls)) throw new Error("database session is not TLS encrypted");
   if (bool(identity.is_superuser)) throw new Error("read-only preflight must not use a superuser connection");
-  if (!bool(identity.ledger_exists)) throw new Error("Supabase migration ledger is missing");
+  const ledgerIssues = migrationLedgerRepairIssues(identity);
+  if (ledgerIssues.length) throw new Error(`migration ledger is not repair-ready: ${ledgerIssues.join("; ")}`);
   const readonlyPermissions = query(dbUrl, `
     SELECT COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname = current_user), false) AS is_superuser,
            has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_public,
+      has_schema_privilege(current_user, 'supabase_migrations', 'CREATE') AS can_create_migration_schema,
            has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'INSERT') AS ledger_insert,
            has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'UPDATE') AS ledger_update,
            has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'DELETE') AS ledger_delete,
+       has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'TRUNCATE') AS ledger_truncate,
            ${TARGET_TABLES.flatMap((table) => [
              `CASE WHEN to_regclass('public.${table}') IS NULL THEN false ELSE has_table_privilege(current_user, to_regclass('public.${table}'), 'INSERT') END AS ${table}_insert`,
              `CASE WHEN to_regclass('public.${table}') IS NULL THEN false ELSE has_table_privilege(current_user, to_regclass('public.${table}'), 'UPDATE') END AS ${table}_update`,
@@ -297,22 +356,39 @@ function integritySummary(schema) {
   return [...schema.duplicates.entries()].map(([key, count]) => `${key}=${count}`).join(", ") || "no relevant duplicate/orphan checks";
 }
 
-function checkMigrationRole(dbUrl, schema) {
-  const row = query(dbUrl, `SELECT COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname = current_user), false) AS is_superuser,
+function migrationRoleSql() {
+  return `SELECT COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname = current_user), false) AS is_superuser,
       has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_public,
+  has_schema_privilege(current_user, 'supabase_migrations', 'CREATE') AS can_create_migration_schema,
       has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'SELECT') AS can_read_ledger,
       has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'INSERT') AS can_insert_ledger,
-           has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'UPDATE') AS can_update_ledger,
-      ${["sales_orders", "collection_visits", "customer_documents", "attachments"].map((table) => `(current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = to_regclass('public.${table}')) OR pg_has_role(current_user, (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = to_regclass('public.${table}')), 'MEMBER')) AS owns_${table}`).join(",")};`, "migration role permissions")[0] || {};
+  has_table_privilege(current_user, 'supabase_migrations.schema_migrations', 'UPDATE') AS can_update_ledger,
+      ${TARGET_TABLES.map((table) => `(current_user = (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = to_regclass('public.${table}'))) AS owns_${table}`).join(",")};`;
+}
+
+export function migrationRoleIssues(row, schema) {
   const issues = [];
   if (bool(row.is_superuser)) issues.push("migration connection is superuser");
   if (!bool(row.can_create_public)) issues.push("migration role lacks CREATE on public");
+  if (bool(row.can_create_migration_schema)) issues.push("migration role must not have CREATE on supabase_migrations");
   if (!bool(row.can_read_ledger) || !bool(row.can_insert_ledger) || !bool(row.can_update_ledger)) issues.push("migration role lacks migration-ledger SELECT/INSERT/UPDATE");
   for (const table of ["sales_orders", "collection_visits", "customer_documents"]) {
     if (schema.tables.some((item) => item.table_name === table && bool(item.exists)) && !bool(row[`owns_${table}`])) issues.push(`migration role lacks owner-level DDL on public.${table}`);
   }
   if (schema.tables.some((item) => item.table_name === "attachments" && bool(item.exists)) && !bool(row.owns_attachments)) issues.push("migration role lacks owner-level DDL on public.attachments");
   return issues;
+}
+
+function checkMigrationRole(dbUrl, schema) {
+  const sql = migrationRoleSql();
+  const cliRow = query(dbUrl, sql, "migration role permissions")[0] || {};
+  const values = queryPsql(dbUrl, sql, "direct SQL execution role permissions");
+  const columns = ["is_superuser", "can_create_public", "can_create_migration_schema", "can_read_ledger", "can_insert_ledger", "can_update_ledger", ...TARGET_TABLES.map((table) => `owns_${table}`)];
+  const psqlRow = Object.fromEntries(columns.map((column, index) => [column, values[index]]));
+  return [
+    ...migrationRoleIssues(cliRow, schema).map((issue) => `Supabase CLI ${issue}`),
+    ...migrationRoleIssues(psqlRow, schema).map((issue) => `psql ${issue}`),
+  ];
 }
 
 export function migrationActionForState(status) {
@@ -322,6 +398,12 @@ export function migrationActionForState(status) {
   return "block";
 }
 
+export function executionFailureStatus(report) {
+  if (report.execution === "completed; exact allowlist only") return report.execution;
+  if (report.executionStarted) return "potentially committed; verify schema and migration history before retrying";
+  return "not executed";
+}
+
 function executeExactMigration(dbUrl, migration) {
   const tempDirectory = mkdtempSync(path.join(os.tmpdir(), "madiba-production-migration-"));
   const tempFile = path.join(tempDirectory, migration.file);
@@ -329,7 +411,7 @@ function executeExactMigration(dbUrl, migration) {
     const source = readFileSync(path.join(ROOT, "supabase", "migrations", migration.file), "utf8");
     if (!hasOnlyAllowlistedMigrationSql(source)) throw new Error(`${migration.version} contains disallowed destructive or storage-policy SQL`);
     writeFileSync(tempFile, `BEGIN;\nSET LOCAL lock_timeout = '5s';\nSET LOCAL statement_timeout = '5min';\n${source}\nCOMMIT;\n`, { flag: "wx" });
-    runCli(["db", "query", "--db-url", dbUrl, "--agent", "no", "--output", "json", "--file", tempFile], `execute ${migration.version}`, false);
+    runPsql(["--no-psqlrc", "--set=ON_ERROR_STOP=1", "--file", tempFile, dbUrl], `execute ${migration.version}`);
   } finally {
     rmSync(tempDirectory, { recursive: true, force: true });
   }
@@ -371,7 +453,7 @@ function writeAudit(report) {
 
 export async function runMigrationWorkflow(env = process.env) {
   const mode = env.PRODUCTION_DB_MIGRATION_MODE || "preflight";
-  const report = { actor: env.GITHUB_ACTOR, commit: env.REVIEWED_COMMIT, mode, preflight: "running", execution: mode === "preflight" ? "not requested (read-only)" : "not started", postVerification: "not run" };
+  const report = { actor: env.GITHUB_ACTOR, commit: env.REVIEWED_COMMIT, mode, preflight: "running", execution: mode === "preflight" ? "not requested (read-only)" : "not started", executionStarted: false, postVerification: "not run" };
   try {
     const contextErrors = validateWorkflowContext({
       mode, reviewedCommit: env.REVIEWED_COMMIT, workflowSha: env.GITHUB_SHA,
@@ -381,6 +463,7 @@ export async function runMigrationWorkflow(env = process.env) {
     });
     if (contextErrors.length) throw new Error(contextErrors.join("; "));
     if (env.PRODUCTION_DB_PROJECT_REF !== PRODUCTION_PROJECT_REF) throw new Error("configured project ref differs from the pinned production project");
+    if (!env.PGSSLROOTCERT) throw new Error("PGSSLROOTCERT must point to the trusted Supabase root CA certificate");
     const readUrl = validateProductionDatabaseUrl(env.PRODUCTION_DB_READONLY_URL);
     if (!readUrl.ok) throw new Error(`read-only connection rejected: ${readUrl.reason}`);
     const schema = collectPreflight(env.PRODUCTION_DB_READONLY_URL);
@@ -409,12 +492,17 @@ export async function runMigrationWorkflow(env = process.env) {
       const action = migrationActionForState(state.status);
       if (action === "skip") continue;
       if (action === "record-history") {
+        report.executionStarted = true;
+        report.execution = `recording history for ${migration.version}; prior SQL is verified in schema`;
         markVersionApplied(env.PRODUCTION_DB_MIGRATION_URL, migration.version);
         state.status = "history recorded for verified schema";
         continue;
       }
       if (action !== "execute") throw new Error(`${migration.version} is not in a safe pending state`);
+      report.executionStarted = true;
+      report.execution = `executing ${migration.version}; outcome unknown`;
       executeExactMigration(env.PRODUCTION_DB_MIGRATION_URL, migration);
+      report.execution = `${migration.version} SQL transaction committed; recording history`;
       markVersionApplied(env.PRODUCTION_DB_MIGRATION_URL, migration.version);
       state.status = "executed exact file and recorded";
     }
@@ -428,7 +516,7 @@ export async function runMigrationWorkflow(env = process.env) {
   } catch (error) {
     report.failure = error.message || "operation failed; sensitive output suppressed";
     if (report.preflight === "running") report.preflight = "FAILED";
-    if (report.execution === "not started") report.execution = "not executed";
+    report.execution = executionFailureStatus(report);
     report.error = true;
     return report;
   } finally {

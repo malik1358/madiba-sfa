@@ -81,6 +81,26 @@ jobs:
             echo "current_main_sha=$current_main_sha"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Verify protected production environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          environment_json="$(gh api "repos/$GITHUB_REPOSITORY/environments/production-db")"
+          jq -e '
+            .can_admins_bypass == false and
+            any(.protection_rules[]?; .type == "required_reviewers" and ((.reviewers // []) | length > 0)) and
+            .deployment_branch_policy.custom_branch_policies == true and
+            .deployment_branch_policy.protected_branches == false
+          ' <<< "$environment_json" >/dev/null || {
+            echo "production-db must require reviewers, disallow admin bypass, and use custom deployment branch policies" >&2
+            exit 1
+          }
+          branch_policies="$(gh api "repos/$GITHUB_REPOSITORY/environments/production-db/deployment-branch-policies")"
+          jq -e '.branch_policies | length == 1 and .[0].name == "main" and .[0].type == "branch"' <<< "$branch_policies" >/dev/null || {
+            echo "production-db deployment policy must allow only the main branch" >&2
+            exit 1
+          }
+
       - name: Verify a successful matching preflight for apply mode
         if: inputs.mode == 'apply'
         id: approved_preflight
@@ -115,6 +135,34 @@ jobs:
             exit 1
           fi
 
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --yes postgresql-client-16
+          version="$(psql --version)"
+          if [[ ! "$version" =~ ^psql\ \(PostgreSQL\)\ 16\. ]]; then
+            echo "unexpected PostgreSQL client version" >&2
+            exit 1
+          fi
+
+      - name: Configure verified production database TLS
+        shell: bash
+        env:
+          PRODUCTION_DB_ROOT_CA_CERT: ${{ secrets.PRODUCTION_DB_ROOT_CA_CERT }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$PRODUCTION_DB_ROOT_CA_CERT" ]]; then
+            echo "production database root CA certificate is missing" >&2
+            exit 1
+          fi
+          cert_path="$RUNNER_TEMP/production-db-root-ca.crt"
+          umask 077
+          printf '%s\n' "$PRODUCTION_DB_ROOT_CA_CERT" > "$cert_path"
+          openssl x509 -in "$cert_path" -noout >/dev/null
+          echo "PGSSLROOTCERT=$cert_path" >> "$GITHUB_ENV"
+
       - name: Run read-only preflight or gated allowlisted apply
         id: migration_runner
         env:
@@ -138,6 +186,10 @@ jobs:
             echo "- Reviewed commit SHA: $REVIEWED_COMMIT"
             echo "- Target Supabase project: $PRODUCTION_DB_PROJECT_REF"
             echo "- Mode: $PRODUCTION_DB_MIGRATION_MODE"
-            echo "- Execution status: **not executed; job status $JOB_STATUS**"
+            if [[ "$PRODUCTION_DB_MIGRATION_MODE" == "preflight" ]]; then
+              echo "- Execution status: **read-only preflight mode; migration SQL is not executed in this mode**"
+            else
+              echo "- Execution status: **apply runner failed or did not report; SQL may have committed. Inspect runner audit and database before retrying. Job status: $JOB_STATUS**"
+            fi
             echo "- Migrations: 20260930190000, 20261002120000, 20261002130000"
           } >> "$GITHUB_STEP_SUMMARY"

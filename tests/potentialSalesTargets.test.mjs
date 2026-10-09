@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPotentialSalesTargetsSection, isPotentialSalesTarget } from "../app/lib/potentialSalesTargets.js";
+import {
+  buildPotentialSalesTargetsSection,
+  daysSincePotentialSalesTargetInvoice,
+  filterPotentialSalesTargetsForProfile,
+  isPotentialSalesTarget,
+} from "../app/lib/potentialSalesTargets.js";
 import { loadPotentialSalesTargetCustomers } from "../app/lib/potentialSalesTargetsServer.js";
 import { runDailyVisitReportEmailCycle } from "../app/lib/dailyVisitReportEmailServer.js";
 
@@ -111,4 +116,23 @@ test("daily emails carry salesman-specific potential targets into the company di
   assert.match(digest.text, /C1 \|/);
   assert.match(digest.text, /C2 \|/);
   assert.match(digest.html, /Potential Sales Target Customers/);
+});
+
+test("browser target scope includes current and previous assignments but not another salesman's customers", () => {
+  const rows = [
+    { customer_code: "CURRENT", current_salesman_code: "sm001" },
+    { customer_code: "PREVIOUS", previous_salesman_code: "SM001" },
+    { customer_code: "UPLOAD", salesman_name: "Sales One (SM001)" },
+    { customer_code: "OTHER", current_salesman_code: "SM002", salesman_name: "Sales Two" },
+  ];
+  assert.deepEqual(
+    filterPotentialSalesTargetsForProfile(rows, { salesman_code: "SM001", salesman_name: "Sales One" })
+      .map((row) => row.customer_code),
+    ["CURRENT", "PREVIOUS", "UPLOAD"],
+  );
+});
+
+test("browser target invoice age is calculated on KSA report date keys", () => {
+  assert.equal(daysSincePotentialSalesTargetInvoice({ last_invoice_date: "2026-09-21" }, "2026-10-07"), 16);
+  assert.equal(daysSincePotentialSalesTargetInvoice({ last_invoice_date: "bad" }, "2026-10-07"), null);
 });

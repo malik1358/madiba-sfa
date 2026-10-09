@@ -1697,6 +1697,28 @@ export function visitOutstandingSummaryFromRow(row) {
   };
 }
 
+export function customerOutstandingBreakdown(source) {
+  const summary = visitOutstandingSummaryFromRow(source);
+  const visitBuckets = [
+    { key: "0-30", amount: summary.days0To30 },
+    { key: "31-60", amount: summary.days30To60 },
+    { key: "61-90", amount: summary.days61To90 },
+    { key: ">90", amount: summary.daysAbove90 },
+  ].filter((bucket) => bucket.amount > 0);
+  const storedBuckets = source?.buckets && typeof source.buckets === "object"
+    ? Object.entries(source.buckets)
+      .map(([key, value]) => ({ key, amount: toNumber(value) }))
+      .filter((bucket) => bucket.amount > 0)
+    : [];
+  const buckets = visitBuckets.length > 0 ? visitBuckets : storedBuckets;
+  const bucketTotal = buckets.reduce((total, bucket) => total + bucket.amount, 0);
+
+  return {
+    total: toNumber(source?.total_outstanding) || bucketTotal,
+    buckets,
+  };
+}
+
 export const CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR =
   "Customers with outstanding cannot be marked inactive.";
 

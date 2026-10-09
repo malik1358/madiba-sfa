@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   CUSTOMER_INACTIVE_WITH_OUTSTANDING_ERROR,
   customerHasOutstandingBalance,
+  customerOutstandingBreakdown,
   findOutstandingForCustomer,
 } from "../app/lib/outstanding.js";
 
@@ -28,6 +29,25 @@ test("customerHasOutstandingBalance detects uploaded outstanding rows", () => {
   assert.equal(customerHasOutstandingBalance({ total_outstanding: 0, buckets: { "0-30": 0 } }), false);
   assert.equal(customerHasOutstandingBalance({ total_outstanding: 1200 }), true);
   assert.equal(customerHasOutstandingBalance({ buckets: { "61-90": 500 } }), true);
+});
+
+test("customerOutstandingBreakdown reports total and positive aging buckets", () => {
+  assert.deepEqual(customerOutstandingBreakdown({
+    outstanding_0_30: 0,
+    outstanding_30_60: 0,
+    outstanding_61_90: 498.7,
+    outstanding_above_90: 0,
+  }), {
+    total: 498.7,
+    buckets: [{ key: "61-90", amount: 498.7 }],
+  });
+  assert.deepEqual(customerOutstandingBreakdown({
+    total_outstanding: 96.43,
+    buckets: { ">90": 96.43, "0-30": 0 },
+  }), {
+    total: 96.43,
+    buckets: [{ key: ">90", amount: 96.43 }],
+  });
 });
 
 test("findOutstandingForCustomer plus balance check blocks inactive candidates", () => {

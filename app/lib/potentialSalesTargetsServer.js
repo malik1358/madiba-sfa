@@ -6,6 +6,7 @@ import {
   sumPotentialSalesByCustomerAndMonth,
 } from "./potentialSalesTargets.js";
 import { promoterCoverageCustomerCodeVariants } from "./promoterCoverage.js";
+import { isMissingSchemaColumn } from "./performanceKpis.js";
 import { parseOutstandingSheetDate } from "./outstanding.js";
 
 const PAGE_SIZE = 1000;
@@ -38,20 +39,27 @@ async function loadSubmittedOrderDates(admin, customerCodes) {
   return latestByCode;
 }
 
-async function loadBrowserVisitData(admin, customerCodes, profiles = []) {
-  const queryCodes = [...new Set(customerCodes.flatMap(promoterCoverageCustomerCodeVariants))];
+async function loadBrowserVisitData(admin, customers, profiles = []) {
+  const queryCodes = [...new Set(customers.flatMap((customer) => promoterCoverageCustomerCodeVariants(customer.customer_code)))];
   const collectionVisits = [];
   for (let start = 0; start < queryCodes.length; start += 200) {
     const batch = queryCodes.slice(start, start + 200);
     for (let offset = 0; ; offset += PAGE_SIZE) {
-      const { data, error } = await admin.from("collection_visits")
-        .select("customer_code,created_by,saved_at")
+      let result = await admin.from("collection_visits")
+        .select("customer_code,created_by,saved_at,latitude,longitude")
         .in("customer_code", batch)
         .order("saved_at", { ascending: false })
         .range(offset, offset + PAGE_SIZE - 1);
-      if (error) throw error;
-      collectionVisits.push(...(data || []));
-      if ((data || []).length < PAGE_SIZE) break;
+      if (result.error && isMissingSchemaColumn(result.error)) {
+        result = await admin.from("collection_visits")
+          .select("customer_code,created_by,saved_at")
+          .in("customer_code", batch)
+          .order("saved_at", { ascending: false })
+          .range(offset, offset + PAGE_SIZE - 1);
+      }
+      if (result.error) throw result.error;
+      collectionVisits.push(...(result.data || []));
+      if ((result.data || []).length < PAGE_SIZE) break;
     }
   }
 
@@ -73,7 +81,7 @@ async function loadBrowserVisitData(admin, customerCodes, profiles = []) {
     }
   }
 
-  return buildPotentialSalesTargetLastVisitMap({ collectionVisits, activityLogs, profiles });
+  return buildPotentialSalesTargetLastVisitMap({ customers, collectionVisits, activityLogs, profiles });
 }
 
 export async function loadPotentialSalesTargetCustomers(admin, {
@@ -86,7 +94,7 @@ export async function loadPotentialSalesTargetCustomers(admin, {
   const customers = [];
   for (let offset = 0; ; offset += 1000) {
     const { data, error } = await admin.from("customers")
-      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,city,area,is_active")
+      .select("customer_code,customer_name,current_salesman_code,previous_salesman_code,latest_transaction_date,city,area,latitude,longitude,is_active")
       .eq("is_active", true)
       .order("customer_code")
       .range(offset, offset + 999);
@@ -128,7 +136,7 @@ export async function loadPotentialSalesTargetCustomers(admin, {
     ? sumPotentialSalesByCustomerAndMonth(salesRows, browserMonthKeys)
     : new Map();
   const submittedOrderDates = includeBrowserDetails ? await loadSubmittedOrderDates(admin, codes) : new Map();
-  const lastVisitDates = includeBrowserDetails ? await loadBrowserVisitData(admin, codes, profiles) : new Map();
+  const lastVisitDates = includeBrowserDetails ? await loadBrowserVisitData(admin, candidates, profiles) : new Map();
 
   return candidates.map((customer) => {
     const code = potentialTargetAccountCode(customer.customer_code);

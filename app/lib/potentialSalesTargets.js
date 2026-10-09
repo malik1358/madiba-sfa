@@ -1,4 +1,6 @@
 import { escapeHtml } from "./dailyVisitReportEmail.js";
+import { isFarFromCustomer } from "./customerLocation.js";
+import { parseGpsFromActivityNote } from "./geo.js";
 import { isCreditNoteTransaction } from "./paymentBehavior.js";
 import { normalizeCode, parseOutstandingSheetDate, resolveCustomerAccountCode, resolveInvoiceAgingDays } from "./outstanding.js";
 import { addKsaCalendarDays, getKsaDateString } from "./workdayActivity.js";
@@ -148,28 +150,42 @@ function parseVisitNote(value) {
   }
 }
 
-export function buildPotentialSalesTargetLastVisitMap({ collectionVisits = [], activityLogs = [], profiles = [] } = {}) {
+export function buildPotentialSalesTargetLastVisitMap({ customers = [], collectionVisits = [], activityLogs = [], profiles = [] } = {}) {
+  const customerByCode = new Map((customers || []).map((customer) => [
+    potentialTargetAccountCode(customer.customer_code),
+    customer,
+  ]));
   const salesmanByUserId = new Map((profiles || []).map((profile) => [
     String(profile.id || ""),
     String(profile.salesman_code || "").trim().toUpperCase().replace(/\s+/g, " "),
   ]));
   const latest = new Map();
-  const remember = (customerCode, userId, dateValue) => {
+  const remember = (customerCode, userId, dateValue, location) => {
     const customer = potentialTargetAccountCode(customerCode);
     const salesman = salesmanByUserId.get(String(userId || "")) || "";
     const date = parseOutstandingSheetDate(dateValue);
     if (!customer || !salesman || !date) return;
+    const master = customerByCode.get(customer);
+    if (master && isFarFromCustomer(location, master)) return;
     const key = `${customer}::${salesman}`;
     if (date > (latest.get(key) || "")) latest.set(key, date);
   };
   (collectionVisits || []).forEach((visit) => {
-    remember(visit.customer_code, visit.created_by, visit.saved_at);
+    remember(visit.customer_code, visit.created_by, visit.saved_at, {
+      latitude: visit.latitude,
+      longitude: visit.longitude,
+    });
   });
   (activityLogs || []).forEach((log) => {
     const note = parseVisitNote(log.note);
     const type = String(log.entry_type || "").trim().toUpperCase();
     if (type !== "VISIT_REPORT" && type !== "PROSPECT_FOLLOW_UP") return;
-    remember(note.customer_code || note.customerCode, log.user_id, note.captured_at || note.capturedAt || log.created_at);
+    remember(
+      note.customer_code || note.customerCode,
+      log.user_id,
+      note.captured_at || note.capturedAt || log.created_at,
+      parseGpsFromActivityNote(log.note),
+    );
   });
   return latest;
 }

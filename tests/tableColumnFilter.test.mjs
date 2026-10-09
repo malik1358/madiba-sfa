@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   columnFiltersAreActive,
   rowTextsMatchColumnFilters,
+  sortTableRowGroups,
   shouldShowTableRowGroup,
   syncStackedHeaderSticky,
   textMatchesColumnFilter,
@@ -99,4 +100,39 @@ test("placeholder detail rows hide only while a column filter is active", () => 
   assert.equal(shouldShowTableRowGroup(placeholder, [""]), true);
   assert.equal(shouldShowTableRowGroup(placeholder, ["parvez"]), false);
   assert.equal(shouldShowTableRowGroup({ cellTexts: ["Parvez"], cellCount: 4, firstColSpan: 1 }, ["parvez"]), true);
+});
+
+function sortGroup(value, isTotal = false, details = []) {
+  const primary = { classList: { contains: (name) => name === "moduleBiTotalRow" && isTotal } };
+  return { primary, primaryCells: [{ innerText: value }], rows: [primary, ...details] };
+}
+
+test("sorting numeric rows is stable and keeps blank values last in either direction", () => {
+  const ten = sortGroup("10");
+  const two = sortGroup("2");
+  const tiedTwo = sortGroup("2");
+  const blank = sortGroup("");
+  assert.deepEqual(sortTableRowGroups([ten, two, blank, tiedTwo]), [two, tiedTwo, ten, blank]);
+  assert.deepEqual(sortTableRowGroups([ten, two, blank, tiedTwo], 0, "desc"), [ten, two, tiedTwo, blank]);
+});
+
+test("sorting preserves grouped detail rows and pins totals last", () => {
+  const detail = { id: "detail" };
+  const ten = sortGroup("10", false, [detail]);
+  const two = sortGroup("2");
+  const total = sortGroup("Total", true);
+  assert.deepEqual(sortTableRowGroups([ten, total, two]), [two, ten, total]);
+  assert.deepEqual(ten.rows, [ten.primary, detail]);
+});
+
+test("sorting recognizes currency values and chronological ISO dates", () => {
+  const high = sortGroup("﷼1,250.50");
+  const low = sortGroup("﷼90.25");
+  assert.deepEqual(sortTableRowGroups([high, low]), [low, high]);
+  const october = sortGroup("2026-10-02");
+  const september = sortGroup("2026-09-30");
+  assert.deepEqual(sortTableRowGroups([october, september]), [september, october]);
+  const octoberDisplay = sortGroup("02 Oct 2026");
+  const septemberDisplay = sortGroup("30 Sep 2026");
+  assert.deepEqual(sortTableRowGroups([octoberDisplay, septemberDisplay]), [septemberDisplay, octoberDisplay]);
 });

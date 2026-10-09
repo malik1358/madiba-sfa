@@ -45,6 +45,8 @@ The global and dashboard logout controls share `useLogoutWithDaySummary` (`app/h
 
 Navigation groups are Home, Field Sales, Collections, Reports, Warehouse, and Setup & Admin (`NAV_GROUPS` in `app/lib/moduleAccess.js`).
 
+Report tables use the shared `ReportTableSorter` app-shell component for sortable report headers, including tables not wrapped for Excel export. It covers the shared `moduleTable` class and read-only Customer Audit matrix/history tables. Sorting uses `app/lib/tableColumnFilter.js` row groups so expanded detail rows remain attached and total rows stay last; tables with editable body controls are excluded.
+
 ## Role system and `moduleAccess.js`
 
 Source of truth: `app/lib/moduleAccess.js` (covered by `tests/moduleAccess.test.mjs`).

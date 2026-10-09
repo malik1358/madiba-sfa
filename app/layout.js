@@ -5,6 +5,7 @@ import WorkdayTimesBar from "./components/WorkdayTimesBar";
 import GlobalLogoutButton from "./components/GlobalLogoutButton";
 import AppBackButton from "./components/AppBackButton";
 import AppMainNav from "./components/AppMainNav";
+import ReportTableSorter from "./components/ReportTableSorter";
 import NativeFieldTracking from "./components/NativeFieldTracking";
 import PwaShell from "./components/PwaShell";
 import { AppLanguageProvider } from "./lib/appLanguage";
@@ -64,6 +65,7 @@ export default function RootLayout({ children }) {
             <GlobalAppStatus environment={environment} buildId={buildId} buildTime={buildTime} />
             <WorkdayTimesBar />
             <AppMainNav />
+            <ReportTableSorter />
             <AppBackButton />
             <GlobalLogoutButton />
             {children}

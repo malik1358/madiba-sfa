@@ -38,7 +38,11 @@ const TEXT = {
   fromMonth: { en: "From month", ar: "من شهر" },
   toMonth: { en: "To month", ar: "إلى شهر" },
   applyPeriod: { en: "Apply period", ar: "تطبيق الفترة" },
-  quantityTrend: { en: "Quantity trend", ar: "اتجاه الكمية" },
+  skuTrend: { en: "SKUs sold trend", ar: "اتجاه الأصناف المباعة" },
+  monthSales: { en: "Sales", ar: "المبيعات" },
+  monthSkus: { en: "SKUs", ar: "الأصناف" },
+  increasingSkus: { en: "SKUs increasing", ar: "الأصناف ترتفع" },
+  decreasingSkus: { en: "SKUs decreasing", ar: "الأصناف تنخفض" },
   invalidPeriod: { en: "Choose a valid month range.", ar: "اختر نطاق أشهر صحيحًا." },
   loading: { en: "Loading team coverage...", ar: "جاري تحميل تغطية الفريق..." },
   customer: { en: "Customer", ar: "العميل" },
@@ -56,8 +60,8 @@ const TEXT = {
   visitedOnce: { en: "Once", ar: "مرة واحدة" },
   repeatedStatus: { en: "Repeated", ar: "متكرر" },
   salesNote: {
-    en: "Visits cover the last 12 months. Monthly sales, quantity, and distinct SKUs cover the selected period for team-book customers, regardless of invoice salesman; credit notes are deducted from sales and quantity.",
-    ar: "تغطي الزيارات آخر 12 شهرًا. تعرض المبيعات والكمية وعدد الأصناف الفريدة شهريًا للفترة المحددة لعملاء دفتر الفريق بغض النظر عن مندوب الفاتورة، مع خصم الإشعارات الدائنة من المبيعات والكمية.",
+    en: "Visits cover the last 12 months. Monthly net sales and distinct SKUs cover team-book customers regardless of invoice salesman. Month-over-month colors exclude the incomplete current month.",
+    ar: "تغطي الزيارات آخر 12 شهرًا. تعرض صافي المبيعات وعدد الأصناف الفريدة شهريًا لعملاء دفتر الفريق بغض النظر عن مندوب الفاتورة. تستثني ألوان المقارنة الشهر الحالي غير المكتمل.",
   },
   noRows: { en: "No customers match this filter.", ar: "لا يوجد عملاء يطابقون هذا التصفية." },
   choosePromoterHint: { en: "Select a product promoter to view their team coverage.", ar: "اختر مروج منتجات لعرض تغطية فريقه." },
@@ -255,6 +259,7 @@ export default function PromoterCoveragePage() {
                 <section className="moduleMetricCard"><span>{t("notVisited")}</span><strong>{report.notVisitedCustomerCount}</strong></section>
                 <section className="moduleMetricCard"><span>{t("repeated")}</span><strong>{report.repeatedCustomerCount}</strong></section>
                 <section className="moduleMetricCard"><span>{t("salesIncreasing")} / {t("salesDecreasing")}</span><strong>{report.increasingCustomerCount} / {report.decreasingCustomerCount}</strong></section>
+                <section className="moduleMetricCard"><span>{t("increasingSkus")} / {t("decreasingSkus")}</span><strong>{report.increasingSkuCustomerCount} / {report.decreasingSkuCustomerCount}</strong></section>
               </div>
 
               <section className="moduleSection">
@@ -311,8 +316,11 @@ export default function PromoterCoveragePage() {
                         <th>{t("visitCount")}</th>
                         <th>{t("lastVisit")}</th>
                         <th>{t("salesTrend")}</th>
-                        <th>{t("quantityTrend")}</th>
-                        {report.monthKeys.map((month) => <th key={month}>{monthLabel(month, language)}</th>)}
+                        <th>{t("skuTrend")}</th>
+                        {report.monthKeys.flatMap((month) => [
+                          <th key={`${month}-sales`}>{monthLabel(month, language)} {t("monthSales")}</th>,
+                          <th key={`${month}-skus`}>{monthLabel(month, language)} {t("monthSkus")}</th>,
+                        ])}
                       </tr>
                     </thead>
                     <tbody>
@@ -331,19 +339,32 @@ export default function PromoterCoveragePage() {
                             {trendLabel(row.trend, t)}
                             {row.changePercent == null ? "" : ` ${row.changePercent > 0 ? "+" : ""}${row.changePercent.toFixed(1)}%`}
                           </td>
-                          <td className={trendClass(row.quantityTrend)}>
-                            {trendLabel(row.quantityTrend, t)}
-                            {row.quantityChangePercent == null ? "" : ` ${row.quantityChangePercent > 0 ? "+" : ""}${row.quantityChangePercent.toFixed(1)}%`}
+                          <td className={trendClass(row.skuTrend)}>
+                            {trendLabel(row.skuTrend, t)}
+                            {row.skuChangePercent == null ? "" : ` ${row.skuChangePercent > 0 ? "+" : ""}${row.skuChangePercent.toFixed(1)}%`}
                           </td>
-                          {report.monthKeys.map((month) => (
-                            <td key={month}>
-                              <strong>{formatAmount(row.monthSales?.[month])}</strong>
-                              <div className="moduleCode">Qty {formatAmount(row.monthQuantity?.[month])} / SKUs {formatAmount(row.monthSkuCount?.[month])}</div>
-                            </td>
-                          ))}
+                          {report.monthKeys.flatMap((month) => {
+                            const salesChange = row.monthSalesChange?.[month];
+                            const skuChange = row.monthSkuChange?.[month];
+                            const changeClass = (change) => (
+                              change?.trend === "increasing" || change?.trend === "new_sales"
+                                ? "moduleBiMonthCell--up"
+                                : change?.trend === "decreasing" ? "moduleBiMonthCell--down" : ""
+                            );
+                            return [
+                              <td key={`${month}-sales`} data-sort-value={row.monthSales?.[month] || 0} className={changeClass(salesChange)}>
+                                {formatAmount(row.monthSales?.[month])}
+                                {salesChange?.changePercent == null ? "" : ` (${salesChange.changePercent > 0 ? "+" : ""}${salesChange.changePercent.toFixed(1)}%)`}
+                              </td>,
+                              <td key={`${month}-skus`} data-sort-value={row.monthSkuCount?.[month] || 0} className={changeClass(skuChange)}>
+                                {formatAmount(row.monthSkuCount?.[month])}
+                                {skuChange?.changePercent == null ? "" : ` (${skuChange.changePercent > 0 ? "+" : ""}${skuChange.changePercent.toFixed(1)}%)`}
+                              </td>,
+                            ];
+                          })}
                         </tr>
                       ))}
-                      {rows.length === 0 ? <tr><td colSpan={6 + report.monthKeys.length}>{t("noRows")}</td></tr> : null}
+                      {rows.length === 0 ? <tr><td colSpan={6 + report.monthKeys.length * 2}>{t("noRows")}</td></tr> : null}
                     </tbody>
                   </table>
                 </ExportableTable>

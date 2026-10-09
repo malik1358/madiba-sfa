@@ -106,7 +106,7 @@ async function loadSalesTrendRows(admin, customerCodes, fromMonth, toMonth) {
   }
   const rowGroups = await Promise.all(codeBatches.map((codes) => loadAllRows(
     () => admin.from("active_sales")
-      .select("customer_code,customer_name,salesman_code,transaction_date,voucher_number,voucher_type,reference,item_code,sales_amount,quantity")
+      .select("customer_code,customer_name,salesman_code,transaction_date,voucher_number,voucher_type,reference,item_code,sales_amount")
       .in("customer_code", codes)
       .gte("transaction_date", `${fromMonth}-01`)
       .lt("transaction_date", `${shiftMonth(toMonth, 1)}-01`),
@@ -119,9 +119,6 @@ async function loadSalesTrendRows(admin, customerCodes, fromMonth, toMonth) {
     net_sales_amount: isCreditNoteTransaction(row)
       ? -Math.abs(Number(row.sales_amount || 0))
       : Number(row.sales_amount || 0),
-    net_quantity: isCreditNoteTransaction(row)
-      ? -Math.abs(Number(row.quantity || 0))
-      : Number(row.quantity || 0),
   }));
 }
 
@@ -295,6 +292,7 @@ export async function GET(request) {
       salesRows,
       visits,
       monthKeys,
+      currentMonth,
     });
 
     return Response.json({

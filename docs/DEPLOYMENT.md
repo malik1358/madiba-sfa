@@ -169,3 +169,4 @@ Do not commit keystores, `android/keystore.properties`, or paste server private 
 3. SQL applied to the **production** Supabase project (and to local/dev when developing the feature).
 4. GitHub secret changes only when a new cron URL is introduced. Existing workflows already default to the production host.
 5. No service-role key in the client bundle. Only `NEXT_PUBLIC_*` values are public, and those must still not be the service role.
+6. In every production-promotion summary, list every user-visible change included in the release and identify the PR, merge commit, and deployed build. Do not report only the latest requested item.

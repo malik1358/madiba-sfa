@@ -66,6 +66,18 @@ export async function databaseStage(label, operation) {
   }
 }
 
+export async function backupStage(label, operation) {
+  console.log(`Backup stage: ${label}`);
+  try {
+    return await operation();
+  } catch (error) {
+    const fileError = ["EACCES", "EPERM", "ENOENT", "ENOSPC"].includes(error?.code);
+    const detail = error instanceof BackupDiagnosticError ? error.message
+      : fileError ? classifyLocalFileFailure(error) : "Operation failed; raw output remains suppressed.";
+    throw new BackupDiagnosticError(`Backup stage failed: ${label}. ${detail}`);
+  }
+}
+
 export function validateDatabaseArchiveCoverage(toc) {
   const requiredSections = [
     ["business table data", "TABLE DATA public"],
@@ -297,19 +309,21 @@ export async function runBackup(config, options = {}) {
       manifest.sourceSha256 = await fileHash(path.join(payload, "source.tar.gz"));
     }
     manifest.finishedAt = new Date().toISOString();
-    await writeFile(path.join(payload, "manifest.json"), JSON.stringify(manifest, null, 2), { mode: 0o600 });
+    await backupStage("backup manifest write", () => writeFile(path.join(payload, "manifest.json"), JSON.stringify(manifest, null, 2), { mode: 0o600 }));
     const archive = path.join(workspace, "backup.tar.gz");
-    await run("tar", ["-czf", archive, "-C", payload, "."]);
+    await backupStage("archive compression (tar)", () => run("tar", ["-czf", archive, "-C", payload, "."]));
     const name = backupName(config.mode, date, runId);
     const encrypted = path.join(workspace, name);
-    await run("age", ["--encrypt", "--recipient", config.recipient, "--output", encrypted, archive]);
+    await backupStage("age encryption", () => run("age", ["--encrypt", "--recipient", config.recipient, "--output", encrypted, archive]));
     const remoteFile = `${config.drivePath}/${name}`;
-    await rclone("copyto", encrypted, remoteFile, "--immutable", "--checksum");
-    const remoteStat = JSON.parse(await rclone("lsjson", remoteFile, "--stat", "--hash"));
-    if (remoteStat.Size !== (await stat(encrypted)).size
-      || remoteStat.Hashes?.MD5?.toLowerCase() !== await fileHash(encrypted, "md5")) {
-      throw new Error("Drive upload checksum/size verification failed; retention cleanup skipped");
-    }
+    await backupStage("Google Drive upload", () => rclone("copyto", encrypted, remoteFile, "--immutable", "--checksum"));
+    await backupStage("Google Drive upload verification", async () => {
+      const remoteStat = JSON.parse(await rclone("lsjson", remoteFile, "--stat", "--hash"));
+      if (remoteStat.Size !== (await stat(encrypted)).size
+        || remoteStat.Hashes?.MD5?.toLowerCase() !== await fileHash(encrypted, "md5")) {
+        throw new BackupDiagnosticError("Drive upload checksum/size verification failed; retention cleanup skipped.");
+      }
+    });
     console.log("Encrypted Drive upload verified.");
     const files = JSON.parse(await rclone("lsjson", config.drivePath, "--files-only", "--max-depth", "1"));
     if (!Array.isArray(files)) throw new Error("Invalid Drive listing; retention cleanup refused");

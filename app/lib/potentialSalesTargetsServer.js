@@ -39,6 +39,30 @@ async function loadSubmittedOrderDates(admin, customerCodes) {
   return latestByCode;
 }
 
+async function loadPotentialTargetMonthlySales(admin, customerCodes, monthKeys) {
+  const completedMonthKeys = (monthKeys || []).slice(0, 3);
+  const currentMonthKey = (monthKeys || [])[3];
+  if (completedMonthKeys.length !== 3 || !currentMonthKey) return new Map();
+  const queryCodes = [...new Set(customerCodes.flatMap(promoterCoverageCustomerCodeVariants))];
+  const salesRows = [];
+  for (let start = 0; start < queryCodes.length; start += 200) {
+    const batch = queryCodes.slice(start, start + 200);
+    for (let offset = 0; ; offset += PAGE_SIZE) {
+      const { data, error } = await admin.from("active_sales")
+        .select("customer_code,transaction_date,sales_amount,voucher_number,voucher_type,reference,quantity")
+        .in("customer_code", batch)
+        .gte("transaction_date", `${completedMonthKeys[0]}-01`)
+        .lt("transaction_date", `${currentMonthKey}-01`)
+        .order("transaction_date", { ascending: false })
+        .range(offset, offset + PAGE_SIZE - 1);
+      if (error) throw error;
+      salesRows.push(...(data || []));
+      if ((data || []).length < PAGE_SIZE) break;
+    }
+  }
+  return sumPotentialSalesByCustomerAndMonth(salesRows, monthKeys);
+}
+
 async function loadBrowserVisitData(admin, customers, profiles = []) {
   const queryCodes = [...new Set(customers.flatMap((customer) => promoterCoverageCustomerCodeVariants(customer.customer_code)))];
   const collectionVisits = [];
@@ -105,6 +129,7 @@ export async function loadPotentialSalesTargetCustomers(admin, {
   const recordByCode = new Map(records.map((row) => [potentialTargetAccountCode(row.customer_code), row]));
   const candidates = customers.filter((row) => recordByCode.has(potentialTargetAccountCode(row.customer_code)));
   const codes = [...new Set(candidates.map((row) => row.customer_code))];
+  const browserMonthKeys = potentialSalesTargetMonthKeys(todayKey);
   const lastInvoiceByCode = new Map();
   const salesRows = [];
   const queryCodes = includeBrowserDetails
@@ -131,10 +156,9 @@ export async function loadPotentialSalesTargetCustomers(admin, {
       if ((data || []).length < 1000) break;
     }
   }
-  const browserMonthKeys = includeBrowserDetails ? potentialSalesTargetMonthKeys(todayKey) : [];
   const monthlySales = includeBrowserDetails
     ? sumPotentialSalesByCustomerAndMonth(salesRows, browserMonthKeys)
-    : new Map();
+    : await loadPotentialTargetMonthlySales(admin, codes, browserMonthKeys);
   const submittedOrderDates = includeBrowserDetails ? await loadSubmittedOrderDates(admin, codes) : new Map();
   const lastVisitDates = includeBrowserDetails ? await loadBrowserVisitData(admin, candidates, profiles) : new Map();
 
@@ -165,8 +189,8 @@ export async function loadPotentialSalesTargetCustomers(admin, {
       total_outstanding: totalOutstanding,
       last_invoice_date: invoiceDate,
       last_order_invoice_date: [invoiceDate, orderDate].filter(Boolean).sort().at(-1) || "",
+      sales_by_month: monthlySales.get(code) || Object.fromEntries(browserMonthKeys.map((month) => [month, 0])),
       ...(includeBrowserDetails ? {
-        sales_by_month: monthlySales.get(code) || Object.fromEntries(browserMonthKeys.map((month) => [month, 0])),
         last_visit_by_salesman: visitBySalesman,
       } : {}),
     };

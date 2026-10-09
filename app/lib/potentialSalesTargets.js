@@ -25,7 +25,13 @@ function matchesSalesmanProfile(value, identitySet) {
 export function isPotentialSalesTarget(row = {}, { todayKey = getKsaDateString() } = {}) {
   if (row.is_active === false) return false;
   const outstanding = Number(row.total_outstanding);
-  if (!Number.isFinite(outstanding) || outstanding <= 0 || outstanding >= 15000) return false;
+  if (!Number.isFinite(outstanding) || outstanding <= 0) return false;
+  const highestRecentMonthlySales = potentialSalesTargetMonthKeys(todayKey).slice(0, 3)
+    .reduce((highest, month) => {
+      const sales = Number(row.sales_by_month?.[month]);
+      return Number.isFinite(sales) ? Math.max(highest, sales) : highest;
+    }, 0);
+  if (outstanding >= 15000 && outstanding >= highestRecentMonthlySales) return false;
   const olderBuckets = [row.outstanding_61_90, row.outstanding_91_120, row.outstanding_above_120];
   if (olderBuckets.some((amount) => Number(amount) > 0)) return false;
   const invoices = (row.invoices || []).filter((invoice) => Number(invoice.pending_amount) > 0);

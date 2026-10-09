@@ -1,0 +1,58 @@
+name: Matched Receipt Email
+
+on:
+  schedule:
+    # 21:35 UTC = 00:35 KSA; check yesterday's app receipts against Tally.
+    - cron: "35 21 * * *"
+  workflow_dispatch:
+    inputs:
+      preview:
+        description: "Send one combined preview to the recipient below without consuming receipt claims."
+        required: false
+        type: boolean
+        default: false
+      to:
+        description: "Preview recipient (use malik@pinasz.com for approval preview)."
+        required: false
+        default: ""
+      date:
+        description: "App receipt date YYYY-MM-DD (KSA); empty defaults to yesterday."
+        required: false
+        default: ""
+
+permissions: {}
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger matched receipt email endpoint
+        env:
+          MATCHED_RECEIPT_EMAIL_URL: ${{ secrets.MATCHED_RECEIPT_EMAIL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PREVIEW: ${{ github.event.inputs.preview }}
+          INPUT_TO: ${{ github.event.inputs.to }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+        run: |
+          DEFAULT_URL='https://madiba-sfa.vercel.app/api/cron/matched-receipt-email'
+          URL="$(printf '%s' "$MATCHED_RECEIPT_EMAIL_URL" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [[ -z "$URL" || ! "$URL" =~ /api/cron/matched-receipt-email([/?].*)?$ ]]; then URL="$DEFAULT_URL"; fi
+          if [[ -z "$CRON_SECRET" ]]; then echo "CRON_SECRET secret is missing"; exit 1; fi
+          export EVENT_NAME INPUT_PREVIEW INPUT_TO INPUT_DATE
+          python3 - <<'PY' > payload.json
+          import json, os
+          payload = {}
+          if os.environ.get("EVENT_NAME") == "workflow_dispatch":
+            payload["preview"] = os.environ.get("INPUT_PREVIEW", "").lower() == "true"
+          to = os.environ.get("INPUT_TO", "").strip()
+          date = os.environ.get("INPUT_DATE", "").strip()
+          if to: payload["to"] = to
+          if date: payload["date"] = date
+          print(json.dumps(payload))
+          PY
+          CRON_SECRET_TRIMMED="$(printf '%s' "$CRON_SECRET" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          status_code="$(curl -sS -L --max-time 180 -o response.json -w "%{http_code}" -X POST "$URL" \
+            -H "x-cron-secret: $CRON_SECRET_TRIMMED" -H "Content-Type: application/json" --data @payload.json)"
+          cat response.json
+          if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then echo "Matched receipt email returned HTTP $status_code"; exit 1; fi

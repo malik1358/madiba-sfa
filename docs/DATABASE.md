@@ -190,6 +190,7 @@ Schemes and quantity limits are settings, not tables:
 | `daily_supplier_order_email_last_sent` | Email dedupe |
 | `outstanding_no_gps_email_last_sent` | Email dedupe |
 | `daily_receipt_email_last_sent:<YYYY-MM-DD>` | Daily app-entered receipt email dedupe, one marker per Riyadh report date |
+| `matched_receipt_email_claim:<collection_visit_id>` | Insert-only one-time claim for a matched app receipt notification; value transitions from `sending` to `sent` |
 
 Do not create a new table for a small flag if the surrounding feature already uses one of these keys. Do not rename a key; clients and cron jobs compare the string exactly.
 

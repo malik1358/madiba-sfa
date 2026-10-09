@@ -107,6 +107,7 @@ function normalizeAppVisit(visit) {
     visit_outcome: String(row.visit_outcome || row.visitOutcome || "").trim(),
     saved_at: savedAt,
     visit_date: visitDate,
+    salesman_code: String(row.salesman_code || row.salesmanCode || "").trim(),
     created_by: row.created_by || row.createdBy || "",
     collector_name: String(row.collector_name || row.collectorName || "").trim(),
   };

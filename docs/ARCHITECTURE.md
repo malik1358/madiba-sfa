@@ -102,6 +102,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 - `/api/payment-collections`, `/api/payment-collections/report`, `/api/payment-collections/day-summary`
 - `/api/receipts`, `/api/receipts-not-in-tally`
+- `/api/cron/matched-receipt-email` — matches saved app receipts against the uploaded receipt register and sends one-time salesman notifications.
 
 **Admin / imports / BI**
 
@@ -126,7 +127,7 @@ Handlers live under `app/api/**/route.js`. Most create a service-role client, ve
 
 **Cron** (`app/api/cron/*`, auth via `CRON_SECRET`)
 
-- `inactivity-push`, `auto-close-workdays`, `daily-visit-report-email`, `daily-salesman-resume-email`, `daily-receipt-email`
+- `inactivity-push`, `auto-close-workdays`, `daily-visit-report-email`, `daily-salesman-resume-email`, `matched-receipt-email`
 - `daily-supplier-order-email`, `outstanding-no-gps-email`, `missing-invoice-email`
 - `customer-gps-change-email` uses `customerGpsChangeEmailServer.js` to send one previous-calendar-day salesman-accepted location digest, with atomic per-day claims in `system_settings`.
 - `salesman-visit-plan-email`, `mobile-snapshot`

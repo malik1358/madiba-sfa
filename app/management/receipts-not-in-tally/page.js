@@ -64,10 +64,17 @@ const TEXT = {
   mode: { en: "Mode", ar: "الطريقة" },
   collector: { en: "Collected by", ar: "محصّل بواسطة" },
   status: { en: "Status", ar: "الحالة" },
+  reconciliation: { en: "Reconciliation", ar: "حالة المطابقة" },
+  pending: { en: "Pending in Tally", ar: "بانتظار الظهور في تالي" },
+  resolved: { en: "Resolved receipts", ar: "الإيصالات المعالجة" },
+  resolution: { en: "Resolution", ar: "المعالجة" },
+  resolvedError: { en: "Error", ar: "خطأ" },
+  resolvedDuplicate: { en: "Duplicate", ar: "مكرر" },
   actions: { en: "Actions", ar: "إجراءات" },
-  markMistake: { en: "Mark as mistake", ar: "تعليم كخطأ" },
+  markError: { en: "Resolve as error", ar: "معالجة كخطأ" },
+  markDuplicate: { en: "Resolve as duplicate", ar: "معالجة كتكرار" },
   marking: { en: "Saving...", ar: "جاري الحفظ..." },
-  markedOk: { en: "Marked as mistake and removed from this list.", ar: "تم التعليم كخطأ وإزالته من هذه القائمة." },
+  markedOk: { en: "Receipt resolved and removed from the pending list.", ar: "تمت معالجة الإيصال وإزالته من قائمة الانتظار." },
   total: { en: "Total", ar: "الإجمالي" },
   none: { en: "None", ar: "لا يوجد" },
   shown: { en: "shown", ar: "ظاهر" },
@@ -239,7 +246,7 @@ export default function ReceiptsNotInTallyPage() {
     };
   }, [canAccess, loadingAccess, loadReport]);
 
-  async function markAsMistake(row) {
+  async function markAsMistake(row, resolution) {
     const visitId = String(row?.id || "").trim();
     if (!visitId || markingId) return;
 
@@ -267,7 +274,7 @@ export default function ReceiptsNotInTallyPage() {
           body: JSON.stringify({
             visitId,
             action: "ignore",
-            note: "mistake",
+            note: resolution,
             visitDate: row.visitDate,
             customerCode: row.customerCode,
             customerName: row.customerName,
@@ -289,6 +296,10 @@ export default function ReceiptsNotInTallyPage() {
         return {
           ...current,
           missingInTally: remaining,
+          ignoredInTally: [
+            ...(current.ignoredInTally || []),
+            removed ? { ...removed, resolution } : null,
+          ].filter(Boolean),
           summary: {
             ...current.summary,
             missingCount: remaining.length,
@@ -483,6 +494,7 @@ export default function ReceiptsNotInTallyPage() {
                         <BiExcelHead label={t("mode")} filterKey="mode" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("status")} filterKey="status" options={options} filters={filters} onChange={setFilter} />
                         <BiExcelHead label={t("collector")} filterKey="collector" options={options} filters={filters} onChange={setFilter} />
+                        <th>{t("reconciliation")}</th>
                         {canMarkMistakes ? <th>{t("actions")}</th> : null}
                       </tr>
                     </thead>
@@ -501,15 +513,24 @@ export default function ReceiptsNotInTallyPage() {
                           <td>{formatMode(row.receiptMode)}</td>
                           <td>{formatMode(row.paymentStatus)}</td>
                           <td>{row.collectorName || "-"}</td>
+                          <td>{t("pending")}</td>
                           {canMarkMistakes ? (
-                            <td>
+                            <td style={{ display: "flex", gap: 6 }}>
                               <button
                                 type="button"
                                 className="moduleInlineButton"
                                 disabled={Boolean(markingId)}
-                                onClick={() => markAsMistake(row)}
+                                onClick={() => markAsMistake(row, "error")}
                               >
-                                {markingId === row.id ? t("marking") : t("markMistake")}
+                                {markingId === row.id ? t("marking") : t("markError")}
+                              </button>
+                              <button
+                                type="button"
+                                className="moduleInlineButton"
+                                disabled={Boolean(markingId)}
+                                onClick={() => markAsMistake(row, "duplicate")}
+                              >
+                                {markingId === row.id ? t("marking") : t("markDuplicate")}
                               </button>
                             </td>
                           ) : null}
@@ -517,7 +538,7 @@ export default function ReceiptsNotInTallyPage() {
                       ))}
                       {visibleRows.length === 0 && (
                         <tr>
-                          <td colSpan={8}>{t("noRows")}</td>
+                          <td colSpan={canMarkMistakes ? 9 : 8}>{t("noRows")}</td>
                         </tr>
                       )}
                     </tbody>
@@ -526,13 +547,47 @@ export default function ReceiptsNotInTallyPage() {
                         <tr>
                           <td colSpan={3}><strong>{t("total")}</strong></td>
                           <td className="moduleBiTotalCol"><strong>{formatAmount(missingTotal)}</strong></td>
-                          <td colSpan={4} />
+                          <td colSpan={canMarkMistakes ? 5 : 4} />
                         </tr>
                       </tfoot>
                     ) : null}
                   </table>
                 </ExportableTable>
               </section>
+
+              {(report.ignoredInTally?.length || report.duplicatesInApp?.length) ? (
+                <section className="moduleSection">
+                  <div className="moduleSectionHeader">
+                    <h2>{t("resolved")}</h2>
+                    <span>{(report.ignoredInTally?.length || 0) + (report.duplicatesInApp?.length || 0)}</span>
+                  </div>
+                  <div className="moduleTableWrap">
+                    <table className="moduleTable moduleBiTable">
+                      <thead><tr>
+                        <th>{t("visitDate")}</th>
+                        <th>{t("customer")}</th>
+                        <th>{t("amount")}</th>
+                        <th>{t("collector")}</th>
+                        <th>{t("resolution")}</th>
+                      </tr></thead>
+                      <tbody>
+                        {[
+                          ...(report.ignoredInTally || []),
+                          ...(report.duplicatesInApp || []),
+                        ].map((row) => (
+                          <tr key={`resolved-${row.id}`}>
+                            <td>{formatDateDisplay(row.visitDate)}</td>
+                            <td>{row.customerName || row.customerCode || "-"}<div className="moduleCode">{row.customerCode}</div></td>
+                            <td>{formatAmount(row.amountReceived)}</td>
+                            <td>{row.collectorName || "-"}</td>
+                            <td>{row.resolution === "duplicate" ? t("resolvedDuplicate") : t("resolvedError")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ) : null}
             </>
           )}
         </div>

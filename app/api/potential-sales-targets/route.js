@@ -141,7 +141,7 @@ export async function GET(request) {
     const allowedCodeArray = managementAccess ? null : [...allowedCodes];
     const salesmanOptions = salesmanOptionsForTargets(
       eligibleTargets,
-      profiles,
+      allProfiles,
       allowedCodeArray,
       managementAccess,
     );

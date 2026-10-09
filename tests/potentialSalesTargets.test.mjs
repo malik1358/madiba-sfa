@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   buildPotentialSalesTargetsSection,
   buildPotentialSalesTargetLastVisitMap,
@@ -19,6 +20,16 @@ const customer = {
   total_outstanding: 14999.99, outstanding_0_30: 14999.99,
   last_invoice_date: "2026-09-21", invoices: [{ pending_amount: 14999.99, invoice_day: 16 }],
 };
+const potentialSalesTargetsRoute = readFileSync(
+  new URL("../app/api/potential-sales-targets/route.js", import.meta.url),
+  "utf8",
+);
+
+test("potential target API builds salesman options from the loaded allProfiles variable", () => {
+  assert.match(potentialSalesTargetsRoute, /const \[allProfiles, records\] = await Promise\.all\(/);
+  assert.match(potentialSalesTargetsRoute, /salesmanOptionsForTargets\(\s*eligibleTargets,\s*allProfiles,/);
+  assert.doesNotMatch(potentialSalesTargetsRoute, /salesmanOptionsForTargets\(\s*eligibleTargets,\s*profiles,/);
+});
 
 test("potential sales targets require positive outstanding strictly below SAR 15000", () => {
   assert.equal(isPotentialSalesTarget(customer, options), true);

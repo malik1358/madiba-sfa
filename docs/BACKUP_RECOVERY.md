@@ -26,7 +26,7 @@ The full archive also includes a verified `repository.bundle` (`git bundle --all
 
 Archives are compressed and **age-encrypted before leaving the runner**. Only the public age recipient is needed by the workflow. Keep the private identity in a password manager and a separate offline copy, not in GitHub Actions or this Drive folder. Losing it makes backups unrecoverable. Protect Google and GitHub accounts with MFA and independent recovery codes.
 
-Upload uses `rclone copyto --immutable --checksum`, not `sync`. The job verifies the remote encrypted file's MD5 and size before retention. The encrypted archive also carries internal SHA256 hashes; age authenticates ciphertext. Plaintext temporary files and OAuth config are removed in `finally` on handled success/failure; cancelled runners rely on ephemeral runner disposal. No plaintext GitHub artifact upload is used.
+Upload uses `rclone copyto --immutable --checksum`, not `sync`. The job verifies the remote encrypted file's MD5 and size before retention; MD5 algorithm names are compared case-insensitively. Missing checksums or size mismatches fail closed and skip cleanup. The encrypted archive also carries internal SHA256 hashes; age authenticates ciphertext. Plaintext temporary files and OAuth config are removed in `finally` on handled success/failure; cancelled runners rely on ephemeral runner disposal. No plaintext GitHub artifact upload is used.
 
 Default destination: `gdrive:MADIBA-SFA-Backups`, private and not shared. OAuth uses **drive.file**, which limits access to files/folders created by this OAuth app. Let rclone create the folder; do not pre-create it in the Drive website. Skip shortcuts. Use only the dedicated remote in the backup config.
 

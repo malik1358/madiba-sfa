@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { BackupDiagnosticError, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, runBackup, safeBackupConfigError, validateDatabaseArchiveCoverage } from "../scripts/backup/run-backup.mjs";
+import { BackupDiagnosticError, backupStage, classifyCommandFailure, databaseStage, databaseCommand, execute, exportStorage, fetchJson, runBackup, safeBackupConfigError, validateDatabaseArchiveCoverage } from "../scripts/backup/run-backup.mjs";
 import { verifyBackup } from "../scripts/backup/verify-backup.mjs";
 
 test("database command captures all schemas and passes passwords only through environment", () => {
@@ -138,6 +138,20 @@ test("post-dump file failures identify safe permission, missing-file and disk-fu
       assert.match(error.message, expected);
       assert.ok(!error.message.includes("private path"));
       assert.ok(!error.message.includes("customer table"));
+      return true;
+    });
+  }
+});
+
+test("final archive and Drive operation failures report fixed stage labels only", async () => {
+  for (const label of ["backup manifest write", "archive compression (tar)", "age encryption", "Google Drive upload", "Google Drive upload verification"]) {
+    await assert.rejects(backupStage(label, async () => {
+      throw new Error("private-path private-token");
+    }), (error) => {
+      assert.ok(error instanceof BackupDiagnosticError);
+      assert.ok(error.message.includes(`Backup stage failed: ${label}`));
+      assert.ok(!error.message.includes("private-path"));
+      assert.ok(!error.message.includes("private-token"));
       return true;
     });
   }

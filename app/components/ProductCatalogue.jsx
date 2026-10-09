@@ -253,8 +253,8 @@ export default function ProductCatalogue({
                 <h3>{item.item_name}</h3>
                 <div className="moduleCode">{item.item_code}</div>
                 <p className={styles.packing}>
-                  <strong>{ar ? "التعبئة" : "Packing"}:</strong> {detail.sellingUnit || (ar ? "الوحدة غير محددة" : "Unit not specified")}
-                  {detail.packing ? <span>{detail.packing}</span> : <span>{ar ? "حجم العبوة غير متوفر" : "Pack size not available"}</span>}
+                  <strong>{ar ? "التعبئة" : "Packing"}:</strong> {detail.packing || (ar ? "حجم العبوة غير متوفر" : "Pack size not available")}
+                  {detail.sellingUnit && <span><strong>{ar ? "وحدة البيع" : "Selling unit"}:</strong> {detail.sellingUnit}</span>}
                 </p>
                 <div className={styles.priceRow}>
                   {discounted && <del className={styles.originalPrice}>{formatMoneyAmount(price)} ﷼</del>}

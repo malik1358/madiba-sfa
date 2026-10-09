@@ -10,6 +10,14 @@ import { buildModuleAccess, listAccessibleNavGroups, localizedModuleLabel } from
 
 const loadCatalogueDetails = (admin) => loadDetails(admin, async () => ({}));
 
+test("packing label shows the description directly and selling unit is separately optional", () => {
+  const source = fs.readFileSync(new URL("../app/components/ProductCatalogue.jsx", import.meta.url), "utf8");
+  const packingBlock = source.match(/<p className=\{styles\.packing\}>([\s\S]*?)<\/p>/)[1];
+  assert.match(packingBlock, /"Packing"\}:\s*<\/strong> \{detail\.packing \|\|/);
+  assert.match(packingBlock, /\{detail\.sellingUnit && <span><strong>.*"Selling unit"/);
+  assert.doesNotMatch(packingBlock, /Unit not specified/);
+});
+
 test("catalogue flags selected cart items missing prices after a pricing change", () => {
   const source = fs.readFileSync(new URL("../app/components/ProductCatalogue.jsx", import.meta.url), "utf8");
   const selector = source.match(/const unpricedCartCodes = [^\r\n]+/)[0];
